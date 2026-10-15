@@ -2,6 +2,7 @@
 
 import type { ApplicationEvent } from "@/lib/api";
 import { eventTitle } from "@/lib/event-detail";
+import { actorLabel } from "@/lib/event-labels";
 import { WhoChip } from "@/components/applications/WhoChip";
 import { formatDateTime } from "@/lib/format-date";
 
@@ -28,6 +29,9 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
             <WhoChip recordedBy={event.recorded_by} />
             <span className={`font-medium ${event.superseded ? "line-through" : ""}`}>
               {eventTitle(event)}
+            </span>
+            <span data-testid="event-actor" className="text-xs text-muted-foreground">
+              recorded by {actorLabel(event.recorded_by)}
             </span>
             {event.superseded && (
               <span className="font-mono text-[11px] text-faint">superseded</span>

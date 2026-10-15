@@ -61,6 +61,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     else:
         status = "answered" if answered_at else "open"
     user_words = row.get("user_words") or ""
+    confirmed_at = row.get("confirmed_at")
     relayed = bool(answered_at) and row.get("answered_by") != "web" and bool(user_words)
     return {
         "id": row["id"],
@@ -85,6 +86,9 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         # Whose decision it reads as: "you" for a web answer or a relayed chat
         # answer; "assistant" when the assistant answered with no user words.
         "said_by": "you" if (row.get("answered_by") == "web" or relayed) else "assistant",
+        # When the user confirmed the relayed answer on the web; None until then,
+        # and None again if the answer was changed after the confirmation.
+        "confirmed_at": confirmed_at if relayed and confirmed_at and confirmed_at >= answered_at else None,
         "withdrawn_at": withdrawn_at,
         "status": status,
     }
@@ -92,7 +96,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
 
 _SELECT = (
     "SELECT k.id, k.application_id, a.job_title, a.job_company, k.question, k.context, k.asked_by, "
-    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at, k.user_words "
+    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at, k.user_words, k.confirmed_at "
     "FROM application_asks k LEFT JOIN applications a ON a.id = k.application_id AND a.user_id = k.user_id "
 )
 
@@ -249,6 +253,35 @@ async def answer_ask(
     # string rather than a number; nothing reads that field (grepped).
     get_audit_logger().info(
         "ask_answered", extra={"event": "ask_answered", "user_id": user_id, "ask_id": safe_log_value(ask_id)}
+    )
+    ask = await _get_ask(db, user_id, ask_id)
+    assert ask is not None
+    return ask
+
+
+async def confirm_ask(db: JobDatabase, user_id: str, ask_id: int) -> dict[str, Any]:
+    """The user confirms an answer their assistant relayed from chat. Sets
+    ``confirmed_at`` once per answer (a repeat is a no-op); nothing is
+    rewritten and no event is added. 404 if not the caller's, 409 if the ask
+    was withdrawn or has no relayed answer to confirm."""
+    existing = await _get_ask(db, user_id, ask_id)
+    if existing is None:
+        raise SpineError(404, "ask not found")
+    if existing["withdrawn_at"]:
+        raise SpineError(409, "ask was withdrawn")
+    if not existing["relayed_from_chat"]:
+        raise SpineError(409, "only an answer your assistant relayed from chat can be confirmed")
+    if existing["confirmed_at"]:
+        return existing
+    now = datetime.now(timezone.utc).isoformat()
+    await db._db.execute(
+        "UPDATE application_asks SET confirmed_at = ? "
+        "WHERE id = ? AND user_id = ? AND withdrawn_at IS NULL AND answered_at IS NOT NULL "
+        "AND (confirmed_at IS NULL OR confirmed_at < answered_at)",
+        (now, ask_id, user_id),
+    )
+    get_audit_logger().info(
+        "ask_confirmed", extra={"event": "ask_confirmed", "user_id": user_id, "ask_id": safe_log_value(ask_id)}
     )
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None

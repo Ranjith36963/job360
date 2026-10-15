@@ -93,6 +93,23 @@ async def answer_ask(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+@router.post("/asks/{ask_id}/confirm", response_model=AskOut, dependencies=AUTH_FIRST)
+async def confirm_ask(
+    ask_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The user confirms a relayed chat answer. Web session only: an assistant
+    can never confirm for the user, so there is deliberately no MCP tool."""
+    if actor_for(user) != "web":
+        raise HTTPException(status_code=403, detail="only you can confirm this, on Job360")
+    try:
+        return await asks_service.confirm_ask(db, user.id, ask_id)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
 @router.post("/asks/{ask_id}/withdraw", response_model=AskOut, dependencies=AUTH_FIRST)
 async def withdraw_ask(
     ask_id: int,

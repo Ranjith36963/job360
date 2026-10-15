@@ -569,6 +569,8 @@ class AskOut(BaseModel):
     relayed_from_chat: bool = False
     # "you" = web answer or relayed chat answer; "assistant" = it answered alone.
     said_by: Literal["you", "assistant"] = "assistant"
+    # When the user confirmed the relayed answer on the web (None = not yet).
+    confirmed_at: Optional[str] = None
     withdrawn_at: Optional[str]
     status: str
 

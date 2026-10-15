@@ -122,6 +122,14 @@ export function eventLabel(e: { event_type: string; payload?: unknown; recorded_
  * "agent" (not renamed — it is code, never shown), only the display string in
  * `WhoChip` changed.
  */
+/** Plain-words "who recorded it" line for the Timeline: "you", "your
+ * assistant (via <client>)" or "Job360" (the server itself). */
+export function actorLabel(recordedBy: string): string {
+  if (recordedBy === "system" || recordedBy === "job360") return "Job360";
+  const { who, name } = whoLabel(recordedBy);
+  return who === "you" ? "you" : `your assistant (via ${name})`;
+}
+
 export function whoLabel(recordedBy: string): { who: "you" | "agent"; name: string } {
   if (recordedBy === "web") {
     return { who: "you", name: "You" };

@@ -15,9 +15,9 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0061** | `backend/migrations/` |
-| Migration files | **62** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 21 route modules (123 endpoints) | `backend/src/api/routes/` |
+| Migration head | **0062** | `backend/migrations/` |
+| Migration files | **63** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 21 route modules (124 endpoints) | `backend/src/api/routes/` |
 | Test files | across 196 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
@@ -70,6 +70,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/asks` | `asks.py` |
 | `POST` | `/api/asks` | `asks.py` |
 | `POST` | `/api/asks/{ask_id}/answer` | `asks.py` |
+| `POST` | `/api/asks/{ask_id}/confirm` | `asks.py` |
 | `POST` | `/api/asks/{ask_id}/withdraw` | `asks.py` |
 | `GET` | `/api/assistant-settings` | `assistant_settings.py` |
 | `GET` | `/api/assistant-settings/history` | `assistant_settings.py` |
@@ -157,5 +158,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**123 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**124 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

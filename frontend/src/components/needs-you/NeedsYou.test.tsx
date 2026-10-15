@@ -5,6 +5,7 @@ import { NeedsYou } from "./NeedsYou";
 const listAsks = vi.fn();
 const answerAsk = vi.fn();
 const withdrawAsk = vi.fn();
+const confirmAsk = vi.fn();
 const getAssistantSettings = vi.fn();
 
 vi.mock("@/lib/api", () => ({
@@ -12,6 +13,7 @@ vi.mock("@/lib/api", () => ({
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   withdrawAsk: (...a: unknown[]) => withdrawAsk(...a),
+  confirmAsk: (...a: unknown[]) => confirmAsk(...a),
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: vi.fn(),
   declineSettingRequest: vi.fn(),
@@ -46,6 +48,7 @@ const base = {
   user_words: "",
   relayed_from_chat: false,
   said_by: "assistant",
+  confirmed_at: null,
   withdrawn_at: null,
 };
 const evil = "<img src=x onerror=alert(1)>";
@@ -97,6 +100,27 @@ describe("NeedsYou", () => {
     expect(withdrawAsk).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("ask-withdraw-confirm"));
     await waitFor(() => expect(withdrawAsk).toHaveBeenCalledWith(1));
+  });
+
+  it("a relayed answer gets a Confirm button that records the confirmation, then reads You confirmed", async () => {
+    const relayed = {
+      ...base, id: 4, question: "Q4", status: "answered", answer: "Two months",
+      answered_by: "agent:Claude", user_words: "two months", relayed_from_chat: true, said_by: "you",
+    };
+    const done = { ...relayed, confirmed_at: new Date().toISOString() };
+    confirmAsk.mockResolvedValue(done);
+    listAsks.mockImplementation(async (s: string) =>
+      s === "open"
+        ? { asks: [], open_count: 0 }
+        : { asks: [confirmAsk.mock.calls.length ? done : relayed, { ...base, id: 5, question: "Q5", status: "answered", answer: "A5", answered_by: "agent:Claude" }], open_count: 0 }
+    );
+    render(<NeedsYou />);
+    const btn = await screen.findByTestId("confirm-relayed");
+    expect(screen.getAllByTestId("confirm-relayed")).toHaveLength(1); // not on the assistant-only answer
+    fireEvent.click(btn);
+    await waitFor(() => expect(confirmAsk).toHaveBeenCalledWith(4));
+    expect(await screen.findByTestId("ask-confirmed")).toHaveTextContent("You confirmed");
+    expect(screen.queryByTestId("confirm-relayed")).toBeNull();
   });
 
   it("shows the user's own words when an assistant relayed them from chat", async () => {
