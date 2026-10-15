@@ -141,7 +141,8 @@ in that same one message. Each answer has a
 `state`: `confirmed` (the user's - use it), `inferred` (an assistant worked it
 out - confirm once, then save it again with source user_said) or `sensitive`
 (salary, equality, sanctions, visa / right-to-work status - show it to the user and confirm it on THIS form
-before use; never fill it silently; ask separately "use it here?" and "remember it?"). FILE: desktop/
+before use; never fill it silently; ask separately "use it here?" and "remember it?"; save it with update_profile only after a yes to the second,
+adding remember: true to that edit, else it is not saved). FILE: desktop/
 Claude Code — download `file.url` to a local file and upload that; chat
 apps — ask the user to attach the PDF once for this job; else paste `text`
 if the form allows; else the user uploads by hand. Expired link = call the

@@ -15,8 +15,8 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0062** | `backend/migrations/` |
-| Migration files | **63** | `backend/migrations/*.up.sql` |
+| Migration head | **0063** | `backend/migrations/` |
+| Migration files | **64** | `backend/migrations/*.up.sql` |
 | FastAPI surface | 21 route modules (124 endpoints) | `backend/src/api/routes/` |
 | Test files | across 197 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |

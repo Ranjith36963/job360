@@ -953,6 +953,9 @@ class KitAnswerOut(BaseModel):
     state: Literal["confirmed", "inferred", "sensitive"]
     # Set when state is confirmed and the stored row has a time (the reference's confirmedAt).
     confirmed_at: Optional[str] = None
+    # Sensitive items only: when the user agreed to REMEMBER it (server-stamped). Still show it
+    # to the user and confirm on each form before use.
+    remembered_at: Optional[str] = None
 
 
 class KitAnswersSummaryOut(BaseModel):

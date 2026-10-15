@@ -164,7 +164,10 @@ def test_kit_marks_inferred_answer_unconfirmed():
 
 
 def _kit_rows(path: str, value: Any, source: str, set_by: str = "agent:Claude") -> dict[str, Any]:
-    return {"path": path, "value": value, "set_by": set_by, "set_at": "2026-10-01T00:00:00Z", "source": source}
+    return {
+        "path": path, "value": value, "set_by": set_by, "set_at": "2026-10-01T00:00:00Z", "source": source,
+        "remember_consent_at": "2026-10-01T00:00:00Z",
+    }
 
 
 def _full_profile():
@@ -366,3 +369,141 @@ def test_salary_is_sensitive_like_the_reference():
     assert kit._is_sensitive("logistics", "logistics.notice_period") is False
     text = " ".join(kit.KIT_INSTRUCTIONS)
     assert "may I use it on this form, and may I remember it for later" in text
+
+
+# ── Weak spot #6 wave 2: remember consent (migration 0063) ───────────────────
+# Mirrors job-apply-plugin scripts/job-apply-store.py L503-507 (refuse without consent), L541-544
+# (the helper stamps rememberedWithConsentAt), L195-199 (no marker on read = refused) and
+# skills/answer-memory/SKILL.md L151 (null placeholder allowed). NOT IN REFERENCE: the web actor.
+EQ = "user_info.equality"
+GENDER = {"gender": "Male"}
+
+
+async def _agent_patch(authenticated_async_context, fixture_user_id, edits):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        resp = await agent.patch("/api/profile", json={"edits": edits})
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+
+def _overlay(user_id: str) -> dict[str, dict[str, Any]]:
+    from src.services.profile import edits as profile_edits
+
+    return {r["path"]: r for r in profile_edits.current_overlay(user_id)}
+
+
+@pytest.mark.asyncio
+async def test_sensitive_value_without_remember_not_stored(authenticated_async_context, fixture_user_id):
+    body = await _agent_patch(authenticated_async_context, fixture_user_id, [{"path": EQ, "value": GENDER}])
+    assert body["applied"] == []
+    assert any(EQ in line and "remember: true" in line for line in body["not_saved"])
+    assert EQ not in _overlay(fixture_user_id)
+
+
+@pytest.mark.asyncio
+async def test_sensitive_with_remember_stamps_server_marker(authenticated_async_context, fixture_user_id):
+    from datetime import datetime, timezone
+
+    body = await _agent_patch(
+        authenticated_async_context, fixture_user_id,
+        [{"path": EQ, "value": GENDER, "remember": True}],
+    )
+    assert [a["path"] for a in body["applied"]] == [EQ]
+    stamp = _overlay(fixture_user_id)[EQ]["remember_consent_at"]
+    assert abs((datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
+async def test_caller_cannot_supply_the_marker_time(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        resp = await agent.patch(
+            "/api/profile",
+            json={"edits": [{"path": EQ, "value": GENDER, "remember": True, "remember_consent_at": "2000-01-01"}]},
+        )
+    assert resp.status_code == 422  # extra="forbid": the time is never an input
+
+
+@pytest.mark.asyncio
+async def test_sensitive_null_placeholder_allowed(authenticated_async_context, fixture_user_id):
+    body = await _agent_patch(authenticated_async_context, fixture_user_id, [{"path": EQ, "value": None}])
+    assert [a["path"] for a in body["applied"]] == [EQ]
+    assert body["not_saved"] == []
+
+
+@pytest.mark.asyncio
+async def test_nonsensitive_needs_no_remember(authenticated_async_context, fixture_user_id):
+    body = await _agent_patch(authenticated_async_context, fixture_user_id, [_edit()])
+    assert [a["path"] for a in body["applied"]] == [LOGI]
+    assert _overlay(fixture_user_id)[LOGI]["remember_consent_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_one_refused_sensitive_edit_does_not_block_the_others(authenticated_async_context, fixture_user_id):
+    body = await _agent_patch(
+        authenticated_async_context, fixture_user_id, [_edit(), {"path": EQ, "value": GENDER}]
+    )
+    assert [a["path"] for a in body["applied"]] == [LOGI]
+    assert len(body["not_saved"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_web_write_sensitive_always_stamps_marker(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        resp = await client.patch("/api/profile", json={"edits": [{"path": EQ, "value": GENDER}]})
+        assert resp.status_code == 200, resp.text
+    assert _overlay(fixture_user_id)[EQ]["remember_consent_at"]
+
+
+def test_edit_is_sensitive_covers_visa_salary_and_ignores_empty():
+    from src.services.applications.kit import edit_is_sensitive
+
+    assert edit_is_sensitive("user_info.right_to_work", {"countries": [{"country": "GB", "needs_sponsorship": False}]})
+    assert edit_is_sensitive("user_info.right_to_work", {"sanctions_country_citizen": False})
+    assert not edit_is_sensitive("user_info.right_to_work", {"citizenship": "GB"})
+    assert edit_is_sensitive("user_info.logistics", {"current_salary": {"amount": 1}})
+    assert not edit_is_sensitive("user_info.logistics", NOTICE)
+    assert edit_is_sensitive("preferences.salary_by_country", [{"country": "GB", "min": 1}])
+    assert not edit_is_sensitive(EQ, {}) and not edit_is_sensitive(EQ, None)
+
+
+def test_kit_sensitive_item_has_remembered_at_value():
+    from src.services.applications import kit
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+
+    profile = UserProfile(cv_data=CVData(), user_info=UserInfo(equality=dict(GENDER)))
+    stamp = "2026-10-15T09:00:00+00:00"
+    row = {"path": EQ, "value": GENDER, "set_by": "agent:Claude", "set_at": "2026-10-15T09:00:00+00:00",
+           "source": "user_said", "remember_consent_at": stamp}
+    answers, missing = kit.compute_answers(profile, [row], "GB")
+    item = answers["equality"][0]
+    assert (item["state"], item["remembered_at"]) == ("sensitive", stamp)
+    assert all(m["key"] != EQ for m in missing)
+
+
+def test_kit_legacy_sensitive_without_marker_moves_to_missing():
+    from src.services.applications import kit
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+
+    profile = UserProfile(cv_data=CVData(), user_info=UserInfo(equality=dict(GENDER)))
+    row = {"path": EQ, "value": GENDER, "set_by": "agent:Claude", "set_at": "2026-10-01T00:00:00+00:00",
+           "source": "user_said", "remember_consent_at": None}
+    answers, missing = kit.compute_answers(profile, [row], "GB")
+    assert answers["equality"] == []
+    assert any(m["key"] == EQ and "remember" in m["why"] for m in missing)
+    # The user's own web row is trusted without a marker.
+    web = dict(row, set_by="web")
+    answers, _ = kit.compute_answers(profile, [web], "GB")
+    assert answers["equality"][0]["remembered_at"] == web["set_at"]
+
+
+def test_kit_instructions_name_remember():
+    from src.services.applications import kit
+
+    assert any("remember: true" in line for line in kit.KIT_INSTRUCTIONS)
