@@ -69,12 +69,14 @@ _ANNUAL_RE = re.compile(
     r"|\ba\s+year\b|\bp\.a\b|\blpa\b|\blakhs?\b)", re.IGNORECASE)
 _MONTHLY_RE = re.compile(r"(?:/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b|\ba\s+month\b)", re.IGNORECASE)
 _HOURLY_RE = re.compile(r"(?:/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b|\ban\s+hour\b)", re.IGNORECASE)
+# Whitespace runs are bounded ({0,3}), never `\s*`: an unbounded `\s*` in front of an alternation or beside an
+# optional group backtracks quadratically on a long run of spaces (CodeQL py/polynomial-redos).
 _PERIOD_STRIP_RE = re.compile(
-    r"\s*(?:/\s*(?:year|yr|month|mo|hour|hr)|per\s+(?:year|annum|month|hour)|a\s+year|p\.a\.?"
-    r"|annual(?:ly)?|yearly|monthly|hourly)\s*$", re.IGNORECASE)
-_CUR_EDGE_RE = re.compile(rf"(?:^\s*{_CUR}\s*|\s*{_CUR}\s*$)", re.IGNORECASE)
-_RANGE_RE = re.compile(r"^([\d.,]+)\s*(k)?\s*(?:[-–—]|to)\s*([\d.,]+)\s*(k)?$", re.IGNORECASE)
-_SINGLE_RE = re.compile(r"^([\d.,]+)\s*(k)?$", re.IGNORECASE)
+    r"\s{0,3}(?:/\s{0,3}(?:year|yr|month|mo|hour|hr)|per\s{1,3}(?:year|annum|month|hour)|a\s{1,3}year|p\.a\.?"
+    r"|annual(?:ly)?|yearly|monthly|hourly)\s{0,3}$", re.IGNORECASE)
+_CUR_EDGE_RE = re.compile(rf"(?:^\s{{0,3}}{_CUR}\s{{0,3}}|\s{{0,3}}{_CUR}\s{{0,3}}$)", re.IGNORECASE)
+_RANGE_RE = re.compile(r"^([\d.,]+)\s{0,3}(k)?\s{0,3}(?:[-–—]|to)\s{0,3}([\d.,]+)\s{0,3}(k)?$", re.IGNORECASE)
+_SINGLE_RE = re.compile(r"^([\d.,]+)\s{0,3}(k)?$", re.IGNORECASE)
 _EQUITY_RE = re.compile(r"\b(?:equity|stock\s+options?|rsus?|shares)\b", re.IGNORECASE)
 _PLUS_PCT_RE = re.compile(r"\s?\+\s?\d+(?:\.\d+)?\s?%")
 _PERIOD_WINDOW = 40  # characters after the amount read for its period

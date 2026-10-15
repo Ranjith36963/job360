@@ -849,7 +849,7 @@ async def _check_kit_event(
                 "form_filled_refused",
                 extra={
                     "event": "form_filled_refused", "user_id": safe_log_value(user.id),
-                    "actor": safe_log_value(actor), "application_id": application_id,
+                    "actor": safe_log_value(actor), "application_id": safe_log_value(application_id),
                     "reason": "form_url_unreadable", "status": 422, "result": "refused",
                 },
             )
