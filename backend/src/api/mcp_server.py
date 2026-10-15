@@ -585,7 +585,9 @@ def build_server(version: str = "") -> MCPServer:
             "editable_paths": editable_paths,
             # Already read on the profile's own connection — the response
             # carries it, so this is not a third query.
-            "agent_edits": [row.model_dump() for row in resp.agent_edits],
+            # Who wrote each path and when; the value itself is already in `fields`
+            # (sending it twice doubled the payload), so it is left out here.
+            "agent_edits": [row.model_dump(exclude={"value"}) for row in resp.agent_edits],
             # Feature 9 - paths you wrote without the user's word (inferred). Absent when none (rule #29).
             **(
                 {"unconfirmed": [row.path for row in resp.agent_edits if not row.confirmed]}
