@@ -105,6 +105,11 @@ delete a lesson; if one stops being true, say so on its line and why.
   before merging a queued PR, merge origin/main into it and run
   `python3 scripts/gen_doc_blocks.py --write`.
 
+- 2026-10-15: a one-line `git merge ...; git add -A; git commit` kept going
+  after the merge CONFLICTED and pushed a commit full of conflict markers
+  (caught and fixed one commit later). **Rule:** never chain past a merge.
+  Check its exit code (or `set -e`), resolve, run the tests, then commit.
+
 ## Tooling
 
 - `scripts/gen-api-types.sh` calls plain `python`. **Rule:** run it with the
