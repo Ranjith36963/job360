@@ -52,7 +52,7 @@ schema, the application spine, MCP, auth, extraction. They live in
 Read them before editing any of those areas. Full product rules:
 `docs/product/product_design_rules.md`.
 
-**Mistakes:** append each one, with its rule, to `.claude/skills/session-lessons/SKILL.md` (owner rule). **Copying a competitor:** open every source in that skill's index first; quote file:line.
+**Mistakes:** `.claude/rules/mistakes.md` loads every session; add each new mistake's rule there and its story to `.claude/skills/session-lessons/SKILL.md` (owner rule).
 
 ## Commands
 

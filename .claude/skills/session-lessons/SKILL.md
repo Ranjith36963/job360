@@ -1,6 +1,6 @@
 ---
 name: session-lessons
-description: Mistakes past sessions made in this repo and the rule each one taught. Read BEFORE dispatching parallel workers, opening or watching PRs, handing work to another Claude session, running a real apply / outreach lifecycle for the owner, or writing a CV, letter or outreach note. Append a new lesson whenever you make a mistake the owner had to catch or that cost real time.
+description: Mistakes past sessions made in this repo and the rule each one taught. Read BEFORE dispatching parallel workers, opening or watching PRs, handing work to another Claude session, running a real apply / outreach lifecycle for the owner, or writing a CV, letter or outreach note. Append a new lesson whenever you make a mistake the owner had to catch or that cost real time, and put its one-line rule in .claude/rules/mistakes.md (loads every session).
 ---
 <!-- doc: LIVING | last-verified: 2026-10-15 by the owner ("ask Claude to document its mistakes") -->
 
