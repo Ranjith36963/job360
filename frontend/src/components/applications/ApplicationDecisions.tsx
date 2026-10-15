@@ -41,6 +41,7 @@ export function ApplicationDecisions({
   onChanged,
   newFillWaiting = false,
   status = "considering",
+  changesSinceApproved = 0,
 }: {
   applicationId: number;
   controls: ApplicationControls;
@@ -48,6 +49,8 @@ export function ApplicationDecisions({
   newFillWaiting?: boolean;
   /** The application's status: Send / Don't send only show while it is pre-apply. */
   status?: string;
+  /** CV versions saved after the approved one not yet approved. */
+  changesSinceApproved?: number;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -148,6 +151,11 @@ export function ApplicationDecisions({
                 Don&apos;t send
               </button>
             </div>
+          )}
+          {allowed.includes("send_approve") && (
+            <p data-testid="nothing-sent" className={NOTE}>
+              <span data-testid="changes-since-approved">{`${changesSinceApproved} change${changesSinceApproved === 1 ? "" : "s"}`}</span> · nothing sent yet
+            </p>
           )}
           {newFillWaiting ? (
             <p data-testid="send-state" className={NOTE}>

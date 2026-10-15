@@ -9,6 +9,7 @@ import type { ReadyCardData } from "@/lib/api";
 import { clock, docText, flagText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
 import type { ChipTone } from "@/lib/ready-to-send";
 import { whoLabel } from "@/lib/event-labels";
+import { nothingSent } from "@/lib/application-actions";
 import { cn } from "@/lib/utils";
 
 // Every string here (company, title, questions, answers, flags) was written by
@@ -31,7 +32,13 @@ export function ReadyCard({
   card,
   paused,
   onChanged,
+  status = "considering",
+  changes,
 }: {
+  /** The application status: "Nothing has been sent" shows while the table says so. */
+  status?: string;
+  /** CV changes not yet approved; unknown (e.g. the Needs-you list) shows no count. */
+  changes?: number;
   card: ReadyCardData;
   paused: boolean;
   onChanged: () => void;
@@ -152,6 +159,17 @@ export function ReadyCard({
         >
           Don&apos;t send
         </button>
+        {nothingSent(status) && (
+          <p data-testid="nothing-sent" className="text-xs text-muted-foreground">
+            {changes === undefined ? (
+              "Nothing sent yet"
+            ) : (
+              <>
+                <span data-testid="changes-since-approved">{`${changes} change${changes === 1 ? "" : "s"}`}</span> · nothing sent yet
+              </>
+            )}
+          </p>
+        )}
         <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
       </div>
     </article>

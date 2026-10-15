@@ -296,3 +296,20 @@ describe("Your assistant got stuck (blocked record)", () => {
     expect(screen.getByTestId("blocked-detail").textContent).toBe("Needs a puzzle solved");
   });
 });
+
+describe("nothing-sent line", () => {
+  const noop = () => undefined;
+  it("reads '<N> changes · nothing sent yet' next to the approve button", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={2} />);
+    expect(screen.getByTestId("nothing-sent")).toHaveTextContent("2 changes · nothing sent yet");
+    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("2 changes");
+  });
+  it("says change (singular) for one", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={1} />);
+    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("1 change");
+  });
+  it("is gone once the status is applied", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} status="applied" changesSinceApproved={2} />);
+    expect(screen.queryByTestId("nothing-sent")).toBeNull();
+  });
+});
