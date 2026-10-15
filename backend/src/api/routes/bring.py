@@ -152,14 +152,18 @@ def _posting_link(url: str) -> str:
     return f"{parts.netloc}{parts.path}" + ("?" + "&".join(f"{k}={v}" for k, v in keep) if keep else "")
 
 
-def posting_differences(app_row: dict[str, Any], body: BringJobRequest, country: Optional[str]) -> list[str]:
+def posting_differences(
+    app_row: dict[str, Any], body: BringJobRequest, country: Optional[str], catalog_url: str = ""
+) -> list[str]:
     """What makes this paste a DIFFERENT posting from the one already on the
     caller's application. Only a field both sides actually state can differ
     (rule #29 — blank is "not said", never a conflict). Location is compared
-    loosely: "London" and "London, UK" are the same place."""
+    loosely: "London" and "London, UK" are the same place. ``catalog_url`` is
+    the job row's own link: after update_job replaced a dead link with the
+    employer's, re-bringing the original ad is still the same posting."""
     diffs: list[str] = []
     have_link, want_link = _posting_link(str(app_row.get("job_url") or "")), _posting_link(body.apply_url)
-    if have_link and want_link and have_link != want_link:
+    if have_link and want_link and have_link != want_link and want_link != _posting_link(catalog_url):
         diffs.append("apply_url")
     have_loc, want_loc = _loose_location(str(app_row.get("job_location") or "")), _loose_location(body.location)
     if have_loc and want_loc and have_loc not in want_loc and want_loc not in have_loc:
@@ -367,7 +371,7 @@ async def bring_job(
     mine = await applications_spine.get_application_by_job(db, user.id, job_id)
     if mine is not None:
         mine_row = await applications_spine.get_owned_application(db, user.id, int(mine["id"])) or {}
-        diffs = posting_differences(mine_row, body, clean_facts.get("country"))
+        diffs = posting_differences(mine_row, body, clean_facts.get("country"), str(row.get("apply_url") or ""))
         if diffs:
             get_audit_logger().info(
                 "job_bring_conflict",

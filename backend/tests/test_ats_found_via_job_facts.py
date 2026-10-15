@@ -307,6 +307,12 @@ async def test_update_job_apply_url_is_per_user(authenticated_async_context):
         kit = (await client.get(f"/api/applications/{a_app}/kit")).json()
         assert kit["job"]["apply_url"] == new_url
 
+        # Re-bringing the ORIGINAL ad (a job alert repeats it) is the same
+        # posting, never a 409 "different posting".
+        again = await client.post("/api/jobs/bring", json=_AD_FR)
+        assert again.status_code == 200, again.text
+        assert again.json()["application_id"] == a_app
+
     cookie = await _second_user_session_cookie("apply-url-b@example.com")
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", cookies={"job360_session": cookie}

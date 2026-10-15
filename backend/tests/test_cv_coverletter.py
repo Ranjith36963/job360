@@ -318,6 +318,13 @@ def test_letter_without_letterhead_is_flagged():
     # Contact but no date, and date but no contact, are both flagged.
     assert "letter_no_header" in codes("cover_letter", full.replace("15 October 2026\n", ""))
     assert "letter_no_header" in codes("cover_letter", full.replace("07700 900123 | jane@example.com | London", "London"))
+    # A date or phone in the BODY (below "Dear") is not a letterhead; a date is not a phone.
+    assert "letter_no_header" in codes(
+        "cover_letter", "Dear Hiring Manager,\nSince March 2021 I have led teams; call me on 07700 900123.\nJane"
+    )
+    assert "letter_no_header" in codes(
+        "cover_letter", "Jane Doe\n2026-10-15\n\nAcme Ltd\nDear Hiring Manager,\nI am applying.\nRegards, Jane"
+    )
     # CV kind never gets it.
     assert "letter_no_header" not in codes("cv", bare)
 
