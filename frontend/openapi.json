@@ -3004,6 +3004,38 @@
           "setup": {
             "$ref": "#/components/schemas/DoctorSetup"
           },
+          "stale_hint": {
+            "default": "",
+            "title": "Stale Hint",
+            "type": "string"
+          },
+          "tools": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Tools",
+            "type": "object"
+          },
+          "tools_stale": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools Stale"
+          },
+          "tools_version": {
+            "default": "",
+            "title": "Tools Version",
+            "type": "string"
+          },
           "waiting_settings": {
             "title": "Waiting Settings",
             "type": "integer"
@@ -14360,9 +14392,20 @@
     },
     "/api/doctor": {
       "get": {
-        "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only; email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).",
+        "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only; email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).\n\nAlso the MCP tool list as served now (``tools``, ``tools_version``) so an\nassistant can tell its client cached an old one: pass the version it saw\nlast as ``client_tools_version`` and ``tools_stale`` says whether it moved\n(null when none was passed).",
         "operationId": "doctor_api_doctor_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "client_tools_version",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 64,
+              "title": "Client Tools Version",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",

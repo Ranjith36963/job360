@@ -6,7 +6,7 @@ Print this checklist and tick each step:
 [ ] 2 Fix profile  [ ] 3 Connect  [ ] 4 Watched daily run  [ ] 5 Schedule  [ ] 6 Finish
 
 This is an INTERVIEW: you ask, the user answers, you save their words. Never answer
-for them from the CV. Job360 is the record. Plain words. Rules: `get_recipe("rules")`.
+for them from the CV. Job360 is the record. Plain words. Rules: `get_recipe("rules")`. If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360.
 
 0. **Resume.** `get_profile`: read `assistant_notes`, `fields`, `settings.setup_progress`.
    Say "N of 6 done", **resume** at `setup_progress.next`; a field already set:
