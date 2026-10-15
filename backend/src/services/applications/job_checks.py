@@ -27,10 +27,36 @@ from src.core import settings
 _TRACKING_KEYS = frozenset({"gclid", "fbclid", "ref", "trackingid", "refid", "msclkid", "mc_cid", "mc_eid"})
 
 _CUR = r"(?:USD|EUR|GBP|CAD|AUD|CHF|INR|SGD|AED)"
-_PAY_RE = re.compile(
+# An amount of money. Every quantifier is bounded or single, so the scan is linear.
+_MONEY_RE = re.compile(
     rf"(?:[$€£₹¥]\s?\d|\b{_CUR}\s?\d|\d\s?{_CUR}\b|\d\s?k\s?(?:/|per\s)?\s?(?:yr|year|annum)\b)",
     re.IGNORECASE,
 )
+# INR amounts that are pay by nature (a salary unit, not a company figure).
+_PAY_UNIT_RE = re.compile(
+    r"(?:\d[\d,.]{0,12}\s?(?:lpa|lakhs?)\b|₹\s?\d[\d,.]{0,12}\s?(?:l|lac|lakhs?)\b)",
+    re.IGNORECASE,
+)
+# Pay-context words: a money amount counts as pay only with one of these nearby.
+_PAY_WORD_RE = re.compile(
+    r"(?:\b(?:salary|salaries|pay|paid|compensation|ctc|lpa|lakhs?|annum|p\.a|annual|annually|yearly"
+    r"|hourly|ote|base|stipend|range|package|wage|wages)\b"
+    r"|\bper\s(?:year|month|hour|week|day)\b|\ba\s(?:year|month)\b"
+    r"|/\s?(?:yr|year|month|mo|hr|hour)\b|\bk\s?per\b)",
+    re.IGNORECASE,
+)
+# Company-figure words: an amount right next to one of these is not pay.
+_NOT_PAY_RE = re.compile(
+    r"\b(?:revenue|transactions?|funding|funded|raised|raises|valuation|valued|billions?|arr|gmv"
+    r"|markets?|customers?|series\s[a-f])\b",
+    re.IGNORECASE,
+)
+_SENTENCE_END_RE = re.compile(r"[.!?;](?=\s)|\n")
+_PAY_WINDOW = 120  # characters either side of an amount
+_NOT_PAY_WINDOW = 50  # how close an exclusion word must sit to veto an amount
+_PAY_SCAN_CAP = 100_000  # characters of the ad ever scanned
+_PAY_MATCH_CAP = 200  # amounts examined
+_EVIDENCE_MAX = 160
 _SPONSOR_RE = re.compile(r"\b(?:sponsor\w*|visas?)\b", re.IGNORECASE)
 
 
@@ -129,6 +155,49 @@ def parse_day(value: Optional[str]) -> Optional[date]:
         return None
 
 
+def pay_evidence(description: str) -> str:
+    """The sentence/line that states pay, whitespace-collapsed and cut to 160
+    characters, or ``''``. An amount counts only with a pay word in its own
+    sentence or line (<=120 chars each side), or as an INR pay unit (LPA, lakh,
+    ``₹12L``); an amount beside revenue / funding / billion words never counts."""
+    text = (description or "")[:_PAY_SCAN_CAP]
+    for i, m in enumerate(_MONEY_RE.finditer(text)):
+        if i >= _PAY_MATCH_CAP:
+            break
+        ms, me = m.start(), m.end()
+        left = text[max(0, ms - _PAY_WINDOW):ms]
+        right = text[me:me + _PAY_WINDOW]
+        cut = 0
+        for prev_end in _SENTENCE_END_RE.finditer(left):
+            cut = prev_end.end()
+        left = left[cut:]
+        next_end = _SENTENCE_END_RE.search(right)
+        if next_end:
+            right = right[:next_end.start()]
+        sentence = left + m.group(0) + right
+        pos = len(left)
+        near = sentence[max(0, pos - _NOT_PAY_WINDOW):pos + len(m.group(0)) + _NOT_PAY_WINDOW]
+        if _NOT_PAY_RE.search(near):
+            continue
+        unit = _PAY_UNIT_RE.search(sentence)
+        if not (unit or _PAY_WORD_RE.search(sentence)):
+            continue
+        anchor = unit.start() if unit and not _PAY_WORD_RE.search(sentence) else pos
+        flat = " ".join(sentence.split())
+        if len(flat) > _EVIDENCE_MAX:
+            # centre the cut on the amount so the figure stays in the evidence
+            anchor_flat = len(" ".join(sentence[:anchor].split()))
+            start = max(0, min(anchor_flat - _EVIDENCE_MAX // 2, len(flat) - _EVIDENCE_MAX))
+            flat = flat[start:start + _EVIDENCE_MAX]
+        return flat
+    # an INR pay unit on its own (no currency symbol the money regex saw)
+    u = _PAY_UNIT_RE.search(text)
+    if u:
+        flat = " ".join(text[max(0, u.start() - 60):u.end() + 60].split())
+        return flat[:_EVIDENCE_MAX]
+    return ""
+
+
 def job_checks(
     description: str,
     apply_url: str,
@@ -190,10 +259,11 @@ def job_checks(
             )
         out.append({"code": "reposted", "ok": not reposted, "value": reposted, "reason": why})
 
-    pay = bool(_PAY_RE.search(description or ""))
-    out.append({"code": "pay_stated", "ok": pay, "value": pay,
-                "reason": "The ad text contains an amount of money." if pay
-                else "No amount of money appears in the ad text."})
+    evidence = pay_evidence(description)
+    pay = bool(evidence)
+    out.append({"code": "pay_stated", "ok": pay, "value": pay, "evidence": evidence,
+                "reason": f'The ad states pay: "{evidence}"' if pay
+                else "No pay (an amount next to a salary or pay word) appears in the ad text."})
     spon = bool(_SPONSOR_RE.search(description or ""))
     out.append({"code": "sponsorship_mentioned", "ok": spon, "value": spon,
                 "reason": "The ad text mentions sponsorship or visas - read what it says." if spon

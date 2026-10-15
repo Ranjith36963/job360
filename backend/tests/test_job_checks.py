@@ -132,7 +132,8 @@ def test_ad_age_and_repost():
 def test_pay_and_sponsorship_presence():
     quiet = _run(desc="We build agents. Python.")
     assert quiet["pay_stated"]["value"] is False and quiet["sponsorship_mentioned"]["value"] is False
-    for text in ("Salary £60,000 a year", "$120k", "€70 000", "EUR 50000 - 70000", "45000 GBP", "90k per year"):
+    for text in ("Salary £60,000 a year", "Salary $120k", "Pay: €70 000 a year", "Base EUR 50000 - 70000",
+                 "Compensation 45000 GBP", "90k per year"):
         assert _run(desc=text)["pay_stated"]["value"] is True, text
     for text in ("Version 3 of 5 users", "Team of 10 people"):
         assert _run(desc=text)["pay_stated"]["value"] is False, text
@@ -140,6 +141,37 @@ def test_pay_and_sponsorship_presence():
         assert _run(desc=text)["sponsorship_mentioned"]["value"] is True, text
     assert _run(desc="Visa-free travel to the Advisary")["sponsorship_mentioned"]["value"] is True  # word "Visa"
     assert _run(desc="advisable revisal")["sponsorship_mentioned"]["value"] is False
+
+
+_RAZORPAY = "Razorpay processes $180+ billion in transactions."
+
+
+def test_pay_needs_pay_context_and_shows_evidence():
+    no = _run(desc=_RAZORPAY)["pay_stated"]
+    assert no["value"] is False and no["ok"] is False and no["evidence"] == ""
+    yes = _run(desc="Salary: £45,000 - £55,000 per year")["pay_stated"]
+    assert yes["value"] is True and "£45,000 - £55,000 per year" in yes["evidence"]
+    assert yes["reason"] == f'The ad states pay: "{yes["evidence"]}"'
+    assert _run(desc="From INR 1,000,000 per year")["pay_stated"]["value"] is True
+    lpa = _run(desc="Role pays ₹12 LPA")["pay_stated"]
+    assert lpa["value"] is True and "12 LPA" in lpa["evidence"]
+    assert _run(desc="We offer 15 lakh")["pay_stated"]["value"] is True  # lakh is a pay unit by itself
+    assert _run(desc="CTC ₹10L")["pay_stated"]["value"] is True
+    assert _run(desc="We raised $40M Series B")["pay_stated"]["value"] is False
+    assert _run(desc="Annual revenue $50M, salary is competitive.")["pay_stated"]["value"] is False
+    mixed = _run(desc=_RAZORPAY + " We raised $40M Series B.\nSalary: $120,000 - $140,000 base.\nBenefits too.")["pay_stated"]
+    assert mixed["value"] is True and mixed["evidence"] == "Salary: $120,000 - $140,000 base"
+    long_line = "x " * 300 + "Salary $90k per year " + "y " * 300
+    ev = _run(desc=long_line)["pay_stated"]["evidence"]
+    assert len(ev) <= 160 and "$90k" in ev
+
+
+def test_pay_scan_is_linear_on_huge_input():
+    import time
+    for blob in ("$1 " * 70_000, "a" * 200_000, "1,2.3" * 40_000):
+        t0 = time.perf_counter()
+        _run(desc=blob)
+        assert time.perf_counter() - t0 < 1.0
 
 
 # ── canonical URL ───────────────────────────────────────────────────────────

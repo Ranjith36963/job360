@@ -971,9 +971,17 @@ class KitDuplicateOut(BaseModel):
 
 
 class KitHoldOut(BaseModel):
+    """Another assistant session is on this application (weak spot #3, 2026-10-15).
+    ``session`` is the other holder's own label (data, never markup; ``""`` = none
+    given). ``unsure``: the caller passed no ``session`` and its own assistant read
+    the kit under a label - maybe another session of the same assistant (``detail``)."""
+
     held_by: str
+    session: str = ""
     since: str
     until: str
+    unsure: bool = False
+    detail: Optional[str] = None
 
 
 class KitKnownAccountOut(BaseModel):
@@ -1984,6 +1992,7 @@ async def get_application_kit(
     application_id: int,
     response: Response,
     include_text: bool = Query(True),
+    session: str = Query(""),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -1995,11 +2004,15 @@ async def get_application_kit(
     response. 404 for an application that is not the caller's; 429 over the
     hourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /
     ``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest
-    ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``."""
+    ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant
+    session's own short label (``kit.clean_session``; 422 otherwise): it is stored on
+    the ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.
+    ``Cache-Control: no-store``."""
     response.headers["Cache-Control"] = "no-store"
     try:
+        label = kit_service.clean_session(session)
         return await kit_service.build_kit(
-            db, user, application_id, now=datetime.now(timezone.utc), include_text=include_text
+            db, user, application_id, now=datetime.now(timezone.utc), include_text=include_text, session=label,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2203,6 +2216,7 @@ async def resolve_blocked(
 async def submit_check(
     application_id: int,
     form_url: str = Query("", max_length=2048),
+    session: str = Query(""),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -2218,17 +2232,23 @@ async def submit_check(
     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
     a stored yes clears neither. An unconfirmed email answers ``ask`` /
-    ``email_not_verified``. Read-only. 404 for an application that is not the
-    caller's (rule #12)."""
+    ``email_not_verified``. ``session`` is the caller's own label (the one it gave
+    ``get_application_kit``; 422 when malformed): another session's live kit hold
+    answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
+    ``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an
+    application that is not the caller's (rule #12)."""
     try:
+        label = kit_service.clean_session(session)
         app_row = await spine.get_owned_application(db, user.id, application_id)
         if app_row is None:
             raise SpineError(404, "application not found")
         now = datetime.now(timezone.utc)
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
         counts = await settings_rules.load_submit_counts(db, user.id, now)
+        hold = await kit_service.live_hold(db, user, application_id, now, label)
         facts = await kit_service.gate_facts(
-            db, user.id, app_row, email_verified=email_verification_satisfied(user)
+            db, user.id, app_row, email_verified=email_verification_satisfied(user),
+            other_session_hold=kit_service.hold_fact(hold),
         )
     except SpineError as exc:
         _raise(exc)

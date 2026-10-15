@@ -30,6 +30,9 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    `blocked` {reason: safety_block, step: "final submit", page_host}, `hold_released` {reason: blocked}, leave the
    filled tab open and tell the user to press Submit themselves. When they say it went: `unblocked`
    {resolution: user_did_it}, then `record_application`. **Done when** the page shows the confirmation, or `blocked`.
+   Pass a `session` label (same one all conversation) to get_application_kit and check_submit. `hold` set means another
+   session is working this application: tell the user and stop unless they say continue. When you finish or hand over,
+   record `hold_released` {reason: done|stopped}.
 8. **Next form.** Go back to step 2 for the next job on the approved list.
 
 Per ATS (only what was seen):
