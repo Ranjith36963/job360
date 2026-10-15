@@ -1700,7 +1700,9 @@ async def test_first_score_line_never_parks(authenticated_async_context, fixture
         first = (await _patch(agent, _e(SUBMIT, "auto_when_sure"), _e(APPLY, "auto"))).json()
         assert {w["path"] for w in first["waiting"]} == {SUBMIT, APPLY}
         resp = await _patch(
-            agent, _e(SCORE, 70), _e(PROGRESS, _done("targets", at=at)), _e("user_info.right_to_work", where)
+            agent, _e(SCORE, 70), _e(PROGRESS, _done("targets", at=at)),
+            # work_authorization is a sensitive answer (weak spot #6 wave 2): saved only with the user's remember OK
+            {**_e("user_info.right_to_work", where), "remember": True},
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
@@ -1711,6 +1713,23 @@ async def test_first_score_line_never_parks(authenticated_async_context, fixture
     async with authenticated_async_context() as client:
         view = await _view(client)
         assert view["apply_min_score"]["effective"] == 70 and view["setup_progress"]["next"] == "you"
+
+
+@pytest.mark.asyncio
+async def test_setup_right_to_work_without_remember_is_not_saved_and_says_so(authenticated_async_context, fixture_user_id):
+    """Weak spot #6 wave 2 x setup: a visa / work-authorization answer sent without the user's remember OK
+    is NOT written - and the reply names the path in `not_saved` (never a silent pass); resent with
+    remember: true it is saved."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    where = {"countries": [{"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"}]}
+    async with _bearer_client(token) as agent:
+        body = (await _patch(agent, _e("user_info.right_to_work", where))).json()
+        assert body["applied"] == []
+        assert any("user_info.right_to_work" in line and "NOT saved" in line for line in body["not_saved"]), body
+        saved = (await _patch(agent, {**_e("user_info.right_to_work", where), "remember": True})).json()
+        assert [a["path"] for a in saved["applied"]] == ["user_info.right_to_work"] and saved["not_saved"] == []
 
 
 @pytest.mark.asyncio

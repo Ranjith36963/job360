@@ -6,7 +6,7 @@ conversation. The hard lines in the server instructions win over everything
 here. Sections: Settings and the submit gate, Apply kit, Gmail and the daily
 check, Outreach, Events, Profile, Job facts.
 
-If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360.
+If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360. Every get_recipe result carries `tools_version` and `tools_rev`: if either differs from the one you saw last, reconnect too.
 
 ## Settings and the submit gate
 
@@ -69,7 +69,7 @@ held_by_other_session (another assistant session read this application's kit
 recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
 the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
-latest `form_filled`), email_not_verified (the user has not confirmed their
+latest `form_filled`), form_check_missing (`stop`: a newer application has no `form_checked`: call check_form, record it), email_not_verified (the user has not confirmed their
 email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you
@@ -141,14 +141,15 @@ in that same one message. Each answer has a
 `state`: `confirmed` (the user's - use it), `inferred` (an assistant worked it
 out - confirm once, then save it again with source user_said) or `sensitive`
 (salary, equality, sanctions, visa / right-to-work status - show it to the user and confirm it on THIS form
-before use; never fill it silently; ask separately "use it here?" and "remember it?"). FILE: desktop/
+before use; never fill it silently; ask separately "use it here?" and "remember it?"; save it with update_profile only after a yes to the second,
+adding remember: true to that edit, else it is not saved). FILE: desktop/
 Claude Code — download `file.url` to a local file and upload that; chat
 apps — ask the user to attach the PDF once for this job; else paste `text`
 if the form allows; else the user uploads by hand. Expired link = call the
 kit again. Show the CV; when the user OKs it in chat record_event cv_seen
 (where chat); when they say yes to submitting, record_event submit_approved.
 After filling, record_event form_filled with `answers`: every field you typed,
-its `source`, the kit `key` for memory/profile answers; a guess is `guessed`. Pass a `session` label (same one
+its `source`, the kit `key` for memory/profile answers; a guess is `guessed`; name any field you left blank in `fields_skipped`. Pass a `session` label (same one
 all conversation) to get_application_kit and check_submit. `hold` set means another session is working this
 application: tell the user and stop unless they say continue. When you finish or hand over, record
 `hold_released` {reason: done|stopped}. `duplicate` set = warn before any work. `autofill`
@@ -315,6 +316,11 @@ it may not be implausibly in the future. A status event (applied/replied/
 interview_*/offer/rejected/withdrawn/ghosted) moves the application's status; a
 note-family event never does.
 
+Wrong applied date: get_application -> timeline, take the `applied` event_id,
+then record_event `applied` with the right `occurred_at` and `corrects_event_id`
+= that id. The old event is kept and marked superseded; never record a second
+plain `applied` (it becomes a confirmation, not a new date).
+
 `source` names the email an event came from (kind/message_id/sender/subject/
 received_at) — the same message_id on the same application is the same event,
 so you get the first one back with already_existed=true and nothing is written;
@@ -356,8 +362,8 @@ APPLY-KIT events (closed payloads, anything else is 422): `cv_seen`
 they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat"} -
 ONLY when the user typed yes to submitting THIS application; `submit_declined`
 {where:"chat"} - the user said don't send; `autofill_set` {mode:"deny"} - you
-may only send deny; `form_filled` {form_url, fields_count, answers?} - after you filled
-the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
+may only send deny; `form_filled` {form_url, fields_count, fields_skipped?, answers?} - after you filled
+the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?, unreadable?: [field names you could not read back]} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill, while `unreadable` is not empty, or if fields_checked < the latest `form_checked` questions_count); `form_checked` {questions_count, answered, missing, answers?: [{question, source, key?, needs_confirmation?}]} - after check_form and the user's reply, counts and wording only, never values; `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
 wall (never a password anywhere). A payload that is wrong is refused ONCE (422) with every
 problem listed and one complete valid example for that event; fix them all and
@@ -461,6 +467,9 @@ several edits in one call. Each edit may carry `"source": "user_said"` (the user
 told you) or `"agent_inferred"` (you worked it out); omitted = agent_inferred.
 ALWAYS pass `"source": "user_said"` when the value is the user's own answer;
 `agent_inferred` only for what you worked out yourself.
+SENSITIVE VALUES (equality, salary, visa / right-to-work status, current salary): ask "may I remember this for future
+applications?"; only on a yes add `"remember": true` to that edit, else it is NOT saved (the reply lists it in
+`not_saved`; use it on this form only). Permission to fill is not permission to remember.
 get_profile lists your inferred paths in `unconfirmed`. A kit answer with state
 'inferred' was worked out by an assistant — confirm it with the user once, then
 save it again with source user_said. Never mark your own guess user_said. To drop a wrong skill from every surface, add it to
@@ -532,7 +541,8 @@ why-this-company, a referral there) gets `company`: that job's company; it is re
 `topic` = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. `work_from.IN`,
 `notice_period_days`): save it with every answer; a gap's own `topic` goes in unchanged. An approved answer
 closes a gap when its topic matches, or its question equals the gap's text ignoring case and punctuation.
-The kit's `approved_text` holds the newest 25 (with `topic` when saved); more: get_profile `fields["user_info.answers"]`.
+`check_form` finds the saved answer for a form question by that topic, wording or alias (this company's answer
+before a general one; disagreeing answers = ask; `consent.`/`certify.` topics are never reused). The kit's `approved_text` holds the newest 25 (with `topic` when saved); more: get_profile `fields["user_info.answers"]`.
 `preferences.salary_by_country` = [{country (ISO2), min, max (numbers > 0, min
 not above max; equal = one figure), currency (3 letters, e.g. EUR), period:
 year | month}], ONE record per country (`min` alone = one figure; never `max`

@@ -116,6 +116,7 @@ async def doctor(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
     client_tools_version: Annotated[str, Query(max_length=64)] = "",
+    client_tools_rev: Annotated[Optional[int], Query(ge=0, le=1_000_000)] = None,
 ) -> dict[str, Any]:
     """The account's state in one read, plus ONE closed ``next_step``:
     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
@@ -161,20 +162,20 @@ async def doctor(
             "blocked_today": await _blocked_today(db, user.id, now),
         },
         "next_step": next_step,
-        **_tools_block(client_tools_version),
+        **_tools_block(client_tools_version, client_tools_rev),
     }
 
 
-def _tools_block(client_tools_version: str) -> dict[str, Any]:
+def _tools_block(client_tools_version: str, client_tools_rev: Optional[int] = None) -> dict[str, Any]:
     """The MCP tool-list block (``mcp_server.tools_report``), lazily imported (rule #16).
     Defensive like every doctor field: a failure reads as an empty list, never a 500."""
     try:
         from src.api.mcp_server import tools_report  # noqa: PLC0415
 
-        return tools_report(client_tools_version)
+        return tools_report(client_tools_version, client_tools_rev)
     except Exception:  # noqa: BLE001
         log.warning("doctor_tools_report_failed", extra={"event": "doctor_tools_report_failed"})
-        return {"tools_version": "", "tools": {}, "tools_stale": None, "stale_hint": ""}
+        return {"tools_version": "", "tools_rev": 0, "tools": {}, "tools_stale": None, "stale_hint": ""}
 
 
 @router.post("/missing-tools", status_code=201, response_model=MissingToolResponse, dependencies=AUTH_FIRST)

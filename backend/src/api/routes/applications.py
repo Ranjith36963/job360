@@ -286,6 +286,20 @@ class AddContactRequest(BaseModel):
 # `X | null` and the second as an optional key).
 
 
+class PayAdvertisedOut(BaseModel):
+    """Pay exactly as the ad states it (job_checks.pay_facts). Never annualised:
+    ``period`` is null when the ad does not say; ``currency`` is "UNKNOWN" when
+    no ISO code / unambiguous symbol sits beside the amount."""
+
+    amount: str
+    evidence: str
+    period: Optional[str] = None
+    currency: str
+    min: Optional[int] = None
+    max: Optional[int] = None
+    equity: bool = False
+
+
 class ApplicationJobOut(BaseModel):
     job_title: str
     job_company: str
@@ -302,6 +316,8 @@ class ApplicationJobOut(BaseModel):
     found_on: Optional[str] = None
     ad_posted_at: Optional[str] = None
     employer_published_at: Optional[str] = None
+    # Pay as advertised in the stored ad text (null = the ad states none).
+    pay_advertised: Optional[PayAdvertisedOut] = None
 
 
 class FitAxisOut(BaseModel):
@@ -466,6 +482,15 @@ class ApplicationReceiptOut(BaseModel):
     cover_letter_artifact_id: Optional[int]
     # True iff cover_letter_artifact_id is set; False = "Cover letter: not sent".
     cover_letter_sent: bool = False
+    cv_version_no: Optional[int] = None
+    cover_letter_version_no: Optional[int] = None
+    # Read-time facts (spine.receipt_summary_facts), never stored: "N of M fields · S skipped · G guessed".
+    # counts_line is "" and fields_total None when no form_filled event was recorded (no invented M).
+    counts_line: str = ""
+    fields_total: Optional[int] = None
+    fields_skipped: int = 0
+    guessed_count: int = 0
+    form_host: str = ""
     note: str
     # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
     answers: list[ReceiptAnswerOut] = Field(default_factory=list)
@@ -602,6 +627,20 @@ class ProofMissingOut(BaseModel):
     context: str
 
 
+class KitHoldOut(BaseModel):
+    """Another assistant session is on this application (weak spot #3, 2026-10-15).
+    ``session`` is the other holder's own label (data, never markup; ``""`` = none
+    given). ``unsure``: the caller passed no ``session`` and its own assistant read
+    the kit under a label - maybe another session of the same assistant (``detail``)."""
+
+    held_by: str
+    session: str = ""
+    since: str
+    until: str
+    unsure: bool = False
+    detail: Optional[str] = None
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -633,6 +672,11 @@ class ApplicationDetailOut(BaseModel):
     # known ATS) and the time up to which this job's mail was read (null = never).
     email_senders: list[str] = []
     inbox_checked_at: Optional[str] = None
+    # Weak spot #3 wave 2 - another assistant session's live kit hold and the headline stage.
+    hold: Optional[KitHoldOut] = None
+    stage: str = ""
+    # Weak spot #1b (c): derived from `form_filled` + a receipt, never stored. null = no form_filled.
+    form_state: Optional[Literal["filled", "submitted"]] = None
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -685,6 +729,9 @@ class ApplicationSummaryOut(BaseModel):
     # Gmail check slice 2026-10-15 - same pair as ApplicationDetailOut.
     email_senders: list[str] = []
     inbox_checked_at: Optional[str] = None
+    # Weak spot #3 wave 2 - same pair as ApplicationDetailOut, batched for the page.
+    hold: Optional[KitHoldOut] = None
+    stage: str = ""
 
 
 class ListApplicationsResponse(BaseModel):
@@ -779,6 +826,7 @@ class RecordApplicationReceiptResponse(BaseModel):
     cover_letter_artifact_id: Optional[int]
     # False when no letter was named: the receipt says no cover letter was sent.
     cover_letter_sent: bool = False
+    cover_letter_version_no: Optional[int] = None
     channel: str
     # What the caller sent, verbatim (trimmed); '' when none.
     channel_given: str = ""
@@ -943,6 +991,9 @@ class KitAnswerOut(BaseModel):
     state: Literal["confirmed", "inferred", "sensitive"]
     # Set when state is confirmed and the stored row has a time (the reference's confirmedAt).
     confirmed_at: Optional[str] = None
+    # Sensitive items only: when the user agreed to REMEMBER it (server-stamped). Still show it
+    # to the user and confirm on each form before use.
+    remembered_at: Optional[str] = None
 
 
 class KitAnswersSummaryOut(BaseModel):
@@ -1001,20 +1052,6 @@ class KitDuplicateOut(BaseModel):
     same_company_30d: int
     flag: str
     cleared: Optional[KitSeenOut] = None
-
-
-class KitHoldOut(BaseModel):
-    """Another assistant session is on this application (weak spot #3, 2026-10-15).
-    ``session`` is the other holder's own label (data, never markup; ``""`` = none
-    given). ``unsure``: the caller passed no ``session`` and its own assistant read
-    the kit under a label - maybe another session of the same assistant (``detail``)."""
-
-    held_by: str
-    session: str = ""
-    since: str
-    until: str
-    unsure: bool = False
-    detail: Optional[str] = None
 
 
 class KitKnownAccountOut(BaseModel):
@@ -1444,13 +1481,15 @@ async def list_applications(
     # the daily-check prompt closes its run with.
     due: bool = Query(False),
     quiet_days: Optional[int] = Query(None, ge=1, le=settings.APPLICATION_QUIET_DAYS_MAX),
+    # Weak spot #3 wave 2 - only applications another assistant session holds right now.
+    in_flight: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
-            due=due, quiet_days=quiet_days,
+            due=due, quiet_days=quiet_days, in_flight=in_flight,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2089,7 +2128,11 @@ async def check_application_form(
     key it matches the normalized wording of the question against the user's approved
     answers. No fuzzy matching, no NLP. ``answered`` carries the value and its source
     (``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask
-    the user, once. Read-only: no event is written. 404 for an application that is not the
+    the user, once. Each question may also carry the live control's ``field_type``, ``options``,
+    ``limit`` and ``limit_unit``: a saved value outside ``options`` is a gap, one over ``limit``
+    is flagged ``over_limit`` (never cut), sensitive questions are flagged ``needs_confirmation``
+    and knock-out questions are listed in ``knockouts`` with ``stop_for_user``. Read-only: no event is
+    written. 404 for an application that is not the
     caller's. ``Cache-Control: no-store``."""
     response.headers["Cache-Control"] = "no-store"
     try:
@@ -2351,6 +2394,41 @@ async def submit_check(
         "application_id": application_id, "decision": verdict.decision,
         "reason": verdict.reason, "detail": verdict.detail,
     }
+
+
+class ReleaseHoldOut(BaseModel):
+    released: bool
+
+
+@router.post(
+    "/applications/{application_id}/hold/release", response_model=ReleaseHoldOut, dependencies=AUTH_FIRST
+)
+async def release_hold(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Release" - the user frees an application another assistant session holds (it crashed
+    or was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.
+    ``{released: false}`` and no event when no hold is live. 404 for an application that is not
+    the caller's. Session only: a bearer token is refused, so an assistant can never release
+    another session's hold; assistants record ``hold_released`` through ``record_event``."""
+    try:
+        if await spine.get_owned_application(db, user.id, application_id) is None:
+            raise SpineError(404, "application not found")
+        now = datetime.now(timezone.utc)
+        if application_id not in await kit_service.holds_for_apps(db, user.id, [application_id], now):
+            return {"released": False}
+        stored = await kit_service.check_kit_event(db, user, application_id, "hold_released", {"reason": "stopped"})
+        result = await spine.append_event(
+            db, user_id=user.id, application_id=application_id, event_type="hold_released",
+            payload=stored, occurred_at=now.isoformat(), recorded_by=actor_for(user),
+        )
+        kit_service.log_kit_event(user, application_id, "hold_released", stored, int(result["event_id"]))
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    return {"released": True}
 
 
 @router.post(

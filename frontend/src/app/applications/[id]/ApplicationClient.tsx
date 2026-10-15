@@ -9,6 +9,7 @@ import {
   getApplicationControls,
   getReadyToSend,
   recordApplicationReceipt,
+  releaseHold,
 } from "@/lib/api";
 import type { ApplicationControls, ApplicationDetail, Ask, ReadyCardData, VisaShape } from "@/lib/api";
 import { ReadyCard } from "@/components/needs-you/ReadyCard";
@@ -24,6 +25,7 @@ import { Receipts } from "@/components/applications/Receipts";
 import { NoteForm } from "@/components/applications/NoteForm";
 import { LessonForm } from "@/components/applications/LessonForm";
 import { JobFacts } from "@/components/applications/JobFacts";
+import { PayAdvertised } from "@/components/applications/PayAdvertised";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
@@ -130,6 +132,21 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
     await announceOpenCount();
   }, [load]);
 
+  // Weak spot #3 wave 2: the user frees an application a crashed/closed assistant session
+  // still holds. Posts once, then re-reads so the banner follows the stored state.
+  const [releasing, setReleasing] = useState(false);
+  const release = useCallback(async () => {
+    setReleasing(true);
+    try {
+      await releaseHold(applicationId);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not release this application.");
+    } finally {
+      setReleasing(false);
+    }
+  }, [applicationId, load]);
+
   const markApplied = useCallback(async () => {
     setMarking(true);
     try {
@@ -218,7 +235,34 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             found_on: detail.job.found_on ?? null,
           }}
         />
+        <PayAdvertised pay={detail.job.pay_advertised} />
       </header>
+
+      {detail.hold && (
+        <section
+          data-testid="app-hold"
+          className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p>
+            {detail.hold.unsure
+              ? "Another session of your assistant may be working on this application."
+              : `Another assistant session (${detail.hold.held_by}${
+                  detail.hold.session ? ` / ${detail.hold.session}` : ""
+                }) is working this application until ${formatDateTime(detail.hold.until)}.`}
+            {detail.stage ? ` ${detail.stage}` : ""}
+          </p>
+          {!detail.hold.unsure && (
+            <button
+              type="button"
+              onClick={() => void release()}
+              disabled={releasing}
+              className="self-start rounded-full bg-warning px-3 py-1 text-xs font-medium text-background disabled:opacity-60"
+            >
+              {releasing ? "Releasing…" : "Release"}
+            </button>
+          )}
+        </section>
+      )}
 
       {openAsks.length > 0 && (
         <section aria-labelledby="app-asks" data-testid="app-asks" className="flex flex-col gap-3">

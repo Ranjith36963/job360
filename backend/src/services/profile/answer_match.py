@@ -20,6 +20,9 @@ from typing import Any, Callable, Optional
 
 TOPIC_MAX_CHARS = 60
 TOPIC_PATTERN = re.compile(r"^[A-Za-z0-9_.]+$")
+# trackly-cli answer-resolution.md:145 "Truthfulness certification is always per-run and never
+# reusable": a consent / certification answer is asked on every form, never matched.
+NEVER_REUSED_TOPIC_PREFIXES = ("consent.", "certify.")
 _NON_ALNUM = re.compile(r"[\W_]+", re.UNICODE)
 
 
@@ -64,6 +67,7 @@ def resolve_answer(
     usable = [
         r for r in (answers if isinstance(answers, list) else [])
         if isinstance(r, dict) and r.get("approved") is True and _in_scope(r, company_key)
+        and not str(r.get("topic") or "").casefold().startswith(NEVER_REUSED_TOPIC_PREFIXES)
     ]
     want = normalize_question(question)
     stages: list[Callable[[dict[str, Any]], bool]] = []

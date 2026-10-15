@@ -686,7 +686,7 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
     connection (S1/N4).
     """
     sql = """
-        SELECT path, value, set_by, set_at, source
+        SELECT path, value, set_by, set_at, source, remember_consent_at
         FROM profile_edits
         WHERE user_id = ? AND id IN (
             SELECT MAX(id) FROM profile_edits WHERE user_id = ? GROUP BY path
@@ -704,12 +704,12 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
             return []
         raise
     out: list[dict[str, Any]] = []
-    for path, value, set_by, set_at, source in rows:
+    for path, value, set_by, set_at, source, consent_at in rows:
         if value is None:
             continue
         out.append({
             "path": path, "value": json.loads(value), "set_by": set_by, "set_at": set_at,
-            "source": source or "",
+            "source": source or "", "remember_consent_at": consent_at,
         })
     return out
 
@@ -822,6 +822,7 @@ def record_edits(
     enforce_rate_limit: bool = True,
     store_as_given: bool = False,
     source: str | dict[str, str] = "",
+    consent_paths: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     """Validate every edit, then insert them append-only in ONE transaction.
 
@@ -855,6 +856,11 @@ def record_edits(
     ``source`` (feature 9) is ``user_said`` / ``agent_inferred`` / ``""``, one
     word for the whole batch or a ``{path: word}`` map; stored on each row.
 
+    ``consent_paths`` (weak spot #6, wave 2): paths whose row carries the user's OK to
+    REMEMBER a sensitive answer. ``remember_consent_at`` is stamped HERE from the server
+    clock - a caller can never supply the time (mirrors job-apply-store.py L541-544:
+    ``record["rememberedWithConsentAt"] = utc_now()``, set by the helper, not the input).
+
     Returns the applied rows in the same ``{"path", "value", "set_by",
     "set_at", "source"}`` shape as :func:`current_overlay`.
     """
@@ -881,6 +887,7 @@ def record_edits(
         )
 
     now = datetime.now(timezone.utc).isoformat()
+    consent = frozenset(consent_paths)
     applied: list[dict[str, Any]] = []
     with pgsync.connect(str(DB_PATH)) as conn, conn._raw.transaction():
         for path, value in normalised:
@@ -888,10 +895,11 @@ def record_edits(
             row_source = source.get(path, "") if isinstance(source, dict) else source
             if not row_source and actor == WEB_ACTOR:
                 row_source = SOURCE_USER_SAID  # a human at the browser is the user speaking
+            marker = now if (path in consent and value is not None) else None
             conn.execute(
-                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at, source) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (user_id, path, encoded, actor, now, row_source),
+                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at, source, remember_consent_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, path, encoded, actor, now, row_source, marker),
             )
             applied.append(
                 {"path": path, "value": value, "set_by": actor, "set_at": now, "source": row_source}

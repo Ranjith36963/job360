@@ -51,7 +51,7 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 SERVER_ONLY_EVENTS = frozenset({"kit_read"})
 KIT_EVENT_TYPES = frozenset({
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
-    "form_filled", "form_swept", "hold_released", "site_account", "account_needed",
+    "form_filled", "form_swept", "hold_released", "site_account", "account_needed", "form_checked",
 })
 HOLD_RELEASE_REASONS = frozenset({"done", "blocked", "stopped", "failed"})
 SEEN_WHERE = frozenset({"web", "chat"})
@@ -66,7 +66,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "then save it again with source user_said. 'confirmed' answers are the user's: use them. "
     "A 'sensitive' answer (salary, equality, sanctions, visa / right-to-work status) is shown to the user "
     "and confirmed on THIS form before it is used; never fill it silently. Ask two things separately: "
-    "may I use it on this form, and may I remember it for later.",
+    "may I use it on this form, and may I remember it for later. Save it with remember: true only after "
+    "a yes to the second; `remembered_at` set = the user agreed to that.",
     "Upload file: desktop or Claude Code - download `file.url` to a local file and upload that. "
     "Chat app - ask the user to attach the PDF once for this job. Otherwise paste `text` if the form allows, "
     "else the user uploads it by hand. An expired link: call the kit again.",
@@ -362,6 +363,52 @@ async def _swept_after_fill(db: JobDatabase, user_id: str, application_id: int) 
     return bool(fills and sweeps and max(sweeps) > max(fills))
 
 
+async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) -> tuple[bool, bool]:
+    """``(count_short, unreadable)`` from the NEWEST ``form_checked`` / ``form_swept``.
+    ``count_short``: the sweep read fewer fields than the form check listed questions.
+    NOT IN REFERENCE (career-ops apply.md:315-321 asserts each required control holds a value, it never
+    compares an earlier count). No ``form_checked`` on record = no shortfall (older applications)."""
+    events = await _events(db, user_id, application_id, ("form_checked", "form_swept"))
+    checked = next((e for e in events if e["event_type"] == "form_checked"), None)
+    swept = next((e for e in events if e["event_type"] == "form_swept"), None)
+    if swept is None:
+        return False, False
+    unreadable = bool(swept["payload"].get("unreadable"))
+    if checked is None:
+        return False, unreadable
+    want, got = checked["payload"].get("questions_count"), swept["payload"].get("fields_checked")
+    short = isinstance(want, int) and isinstance(got, int) and got < want
+    return short, unreadable
+
+
+# Weak spot #1b (c): applications CREATED on or after this day must have a ``form_checked`` on record
+# before check_submit allows a submit (``form_check_missing``). Older in-flight applications keep
+# working without one. Set to the day this gate shipped (2026-10-15); never move it later.
+# NOT IN REFERENCE: career-ops apply.md:61-62 scans the form for knock-outs by prompt only, with no gate.
+FORM_CHECK_REQUIRED_FROM = datetime(2026, 10, 15, tzinfo=timezone.utc)
+
+
+def form_check_required(created_at: Any) -> bool:
+    """True when an application created at ``created_at`` is under the ``form_checked`` rule.
+    An unreadable timestamp is treated as an old application (fail open, never a surprise stop)."""
+    if not isinstance(created_at, str) or not created_at:
+        return False
+    try:
+        made = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=timezone.utc)
+    return made >= FORM_CHECK_REQUIRED_FROM
+
+
+async def _form_check_missing(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """A new application (see :data:`FORM_CHECK_REQUIRED_FROM`) with no ``form_checked`` event."""
+    if not form_check_required(app_row.get("created_at")):
+        return False
+    return not await _events(db, user_id, int(app_row["id"]), ("form_checked",))
+
+
 async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
     """The host stored on the NEWEST ``form_filled`` (``None`` when there is none)."""
     fills = await _events(db, user_id, application_id, ("form_filled",))
@@ -386,6 +433,7 @@ async def gate_facts(
     has_receipt = await cur.fetchone() is not None
     now = datetime.now(timezone.utc)
     state = await controls_state(db, user_id, app_row, now)
+    shortfalls = await _sweep_shortfalls(db, user_id, application_id)
     cv = state["cv"]
     approved = state["cv"]["approved"] is not None if cv else await _approved_without_cv(db, user_id, application_id)
     dup = state["duplicate"]
@@ -400,6 +448,9 @@ async def gate_facts(
         blocked=state["blocked"] is not None,
         form_filled=await _filled_with_latest_cv(db, user_id, application_id),
         form_swept=await _swept_after_fill(db, user_id, application_id),
+        form_count_short=shortfalls[0],
+        unreadable_fields=shortfalls[1],
+        form_check_missing=await _form_check_missing(db, user_id, app_row),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=await _newest_form_host(db, user_id, application_id),
@@ -440,7 +491,9 @@ async def submit_verdict(
         # The preview imagines the form filled ON this address, so it never
         # shows a form_host_mismatch for a form that is not filled yet.
         facts = replace(
-            facts, form_filled=True, form_swept=True, form_host=settings_rules.screen_form_url(form_url),
+            facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
+            form_check_missing=False,
+            form_host=settings_rules.screen_form_url(form_url),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -475,15 +528,20 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
-    "form_swept": frozenset({"fields_checked", "fixed", "notes"}),
+    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable"}),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
 }
 FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
-FORM_FILLED_OPTIONAL = frozenset({"answers"})
+FORM_FILLED_OPTIONAL = frozenset({"answers", "fields_skipped"})
 FORM_SWEPT_REQUIRED = frozenset({"fields_checked", "fixed"})
 FORM_SWEPT_NOTES_MAX = 300
+FORM_SWEPT_UNREADABLE_MAX = 50
+# ``form_checked`` (weak spot #1b): what check_form found, COUNTS and wording only - never an answer value.
+FORM_CHECKED_REQUIRED = frozenset({"questions_count", "answered", "missing"})
+FORM_CHECKED_OPTIONAL = frozenset({"answers"})
+FORM_CHECKED_ANSWER_KEYS = frozenset({"question", "key", "source", "needs_confirmation"})
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
 ANSWER_QUESTION_MAX = 300
 ANSWER_KEY_MAX = 120
@@ -533,6 +591,22 @@ def clean_answers(raw: Any) -> list[dict[str, str]]:
     return [_clean_answer(item) for item in _answers_list(raw)]
 
 
+def clean_fields_skipped(raw: Any) -> list[str]:
+    """The field labels the assistant left blank on the form (``form_filled``'s optional
+    ``fields_skipped``): a list of short texts, at most ``KIT_FORM_FIELDS_MAX``. 422 otherwise."""
+    if not isinstance(raw, list) or len(raw) > settings.KIT_FORM_FIELDS_MAX:
+        raise SpineError(422, f"fields_skipped must be a list of at most {settings.KIT_FORM_FIELDS_MAX} field names")
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise SpineError(422, "each fields_skipped entry must be text")
+        label = " ".join(spine._strip_control_chars(item).split())
+        if not label or len(label) > ANSWER_QUESTION_MAX:
+            raise SpineError(422, f"each fields_skipped entry must be 1 to {ANSWER_QUESTION_MAX} characters")
+        out.append(label)
+    return out
+
+
 def answer_problems(raw: Any) -> list[str]:
     """Every problem in an ``answers`` value (same rules as :func:`clean_answers`), not just the first."""
     problems: list[str] = []
@@ -569,6 +643,54 @@ def _keys_problem(
     if unknown:
         out.append(f"unknown payload keys: {unknown} (allowed: {sorted(allowed)})")
     return out
+
+
+def _count_problem(name: str, value: Any, problems: list[str]) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= settings.KIT_FORM_FIELDS_MAX:
+        problems.append(f"{name} must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
+
+
+def _clean_text(value: Any, name: str, limit: int, problems: list[str]) -> str:
+    if not isinstance(value, str):
+        problems.append(f"{name} must be text")
+        return ""
+    text = " ".join(spine._strip_control_chars(value).split())
+    if len(text) > limit:
+        problems.append(f"{name} must be at most {limit} characters")
+    return text
+
+
+def _checked_answers(raw: Any, problems: list[str]) -> list[dict[str, Any]]:
+    """``form_checked.answers``: closed ``{question, key?, source, needs_confirmation?}`` rows. A key named
+    ``value`` or ``answer`` is refused as unknown, so a saved answer can never be copied into this event."""
+    if not isinstance(raw, list) or len(raw) > settings.KIT_FORM_FIELDS_MAX:
+        problems.append(f"answers must be a list of at most {settings.KIT_FORM_FIELDS_MAX} items")
+        return []
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict) or not {"question", "source"} <= set(item) <= FORM_CHECKED_ANSWER_KEYS:
+            problems.append(f"answers[{i}] needs keys question, source (and key, needs_confirmation) and nothing else")
+            continue
+        row: dict[str, Any] = {
+            "question": _clean_text(item["question"], f"answers[{i}].question", 500, problems),
+            "source": _clean_text(item["source"], f"answers[{i}].source", 40, problems),
+        }
+        if item.get("key") is not None:
+            row["key"] = _clean_text(item["key"], f"answers[{i}].key", 300, problems)
+        if "needs_confirmation" in item:
+            if not isinstance(item["needs_confirmation"], bool):
+                problems.append(f"answers[{i}].needs_confirmation must be true or false")
+            else:
+                row["needs_confirmation"] = item["needs_confirmation"]
+        out.append(row)
+    return out
+
+
+def _unreadable_list(raw: Any, problems: list[str]) -> list[str]:
+    if not isinstance(raw, list) or len(raw) > FORM_SWEPT_UNREADABLE_MAX:
+        problems.append(f"unreadable must be a list of at most {FORM_SWEPT_UNREADABLE_MAX} field names")
+        return []
+    return [t for t in (_clean_text(x, "unreadable item", 200, problems) for x in raw) if t]
 
 
 def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
@@ -614,6 +736,8 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
             problems.append("form_url host could not be read (the full address of the application form)")
         if "answers" in payload:
             problems += answer_problems(payload["answers"])
+        if "fields_skipped" in payload:
+            event_examples.collect(problems, clean_fields_skipped, payload["fields_skipped"])
     elif event_type == "form_swept":
         problems += _keys_problem(payload, FORM_SWEPT_REQUIRED, EVENT_PAYLOAD_KEYS[event_type])
         ints: dict[str, int] = {}
@@ -631,6 +755,15 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 problems.append("notes must be text")
             elif len(" ".join(spine._strip_control_chars(notes).split())) > FORM_SWEPT_NOTES_MAX:
                 problems.append(f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
+        if "unreadable" in payload:
+            _unreadable_list(payload["unreadable"], problems)
+    elif event_type == "form_checked":
+        problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
+        for name in ("questions_count", "answered", "missing"):
+            if name in payload:
+                _count_problem(name, payload[name], problems)
+        if "answers" in payload:
+            _checked_answers(payload["answers"], problems)
     return problems
 
 
@@ -699,7 +832,9 @@ async def _check_kit_event(
         return {"where": "web", "by": actor}
     if event_type == "form_filled":
         if not FORM_FILLED_REQUIRED <= set(payload) <= FORM_FILLED_REQUIRED | FORM_FILLED_OPTIONAL:
-            raise SpineError(422, "form_filled needs payload keys ['fields_count', 'form_url'] (and 'answers')")
+            raise SpineError(
+                422, "form_filled needs payload keys ['fields_count', 'form_url'] (and 'answers', 'fields_skipped')"
+            )
         count = payload.get("fields_count")
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= settings.KIT_FORM_FIELDS_MAX:
             raise SpineError(422, f"fields_count must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
@@ -714,7 +849,7 @@ async def _check_kit_event(
                 "form_filled_refused",
                 extra={
                     "event": "form_filled_refused", "user_id": safe_log_value(user.id),
-                    "actor": safe_log_value(actor), "application_id": application_id,
+                    "actor": safe_log_value(actor), "application_id": safe_log_value(application_id),
                     "reason": "form_url_unreadable", "status": 422, "result": "refused",
                 },
             )
@@ -726,6 +861,8 @@ async def _check_kit_event(
         stored: dict[str, Any] = {"host": host, "fields_count": count, "by": actor}
         if "answers" in payload:
             stored["answers"] = clean_answers(payload["answers"])
+        if "fields_skipped" in payload:
+            stored["fields_skipped"] = clean_fields_skipped(payload["fields_skipped"])
         return stored
     if event_type == "form_swept":
         keys = EVENT_PAYLOAD_KEYS[event_type]
@@ -758,7 +895,24 @@ async def _check_kit_event(
                 raise SpineError(422, f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
             if notes:
                 swept["notes"] = notes
+        if "unreadable" in payload:
+            bad: list[str] = []
+            names = _unreadable_list(payload["unreadable"], bad)
+            if bad:
+                raise SpineError(422, bad[0])
+            if names:
+                swept["unreadable"] = names
         return swept
+    if event_type == "form_checked":
+        # Recorded by the assistant after check_form and the user's answers. Counts + wording only.
+        found = payload_problems(event_type, payload)
+        if found:
+            raise SpineError(422, found[0])
+        stored_checked: dict[str, Any] = {k: payload[k] for k in ("questions_count", "answered", "missing")}
+        if "answers" in payload:
+            stored_checked["answers"] = _checked_answers(payload["answers"], [])
+        stored_checked["by"] = actor
+        return stored_checked
     if event_type == "hold_released":
         _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         if payload.get("reason") not in HOLD_RELEASE_REASONS:
@@ -839,6 +993,32 @@ def _is_sensitive(block: str, key: str) -> bool:
     if block in ("equality", "salary") or key == "logistics.current_salary":
         return True
     return block == "right_to_work" and key.endswith(_SENSITIVE_RTW_SUFFIXES)
+
+
+# The overlay path each sensitive kit block is read from (one whole-value row per path).
+_SENSITIVE_PATH = {
+    "equality": "user_info.equality", "salary": "preferences.salary_by_country",
+    "right_to_work": "user_info.right_to_work", "logistics": "user_info.logistics",
+}
+
+
+def edit_is_sensitive(path: str, value: Any) -> bool:
+    """True when saving ``value`` at overlay ``path`` stores a sensitive answer (equality,
+    expected salary, current salary, sanctions or visa status). An empty value is the
+    ``"value": null`` placeholder of SKILL.md L151 and is never sensitive."""
+    if not _present(value):
+        return False
+    if path in ("user_info.equality", "preferences.salary_by_country"):
+        return True
+    if path == "user_info.logistics":
+        return isinstance(value, dict) and _present(value.get("current_salary"))
+    if path != "user_info.right_to_work" or not isinstance(value, dict):
+        return False
+    keys = [f"right_to_work.{k}" for k, v in value.items() if k != "countries" and _present(v)]
+    for rec in _records(value.get("countries")):
+        cc = str(rec.get("country") or "").upper()
+        keys += [f"right_to_work.{cc}.{k}" for k, v in rec.items() if k != "country" and _present(v)]
+    return any(_is_sensitive("right_to_work", k) for k in keys)
 
 
 def answers_summary(answers: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
@@ -982,6 +1162,23 @@ def compute_answers(
                     **({"topic": rec["topic"]} if _present(rec.get("topic")) else {}))
             )
 
+    # Remember consent (job-apply-store.py L195-199: "sensitive answer record has no remember
+    # consent marker"): a sensitive value an assistant saved with no marker is not offered; it is
+    # listed in `missing` so the assistant asks the user. A web write is the user: always trusted.
+    consented = {
+        str(r["path"]): (r.get("remember_consent_at") or (r.get("set_at") if not is_assistant_actor(
+            str(r.get("set_by") or "")) else None))
+        for r in overlay
+    }
+    dropped: list[str] = []
+    for block, items in out.items():
+        path = _SENSITIVE_PATH.get(block)
+        if path is None or consented.get(path) or path not in saved:
+            continue
+        keep = [i for i in items if not _is_sensitive(block, str(i["key"]))]
+        if len(keep) != len(items):
+            out[block] = keep
+            dropped.append(path)
     have = {i["key"] for block in out.values() for i in block}
     _mark_sensitive(out)
     # No record for the job's country: the user's "ANY" record (every other country) answers it, so the
@@ -997,7 +1194,16 @@ def compute_answers(
                 )
             have = {i["key"] for block in out.values() for i in block}
             _mark_sensitive(out)
+    for block, items in out.items():
+        for item in items:
+            if item.get("state") == "sensitive" and consented.get(_SENSITIVE_PATH.get(block, "")):
+                item["remembered_at"] = consented[_SENSITIVE_PATH[block]]  # the user's OK to remember
     missing: list[dict[str, str]] = []
+    for path in dropped:
+        missing.append({
+            "key": path,
+            "why": "saved without the user's OK to remember it: ask the user, then save again with remember: true",
+        })
     if country:
         for key, why in (
             (f"right_to_work.{country}.work_authorization", f"right to work in {country} is not saved"),
@@ -1182,6 +1388,14 @@ async def live_hold(
     )
     got = await cur.fetchone()
     cleared_upto = int(got[0]) if got is not None and got[0] is not None else 0
+    return _pick_hold(reads, cleared_upto, actor, session)
+
+
+def _pick_hold(
+    reads: list[dict[str, Any]], cleared_upto: int, actor: str, session: str
+) -> Optional[dict[str, Any]]:
+    """The hold shape of :func:`live_hold` from kit reads (newest first) and the id of the
+    newest releasing event. Shared with :func:`holds_for_apps` so the two can never disagree."""
     sure: Optional[dict[str, Any]] = None
     unsure: Optional[dict[str, Any]] = None
     for r in reads:  # newest first
@@ -1205,11 +1419,72 @@ async def live_hold(
     return hold
 
 
+# The headline stage of a held application. Verb + "..." while the assistant works, a plain
+# state once it waits. Job360's own wording (NOT IN REFERENCE: Tsenta's static dashboard shows
+# "Tailoring résumé" / "Reading job description…" but not how the string is derived).
+STAGE_LABELS = {
+    "kit_read": "Reading the kit…", "form_filled": "Form filled", "form_swept": "Ready to submit",
+    "blocked": "Needs you",
+}
+_RELEASING = ("applied", "withdrawn", "rejected", "hold_released")
+
+
+async def holds_for_apps(
+    db: JobDatabase, user_id: str, application_ids: list[int], now: datetime
+) -> dict[int, tuple[dict[str, Any], str]]:
+    """``{application_id: (hold, stage)}`` for the applications with a live hold, in TWO queries
+    for the whole page. The web user is the viewer: it holds no session of its own, so every
+    kit read in the window counts (``unsure`` holds included, shown softer). ``stage`` is
+    :data:`STAGE_LABELS` of the newest kit_read / form_filled / form_swept / blocked after the
+    last release. Applications without a live hold are absent."""
+    if not application_ids:
+        return {}
+    marks = ",".join("?" for _ in application_ids)
+    cutoff = (now - timedelta(minutes=settings.KIT_HOLD_MINUTES)).isoformat()
+    cur = await db._db.execute(
+        f"SELECT id, application_id, event_type, recorded_at, recorded_by, payload FROM application_events "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND application_id IN ({marks}) AND recorded_at >= ? "
+        f"AND event_type IN ('kit_read', 'form_filled', 'form_swept', 'blocked') ORDER BY id DESC",
+        [user_id, *application_ids, cutoff],
+    )
+    events: dict[int, list[dict[str, Any]]] = {}
+    for r in await cur.fetchall():
+        row = dict(r)
+        events.setdefault(int(row["application_id"]), []).append(row)
+    if not events:
+        return {}
+    held_ids = list(events)
+    marks = ",".join("?" for _ in held_ids)
+    rel = ",".join("?" for _ in _RELEASING)
+    cur = await db._db.execute(
+        f"SELECT application_id, MAX(id) FROM application_events WHERE user_id = ? "  # noqa: S608 - placeholders only
+        f"AND application_id IN ({marks}) AND event_type IN ({rel}) GROUP BY application_id",
+        [user_id, *held_ids, *_RELEASING],
+    )
+    cleared = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+    out: dict[int, tuple[dict[str, Any], str]] = {}
+    for app_id, rows in events.items():
+        upto = cleared.get(app_id, 0)
+        reads = [r for r in rows if r["event_type"] == "kit_read"]
+        hold = _pick_hold(reads, upto, "", "")
+        if hold is None:
+            continue
+        newest = next((r for r in rows if int(r["id"]) > upto), None)  # rows are newest first
+        out[app_id] = (hold, STAGE_LABELS.get(str(newest["event_type"]), "") if newest else "")
+    return out
+
+
 def hold_fact(hold: Optional[dict[str, Any]]) -> Optional[tuple[str, str, str]]:
     """The gate's view of a hold: ``(held_by, session, since)`` for a SURE hold, else ``None``."""
     if not hold or hold.get("unsure"):
         return None
     return (str(hold["held_by"]), str(hold.get("session") or ""), str(hold["since"]))
+
+
+async def _job_company_key(db: JobDatabase, app_row: dict[str, Any]) -> str:
+    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
+    job_row = await cur.fetchone()
+    return str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
 
 
 async def _application_answers(
@@ -1223,9 +1498,7 @@ async def _application_answers(
     loaded, overlay = load_profile_with_overlay(user.id)
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
-    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
-    job_row = await cur.fetchone()
-    job_company_key = str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
+    job_company_key = await _job_company_key(db, app_row)
     answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
     return profile, country, answers, missing
 
@@ -1384,7 +1657,23 @@ FORM_NEXT_ASK = (
     "save reusable answers with update_profile (user_info.answers); never guess."
 )
 FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
+FORM_NEXT_CONFIRM = " Confirm every `needs_confirmation` answer with the user in that same message."
+FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
+# NOT IN REFERENCE (kept small, deterministic): which kit groups / which wording count as sensitive or a knock-out.
+# The wording follows career-ops modes/apply.md:266 (needs_candidate_confirmation) and :65-68 (knock-out areas).
+_SENSITIVE_GROUPS = frozenset({"right_to_work", "salary", "equality"})
+_SENSITIVE_RE = re.compile(
+    r"visa|sponsor|work authori[sz]ation|right to work|eligible to work|relocat|salary|compensation|"
+    r"disabilit|veteran|gender|ethnic|\brace\b|sexual|religio|criminal|convict|background check|"
+    r"self.?identif|demographic"
+)
+_KNOCKOUT_GROUPS = frozenset({"right_to_work", "salary"})
+_KNOCKOUT_RE = re.compile(
+    r"\byears?\b.{0,30}\bexperience|\bexperience\b.{0,30}\byears?\b|\bdegree\b|bachelor|master'?s|"
+    r"sponsor|\bvisa\b|work authori[sz]ation|right to work|salary|compensation expectation"
+)
+_OPTION_FIELDS = frozenset({"select", "radio", "checkbox"})
 
 
 def _norm_question(text: Any) -> str:
@@ -1392,50 +1681,134 @@ def _norm_question(text: Any) -> str:
     return _NON_ALNUM_RE.sub(" ", str(text or "").casefold()).strip()
 
 
-def form_check(answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]]) -> dict[str, Any]:
+def _question_is_sensitive(text: str, key: Optional[str]) -> bool:
+    group = (key or "").split(".", 1)[0]
+    return group in _SENSITIVE_GROUPS or bool(_SENSITIVE_RE.search(text.casefold()))
+
+
+def _is_knockout(text: str, key: Optional[str]) -> bool:
+    group = (key or "").split(".", 1)[0]
+    return group in _KNOCKOUT_GROUPS or bool(_KNOCKOUT_RE.search(text.casefold()))
+
+
+def _over_limit(value: Any, limit: Any, unit: str) -> bool:
+    """career-ops apply.md:273 - the limit is the live control's own; Job360 only compares, never cuts."""
+    if not isinstance(limit, int) or not isinstance(value, str):
+        return False
+    return (len(value.split()) if unit == "words" else len(value)) > limit
+
+
+def _record_item(rec: dict[str, Any]) -> dict[str, Any]:
+    return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text"}
+
+
+def form_check(
+    answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
+    records: Any = None, company_key: Optional[str] = None,
+) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
     really is in the kit (an ``approved_text`` item is also matched by normalized
-    question); without a key the normalized wording is matched against the approved
-    answers only. Never logs, never writes, never guesses."""
+    question); else the key may be a saved ``topic``. Without a key the question is matched
+    against the approved ``records`` (``user_info.answers``) by
+    :func:`answer_match.resolve_answer`: topic, then wording or alias, the company's own answer
+    before the general one; two answers that disagree are a gap (fail closed), never a guess.
+    Also reads the control facts the assistant passed: a saved value that is
+    not one of a select/radio/checkbox's ``options`` is a gap, one longer than the
+    control's ``limit`` is flagged ``over_limit`` (never cut), a sensitive question is
+    flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts``.
+    Never logs, never writes, never guesses."""
+    from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
+
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
-    approved = {_norm_question(i["key"]): i for i in answers.get("approved_text", [])}
+    approved = {
+        _norm_question(i["key"]): i for i in answers.get("approved_text", [])
+        if not str(i.get("topic") or "").casefold().startswith(NEVER_REUSED_TOPIC_PREFIXES)
+    }
     answered: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
+    knockouts: list[dict[str, Any]] = []
+    confirm: list[str] = []
     for q in questions:
         text = str(q["question"])
         required = bool(q.get("required", True))
         key = (q.get("key") or "").strip() or None
+        ftype = str(q.get("field_type") or "unknown")
+        sensitive = _question_is_sensitive(text, key)
         item: Optional[dict[str, Any]] = None
         matched_by = "key"
+        why = ""
         if key is not None:
             item = by_key.get(key)
             if item is None:
                 item = approved.get(_norm_question(key)) if _norm_question(key) else None
             if item is None:
-                missing.append({"question": text, "required": required,
-                                "why": f"key '{key}' is not in this application's kit"})
-                continue
+                rec, note = resolve_answer(records, topic=key, company_key=company_key)
+                if note:
+                    why = note
+                elif rec is not None:
+                    item = _record_item(rec)
+                    matched_by = "topic"
+            if item is None and not why:
+                why = f"key '{key}' is not in this application's kit"
         else:
-            item = approved.get(_norm_question(text)) if _norm_question(text) else None
+            rec, note = resolve_answer(records, question=text, company_key=company_key)
             matched_by = "wording"
-            if item is None:
-                missing.append({"question": text, "required": required, "why": "no saved answer for this question"})
-                continue
+            if note:
+                why = note
+            elif rec is not None:
+                item = _record_item(rec)
+            else:
+                item = approved.get(_norm_question(text)) if _norm_question(text) else None
+            if item is None and not why:
+                why = "no saved answer for this question"
+        options = [str(o) for o in (q.get("options") or [])]
+        if item is not None and ftype in _OPTION_FIELDS and options and isinstance(item["value"], str) \
+                and item["value"].casefold() not in {o.casefold() for o in options}:
+            why = "saved answer is not one of the form's options"
+            item = None
+        # A knock-out is spotted from the question and key alone - never from a gap in the profile or CV
+        # (career-ops apply.md:72: a missing field is not evidence the candidate lacks the credential).
+        if _is_knockout(text, key):
+            knockouts.append({"question": text, "key": key, **({"value": item["value"]} if item is not None else {})})
+        if item is None:
+            row_m: dict[str, Any] = {"question": text, "required": required, "why": why}
+            if ftype != "unknown":
+                row_m["field_type"] = ftype
+            if sensitive:
+                row_m["needs_confirmation"] = True
+                confirm.append(text)
+            missing.append(row_m)
+            continue
         row: dict[str, Any] = {
             "question": text, "required": required, "key": item["key"], "value": item["value"],
             "source": item["source"], "matched_by": matched_by,
         }
+        if ftype != "unknown":
+            row["field_type"] = ftype
         if item.get("confirmed") is False:
             row["confirmed"] = False
+        if _over_limit(item["value"], q.get("limit"), str(q.get("limit_unit") or "chars")):
+            row["over_limit"] = True
+        if sensitive or item.get("confirmed") is False:
+            row["needs_confirmation"] = True
+            confirm.append(text)
         answered.append(row)
     missing_required = sum(1 for m in missing if m["required"])
-    return {
+    nxt = FORM_NEXT_ASK if missing else FORM_NEXT_FILL
+    if confirm:
+        nxt += FORM_NEXT_CONFIRM
+    if knockouts:
+        nxt += FORM_NEXT_KNOCKOUT
+    out: dict[str, Any] = {
         "questions_count": len(questions), "answered": answered, "missing": missing,
         "counts": {"answered": len(answered), "missing": len(missing), "missing_required": missing_required},
-        "next": FORM_NEXT_ASK if missing else FORM_NEXT_FILL,
+        "needs_confirmation": confirm, "knockouts": knockouts, "next": nxt,
     }
+    if knockouts:
+        out["stop_for_user"] = True
+    return out
 
 
 async def check_form(
@@ -1455,8 +1828,8 @@ async def check_form(
             "result": "refused",
         })
         raise SpineError(404, "application not found")
-    _profile, _country, answers, _missing = await _application_answers(db, user, app_row)
-    out = form_check(answers, questions)
+    profile, _country, answers, _missing = await _application_answers(db, user, app_row)
+    out = form_check(answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None)
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
         "questions_count": out["questions_count"], "answered": out["counts"]["answered"],

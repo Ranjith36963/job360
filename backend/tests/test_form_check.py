@@ -135,7 +135,7 @@ def test_pure_form_check_matches_key_wording_and_reports_gaps():
         {"question": "Notice (days)", "required": True, "key": "notice period in days"},
         {"question": "NOTICE PERIOD in days", "required": False},
         {"question": "Phone", "key": "contact.phone"},
-        {"question": "Salary", "key": "salary.GB"},
+        {"question": "Favourite colour", "key": "logistics.colour"},
     ])
     assert [(a["question"], a["key"], a["value"], a["matched_by"]) for a in out["answered"]] == [
         ("Email", "contact.email", "a@b.c", "key"),
@@ -145,11 +145,12 @@ def test_pure_form_check_matches_key_wording_and_reports_gaps():
     ]
     assert out["answered"][3]["confirmed"] is False and "confirmed" not in out["answered"][0]
     assert out["missing"] == [
-        {"question": "Salary", "required": True, "why": "key 'salary.GB' is not in this application's kit"}
+        {"question": "Favourite colour", "required": True, "why": "key 'logistics.colour' is not in this application's kit"}
     ]
     assert out["questions_count"] == 5
     assert out["counts"] == {"answered": 4, "missing": 1, "missing_required": 1}
-    assert out["next"] == ASK_NEXT
+    assert out["answered"][3]["needs_confirmation"] is True  # confirmed false = inferred = confirm with the user
+    assert out["next"] == ASK_NEXT + kit_service.FORM_NEXT_CONFIRM
 
 
 def test_pure_all_answered_says_fill():
@@ -220,14 +221,16 @@ async def test_unknown_key_and_unmatched_wording_are_missing_and_counts_split_re
             {"question": "Email", "key": "contact.email"},
         ])).json()
         assert body["missing"] == [
-            {"question": "Visa?", "required": True,
+            {"question": "Visa?", "required": True, "needs_confirmation": True,
              "why": "key 'right_to_work.GB.invented' is not in this application's kit"},
             {"question": "Favourite colour", "required": False, "why": "no saved answer for this question"},
             {"question": "Pronouns", "required": True, "why": "no saved answer for this question"},
         ]
         assert body["counts"] == {"answered": 1, "missing": 3, "missing_required": 2}
         assert body["questions_count"] == 4
-        assert body["next"] == ASK_NEXT
+        # "Visa?" is sensitive AND a knock-out (weak spot #1b): the ask also says to confirm and to stop.
+        assert body["next"] == ASK_NEXT + kit_service.FORM_NEXT_CONFIRM + kit_service.FORM_NEXT_KNOCKOUT
+        assert body["knockouts"] == [{"question": "Visa?", "key": "right_to_work.GB.invented"}]
 
 
 @pytest.mark.asyncio
@@ -363,3 +366,231 @@ async def test_mcp_check_form_matches_the_route(authenticated_async_context, fix
             assert str(bad.value).startswith("422")
         finally:
             mcp_server._current_user.reset(token)
+
+
+# ── Weak spot #1b: control facts, sensitive answers, knock-outs, form_checked, sweep shortfalls ──────────────
+
+
+def test_limit_over_limit_flag_keeps_the_value_whole():
+    answers = {"approved_text": [{"key": "Why us?", "value": "x" * 300, "source": "approved_text", "saved_at": None}]}
+    out = kit_service.form_check(answers, [
+        {"question": "Why us?", "field_type": "textarea", "limit": 200, "limit_unit": "chars"},
+        {"question": "Why us?", "field_type": "textarea", "limit": 400},
+    ])
+    assert out["answered"][0]["over_limit"] is True and len(out["answered"][0]["value"]) == 300
+    assert "over_limit" not in out["answered"][1]
+    words = {"approved_text": [{"key": "Why us?", "value": "one two three four", "source": "approved_text"}]}
+    row = kit_service.form_check(words, [{"question": "Why us?", "limit": 3, "limit_unit": "words"}])["answered"][0]
+    assert row["over_limit"] is True
+
+
+def test_options_mismatch_moves_to_missing_and_casefold_matches():
+    answers = {"logistics": [{"key": "logistics.remote", "value": "Yes", "source": "memory", "saved_at": "x"}]}
+    bad = kit_service.form_check(answers, [
+        {"question": "Remote?", "key": "logistics.remote", "field_type": "select", "options": ["No", "Maybe"]},
+    ])
+    assert bad["answered"] == [] and bad["missing"][0]["why"] == "saved answer is not one of the form's options"
+    assert bad["missing"][0]["field_type"] == "select"
+    ok = kit_service.form_check(answers, [
+        {"question": "Remote?", "key": "logistics.remote", "field_type": "radio", "options": ["yes", "No"]},
+    ])
+    assert ok["missing"] == [] and ok["answered"][0]["value"] == "Yes" and ok["answered"][0]["field_type"] == "radio"
+    free = kit_service.form_check(answers, [{"question": "Remote?", "key": "logistics.remote", "options": ["No"]}])
+    assert free["answered"][0]["value"] == "Yes"  # options only bind select / radio / checkbox
+
+
+def test_sensitive_needs_confirmation_and_plain_contact_does_not():
+    answers = {
+        "salary": [{"key": "salary.GB", "value": "60000", "source": "memory", "saved_at": "x"}],
+        "right_to_work": [{"key": "right_to_work.GB", "value": "Yes", "source": "profile", "saved_at": "x"}],
+        "contact": [
+            {"key": "contact.email", "value": "a@b.c", "source": "memory", "saved_at": "x"},
+            {"key": "contact.phone", "value": "1", "source": "memory", "saved_at": "x", "confirmed": False},
+        ],
+    }
+    out = kit_service.form_check(answers, [
+        {"question": "Expected salary", "key": "salary.GB"},
+        {"question": "Right to work?", "key": "right_to_work.GB"},
+        {"question": "Email", "key": "contact.email"},
+        {"question": "Phone", "key": "contact.phone"},
+    ])
+    flags = {a["key"]: a.get("needs_confirmation", False) for a in out["answered"]}
+    assert flags == {"salary.GB": True, "right_to_work.GB": True, "contact.email": False, "contact.phone": True}
+    assert out["needs_confirmation"] == ["Expected salary", "Right to work?", "Phone"]
+    assert out["next"].endswith(kit_service.FORM_NEXT_CONFIRM) is False  # a knock-out is listed too, after it
+    assert kit_service.FORM_NEXT_CONFIRM in out["next"]
+
+
+def test_knockout_listed_with_value_and_stop_and_ordinary_question_is_not():
+    answers = {"right_to_work": [{"key": "right_to_work.GB", "value": "Yes", "source": "profile", "saved_at": "x"}]}
+    out = kit_service.form_check(answers, [
+        {"question": "Will you require visa sponsorship?", "key": "right_to_work.GB"},
+        {"question": "Do you have 5+ years of professional experience?"},
+        {"question": "Favourite colour"},
+    ])
+    assert [k["question"] for k in out["knockouts"]] == [
+        "Will you require visa sponsorship?", "Do you have 5+ years of professional experience?",
+    ]
+    assert out["knockouts"][0]["value"] == "Yes" and "value" not in out["knockouts"][1]
+    assert out["stop_for_user"] is True and kit_service.FORM_NEXT_KNOCKOUT in out["next"]
+    calm = kit_service.form_check(answers, [{"question": "Favourite colour"}])
+    assert calm["knockouts"] == [] and "stop_for_user" not in calm
+
+
+@pytest.mark.asyncio
+async def test_bad_field_type_is_422_and_default_is_unknown(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        bad = await _form_check(client, app_id, [{"question": "Email", "field_type": "dropdown"}])
+        assert bad.status_code == 422
+        long_option = await _form_check(client, app_id, [{"question": "Email", "options": ["x" * 201]}])
+        assert long_option.status_code == 422
+        ok = (await _form_check(client, app_id, [{"question": "Email", "field_type": "text", "limit": 50}])).json()
+        assert ok["missing"][0]["field_type"] == "text"
+
+
+async def _post_event(client: AsyncClient, app_id: int, event_type: str, payload: dict[str, Any]):
+    return await client.post(
+        f"/api/applications/{app_id}/events", json={"event_type": event_type, "payload": payload}
+    )
+
+
+@pytest.mark.asyncio
+async def test_form_checked_event_stores_no_values(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _seed_answers(client)
+        route = (await _form_check(client, app_id, [{"question": "Email", "key": "contact.email"}])).json()
+        payload = {
+            "questions_count": route["questions_count"], "answered": 1, "missing": 0,
+            "answers": [{"question": "Email", "key": "contact.email", "source": "memory"}],
+        }
+        resp = await _post_event(client, app_id, "form_checked", payload)
+        assert resp.status_code == 201, resp.text
+        stored = _count(
+            "SELECT COUNT(*) FROM application_events WHERE application_id = ? AND event_type = 'form_checked' "
+            "AND payload NOT LIKE ?", (app_id, "%ada@example.com%"),
+        )
+        assert stored == 1  # the saved value is nowhere in the stored payload
+        leak = await _post_event(client, app_id, "form_checked", {**payload, "answers": [
+            {"question": "Email", "source": "memory", "value": "ada@example.com"},
+        ]})
+        assert leak.status_code == 422 and "Valid example payload:" in leak.text
+
+
+@pytest.mark.asyncio
+async def test_check_submit_stops_on_a_short_sweep_and_on_unreadable_fields(
+    authenticated_async_context, fixture_user_id
+):
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+
+        async def verdict() -> dict[str, Any]:
+            resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+        assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
+        assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 9, "fixed": 0})).status_code == 201
+        # No form_checked on record (an older application): the sweep alone is enough.
+        assert (await verdict())["reason"] not in ("form_count_mismatch", "unreadable_fields")
+        checked = {"questions_count": 12, "answered": 12, "missing": 0}
+        assert (await _post_event(client, app_id, "form_checked", checked)).status_code == 201
+        short = await verdict()
+        assert (short["decision"], short["reason"]) == ("stop", "form_count_mismatch")
+        assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 12, "fixed": 0})).status_code == 201
+        assert (await verdict())["reason"] not in ("form_count_mismatch", "unreadable_fields")
+        unread = {"fields_checked": 12, "fixed": 0, "unreadable": ["Resume upload"]}
+        assert (await _post_event(client, app_id, "form_swept", unread)).status_code == 201
+        stuck = await verdict()
+        assert (stuck["decision"], stuck["reason"]) == ("stop", "unreadable_fields")
+        assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 12, "fixed": 1})).status_code == 201
+        assert (await verdict())["reason"] not in ("form_count_mismatch", "unreadable_fields")
+
+
+# ── Weak spot #1b (c): derived form_state and the form_check_missing gate ───────────────────
+
+
+def _event_count(app_id: int) -> int:
+    return _count("SELECT COUNT(*) FROM application_events WHERE application_id = ?", (app_id,))
+
+
+@pytest.mark.asyncio
+async def test_form_state_goes_filled_then_submitted_without_touching_events(
+    authenticated_async_context, fixture_user_id
+):
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+
+        async def state() -> Any:
+            resp = await client.get(f"/api/applications/{app_id}")
+            assert resp.status_code == 200, resp.text
+            return resp.json()["form_state"]
+
+        assert await state() is None  # nothing filled yet
+        assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
+        assert await state() == "filled"
+        before = _event_count(app_id)
+        rec = await client.post(
+            f"/api/applications/{app_id}/receipt", json={"channel": "company site", "note": "sent"},
+        )
+        assert rec.status_code in (200, 201), rec.text
+        assert await state() == "submitted"
+        # append-only: the state moved, the recorded events only grew (never edited or removed)
+        assert _event_count(app_id) >= before
+
+
+def test_derive_form_state_is_pure():
+    from src.services.applications.spine import derive_form_state
+
+    filled = {"event_type": "form_filled"}
+    assert derive_form_state([], []) is None
+    assert derive_form_state([filled], []) == "filled"
+    assert derive_form_state([filled], [{"id": 1}]) == "submitted"
+    assert derive_form_state([{"event_type": "note"}], [{"id": 1}]) is None  # a receipt alone is not a filled form
+
+
+def test_form_check_required_follows_the_cutoff_day(form_check_gate):
+    assert kit_service.FORM_CHECK_REQUIRED_FROM.date().isoformat() == "2026-10-15"
+    assert kit_service.form_check_required("2026-10-14T23:59:59+00:00") is False
+    assert kit_service.form_check_required("2026-10-15T00:00:00+00:00") is True
+    assert kit_service.form_check_required("2026-10-15T08:00:00") is True  # naive = UTC
+    assert kit_service.form_check_required("not a date") is False and kit_service.form_check_required(None) is False
+
+
+@pytest.mark.asyncio
+async def test_new_application_needs_form_checked_old_one_does_not(
+    authenticated_async_context, fixture_user_id, form_check_gate, monkeypatch
+):
+    from datetime import datetime, timezone
+
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)  # created now: after the cut-off
+
+        async def verdict() -> dict[str, Any]:
+            resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+        assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
+        assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 9, "fixed": 0})).status_code == 201
+        stop = await verdict()
+        assert (stop["decision"], stop["reason"]) == ("stop", "form_check_missing")
+        assert "check_form" in stop["detail"]
+        # the kit's own preview imagines the form checked: it never shows this stop before the fill
+        # An OLDER application (cut-off later than its created_at) keeps working with no form_checked.
+        monkeypatch.setattr(kit_service, "FORM_CHECK_REQUIRED_FROM", datetime(2999, 1, 1, tzinfo=timezone.utc))
+        assert (await verdict())["reason"] != "form_check_missing"
+        monkeypatch.undo()
+        # recording the form check clears the stop (count 9 == swept 9)
+        checked = {"questions_count": 9, "answered": 9, "missing": 0}
+        assert (await _post_event(client, app_id, "form_checked", checked)).status_code == 201
+        assert (await verdict())["reason"] != "form_check_missing"

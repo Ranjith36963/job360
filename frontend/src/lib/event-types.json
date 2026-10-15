@@ -34,6 +34,7 @@
     "hold_released",
     "site_account",
     "account_needed",
+    "form_checked",
     "blocked",
     "unblocked",
     "proof_text",

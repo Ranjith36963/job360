@@ -51,6 +51,35 @@ _NOT_PAY_RE = re.compile(
     r"|markets?|customers?|series\s[a-f])\b",
     re.IGNORECASE,
 )
+# Pay facts (amount extent, period, currency, equity). Every quantifier is bounded.
+_SYM = r"[$€£₹¥]"
+_NUM = r"\d[\d,.]{0,15}(?:[ \u00a0]\d{3}\b){0,3}"
+_AMOUNT_RE = re.compile(
+    rf"(?:{_SYM}\s{{0,3}}|\b{_CUR}\s{{0,3}})?{_NUM}(?:\s{{0,3}}k\b)?"
+    rf"(?:\s{{0,3}}(?:-|–|—|to)\s{{0,3}}(?:{_SYM}\s{{0,3}}|\b{_CUR}\s{{0,3}})?{_NUM}(?:\s{{0,3}}k\b)?)?"
+    rf"(?:\s{{0,3}}{_CUR}\b|\s{{0,3}}(?:lpa|lakhs?|lacs?)\b|(?<=\d)L\b)?"
+    rf"(?:\s{{0,3}}(?:/|per\s)\s{{0,3}}(?:yr|year|annum|month|mo|hour|hr)\b)?"
+    rf"(?:\s{{0,3}}{_CUR}\b)?",
+    re.IGNORECASE,
+)
+_ISO_RE = re.compile(rf"\b{_CUR}\b")  # case-SENSITIVE on purpose (salary-gap.mjs:312)
+_LAKH_RE = re.compile(r"(?:\blpa\b|\blakhs?\b|\blacs?\b|(?<=\d)L\b)", re.IGNORECASE)
+_ANNUAL_RE = re.compile(
+    r"(?:/\s*(?:year|yr)\b|\bper\s+(?:year|annum)\b|\bannual(?:ly)?\b|\byearly\b"
+    r"|\ba\s+year\b|\bp\.a\b|\blpa\b|\blakhs?\b)", re.IGNORECASE)
+_MONTHLY_RE = re.compile(r"(?:/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b|\ba\s+month\b)", re.IGNORECASE)
+_HOURLY_RE = re.compile(r"(?:/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b|\ban\s+hour\b)", re.IGNORECASE)
+# Whitespace runs are bounded ({0,3}), never `\s*`: an unbounded `\s*` in front of an alternation or beside an
+# optional group backtracks quadratically on a long run of spaces (CodeQL py/polynomial-redos).
+_PERIOD_STRIP_RE = re.compile(
+    r"\s{0,3}(?:/\s{0,3}(?:year|yr|month|mo|hour|hr)|per\s{1,3}(?:year|annum|month|hour)|a\s{1,3}year|p\.a\.?"
+    r"|annual(?:ly)?|yearly|monthly|hourly)\s{0,3}$", re.IGNORECASE)
+_CUR_EDGE_RE = re.compile(rf"(?:^\s{{0,3}}{_CUR}\s{{0,3}}|\s{{0,3}}{_CUR}\s{{0,3}}$)", re.IGNORECASE)
+_RANGE_RE = re.compile(r"^([\d.,]+)\s{0,3}(k)?\s{0,3}(?:[-–—]|to)\s{0,3}([\d.,]+)\s{0,3}(k)?$", re.IGNORECASE)
+_SINGLE_RE = re.compile(r"^([\d.,]+)\s{0,3}(k)?$", re.IGNORECASE)
+_EQUITY_RE = re.compile(r"\b(?:equity|stock\s+options?|rsus?|shares)\b", re.IGNORECASE)
+_PLUS_PCT_RE = re.compile(r"\s?\+\s?\d+(?:\.\d+)?\s?%")
+_PERIOD_WINDOW = 40  # characters after the amount read for its period
 _SENTENCE_END_RE = re.compile(r"[.!?;](?=\s)|\n")
 _PAY_WINDOW = 120  # characters either side of an amount
 _NOT_PAY_WINDOW = 50  # how close an exclusion word must sit to veto an amount
@@ -155,11 +184,126 @@ def parse_day(value: Optional[str]) -> Optional[date]:
         return None
 
 
-def pay_evidence(description: str) -> str:
-    """The sentence/line that states pay, whitespace-collapsed and cut to 160
-    characters, or ``''``. An amount counts only with a pay word in its own
-    sentence or line (<=120 chars each side), or as an INR pay unit (LPA, lakh,
-    ``₹12L``); an amount beside revenue / funding / billion words never counts."""
+def _canon_separators(num: str) -> str:
+    """Port of career-ops salary-gap.mjs:169-196 ``canonicalizeSeparators``: with
+    both ``,`` and ``.`` the LAST is the decimal point; with one, exactly three
+    digits after it read as grouping ("35.000", "123,684"), else a decimal."""
+    last_comma, last_dot = num.rfind(","), num.rfind(".")
+    if last_comma != -1 and last_dot != -1:
+        decimal = "," if last_comma > last_dot else "."
+        grouping = "." if decimal == "," else ","
+        return num.replace(grouping, "").replace(decimal, ".", 1)
+    sep = "," if last_comma != -1 else "." if last_dot != -1 else None
+    if sep is None:
+        return num
+    return re.sub(rf"(\d)\{sep}(?=\d{{3}}(?!\d))", r"\1", num).replace(sep, ".", 1)
+
+
+def _to_num(num: str, k: bool) -> Optional[float]:
+    try:
+        n = float(_canon_separators(num))
+    except ValueError:
+        return None
+    return n * 1000 if k else n
+
+
+def parse_amount(span: str) -> Optional[tuple[int, int]]:
+    """Port of career-ops salary-gap.mjs:204-235 ``parseAmount``: ``(min, max)``
+    of an amount span, or None when it is not a plain number or range. Period
+    words, currency symbols and a currency token are stripped first; NOTHING is
+    annualised (the reference leaves other periods to the caller, :207-208).
+    Lakh / LPA spans and "M" amounts return None: the reference has no such unit
+    (NOT IN REFERENCE), so we never scale them."""
+    s = (span or "").strip()
+    if not s or _LAKH_RE.search(s):
+        return None
+    s = _PERIOD_STRIP_RE.sub("", s).strip()
+    s = re.sub(r"[€$£¥₹]", "", s)
+    s = re.sub(r"(?<=\d)[  ](?=\d{3}\b)", "", s)  # "70 000" -> 70000 (NOT IN REFERENCE)
+    s = _CUR_EDGE_RE.sub("", s).strip()
+    s = _PERIOD_STRIP_RE.sub("", s).strip()
+    m = _RANGE_RE.match(s)
+    if m:
+        lo = _to_num(m.group(1), bool(m.group(2) or m.group(4)))
+        hi = _to_num(m.group(3), bool(m.group(4) or m.group(2)))
+        if lo is None or hi is None:
+            return None
+        return int(round(min(lo, hi))), int(round(max(lo, hi)))
+    m = _SINGLE_RE.match(s)
+    if m:
+        v = _to_num(m.group(1), bool(m.group(2)))
+        return None if v is None else (int(round(v)), int(round(v)))
+    return None
+
+
+def compensation_period(text: str, nearest: bool = False) -> Optional[str]:
+    """Port of career-ops salary-gap.mjs:239-245 ``compensationPeriod``: annual /
+    monthly / hourly, or None - an unknown period is never guessed (:244). Added
+    (NOT IN REFERENCE): "a year", "p.a.", "LPA", "lakh" (annual), "a month",
+    "an hour"."""
+    hits = [(rx.search(text), name) for rx, name in
+            ((_ANNUAL_RE, "annual"), (_MONTHLY_RE, "monthly"), (_HOURLY_RE, "hourly"))]
+    found = [(m.start(), name) for m, name in hits if m]
+    if not found:
+        return None
+    # `nearest`: the period word closest to the amount; else the reference's
+    # annual > monthly > hourly order (:241-243).
+    return min(found)[1] if nearest else found[0][1]
+
+
+def _currency_of(span: str) -> str:
+    """ISO code beside the amount. The reference takes the first standalone
+    UPPERCASE 3-letter token, case-sensitive on purpose (salary-gap.mjs:312-317);
+    we limit it to our ISO set and fall back to the symbols GBP / EUR / INR
+    (NOT IN REFERENCE; the reference drops symbols, :217). "$" and "¥" are never
+    mapped (many currencies): ``"UNKNOWN"`` as :317."""
+    iso = _ISO_RE.search(span)
+    if iso:
+        return iso.group(0)
+    for sym, code in (("£", "GBP"), ("€", "EUR"), ("₹", "INR")):
+        if sym in span:
+            return code
+    return "UNKNOWN"
+
+
+def _amount_bounds(text: str, ms: int) -> tuple[int, int]:
+    """Char offsets of the whole amount (range, symbol / ISO token, k, lakh) for a
+    money match starting at ``ms``. Bounded scans only, so it stays linear."""
+    start = ms
+    if text[start:start + 1].isdigit():  # the `\d CUR` / `\dk yr` forms start mid-number
+        back = 0
+        while start > 0 and back < 16 and text[start - 1] in "0123456789,.":
+            start -= 1
+            back += 1
+        while start < ms and text[start] in ",.":
+            start += 1
+    m = _AMOUNT_RE.match(text, start)
+    end = m.end() if m else ms + 1
+    while end > start and text[end - 1] in " ,.":
+        end -= 1
+    return start, end
+
+
+def _facts(text: str, evidence: str, s0: int, s1: int, period: Optional[str], sentence: str) -> dict[str, Any]:
+    amount = text[s0:s1]
+    bounds = parse_amount(amount)
+    equity = bool(_EQUITY_RE.search(sentence)) or bool(_PLUS_PCT_RE.match(text, s1))
+    return {
+        "evidence": evidence, "amount": amount, "amount_span": [s0, s1],
+        "min": bounds[0] if bounds else None, "max": bounds[1] if bounds else None,
+        "period": period, "currency": _currency_of(amount), "equity": equity,
+    }
+
+
+def pay_facts(description: str) -> Optional[dict[str, Any]]:
+    """The advertised pay in the ad, or None. ``evidence`` is the sentence/line
+    (whitespace-collapsed, <=160 chars). An amount counts only with a pay word in
+    its own sentence or line (<=120 chars each side), or as an INR pay unit (LPA,
+    lakh, ``₹12L``); an amount beside revenue / funding / billion words never
+    counts. Next to it, as stated and never annualised: ``amount`` (the matched
+    text), ``amount_span`` ([start, end) offsets in ``description``), ``min`` /
+    ``max`` (ints, or None when not a plain number), ``period`` (annual / monthly /
+    hourly / None), ``currency`` (ISO code or ``"UNKNOWN"``) and ``equity``."""
     text = (description or "")[:_PAY_SCAN_CAP]
     for i, m in enumerate(_MONEY_RE.finditer(text)):
         if i >= _PAY_MATCH_CAP:
@@ -189,13 +333,24 @@ def pay_evidence(description: str) -> str:
             anchor_flat = len(" ".join(sentence[:anchor].split()))
             start = max(0, min(anchor_flat - _EVIDENCE_MAX // 2, len(flat) - _EVIDENCE_MAX))
             flat = flat[start:start + _EVIDENCE_MAX]
-        return flat
+        s0, s1 = _amount_bounds(text, ms)
+        # the period word usually follows the amount: read that stretch first
+        after = text[s0:s1 + _PERIOD_WINDOW]
+        stop = _SENTENCE_END_RE.search(after)
+        period = compensation_period(after[:stop.start()] if stop else after, nearest=True)
+        return _facts(text, flat, s0, s1, period or compensation_period(sentence), sentence)
     # an INR pay unit on its own (no currency symbol the money regex saw)
     u = _PAY_UNIT_RE.search(text)
     if u:
-        flat = " ".join(text[max(0, u.start() - 60):u.end() + 60].split())
-        return flat[:_EVIDENCE_MAX]
-    return ""
+        flat = " ".join(text[max(0, u.start() - 60):u.end() + 60].split())[:_EVIDENCE_MAX]
+        return _facts(text, flat, u.start(), u.end(), "annual", flat)
+    return None
+
+
+def pay_evidence(description: str) -> str:
+    """The evidence sentence of ``pay_facts``, or ``''``."""
+    facts = pay_facts(description)
+    return facts["evidence"] if facts else ""
 
 
 def job_checks(
@@ -259,11 +414,18 @@ def job_checks(
             )
         out.append({"code": "reposted", "ok": not reposted, "value": reposted, "reason": why})
 
-    evidence = pay_evidence(description)
-    pay = bool(evidence)
-    out.append({"code": "pay_stated", "ok": pay, "value": pay, "evidence": evidence,
-                "reason": f'The ad states pay: "{evidence}"' if pay
-                else "No pay (an amount next to a salary or pay word) appears in the ad text."})
+    facts = pay_facts(description)
+    if facts:
+        per = facts["period"] or "not stated"
+        cur = facts["currency"] if facts["currency"] != "UNKNOWN" else "not stated"
+        out.append({"code": "pay_advertised", "ok": True, "value": True, **facts,
+                    "reason": f'The ad advertises pay: "{facts["evidence"]}" '
+                              f"(period: {per}, currency: {cur}; as advertised, not annualised)"})
+    else:
+        out.append({"code": "pay_advertised", "ok": False, "value": False, "evidence": "", "amount": None,
+                    "amount_span": None, "min": None, "max": None, "period": None, "currency": None,
+                    "equity": None,
+                    "reason": "No pay (an amount next to a salary or pay word) appears in the ad text."})
     spon = bool(_SPONSOR_RE.search(description or ""))
     out.append({"code": "sponsorship_mentioned", "ok": spon, "value": spon,
                 "reason": "The ad text mentions sponsorship or visas - read what it says." if spon

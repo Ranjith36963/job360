@@ -1522,6 +1522,7 @@ async def record_receipt(
         "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
         "cover_letter_sent": cl_artifact is not None,
+        "cover_letter_version_no": cl_artifact["version_no"] if cl_artifact else None,
         "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
         "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
@@ -1608,6 +1609,13 @@ async def _list_receipts_for_application(
         row["fields_filled"] = _receipt_json(row.get("fields_filled"), dict)
         frozen = bool(row.pop("_letter_frozen", None))
         row["cover_letter_sent"] = frozen or row.get("cover_letter_artifact_id") is not None
+        row.update(await receipt_summary_facts(db, user_id, int(row["id"])))
+        row["cv_version_no"] = await _artifact_version_no(
+            db, user_id, application_id, "cv", row.get("cv_artifact_id")
+        )
+        row["cover_letter_version_no"] = await _artifact_version_no(
+            db, user_id, application_id, "cover_letter", row.get("cover_letter_artifact_id")
+        )
     return rows
 
 
@@ -1642,6 +1650,62 @@ async def _artifact_version_no(
     )
     row = await cur.fetchone()
     return int(row["version_no"]) if row is not None else None
+
+
+async def receipt_summary_facts(db: JobDatabase, user_id: str, receipt_id: int) -> dict[str, Any]:
+    """Read-time facts a receipt shows (nothing stored twice; receipts stay append-only):
+    the counts line ``"N of M fields · S skipped · G guessed"`` and the host the form was on.
+
+    M = ``fields_count`` of the newest ``form_filled`` recorded at or before the receipt was
+    created; no such event means no M and no line (never an invented number). N = fields +
+    answers on the receipt, capped at M. S = the event's own ``fields_skipped`` list when the
+    assistant gave one, else M - N. G = answers whose ``source`` is ``guessed``.
+    ``form_host`` is the host the form was filled on, else the job link's host marked as such.
+    Scoped by ``user_id``; a foreign or unknown id reads as the empty facts."""
+    empty: dict[str, Any] = {
+        "counts_line": "", "fields_total": None, "fields_skipped": 0, "guessed_count": 0, "form_host": "",
+    }
+    cur = await db._db.execute(
+        "SELECT application_id, created_at, job_apply_url, answers, fields_filled "
+        "FROM application_receipts WHERE user_id = ? AND id = ?",
+        (user_id, receipt_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return empty
+    r = dict(row)
+    answers = _receipt_answers(r.get("answers"))
+    filled = _receipt_json(r.get("fields_filled"), dict)
+    form: dict[str, Any] = {}
+    if r.get("application_id") is not None:
+        cur = await db._db.execute(
+            "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
+            "AND event_type = 'form_filled' AND recorded_at <= ? ORDER BY recorded_at DESC, id DESC LIMIT 1",
+            (user_id, r["application_id"], r.get("created_at") or ""),
+        )
+        ev = await cur.fetchone()
+        form = _receipt_json(dict(ev)["payload"], dict) if ev is not None else {}
+    out = dict(empty)
+    out["guessed_count"] = sum(1 for a in answers if a.get("source") == "guessed")
+    host = form.get("host")
+    if isinstance(host, str) and host:
+        out["form_host"] = host
+    else:
+        from src.services.profile.assistant_settings import screen_form_url  # noqa: PLC0415
+
+        job_host = screen_form_url(r.get("job_apply_url") or None)
+        out["form_host"] = f"{job_host} (job link)" if job_host else ""
+    total = form.get("fields_count")
+    if isinstance(total, bool) or not isinstance(total, int):
+        return out
+    done = min(len(filled) + len(answers), total)
+    skipped_list = form.get("fields_skipped")
+    skipped = len(skipped_list) if isinstance(skipped_list, list) else max(total - done, 0)
+    out.update(
+        fields_total=total, fields_skipped=skipped,
+        counts_line=f"{done} of {total} fields \u00b7 {skipped} skipped \u00b7 {out['guessed_count']} guessed",
+    )
+    return out
 
 
 async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Optional[dict[str, Any]]:
@@ -1685,6 +1749,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
             db, user_id, application_id, "cover_letter", r.get("cover_letter_artifact_id")
         ),
         "cover_letter_sent": r.get("cover_letter_artifact_id") is not None or bool(r.get("letter_frozen")),
+        **await receipt_summary_facts(db, user_id, receipt_id),
     }
 
 
@@ -1724,6 +1789,17 @@ async def _work_countries(db: JobDatabase, user_id: str) -> list[str]:
     from src.services.applications.visa import user_work_countries  # noqa: PLC0415
 
     return await user_work_countries(db, user_id)
+
+
+def derive_form_state(events: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> Optional[str]:
+    """Weak spot #1b (c): the form's state READ off the record, never stored or updated.
+    ``None`` = no ``form_filled`` yet; ``"filled"`` = a ``form_filled`` is on record;
+    ``"submitted"`` = a ``form_filled`` AND a receipt. Mirrors career-ops apply.md:356-358 ("update that
+    same section from `filled` to `submitted`") as a derived read model, so the append-only
+    events and receipts (M3) are never rewritten. A receipt with no ``form_filled`` stays ``None``."""
+    if not any(e.get("event_type") == "form_filled" for e in events):
+        return None
+    return "submitted" if receipts else "filled"
 
 
 async def get_application_detail(
@@ -1797,6 +1873,7 @@ async def get_application_detail(
             # Owner decision 2026-10-04 — country / remote / found_on, the
             # user's own facts about the job (None when unset, rule #29).
             **_job_facts_for(app_row),
+            "pay_advertised": _pay_advertised_for(app_row),
         },
         "fit": fit,
         "visa": _visa_for(app_row, await _work_countries(db, user_id)),
@@ -1816,13 +1893,31 @@ async def get_application_detail(
         "email_senders": email_senders_for(app_row.get("job_url") or ""),
         "inbox_checked_at": app_row.get("inbox_checked_at"),
     }
+    detail["form_state"] = derive_form_state(events, detail["receipts"])
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
     # reaches the web header and every agent calling get_application.
     from src.services.applications.next_step import next_step_for_detail  # noqa: PLC0415
 
     detail["next_step"] = next_step_for_detail(detail)
+    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+
+    held = (await kit_service.holds_for_apps(db, user_id, [application_id], datetime.now(timezone.utc))).get(
+        application_id
+    )
+    detail["hold"], detail["stage"] = (held[0], held[1]) if held else (None, "")
     return detail
+
+
+def _pay_advertised_for(app_row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """Pay as the stored ad states it (job_checks.pay_facts), or None. Computed on
+    read: nothing is stored, nothing is annualised."""
+    from src.services.applications.job_checks import pay_facts  # noqa: PLC0415
+
+    facts = pay_facts(str(app_row.get("job_description_snapshot") or ""))
+    if not facts:
+        return None
+    return {k: facts[k] for k in ("amount", "evidence", "period", "currency", "min", "max", "equity")}
 
 
 async def _count(db: JobDatabase, table: str, col: str, value: Any) -> int:
@@ -1849,9 +1944,12 @@ async def list_applications(
     offset: int = 0,
     due: bool = False,
     quiet_days: Optional[int] = None,
+    in_flight: bool = False,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
-    status, per-kind counts) — no event/artifact bodies. Newest
+    status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
+    (another assistant session's live kit hold, weak spot #3); ``in_flight`` keeps only the
+    applications with one. Newest
     ``last_event_at`` first; optionally filtered by ``status`` and/or
     ``updated_since``.
 
@@ -1879,6 +1977,8 @@ async def list_applications(
             f"quiet_days must be between 1 and APPLICATION_QUIET_DAYS_MAX "
             f"({settings.APPLICATION_QUIET_DAYS_MAX})",
         )
+    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+
     where = ["user_id = ?"]
     params: list[Any] = [user_id]
     if status:
@@ -1902,6 +2002,20 @@ async def list_applications(
         cutoff = (datetime.now(timezone.utc) - timedelta(days=quiet_days)).isoformat()
         where.append("(last_event_at IS NULL OR last_event_at < ?)")
         params.append(cutoff)
+    if in_flight:
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(minutes=settings.KIT_HOLD_MINUTES)).isoformat()
+        cand = await db._db.execute(
+            "SELECT DISTINCT application_id FROM application_events WHERE user_id = ? "
+            "AND event_type = 'kit_read' AND recorded_at >= ?",
+            (user_id, cutoff),
+        )
+        held = await kit_service.holds_for_apps(db, user_id, [int(c[0]) for c in await cand.fetchall()], now)
+        if held:
+            where.append(f"id IN ({','.join('?' for _ in held)})")
+            params.extend(held)
+        else:
+            where.append("1 = 0")
     where_sql = " AND ".join(where)
 
     cur = await db._db.execute(
@@ -1980,6 +2094,7 @@ async def list_applications(
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user_id, app_ids)
+    holds = await kit_service.holds_for_apps(db, user_id, app_ids, datetime.now(timezone.utc))
     out = []
     for r in rows:
         app_id = r["id"]
@@ -2010,6 +2125,8 @@ async def list_applications(
                 "follow_up_on": follow_up_on,
                 "follow_up_due": follow_up_due,
                 "proof": proofs[app_id],
+                "hold": holds[app_id][0] if app_id in holds else None,
+                "stage": holds[app_id][1] if app_id in holds else "",
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
                 "inbox_checked_at": r.get("inbox_checked_at"),

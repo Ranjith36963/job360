@@ -571,13 +571,14 @@ ALL_EDITS = [
     {"path": CONTACT, "value": {"email": "ada@example.com", "phone": PHONE, "date_of_birth": DOB,
                                  "residence_country": "gb", "preferred_name": "Ada"}},
     {"path": RTW, "value": {"countries": [{"country": "de", "work_authorization": "visa"}],
-                             "citizenship": ["gb"]}},
+                             "citizenship": ["gb"]}, "remember": True},
     {"path": LOGI, "value": {"notice_period": "1 month",
                               "countries": [{"country": "de", "travel_ok_pct": 20}]}},
     {"path": LANGS, "value": [{"language": "English", "level": "native"}]},
-    {"path": EQ, "value": {"gender": "Prefer not to say"}},
+    {"path": EQ, "value": {"gender": "Prefer not to say"}, "remember": True},
     {"path": ANSWERS, "value": [{"question": "Why us?", "answer": "Because.", "approved": True}]},
-    {"path": SALARY, "value": [{"country": "ae", "min": 25000, "max": 30000, "currency": "aed", "period": "month"}]},
+    {"path": SALARY, "value": [{"country": "ae", "min": 25000, "max": 30000, "currency": "aed", "period": "month"}],
+     "remember": True},
 ]
 
 
@@ -1035,7 +1036,8 @@ async def test_keep_and_clear_log_the_base_write_without_values(
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, {"path": EQ, "value": {"gender": "SECRETGENDER"}})).status_code == 200
+        edit = {"path": EQ, "value": {"gender": "SECRETGENDER"}, "remember": True}
+        assert (await _patch(agent, edit)).status_code == 200
     async with authenticated_async_context() as client:
         assert (await client.post("/api/profile/edits/keep", json={"path": EQ})).status_code == 200
         assert (await client.post("/api/profile/clear", data={"section": "memory"})).status_code == 200

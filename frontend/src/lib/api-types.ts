@@ -480,6 +480,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/hold/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release Hold
+         * @description "Release" - the user frees an application another assistant session holds (it crashed
+         *     or was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.
+         *     ``{released: false}`` and no event when no hold is live. 404 for an application that is not
+         *     the caller's. Session only: a bearer token is refused, so an assistant can never release
+         *     another session's hold; assistants record ``hold_released`` through ``record_event``.
+         */
+        post: operations["release_hold_api_applications__application_id__hold_release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/job": {
         parameters: {
             query?: never;
@@ -551,7 +575,11 @@ export interface paths {
          *     key it matches the normalized wording of the question against the user's approved
          *     answers. No fuzzy matching, no NLP. ``answered`` carries the value and its source
          *     (``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask
-         *     the user, once. Read-only: no event is written. 404 for an application that is not the
+         *     the user, once. Each question may also carry the live control's ``field_type``, ``options``,
+         *     ``limit`` and ``limit_unit``: a saved value outside ``options`` is a gap, one over ``limit``
+         *     is flagged ``over_limit`` (never cut), sensitive questions are flagged ``needs_confirmation``
+         *     and knock-out questions are listed in ``knockouts`` with ``stop_for_user``. Read-only: no event is
+         *     written. 404 for an application that is not the
          *     caller's. ``Cache-Control: no-store``.
          */
         post: operations["check_application_form_api_applications__application_id__kit_form_check_post"];
@@ -2878,6 +2906,9 @@ export interface components {
             follow_up_due: boolean;
             /** Follow Up On */
             follow_up_on: string | null;
+            /** Form State */
+            form_state?: ("filled" | "submitted") | null;
+            hold?: components["schemas"]["KitHoldOut"] | null;
             /** Id */
             id: number;
             /** Inbox Checked At */
@@ -2893,6 +2924,11 @@ export interface components {
             proof: components["schemas"]["ProofOut"];
             /** Receipts */
             receipts: components["schemas"]["ApplicationReceiptOut"][];
+            /**
+             * Stage
+             * @default
+             */
+            stage: string;
             /** Status */
             status: string;
             /** Updated At */
@@ -2974,6 +3010,7 @@ export interface components {
             job_title: string;
             /** Job Url */
             job_url: string;
+            pay_advertised?: components["schemas"]["PayAdvertisedOut"] | null;
             /** Remote */
             remote?: boolean | null;
             /** Snapshot At */
@@ -3030,6 +3067,11 @@ export interface components {
             channel: string;
             /** Confirmation */
             confirmation: string;
+            /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
             /**
@@ -3039,14 +3081,35 @@ export interface components {
             cover_letter_sent: boolean;
             /** Cover Letter Text */
             cover_letter_text?: string | null;
+            /** Cover Letter Version No */
+            cover_letter_version_no?: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Cv Text */
             cv_text?: string | null;
+            /** Cv Version No */
+            cv_version_no?: number | null;
             /** Fields Filled */
             fields_filled?: {
                 [key: string]: unknown;
             };
+            /**
+             * Fields Skipped
+             * @default 0
+             */
+            fields_skipped: number;
+            /** Fields Total */
+            fields_total?: number | null;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
+            /**
+             * Guessed Count
+             * @default 0
+             */
+            guessed_count: number;
             /** Id */
             id: number;
             /** Note */
@@ -3067,6 +3130,11 @@ export interface components {
             channel: string;
             /** Confirmation */
             confirmation: string;
+            /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
             /**
@@ -3074,12 +3142,33 @@ export interface components {
              * @default false
              */
             cover_letter_sent: boolean;
+            /** Cover Letter Version No */
+            cover_letter_version_no?: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
+            /** Cv Version No */
+            cv_version_no?: number | null;
             /** Fields Filled */
             fields_filled?: {
                 [key: string]: unknown;
             };
+            /**
+             * Fields Skipped
+             * @default 0
+             */
+            fields_skipped: number;
+            /** Fields Total */
+            fields_total?: number | null;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
+            /**
+             * Guessed Count
+             * @default 0
+             */
+            guessed_count: number;
             /** Id */
             id: number;
             /** Note */
@@ -3122,6 +3211,7 @@ export interface components {
             follow_up_on?: string | null;
             /** Found On */
             found_on?: string | null;
+            hold?: components["schemas"]["KitHoldOut"] | null;
             /** Id */
             id: number;
             /** Inbox Checked At */
@@ -3162,6 +3252,11 @@ export interface components {
             receipts: number;
             /** Remote */
             remote?: boolean | null;
+            /**
+             * Stage
+             * @default
+             */
+            stage: string;
             /** Status */
             status: string;
             /**
@@ -3845,6 +3940,11 @@ export interface components {
             tools: {
                 [key: string]: string[];
             };
+            /**
+             * Tools Rev
+             * @default 0
+             */
+            tools_rev: number;
             /** Tools Stale */
             tools_stale?: boolean | null;
             /**
@@ -4127,13 +4227,19 @@ export interface components {
         FormAnsweredOut: {
             /** Confirmed */
             confirmed?: boolean | null;
+            /** Field Type */
+            field_type?: string | null;
             /** Key */
             key: string;
             /**
              * Matched By
              * @enum {string}
              */
-            matched_by: "key" | "wording";
+            matched_by: "key" | "wording" | "topic";
+            /** Needs Confirmation */
+            needs_confirmation?: boolean | null;
+            /** Over Limit */
+            over_limit?: boolean | null;
             /** Question */
             question: string;
             /** Required */
@@ -4164,12 +4270,18 @@ export interface components {
             /** Application Id */
             application_id: number;
             counts: components["schemas"]["FormCheckCountsOut"];
+            /** Knockouts */
+            knockouts?: components["schemas"]["FormKnockoutOut"][];
             /** Missing */
             missing: components["schemas"]["FormMissingOut"][];
+            /** Needs Confirmation */
+            needs_confirmation?: string[];
             /** Next */
             next: string;
             /** Questions Count */
             questions_count: number;
+            /** Stop For User */
+            stop_for_user?: boolean | null;
         };
         /**
          * FormCheckRequest
@@ -4184,8 +4296,21 @@ export interface components {
             /** Questions */
             questions: components["schemas"]["FormQuestion"][];
         };
+        /** FormKnockoutOut */
+        FormKnockoutOut: {
+            /** Key */
+            key?: string | null;
+            /** Question */
+            question: string;
+            /** Value */
+            value?: unknown;
+        };
         /** FormMissingOut */
         FormMissingOut: {
+            /** Field Type */
+            field_type?: string | null;
+            /** Needs Confirmation */
+            needs_confirmation?: boolean | null;
             /** Question */
             question: string;
             /** Required */
@@ -4200,8 +4325,24 @@ export interface components {
          *     or the saved ``approved_text`` question).
          */
         FormQuestion: {
+            /**
+             * Field Type
+             * @default unknown
+             * @enum {string}
+             */
+            field_type: "text" | "textarea" | "select" | "radio" | "checkbox" | "number" | "file" | "unknown";
             /** Key */
             key?: string | null;
+            /** Limit */
+            limit?: number | null;
+            /**
+             * Limit Unit
+             * @default chars
+             * @enum {string}
+             */
+            limit_unit: "chars" | "words";
+            /** Options */
+            options?: string[];
             /** Question */
             question: string;
             /**
@@ -4350,6 +4491,8 @@ export interface components {
             key: string;
             /** Label */
             label?: string | null;
+            /** Remembered At */
+            remembered_at?: string | null;
             /** Saved At */
             saved_at?: string | null;
             /**
@@ -4835,6 +4978,31 @@ export interface components {
             email: string;
         };
         /**
+         * PayAdvertisedOut
+         * @description Pay exactly as the ad states it (job_checks.pay_facts). Never annualised:
+         *     ``period`` is null when the ad does not say; ``currency`` is "UNKNOWN" when
+         *     no ISO code / unambiguous symbol sits beside the amount.
+         */
+        PayAdvertisedOut: {
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /**
+             * Equity
+             * @default false
+             */
+            equity: boolean;
+            /** Evidence */
+            evidence: string;
+            /** Max */
+            max?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Period */
+            period?: string | null;
+        };
+        /**
          * PersonFullOut
          * @description ``list_people(contact_id=...)``'s shape — the one row's own full
          *     record (never merged with another row that happens to share an email).
@@ -4954,6 +5122,8 @@ export interface components {
         ProfileEditIn: {
             /** Path */
             path: string;
+            /** Remember */
+            remember?: boolean | null;
             /** Source */
             source?: ("user_said" | "agent_inferred") | null;
             /** Value */
@@ -5388,6 +5558,11 @@ export interface components {
             channel: string;
             /** Confirmation */
             confirmation?: string | null;
+            /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
             /** Cover Letter Origin */
             cover_letter_origin: string | null;
             /**
@@ -5409,6 +5584,23 @@ export interface components {
             fields_filled?: {
                 [key: string]: unknown;
             };
+            /**
+             * Fields Skipped
+             * @default 0
+             */
+            fields_skipped: number;
+            /** Fields Total */
+            fields_total?: number | null;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
+            /**
+             * Guessed Count
+             * @default 0
+             */
+            guessed_count: number;
             /** Id */
             id: number;
             /** Job Apply Url */
@@ -5495,10 +5687,20 @@ export interface components {
             /** Channel */
             channel: string;
             /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
+            /**
              * Cover Letter Sent
              * @default false
              */
             cover_letter_sent: boolean;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
             /** Has Cover Letter */
             has_cover_letter: boolean;
             /** Has Cv */
@@ -5529,6 +5731,16 @@ export interface components {
             text: string;
             /** Title */
             title: string;
+            /**
+             * Tools Rev
+             * @default 0
+             */
+            tools_rev: number;
+            /**
+             * Tools Version
+             * @default
+             */
+            tools_version: string;
         };
         /** RecipeSummary */
         RecipeSummary: {
@@ -5585,6 +5797,8 @@ export interface components {
              * @default false
              */
             cover_letter_sent: boolean;
+            /** Cover Letter Version No */
+            cover_letter_version_no?: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Cv Version No */
@@ -5714,6 +5928,11 @@ export interface components {
              * @default ok
              */
             status: string;
+        };
+        /** ReleaseHoldOut */
+        ReleaseHoldOut: {
+            /** Released */
+            released: boolean;
         };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
@@ -6484,6 +6703,7 @@ export interface operations {
                 offset?: number;
                 due?: boolean;
                 quiet_days?: number | null;
+                in_flight?: boolean;
             };
             header?: {
                 authorization?: string | null;
@@ -7252,6 +7472,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveFitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_hold_api_applications__application_id__hold_release_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseHoldOut"];
                 };
             };
             /** @description Validation Error */
@@ -8973,6 +9228,7 @@ export interface operations {
         parameters: {
             query?: {
                 client_tools_version?: string;
+                client_tools_rev?: number | null;
             };
             header?: {
                 authorization?: string | null;
