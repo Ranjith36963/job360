@@ -185,6 +185,28 @@ async def test_mcp_receipt_tools_carry_same_counts_as_route(authenticated_async_
 
 
 @pytest.mark.asyncio
+async def test_list_receipts_summary_rows_always_carry_counts_line_and_form_host(authenticated_async_context):
+    """Route list AND MCP list_receipts: every summary row has both keys, with the real values
+    (a receipt with no form_filled event reads "" + the job link host, never a missing key)."""
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _form_filled(client, app_id, fields_count=4)
+        await _receipt(client, app_id, fields_filled={"a": "1", "b": "2"})
+        rows = (await client.get("/api/receipts")).json()["receipts"]
+    token = await _mint_token(authenticated_async_context)
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            listed = _payload(await mcp.call_tool("list_receipts", {}))["receipts"]
+    assert len(rows) == len(listed) == 1
+    for row in (rows[0], listed[0]):
+        assert "counts_line" in row and "form_host" in row
+        assert row["counts_line"] == f"2 of 4 fields {_DOT} 2 skipped {_DOT} 0 guessed"
+        assert row["form_host"] == "boards.greenhouse.io"
+
+
+@pytest.mark.asyncio
 async def test_form_filled_accepts_fields_skipped_and_rejects_non_list(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)

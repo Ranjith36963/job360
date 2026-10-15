@@ -564,3 +564,45 @@ def test_no_mcp_tool_confirms_an_ask():
 
     src = (Path(__file__).resolve().parent.parent / "src" / "api" / "mcp_server.py").read_text(encoding="utf-8")
     assert "confirm_ask" not in src
+
+
+@pytest.mark.asyncio
+async def test_kit_answer_relayed_until_that_edit_is_kept_not_any_ask_confirm(authenticated_async_context):
+    """Weak spot #6 part B. Mirrors neonwatty job-apply/SKILL.md:118. Confirming an UNRELATED ask leaves
+    the relayed row relayed; approving THAT edit (profile-memory Keep) makes it confirmed."""
+    token = await _mint_token(authenticated_async_context)
+    from src.api.main import app
+
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web)
+        ask_id = (await _ask(web, application_id=app_id)).json()["id"]
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        saved = await agent.patch("/api/profile", json={"edits": [
+            {"path": "user_info.contact", "value": {"phone": "+44 7700 900123"}, "source": "user_said"}]})
+        assert saved.status_code == 200, saved.text
+        assert (await agent.post(f"/api/asks/{ask_id}/answer",
+                                 json={"answer": "yes", "user_words": "yes that is right"})).status_code == 200
+        before = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+        phone = next(i for i in before["answers"]["contact"] if i["key"] == "contact.phone")
+        assert phone["state"] == "relayed" and phone.get("confirmed_at") is None
+        assert before["answers_summary"]["relayed"] >= 1
+    async with authenticated_async_context() as web:
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).status_code == 200
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        mid = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+        phone = next(i for i in mid["answers"]["contact"] if i["key"] == "contact.phone")
+        assert phone["state"] == "relayed" and mid["answers_summary"]["relayed"] >= 1
+    async with authenticated_async_context() as web:
+        kept = await web.post("/api/profile/edits/keep", json={"path": "user_info.contact"})
+        assert kept.status_code == 200, kept.text
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        after = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+        phone = next(i for i in after["answers"]["contact"] if i["key"] == "contact.phone")
+        assert phone["state"] == "confirmed" and phone["confirmed_at"]
+        assert after["answers_summary"]["relayed"] == 0

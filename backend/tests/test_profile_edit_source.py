@@ -186,13 +186,13 @@ def _full_profile():
     )
 
 
-def test_assistant_write_marked_user_said_is_confirmed():
+def test_assistant_write_marked_user_said_is_relayed_until_web_confirm():
     from src.services.applications import kit
 
     answers, _ = kit.compute_answers(_full_profile(), [_kit_rows(LOGI, NOTICE, "user_said")], "GB")
     item = answers["logistics"][0]
-    assert item["state"] == "confirmed"
-    assert "confirmed" not in item
+    assert item["state"] == "relayed"
+    assert "confirmed" not in item and "confirmed_at" not in item
 
 
 def test_assistant_write_agent_inferred_is_inferred_and_keeps_confirmed_false():
@@ -235,14 +235,15 @@ def test_answers_summary_counts_each_state():
 
     rows = [
         _kit_rows(LOGI, NOTICE, "agent_inferred"),  # logistics.notice_period -> inferred
-        _kit_rows("user_info.contact", {}, "user_said"),  # contact.email -> confirmed
+        _kit_rows("user_info.contact", {}, "user_said", "web"),  # contact.email -> confirmed
         _kit_rows("user_info.right_to_work", {}, "agent_inferred"),  # citizenship inferred, sanctions sensitive
     ]
     answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
     states = sorted(i["state"] for block in answers.values() for i in block)
     assert states == ["confirmed", "confirmed", "inferred", "inferred", "sensitive", "sensitive"]
+    assert kit.answers_summary(answers)["relayed"] == 0
     # contact.email + approved_text = 2 confirmed; notice + citizenship = 2 inferred; equality + sanctions = 2.
-    assert kit.answers_summary(answers) == {"confirmed": 2, "inferred": 2, "sensitive": 2}
+    assert kit.answers_summary(answers) == {"confirmed": 2, "relayed": 0, "inferred": 2, "sensitive": 2}
 
 
 def test_a_profile_item_an_assistant_inferred_is_inferred():
@@ -265,7 +266,7 @@ def test_setup_recipe_tells_the_assistant_to_save_the_users_words_as_user_said()
 
 @pytest.mark.asyncio
 async def test_kit_route_carries_state_and_answers_summary(authenticated_async_context, fixture_user_id):
-    """End to end: a user_said write over MCP's route reads confirmed, an inferred one inferred."""
+    """End to end: a user_said write over MCP's route reads relayed, an inferred one inferred."""
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
@@ -284,9 +285,9 @@ async def test_kit_route_carries_state_and_answers_summary(authenticated_async_c
         kit_body = (await agent.get(f"/api/applications/{app_id}/kit")).json()
     logi = kit_body["answers"]["logistics"][0]
     email = next(i for i in kit_body["answers"]["contact"] if i["key"] == "contact.email")
-    assert (logi["key"], logi["state"]) == ("logistics.notice_period", "confirmed")
+    assert (logi["key"], logi["state"]) == ("logistics.notice_period", "relayed")
     assert email["state"] == "inferred"
-    assert kit_body["answers_summary"]["inferred"] >= 1 and kit_body["answers_summary"]["confirmed"] >= 1
+    assert kit_body["answers_summary"]["inferred"] >= 1 and kit_body["answers_summary"]["relayed"] >= 1
 
 
 @pytest.mark.asyncio
@@ -347,7 +348,7 @@ def test_confirmed_items_carry_confirmed_at_and_inferred_do_not():
     from src.services.applications import kit
 
     rows = [
-        _kit_rows(LOGI, NOTICE, "user_said"),
+        _kit_rows(LOGI, NOTICE, "user_said", "web"),
         _kit_rows("user_info.contact", {}, "agent_inferred"),
     ]
     answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
@@ -507,3 +508,38 @@ def test_kit_instructions_name_remember():
     from src.services.applications import kit
 
     assert any("remember: true" in line for line in kit.KIT_INSTRUCTIONS)
+
+
+# ── Part B: a relayed chat word reads "relayed" until the user confirms on the web ──
+
+
+def test_relayed_until_that_row_is_approved_on_the_web():
+    """neonwatty job-apply/SKILL.md:118 - the user's own word is what makes an answer theirs.
+    Per row: the profile-memory Keep writes a newer web row for THAT path; nothing else confirms it."""
+    from src.services.applications import kit
+
+    rows = [_kit_rows(LOGI, NOTICE, "user_said")]
+    before, _ = kit.compute_answers(_full_profile(), rows, "GB")
+    assert before["logistics"][0]["state"] == "relayed"
+    assert kit.answers_summary(before)["relayed"] == 1
+    kept = [_kit_rows(LOGI, NOTICE, "user_said", set_by="web") | {"set_at": "2026-10-02T00:00:00Z"}]
+    after, _ = kit.compute_answers(_full_profile(), kept, "GB")
+    assert after["logistics"][0]["state"] == "confirmed"
+    assert after["logistics"][0]["confirmed_at"] == "2026-10-02T00:00:00Z"
+    assert kit.answers_summary(after)["relayed"] == 0
+    # Keeping a DIFFERENT path leaves this row relayed.
+    other = rows + [_kit_rows("user_info.contact", {"phone": "1"}, "user_said", set_by="web")]
+    still, _ = kit.compute_answers(_full_profile(), other, "GB")
+    assert still["logistics"][0]["state"] == "relayed"
+
+
+def test_sensitive_beats_relayed_and_inferred_stays_inferred():
+    from src.services.applications import kit
+
+    rows = [
+        _kit_rows("user_info.equality", {}, "user_said"),
+        _kit_rows("user_info.contact", {}, "agent_inferred"),
+    ]
+    answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
+    assert answers["equality"][0]["state"] == "sensitive"
+    assert answers["contact"][0]["state"] == "inferred"

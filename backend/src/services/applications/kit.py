@@ -64,6 +64,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "Use only the answers in this kit. Anything in `missing`: ask the user ONCE, in one message. Never guess.",
     "An answer with state 'inferred' was worked out by an assistant - confirm it with the user once, "
     "then save it again with source user_said. 'confirmed' answers are the user's: use them. "
+    "'relayed' = you saved the user's chat word and they have not confirmed it on Job360 yet: usable, "
+    "but say once that they can confirm it there. "
     "A 'sensitive' answer (salary, equality, sanctions, visa / right-to-work status) is shown to the user "
     "and confirmed on THIS form before it is used; never fill it silently. Ask two things separately: "
     "may I use it on this form, and may I remember it for later. Save it with remember: true only after "
@@ -971,7 +973,7 @@ def _item(key: str, value: Any, source: str, saved_at: Optional[str], **extra: A
 
 
 # Every kit answer carries one of these (answer memory: who stands behind it).
-ANSWER_STATES = ("confirmed", "inferred", "sensitive")
+ANSWER_STATES = ("confirmed", "relayed", "inferred", "sensitive")
 # The profile paths a "profile" item is read from (an assistant may have written them).
 _PROFILE_PATHS = {
     "contact.name": "cv_data.name", "contact.location": "cv_data.location",
@@ -1058,13 +1060,21 @@ def compute_answers(
     list for ``country`` (the JOB's country; ``None`` = unknown). Empty / null =
     absent, not an item (rule #29); ``False`` and ``0`` are real answers.
     An approved answer with a ``company`` rides only in that company's kit: it is
-    skipped when ``company_key`` differs from the company's normalized key."""
+    skipped when ``company_key`` differs from the company's normalized key.
+    A row an assistant saved as the user's chat word (``user_said``) reads ``relayed`` until the user
+    approves THAT edit on the web (profile-memory Keep writes a newer ``web`` row, so it is no longer
+    the assistant's and reads ``confirmed``). No other action confirms it."""
     saved = {str(r["path"]): r.get("set_at") for r in overlay}
     # Feature 9: a path whose newest row an assistant wrote WITHOUT the user's word is an inference.
     unconfirmed = {
         str(r["path"]) for r in overlay
         if is_assistant_actor(str(r.get("set_by") or ""))
         and not is_confirmed(str(r.get("set_by") or ""), str(r.get("source") or ""))
+    }
+    # Relayed: an assistant wrote it as the user's chat word and the newest row is still the assistant's.
+    relayed_paths = {
+        str(r["path"]) for r in overlay
+        if is_assistant_actor(str(r.get("set_by") or "")) and str(r.get("source") or "") == "user_said"
     }
     current = [""]
 
@@ -1082,6 +1092,8 @@ def compute_answers(
             item["state"] = "confirmed"
         elif item.get("confirmed") is False or (source == "profile" and _PROFILE_PATHS.get(key) in unconfirmed):
             item["state"] = "inferred"
+        elif current[0] in relayed_paths or (source == "profile" and _PROFILE_PATHS.get(key) in relayed_paths):
+            item["state"] = "relayed"
         else:
             item["state"] = "confirmed"
         if item["state"] == "confirmed" and saved_at:

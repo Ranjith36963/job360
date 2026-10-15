@@ -987,8 +987,9 @@ class KitAnswerOut(BaseModel):
     company: Optional[str] = None
     topic: Optional[str] = None
     # Weak spot #6: who stands behind it. confirmed = the user's (web, user_said, approved
-    # wording); inferred = an assistant worked it out; sensitive = equality / sanctions / visa.
-    state: Literal["confirmed", "inferred", "sensitive"]
+    # wording); relayed = an assistant saved the user's chat word, not yet confirmed on the web;
+    # inferred = an assistant worked it out; sensitive = equality / sanctions / visa.
+    state: Literal["confirmed", "relayed", "inferred", "sensitive"]
     # Set when state is confirmed and the stored row has a time (the reference's confirmedAt).
     confirmed_at: Optional[str] = None
     # Sensitive items only: when the user agreed to REMEMBER it (server-stamped). Still show it
@@ -998,6 +999,7 @@ class KitAnswerOut(BaseModel):
 
 class KitAnswersSummaryOut(BaseModel):
     confirmed: int = 0
+    relayed: int = 0
     inferred: int = 0
     sensitive: int = 0
 
