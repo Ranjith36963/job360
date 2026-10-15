@@ -1385,8 +1385,9 @@ async def record_receipt(
     cover_letter_artifact_id: Optional[int] = None,
     applied_at: Optional[str] = None,
 ) -> dict[str, Any]:
-    """R8/S3 — the rich receipt: freeze the named artifact versions (or the
-    newest, if none named — ``_resolve_receipt_artifact``) as text, and
+    """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
+    none named, with a warning) and the named cover letter (NONE if not named:
+    the receipt records "no cover letter sent") as text, and
     append the ``applied`` event. ``profile_version`` is stamped from the
     CALLER's current profile (B6 fix — this used to be hardcoded ``None``,
     unlike the legacy ``/receipts/{job_id}`` route which has always stamped
@@ -1420,9 +1421,23 @@ async def record_receipt(
         raise SpineError(404, "application not found")
 
     cv_artifact = await _resolve_receipt_artifact(db, user_id, application_id, "cv", cv_artifact_id)
-    cl_artifact = await _resolve_receipt_artifact(
-        db, user_id, application_id, "cover_letter", cover_letter_artifact_id
-    )
+    if cv_artifact_id is None and cv_artifact is not None:
+        warnings.append(
+            "cv_artifact_id not given: froze the newest CV "
+            f"(artifact {cv_artifact['id']}, v{cv_artifact['version_no']})"
+        )
+    # A receipt never guesses a letter: only a NAMED letter is frozen (M3 - the
+    # receipt is permanent, so a wrong "sent" claim could never be corrected).
+    cl_artifact: Optional[dict[str, Any]] = None
+    if cover_letter_artifact_id is None:
+        warnings.append(
+            "no cover_letter_artifact_id given: the receipt says no cover letter was sent. "
+            "If one was sent, record a correction note; receipts cannot be edited."
+        )
+    else:
+        cl_artifact = await _resolve_receipt_artifact(
+            db, user_id, application_id, "cover_letter", cover_letter_artifact_id
+        )
 
     # Lazy: profile storage pulls the scoring stack transitively (rule #16),
     # same reasoning as save_artifact's identical import above.
@@ -1506,6 +1521,7 @@ async def record_receipt(
         "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
         "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
+        "cover_letter_sent": cl_artifact is not None,
         "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
         "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
@@ -1577,7 +1593,7 @@ async def _list_receipts_for_application(
     never read back until 2026-09-11 (``tests/test_receipt_answers_readable.py``)."""
     cols = (
         "id, sent_at, channel, confirmation, cv_artifact_id, cover_letter_artifact_id, note, "
-        "answers, fields_filled"
+        "answers, fields_filled, (COALESCE(cover_letter_text, '') <> '') AS _letter_frozen"
     )
     if include_text:
         cols += ", cv_text, cover_letter_text"
@@ -1590,6 +1606,8 @@ async def _list_receipts_for_application(
     for row in rows:
         row["answers"] = _receipt_answers(row.get("answers"))
         row["fields_filled"] = _receipt_json(row.get("fields_filled"), dict)
+        frozen = bool(row.pop("_letter_frozen", None))
+        row["cover_letter_sent"] = frozen or row.get("cover_letter_artifact_id") is not None
     return rows
 
 
@@ -1638,7 +1656,8 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     """
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
-        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256 "
+        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+        "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
     )
@@ -1665,6 +1684,25 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "cover_letter_version_no": await _artifact_version_no(
             db, user_id, application_id, "cover_letter", r.get("cover_letter_artifact_id")
         ),
+        "cover_letter_sent": r.get("cover_letter_artifact_id") is not None or bool(r.get("letter_frozen")),
+    }
+
+
+async def receipt_letter_sent(db: JobDatabase, user_id: str, receipt_ids: list[int]) -> dict[int, bool]:
+    """``cover_letter_sent`` for many receipts at once: true when the row names a
+    cover letter artifact or froze a letter's text (the legacy web "I applied"
+    route stores text without an id). Read-only; a foreign or unknown id is absent."""
+    if not receipt_ids:
+        return {}
+    marks = ",".join("?" for _ in receipt_ids)
+    cur = await db._db.execute(
+        f"SELECT id, cover_letter_artifact_id, (COALESCE(cover_letter_text, '') <> '') AS frozen "  # noqa: S608
+        f"FROM application_receipts "
+        f"WHERE user_id = ? AND id IN ({marks})",
+        (user_id, *receipt_ids),
+    )
+    return {
+        int(r["id"]): r["cover_letter_artifact_id"] is not None or bool(r["frozen"]) for r in await cur.fetchall()
     }
 
 

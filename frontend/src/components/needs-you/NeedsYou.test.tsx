@@ -43,6 +43,9 @@ const base = {
   answered_by: null,
   answered_at: null,
   answered_by_user: false,
+  user_words: "",
+  relayed_from_chat: false,
+  said_by: "assistant",
   withdrawn_at: null,
 };
 const evil = "<img src=x onerror=alert(1)>";
@@ -94,6 +97,25 @@ describe("NeedsYou", () => {
     expect(withdrawAsk).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("ask-withdraw-confirm"));
     await waitFor(() => expect(withdrawAsk).toHaveBeenCalledWith(1));
+  });
+
+  it("shows the user's own words when an assistant relayed them from chat", async () => {
+    setup(
+      [],
+      [
+        {
+          ...base, id: 4, question: "Q4", status: "answered", answer: "Two months",
+          answered_by: "agent:Claude", user_words: "its two months, give or take",
+          relayed_from_chat: true, said_by: "you",
+        },
+        { ...base, id: 5, question: "Q5", status: "answered", answer: "A5", answered_by: "agent:Claude" },
+      ]
+    );
+    render(<NeedsYou />);
+    const relayed = await screen.findByTestId("ask-relayed-from-chat");
+    expect(relayed).toHaveTextContent("You said (via Claude): its two months, give or take");
+    // only the relayed card shows it; the assistant-only answer is unchanged
+    expect(screen.getAllByTestId("ask-relayed-from-chat")).toHaveLength(1);
   });
 
   it("shows provenance for both answer sources", async () => {

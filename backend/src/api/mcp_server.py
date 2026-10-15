@@ -237,6 +237,7 @@ def _receipt_summary(r: Any) -> dict[str, Any]:
         "job_location": r.job_location,
         "has_cv": r.has_cv,
         "has_cover_letter": r.has_cover_letter,
+        "cover_letter_sent": r.cover_letter_sent,
         "channel": r.channel,
         "note": r.note,
         "proof": r.proof.model_dump(),
@@ -269,6 +270,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "confirmation": r.confirmation,
         "cv_version_no": r.cv_version_no,
         "cover_letter_version_no": r.cover_letter_version_no,
+        "cover_letter_sent": r.cover_letter_sent,
         "recorded_by": r.recorded_by,
         "possible_duplicate": r.possible_duplicate,
         "kit_event_id": r.kit_event_id,
@@ -753,8 +755,8 @@ def build_server(version: str = "") -> MCPServer:
         """Record that the user has applied to this job — ONLY after they say so. Pass
         `application_id` (the same id every other tool takes); `job_id` still works
         but is the older form — if you give both they must belong together. Freezes
-        the named CV / cover-letter version (or the newest saved one, if none named) and
-        any answers/fields into an immutable receipt, and appends an `applied` event to
+        the named CV version (the newest saved one, with a warning, if none named), the
+        named cover letter and any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere. `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
         "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
@@ -768,6 +770,9 @@ def build_server(version: str = "") -> MCPServer:
         `POST /receipts/{job_id}` — the new optional fields (`confirmation`, `answers`,
         `fields_filled`, `cv_artifact_id`, `cover_letter_artifact_id`, `applied_at`)
         are exactly spec R8/S4's tool contract.
+
+        cover_letter_artifact_id: pass it ONLY if a letter was actually sent; leave it out
+        and the receipt records no letter (`cover_letter_sent` false, plus a warning).
         """
         try:
             body = applications_route.RecordApplicationReceiptRequest(
@@ -1658,13 +1663,15 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def answer_ask(ask_id: int, answer: str) -> dict[str, Any]:
+    async def answer_ask(ask_id: int, answer: str, user_words: str = "") -> dict[str, Any]:
         """Record the answer the user gave you in chat to an ask. Only record an
         answer the user actually gave you in chat, in their words; never invent
-        or infer one. Calling it again changes the answer (the earlier answers
-        stay in the application's history)."""
+        or infer one. Pass `user_words`: the user's exact words from chat (at
+        most 2000 chars). Then the answer shows as theirs (via you). Calling it
+        again changes the answer (the earlier answers stay in the application's
+        history)."""
         try:
-            body = asks_route.AnswerAskRequest(answer=answer)
+            body = asks_route.AnswerAskRequest(answer=answer, user_words=user_words)
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:
