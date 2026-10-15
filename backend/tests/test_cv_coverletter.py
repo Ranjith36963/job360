@@ -325,6 +325,10 @@ def test_letter_without_letterhead_is_flagged():
     assert "letter_no_header" in codes(
         "cover_letter", "Jane Doe\n2026-10-15\n\nAcme Ltd\nDear Hiring Manager,\nI am applying.\nRegards, Jane"
     )
+    # A numeric date followed by a numbered address line is not a phone number.
+    assert "letter_no_header" in codes(
+        "cover_letter", "Jane Doe\n15.10.2026\n\n10 Downing Street\nDear Sir,\nI am applying."
+    )
     # CV kind never gets it.
     assert "letter_no_header" not in codes("cv", bare)
 

@@ -99,8 +99,13 @@ def normalize_apply_url(value: Any) -> str:
         raise SpineError(422, "apply_url cannot be empty (it replaces the link, it never clears it)")
     if len(text) > 2048:
         raise SpineError(422, "apply_url is too long")
-    if urlsplit(text).scheme.lower() not in ("http", "https") or settings_rules.parse_site_host(text) is None:
-        raise SpineError(422, "apply_url must be an http(s) link with a host, like https://company.com/careers/1")
+    bad = "apply_url must be an http(s) link with a host, like https://company.com/careers/1"
+    try:
+        scheme = urlsplit(text).scheme.lower()
+    except ValueError:  # "http://[bad" - unparseable is bad input, never a 500
+        raise SpineError(422, bad) from None
+    if scheme not in ("http", "https") or settings_rules.parse_site_host(text) is None:
+        raise SpineError(422, bad)
     return text
 
 

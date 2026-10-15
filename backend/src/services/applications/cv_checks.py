@@ -485,7 +485,8 @@ def letter_no_header(text: str, profile: Any = None) -> Optional[dict[str, str]]
     else:  # nothing on file to match: any email address or phone number will do
         has_contact = bool(_EMAIL_IN_TEXT_RE.search(head)) or any(
             len(re.sub(r"\D", "", m)) >= 8 and not any(r.fullmatch(m.strip()) for r in _LETTER_DATE_RES)
-            for m in _PHONE_RE.findall(head)
+            for ln in head.splitlines()  # per line: a phone match must never join a date to the next line
+            for m in _PHONE_RE.findall(ln)
         )
     has_date = any(r.search(head) for r in _LETTER_DATE_RES)
     if has_contact and has_date:

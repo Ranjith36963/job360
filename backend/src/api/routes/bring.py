@@ -269,15 +269,19 @@ async def _job_id_for_same_link(db: JobDatabase, user_id: str, apply_url: str, c
     if not wanted or not is_job_specific_url(apply_url):
         return None
     want_company = " ".join(company.lower().split())
+    # The catalog row's own link counts too: update_job may have replaced a dead
+    # aggregator link on the application, and the original ad still names this job.
     cur = await db._db.execute(
-        "SELECT job_id, job_url, job_company FROM applications WHERE user_id = ? AND job_url <> '' ORDER BY id",
+        "SELECT a.job_id, a.job_url, a.job_company, j.apply_url AS catalog_url FROM applications a "
+        "LEFT JOIN jobs j ON j.id = a.job_id WHERE a.user_id = ? AND a.job_url <> '' ORDER BY a.id",
         (user_id,),
     )
     for r in await cur.fetchall():
         have = " ".join(str(r["job_company"] or "").lower().split())
         # "Parisien" and "Parisien SAS" are the same employer; two blanks never match.
         same_company = bool(have and want_company) and (have.startswith(want_company) or want_company.startswith(have))
-        if same_company and canonical_url(str(r["job_url"] or "")) == wanted:
+        links = {canonical_url(str(r["job_url"] or "")), canonical_url(str(r["catalog_url"] or ""))}
+        if same_company and wanted in links:
             return int(r["job_id"])
     return None
 

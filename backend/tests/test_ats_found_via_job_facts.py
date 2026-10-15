@@ -296,7 +296,7 @@ async def test_update_job_apply_url_is_per_user(authenticated_async_context):
     async with authenticated_async_context() as client:
         a_app = (await _bring(client, _AD_FR))["application_id"]
         path = f"/api/applications/{a_app}/job"
-        for bad in ("ftp://x", "", "   ", "not a url", "https://"):
+        for bad in ("ftp://x", "", "   ", "not a url", "https://", "http://[bad", "https://x.example/" + "a" * 2049):
             resp = await client.patch(path, json={"apply_url": bad})
             assert resp.status_code == 422, (bad, resp.text)
         kit0 = (await client.get(f"/api/applications/{a_app}/kit")).json()
@@ -312,6 +312,14 @@ async def test_update_job_apply_url_is_per_user(authenticated_async_context):
         again = await client.post("/api/jobs/bring", json=_AD_FR)
         assert again.status_code == 200, again.text
         assert again.json()["application_id"] == a_app
+        # A re-titled repost of an ORIGINAL job-specific link still merges into the same job.
+        board = {**_AD_FR, "company": "Boardco", "apply_url": "https://boards.greenhouse.io/boardco/jobs/12345"}
+        b_id = (await _bring(client, board))["application_id"]
+        moved = await client.patch(f"/api/applications/{b_id}/job", json={"apply_url": "https://boardco.example/careers/1"})
+        assert moved.status_code == 200, moved.text
+        repost = await client.post("/api/jobs/bring", json={**board, "title": board["title"] + " (Repost)"})
+        assert repost.status_code == 200, repost.text
+        assert repost.json()["application_id"] == b_id
 
     cookie = await _second_user_session_cookie("apply-url-b@example.com")
     async with AsyncClient(
