@@ -1216,7 +1216,7 @@ def build_server(version: str = "") -> MCPServer:
         submit_declined {where};
         form_swept {fields_checked, fixed, notes} (after a full re-read);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
-        site_account / account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
+        site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped}.
