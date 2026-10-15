@@ -460,11 +460,8 @@ def build_server(version: str = "") -> MCPServer:
         `settings.setup_progress` = which of the six setup rounds (targets first) are done.
 
         The CV/LinkedIn/GitHub text is sent only with get_profile(include_raw=true) as `raw` (+`raw.truncated`);
-        `raw_available` says whether any exists. Each text section is cut at 15000 characters and github_repos at
-        about 15000 characters of JSON; `raw.more` lists every cut section with its `total_chars` and a `next` call.
-        To read one section (or the rest of one), pass `raw_section` (cv | linkedin | github_bio |
-        github_profile_readme | github_repos) and `raw_offset` (a character offset; a repo index for github_repos).
-        `editable_paths` = what you may write, `fields` = current values,
+        `raw_available` says whether any exists. Each section is cut at 15000 chars; `raw.more` gives the `next`
+        call (`raw_section` + `raw_offset`). `editable_paths` = what you may write, `fields` = current values,
         `shapes` = a valid example for each structured path. `skills` = THE skill list; remove a wrong one via
         `preferences.excluded_skills`.
 
