@@ -1908,7 +1908,6 @@ async def test_approved_text_keeps_the_newest_25_and_counts_the_rest(authenticat
         assert "answers_omitted" not in small or small["answers_omitted"] is None
 
 
-<<<<<<< HEAD
 async def test_kit_approved_text_carries_topic_and_bad_topic_is_refused(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
@@ -1926,7 +1925,8 @@ async def test_kit_approved_text_carries_topic_and_bad_topic_is_refused(authenti
         items = {i["key"]: i for i in (await _kit(client, app_id)).json()["answers"]["approved_text"]}
         assert items["Work from India?"]["topic"] == "work_from.IN"
         assert items["Notice period?"].get("topic") is None
-=======
+
+
 @pytest.mark.asyncio
 async def test_send_approve_and_decline_refuse_once_applied_or_closed(
     authenticated_async_context, fixture_user_id
@@ -1959,4 +1959,3 @@ async def test_send_approve_and_decline_refuse_once_applied_or_closed(
         assert (await client.post(f"/api/applications/{app_id}/send/decline")).status_code == 409
         closed = (await client.get(f"/api/applications/{app_id}")).json()
         assert [e["event_type"] for e in closed["events"]][-1] == "rejected"
->>>>>>> origin/main
