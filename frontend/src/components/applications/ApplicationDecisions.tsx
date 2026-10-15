@@ -41,6 +41,7 @@ export function ApplicationDecisions({
   onChanged,
   newFillWaiting = false,
   status = "considering",
+  changesSinceApproved = null,
 }: {
   applicationId: number;
   controls: ApplicationControls;
@@ -48,6 +49,8 @@ export function ApplicationDecisions({
   newFillWaiting?: boolean;
   /** The application's status: Send / Don't send only show while it is pre-apply. */
   status?: string;
+  /** CV versions saved after the approved one (null = no approval to compare with). */
+  changesSinceApproved?: number | null;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -120,6 +123,12 @@ export function ApplicationDecisions({
       {dup.cleared && (
         <p data-testid="duplicate-cleared" className={NOTE}>
           Not a duplicate - {stamp(dup.cleared)}
+        </p>
+      )}
+
+      {changesSinceApproved !== null && changesSinceApproved > 0 && (
+        <p data-testid="changes-since-approved" className="text-xs text-warning">
+          {`${changesSinceApproved} change${changesSinceApproved === 1 ? "" : "s"} since approved CV`}
         </p>
       )}
 

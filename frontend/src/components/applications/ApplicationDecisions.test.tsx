@@ -296,3 +296,21 @@ describe("Your assistant got stuck (blocked record)", () => {
     expect(screen.getByTestId("blocked-detail").textContent).toBe("Needs a puzzle solved");
   });
 });
+
+describe("changes-since-approved", () => {
+  const noop = () => undefined;
+  it("shows the count when the CV changed after the approval", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} status="applied" changesSinceApproved={2} />);
+    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("2 changes since approved CV");
+  });
+  it("says change (singular) for one", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} status="applied" changesSinceApproved={1} />);
+    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("1 change since approved CV");
+  });
+  it("is absent for 0 or null", () => {
+    const { rerender } = render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={0} />);
+    expect(screen.queryByTestId("changes-since-approved")).toBeNull();
+    rerender(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={null} />);
+    expect(screen.queryByTestId("changes-since-approved")).toBeNull();
+  });
+});

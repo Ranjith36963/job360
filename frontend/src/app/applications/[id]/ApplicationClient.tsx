@@ -12,7 +12,7 @@ import {
 } from "@/lib/api";
 import type { ApplicationControls, ApplicationDetail, Ask, ReadyCardData, VisaShape } from "@/lib/api";
 import { ReadyCard } from "@/components/needs-you/ReadyCard";
-import { readyCardAllowed } from "@/lib/application-actions";
+import { allowedActions, changesSinceApprovedCv } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
 import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
@@ -177,6 +177,8 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
   const openAsks: Ask[] = (detail.asks ?? []).filter((a) => a.status === "open" && !a.withdrawn_at);
   const tone = STAGE_TONE[detail.status] ?? "quiet";
+  // The one table (lib/application-actions) decides which buttons show.
+  const actions = allowedActions(detail.status, { hasReceipt: detail.receipts.length > 0 });
   const place = detail.job.job_location;
 
   return (
@@ -322,7 +324,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 forever, with no way left to create a receipt. The real gate
                 is simpler and survives every status: show it whenever there
                 is no receipt yet. */}
-            {detail.receipts.length === 0 &&
+            {actions.includes("mark_applied") &&
               (!markConfirming ? (
                 <button
                   type="button"
@@ -379,9 +381,9 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 Add to calendar
               </a>
             )}
-            {ready && readyCardAllowed(detail.status) && (
+            {ready && actions.includes("ready_card") && (
               <div className="w-full">
-                <ReadyCard card={ready.card} paused={ready.paused} onChanged={reloadAfterAsk} />
+                <ReadyCard card={ready.card} paused={ready.paused} status={detail.status} onChanged={reloadAfterAsk} />
               </div>
             )}
             {controls && (
@@ -389,6 +391,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 applicationId={detail.id}
                 controls={controls}
                 status={detail.status}
+                changesSinceApproved={changesSinceApprovedCv(detail.events, detail.artifacts)}
                 newFillWaiting={ready !== null}
                 onChanged={(next) => {
                   setControls(next);

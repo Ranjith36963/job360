@@ -9,6 +9,7 @@ import type { ReadyCardData } from "@/lib/api";
 import { clock, docText, flagText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
 import type { ChipTone } from "@/lib/ready-to-send";
 import { whoLabel } from "@/lib/event-labels";
+import { nothingSent } from "@/lib/application-actions";
 import { cn } from "@/lib/utils";
 
 // Every string here (company, title, questions, answers, flags) was written by
@@ -31,7 +32,10 @@ export function ReadyCard({
   card,
   paused,
   onChanged,
+  status = "considering",
 }: {
+  /** The application status: "Nothing has been sent" shows while the table says so. */
+  status?: string;
   card: ReadyCardData;
   paused: boolean;
   onChanged: () => void;
@@ -131,6 +135,12 @@ export function ReadyCard({
             })}
           </ul>
         </div>
+      )}
+
+      {nothingSent(status) && (
+        <p data-testid="nothing-sent" className="text-xs text-muted-foreground">
+          Nothing has been sent.
+        </p>
       )}
 
       <div className="flex flex-wrap items-center gap-3">

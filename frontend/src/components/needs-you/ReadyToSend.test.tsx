@@ -132,3 +132,12 @@ describe("Ready to send", () => {
     }
   });
 });
+
+describe("nothing-sent", () => {
+  it("shows while considering and is gone once the status is applied", () => {
+    const { rerender } = render(<ReadyCard card={card(5)} paused={false} onChanged={() => undefined} />);
+    expect(screen.getByTestId("nothing-sent")).toHaveTextContent("Nothing has been sent");
+    rerender(<ReadyCard card={card(5)} paused={false} status="applied" onChanged={() => undefined} />);
+    expect(screen.queryByTestId("nothing-sent")).toBeNull();
+  });
+});
