@@ -449,7 +449,7 @@ def leaked_chatter(text: str) -> Optional[dict[str, str]]:
 
 # ── (e) cover letter letterhead + date ─────────────────────────────────────
 
-_EMAIL_IN_TEXT_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_EMAIL_IN_TEXT_RE = re.compile(r"(?<![\w.+-])[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}")
 _LETTER_DATE_RES = (
     re.compile(
         rf"\b(?:\d{{1,2}}(?:st|nd|rd|th)?\s+)?{_MONTH}\s+(?:\d{{1,2}}(?:st|nd|rd|th)?,?\s+)?(?:19|20)\d{{2}}\b",
@@ -459,6 +459,7 @@ _LETTER_DATE_RES = (
     re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b"),
 )
 _LETTER_HEAD_LINES = 8
+_LETTER_HEAD_CHARS = 600
 _SALUTATION_RE = re.compile(r"\s*(?:dear|to whom|hello|hi)\b", re.I)
 
 
@@ -470,7 +471,8 @@ def letter_no_header(text: str, profile: Any = None) -> Optional[dict[str, str]]
     lines = [ln for ln in text.splitlines() if ln.strip()][:_LETTER_HEAD_LINES]
     # The letterhead sits ABOVE the salutation; a date or number in the body is not one.
     cut = next((i for i, ln in enumerate(lines) if _SALUTATION_RE.match(ln)), None)
-    head = "\n".join(lines[:cut] if cut is not None else lines[:4])
+    # Bounded: a letterhead is short, and the regexes below never see a long run.
+    head = "\n".join(lines[:cut] if cut is not None else lines[:4])[:_LETTER_HEAD_CHARS]
     contact = getattr(getattr(profile, "user_info", None), "contact", None)
     contact = contact if isinstance(contact, dict) else {}
     email = str(contact.get("email") or "").strip().casefold()
