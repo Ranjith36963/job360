@@ -4327,6 +4327,8 @@ export interface components {
             key: string;
             /** Label */
             label?: string | null;
+            /** Remembered At */
+            remembered_at?: string | null;
             /** Saved At */
             saved_at?: string | null;
             /**
@@ -4931,6 +4933,8 @@ export interface components {
         ProfileEditIn: {
             /** Path */
             path: string;
+            /** Remember */
+            remember?: boolean | null;
             /** Source */
             source?: ("user_said" | "agent_inferred") | null;
             /** Value */

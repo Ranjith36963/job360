@@ -66,7 +66,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "then save it again with source user_said. 'confirmed' answers are the user's: use them. "
     "A 'sensitive' answer (salary, equality, sanctions, visa / right-to-work status) is shown to the user "
     "and confirmed on THIS form before it is used; never fill it silently. Ask two things separately: "
-    "may I use it on this form, and may I remember it for later.",
+    "may I use it on this form, and may I remember it for later. Save it with remember: true only after "
+    "a yes to the second; `remembered_at` set = the user agreed to that.",
     "Upload file: desktop or Claude Code - download `file.url` to a local file and upload that. "
     "Chat app - ask the user to attach the PDF once for this job. Otherwise paste `text` if the form allows, "
     "else the user uploads it by hand. An expired link: call the kit again.",
@@ -841,6 +842,32 @@ def _is_sensitive(block: str, key: str) -> bool:
     return block == "right_to_work" and key.endswith(_SENSITIVE_RTW_SUFFIXES)
 
 
+# The overlay path each sensitive kit block is read from (one whole-value row per path).
+_SENSITIVE_PATH = {
+    "equality": "user_info.equality", "salary": "preferences.salary_by_country",
+    "right_to_work": "user_info.right_to_work", "logistics": "user_info.logistics",
+}
+
+
+def edit_is_sensitive(path: str, value: Any) -> bool:
+    """True when saving ``value`` at overlay ``path`` stores a sensitive answer (equality,
+    expected salary, current salary, sanctions or visa status). An empty value is the
+    ``"value": null`` placeholder of SKILL.md L151 and is never sensitive."""
+    if not _present(value):
+        return False
+    if path in ("user_info.equality", "preferences.salary_by_country"):
+        return True
+    if path == "user_info.logistics":
+        return isinstance(value, dict) and _present(value.get("current_salary"))
+    if path != "user_info.right_to_work" or not isinstance(value, dict):
+        return False
+    keys = [f"right_to_work.{k}" for k, v in value.items() if k != "countries" and _present(v)]
+    for rec in _records(value.get("countries")):
+        cc = str(rec.get("country") or "").upper()
+        keys += [f"right_to_work.{cc}.{k}" for k, v in rec.items() if k != "country" and _present(v)]
+    return any(_is_sensitive("right_to_work", k) for k in keys)
+
+
 def answers_summary(answers: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
     """How many kit answers are in each ``state``."""
     counts = dict.fromkeys(ANSWER_STATES, 0)
@@ -982,6 +1009,23 @@ def compute_answers(
                     **({"topic": rec["topic"]} if _present(rec.get("topic")) else {}))
             )
 
+    # Remember consent (job-apply-store.py L195-199: "sensitive answer record has no remember
+    # consent marker"): a sensitive value an assistant saved with no marker is not offered; it is
+    # listed in `missing` so the assistant asks the user. A web write is the user: always trusted.
+    consented = {
+        str(r["path"]): (r.get("remember_consent_at") or (r.get("set_at") if not is_assistant_actor(
+            str(r.get("set_by") or "")) else None))
+        for r in overlay
+    }
+    dropped: list[str] = []
+    for block, items in out.items():
+        path = _SENSITIVE_PATH.get(block)
+        if path is None or consented.get(path) or path not in saved:
+            continue
+        keep = [i for i in items if not _is_sensitive(block, str(i["key"]))]
+        if len(keep) != len(items):
+            out[block] = keep
+            dropped.append(path)
     have = {i["key"] for block in out.values() for i in block}
     _mark_sensitive(out)
     # No record for the job's country: the user's "ANY" record (every other country) answers it, so the
@@ -997,7 +1041,16 @@ def compute_answers(
                 )
             have = {i["key"] for block in out.values() for i in block}
             _mark_sensitive(out)
+    for block, items in out.items():
+        for item in items:
+            if item.get("state") == "sensitive" and consented.get(_SENSITIVE_PATH.get(block, "")):
+                item["remembered_at"] = consented[_SENSITIVE_PATH[block]]  # the user's OK to remember
     missing: list[dict[str, str]] = []
+    for path in dropped:
+        missing.append({
+            "key": path,
+            "why": "saved without the user's OK to remember it: ask the user, then save again with remember: true",
+        })
     if country:
         for key, why in (
             (f"right_to_work.{country}.work_authorization", f"right to work in {country} is not saved"),

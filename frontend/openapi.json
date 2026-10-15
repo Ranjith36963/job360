@@ -4372,6 +4372,17 @@
             ],
             "title": "Label"
           },
+          "remembered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remembered At"
+          },
           "saved_at": {
             "anyOf": [
               {
@@ -5939,6 +5950,17 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "remember": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remember"
           },
           "source": {
             "anyOf": [

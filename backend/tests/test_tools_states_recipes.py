@@ -211,7 +211,7 @@ async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
             res = await session.call_tool(
                 "update_profile",
                 {"edits": [{"path": "user_info.logistics", "value": {
-                    "current_salary": {"amount": 45000, "currency": "gbp", "period": "year"}}}]},
+                    "current_salary": {"amount": 45000, "currency": "gbp", "period": "year"}}, "remember": True}]},
             )
             assert not res.is_error, res.content[0].text
             body = json.loads(res.content[0].text)

@@ -469,6 +469,10 @@ class ProfileEditIn(BaseModel):
     # Feature 9: did the user SAY this, or did you work it out? Omitted = "agent_inferred"
     # for an assistant (the safe default); the web always stores "user_said".
     source: Optional[Literal["user_said", "agent_inferred"]] = None
+    # Weak spot #6 wave 2: the user said "yes, remember it" for THIS sensitive answer (equality,
+    # salary, visa). Without it an assistant's sensitive value is not saved. Never a time:
+    # the server stamps the marker itself. A web write is the user and needs no flag.
+    remember: Optional[bool] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -541,6 +545,34 @@ _SETTING_LOG_VALUE_PATHS = frozenset(
         settings_rules.APPLY_MIN_SCORE_PATH, settings_rules.DAILY_CAP_PATH,
     }
 )
+
+
+def _remember_split(
+    actor: str, write_now: list[tuple[str, Any]], remembered: set[str]
+) -> tuple[set[str], set[str]]:
+    """``(consent_paths, no_consent)`` for the pairs about to be written: ``consent_paths`` get the
+    server-stamped remember marker (a web write, or an assistant edit sent with ``remember: true``);
+    ``no_consent`` are an assistant's sensitive values sent without it - not written."""
+    from src.services.applications.kit import edit_is_sensitive  # noqa: PLC0415 - kit pulls in the spine
+
+    consent: set[str] = set()
+    refused: set[str] = set()
+    for path, value in write_now:
+        if not edit_is_sensitive(path, value):
+            continue
+        if actor == profile_edits.WEB_ACTOR or path in remembered:
+            consent.add(path)
+        else:
+            refused.add(path)
+    return consent, refused
+
+
+def _remember_line(path: str) -> str:
+    """One plain sentence for ``not_saved``: the assistant must ask, then resend."""
+    return (
+        f"{path} was NOT saved: it holds a sensitive answer. Ask the user 'may I remember this for later "
+        "applications?'; if yes, send it again with remember: true (if no, use it on this form only)."
+    )
 
 
 def _split_gated(
@@ -804,6 +836,12 @@ async def update_profile(
     # hourly budget for held requests is checked HERE, before any write of the
     # call, so a 429 changes nothing.
     write_now, hold, risk = _split_gated(user.id, actor, pairs)
+    # Weak spot #6 wave 2 - permission to fill is not permission to remember (answer-memory
+    # SKILL.md L151; job-apply-store.py L503-507: "sensitive answer value requires explicit
+    # remember consent"). An assistant's sensitive value without remember:true is NOT written.
+    consent_paths, no_consent = _remember_split(actor, write_now, {e.path for e in body.edits if e.remember})
+    if no_consent:
+        write_now = [(p, v) for p, v in write_now if p not in no_consent]
     # Owner decision 2026-10-10 - checks that need the state AFTER this batch:
     # years min <= max, and a setup round only counts as done once its answers
     # are saved (in this call or before). A refusal writes nothing.
@@ -838,7 +876,8 @@ async def update_profile(
         # including every MCP update_profile call (/api/mcp is bearer-only),
         # are never WEB_ACTOR and stay limited.
         applied = profile_edits.record_edits(
-            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR, source=sources
+            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR, source=sources,
+            consent_paths=consent_paths,
         )
     except profile_edits.ProfileEditError as exc:
         _log_edit_rejected(
@@ -881,7 +920,8 @@ async def update_profile(
         applied=[ProfileEditOut(**row) for row in applied],
         profile=rendered,
         waiting=[SettingRequestOut(**setting_requests.waiting_out(r)) for r in created],
-        not_saved=[settings_rules.parked_line(str(r["path"]), settings.SITE_BASE_URL) for r in created],
+        not_saved=[settings_rules.parked_line(str(r["path"]), settings.SITE_BASE_URL) for r in created]
+        + [_remember_line(p) for p in sorted(no_consent)],
         normalized=[NormalizedOut(**row) for row in normalized_rows],
     )
 

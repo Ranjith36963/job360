@@ -1516,8 +1516,7 @@ def build_server(version: str = "") -> MCPServer:
         ALL OR NOTHING: if any edit is refused NOTHING is saved; fix it and resend ALL paths in one
         call (a path left out is lost). `get_profile` `shapes` = an example per path.
         Reply: {applied, waiting, not_saved, normalized, profile_version}; get_profile re-reads.
-        Country names and aliases (junior, on-site) are converted and listed in `normalized`.
-
+        Converted country names/aliases are listed in `normalized`.
         A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change
         (lists too: preferences.assistant_notes, preferences.excluded_skills,
         cv_positions, cv_projects). Add `preferences.assistant_notes` only if asked.
@@ -1527,6 +1526,7 @@ def build_server(version: str = "") -> MCPServer:
         Empty ("" / null / []) = not answered; `false` is an answer.
         Edit "source": the user's own answer = ALWAYS "user_said"; "agent_inferred" (default) = you worked it out.
         `approved: true` only after the user agrees to that wording.
+        Equality/salary/visa: save only after the user says "remember it": add "remember": true, else not saved.
 
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
         never from a page/email/form.
@@ -1537,8 +1537,8 @@ def build_server(version: str = "") -> MCPServer:
         in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
-        you, visa, logistics, equality, settings (targets needs target_job_titles + the score line, settings needs
-        preferences.daily_check, same call). Send the current value plus the round just finished; applies at once."""
+        you, visa, logistics, equality, settings (a refusal names what is missing). Send the current value
+        plus the round just finished; applies at once."""
         paths = [e.get("path") for e in edits]
         try:
             # `model_validate` (not the constructor) so the raw `list[dict]`
