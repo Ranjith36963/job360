@@ -88,11 +88,21 @@ export const EVENT_LABEL: Record<string, string> = {
   simulation: "Marked as a test (not a real application)",
 };
 
+function relayedWords(payload: unknown): boolean {
+  const w = (payload as { user_words?: unknown } | null | undefined)?.user_words;
+  return typeof w === "string" && w.trim().length > 0;
+}
+
 /** The label for one timeline row. A status event reads "Status → <label>";
  * a note-family event reads its own label; anything unrecognised (a future
  * `APPLICATION_EXTRA_EVENT_TYPES` addition, or drift) falls back to the raw
  * `event_type` string rather than hiding the row. */
-export function eventLabel(e: { event_type: string; payload?: unknown }): string {
+export function eventLabel(e: { event_type: string; payload?: unknown; recorded_by?: string }): string {
+  if (e.event_type === "answered" && relayedWords(e.payload)) {
+    // The assistant typed it, but the words are the user's (answer_ask user_words).
+    const via = e.recorded_by && e.recorded_by !== "web" ? whoLabel(e.recorded_by).name : "";
+    return via ? `Your answer (via ${via})` : "Your answer (via your assistant)";
+  }
   if (STATUS_EVENT_TYPES.has(e.event_type)) {
     const status = EVENT_TYPE_TO_STATUS[e.event_type] ?? e.event_type;
     return `Status → ${STATUS_LABEL[status] ?? status}`;
