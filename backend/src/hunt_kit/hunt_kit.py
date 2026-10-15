@@ -57,6 +57,7 @@ MAX_WORKERS = 8
 MAX_PER_HOST = 3
 TIMEOUT_S = 30
 RETRIES_429 = 2
+TRANSIENT_5XX = (502, 503, 504)  # retried once, GET only; every other 4xx/5xx fails fast
 
 BOARD_SOURCES = (
     "greenhouse",
@@ -587,7 +588,8 @@ def http_request(
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given). Returns (status, final_url, body).
 
-    429 backs off and retries twice. Status 0 = network error or refused URL. Max 3 in flight per host.
+    429 backs off, retries twice; 502/503/504 on a GET retry once; other 4xx never retry.
+    Status 0 = network error or refused URL. Max 3 in flight per host.
     Only public http(s) hosts are contacted. The User-Agent is always ours. Never raises.
     """
     try:
@@ -602,7 +604,9 @@ def http_request(
     hdrs.update(headers or {})
     hdrs["User-Agent"] = USER_AGENT
     wait = 0
-    for attempt in range(retries + 1):
+    retried_5xx = False
+    attempt = 0  # counts 429 retries only; the one 5xx retry never eats one
+    while True:
         with _host_sem(host):
             try:
                 req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
@@ -612,12 +616,15 @@ def http_request(
                 if e.code == 429 and attempt < retries:
                     ra = e.headers.get("Retry-After", "") if e.headers else ""
                     wait = min(int(ra), 30) if ra.isdigit() else 4 * (attempt + 1)
+                    attempt += 1
+                elif e.code in TRANSIENT_5XX and not retried_5xx and data is None and method in (None, "GET"):
+                    retried_5xx = True
+                    wait = 2
                 else:
                     return e.code, url, b""
             except (urllib.error.URLError, HTTPException, TimeoutError, ValueError, OSError):
                 return 0, url, b""
         time.sleep(wait)
-    return 429, url, b""
 
 
 def decode_body(body: bytes) -> str:
