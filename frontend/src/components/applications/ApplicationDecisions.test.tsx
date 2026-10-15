@@ -93,6 +93,24 @@ describe("cv-seen-button", () => {
   });
 });
 
+describe("Send / Don't send by status", () => {
+  it("considering: both buttons are there", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={vi.fn()} status="considering" />);
+    expect(screen.getByTestId("send-approve-button").textContent).toBe("Send this one");
+    expect(screen.getByTestId("send-decline-button").textContent).toBe("Don't send");
+  });
+
+  it.each(["applied", "replied", "interview_scheduled", "offer", "rejected", "withdrawn", "ghosted"])(
+    "%s: no Send / Don't send buttons, the other controls stay",
+    (status) => {
+      render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={vi.fn()} status={status} />);
+      expect(screen.queryByTestId("send-approve-button")).toBeNull();
+      expect(screen.queryByTestId("send-decline-button")).toBeNull();
+      expect(screen.getByTestId("autofill-allow-button")).toBeTruthy();
+    },
+  );
+});
+
 describe("Send this one / Don't send", () => {
   beforeEach(() => {
     approveSend.mockReset();

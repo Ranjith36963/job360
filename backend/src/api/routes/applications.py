@@ -464,6 +464,8 @@ class ApplicationReceiptOut(BaseModel):
     confirmation: str
     cv_artifact_id: Optional[int]
     cover_letter_artifact_id: Optional[int]
+    # True iff cover_letter_artifact_id is set; False = "Cover letter: not sent".
+    cover_letter_sent: bool = False
     note: str
     # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
     answers: list[ReceiptAnswerOut] = Field(default_factory=list)
@@ -561,6 +563,12 @@ class AskOut(BaseModel):
     # True = the user answered on Job360; False = the assistant recorded
     # the user's chat answer.
     answered_by_user: bool
+    # The user's exact chat words when the assistant relayed them ("" = none).
+    user_words: str = ""
+    # True = an assistant (not the web) recorded an answer AND the user's words.
+    relayed_from_chat: bool = False
+    # "you" = web answer or relayed chat answer; "assistant" = it answered alone.
+    said_by: Literal["you", "assistant"] = "assistant"
     withdrawn_at: Optional[str]
     status: str
 
@@ -747,6 +755,8 @@ class RecordApplicationReceiptResponse(BaseModel):
     cv_artifact_id: Optional[int]
     cv_version_no: Optional[int]
     cover_letter_artifact_id: Optional[int]
+    # False when no letter was named: the receipt says no cover letter was sent.
+    cover_letter_sent: bool = False
     channel: str
     # What the caller sent, verbatim (trimmed); '' when none.
     channel_given: str = ""
@@ -2066,6 +2076,25 @@ async def mark_cv_seen(
     return await _controls(db, user, application_id)
 
 
+# Statuses at which "Send this one" / "Don't send" no longer make sense: the
+# application is already applied (or further along), or closed. The pre-submit
+# approval step only exists while the status is still `considering`.
+_SEND_DECISION_CLOSED_STATUSES = frozenset({
+    "applied", "replied", "interview_requested", "interview_scheduled", "interview_done",
+    "offer", "rejected", "withdrawn", "ghosted",
+})
+
+
+async def _refuse_if_already_applied(db: JobDatabase, user: CurrentUser, application_id: int) -> None:
+    """Defence in depth for the web buttons: 404 for a foreign id, 409 once the
+    application is applied or later (or closed). Nothing is recorded."""
+    row = await spine.get_owned_application(db, user.id, application_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if row.get("status") in _SEND_DECISION_CLOSED_STATUSES:
+        raise HTTPException(status_code=409, detail="already applied")
+
+
 @router.post(
     "/applications/{application_id}/send/approve", response_model=ApplicationControlsOut, status_code=201,
     dependencies=AUTH_FIRST,
@@ -2083,6 +2112,7 @@ async def approve_send(
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
     nothing is recorded (the yes must name what the user saw)."""
+    await _refuse_if_already_applied(db, user, application_id)
     cv = await _latest_cv_or_409(db, user, application_id)
     if artifact_id is not None and int(cv["id"]) != artifact_id:
         raise HTTPException(status_code=409, detail="the CV changed since you looked - look again")
@@ -2106,6 +2136,7 @@ async def decline_send(
 ) -> dict[str, Any]:
     """"Don't send" - the gate answers ``stop`` / ``user_declined`` until a later
     "Send this one"."""
+    await _refuse_if_already_applied(db, user, application_id)
     await _web_decision(db, user, application_id, "submit_declined", {"where": "web"})
     return await _controls(db, user, application_id)
 

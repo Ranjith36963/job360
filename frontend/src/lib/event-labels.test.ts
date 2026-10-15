@@ -20,6 +20,23 @@ describe("STATUS_LABEL", () => {
   });
 });
 
+describe("answered event label", () => {
+  it("says it is the user's answer, via the assistant, when the payload has user_words", () => {
+    const payload = { ask_id: 1, answer: "Two months", user_words: "two months" };
+    expect(eventLabel({ event_type: "answered", payload, recorded_by: "agent:Claude" })).toBe(
+      "Your answer (via Claude)",
+    );
+    expect(eventLabel({ event_type: "answered", payload, recorded_by: "token:agent" })).toBe(
+      "Your answer (via agent)",
+    );
+  });
+  it("keeps the plain label without user_words", () => {
+    expect(
+      eventLabel({ event_type: "answered", payload: { ask_id: 1, answer: "x" }, recorded_by: "web" }),
+    ).toBe("You answered a question");
+  });
+});
+
 describe("EVENT_LABEL", () => {
   it("has a label for every note-family event type", () => {
     for (const type of APPLICATION_NOTE_EVENT_TYPES) {

@@ -40,6 +40,11 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
                   `Cover letter #${receipt.cover_letter_artifact_id}`}
               </p>
             )}
+            {receipt.cover_letter_artifact_id == null && receipt.cover_letter_sent !== true && (
+              <p data-testid="receipt-no-cover-letter" className="mt-1 font-mono text-xs text-muted-foreground">
+                Cover letter: not sent
+              </p>
+            )}
             {receipt.confirmation && (
               <p className="mt-1 font-mono text-xs text-muted-foreground">Confirmation: {receipt.confirmation}</p>
             )}

@@ -61,6 +61,8 @@ class Receipt(BaseModel):
     confirmation: str | None = None
     cv_version_no: int | None = None
     cover_letter_version_no: int | None = None
+    # True iff the receipt names a cover letter artifact; False = no letter was sent.
+    cover_letter_sent: bool = False
     recorded_by: str | None = None
     # S3 - '' | same_job | same_company, the kit the assistant filled from. Set
     # at INSERT; a receipt made without a kit reads '' / None / ''.
@@ -89,6 +91,7 @@ class ReceiptSummary(BaseModel):
     job_apply_url: str
     has_cv: bool
     has_cover_letter: bool
+    cover_letter_sent: bool = False
     channel: str
     note: str
     proof: ProofOut = Field(default_factory=ProofOut)
@@ -108,12 +111,15 @@ async def _to_receipt(db: JobDatabase, user_id: str, row: dict[str, Any]) -> Rec
     return Receipt(**{k: row[k] for k in _RECEIPT_BASE_FIELDS}, **details)
 
 
-def _to_summary(row: dict[str, Any], proof: dict[str, Any] | None = None) -> ReceiptSummary:
+def _to_summary(
+    row: dict[str, Any], proof: dict[str, Any] | None = None, letter_sent: bool = False
+) -> ReceiptSummary:
     return ReceiptSummary(
         id=row["id"], job_id=row["job_id"], sent_at=row["sent_at"],
         job_title=row["job_title"], job_company=row["job_company"],
         job_location=row["job_location"], job_apply_url=row["job_apply_url"],
         has_cv=bool(row["has_cv"]), has_cover_letter=bool(row["has_cover_letter"]),
+        cover_letter_sent=letter_sent,
         channel=row["channel"], note=row["note"], proof=ProofOut(**(proof or {})),
     )
 
@@ -243,8 +249,15 @@ async def list_receipts(
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user.id, sorted({int(r["application_id"]) for r in rows if r.get("application_id")}))
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+
+    sent = await applications_spine.receipt_letter_sent(db, user.id, [int(r["id"]) for r in rows])
     return ReceiptListResponse(
-        receipts=[_to_summary(r, proofs.get(int(r.get("application_id") or 0))) for r in rows], total=total
+        receipts=[
+            _to_summary(r, proofs.get(int(r.get("application_id") or 0)), sent.get(int(r["id"]), False))
+            for r in rows
+        ],
+        total=total,
     )
 
 
