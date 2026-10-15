@@ -1427,6 +1427,11 @@ export interface paths {
          *     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
          *     Read-only; email verification is NOT required (an unverified user is told
          *     to verify). No 404 when there is no profile (``profile_exists: false``).
+         *
+         *     Also the MCP tool list as served now (``tools``, ``tools_version``) so an
+         *     assistant can tell its client cached an old one: pass the version it saw
+         *     last as ``client_tools_version`` and ``tools_stale`` says whether it moved
+         *     (null when none was passed).
          */
         get: operations["doctor_api_doctor_get"];
         put?: never;
@@ -3770,6 +3775,25 @@ export interface components {
             /** Profile Exists */
             profile_exists: boolean;
             setup: components["schemas"]["DoctorSetup"];
+            /**
+             * Stale Hint
+             * @default
+             */
+            stale_hint: string;
+            /**
+             * Tools
+             * @default {}
+             */
+            tools: {
+                [key: string]: string[];
+            };
+            /** Tools Stale */
+            tools_stale?: boolean | null;
+            /**
+             * Tools Version
+             * @default
+             */
+            tools_version: string;
             /** Waiting Settings */
             waiting_settings: number;
             /** Whats New Hint */
@@ -8681,7 +8705,9 @@ export interface operations {
     };
     doctor_api_doctor_get: {
         parameters: {
-            query?: never;
+            query?: {
+                client_tools_version?: string;
+            };
             header?: {
                 authorization?: string | null;
             };

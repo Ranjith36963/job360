@@ -6,6 +6,8 @@ conversation. The hard lines in the server instructions win over everything
 here. Sections: Settings and the submit gate, Apply kit, Gmail and the daily
 check, Outreach, Events, Profile, Job facts.
 
+If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360.
+
 ## Settings and the submit gate
 
 SETTINGS: read get_profile `settings` before any apply step. Paused = stop.
