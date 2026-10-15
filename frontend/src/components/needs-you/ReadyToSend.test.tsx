@@ -141,4 +141,10 @@ describe("nothing-sent", () => {
     rerender(<ReadyCard card={card(5)} paused={false} status="applied" changes={4} onChanged={() => undefined} />);
     expect(screen.queryByTestId("nothing-sent")).toBeNull();
   });
+
+  it("shows no made-up count when the change count is unknown (Needs-you list)", () => {
+    render(<ReadyCard card={card(5)} paused={false} onChanged={() => undefined} />);
+    expect(screen.getByTestId("nothing-sent")).toHaveTextContent("Nothing sent yet");
+    expect(screen.queryByTestId("changes-since-approved")).toBeNull();
+  });
 });
