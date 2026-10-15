@@ -37,6 +37,7 @@
     "blocked",
     "unblocked",
     "proof_text",
-    "proof_screenshot"
+    "proof_screenshot",
+    "simulation"
   ]
 }

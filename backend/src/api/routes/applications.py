@@ -1225,6 +1225,8 @@ class StatsOverallOut(BaseModel):
     # applications that ALSO have an `applied` event (so no rate exceeds 1);
     # this is how many reached a later stage with no `applied` recorded.
     replies_without_applied: int = 0
+    # Applications marked with a `simulation` event: dropped from every count.
+    simulations_excluded: int = 0
 
 
 class StatsCvVersionGroupOut(BaseModel):

@@ -216,6 +216,14 @@ def _group_by(
     return groups[: settings.STATS_MAX_GROUPS], truncated
 
 
+# An application marked by a `simulation` event that no later event corrects is a
+# test: it counts nowhere (owner decision 2026-10-15). `{app}` is the SQL for its id.
+_SIMULATED_SQL = (
+    "EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = {app} AND s.user_id = ? "
+    "AND s.event_type = ? AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = s.id))"
+)
+
+
 async def _contact_found_via_groups(
     db: JobDatabase, user_id: str, since_val: Optional[str]
 ) -> list[dict[str, Any]]:
@@ -225,8 +233,8 @@ async def _contact_found_via_groups(
     base row; a cleared edit '' reads as unset). Bounded by the closed set,
     so there is no row cap to apply. ``since`` scopes by the contact's own
     ``created_at``."""
-    where = ["ac.user_id = ?"]
-    where_params: list[Any] = [user_id]
+    where = ["ac.user_id = ?", "NOT " + _SIMULATED_SQL.format(app="ac.application_id")]
+    where_params: list[Any] = [user_id, user_id, settings.SIMULATION_EVENT_TYPE]
     if since_val:
         where.append("ac.created_at >= ?")
         where_params.append(since_val)
@@ -318,6 +326,16 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     if since_val:
         where.append("a.created_at >= ?")
         where_params.append(since_val)
+    # Count the test applications, then leave them out BEFORE the row cap so they
+    # can never crowd a real application out of the counted set.
+    cur = await db._db.execute(
+        f"SELECT COUNT(*) FROM applications a WHERE {' AND '.join(where)} AND "  # noqa: S608 - constants only
+        + _SIMULATED_SQL.format(app="a.id"),
+        [*where_params, user_id, settings.SIMULATION_EVENT_TYPE],
+    )
+    simulations_excluded = int((await cur.fetchone())[0] or 0)
+    where.append("NOT " + _SIMULATED_SQL.format(app="a.id"))
+    where_params.extend([user_id, settings.SIMULATION_EVENT_TYPE])
     where_sql = " AND ".join(where)
 
     # S6 — read one more than the cap so "there were more" is a fact, not a
@@ -384,7 +402,8 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     rows = rows[:limit]
     replies_without_applied = _gate_on_applied(rows)
 
-    overall = {**_summarize(rows), "replies_without_applied": replies_without_applied}
+    overall = {**_summarize(rows), "replies_without_applied": replies_without_applied,
+               "simulations_excluded": simulations_excluded}
 
     by_cv_version, cv_truncated = _group(
         rows, key_field="cv_label", label_key="label", with_profile_versions=True
