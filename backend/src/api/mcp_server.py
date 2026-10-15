@@ -1196,29 +1196,29 @@ def build_server(version: str = "") -> MCPServer:
         """Append one event to an application's history (append-only).
 
         `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; the same
-        message_id returns already_existed=true and writes nothing, so re-reading an inbox is safe.
+        message_id returns already_existed=true, writes nothing (re-reading an inbox is safe).
 
-        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, a note
-        never; the furthest stage wins (only corrects_event_id moves it back). A repeat `applied` (e.g. its
-        confirmation email + `source`) becomes the submission confirmation (proof), not a 2nd applied.
-        `warnings` = what to fix. `occurred_at` may be past. `scheduled_at` (ISO-8601 with timezone) only on
-        interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase on any event; ""
-        clears it.
+        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, notes
+        never; the furthest stage wins (only corrects_event_id moves back). A repeat `applied` (its
+        confirmation email + `source`) becomes the submission confirmation (proof), not a 2nd one. Wrong
+        applied date: `applied` + occurred_at + corrects_event_id=<old id>.
+        `warnings` = fixes. `occurred_at` may be past. `scheduled_at` (ISO-8601 with timezone) only on
+        interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or the
-        user says it went) or outreach_replied; no application_id for a cold contact; a reply never moves the status.
+        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or
+        the user says so) or outreach_replied; no application_id if cold; a reply never moves the status.
 
         Kit events (only these keys, else 422):
-        form_filled {form_url, fields_count, fields_skipped?: [blank fields],
+        form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory | profile |
         approved | written | guessed (key = the kit key, for memory/profile/approved);
         cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so in chat (where = chat);
         submit_declined {where};
-        form_swept {fields_checked, fixed, notes} (notes optional);
+        form_swept {fields_checked, fixed, notes?} (after a full re-read);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
-        site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
+        site_account / account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
-        quick_apply_warning|other, step, page_host, detail}, then stop that application; unblocked {resolution:
+        quick_apply_warning|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped}.
         proof_text {text, page_host}; simulation {} = a test app, record it first, never counted.
         Payloads, 403/409: get_recipe("rules"), Events."""
