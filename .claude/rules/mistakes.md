@@ -1,4 +1,5 @@
 # Mistakes not to repeat (loads every session)
+<!-- doc: LIVING | last-verified: 2026-10-15 by the owner ("ask Claude to document its mistakes") -->
 
 Owner rule: every mistake gets a one-line rule here and its full story in
 `.claude/skills/session-lessons/SKILL.md`. Keep this file short; it is read
