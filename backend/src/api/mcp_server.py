@@ -1425,7 +1425,7 @@ def build_server(version: str = "") -> MCPServer:
         Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
         `user_info.languages`, `user_info.equality`, `user_info.answers`, `preferences.salary_by_country`.
         Empty ("" / null / []) = not answered; `false` is an answer.
-        Edit "source": user_said | agent_inferred (default). confirmed:false = inferred; ask before using.
+        Edit "source": the user's own answer = ALWAYS "user_said"; "agent_inferred" (default) = you worked it out.
         `approved: true` only after the user agrees to that wording.
 
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
@@ -1571,8 +1571,8 @@ def build_server(version: str = "") -> MCPServer:
         sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link you can download, 3
         downloads), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality ("equality / voluntary") /
-        approved_text, each with its `source` (memory, profile, approved_text) and
-        `saved_at`, and `missing` - what the form may ask that Job360 does not have
+        approved_text, each with its `source` (memory, profile, approved_text),
+        `saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary` counts them), and `missing` - what the form may ask that Job360 does not have
         for THIS job's country. Use only kit answers; ask the user ONCE, in one
         message, for anything in `missing`; never guess. Also: `duplicate` (warn
         the user before any work), `hold` (another assistant is on it - tell the

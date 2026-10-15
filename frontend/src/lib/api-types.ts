@@ -2895,6 +2895,7 @@ export interface components {
             answers: components["schemas"]["KitAnswersOut"];
             /** Answers Omitted */
             answers_omitted?: number | null;
+            answers_summary: components["schemas"]["KitAnswersSummaryOut"];
             application: components["schemas"]["KitApplicationOut"];
             /**
              * Autofill
@@ -4099,6 +4100,11 @@ export interface components {
              * @enum {string}
              */
             source: "memory" | "profile" | "approved_text";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "confirmed" | "inferred" | "sensitive";
             /** Value */
             value: unknown;
         };
@@ -4118,6 +4124,24 @@ export interface components {
             right_to_work?: components["schemas"]["KitAnswerOut"][];
             /** Salary */
             salary?: components["schemas"]["KitAnswerOut"][];
+        };
+        /** KitAnswersSummaryOut */
+        KitAnswersSummaryOut: {
+            /**
+             * Confirmed
+             * @default 0
+             */
+            confirmed: number;
+            /**
+             * Inferred
+             * @default 0
+             */
+            inferred: number;
+            /**
+             * Sensitive
+             * @default 0
+             */
+            sensitive: number;
         };
         /** KitApplicationOut */
         KitApplicationOut: {

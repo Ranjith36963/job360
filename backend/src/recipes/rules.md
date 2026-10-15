@@ -130,7 +130,10 @@ no invented recipient. A letter without a letterhead or a date is flagged in
 APPLY KIT: before filling any form call get_application_kit(application_id) —
 it holds the CV and letter, every stored answer with its source, and what
 is missing for this job's country. Use only kit answers; anything in
-`missing` = ask the user ONCE in one message, never guess. FILE: desktop/
+`missing` = ask the user ONCE in one message, never guess. Each answer has a
+`state`: `confirmed` (the user's - use it), `inferred` (an assistant worked it
+out - confirm once, then save it again with source user_said) or `sensitive`
+(equality, sanctions - use only as stored, never ask again). FILE: desktop/
 Claude Code — download `file.url` to a local file and upload that; chat
 apps — ask the user to attach the PDF once for this job; else paste `text`
 if the form allows; else the user uploads by hand. Expired link = call the
@@ -148,8 +151,9 @@ The kit holds, for THIS application only: the CV and cover letter (`text`
 up to 8000 chars - `text_more` says how to fetch the rest; `include_text=false` sends none - a `sha256` of the full text, and a 30-minute `file.url` PDF link you can download, 3
 downloads), every stored answer grouped as contact / right_to_work /
 logistics / salary / languages / equality ("equality / voluntary") /
-approved_text, each with its `source` (memory, profile, approved_text) and
-`saved_at`, and `missing` - what the form may ask that Job360 does not have for
+approved_text, each with its `source` (memory, profile, approved_text),
+`saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary`
+counts them), and `missing` - what the form may ask that Job360 does not have for
 THIS job's country. Also: `duplicate` (warn the user before any work), `hold`
 (another assistant is on it - tell the user), `account_site` (an account is
 needed: stop, the user signs up and signs in themselves, never a password),
@@ -439,9 +443,11 @@ value, or null to clear back to what the structural read says>}. An unknown path
 or a wrongly-typed value is refused with the allowed set/values named. Send
 several edits in one call. Each edit may carry `"source": "user_said"` (the user
 told you) or `"agent_inferred"` (you worked it out); omitted = agent_inferred.
-get_profile lists your inferred paths in `unconfirmed`. An answer with
-confirmed:false was inferred — confirm it with the user before using it. Only
-the user confirms, on the web; you cannot confirm your own guess. To drop a wrong skill from every surface, add it to
+ALWAYS pass `"source": "user_said"` when the value is the user's own answer;
+`agent_inferred` only for what you worked out yourself.
+get_profile lists your inferred paths in `unconfirmed`. A kit answer with state
+'inferred' was worked out by an assistant — confirm it with the user once, then
+save it again with source user_said. Never mark your own guess user_said. To drop a wrong skill from every surface, add it to
 `preferences.excluded_skills` (value = the current list from get_profile's
 `fields` plus the new names); rewriting `cv_data.skills` only reaches the CV's
 share and is capped per edit.
@@ -464,7 +470,7 @@ MEMORY: the facts job forms ask are in `fields["user_info.contact"]`,
 `fields["user_info.languages"]`, `fields["user_info.equality"]` and
 `fields["user_info.answers"]`. Read them before filling any form. A missing key
 means "not answered": ask the user only that, once, then save it with
-`update_profile`; never guess. Per country, use the record of the HIRING country
+`update_profile` and `"source": "user_said"`; never guess. Per country, use the record of the HIRING country
 in `right_to_work.countries` and `logistics.countries` (also for a remote job).
 The salary is a PREFERENCE: `fields["preferences.salary_by_country"]`, the
 hiring country's record, with its period (year or month); if there is none, ask.

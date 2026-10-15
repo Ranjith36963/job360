@@ -61,7 +61,9 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 
 KIT_INSTRUCTIONS: tuple[str, ...] = (
     "Use only the answers in this kit. Anything in `missing`: ask the user ONCE, in one message. Never guess.",
-    "An answer with confirmed:false was inferred — confirm it with the user before using it.",
+    "An answer with state 'inferred' was worked out by an assistant - confirm it with the user once, "
+    "then save it again with source user_said. 'confirmed' answers are the user's: use them. "
+    "'sensitive' answers (equality, sanctions): use only as stored, never ask again.",
     "Upload file: desktop or Claude Code - download `file.url` to a local file and upload that. "
     "Chat app - ask the user to attach the PDF once for this job. Otherwise paste `text` if the form allows, "
     "else the user uploads it by hand. An expired link: call the kit again.",
@@ -800,6 +802,29 @@ def _item(key: str, value: Any, source: str, saved_at: Optional[str], **extra: A
     return {"key": key, "value": value, "source": source, "saved_at": saved_at, **extra}
 
 
+# Every kit answer carries one of these (answer memory: who stands behind it).
+ANSWER_STATES = ("confirmed", "inferred", "sensitive")
+# The profile paths a "profile" item is read from (an assistant may have written them).
+_PROFILE_PATHS = {
+    "contact.name": "cv_data.name", "contact.location": "cv_data.location",
+    "contact.linkedin_url": "cv_data.links", "contact.github_url": "cv_data.links",
+}
+
+
+def _is_sensitive(block: str, key: str) -> bool:
+    """Equality answers and the sanctions question: reused only as stored, never re-asked."""
+    return block == "equality" or (block == "right_to_work" and key.endswith(".sanctions_country_citizen"))
+
+
+def answers_summary(answers: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
+    """How many kit answers are in each ``state``."""
+    counts = dict.fromkeys(ANSWER_STATES, 0)
+    for block in answers.values():
+        for item in block:
+            counts[str(item.get("state"))] = counts.get(str(item.get("state")), 0) + 1
+    return counts
+
+
 def _records(value: Any) -> list[dict[str, Any]]:
     return [r for r in (value or []) if isinstance(r, dict)]
 
@@ -809,6 +834,15 @@ def normalized_company_key(company: str) -> str:
     from src.models import Job  # noqa: PLC0415
 
     return Job(title="", company=company, apply_url="", source="", date_found="").normalized_key()[0]
+
+
+def _mark_sensitive(out: dict[str, list[dict[str, Any]]]) -> None:
+    """``state`` = sensitive for equality and sanctions items, whoever wrote them
+    (``confirmed: false`` stays where it is, for older readers)."""
+    for block, items in out.items():
+        for item in items:
+            if _is_sensitive(block, str(item["key"])):
+                item["state"] = "sensitive"
 
 
 def compute_answers(
@@ -836,6 +870,14 @@ def compute_answers(
         item = _item(key, value, source, saved_at, **extra)
         if source == "memory" and current[0] in unconfirmed and "confirmed" not in item:
             item["confirmed"] = False  # inferred by the assistant - confirm with the user before use
+        if source == "approved_text":
+            # approved: true = the user agreed this wording, whoever wrote the row.
+            item.pop("confirmed", None)
+            item["state"] = "confirmed"
+        elif item.get("confirmed") is False or (source == "profile" and _PROFILE_PATHS.get(key) in unconfirmed):
+            item["state"] = "inferred"
+        else:
+            item["state"] = "confirmed"
         return item
 
     info, prefs, cvd = profile.user_info, profile.preferences, profile.cv_data
@@ -912,6 +954,7 @@ def compute_answers(
             )
 
     have = {i["key"] for block in out.values() for i in block}
+    _mark_sensitive(out)
     # No record for the job's country: the user's "ANY" record (every other country) answers it, so the
     # assistant is not asked again. Its facts ride along as right_to_work.<country>.<field> items.
     if country:
@@ -924,6 +967,7 @@ def compute_answers(
                           applies_via="ANY", **({"confirmed": False} if item.get("confirmed") is False else {}))
                 )
             have = {i["key"] for block in out.values() for i in block}
+            _mark_sensitive(out)
     missing: list[dict[str, str]] = []
     if country:
         for key, why in (
@@ -1220,7 +1264,7 @@ async def build_kit(
         "kit": {"id": event["event_id"], "sha256": kit_sha, "generated_at": now.isoformat()},
         "job": job, "application": application,
         "cv": _cap_text(cv, include_text), "cover_letter": _cap_text(letter, include_text),
-        "answers": answers, "missing": missing,
+        "answers": answers, "answers_summary": answers_summary(answers), "missing": missing,
         "settings": settings_block,
         "duplicate": dup,
         "hold": hold, "account_site": account_site,
