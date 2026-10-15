@@ -1525,7 +1525,7 @@ def build_server(version: str = "") -> MCPServer:
         Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
         `user_info.languages`, `user_info.equality`, `user_info.answers`, `preferences.salary_by_country`.
         Empty ("" / null / []) = not answered; `false` is an answer.
-        Edit "source": user_said | agent_inferred (default). confirmed:false = inferred; ask before using.
+        Edit "source": the user's own answer = ALWAYS "user_said"; "agent_inferred" (default) = you worked it out.
         `approved: true` only after the user agrees to that wording.
 
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
@@ -1674,32 +1674,32 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def get_application_kit(application_id: int, include_text: bool = True, session: str = "") -> dict[str, Any]:
-        """The APPLICATION KIT - call this before you fill ANY application form.
+        """The APPLICATION KIT - call before you fill ANY application form.
         Pass `session`: a short label you pick once per conversation (letters, digits,
         space . _ : -, max 60) and reuse, also in check_submit.
-        It holds, for THIS application only: the CV and cover letter (`text` up to 8000
-        chars - `text_truncated` + `text_more` say how to fetch the rest; `include_text=false`
-        sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link you can download, 3
-        downloads), every stored answer grouped as contact / right_to_work /
+        It holds, for THIS job: the CV and cover letter (`text` up to 8000
+        chars, `text_truncated` + `text_more` fetch the rest; `include_text=false`
+        sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link,
+        3 downloads), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality ("equality / voluntary") /
-        approved_text, each with its `source` (memory, profile, approved_text) and
-        `saved_at`, and `missing` - country and contact facts Job360 lacks for THIS
-        job; it does not see the form's own questions, so call check_form with them.
-        Use only kit answers; ask the user ONCE, in one message, for anything in
-        `missing`; never guess. Also: `duplicate` (warn
-        the user before any work), `hold` (another session is working this
-        application: `held_by`, `session`, `until`; tell the user and stop unless
-        they say continue; `unsure` = maybe your own other session), `account_site`
-        (an account is needed: stop, the user signs up and
-        signs in themselves, never a password), `autofill` (deny = do not type
-        into the form, give the user the answers to paste) and `settings`
-        (including `submit_preview`, what check_submit would say). Each call
-        mints fresh links and records a `kit_read` on the timeline; an expired
-        link means call it again. After filling the form, record_event
+        approved_text, each with its `source` (memory, profile, approved_text),
+        `saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary` counts
+        them; a 'sensitive' answer (equality, sanctions, visa / right-to-work) is shown
+        to the user and confirmed on THIS form first, never filled silently; a confirmed
+        one may carry `confirmed_at`), and `missing` (country and contact facts Job360
+        lacks for THIS job; the form's own questions: check_form). Use only kit answers;
+        ask ONCE, in one message, for anything in `missing`; never guess. Also: `duplicate` (warn
+        the user first), `hold` (another session is on it: `held_by`,
+        `session`, `until`; tell the user, stop unless they say continue; `unsure` = maybe
+        your own), `account_site` (an account is needed: stop; the user signs
+        up and in themselves, never a password), `autofill` (deny = do not type;
+        give the user the answers to paste) and `settings`
+        (with `submit_preview`: what check_submit would say). Each call
+        mints fresh links and records `kit_read`; expired link: call again. After filling the form, record_event
         form_filled {form_url, fields_count}, re-read every field and record form_swept
-        {fields_checked, fixed}; check_submit says stop until you do. When you finish
-        or hand over, record_event hold_released {reason: done|stopped}. `warnings` and
-        `cv.checks` are plain facts to check, never a block. `approved_text` holds
+        {fields_checked, fixed}; check_submit says stop until you do. On finish
+        or hand over, record_event hold_released {reason: done|stopped}. `warnings`,
+        `cv.checks`: facts to check, never a block. `approved_text` holds
         the newest 25 answers (`answers_omitted` counts the rest)."""
         try:
             async with _request_db() as db:

@@ -11,7 +11,7 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
 1. **Read the targets.** Call `get_profile`: target titles, level, `search_brief`, `assistant_notes`. Call
    `list_applications` so you never bring a job twice. `search_brief.gaps` not empty: ask each `ask` once, then
    save it to the `path` that gap names with `update_profile`. For `user_info.answers` save `{question: <the ask
-   text exactly>, answer: "Yes"|"No", approved: true, topic: <the gap's `topic`>}` only after the user answers. Read again. **Done when**
+   text exactly>, answer: "Yes"|"No", approved: true, topic: <the gap's `topic`>}` only after the user answers. The user's answer = `"source": "user_said"`. Read again. **Done when**
    you hold titles, the brief with no gaps, and the list. STOP if `search_brief.rows` is empty: ask the user
    before you search.
 2. **Plan.** Print one line per `search_brief.rows` row: the place, its `counts_if` lines, the titles, and the
