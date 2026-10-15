@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 TOPIC_MAX_CHARS = 60
 TOPIC_PATTERN = re.compile(r"^[A-Za-z0-9_.]+$")
@@ -66,7 +66,7 @@ def resolve_answer(
         if isinstance(r, dict) and r.get("approved") is True and _in_scope(r, company_key)
     ]
     want = normalize_question(question)
-    stages = []
+    stages: list[Callable[[dict[str, Any]], bool]] = []
     if topic:
         stages.append(lambda r: r.get("topic") == topic)
     if want:
