@@ -156,6 +156,21 @@ jobs:
             fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # Also log + annotate: $GITHUB_STEP_SUMMARY is not exposed by the
+          # check-run API; annotations are (GET /check-runs/{id}/annotations).
+          if [ -f /tmp/pytest.out ]; then
+            if grep -qE '^(FAILED|ERROR) ' /tmp/pytest.out; then
+              grep -E '^(FAILED|ERROR) ' /tmp/pytest.out | head -50 | while IFS= read -r line; do
+                echo "$line"
+                echo "::error title=pytest::${line//%/%25}"
+              done
+            else
+              tail -30 /tmp/pytest.out
+              echo "::error title=pytest::pytest failed without FAILED lines; see log tail"
+            fi
+          else
+            echo "::error title=pytest::pytest did not run (an earlier step failed)"
+          fi
 
       - name: Type-check (mypy ratchet)
         if: needs.scope.outputs.scope == 'full'
