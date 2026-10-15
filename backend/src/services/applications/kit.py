@@ -380,6 +380,34 @@ async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) 
     return short, unreadable
 
 
+# Weak spot #1b (c): applications CREATED on or after this day must have a ``form_checked`` on record
+# before check_submit allows a submit (``form_check_missing``). Older in-flight applications keep
+# working without one. Set to the day this gate shipped (2026-10-15); never move it later.
+# NOT IN REFERENCE: career-ops apply.md:61-62 scans the form for knock-outs by prompt only, with no gate.
+FORM_CHECK_REQUIRED_FROM = datetime(2026, 10, 15, tzinfo=timezone.utc)
+
+
+def form_check_required(created_at: Any) -> bool:
+    """True when an application created at ``created_at`` is under the ``form_checked`` rule.
+    An unreadable timestamp is treated as an old application (fail open, never a surprise stop)."""
+    if not isinstance(created_at, str) or not created_at:
+        return False
+    try:
+        made = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=timezone.utc)
+    return made >= FORM_CHECK_REQUIRED_FROM
+
+
+async def _form_check_missing(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """A new application (see :data:`FORM_CHECK_REQUIRED_FROM`) with no ``form_checked`` event."""
+    if not form_check_required(app_row.get("created_at")):
+        return False
+    return not await _events(db, user_id, int(app_row["id"]), ("form_checked",))
+
+
 async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
     """The host stored on the NEWEST ``form_filled`` (``None`` when there is none)."""
     fills = await _events(db, user_id, application_id, ("form_filled",))
@@ -421,6 +449,7 @@ async def gate_facts(
         form_swept=await _swept_after_fill(db, user_id, application_id),
         form_count_short=shortfalls[0],
         unreadable_fields=shortfalls[1],
+        form_check_missing=await _form_check_missing(db, user_id, app_row),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=await _newest_form_host(db, user_id, application_id),
@@ -462,6 +491,7 @@ async def submit_verdict(
         # shows a form_host_mismatch for a form that is not filled yet.
         facts = replace(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
+            form_check_missing=False,
             form_host=settings_rules.screen_form_url(form_url),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
@@ -1509,7 +1539,7 @@ def _norm_question(text: Any) -> str:
     return _NON_ALNUM_RE.sub(" ", str(text or "").casefold()).strip()
 
 
-def _is_sensitive(text: str, key: Optional[str]) -> bool:
+def _question_is_sensitive(text: str, key: Optional[str]) -> bool:
     group = (key or "").split(".", 1)[0]
     return group in _SENSITIVE_GROUPS or bool(_SENSITIVE_RE.search(text.casefold()))
 
@@ -1548,7 +1578,7 @@ def form_check(answers: dict[str, list[dict[str, Any]]], questions: list[dict[st
         required = bool(q.get("required", True))
         key = (q.get("key") or "").strip() or None
         ftype = str(q.get("field_type") or "unknown")
-        sensitive = _is_sensitive(text, key)
+        sensitive = _question_is_sensitive(text, key)
         item: Optional[dict[str, Any]] = None
         matched_by = "key"
         why = ""

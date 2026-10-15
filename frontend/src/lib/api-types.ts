@@ -2861,6 +2861,8 @@ export interface components {
             follow_up_due: boolean;
             /** Follow Up On */
             follow_up_on: string | null;
+            /** Form State */
+            form_state?: ("filled" | "submitted") | null;
             /** Id */
             id: number;
             /** Inbox Checked At */

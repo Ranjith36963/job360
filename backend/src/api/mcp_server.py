@@ -1576,10 +1576,9 @@ def build_server(version: str = "") -> MCPServer:
         the user yes for this one application; `stop` - do not submit. `reason`
         is a short code and `detail` one plain sentence you can show the user. Reasons:
         paused, already_applied, user_declined (the user said don't send),
-        daily_cap_reached, form_not_recorded (`stop`: no `form_filled` recorded yet -
-        fill the form, record it, call again), form_not_swept (`stop`: no `form_swept`
+        daily_cap_reached, form_not_recorded (`stop`: no `form_filled` yet - fill, record it), form_not_swept (`stop`: no `form_swept`
         after the latest `form_filled` - re-read every field, fix, record it),
-        form_count_mismatch and unreadable_fields (`stop`: re-read, sweep again),
+        form_count_mismatch, unreadable_fields (`stop`: re-read, sweep again), form_check_missing (`stop`: call check_form),
         duplicate_job (same job already applied to: `stop`
         in auto mode, else `ask`), held_by_other_session (another assistant
         session read this kit recently and did not record `hold_released`),

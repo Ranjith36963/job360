@@ -69,7 +69,7 @@ held_by_other_session (another assistant session read this application's kit
 recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
 the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
-latest `form_filled`), email_not_verified (the user has not confirmed their
+latest `form_filled`), form_check_missing (`stop`: a newer application has no `form_checked`: call check_form, record it), email_not_verified (the user has not confirmed their
 email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you

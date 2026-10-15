@@ -1726,6 +1726,17 @@ async def _work_countries(db: JobDatabase, user_id: str) -> list[str]:
     return await user_work_countries(db, user_id)
 
 
+def derive_form_state(events: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> Optional[str]:
+    """Weak spot #1b (c): the form's state READ off the record, never stored or updated.
+    ``None`` = no ``form_filled`` yet; ``"filled"`` = a ``form_filled`` is on record;
+    ``"submitted"`` = a ``form_filled`` AND a receipt. Mirrors career-ops apply.md:356-358 ("update that
+    same section from `filled` to `submitted`") as a derived read model, so the append-only
+    events and receipts (M3) are never rewritten. A receipt with no ``form_filled`` stays ``None``."""
+    if not any(e.get("event_type") == "form_filled" for e in events):
+        return None
+    return "submitted" if receipts else "filled"
+
+
 async def get_application_detail(
     db: JobDatabase, user_id: str, application_id: int, *, with_artifact_text: bool = False
 ) -> Optional[dict[str, Any]]:
@@ -1816,6 +1827,7 @@ async def get_application_detail(
         "email_senders": email_senders_for(app_row.get("job_url") or ""),
         "inbox_checked_at": app_row.get("inbox_checked_at"),
     }
+    detail["form_state"] = derive_form_state(events, detail["receipts"])
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
     # reaches the web header and every agent calling get_application.

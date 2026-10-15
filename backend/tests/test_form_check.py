@@ -510,3 +510,87 @@ async def test_check_submit_stops_on_a_short_sweep_and_on_unreadable_fields(
         assert (stuck["decision"], stuck["reason"]) == ("stop", "unreadable_fields")
         assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 12, "fixed": 1})).status_code == 201
         assert (await verdict())["reason"] not in ("form_count_mismatch", "unreadable_fields")
+
+
+# ── Weak spot #1b (c): derived form_state and the form_check_missing gate ───────────────────
+
+
+def _event_count(app_id: int) -> int:
+    return _count("SELECT COUNT(*) FROM application_events WHERE application_id = ?", (app_id,))
+
+
+@pytest.mark.asyncio
+async def test_form_state_goes_filled_then_submitted_without_touching_events(
+    authenticated_async_context, fixture_user_id
+):
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+
+        async def state() -> Any:
+            resp = await client.get(f"/api/applications/{app_id}")
+            assert resp.status_code == 200, resp.text
+            return resp.json()["form_state"]
+
+        assert await state() is None  # nothing filled yet
+        assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
+        assert await state() == "filled"
+        before = _event_count(app_id)
+        rec = await client.post(
+            f"/api/applications/{app_id}/receipt", json={"channel": "company site", "note": "sent"},
+        )
+        assert rec.status_code in (200, 201), rec.text
+        assert await state() == "submitted"
+        # append-only: the state moved, the recorded events only grew (never edited or removed)
+        assert _event_count(app_id) >= before
+
+
+def test_derive_form_state_is_pure():
+    from src.services.applications.spine import derive_form_state
+
+    filled = {"event_type": "form_filled"}
+    assert derive_form_state([], []) is None
+    assert derive_form_state([filled], []) == "filled"
+    assert derive_form_state([filled], [{"id": 1}]) == "submitted"
+    assert derive_form_state([{"event_type": "note"}], [{"id": 1}]) is None  # a receipt alone is not a filled form
+
+
+def test_form_check_required_follows_the_cutoff_day(form_check_gate):
+    assert kit_service.FORM_CHECK_REQUIRED_FROM.date().isoformat() == "2026-10-15"
+    assert kit_service.form_check_required("2026-10-14T23:59:59+00:00") is False
+    assert kit_service.form_check_required("2026-10-15T00:00:00+00:00") is True
+    assert kit_service.form_check_required("2026-10-15T08:00:00") is True  # naive = UTC
+    assert kit_service.form_check_required("not a date") is False and kit_service.form_check_required(None) is False
+
+
+@pytest.mark.asyncio
+async def test_new_application_needs_form_checked_old_one_does_not(
+    authenticated_async_context, fixture_user_id, form_check_gate, monkeypatch
+):
+    from datetime import datetime, timezone
+
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)  # created now: after the cut-off
+
+        async def verdict() -> dict[str, Any]:
+            resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+        assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
+        assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 9, "fixed": 0})).status_code == 201
+        stop = await verdict()
+        assert (stop["decision"], stop["reason"]) == ("stop", "form_check_missing")
+        assert "check_form" in stop["detail"]
+        # the kit's own preview imagines the form checked: it never shows this stop before the fill
+        # An OLDER application (cut-off later than its created_at) keeps working with no form_checked.
+        monkeypatch.setattr(kit_service, "FORM_CHECK_REQUIRED_FROM", datetime(2999, 1, 1, tzinfo=timezone.utc))
+        assert (await verdict())["reason"] != "form_check_missing"
+        monkeypatch.undo()
+        # recording the form check clears the stop (count 9 == swept 9)
+        checked = {"questions_count": 9, "answered": 9, "missing": 0}
+        assert (await _post_event(client, app_id, "form_checked", checked)).status_code == 201
+        assert (await verdict())["reason"] != "form_check_missing"

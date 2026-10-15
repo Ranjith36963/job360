@@ -600,6 +600,21 @@
             ],
             "title": "Follow Up On"
           },
+          "form_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "filled",
+                  "submitted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Form State"
+          },
           "id": {
             "title": "Id",
             "type": "integer"

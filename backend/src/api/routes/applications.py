@@ -631,6 +631,8 @@ class ApplicationDetailOut(BaseModel):
     # known ATS) and the time up to which this job's mail was read (null = never).
     email_senders: list[str] = []
     inbox_checked_at: Optional[str] = None
+    # Weak spot #1b (c): derived from `form_filled` + a receipt, never stored. null = no form_filled.
+    form_state: Optional[Literal["filled", "submitted"]] = None
 
 
 class ApplicationSummaryOut(BaseModel):
