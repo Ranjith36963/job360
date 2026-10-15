@@ -456,6 +456,17 @@ async def test_only_still_applied_jobs_are_listed_as_missing_proof(authenticated
 
 
 @pytest.mark.asyncio
+async def test_a_simulated_application_is_not_missing_proof(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        real, fake = [await _bring(client, {**AD, "company": c}) for c in ("Real", "Fake")]
+        await _ev(client, fake, "simulation", {})
+        for app_id in (real, fake):
+            await _ev(client, app_id, "applied", {}, occurred_at=_ago(8))
+        missing = (await client.get("/api/whats-new")).json()["proof_missing"]
+        assert [m["application_id"] for m in missing] == [real]
+
+
+@pytest.mark.asyncio
 async def test_links_in_proof_text_are_removed_before_storing(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)

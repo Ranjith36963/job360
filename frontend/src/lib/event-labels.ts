@@ -84,6 +84,8 @@ export const EVENT_LABEL: Record<string, string> = {
   // S7 proof of application.
   proof_text: "Saved the confirmation page text",
   proof_screenshot: "Saved a screenshot of the confirmation",
+  // Simulated/test application marker.
+  simulation: "Marked as a test (not a real application)",
 };
 
 /** The label for one timeline row. A status event reads "Status → <label>";

@@ -451,6 +451,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "blocked", "unblocked",
         # S7 proof of application (2026-10-10).
         "proof_text", "proof_screenshot",
+        # Simulated/test application marker (2026-10-15).
+        "simulation",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

@@ -5710,6 +5710,11 @@ export interface components {
             replies_without_applied: number;
             /** Reply Rate */
             reply_rate: number | null;
+            /**
+             * Simulations Excluded
+             * @default 0
+             */
+            simulations_excluded: number;
         };
         /** StatsResponse */
         StatsResponse: {

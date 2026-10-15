@@ -358,8 +358,11 @@ async def proof_missing(db: JobDatabase, user_id: str, now: datetime) -> list[di
         "WHERE e.user_id = ? AND a.status = 'applied' AND e.event_type = 'applied' AND e.occurred_at <= ? "
         "AND e.id NOT IN "
         "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL) "
+        "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
+        "AND s.user_id = e.user_id AND s.event_type = ? AND s.id NOT IN "
+        "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL)) "
         "GROUP BY e.application_id, a.job_company ORDER BY MIN(e.occurred_at), e.application_id",
-        (user_id, (now - timedelta(days=days)).isoformat(), user_id),
+        (user_id, (now - timedelta(days=days)).isoformat(), user_id, settings.SIMULATION_EVENT_TYPE, user_id),
     )
     applied = [tuple(r) for r in await cur.fetchall()]
     if not applied:
