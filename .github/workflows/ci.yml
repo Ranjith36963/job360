@@ -146,7 +146,9 @@ jobs:
           {
             echo "### Failed tests (backend)"
             echo '```'
-            if grep -qE '^(FAILED|ERROR) ' /tmp/pytest.out; then
+            if [ ! -f /tmp/pytest.out ]; then
+              echo 'pytest did not run (an earlier step failed)'
+            elif grep -qE '^(FAILED|ERROR) ' /tmp/pytest.out; then
               grep -E '^(FAILED|ERROR) ' /tmp/pytest.out | head -50
               grep -E '[0-9]+ (failed|passed|error)' /tmp/pytest.out | tail -1
             else
