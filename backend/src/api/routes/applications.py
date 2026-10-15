@@ -2066,6 +2066,25 @@ async def mark_cv_seen(
     return await _controls(db, user, application_id)
 
 
+# Statuses at which "Send this one" / "Don't send" no longer make sense: the
+# application is already applied (or further along), or closed. The pre-submit
+# approval step only exists while the status is still `considering`.
+_SEND_DECISION_CLOSED_STATUSES = frozenset({
+    "applied", "replied", "interview_requested", "interview_scheduled", "interview_done",
+    "offer", "rejected", "withdrawn", "ghosted",
+})
+
+
+async def _refuse_if_already_applied(db: JobDatabase, user: CurrentUser, application_id: int) -> None:
+    """Defence in depth for the web buttons: 404 for a foreign id, 409 once the
+    application is applied or later (or closed). Nothing is recorded."""
+    row = await spine.get_owned_application(db, user.id, application_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if row.get("status") in _SEND_DECISION_CLOSED_STATUSES:
+        raise HTTPException(status_code=409, detail="already applied")
+
+
 @router.post(
     "/applications/{application_id}/send/approve", response_model=ApplicationControlsOut, status_code=201,
     dependencies=AUTH_FIRST,
@@ -2083,6 +2102,7 @@ async def approve_send(
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
     nothing is recorded (the yes must name what the user saw)."""
+    await _refuse_if_already_applied(db, user, application_id)
     cv = await _latest_cv_or_409(db, user, application_id)
     if artifact_id is not None and int(cv["id"]) != artifact_id:
         raise HTTPException(status_code=409, detail="the CV changed since you looked - look again")
@@ -2106,6 +2126,7 @@ async def decline_send(
 ) -> dict[str, Any]:
     """"Don't send" - the gate answers ``stop`` / ``user_declined`` until a later
     "Send this one"."""
+    await _refuse_if_already_applied(db, user, application_id)
     await _web_decision(db, user, application_id, "submit_declined", {"where": "web"})
     return await _controls(db, user, application_id)
 

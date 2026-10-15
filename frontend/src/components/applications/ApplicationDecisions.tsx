@@ -5,6 +5,7 @@ import { approveSend, clearDuplicate, declineSend, resolveBlocked, setAutofill }
 import type { ApplicationControls, DecisionMark } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { formatDate } from "@/lib/format-date";
+import { allowedActions } from "@/lib/application-actions";
 import { describeMark } from "@/components/applications/CvSeenButton";
 
 const BTN =
@@ -39,11 +40,14 @@ export function ApplicationDecisions({
   controls,
   onChanged,
   newFillWaiting = false,
+  status = "considering",
 }: {
   applicationId: number;
   controls: ApplicationControls;
   onChanged: (next: ApplicationControls) => void;
   newFillWaiting?: boolean;
+  /** The application's status: Send / Don't send only show while it is pre-apply. */
+  status?: string;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -59,6 +63,7 @@ export function ApplicationDecisions({
   }
 
   const cv = controls.cv ?? null;
+  const allowed = allowedActions(status, { hasCv: cv !== null, newFillWaiting });
   // The newest of {fill, yes, no} is the current one: after a newer fill an old mark is history.
   const approved = newFillWaiting ? null : (cv?.approved ?? null);
   const declined = newFillWaiting ? null : (controls.declined ?? null);
@@ -122,7 +127,7 @@ export function ApplicationDecisions({
         <div className="flex flex-col gap-1.5">
           {/* A newer fill is waiting: the Ready card above owns Send / Don't send (it passes the
               CV + fill ids the guard checks), so no second, unguarded pair of buttons here. */}
-          {!newFillWaiting && (
+          {allowed.includes("send_approve") && (
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"

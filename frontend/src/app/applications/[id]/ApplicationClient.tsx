@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import type { ApplicationControls, ApplicationDetail, Ask, ReadyCardData, VisaShape } from "@/lib/api";
 import { ReadyCard } from "@/components/needs-you/ReadyCard";
+import { readyCardAllowed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
 import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
@@ -378,7 +379,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 Add to calendar
               </a>
             )}
-            {ready && (
+            {ready && readyCardAllowed(detail.status) && (
               <div className="w-full">
                 <ReadyCard card={ready.card} paused={ready.paused} onChanged={reloadAfterAsk} />
               </div>
@@ -387,6 +388,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               <ApplicationDecisions
                 applicationId={detail.id}
                 controls={controls}
+                status={detail.status}
                 newFillWaiting={ready !== null}
                 onChanged={(next) => {
                   setControls(next);
