@@ -758,6 +758,7 @@ def build_server(version: str = "") -> MCPServer:
         "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
         greenhouse etc. = company_site; other text is stored as "other" (never refused;
         the reply has `channel_given` + a `warning`). `note` is free text.
+        `confirmation` = the ID only (must contain a digit); anything else is kept in the note with a warning.
 
         C1 (application-spine review) — this is the SAME tool as before (`job_id`,
         `channel`, `note` still work unchanged), rewired onto the rich
@@ -1196,7 +1197,8 @@ def build_server(version: str = "") -> MCPServer:
         time — for an agent waking up and asking "what did I miss?". Paged by
         when Job360 recorded each event, never by when it happened in the
         world, so a backdated event can never be silently skipped. Always carries
-        `open_asks` — the user's unanswered questions — whatever `since` says."""
+        `open_asks` — the user's unanswered questions — whatever `since` says. Also
+        `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.whats_new(since, after_id, limit, db, _user())
