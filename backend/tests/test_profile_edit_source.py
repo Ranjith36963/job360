@@ -513,22 +513,24 @@ def test_kit_instructions_name_remember():
 # ── Part B: a relayed chat word reads "relayed" until the user confirms on the web ──
 
 
-def test_relayed_until_web_confirm_then_confirmed_with_time():
-    """neonwatty job-apply/SKILL.md:118 - the user's own word is what makes an answer theirs."""
+def test_relayed_until_that_row_is_approved_on_the_web():
+    """neonwatty job-apply/SKILL.md:118 - the user's own word is what makes an answer theirs.
+    Per row: the profile-memory Keep writes a newer web row for THAT path; nothing else confirms it."""
     from src.services.applications import kit
 
     rows = [_kit_rows(LOGI, NOTICE, "user_said")]
     before, _ = kit.compute_answers(_full_profile(), rows, "GB")
     assert before["logistics"][0]["state"] == "relayed"
     assert kit.answers_summary(before)["relayed"] == 1
-    # The user confirmed a relayed ask on the web AFTER this row was saved.
-    after, _ = kit.compute_answers(_full_profile(), rows, "GB", confirmed_through="2026-10-02T00:00:00Z")
+    kept = [_kit_rows(LOGI, NOTICE, "user_said", set_by="web") | {"set_at": "2026-10-02T00:00:00Z"}]
+    after, _ = kit.compute_answers(_full_profile(), kept, "GB")
     assert after["logistics"][0]["state"] == "confirmed"
-    assert after["logistics"][0]["confirmed_at"] == "2026-10-01T00:00:00Z"
+    assert after["logistics"][0]["confirmed_at"] == "2026-10-02T00:00:00Z"
     assert kit.answers_summary(after)["relayed"] == 0
-    # A change saved AFTER the confirmation is relayed again.
-    later, _ = kit.compute_answers(_full_profile(), rows, "GB", confirmed_through="2026-09-30T00:00:00Z")
-    assert later["logistics"][0]["state"] == "relayed"
+    # Keeping a DIFFERENT path leaves this row relayed.
+    other = rows + [_kit_rows("user_info.contact", {"phone": "1"}, "user_said", set_by="web")]
+    still, _ = kit.compute_answers(_full_profile(), other, "GB")
+    assert still["logistics"][0]["state"] == "relayed"
 
 
 def test_sensitive_beats_relayed_and_inferred_stays_inferred():

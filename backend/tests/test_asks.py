@@ -567,9 +567,9 @@ def test_no_mcp_tool_confirms_an_ask():
 
 
 @pytest.mark.asyncio
-async def test_kit_answer_reads_relayed_until_the_web_confirm(authenticated_async_context):
-    """Weak spot #6 part B, over the EXISTING POST /api/asks/{id}/confirm. Mirrors neonwatty
-    job-apply/SKILL.md:118: an assistant relaying the user's word is not the user's own confirmation."""
+async def test_kit_answer_relayed_until_that_edit_is_kept_not_any_ask_confirm(authenticated_async_context):
+    """Weak spot #6 part B. Mirrors neonwatty job-apply/SKILL.md:118. Confirming an UNRELATED ask leaves
+    the relayed row relayed; approving THAT edit (profile-memory Keep) makes it confirmed."""
     token = await _mint_token(authenticated_async_context)
     from src.api.main import app
 
@@ -590,6 +590,15 @@ async def test_kit_answer_reads_relayed_until_the_web_confirm(authenticated_asyn
         assert before["answers_summary"]["relayed"] >= 1
     async with authenticated_async_context() as web:
         assert (await web.post(f"/api/asks/{ask_id}/confirm")).status_code == 200
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        mid = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+        phone = next(i for i in mid["answers"]["contact"] if i["key"] == "contact.phone")
+        assert phone["state"] == "relayed" and mid["answers_summary"]["relayed"] >= 1
+    async with authenticated_async_context() as web:
+        kept = await web.post("/api/profile/edits/keep", json={"path": "user_info.contact"})
+        assert kept.status_code == 200, kept.text
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
     ) as agent:
