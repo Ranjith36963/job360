@@ -133,28 +133,13 @@ pre-commit install
 
 ## 5. Unicode CV text crashes fpdf2
 
-**Symptom:** `UnicodeEncodeError: 'latin-1' codec can't encode character` when the test suite builds a sample PDF with fpdf2.
+**Symptom:** `UnicodeEncodeError: 'latin-1' codec can't encode character` while
+building a PDF with a core font.
 
-**Cause:** fpdf2's core 14 fonts (Helvetica/Times/Courier) only support Latin-1. Unicode needs `add_font(..., uni=True)` with a TTF path.
-
-**Fix — two options:**
-
-```python
-# Option A: use a Unicode TTF (heaviest, but handles any char)
-from fpdf import FPDF
-pdf = FPDF()
-pdf.add_font("DejaVu", "", "/path/to/DejaVuSans.ttf", uni=True)
-pdf.set_font("DejaVu", size=12)
-pdf.cell(0, 10, "café naïve — résumé")
-
-# Option B: strip to Latin-1, keep the core fonts (cheaper)
-def safe_latin1(s: str) -> str:
-    return s.encode("latin-1", errors="replace").decode("latin-1")
-
-pdf = FPDF()
-pdf.set_font("Helvetica", size=12)
-pdf.cell(0, 10, safe_latin1("café naïve — résumé"))
-```
+**Fix:** reuse the renderer's own transliterator,
+`services/tailoring/pdf._to_latin1` — pinned by
+`backend/tests/test_pdf_unicode.py`. To embed a Unicode TTF instead, copy the
+`add_font(family, style, path)` call in `services/tailoring/cv_render`.
 
 ---
 
