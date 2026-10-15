@@ -42,6 +42,14 @@ What the options mean:
 - `--check-live` re-fetches each kept job once and drops 404, 410 and "closed" pages.
 - `--discover "Company A,Company B"` probes likely board names on Greenhouse, Lever, Ashby, Workable and Recruitee and prints the ones that answer with jobs. The assistant can add good ones to the user's `target_companies`.
 
+- `--out found.jsonl` the final file, written at the end. `--stream PATH` where jobs are saved as they are found (default `found.jsonl.stream`, or `hunt_stream.jsonl` when `--out` is stdout). `--resume` continues a stopped run. `--max-minutes 15` (default; 0 = no limit) and `--max-sources N` stop the run cleanly when spent.
+
+## Long runs: results stream, runs resume
+
+Results stream to the stream file as they come: every company or feed that finishes appends its jobs there and prints one line to stderr (name, jobs, seconds). If a run stops (time budget, Ctrl-C, the machine kills it), rerun the same command with `--resume` to continue where it left off: sources already done are skipped and nothing is written twice. When a budget is hit the kit writes what it found to `--out`, prints the exact `--resume` command, and does not add those jobs to the history yet. A finished run marks itself complete. Plain files next to your output (`<stream>` and `<stream>.progress`), no database. Memory stays flat because one source is processed at a time and only the kept jobs are held, on disk.
+
+A `--resume` only continues the same search (same titles, countries, sources, days); a different one starts fresh and keeps the unfinished results as `<stream>.prev`. A fresh start without `--resume` does the same.
+
 Each output line is one job: title, company, url, location, posted, source,
 board, row (which rule matched: `work_country`, `remote_world`, `remote_region`,
 `visa_onsite`, `maybe_relocation`), years_min, visa_lines (up to 2 exact

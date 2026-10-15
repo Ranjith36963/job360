@@ -29,11 +29,14 @@ import collections
 import concurrent.futures
 import datetime as _dt
 import functools
+import hashlib
 import html
 import importlib
 import ipaddress
 import json
+import os
 import re
+import shlex
 import socket
 import sys
 import threading
@@ -780,6 +783,191 @@ def parse_smartrecruiters_list(d: dict[str, Any], b: dict[str, Any],
     return out
 
 
+# ================================================================== stream
+def _now() -> float:
+    return time.monotonic()
+
+
+FINGERPRINT_ARGS = (
+    "titles", "exclude_title_words", "work_countries", "remote", "visa_onsite", "maybe_relocation",
+    "only_countries", "exclude_countries", "any_location", "max_years", "days", "sources", "companies",
+    "universe", "companies_extra", "skip_companies", "limit_boards",
+)
+
+
+def run_fingerprint(args: argparse.Namespace) -> str:
+    """Hash of the options that decide WHAT is searched. A resume only continues the same search."""
+    d = {k: getattr(args, k, None) for k in FINGERPRINT_ARGS}
+    return hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+class Stream:
+    """Crash-safe output: every kept job is appended to a JSONL file the moment it is found.
+
+    Next to it sits a small progress file (``<stream>.progress``): a header line with the run's
+    fingerprint, one line per finished source, and ``#complete`` at the very end. ``--resume`` skips
+    the finished sources and keeps the jobs already on disk. Plain files, no database.
+    """
+
+    def __init__(self, path: str, fingerprint: str, max_minutes: float = 0, max_sources: int = 0) -> None:
+        self.path = path
+        self.progress_path = path + ".progress"
+        self.fingerprint = fingerprint
+        self.deadline = _now() + max_minutes * 60 if max_minutes and max_minutes > 0 else None
+        self.max_sources = max(0, int(max_sources or 0))
+        self.t0 = _now()
+        self.lock = threading.Lock()
+        self.done: set[str] = set()
+        self.complete = False
+        self.count = 0  # jobs on disk (including any from the run being resumed)
+        self.started = 0  # sources begun this session
+        self.stop_reason = ""
+        self._fh: Any = None
+        self._pfh: Any = None
+
+    def open(self, resume: bool) -> str:
+        """Start or continue. Returns '', 'resumed', 'complete' or 'mismatch' (mismatch = started fresh)."""
+        state = ""
+        header, done, complete = self._read_progress()
+        if resume and header is not None:
+            if header != self.fingerprint:
+                print("note: --resume ignored: the saved run in %s was a different search; starting fresh." % self.path,
+                      file=sys.stderr)
+                state = "mismatch"
+            elif complete:
+                self.complete = True
+                self.count = sum(1 for _ in self.iter_records())
+                return "complete"
+            else:
+                self.done = done
+                state = "resumed"
+        elif resume:
+            print("note: --resume: nothing saved in %s yet; starting fresh." % self.path, file=sys.stderr)
+        if state != "resumed":
+            self._set_aside_old()
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        if state == "resumed":
+            half_line = False
+            try:
+                with open(self.path, "rb") as r:
+                    r.seek(0, os.SEEK_END)
+                    if r.tell():
+                        r.seek(-1, os.SEEK_END)
+                        half_line = r.read(1) != b"\n"
+            except OSError:
+                pass
+            self._fh = open(self.path, "a", encoding="utf-8")
+            if half_line:  # a kill can leave a half line: end it so new lines start clean
+                self._fh.write("\n")
+            self.count = sum(1 for _ in self.iter_records())
+            self._pfh = open(self.progress_path, "a", encoding="utf-8")
+        else:
+            self._fh = open(self.path, "w", encoding="utf-8")
+            self._pfh = open(self.progress_path, "w", encoding="utf-8")
+            self._pfh.write(self.fingerprint + "\n")
+        self._pfh.flush()
+        self._fh.flush()
+        return state
+
+    def _read_progress(self) -> tuple[str | None, set[str], bool]:
+        try:
+            with open(self.progress_path, encoding="utf-8") as f:
+                lines = f.read().split("\n")
+        except OSError:
+            return None, set(), False
+        lines = [x for x in lines[:-1] if x]  # the last piece has no newline: a cut-short write, ignore it
+        if not lines:
+            return None, set(), False
+        body = lines[1:]
+        return lines[0], {x for x in body if x != "#complete"}, "#complete" in body
+
+    def _set_aside_old(self) -> None:
+        """A fresh start never destroys an unfinished run: its jobs move to <stream>.prev."""
+        header, _done, complete = self._read_progress()
+        try:
+            if header is not None and not complete and os.path.getsize(self.path) > 0:
+                os.replace(self.path, self.path + ".prev")
+                print("note: kept the unfinished earlier results as %s.prev" % self.path, file=sys.stderr)
+        except OSError:
+            pass
+
+    def iter_records(self) -> Iterable[dict[str, Any]]:
+        """Read the jobs back from disk, one line at a time (a half-written line is skipped)."""
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(rec, dict) and rec.get("url"):
+                        yield rec
+        except OSError:
+            return
+
+    def seed(self, col: Collector) -> None:
+        """Teach the collector what is already on disk so a rerun never writes a job twice."""
+        for rec in self.iter_records():
+            col.seen_url.add(rec["url"])
+            col.seen_key.setdefault(job_key(rec), rec["url"])
+
+    def write(self, rec: dict[str, Any]) -> None:
+        """Append one job and flush. The caller holds the collector lock."""
+        self._fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._fh.flush()
+        self.count += 1
+
+    def mark_done(self, task_id: str) -> None:
+        with self.lock:
+            self.done.add(task_id)
+            self._pfh.write(task_id + "\n")
+            self._pfh.flush()
+
+    def mark_complete(self) -> None:
+        with self.lock:
+            self._pfh.write("#complete\n")
+            self._pfh.flush()
+            self.complete = True
+
+    def admit(self) -> bool:
+        """May another source start? Sets stop_reason once a budget runs out."""
+        with self.lock:
+            if self.stop_reason:
+                return False
+            if self.deadline is not None and _now() >= self.deadline:
+                self.stop_reason = "time budget reached"
+            elif self.max_sources and self.started >= self.max_sources:
+                self.stop_reason = "source budget reached (%d)" % self.max_sources
+            else:
+                self.started += 1
+                return True
+            return False
+
+    def stop(self, reason: str) -> None:
+        with self.lock:
+            self.stop_reason = self.stop_reason or reason
+
+    def elapsed(self) -> float:
+        return _now() - self.t0
+
+    def close(self) -> None:
+        for fh in (self._fh, self._pfh):
+            try:
+                if fh:
+                    fh.close()
+            except OSError:
+                pass
+
+
+def resume_hint(argv: list[str], stream: Stream) -> str:
+    """The exact command that continues a stopped run."""
+    parts = [a for a in argv if a != "--resume"]
+    cmd = "python hunt_kit.py " + " ".join(shlex.quote(a) for a in parts) + " --resume"
+    n = len(stream.done)
+    return ("%d source%s done so far, %d job%s saved in %s\nTo continue where it stopped, rerun with --resume:\n  %s"
+            % (n, "" if n == 1 else "s", stream.count, "" if stream.count == 1 else "s", stream.path, cmd))
+
+
 # ================================================================ collector
 class Collector:
     """Thread-safe stats + results, applying the shared filter pipeline."""
@@ -789,6 +977,8 @@ class Collector:
         self.lock = threading.Lock()
         self.stats: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
         self.results: list[dict[str, Any]] = []
+        self.sink: Stream | None = getattr(args, "sink", None)
+        self.tl = threading.local()  # per worker thread: jobs kept by the source it is running
         self.seen_url: set[str] = set()
         self.seen_key: dict[str, str] = {}
         self.matcher = make_title_matcher(args.titles, args.exclude_title_words)
@@ -886,7 +1076,11 @@ class Collector:
             first = self.seen_key.setdefault(key, url)
             if first != url:
                 rec["possible_duplicate_of"] = first  # same company+title, different URL: flag, never hide
-            self.results.append(rec)
+            if self.sink is not None:
+                self.sink.write(rec)  # on disk now; only small URL/key sets stay in memory
+            else:
+                self.results.append(rec)
+            self.tl.n = getattr(self.tl, "n", 0) + 1
             self.stats[source]["kept"] += 1
 
 
@@ -894,6 +1088,30 @@ class Collector:
 def _offer_all(col: Collector, source: str, raws: Iterable[dict[str, Any]]) -> None:
     for r in raws:
         col.offer(source, r)
+
+
+PARSE_CHUNK = 50
+
+
+def _parse_chunks(
+    parse: Callable[[Any, dict[str, Any]], list[dict[str, Any]]], d: Any, b: dict[str, Any]
+) -> Iterable[list[dict[str, Any]]]:
+    """Parse a board payload PARSE_CHUNK jobs at a time.
+
+    The parse_* functions turn every job's full HTML description into text up front. On a big board
+    that is thousands of descriptions alive at once, times up to 8 boards in parallel, for jobs the
+    title filter drops a moment later. Chunking keeps only a few dozen alive at any time.
+    """
+    if isinstance(d, list):
+        for i in range(0, len(d), PARSE_CHUNK):
+            yield parse(d[i:i + PARSE_CHUNK], b)
+        return
+    items = d.get("jobs", [])
+    if not isinstance(items, list):
+        yield parse(d, b)
+        return
+    for i in range(0, len(items), PARSE_CHUNK):
+        yield parse({**d, "jobs": items[i:i + PARSE_CHUNK]}, b)
 
 
 def _board_json(
@@ -906,7 +1124,8 @@ def _board_json(
     if st != 200 or not isinstance(d, kind):
         return
     col.bump(source, "boards_ok")
-    _offer_all(col, source, parse(d, b))
+    for raws in _parse_chunks(parse, d, b):
+        _offer_all(col, source, raws)
 
 
 def _gh(col: Collector, b: dict[str, Any]) -> None:
@@ -925,7 +1144,8 @@ def _lever(col: Collector, b: dict[str, Any]) -> None:
         st, d = http_get_json("%s/v0/postings/%s?mode=json" % (base, b["token"]), retries=1)
         if st == 200 and isinstance(d, list):
             col.bump("lever", "boards_ok")
-            _offer_all(col, "lever", parse_lever(d, b))
+            for raws in _parse_chunks(parse_lever, d, b):
+                _offer_all(col, "lever", raws)
             return
 
 
@@ -964,6 +1184,35 @@ def _smartrecruiters(col: Collector, b: dict[str, Any]) -> None:
             return
 
 
+def _freehire_offer(col: Collector, r: dict[str, Any], seen_rows: set[str]) -> None:
+    """Send one freehire row through the filters (copies of big-site ads are never read)."""
+    key = r.get("public_slug") or r.get("url")
+    if key:
+        if key in seen_rows:
+            return
+        seen_rows.add(key)
+    url = r.get("url") or ""
+    if r.get("source") == "telegram" or re.search(r"linkedin\.com|indeed\.|glassdoor", url, re.I):
+        return
+    wm = r.get("work_mode") or ""
+    regions = r.get("regions") or []
+    extra = (["Worldwide"] if "global" in regions else []) + (["APAC"] if "apac" in regions else [])
+    extra += [country_name(c) for c in r.get("countries") or []]
+    loc = " | ".join(x for x in [r.get("location") or "", wm, "Remote" if wm == "remote" else "", *extra] if x)
+    col.offer(
+        "freehire",
+        dict(
+            title=r.get("title", ""),
+            url=url,
+            loc=loc,
+            posted=to_date(r.get("posted_at")),
+            desc=r.get("description") or "",
+            company=r.get("company") or "",
+            board=r.get("source") or "",
+        ),
+    )
+
+
 def _freehire(col: Collector, queries: list[str]) -> None:
     pr = col.prefs
     pl = get_places()
@@ -975,7 +1224,7 @@ def _freehire(col: Collector, queries: list[str]) -> None:
     filters += [dict(countries=cc) for cc in sorted(pr.work)]
     if not filters:
         filters.append({})
-    jobs: dict[str, dict[str, Any]] = {}
+    seen_rows: set[str] = set()
     for q in queries:
         for f in filters:
             for page in range(4):
@@ -995,31 +1244,12 @@ def _freehire(col: Collector, queries: list[str]) -> None:
                     break
                 col.bump("freehire", "boards_ok")
                 rows = d.get("data") or []
-                for r in rows:
-                    jobs[r.get("public_slug") or r.get("url") or str(len(jobs))] = r
-                if len(rows) < 50:
+                n_rows = len(rows)
+                for r in rows:  # one row at a time, straight to the filters: never hold every query's ads
+                    _freehire_offer(col, r, seen_rows)
+                del rows, d
+                if n_rows < 50:
                     break
-    for r in jobs.values():
-        url = r.get("url") or ""
-        if r.get("source") == "telegram" or re.search(r"linkedin\.com|indeed\.|glassdoor", url, re.I):
-            continue  # copies of ads from big job sites: the kit never reads those
-        wm = r.get("work_mode") or ""
-        regions = r.get("regions") or []
-        extra = (["Worldwide"] if "global" in regions else []) + (["APAC"] if "apac" in regions else [])
-        extra += [country_name(c) for c in r.get("countries") or []]
-        loc = " | ".join(x for x in [r.get("location") or "", wm, "Remote" if wm == "remote" else "", *extra] if x)
-        col.offer(
-            "freehire",
-            dict(
-                title=r.get("title", ""),
-                url=url,
-                loc=loc,
-                posted=to_date(r.get("posted_at")),
-                desc=r.get("description") or "",
-                company=r.get("company") or "",
-                board=r.get("source") or "",
-            ),
-        )
 
 
 # ============================================================ run / output
@@ -1188,7 +1418,10 @@ def run(args: argparse.Namespace) -> Collector:
     sources = select_sources(args.sources)
     queries = split_csv(args.titles or DEFAULT_TITLES)[:12]
     countries = sorted(col.prefs.only or col.prefs.work)
-    tasks: list[tuple[str, Callable[[], None]]] = []
+    sink = col.sink
+    if sink is not None:
+        sink.seed(col)
+    tasks: list[tuple[str, str, Callable[[], None]]] = []  # (source label, task id, work)
 
     base = load_companies(Path(args.companies))
     extra_universe = load_universe([a for a in UNIVERSE_ATS if a in sources]) if args.universe else []
@@ -1213,34 +1446,71 @@ def run(args: argparse.Namespace) -> Collector:
     ats_fetchers = getattr(kit_ats, "ATS_FETCHERS", {}) if kit_ats else {}
     for b in boards:
         if b["ats"] in _BOARD_FN:
-            tasks.append((b["ats"], functools.partial(_BOARD_FN[b["ats"]], col, b)))
+            tasks.append((b["ats"], "%s:%s" % (b["ats"], b["token"].lower()),
+                          functools.partial(_BOARD_FN[b["ats"]], col, b)))
         elif b["ats"] in ats_fetchers:
             call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
-            tasks.append((b["ats"], functools.partial(_module_task, col, b["ats"], call)))
+            tasks.append((b["ats"], "%s:%s" % (b["ats"], b["token"].lower()),
+                          functools.partial(_module_task, col, b["ats"], call)))
     if "freehire" in sources:
-        tasks.append(("freehire", lambda: _freehire(col, queries)))
+        tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
     if wanted_feeds:
         kit_feeds = _import_kit("kit_feeds")
         feeds = getattr(kit_feeds, "FEEDS", {}) if kit_feeds else {}
         for name in wanted_feeds:
             if name in feeds:
-                tasks.append((name, functools.partial(
+                tasks.append((name, "feed:" + name, functools.partial(
                     _module_task, col, name,
                     functools.partial(_feed_call, feeds[name], queries, args.days, countries),
                 )))
             elif kit_feeds is not None:
                 print("note: feed %s not provided by kit_feeds; skipped" % name, file=sys.stderr)
 
-    progress = Progress(col, [src for src, _ in tasks])
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, args.workers))) as ex:
-        futs = {ex.submit(t): src for src, t in tasks}
+    if sink is not None and sink.done:
+        before = len(tasks)
+        tasks = [t for t in tasks if t[1] not in sink.done]
+        print("resuming: %d of %d sources already done, %d jobs already on disk"
+              % (before - len(tasks), before, sink.count), file=sys.stderr, flush=True)
+
+    def guarded(src: str, tid: str, work: Callable[[], None]) -> None:
+        """One source from start to finish: budget check, run, stream progress line, mark done."""
+        if sink is not None and not sink.admit():
+            return  # budget spent: leave it for --resume
+        col.tl.n = 0
+        t0 = _now()
+        ok = True
+        try:
+            work()
+        except Exception as e:  # one bad board must not stop the sweep (and is retried on --resume)
+            ok = False
+            print("warning: %s failed: %s: %s" % (tid, type(e).__name__, e), file=sys.stderr)
+        except BaseException:  # Ctrl-C or a hard crash: no further source may start
+            if sink is not None:
+                sink.stop("interrupted")
+            raise
+        if sink is not None:
+            if ok:
+                sink.mark_done(tid)
+            print("[%s] %d job%s, %.1fs (total %.0fs)" % (tid, col.tl.n, "" if col.tl.n == 1 else "s",
+                  _now() - t0, sink.elapsed()), file=sys.stderr, flush=True)
+
+    progress = Progress(col, [src for src, _, _ in tasks])
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, args.workers)))
+    try:
+        futs = {ex.submit(guarded, src, tid, work): src for src, tid, work in tasks}
         for f in concurrent.futures.as_completed(futs):
             try:
                 f.result()
-            except Exception as e:  # one bad board must not stop the sweep
+            except Exception as e:
                 print("warning: task failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
             progress.done(futs[f])
+    except BaseException:  # Ctrl-C or a crash: queued sources must not start while we unwind
+        if sink is not None:
+            sink.stop("interrupted")
+        raise
+    finally:
+        ex.shutdown(wait=True, cancel_futures=True)
     return col
 
 
@@ -1452,6 +1722,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--all", action="store_true", help="ignore history when choosing what to output")
     p.add_argument("--out", default="-", help="JSONL output path (default stdout)")
+    p.add_argument(
+        "--stream",
+        default=None,
+        help="file jobs are appended to as they are found (default: OUT.stream, or hunt_stream.jsonl)",
+    )
+    p.add_argument("--resume", action="store_true", help="continue a stopped run: skip sources already done")
+    p.add_argument(
+        "--max-minutes", type=float, default=15.0,
+        help="stop starting new sources after N minutes (default 15, 0 = no limit); rerun with --resume",
+    )
+    p.add_argument("--max-sources", type=int, default=0, help="stop after N sources (0 = no limit)")
     p.add_argument("--stats", action="store_true", help="print coverage counts per source to stderr")
     return p
 
@@ -1470,33 +1751,65 @@ def main(argv: list[str] | None = None) -> int:
         for hit in discover(split_csv(args.discover)):
             print(json.dumps(hit, ensure_ascii=False))
         return 0
-    col = run(args)
-    results = sort_newest(col.results)
-    urls, keys = load_history(args.history)
-    skipped = 0
+    stream_path = args.stream or ("hunt_stream.jsonl" if args.out == "-" else args.out + ".stream")
+    sink = Stream(stream_path, run_fingerprint(args), args.max_minutes, args.max_sources)
+    state = sink.open(args.resume)
+    if state == "complete":
+        print("That run already finished: %d jobs are in %s. Rerun without --resume to search again."
+              % (sink.count, stream_path), file=sys.stderr)
+        sink.close()
+        return 0
+    args.sink = sink
+    print("Results stream to %s as they come; if the run stops, rerun with --resume to continue."
+          % stream_path, file=sys.stderr, flush=True)
+    cli = list(sys.argv[1:] if argv is None else argv)
     try:
-        results, skipped = filter_new(results, set() if args.all else urls, set() if args.all else keys)
-        if args.check_live:
-            results = check_live(col, results)
-    except Exception as e:  # a late step must not lose the results
-        print("warning: late step failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
-    col.results = results
-    try:
-        if args.out == "-":
-            for r in results:
-                sys.stdout.write(json.dumps(r, ensure_ascii=False) + "\n")
-        else:
-            with open(args.out, "w", encoding="utf-8") as f:
-                for r in results:
-                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    finally:
         try:
-            save_history(args.history, urls, keys, results)
-        except OSError as e:
-            print("warning: could not write history: %s" % e, file=sys.stderr)
-    if args.stats or skipped:
-        print(format_stats(col, skipped), file=sys.stderr)
-    return 0
+            col = run(args)
+        except KeyboardInterrupt:
+            print("\nInterrupted.\n" + resume_hint(cli, sink), file=sys.stderr)
+            return 130
+        partial = bool(sink.stop_reason)
+        stored = list(sink.iter_records()) if sink.count else col.results
+        results = sort_newest(stored)
+        del stored
+        urls, keys = load_history(args.history)
+        skipped = 0
+        try:
+            results, skipped = filter_new(results, set() if args.all else urls, set() if args.all else keys)
+            if args.check_live and not partial:
+                results = check_live(col, results)
+        except Exception as e:  # a late step must not lose the results
+            print("warning: late step failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
+        col.results = results
+        try:
+            if args.out == "-":
+                for r in results:
+                    sys.stdout.write(json.dumps(r, ensure_ascii=False) + "\n")
+            else:
+                with open(args.out, "w", encoding="utf-8") as f:
+                    for r in results:
+                        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        finally:
+            if not partial:  # a partial run must not mark its jobs "seen": the resumed run still outputs them
+                try:
+                    save_history(args.history, urls, keys, results)
+                except OSError as e:
+                    print("warning: could not write history: %s" % e, file=sys.stderr)
+        if args.stats or skipped:
+            print(format_stats(col, skipped), file=sys.stderr)
+        if partial:
+            print("\nStopped early: %s. The %d job%s found so far %s written to %s.\n%s"
+                  % (sink.stop_reason, len(results), "" if len(results) == 1 else "s",
+                     "was" if len(results) == 1 else "were", "stdout" if args.out == "-" else args.out,
+                     resume_hint(cli, sink)), file=sys.stderr)
+            if args.check_live:
+                print("(--check-live was skipped on this partial run.)", file=sys.stderr)
+        else:
+            sink.mark_complete()
+        return 0
+    finally:
+        sink.close()
 
 
 if __name__ == "__main__":
