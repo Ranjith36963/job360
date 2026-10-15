@@ -82,7 +82,7 @@ _EQUALITY: dict[str, str] = {
     "gender": "line_or_bool", "ethnicity": "line_or_bool", "disability": "line_or_bool",
     "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
 }
-_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at")
+_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company")
 _SALARY_KEYS = ("country", "min", "max", "currency", "period")
 _SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored
 PREFER_NOT_TO_SAY = "Prefer not to say"
@@ -595,12 +595,18 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
             raise _fail(f"{path}: the same question appears twice")
         seen.add(key)
         approved = raw.get("approved")
-        out.append({
+        record: dict[str, Any] = {
             "question": q,
             "answer": a,
             "approved": False if approved is None else _bool(f"{where}.approved", approved),
             "recorded_at": _recorded_at(f"{where}.recorded_at", raw.get("recorded_at")),
-        })
+        }
+        company = raw.get("company")
+        if company is not None:
+            company_line = _line(f"{where}.company", company, 200)
+            if company_line:
+                record["company"] = company_line
+        out.append(record)
     return out
 
 

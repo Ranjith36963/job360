@@ -98,6 +98,7 @@ SHAPES: dict[str, dict[str, Any]] = {
     "user_info.answers": {
         "example": [{"question": "Why do you want this job?", "answer": "I like the product.", "approved": False}],
         "allowed_keys": list(_ui._ANSWER_KEYS),
+        "note": "company = set it when the answer is only for one employer (consent to X's privacy notice, why X)",
     },
     "preferences.salary_by_country": {
         "example": [{"country": "GB", "min": 60000, "max": 80000, "currency": "GBP", "period": "year"}],

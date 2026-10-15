@@ -942,6 +942,17 @@
           "answers": {
             "$ref": "#/components/schemas/KitAnswersOut"
           },
+          "answers_omitted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answers Omitted"
+          },
           "application": {
             "$ref": "#/components/schemas/KitApplicationOut"
           },
@@ -3969,6 +3980,17 @@
       },
       "KitAnswerOut": {
         "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -4166,6 +4188,28 @@
           "text": {
             "title": "Text",
             "type": "string"
+          },
+          "text_more": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text More"
+          },
+          "text_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Truncated"
           },
           "version": {
             "title": "Version",
@@ -11191,7 +11235,7 @@
     },
     "/api/applications/{application_id}/kit": {
       "get": {
-        "description": "The application kit (S3): the CV and cover letter of THIS application, every\nstored answer with its source, what is missing for the job's country, fresh\n30-minute file links, the duplicate / hold / account-site / autofill state and\nthe gate's preview. Writes one ``kit_read`` event (the timeline shows who read\nit and when) and one link row per document; the file tokens appear only in this\nresponse. 404 for an application that is not the caller's; 429 over the\nhourly cap. ``Cache-Control: no-store``.",
+        "description": "The application kit (S3): the CV and cover letter of THIS application, every\nstored answer with its source, what is missing for the job's country, fresh\n30-minute file links, the duplicate / hold / account-site / autofill state and\nthe gate's preview. Writes one ``kit_read`` event (the timeline shows who read\nit and when) and one link row per document; the file tokens appear only in this\nresponse. 404 for an application that is not the caller's; 429 over the\nhourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /\n``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest\n``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``.",
         "operationId": "get_application_kit_api_applications__application_id__kit_get",
         "parameters": [
           {
@@ -11201,6 +11245,16 @@
             "schema": {
               "title": "Application Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_text",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Text",
+              "type": "boolean"
             }
           },
           {

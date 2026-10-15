@@ -804,12 +804,21 @@ def _records(value: Any) -> list[dict[str, Any]]:
     return [r for r in (value or []) if isinstance(r, dict)]
 
 
+def normalized_company_key(company: str) -> str:
+    """The rule-1 company key of a free-text company name (``Job.normalized_key``; never re-implemented)."""
+    from src.models import Job  # noqa: PLC0415
+
+    return Job(title="", company=company, apply_url="", source="", date_found="").normalized_key()[0]
+
+
 def compute_answers(
-    profile: Any, overlay: list[dict[str, Any]], country: Optional[str]
+    profile: Any, overlay: list[dict[str, Any]], country: Optional[str], company_key: Optional[str] = None
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """The answer blocks (every item tagged with its source) and the ``missing``
     list for ``country`` (the JOB's country; ``None`` = unknown). Empty / null =
-    absent, not an item (rule #29); ``False`` and ``0`` are real answers."""
+    absent, not an item (rule #29); ``False`` and ``0`` are real answers.
+    An approved answer with a ``company`` rides only in that company's kit: it is
+    skipped when ``company_key`` differs from the company's normalized key."""
     saved = {str(r["path"]): r.get("set_at") for r in overlay}
     # Feature 9: a path whose newest row an assistant wrote WITHOUT the user's word is an inference.
     unconfirmed = {
@@ -894,8 +903,12 @@ def compute_answers(
 
     for rec in _records(info.answers):
         if rec.get("approved") is True and _present(rec.get("answer")) and _present(rec.get("question")):
+            scoped = str(rec.get("company") or "").strip()
+            if scoped and normalized_company_key(scoped) != company_key:
+                continue  # given for ONE employer; this kit is for another (or an unknown) one
             out["approved_text"].append(
-                _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"))
+                _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"),
+                    **({"company": scoped} if scoped else {}))
             )
 
     have = {i["key"] for block in out.values() for i in block}
@@ -1076,7 +1089,9 @@ async def _hold(db: JobDatabase, user: CurrentUser, application_id: int, now: da
     }
 
 
-async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, now: datetime) -> dict[str, Any]:
+async def build_kit(
+    db: JobDatabase, user: CurrentUser, application_id: int, *, now: datetime, include_text: bool = True
+) -> dict[str, Any]:
     """Build the kit for one application and record that it was read.
 
     404 for an application that is not the caller's (no link row is written);
@@ -1115,7 +1130,18 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
     loaded, overlay = load_profile_with_overlay(user.id)
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
-    answers, missing = compute_answers(profile, overlay, country)
+    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
+    job_row = await cur.fetchone()
+    job_company_key = str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
+    answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
+    answers_omitted = 0
+    approved = answers["approved_text"]
+    if len(approved) > settings.KIT_APPROVED_TEXT_MAX:
+        # Keep the newest whole items (original order preserved); the rest stay in the profile.
+        newest = sorted(range(len(approved)), key=lambda i: (str(approved[i].get("saved_at") or ""), i))
+        keep = set(newest[-settings.KIT_APPROVED_TEXT_MAX:])
+        answers_omitted = len(approved) - len(keep)
+        answers["approved_text"] = [it for i, it in enumerate(approved) if i in keep]
     hold = await _hold(db, user, application_id, now)
     state = await controls_state(db, user.id, app_row, now)
     events = await _events(db, user.id, application_id, ("cv_seen", "submit_approved"))
@@ -1193,7 +1219,7 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
     out: dict[str, Any] = {
         "kit": {"id": event["event_id"], "sha256": kit_sha, "generated_at": now.isoformat()},
         "job": job, "application": application,
-        "cv": cv, "cover_letter": letter,
+        "cv": _cap_text(cv, include_text), "cover_letter": _cap_text(letter, include_text),
         "answers": answers, "missing": missing,
         "settings": settings_block,
         "duplicate": dup,
@@ -1202,11 +1228,32 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
         "warnings": pay_warnings(profile, country),
         "instructions": list(KIT_INSTRUCTIONS),
     }
+    if answers_omitted:
+        out["answers_omitted"] = answers_omitted
+        out["instructions"].append(
+            "More approved answers: get_profile fields['user_info.answers']"
+        )
     if cv is None:
         out["cv_none_reason"] = NO_CV_REASON
     if letter is None:
         out["cover_letter_none_reason"] = NO_LETTER_REASON
     return out
+
+
+TEXT_MORE = "get_application(application_id, with_artifact_text=true)"
+
+
+def _cap_text(doc: Optional[dict[str, Any]], include_text: bool) -> Optional[dict[str, Any]]:
+    """Output copy of a document with ``text`` cut to ``KIT_DOC_TEXT_MAX_CHARS``. The sha256 / chars
+    stay those of the FULL text (cv_seen / submit_approved compare them); the kit sha is already
+    computed from the full text. ``include_text=False`` sends no text, only the pointer."""
+    if doc is None:
+        return None
+    text = str(doc.get("text") or "")
+    cap = settings.KIT_DOC_TEXT_MAX_CHARS
+    if include_text and len(text) <= cap:
+        return doc
+    return {**doc, "text": text[:cap] if include_text else "", "text_truncated": True, "text_more": TEXT_MORE}
 
 
 def _strip_file(doc: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:

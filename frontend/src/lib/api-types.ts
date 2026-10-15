@@ -495,7 +495,9 @@ export interface paths {
          *     the gate's preview. Writes one ``kit_read`` event (the timeline shows who read
          *     it and when) and one link row per document; the file tokens appear only in this
          *     response. 404 for an application that is not the caller's; 429 over the
-         *     hourly cap. ``Cache-Control: no-store``.
+         *     hourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /
+         *     ``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest
+         *     ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``.
          */
         get: operations["get_application_kit_api_applications__application_id__kit_get"];
         put?: never;
@@ -2891,6 +2893,8 @@ export interface components {
         ApplicationKitOut: {
             account_site: components["schemas"]["KitAccountSiteOut"];
             answers: components["schemas"]["KitAnswersOut"];
+            /** Answers Omitted */
+            answers_omitted?: number | null;
             application: components["schemas"]["KitApplicationOut"];
             /**
              * Autofill
@@ -4082,6 +4086,8 @@ export interface components {
         };
         /** KitAnswerOut */
         KitAnswerOut: {
+            /** Company */
+            company?: string | null;
             /** Key */
             key: string;
             /** Label */
@@ -4146,6 +4152,10 @@ export interface components {
             sha256: string;
             /** Text */
             text: string;
+            /** Text More */
+            text_more?: string | null;
+            /** Text Truncated */
+            text_truncated?: boolean | null;
             /** Version */
             version: number;
         };
@@ -6941,7 +6951,9 @@ export interface operations {
     };
     get_application_kit_api_applications__application_id__kit_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_text?: boolean;
+            };
             header?: {
                 authorization?: string | null;
             };

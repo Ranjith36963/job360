@@ -888,6 +888,9 @@ class KitDocumentOut(BaseModel):
     text: str
     sha256: str
     chars: int
+    # `text` is cut to KIT_DOC_TEXT_MAX_CHARS; sha256 / chars are those of the FULL text.
+    text_truncated: Optional[bool] = None
+    text_more: Optional[str] = None
     seen: Optional[KitSeenOut] = None
     approved: Optional[KitSeenOut] = None
     # Plain facts found when this version was saved (cv_checks.py); [] = none.
@@ -901,6 +904,7 @@ class KitAnswerOut(BaseModel):
     source: Literal["memory", "profile", "approved_text"]
     saved_at: Optional[str] = None
     label: Optional[str] = None
+    company: Optional[str] = None
 
 
 class KitAnswersOut(BaseModel):
@@ -984,6 +988,7 @@ class ApplicationKitOut(BaseModel):
     cover_letter: Optional[KitDocumentOut] = None
     cover_letter_none_reason: Optional[str] = None
     answers: KitAnswersOut
+    answers_omitted: Optional[int] = None
     missing: list[KitMissingOut]
     settings: dict[str, Any]
     duplicate: KitDuplicateOut
@@ -1964,6 +1969,7 @@ async def update_job_facts(
 async def get_application_kit(
     application_id: int,
     response: Response,
+    include_text: bool = Query(True),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -1973,10 +1979,14 @@ async def get_application_kit(
     the gate's preview. Writes one ``kit_read`` event (the timeline shows who read
     it and when) and one link row per document; the file tokens appear only in this
     response. 404 for an application that is not the caller's; 429 over the
-    hourly cap. ``Cache-Control: no-store``."""
+    hourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /
+    ``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest
+    ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``."""
     response.headers["Cache-Control"] = "no-store"
     try:
-        return await kit_service.build_kit(db, user, application_id, now=datetime.now(timezone.utc))
+        return await kit_service.build_kit(
+            db, user, application_id, now=datetime.now(timezone.utc), include_text=include_text
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

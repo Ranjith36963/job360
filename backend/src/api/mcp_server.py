@@ -372,15 +372,39 @@ def build_server(version: str = "") -> MCPServer:
         """Nothing saved + the rule + the limits with an example (no submitted value is quoted)."""
         return f"Nothing was saved. {detail.rstrip('. ')}. {_save_fit_limits()}"
 
-    # How much stored text one `get_profile` call may hand back per document,
-    # and how many repo briefs. Deliberately larger than any real CV (a dense
-    # two-page CV is ~6 KB of text) so the cap is invisible in practice and
-    # only bites a pathological input.
-    _RAW_DOC_CHARS = 120_000
-    _RAW_REPOS = 60
+    # How much stored text one `get_profile` call hands back per section (a text
+    # section is cut at this many characters; github_repos is filled until its
+    # serialized JSON reaches this budget). The rest is paged with `raw_section` +
+    # `raw_offset`, so one call stays far under a client's tool-result limit.
+    _RAW_SECTION_CHARS = 15_000
+    _RAW_TEXT_SECTIONS = ("cv", "linkedin", "github_bio", "github_profile_readme")
+    _RAW_SECTIONS = (*_RAW_TEXT_SECTIONS, "github_repos")
 
-    def _raw_block(cv: Any) -> dict[str, Any]:
-        """The stored documents the agent reads, bounded, with a truncation flag."""
+    def _raw_section_error(section: str, why: str = "") -> Exception:
+        from mcp.server.mcpserver.exceptions import ToolError  # noqa: PLC0415
+
+        return ToolError(
+            why or f"raw_section must be one of: {', '.join(_RAW_SECTIONS)} (got {section[:40]!r})"
+        )
+
+    def _raw_next(section: str, offset: int) -> str:
+        return f'get_profile(include_raw=true, raw_section="{section}", raw_offset={offset})'
+
+    def _raw_repos_slice(repos: list[Any], start: int) -> list[Any]:
+        """Repos from ``start`` until the serialized-JSON budget is full (always at least one)."""
+        out: list[Any] = []
+        used = 2
+        for repo in repos[start:]:
+            size = len(json.dumps(repo, default=str)) + 2
+            if out and used + size > _RAW_SECTION_CHARS:
+                break
+            out.append(repo)
+            used += size
+        return out
+
+    def _raw_block(cv: Any, section: str = "", offset: int = 0) -> dict[str, Any]:
+        """The stored documents the agent reads, bounded, with a truncation flag and
+        `more` (how to page each cut section). With ``section``: only that slice."""
         docs = {
             "cv": cv.raw_text or "",
             "linkedin": cv.linkedin_raw_text or "",
@@ -388,16 +412,47 @@ def build_server(version: str = "") -> MCPServer:
             "github_profile_readme": cv.github_profile_readme or "",
         }
         repos = list(cv.github_repos_brief or [])
-        truncated = len(repos) > _RAW_REPOS or any(
-            len(v) > _RAW_DOC_CHARS for v in docs.values()
-        )
-        out: dict[str, Any] = {k: v[:_RAW_DOC_CHARS] for k, v in docs.items()}
-        out["github_repos"] = repos[:_RAW_REPOS]
-        out["truncated"] = truncated
+        if section and section not in _RAW_SECTIONS:
+            raise _raw_section_error(section)
+        if offset < 0:
+            raise _raw_section_error(section, "raw_offset must be 0 or more")
+        more: dict[str, Any] = {}
+
+        def text_slice(name: str, start: int) -> str:
+            text = docs[name]
+            piece = text[start:start + _RAW_SECTION_CHARS]
+            if start + len(piece) < len(text):
+                more[name] = {
+                    "total_chars": len(text), "returned": len(piece),
+                    "next": _raw_next(name, start + len(piece)),
+                }
+            return piece
+
+        def repo_slice(start: int) -> list[Any]:
+            piece = _raw_repos_slice(repos, start)
+            if start + len(piece) < len(repos):
+                more["github_repos"] = {
+                    "total_repos": len(repos), "total_chars": len(json.dumps(repos, default=str)),
+                    "returned": len(piece), "next": _raw_next("github_repos", start + len(piece)),
+                }
+            return piece
+
+        out: dict[str, Any] = {}
+        if section:
+            out[section] = repo_slice(offset) if section == "github_repos" else text_slice(section, offset)
+        else:
+            for name in _RAW_TEXT_SECTIONS:
+                out[name] = text_slice(name, 0)
+            out["github_repos"] = repo_slice(0)
+        out["truncated"] = bool(more)
+        if more:
+            out["more"] = more
         return out
 
     @mcp.tool()
-    async def get_profile(include_raw: bool = False) -> dict[str, Any]:
+    async def get_profile(
+        include_raw: bool = False, raw_section: str = "", raw_offset: int = 0
+    ) -> dict[str, Any]:
         """READ `assistant_notes` FIRST — the user's standing instructions to you; they win.
 
         Read `settings` before any apply step: obey each `effective`; `paused: true` = stop all apply work;
@@ -405,7 +460,8 @@ def build_server(version: str = "") -> MCPServer:
         `settings.setup_progress` = which of the six setup rounds (targets first) are done.
 
         The CV/LinkedIn/GitHub text is sent only with get_profile(include_raw=true) as `raw` (+`raw.truncated`);
-        `raw_available` says whether any exists. `editable_paths` = what you may write, `fields` = current values,
+        `raw_available` says whether any exists. Each section is cut at 15000 chars; `raw.more` gives the `next`
+        call (`raw_section` + `raw_offset`). `editable_paths` = what you may write, `fields` = current values,
         `shapes` = a valid example for each structured path. `skills` = THE skill list; remove a wrong one via
         `preferences.excluded_skills`.
 
@@ -557,7 +613,7 @@ def build_server(version: str = "") -> MCPServer:
             # and `truncated` says so out loud when one is.
             "raw_available": raw_present,
             "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable_paths},
-            **({"raw": _raw_block(profile.cv_data)} if include_raw else {}),
+            **({"raw": _raw_block(profile.cv_data, raw_section, raw_offset)} if include_raw else {}),
         }
 
     @mcp.tool()
@@ -1501,10 +1557,11 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def get_application_kit(application_id: int) -> dict[str, Any]:
+    async def get_application_kit(application_id: int, include_text: bool = True) -> dict[str, Any]:
         """The APPLICATION KIT - call this before you fill ANY application form.
-        It holds, for THIS application only: the CV and cover letter (full `text`,
-        a `sha256`, and a 30-minute `file.url` PDF link you can download, 3
+        It holds, for THIS application only: the CV and cover letter (`text` up to 8000
+        chars - `text_truncated` + `text_more` say how to fetch the rest; `include_text=false`
+        sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link you can download, 3
         downloads), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality ("equality / voluntary") /
         approved_text, each with its `source` (memory, profile, approved_text) and
@@ -1520,10 +1577,14 @@ def build_server(version: str = "") -> MCPServer:
         link means call it again. After filling the form, record_event
         form_filled {form_url, fields_count}, re-read every field and record form_swept
         {fields_checked, fixed}; check_submit says stop until you do. `warnings` and
-        `cv.checks` are plain facts to check, never a block."""
+        `cv.checks` are plain facts to check, never a block. `approved_text` holds
+        the newest 25 answers (`answers_omitted` counts the rest)."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.get_application_kit(application_id, Response(), db, _user())
+                resp = await applications_route.get_application_kit(
+                    application_id=application_id, response=Response(), include_text=include_text,
+                    db=db, user=_user(),
+                )
         except HTTPException as exc:
             _audit("get_application_kit", "error", application_id=application_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
