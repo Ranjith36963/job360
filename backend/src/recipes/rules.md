@@ -163,7 +163,7 @@ up to 8000 chars - `text_more` says how to fetch the rest; `include_text=false` 
 downloads), every stored answer grouped as contact / right_to_work /
 logistics / salary / languages / equality ("equality / voluntary") /
 approved_text, each with its `source` (memory, profile, approved_text),
-`saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary`
+`saved_at` and `state` (confirmed / relayed / inferred / sensitive; `answers_summary`
 counts them), and `missing` - country and contact facts Job360 lacks for THIS job
 (the form's own questions: check_form). Also: `duplicate` (warn the user before any work), `hold`
 (another session is on it: `held_by`, `session`, `until`; `unsure` = maybe your own

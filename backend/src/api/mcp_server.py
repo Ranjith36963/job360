@@ -1706,9 +1706,9 @@ def build_server(version: str = "") -> MCPServer:
         3 downloads), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality ("equality / voluntary") /
         approved_text, each with its `source` (memory, profile, approved_text),
-        `saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary` counts
+        `saved_at` and `state` (confirmed / relayed / inferred / sensitive; `answers_summary` counts
         them; a 'sensitive' answer (equality, sanctions, visa / right-to-work) is shown
-        to the user and confirmed on THIS form first, never filled silently; a confirmed
+        to the user and confirmed on THIS form first, never filled; a confirmed
         one may carry `confirmed_at`), and `missing` (country and contact facts Job360
         lacks for THIS job; the form's own questions: check_form). Use only kit answers;
         ask ONCE, in one message, for anything in `missing`; never guess. Also: `duplicate` (warn
