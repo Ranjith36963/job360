@@ -139,8 +139,7 @@ building a PDF with a core font.
 **Fix:** reuse the renderer's own transliterator,
 `services/tailoring/pdf._to_latin1` — pinned by
 `backend/tests/test_pdf_unicode.py`. To embed a Unicode TTF instead, copy the
-`add_font(family, style, path)` call in `services/tailoring/cv_render`; the
-pinned fpdf2 takes no `uni=` keyword.
+`add_font(family, style, path)` call in `services/tailoring/cv_render`.
 
 ---
 
