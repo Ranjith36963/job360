@@ -1054,10 +1054,8 @@ def build_server(version: str = "") -> MCPServer:
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|other, step, page_host, detail}, then stop that application; unblocked {resolution:
         retried|user_did_it|skipped}.
-        simulation (no payload; detail = why): a test or simulated application. Record it FIRST, before any other
-        event; stats, proof and the practice run never count it. Undo it with a `note` whose corrects_event_id is
-        the simulation event (never another `simulation`).
-        proof_text {text, page_host}: the pasted confirmation text. Payloads, 403/409: get_recipe("rules"), Events."""
+        proof_text {text, page_host}; simulation {} = a test app, record it first, never counted.
+        Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
             # route: neither the cold outreach door nor the linked branch
