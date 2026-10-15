@@ -265,6 +265,12 @@
           "answer": {
             "title": "Answer",
             "type": "string"
+          },
+          "user_words": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "User Words",
+            "type": "string"
           }
         },
         "required": [
@@ -1100,6 +1106,11 @@
             ],
             "title": "Cover Letter Artifact Id"
           },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
+          },
           "cover_letter_text": {
             "anyOf": [
               {
@@ -1191,6 +1202,11 @@
               }
             ],
             "title": "Cover Letter Artifact Id"
+          },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
           },
           "cv_artifact_id": {
             "anyOf": [
@@ -1742,8 +1758,27 @@
             "title": "Question",
             "type": "string"
           },
+          "relayed_from_chat": {
+            "default": false,
+            "title": "Relayed From Chat",
+            "type": "boolean"
+          },
+          "said_by": {
+            "default": "assistant",
+            "enum": [
+              "you",
+              "assistant"
+            ],
+            "title": "Said By",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
+            "type": "string"
+          },
+          "user_words": {
+            "default": "",
+            "title": "User Words",
             "type": "string"
           },
           "withdrawn_at": {
@@ -6500,6 +6535,11 @@
             ],
             "title": "Cover Letter Origin"
           },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
+          },
           "cover_letter_text": {
             "anyOf": [
               {
@@ -6783,6 +6823,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
+          },
           "has_cover_letter": {
             "title": "Has Cover Letter",
             "type": "boolean"
@@ -6980,6 +7025,11 @@
               }
             ],
             "title": "Cover Letter Artifact Id"
+          },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
           },
           "cv_artifact_id": {
             "anyOf": [

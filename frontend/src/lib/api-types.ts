@@ -2696,6 +2696,11 @@ export interface components {
         AnswerAskRequest: {
             /** Answer */
             answer: string;
+            /**
+             * User Words
+             * @default
+             */
+            user_words: string;
         };
         /**
          * ApplicationArtifactOut
@@ -2943,6 +2948,11 @@ export interface components {
             confirmation: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cover Letter Text */
             cover_letter_text?: string | null;
             /** Cv Artifact Id */
@@ -2975,6 +2985,11 @@ export interface components {
             confirmation: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Fields Filled */
@@ -3175,8 +3190,24 @@ export interface components {
             job_title: string | null;
             /** Question */
             question: string;
+            /**
+             * Relayed From Chat
+             * @default false
+             */
+            relayed_from_chat: boolean;
+            /**
+             * Said By
+             * @default assistant
+             * @enum {string}
+             */
+            said_by: "you" | "assistant";
             /** Status */
             status: string;
+            /**
+             * User Words
+             * @default
+             */
+            user_words: string;
             /** Withdrawn At */
             withdrawn_at: string | null;
         };
@@ -5113,6 +5144,11 @@ export interface components {
             confirmation?: string | null;
             /** Cover Letter Origin */
             cover_letter_origin: string | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cover Letter Text */
             cover_letter_text: string | null;
             /** Cover Letter Version No */
@@ -5212,6 +5248,11 @@ export interface components {
         ReceiptSummary: {
             /** Channel */
             channel: string;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Has Cover Letter */
             has_cover_letter: boolean;
             /** Has Cv */
@@ -5293,6 +5334,11 @@ export interface components {
             confirmation: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Cv Version No */
