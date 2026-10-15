@@ -471,6 +471,12 @@ class SubmitFacts:
     # ``kit.gate_facts`` always sets it from the caller; ``False`` asks
     # ``email_not_verified`` and a yes never clears it (2026-10-14).
     email_verified: bool = True
+    # Another assistant session's live hold on this application (2026-10-15):
+    # ``(held_by, session, since)`` of the newest kit read by a DIFFERENT
+    # (actor, session) inside ``KIT_HOLD_MINUTES`` with no later applied /
+    # withdrawn / rejected / hold_released (``kit.session_hold``). ``None`` =
+    # nobody else is on it. Asks ``held_by_other_session``; a yes never clears it.
+    other_session_hold: Optional[tuple[str, str, str]] = None
 
 
 @dataclass(frozen=True)
@@ -488,7 +494,7 @@ REASONS: tuple[str, ...] = (
     "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
-    "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified",
+    "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
 )
 
 
@@ -623,6 +629,9 @@ def may_submit(
         yes does NOT clear it; after the stops so a stop is never softened to an ask)
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
+    5a. another assistant session read this application's kit inside
+        ``KIT_HOLD_MINUTES`` and has not released it -> ask
+        ``held_by_other_session`` (a yes does NOT clear it; after every stop)
     5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
     5d. ``form_url`` fails :func:`screen_form_url` (user-info ``@``, ``%`` or a
         backslash in the authority, non-ASCII / IDNA host, not http(s)) -> ask
@@ -643,8 +652,8 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4c, the auto-mode duplicate stop, the ``blocked``
-    ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (4d)
+    ``user_approved``. Rules 1-4c, the auto-mode duplicate stop, the other
+    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (4d)
     are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
@@ -682,6 +691,14 @@ def may_submit(
         return SubmitDecision(
             "stop", "duplicate_job",
             "Needs you: possible duplicate - this job was already applied to. Do not submit; the user decides.",
+        )
+    if application.other_session_hold is not None:
+        held_by, session, since = application.other_session_hold
+        who = f"{held_by}/{session}" if session else held_by
+        return SubmitDecision(
+            "ask", "held_by_other_session",
+            f"Another assistant session ({who}) read this application's kit at {since}; "
+            "make sure only one session submits.",
         )
     if application.blocked:
         return SubmitDecision(

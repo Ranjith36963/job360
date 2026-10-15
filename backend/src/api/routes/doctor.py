@@ -20,9 +20,9 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
@@ -115,11 +115,17 @@ def _next_step(
 async def doctor(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+    client_tools_version: Annotated[str, Query(max_length=64)] = "",
 ) -> dict[str, Any]:
     """The account's state in one read, plus ONE closed ``next_step``:
     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
     Read-only; email verification is NOT required (an unverified user is told
-    to verify). No 404 when there is no profile (``profile_exists: false``)."""
+    to verify). No 404 when there is no profile (``profile_exists: false``).
+
+    Also the MCP tool list as served now (``tools``, ``tools_version``) so an
+    assistant can tell its client cached an old one: pass the version it saw
+    last as ``client_tools_version`` and ``tools_stale`` says whether it moved
+    (null when none was passed)."""
     now = datetime.now(timezone.utc)
     loaded, overlay = load_profile_with_overlay(user.id)
     profile = loaded or UserProfile()
@@ -155,7 +161,20 @@ async def doctor(
             "blocked_today": await _blocked_today(db, user.id, now),
         },
         "next_step": next_step,
+        **_tools_block(client_tools_version),
     }
+
+
+def _tools_block(client_tools_version: str) -> dict[str, Any]:
+    """The MCP tool-list block (``mcp_server.tools_report``), lazily imported (rule #16).
+    Defensive like every doctor field: a failure reads as an empty list, never a 500."""
+    try:
+        from src.api.mcp_server import tools_report  # noqa: PLC0415
+
+        return tools_report(client_tools_version)
+    except Exception:  # noqa: BLE001
+        log.warning("doctor_tools_report_failed", extra={"event": "doctor_tools_report_failed"})
+        return {"tools_version": "", "tools": {}, "tools_stale": None, "stale_hint": ""}
 
 
 @router.post("/missing-tools", status_code=201, response_model=MissingToolResponse, dependencies=AUTH_FIRST)

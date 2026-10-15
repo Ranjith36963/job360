@@ -96,9 +96,17 @@ SHAPES: dict[str, dict[str, Any]] = {
         "note": "text answers; true/false are stored as Yes/No",
     },
     "user_info.answers": {
-        "example": [{"question": "Why do you want this job?", "answer": "I like the product.", "approved": False}],
+        "example": [{
+            "question": "Why do you want this job?", "answer": "I like the product.",
+            "approved": False, "topic": "why_this_job",
+        }],
         "allowed_keys": list(_ui._ANSWER_KEYS),
-        "note": "company = set it when the answer is only for one employer (consent to X's privacy notice, why X)",
+        "note": (
+            "company = set it when the answer is only for one employer (consent to X's privacy notice, why X). "
+            "topic = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. work_from.IN, "
+            "notice_period_days); a gap or question with the same topic is answered by this one. "
+            "aliases = up to 5 other wordings of the same question (a fallback match only)"
+        ),
     },
     "preferences.salary_by_country": {
         "example": [{"country": "GB", "min": 60000, "max": 80000, "currency": "GBP", "period": "year"}],
