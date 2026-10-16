@@ -38,7 +38,9 @@ async def _event(client: AsyncClient, app_id: int, event_type: str, **extra: Any
 
 
 async def _fit(client: AsyncClient, app_id: int, score: int) -> None:
-    resp = await client.put(f"/api/applications/{app_id}/fit", json={"score": score})
+    resp = await client.put(f"/api/applications/{app_id}/fit", json={
+        "score": score, "verdict": "Fixture fit for the numbers tests.", "score_source": "full_ad",
+    })
     assert resp.status_code == 200, resp.text
 
 

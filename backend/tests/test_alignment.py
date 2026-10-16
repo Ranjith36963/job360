@@ -75,7 +75,7 @@ async def test_alignment_draws_the_verdict_and_the_skill_split(authenticated_asy
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         fit = await client.put(
-            f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "strong match", "gaps": ["leading university"]}
+            f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "strong match", "score_source": "full_ad", "gaps": ["leading university"]}
         )
         assert fit.status_code == 200, fit.text
         resp = await client.get(f"/api/applications/{app_id}/alignment")

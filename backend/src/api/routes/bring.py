@@ -54,7 +54,7 @@ from src.core import settings
 from src.core.settings import USER_BROUGHT_SOURCE
 from src.repositories.database import JobDatabase
 from src.services.fetch import outcomes
-from src.utils.logger import get_audit_logger, get_logger
+from src.utils.logger import get_audit_logger, get_logger, safe_log_value
 
 router = APIRouter(tags=["bring"])
 logger = get_logger(__name__)
@@ -254,6 +254,17 @@ class BringJobResponse(BaseModel):
     ad_posted_at: Optional[str] = None
     employer_published_at: Optional[str] = None
     checks: list[dict[str, Any]] = Field(default_factory=list)
+    # Slice 5 - set only when this bring birthed a NEW application and the same
+    # title at the same company was brought by THIS user earlier under another
+    # link (1..90 days ago). Facts only; the user decides.
+    repost: Optional[dict[str, Any]] = None
+
+
+def _repost_sentence(repost: dict[str, Any]) -> str:
+    return (
+        f" Among jobs you brought: this title at this company was first brought on {repost['first_seen']} "
+        f"({repost['days_since']} days ago) under another link — it may be a repost of the same opening."
+    )
 
 
 async def _job_id_for_same_link(db: JobDatabase, user_id: str, apply_url: str, company: str) -> Optional[int]:
@@ -366,6 +377,14 @@ async def bring_job(
     if row is None:
         raise HTTPException(status_code=500, detail="Could not read the job back")
 
+    # Slice 5 - a repost among the jobs THIS user brought (never another user's
+    # row, never the catalog). Computed once; never raises.
+    from src.services.applications import reposts  # noqa: PLC0415
+
+    repost = await reposts.repost_of(
+        db, user.id, company=body.company, title=body.title, apply_url=body.apply_url,
+    )
+
     # P0 2026-10-14 — a SAME-user re-bring of a clearly different posting
     # (another job link, location or country under the same title+company)
     # must not land silently on the existing application: applications are
@@ -384,6 +403,16 @@ async def bring_job(
                     "application_id": int(mine["id"]), "reason": ",".join(diffs), "status": "refused",
                 },
             )
+            if repost:
+                get_audit_logger().info(
+                    "job_bring_repost",
+                    extra={
+                        "event": "job_bring_repost", "user_id": safe_log_value(user.id),
+                        "application_id": int(mine["id"]),
+                        "earlier_application_id": repost["application_id"],
+                        "days_since": repost["days_since"], "status": "refused",
+                    },
+                )
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -393,6 +422,7 @@ async def bring_job(
                     "(fix country/remote/found_on/dates with update_job, i.e. PATCH "
                     f"/applications/{int(mine['id'])}/job). If it is a DIFFERENT posting, bring it "
                     "again with a title that tells the two apart, e.g. add the city in brackets."
+                    + (_repost_sentence(repost) if repost else "")
                 ),
             )
 
@@ -420,6 +450,20 @@ async def bring_job(
             extra={
                 "event": "job_bring_own_snapshot", "user_id": user.id, "job_id": job_id,
                 "application_id": birth["application_id"], "reason": "shared_catalog_key", "status": "ok",
+            },
+        )
+    flagged_repost = (
+        repost if repost is not None and not birth["existing"]
+        and repost["application_id"] != birth["application_id"] else None
+    )
+    if flagged_repost is not None:
+        get_audit_logger().info(
+            "job_bring_repost",
+            extra={
+                "event": "job_bring_repost", "user_id": safe_log_value(user.id),
+                "application_id": birth["application_id"],
+                "earlier_application_id": flagged_repost["application_id"],
+                "days_since": flagged_repost["days_since"], "status": "flagged",
             },
         )
     # Slice 7 — the agent's visa reading, when it gave one. Omitted means the
@@ -489,6 +533,7 @@ async def bring_job(
         ad_posted_at=stored.get("ad_posted_at"),
         employer_published_at=stored.get("employer_published_at"),
         checks=checks,
+        repost=flagged_repost,
         **facts,
     )
 

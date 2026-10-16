@@ -675,3 +675,30 @@ Three note events, all through `record_event` (none moves the status). Payload l
   interview went unanswered. doctor `silent_after_interview` lists interviews with no word past 30 days.
 Artifact kinds: `story_bank`, `interview_transcript`, `redflag_analysis`; each save is a new version.
 Counts: `stats(view="digest" | "friction" | "assessments")`. Counts only; coaching and judging are yours.
+
+## Fit records, reposts and patterns
+
+Job360 counts what you saved; it never ranks or recommends a job. `save_fit` stores YOUR verdict:
+- A `score` (0-100) needs `verdict` = your reason in 1-140 characters AND `score_source`: `full_ad` (you read
+  the whole ad), `listing` (only a board listing or teaser) or `owner` (the user gave the number). Without
+  both the call is refused and nothing is saved.
+- No score = unscored (null), never a low score. Say how many fits you left unscored. Without a score `verdict`
+  is optional (200 characters).
+- `gaps`: plain strings, or `{"text", "kind": "hard"|"soft"}`. hard = a must-have the profile lacks.
+- `jd_requirements`: the ad's requirements, same item shape, read off the ad (at most 50).
+- Four optional extras read off the ad: `archetype` (your short name for the role type, 80 chars),
+  `remote_policy` (`remote` | `hybrid` | `onsite`), `team_size` (people, a whole number) and `via`
+  (`agency` | `direct`). Unknown = leave out; never guess.
+- Every `save_fit` REPLACES all of these; the earlier values stay in the event history.
+- Tell the user the gaps BEFORE writing the CV. Never add a skill they do not have.
+- `skill_gap_report` is a `save_artifact` kind for the learning plan: first line `schema: 1`, a new
+  version per review; compare only reports with the same schema.
+- `bring_job` can return `repost`: among the jobs the user brought, this title at this company was first
+  brought on `first_seen`, 1-90 days ago, under another link. Tell the user; they decide. Never skip a job
+  because of it. A 409 from `bring_job` carries the same sentence.
+- `stats(view="patterns")`: outcome counts by archetype, remote policy, team size (1-50, 51-500, 501+)
+  and agency/direct. Needs 5 sent applications. A `signal` needs 2 decided applications; `clear_lead` =
+  10+ points over the overall rate. `rejection_reasons` are exact words: group them yourself.
+- `stats(view="skill_gaps")`: the gaps you saved, counted and tiered. Needs 5 scored fits. Low fit = score
+  under 80. Skills already on the profile are left out and counted.
+- Job360 counts; it never ranks or recommends. Quote every rate with its n.

@@ -87,7 +87,7 @@ async def test_axes_ride_the_slot_and_the_event(authenticated_async_context):
         app_id = await _bring(client)
         resp = await client.put(
             f"/api/applications/{app_id}/fit",
-            json={"score": 68, "verdict": "good", "axes": _AXES},
+            json={"score": 68, "verdict": "good", "score_source": "full_ad", "axes": _AXES},
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["fit"]["axes"] == _AXES
@@ -104,9 +104,9 @@ async def test_axes_ride_the_slot_and_the_event(authenticated_async_context):
 async def test_a_save_without_axes_clears_them_and_stays_silent(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        first = await client.put(f"/api/applications/{app_id}/fit", json={"score": 50, "axes": _AXES})
+        first = await client.put(f"/api/applications/{app_id}/fit", json={"score": 50, "verdict": "ok", "score_source": "full_ad", "axes": _AXES})
         assert first.status_code == 200, first.text
-        second = await client.put(f"/api/applications/{app_id}/fit", json={"score": 55, "verdict": "re-read"})
+        second = await client.put(f"/api/applications/{app_id}/fit", json={"score": 55, "verdict": "re-read", "score_source": "full_ad"})
         assert second.status_code == 200, second.text
         detail = (await client.get(f"/api/applications/{app_id}")).json()
     assert detail["fit"]["score"] == 55
@@ -150,7 +150,7 @@ async def test_the_agent_tool_stores_and_reads_the_same_axes(authenticated_async
         assert save is not None and read is not None
         mcp_server._current_user.set(mcp_server.CurrentUser(id=fixture_user_id, email="e2e@example.com"))
         try:
-            saved = await save.fn(app_id, score=68, verdict="good", axes=_AXES)
+            saved = await save.fn(app_id, score=68, verdict="good", score_source="full_ad", axes=_AXES)
             detail = await read.fn(app_id)
         finally:
             mcp_server._current_user.set(None)
