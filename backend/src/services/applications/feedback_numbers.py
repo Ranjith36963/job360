@@ -641,6 +641,7 @@ async def compute_views(
         now = datetime.now(timezone.utc)
         facts = await load(db, user_id, since_val)
         out: dict[str, Any] = {}
+        company_truncated = facts.truncated
         for name in selected:
             if name == "funnel":
                 out[name] = funnel(facts)
@@ -651,20 +652,28 @@ async def compute_views(
             elif name == "company":
                 # History is the point: `since` is ignored (and says so).
                 company_facts = facts if not since_val else await load(db, user_id, None)
+                company_truncated = company_facts.truncated
                 out[name] = company_cards(company_facts, now, zone, company, since_given=bool(since_val))
             elif name == "lesson_effect":
                 rows, total = lessons_service.list_lessons(user_id, limit=settings.PROFILE_LESSONS_MAX)
                 out[name] = lesson_effect(facts, rows, total)
             elif name == "followups":
                 out[name] = followups(facts, now, zone)
-        if facts.truncated:
-            for block in out.values():
-                if isinstance(block, dict) and "truncated" not in block:
-                    block["truncated"] = True
-                    block["truncated_hint"] = (
-                        f"only the newest {settings.STATS_MAX_APPLICATIONS} applications were read; "
-                        "pass since=YYYY-MM-DD to narrow"
-                    )
+        hint = (
+            f"only the newest {settings.STATS_MAX_APPLICATIONS} applications were read; "
+            "pass since=YYYY-MM-DD to narrow"
+        )
+        for name, block in out.items():
+            if not isinstance(block, dict):
+                continue
+            if name == "company":
+                # The block's own `truncated` is the card cap; the application cap gets its own key.
+                block["applications_truncated"] = bool(company_truncated)
+                if company_truncated:
+                    block["truncated_hint"] = hint
+            elif facts.truncated and "truncated" not in block:
+                block["truncated"] = True
+                block["truncated_hint"] = hint
     except Exception:
         log.exception("stats_view_failed", extra={"user_id": safe_log_value(user_id),
                                                   "view": safe_log_value(view, max_len=40)})

@@ -4101,7 +4101,8 @@ export interface components {
              * @default {
              *       "courtesy_days": 30,
              *       "disclaimer": "Elapsed time only — not legal advice or a claim that the employer did anything wrong.",
-             *       "items": []
+             *       "items": [],
+             *       "truncated": false
              *     }
              */
             silent_after_interview: components["schemas"]["DoctorSilentBlock"];
@@ -4166,6 +4167,11 @@ export interface components {
              * @default []
              */
             items: components["schemas"]["DoctorSilentItem"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /**
          * DoctorSilentItem
@@ -6490,6 +6496,11 @@ export interface components {
         };
         /** StatsCompanyOut */
         StatsCompanyOut: {
+            /**
+             * Applications Truncated
+             * @default false
+             */
+            applications_truncated: boolean;
             /** Cards */
             cards: components["schemas"]["StatsCompanyCardOut"][];
             /** Explanation */

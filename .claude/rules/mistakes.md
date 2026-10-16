@@ -7,8 +7,9 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 
 ## Borrowing from competitors
 - "REA" means the Reverse Engineer Anything tool (github.com/morluto/rea, MCP + `rea` CLI).
-  Never say REA was used unless `which rea` / the rea MCP actually ran; page captures and
-  web reads are "web research", and must be called that.
+  Claim REA only after an actual REA MCP call or CLI run (including `npx rea-agents`);
+  `which rea` only shows it is available. Page captures and web reads are "web research",
+  and must be called that.
 - Open the source before you borrow: every repo and capture in the session-lessons
   "Reference index" (re-clone or re-capture if missing). Quote file:line, or write
   NOT IN REFERENCE. Never cite from memory.

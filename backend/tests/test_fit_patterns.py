@@ -392,6 +392,37 @@ async def test_no_repost_for_the_same_link_blank_links_or_an_exact_rebring(authe
 
 
 @pytest.mark.asyncio
+async def test_a_shared_catalog_link_does_not_mask_a_repost(authenticated_async_context, fixture_user_id):
+    """The comparison is against THIS user's own application link, not the
+    joined catalog url (which another user's bring may share)."""
+    from src.api.dependencies import get_db
+    from src.services.applications import reposts
+
+    async with authenticated_async_context() as client:
+        first = await _bring(client)
+        first_id = int(first["application_id"])
+        _backdate(first_id, 30)
+        # the shared catalog row carries the link the next bring uses; the user's own
+        # application link stays the original one
+        _sql("UPDATE jobs SET apply_url = ? WHERE id = (SELECT job_id FROM applications WHERE id = ?)",
+             ("https://acme.example/jobs/20202", first_id))
+        out = await reposts.repost_of(
+            await get_db(), fixture_user_id, company="Acme", title="Engineer, Data",
+            apply_url="https://acme.example/jobs/20202",
+        )
+    assert out is not None and out["application_id"] == first_id
+
+
+@pytest.mark.asyncio
+async def test_applications_older_than_the_window_are_not_even_read(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        first = await _bring(client)
+        _backdate(int(first["application_id"]), 400)
+        second = await _bring(client, title="Engineer, Data", apply_url="https://acme.example/jobs/20202")
+        assert second["repost"] is None
+
+
+@pytest.mark.asyncio
 async def test_another_users_bring_is_never_a_repost(authenticated_async_context):
     async with authenticated_async_context() as client:
         cookie = await _second_user_session_cookie()
@@ -525,7 +556,7 @@ async def test_patterns_counts_end_to_end(authenticated_async_context):
     assert not [s for s in p["signals"] if s["dimension"] == "via" and s["key"] is None]
 
     reasons = p["rejection_reasons"]
-    # rejections of the apps numbered 3, 5, 7 and 9 carry the reason (odd n); " data " is app 2 etc.
+    # rejections of the apps numbered 3, 5, 7 and 9 carry the reason (odd n); " data " is app n=3.
     assert reasons == [{"reason": "Location", "count": 4, "application_ids": reasons[0]["application_ids"]}]
     assert len(reasons[0]["application_ids"]) == 4 and p["reason_base"] == 4
     text = json.dumps(p).lower()
@@ -685,6 +716,27 @@ async def test_skill_gaps_end_to_end_with_profile_skills(authenticated_async_con
     t = sg["gaps"][0]
     assert (t["applications"], t["low_fit"], t["hard"], t["tier"]) == (3, 3, 3, "Critical")
     assert t["weighted"] == round((60 + 50 + 40) / 20, 2)
+
+
+@pytest.mark.asyncio
+async def test_skill_gaps_known_includes_typed_additional_skills(authenticated_async_context, fixture_user_id):
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
+
+    save_profile(
+        UserProfile(
+            cv_data=CVData(raw_text="Python.", name="Ada", skills=["Python"]),
+            preferences=UserPreferences(additional_skills=["Terraform"]),
+        ),
+        fixture_user_id, source_action="cv_upload",
+    )
+    async with authenticated_async_context() as client:
+        for n, score in enumerate((40, 50, 60, 70, 85), start=1):
+            app_id = await _app(client, n)
+            r = await _fit(client, app_id, score=score, verdict="read", score_source="full_ad", gaps=["Terraform"])
+            assert r.status_code == 200, r.text
+        sg = (await client.get("/api/applications/stats", params={"view": "skill_gaps"})).json()["skill_gaps"]
+    assert sg["gaps"] == [] and sg["excluded_as_known"] == 1
 
 
 # ── 9/10. isolation and the dispatcher ──────────────────────────────────────

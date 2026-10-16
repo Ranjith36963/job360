@@ -243,8 +243,7 @@ export function AssistantTab() {
 
   const aboveLine = settingSwitch(view.above_line);
   const belowLine = settingSwitch(view.below_line);
-  // auto_employer_emails reaches api-types.ts on the next regeneration; read it loosely until then.
-  const autoEmails = settingAutoEmails((view as { auto_employer_emails?: { effective?: unknown; value?: unknown } }).auto_employer_emails);
+  const autoEmails = settingAutoEmails(view.auto_employer_emails);
   const submit_mode = String(eff(view.submit_mode) ?? "confirm");
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";

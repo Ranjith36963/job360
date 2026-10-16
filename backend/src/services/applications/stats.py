@@ -349,10 +349,12 @@ async def _fit_pattern_blocks(
         if "patterns" in selected:
             blocks["patterns"] = fit_patterns.patterns(rows, reasons)
         if "skill_gaps" in selected:
+            from src.services.applications.alignment import candidate_skills  # noqa: PLC0415
             from src.services.profile.storage import load_profile  # noqa: PLC0415 - rule 16, heavy stack
 
             profile = load_profile(user_id)
-            known = list(profile.cv_data.skills) if profile is not None else []
+            # the same list alignment and get_profile use (CV, LinkedIn, GitHub, typed skills)
+            known = candidate_skills(profile) if profile is not None else []
             blocks["skill_gaps"] = fit_patterns.skill_gaps(rows, known)
     except Exception:
         get_logger(__name__).exception("stats_view_failed", extra={"user_id": safe_log_value(user_id)})

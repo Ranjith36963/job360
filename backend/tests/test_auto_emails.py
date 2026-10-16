@@ -357,7 +357,7 @@ async def test_sent_counts_today_and_the_cap_stops_it(authenticated_async_contex
         assert (got["decision"], got["reason"], got["sent_today"], got["daily_max"]) == (
             "stop", "daily_cap_reached", 2, 2,
         )
-        # a retracted send no longer counts, and its application is due again
+        # a retracted send no longer counts toward today's cap
         sent = await _event(client, a, "checkin_sent", payload=_SENT)
         await _event(client, a, "note", corrects_event_id=sent["event_id"])
         assert (await _check(client, c, "checkin"))["sent_today"] == 2

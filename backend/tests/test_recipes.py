@@ -213,7 +213,7 @@ def test_recipes_carry_the_verified_lifecycle():
     prep = load_recipe("prep").text.lower()
     assert "only true facts" in prep and "interview_done" in prep and "story_bank" in prep
     debrief = flat(load_recipe("debrief").text)
-    assert "print this checklist" in debrief and "stop" in debrief and "**done when**" in debrief
+    assert "print this checklist" in debrief and "stop before recording" in debrief and "**done when**" in debrief
     assert "word for word" in debrief and "never guess" in debrief and "silence_confirmed" in debrief
     assert "use this when" in debrief
 

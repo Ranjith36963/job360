@@ -509,6 +509,8 @@ class DoctorSilentBlock(BaseModel):
     courtesy_days: int = 30
     items: list[DoctorSilentItem] = []
     disclaimer: str = SILENT_DISCLAIMER
+    # True when the event cap was hit (the OLDEST events were left out).
+    truncated: bool = False
 
 
 class DoctorResponse(BaseModel):
