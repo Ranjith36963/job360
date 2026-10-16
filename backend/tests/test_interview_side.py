@@ -156,7 +156,7 @@ async def test_offer_figures_and_silence_note_are_stored(authenticated_async_con
 
 # ── every bad shape is a 422 that lists ALL its problems ─────────────────────
 
-_FUTURE = (datetime.now(timezone.utc) + timedelta(days=5)).date().isoformat()
+_FUTURE = "__FUTURE__"  # replaced with a date 5 days ahead inside the test (not at import time)
 _BAD: list[tuple[str, dict[str, Any], list[str]]] = [
     ("interview_session", {"round": "chat", "date": "2026-10-14"}, ["round must be one of"]),
     ("interview_session", {"round": "screen", "date": "2026-02-30"}, ["real calendar date"]),
@@ -187,6 +187,8 @@ _BAD: list[tuple[str, dict[str, Any], list[str]]] = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("event_type", "payload", "expected"), _BAD)
 async def test_bad_shapes_are_422_naming_the_problem(authenticated_async_context, event_type, payload, expected):
+    future = (datetime.now(timezone.utc) + timedelta(days=5)).date().isoformat()
+    payload = {k: (future if v == _FUTURE else v) for k, v in payload.items()}
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         resp = await _post(client, app_id, event_type, payload=payload)
@@ -276,6 +278,42 @@ async def test_a_duplicate_session_is_refused_naming_the_event_and_a_correction_
     tags = {c["tag"]: c["count"] for c in digest["competency_tag_counts"]}
     assert tags == {"python": 1}  # the corrected event left the digest
     assert digest["sessions"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_correction_cannot_collide_with_another_session(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        technical = await _session(client, app_id, "2026-10-05", "technical")
+        behavioral = await _session(client, app_id, "2026-10-05", "behavioral")
+        clash = await _post(
+            client, app_id, "interview_session", corrects_event_id=behavioral,
+            payload={"round": "technical", "date": "2026-10-05"},
+        )
+        assert clash.status_code == 422, clash.text
+        assert f"event {technical}" in clash.json()["detail"]
+        # correcting an event to its own (round, date, source) is not a clash
+        same = await _post(
+            client, app_id, "interview_session", corrects_event_id=technical,
+            payload={"round": "technical", "date": "2026-10-05", "competency_tags": ["sql"]},
+        )
+        assert same.status_code == 201, same.text
+
+
+@pytest.mark.asyncio
+async def test_silent_list_cap_drops_the_oldest_events_and_says_so(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context() as client:
+        old_app = await _bring(client, 0, "Coold")
+        new_app = await _bring(client, 1, "Conew")
+        await _ev(client, old_app, "interview_done", occurred_at=_ago(60))
+        await _ev(client, new_app, "interview_done", occurred_at=_ago(40))
+        monkeypatch.setattr(settings, "INTERVIEW_VIEW_MAX_EVENTS", 1)
+        block = (await client.get("/api/doctor")).json()["silent_after_interview"]
+        assert block["truncated"] is True
+        assert [i["application_id"] for i in block["items"]] == [new_app]  # the newest survived
+        monkeypatch.setattr(settings, "INTERVIEW_VIEW_MAX_EVENTS", 100)
+        block = (await client.get("/api/doctor")).json()["silent_after_interview"]
+        assert block["truncated"] is False and len(block["items"]) == 2
 
 
 # ── digest ───────────────────────────────────────────────────────────────────

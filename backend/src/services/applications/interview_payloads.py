@@ -298,28 +298,28 @@ async def check_refs(
                 raise SpineError(
                     422, "transcript_artifact_id must be an interview_transcript artifact on this application"
                 )
-        if corrects_event_id is None:
-            cur = await db._db.execute(
-                "SELECT e.id, e.payload FROM application_events e "
-                "WHERE e.user_id = ? AND e.application_id = ? AND e.event_type = 'interview_session' "
-                "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
-                "ORDER BY e.id",
-                (user_id, application_id),
-            )
-            wanted = (payload["round"], payload["date"], payload.get("source", DEFAULT_SOURCE))
-            for row in await cur.fetchall():
-                try:
-                    other = json.loads(row["payload"] or "{}")
-                except ValueError:
-                    continue
-                if isinstance(other, dict) and (
-                    other.get("round"), other.get("date"), other.get("source", DEFAULT_SOURCE)
-                ) == wanted:
-                    raise SpineError(
-                        422,
-                        f"this interview_session is already recorded as event {int(row['id'])}; "
-                        f"to change it record_event(..., corrects_event_id={int(row['id'])})",
-                    )
+        cur = await db._db.execute(
+            "SELECT e.id, e.payload FROM application_events e "
+            "WHERE e.user_id = ? AND e.application_id = ? AND e.event_type = 'interview_session' "
+            "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+            "AND e.id <> ? ORDER BY e.id",
+            # a correction replaces its target, so only the corrected event is exempt
+            (user_id, application_id, corrects_event_id if corrects_event_id is not None else -1),
+        )
+        wanted = (payload["round"], payload["date"], payload.get("source", DEFAULT_SOURCE))
+        for row in await cur.fetchall():
+            try:
+                other = json.loads(row["payload"] or "{}")
+            except ValueError:
+                continue
+            if isinstance(other, dict) and (
+                other.get("round"), other.get("date"), other.get("source", DEFAULT_SOURCE)
+            ) == wanted:
+                raise SpineError(
+                    422,
+                    f"this interview_session is already recorded as event {int(row['id'])}; "
+                    f"to change it record_event(..., corrects_event_id={int(row['id'])})",
+                )
     except SpineError as exc:
         raise event_examples.with_example(event_type, exc) from None
 
@@ -330,7 +330,7 @@ def log_recorded(user_id: str, application_id: int, event_id: int, event_type: s
         "interview_event_recorded",
         extra={
             "event": "interview_event_recorded", "user_id": safe_log_value(user_id),
-            "application_id": application_id, "event_id": event_id,
+            "application_id": safe_log_value(application_id), "event_id": safe_log_value(event_id),
             "event_type": safe_log_value(event_type, max_len=40),
             "tags": len(payload.get("competency_tags") or []), "gaps": len(payload.get("gaps") or []),
             "signals": len(payload.get("signals") or []),

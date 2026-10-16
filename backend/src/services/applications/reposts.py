@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from src.core import settings
@@ -78,10 +78,12 @@ async def repost_of(
         want_title = title_identity_key(title or "")
         if not want_company or not want_title:
             return None
+        floor = (now or datetime.now(timezone.utc)) - timedelta(days=settings.REPOST_WINDOW_DAYS + 1)
         cur = await db._db.execute(
             "SELECT a.id, a.job_company, a.job_title, a.job_url, a.created_at, j.apply_url AS catalog_url "
-            "FROM applications a LEFT JOIN jobs j ON j.id = a.job_id WHERE a.user_id = ? ORDER BY a.id",
-            (user_id,),
+            "FROM applications a LEFT JOIN jobs j ON j.id = a.job_id "
+            "WHERE a.user_id = ? AND a.created_at >= ? ORDER BY a.id",
+            (user_id, floor.isoformat()),
         )
         zone = await spine.user_zone(db, user_id)
         today = (now or datetime.now(timezone.utc)).astimezone(zone).date()
@@ -94,13 +96,13 @@ async def repost_of(
                 continue
             if title_identity_key(str(row["job_title"] or "")) != want_title:
                 continue
-            links = {
-                canonical_url(str(row["job_url"] or "")), canonical_url(str(row["catalog_url"] or "")),
-            } - {""}
-            # Both links non-empty and job-specific; the same link is the same posting.
-            if not links or wanted in links:
-                continue
-            if not any(is_job_specific_url(str(u or "")) for u in (row["job_url"], row["catalog_url"])):
+            # This user's OWN link for the application (the shared catalog url may
+            # belong to someone else's bring and must not mask a repost); fall
+            # back to the catalog url only when the application has no link.
+            own = str(row["job_url"] or "") or str(row["catalog_url"] or "")
+            own_key = canonical_url(own)
+            # Non-empty and job-specific; the same link is the same posting.
+            if not own_key or own_key == wanted or not is_job_specific_url(own):
                 continue
             created = _parse(row["created_at"])
             if created is None:

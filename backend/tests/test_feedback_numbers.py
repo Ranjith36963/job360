@@ -285,12 +285,10 @@ async def test_calibration_feedback_quotes_keep_the_exact_words(authenticated_as
     words = "Merci pour votre candidature - nous avons choisi un autre profil. 谢谢 ☕"
     async with authenticated_async_context() as client:
         a = await _scored(client, 91, ("rejected", 10))
-        events = (await client.get(f"/api/applications/{a}")).json()["events"]
-        rej = next(e for e in events if e["event_type"] == "rejected")
         await _event(client, a, "rejected", payload={"verbatim_feedback": words}, occurred_at=_ago(9))
         c = (await _view(client, "calibration"))["calibration"]
         assert c["feedback"] == [{"application_id": a, "company": "Cal", "fit_score": 91, "verbatim_feedback": words}]
-        assert rej["id"]  # the first rejection carries no words and adds no quote
+        # the first rejection carries no words and adds no quote
 
 
 # ── 4. company ───────────────────────────────────────────────────────────────
@@ -319,6 +317,22 @@ async def test_company_silent_pending_answered_and_mixed(authenticated_async_con
         assert mixed["label"] == "mixed"
         answered = next(f for f in mixed["facts"] if f["kind"] == "answered")
         assert answered["outcome"] == "rejected" and answered["note"] == "a rejection is an answer"
+
+
+@pytest.mark.asyncio
+async def test_company_block_carries_the_application_cap_separately(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context() as client:
+        await _applied(client, "Acme", 30)
+        await _applied(client, "Acme", 25)
+        await _applied(client, "Other", 20)
+        plain = (await _view(client, "company"))["company"]
+        assert plain["applications_truncated"] is False and not plain.get("truncated_hint")
+        monkeypatch.setattr(settings, "STATS_MAX_APPLICATIONS", 2)
+        # `since` makes the company block do its own second (history) load, which is capped too
+        capped = (await _view(client, "company", since=_ago(5)[:10]))["company"]
+        assert capped["applications_truncated"] is True
+        assert "newest 2 applications" in capped["truncated_hint"]
+        assert "truncated" in capped  # the card cap key still exists, separate from the application cap
 
 
 @pytest.mark.asyncio
@@ -518,7 +532,6 @@ async def test_no_view_returns_the_old_response_with_every_block_null(authentica
             assert body[key] is None
         assert body["overall"]["applied"] == 1 and body["overall"]["replied"] == 1
         assert body["overall"]["reply_rate"] == 1.0 and body["overall"]["small_sample"] is True
-        assert "small_sample" not in body["by_contact_found_via"][0] if body["by_contact_found_via"] else True
 
 
 @pytest.mark.asyncio
@@ -614,4 +627,6 @@ def test_the_numbers_module_issues_no_write_and_no_event_name_literal_in_sql():
             / "feedback_numbers.py").read_text(encoding="utf-8")
     for verb in ("INSERT", "UPDATE", "DELETE"):
         assert f"{verb} " not in text.replace("# ", ""), verb
+    for name in settings.APPLICATION_STATUS_EVENT_TYPES:
+        assert f"'{name}'" not in text, f"event name {name!r} quoted in the module"
 

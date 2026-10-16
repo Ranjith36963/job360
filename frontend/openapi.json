@@ -3534,7 +3534,8 @@
             "default": {
               "courtesy_days": 30,
               "disclaimer": "Elapsed time only \u2014 not legal advice or a claim that the employer did anything wrong.",
-              "items": []
+              "items": [],
+              "truncated": false
             }
           },
           "stale_hint": {
@@ -3644,6 +3645,11 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "title": "DoctorSilentBlock",
@@ -9705,6 +9711,11 @@
       },
       "StatsCompanyOut": {
         "properties": {
+          "applications_truncated": {
+            "default": false,
+            "title": "Applications Truncated",
+            "type": "boolean"
+          },
           "cards": {
             "items": {
               "$ref": "#/components/schemas/StatsCompanyCardOut"

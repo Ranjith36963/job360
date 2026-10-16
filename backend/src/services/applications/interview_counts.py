@@ -99,10 +99,12 @@ async def _load(
     *,
     event_types: Optional[tuple[str, ...]] = None,
     statuses: Optional[tuple[str, ...]] = None,
+    newest_first: bool = False,
 ) -> tuple[list[dict[str, Any]], bool]:
     """The caller's non-retracted events on non-simulated applications, oldest first,
     with the application's company columns. One more than the cap is read so
-    ``truncated`` is a fact. Never raises for an empty history."""
+    ``truncated`` is a fact. ``newest_first`` makes the cap drop the OLDEST events
+    (rows are still returned oldest first). Never raises for an empty history."""
     where = [
         "e.user_id = ?",
         "NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id)",
@@ -122,12 +124,14 @@ async def _load(
         "FROM application_events e "
         "JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
         "LEFT JOIN jobs j ON j.id = a.job_id "
-        f"WHERE {' AND '.join(where)} ORDER BY e.id LIMIT ?"
+        f"WHERE {' AND '.join(where)} ORDER BY e.id{' DESC' if newest_first else ''} LIMIT ?"
     )
     cur = await db._db.execute(sql, [*params, limit + 1])
     rows = [dict(r) for r in await cur.fetchall()]
     truncated = len(rows) > limit
     rows = rows[:limit]
+    if newest_first:
+        rows.reverse()
     for row in rows:
         row["payload"] = _payload(row.get("payload"))
         row["id"] = int(row["id"])
@@ -400,7 +404,7 @@ async def silent_list(db: JobDatabase, user_id: str, *, now: Optional[datetime] 
     """The doctor block: ``{courtesy_days, items, disclaimer}``. Read-only."""
     zone = await spine.user_zone(db, user_id)
     today = (now or datetime.now(timezone.utc)).astimezone(zone).date()
-    rows, truncated = await _load(db, user_id, statuses=SILENT_STATUSES)
+    rows, truncated = await _load(db, user_id, statuses=SILENT_STATUSES, newest_first=True)
     apps: dict[int, dict[str, Any]] = {}
     for r in rows:
         app = apps.setdefault(r["application_id"], {
@@ -416,7 +420,8 @@ async def silent_list(db: JobDatabase, user_id: str, *, now: Optional[datetime] 
         extra={"event": "silent_after_interview", "user_id": safe_log_value(user_id), "items": len(items),
                "unconfirmed": sum(1 for i in items if not i["confirmed"]), "truncated": truncated},
     )
-    return {"courtesy_days": settings.INTERVIEW_COURTESY_DAYS, "items": items, "disclaimer": SILENT_DISCLAIMER}
+    return {"courtesy_days": settings.INTERVIEW_COURTESY_DAYS, "items": items, "disclaimer": SILENT_DISCLAIMER,
+            "truncated": truncated}
 
 
 # ── the one entry point ──────────────────────────────────────────────────────

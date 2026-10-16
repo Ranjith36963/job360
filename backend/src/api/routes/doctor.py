@@ -230,7 +230,8 @@ async def _silent_after_interview(db: JobDatabase, user_id: str, now: datetime) 
             extra={"event": "doctor_silent_after_interview_failed", "user_id": safe_log_value(user_id)},
             exc_info=True,
         )
-        return {"courtesy_days": settings.INTERVIEW_COURTESY_DAYS, "items": [], "disclaimer": SILENT_DISCLAIMER}
+        return {"courtesy_days": settings.INTERVIEW_COURTESY_DAYS, "items": [], "disclaimer": SILENT_DISCLAIMER,
+                "truncated": False}
 
 
 def _tools_block(client_tools_version: str, client_tools_rev: Optional[int] = None) -> dict[str, Any]:

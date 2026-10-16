@@ -1549,6 +1549,7 @@ class StatsCompanyOut(BaseModel):
     silence_window_days: int
     stale_after_days: int
     truncated: bool
+    applications_truncated: bool = False
     since_ignored: bool
     explanation: str
     truncated_hint: Optional[str] = None
@@ -2222,7 +2223,7 @@ async def auto_email_check(
         "auto_email_check",
         extra={
             "event": "auto_email_check", "user_id": safe_log_value(user.id),
-            "actor": safe_log_value(actor_for(user)), "application_id": application_id,
+            "actor": safe_log_value(actor_for(user)), "application_id": safe_log_value(application_id),
             "kind": safe_log_value(kind, max_len=40), "decision": safe_log_value(verdict.decision, max_len=20),
             "reason": safe_log_value(verdict.reason, max_len=60), "result": "ok",
         },
