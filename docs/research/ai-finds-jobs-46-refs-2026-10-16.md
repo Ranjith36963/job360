@@ -22,7 +22,7 @@ Read the "thin" rows with care.
 5. REA was not installed locally. Sent the 9 thin products to the cloud session **"Cloud 360"**.
    It replied with `docs/research/rea-competitors-2026-10-16.md` on branch `research/rea-competitors`, which I read and folded in (section 6).
 6. Owner said to route reverse-engineering to the cloud session **"Reverse engineering anything"**.
-   Sent it the last 4 unknowns plus a "how do the big indexes collect jobs" question (message copy in section 7). Results are pending.
+   Sent it the last 4 unknowns plus a "how do the big indexes collect jobs" question (message copy in section 7). It answered with commit 3fd829d on `research/rea-competitors`; the answers are folded into sections 4 and 6.
    - Memory: `memory/reference_rea_session.md`
 
 ## 2. How Job360 searches (code read, file:line)
@@ -58,7 +58,7 @@ All paths are under `backend/src/`.
 | 3 | neonwatty/job-apply-plugin (OSS) | LinkedIn, Hacker News, X | saved prefs; hiring manager or 1st-degree contact first | no | github.com/neonwatty/job-apply-plugin |
 | 4 | borgius/jobspy-mcp-server (OSS) | scrapes Indeed, LinkedIn, ZipRecruiter, Glassdoor, Google, Bayt, Naukri | filters only | no | github.com/borgius/jobspy-mcp-server |
 | 5 | trackly-cli (OSS) | own DB of 250K jobs, 5.4K companies, 40+ ATS | filters plus `trackly ask` (20 a day) | no | github.com/kevinastuhuaman/trackly-cli |
-| 6 | freehire.me | own index, **2.2M** jobs per REA (site says 4.8M); crawls company boards | facets; skills coverage % | alerts, daily digest | freehire.me |
+| 6 | freehire.me | own index, 2.2M (facets) to 3.3M (repo) jobs per REA (site says 4.8M); crawls company boards about every 2 h | facets; skills coverage % | alerts, daily digest | freehire.me |
 | 7 | jobspipe.dev | 10 watched sources incl. LinkedIn and Indeed, deduplicated (site says 11.3M) | filters only | "Signals" re-run about every 5 min, webhooks; paid | jobspipe.dev |
 | 8 | Himalayas MCP | own remote-job board (41 tools, 13 public) | filters, sort | alerts | himalayas.app/mcp |
 | 9 | Indeed MCP | Indeed only; Claude only; beta | not stated | no | docs.indeed.com/mcp |
@@ -86,10 +86,10 @@ All paths are under `backend/src/`.
 | 12 | AIApply | "20M+ jobs" | match score | daily auto-apply | aiapply.co |
 | 13 | Wobo | 50+ sources, 3M jobs | match score, swipe | "while you sleep" | wobo.ai |
 | 14 | Jack & Jill | "millions of jobs a day" | matches, then introduces you | overnight | jackandjill.ai |
-| 15 | Kickresume | job board plus "AI Job Matching" (thin) | not stated | unknown | kickresume.com |
-| 16 | Sonara | unclear: relaunched by BOLD, or discontinued? | own matching | unknown | resumly.ai/answers/what-happened-to-sonara-ai |
-| 17 | LazyApply | browser filter search on boards (partial, third-party) | no ranking | no | lazyapply.com |
-| 18 | Teal | unconfirmed (403; REA blocked) | resume vs job-description score | unknown | tealhq.com |
+| 15 | Kickresume | own board, 4,853,650 jobs (REA); feed source NOT FOUND | daily matcher, ranked by match score | daily | kickresume.com |
+| 16 | Sonara | unreachable; shut down Feb 2024, relaunch under BOLD unconfirmed | own matching | unknown | resumly.ai/answers/what-happened-to-sonara-ai |
+| 17 | LazyApply | own remote board (100,000+ jobs) plus "Job GPT" auto-apply (Greenhouse, Dice, Indeed, ZipRecruiter) | no ranking found | no | lazyapply.com |
+| 18 | Teal | still Cloudflare-blocked; the web read says organizer plus extension, likely not a finder | resume vs job-description score | unknown | tealhq.com |
 
 ## 5. Do not find jobs (left out): 14
 
@@ -124,6 +124,17 @@ All paths are under `backend/src/`.
   - freehire's public line, "an agent never submits an application for you", matches our hard line 1.
 - **The REA doc's own verdict** (rules 4-6) says do not build match scores, promoted ranking, auto-apply limits, alert caps or crawling. Whether a hosted index fits rule 4 is the owner's call.
 
+### How the big indexes collect jobs (REA Part B, commit 3fd829d on `research/rea-competitors`)
+
+| Index | Size | How it collects | Board counts (Greenhouse / Ashby / Lever / Workable / Workday) |
+|---|---|---|---|
+| freehire (MIT, github.com/strelov1/freehire) | 3.3M postings, 294K companies | A crawl about every 2 h per provider. Boards are a private DB table, built by **public** harvest scripts: Simplify, vanshb03 and crypto-jobs-fyi GitHub listing JSONs, `site:` web searches and LinkedIn public listings. Each board is validated live against its ATS | 6,863 / 3,994 / 2,205 / 1,480 / 4,202 |
+| **Job360 hunt kit** | 3,677 boards | static `companies.json` (from jobsync and career-ops) | 631 / 1,875 / 1,166 / 5 / 0 |
+| jobspipe | 11.3M postings | closed source; refreshed within 24 h, 6 h or 1 h by paid tier | NOT FOUND |
+| trackly-cli | 250K jobs, 5.4K companies | thin client over a hosted API (closeai.mba); no crawler in the repo | NOT FOUND |
+
+**Most useful finding:** freehire is MIT-licensed and its harvest method is public. Running the same harvest (the GitHub listing JSONs, then a live check per board) could grow our list roughly 4x, about 18.7K boards, Workday included. It would only grow the static kit list that the user's own AI reads. It is not a hosted index, so rule 4 still holds.
+
 ## 7. Messages sent from this session (copies)
 
 **To "Cloud 360" (cloud).** It replied with branch `research/rea-competitors`. The message asked it to:
@@ -133,7 +144,7 @@ All paths are under `backend/src/`.
 > Also: how freehire, jobspipe and trackly collect jobs, and which ATS lists we could add to `companies.json`.
 > This is read-only research. Push the result to a branch, with no PR and no merge.
 
-**To "Reverse engineering anything" (cloud).** Results pending, on branch `research/rea-competitors`. The message asked:
+**To "Reverse engineering anything" (cloud).** It answered with commit 3fd829d on branch `research/rea-competitors`. The message asked:
 
 > **Part A, still unknown:** Teal (retry another public page), Sonara (alive in 2026?), Kickresume, LazyApply. For each: finds jobs? Whose AI? Sources and size, ranking, alerts, MCP.
 > **Part B, our gap:** how freehire.me and jobspipe.dev collect jobs (ATS lists or token datasets, crawl frequency), and what trackly-cli's 250K-job DB is built from.
