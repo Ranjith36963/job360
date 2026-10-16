@@ -60,6 +60,13 @@ class AutoEvent:
     when: Optional[datetime]
     has_source: bool = False
     kind: str = ""  # an auto_email_skipped event's payload.kind
+    # Where the event sits in time: the id of the root of its correction chain (a corrected event
+    # keeps the slot of the one it replaces). 0 = uncorrected, so the event's own id.
+    pos: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.pos:
+            object.__setattr__(self, "pos", self.id)
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,9 @@ class AutoEmailFacts:
     status: str = ""
     events: tuple[AutoEvent, ...] = field(default_factory=tuple)
     sent_today: int = 0
+    # SENT event types ever recorded for this application, retracted or not: a send that was
+    # retracted on paper still left the building, so it still blocks a second one.
+    ever_sent: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -122,7 +132,8 @@ def decide(
         return AutoVerdict("stop", "paused", "Your assistant is paused. Send nothing.")
     if kind not in KINDS:
         return AutoVerdict("stop", "unknown_kind", f"Unknown kind. Use one of: {', '.join(KINDS)}.")
-    if _newest(facts.events, {SENT_EVENT_FOR_KIND[kind]}) is not None:
+    sent_type = SENT_EVENT_FOR_KIND[kind]
+    if sent_type in facts.ever_sent or _newest(facts.events, {sent_type}) is not None:
         return AutoVerdict(
             "stop", "already_sent", "This email was already sent for this application. Never send it twice."
         )
@@ -155,7 +166,7 @@ def _checkin_timing(facts: AutoEmailFacts, now: datetime) -> Optional[AutoVerdic
         return AutoVerdict("stop", "application_moved_on", "The application is no longer just applied.")
     after = [
         e for e in facts.events
-        if e.event_type in _STATUS_TYPES and e.event_type not in ("brought", "applied") and e.id > applied.id
+        if e.event_type in _STATUS_TYPES and e.event_type not in ("brought", "applied") and e.pos > applied.pos
     ]
     if after:
         return AutoVerdict("stop", "application_moved_on", "There is news on this application since it was applied.")
@@ -178,7 +189,9 @@ def _followup_timing(facts: AutoEmailFacts, now: datetime) -> Optional[AutoVerdi
         return AutoVerdict(
             "stop", "no_feedback_request", "No feedback request was sent, so there is nothing to follow up."
         )
-    if any(e.has_source and e.id > asked.id for e in facts.events):
+    if facts.status != "rejected":
+        return AutoVerdict("stop", "application_moved_on", "The application is no longer rejected.")
+    if any(e.has_source and e.pos > asked.pos for e in facts.events):
         return AutoVerdict("stop", "they_replied", "The employer has written since the feedback request.")
     if asked.when is None:
         return AutoVerdict("stop", "not_due", "The feedback request has no usable date.")
@@ -223,25 +236,63 @@ async def _events_by_app(
     type_marks = ", ".join("?" for _ in types)
     cur = await db._db.execute(
         "SELECT e.id, e.application_id, e.event_type, e.occurred_at, e.recorded_at, "  # noqa: S608 - placeholders only
-        "e.source_message_id, e.payload FROM application_events e "
+        "e.source_message_id, e.payload, e.corrects_event_id FROM application_events e "
         f"WHERE e.user_id = ? AND e.application_id IN ({app_marks}) "
         f"AND (e.event_type IN ({type_marks}) OR e.source_message_id <> '') "
         "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
         "ORDER BY e.id",
         (user_id, *app_ids, *types),
     )
-    for row in await cur.fetchall():
-        r = dict(row)
+    rows = [dict(r) for r in await cur.fetchall()]
+    # The whole correction graph, retracted events included: a chain's root is usually retracted.
+    cur = await db._db.execute(
+        "SELECT e.id, e.corrects_event_id FROM application_events e "  # noqa: S608 - placeholders only
+        f"WHERE e.user_id = ? AND e.application_id IN ({app_marks}) AND e.corrects_event_id IS NOT NULL",
+        (user_id, *app_ids),
+    )
+    corrects = {int(dict(r)["id"]): int(dict(r)["corrects_event_id"]) for r in await cur.fetchall()}
+
+    def root(event_id: int) -> int:
+        seen = {event_id}
+        while event_id in corrects and corrects[event_id] not in seen:
+            event_id = corrects[event_id]
+            seen.add(event_id)
+        return event_id
+
+    for r in rows:
         out[int(r["application_id"])].append(
             AutoEvent(
                 id=int(r["id"]),
+                pos=root(int(r["id"])),
                 event_type=str(r["event_type"]),
                 when=_event_when({"occurred_at": r["occurred_at"], "recorded_at": r["recorded_at"]}),
                 has_source=bool(r["source_message_id"]),
                 kind=_payload_kind(r["payload"]) if r["event_type"] == SKIPPED_EVENT_TYPE else "",
             )
         )
+    for evs in out.values():
+        evs.sort(key=lambda e: (e.pos, e.id))
     return out
+
+
+async def _ever_sent_by_app(
+    db: JobDatabase, user_id: str, app_ids: list[int]
+) -> dict[int, frozenset[str]]:
+    """SENT event types ever recorded per application, retracted ones included."""
+    out: dict[int, set[str]] = {a: set() for a in app_ids}
+    if not app_ids:
+        return {}
+    app_marks = ", ".join("?" for _ in app_ids)
+    type_marks = ", ".join("?" for _ in SENT_EVENT_TYPES)
+    cur = await db._db.execute(
+        "SELECT DISTINCT e.application_id, e.event_type FROM application_events e "  # noqa: S608 - placeholders only
+        f"WHERE e.user_id = ? AND e.application_id IN ({app_marks}) AND e.event_type IN ({type_marks})",
+        (user_id, *app_ids, *SENT_EVENT_TYPES),
+    )
+    for row in await cur.fetchall():
+        r = dict(row)
+        out[int(r["application_id"])].add(str(r["event_type"]))
+    return {a: frozenset(v) for a, v in out.items()}
 
 
 async def load_facts(
@@ -261,6 +312,7 @@ async def load_facts(
         status=str(dict(row)["status"] or ""),
         events=tuple(events),
         sent_today=await count_sent_today(db, user_id, when),
+        ever_sent=(await _ever_sent_by_app(db, user_id, [application_id])).get(application_id, frozenset()),
     )
 
 
@@ -295,9 +347,12 @@ async def due_for_user(
     candidates = await _candidate_apps(db, user_id)
     events = await _events_by_app(db, user_id, [a for a, _ in candidates])
     sent_today = await count_sent_today(db, user_id, when)
+    ever_sent = await _ever_sent_by_app(db, user_id, [a for a, _ in candidates])
     due: list[dict[str, Any]] = []
     for app_id, status in candidates:
-        facts = AutoEmailFacts(app_id, status, tuple(events[app_id]), sent_today)
+        facts = AutoEmailFacts(
+            app_id, status, tuple(events[app_id]), sent_today, ever_sent.get(app_id, frozenset())
+        )
         for kind in KINDS:
             verdict = decide(kind, facts, cfg, when)
             if verdict.decision == "stop":
@@ -340,7 +395,7 @@ async def violations(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
         for ev in events[app_id]:
             if ev.event_type not in SENT_EVENT_TYPES:
                 continue
-            before = [e for e in events[app_id] if e.id < ev.id]
+            before = [e for e in events[app_id] if e.pos < ev.pos]
 
             def flag(rule: str, ev: AutoEvent = ev, app_id: int = app_id) -> None:
                 found.append({"event_id": ev.id, "application_id": app_id, "rule": rule})

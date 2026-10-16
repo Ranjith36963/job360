@@ -368,8 +368,9 @@ replied/rejected/interview_*/offer also take `reply_type` (<= 40), `evidence`
 (list <= 5, each <= 300) and `outcome_event_id` (an event on the same
 application). `source.kind` is `email` or `pasted`; for pasted, make your own
 stable `message_id` (e.g. "pasted:<sender>:<subject>:<date>"). Job360 marks an
-`applied` application `ghosted` itself after 45 days of silence (recorded_by
-system, payload auto=true); a later employer reply moves it off ghosted.
+`applied` application `ghosted` itself after 45 days of silence, but only after your inbox
+was checked (mark_inbox_checked at or after day 45; never checked = never auto-ghosted)
+(recorded_by system, payload auto=true); a later employer reply moves it off ghosted.
 Record outcomes at once; see `get_recipe("feedback")`.
 
 Wrong applied date: get_application -> timeline, take the `applied` event_id,

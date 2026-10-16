@@ -60,7 +60,7 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    means the user signs in. An application still blocked: leave it.
 8. **Still open?** For "considering" applications check the posting exists; if gone, look for the employer's link
    (`update_job` `apply_url`), else `withdrawn` with detail "posting closed". **Deadlines:** outreach with no reply after
-   7 days: suggest one follow-up. Job360 marks `ghosted` itself after 45 days; doctor's `ghosted_now` lists them: run the
+   7 days: suggest one follow-up. Job360 marks `ghosted` itself after 45 days, once your inbox was checked (`mark_inbox_checked`); doctor's `ghosted_now` lists them: run the
    `get_recipe("feedback")` post-mortem for each.
    doctor `silent_after_interview` not empty -> `get_recipe("debrief")` step 8 (confirm first; drafts only).
 9. **Due and quiet:** `list_applications(due=true)` and `(quiet_days=7)`.

@@ -54,6 +54,14 @@ async def _doctor(client: AsyncClient) -> dict[str, Any]:
     return resp.json()
 
 
+async def _checked(client: AsyncClient, app_id: int, days_ago: float = 0) -> None:
+    """The assistant read this application's mail `days_ago` days ago (owner decision 18)."""
+    resp = await client.post(
+        "/api/applications/inbox-checked", json={"application_ids": [app_id], "checked_at": _ago(days_ago)}
+    )
+    assert resp.status_code == 200, resp.text
+
+
 # ── A1 statuses ──────────────────────────────────────────────────────────────
 
 
@@ -214,6 +222,7 @@ async def test_doctor_ghosts_only_silent_applied_applications(authenticated_asyn
         considering = await _bring(client, 6)
         await _event(client, young, "applied", occurred_at=_ago(44))
         await _event(client, old, "applied", occurred_at=_ago(46))
+        await _checked(client, old)
         await _event(client, replied, "applied", occurred_at=_ago(60))
         await _event(client, replied, "replied", occurred_at=_ago(10))
         await _event(client, simulated, "simulation")
@@ -239,10 +248,29 @@ async def test_doctor_ghosts_only_silent_applied_applications(authenticated_asyn
 
 
 @pytest.mark.asyncio
+async def test_ghosting_needs_an_inbox_check_at_or_after_day_45(authenticated_async_context):
+    """Owner decision 18: silence only counts once the assistant has read the mail."""
+    async with authenticated_async_context() as client:
+        never = await _bring(client, 1)
+        early = await _bring(client, 2)
+        late = await _bring(client, 3)
+        for app_id in (never, early, late):
+            await _event(client, app_id, "applied", occurred_at=_ago(46))
+        await _checked(client, early, days_ago=6)  # day 40: before day 45
+        await _checked(client, late, days_ago=0)  # day 46: after day 45
+        doc = await _doctor(client)
+        assert doc["ghosted_now"] == [late]
+        assert (await _detail(client, never))["status"] == "applied"
+        assert (await _detail(client, early))["status"] == "applied"
+        assert (await _detail(client, late))["status"] == "ghosted"
+
+
+@pytest.mark.asyncio
 async def test_reply_after_auto_ghost_moves_it_off_ghosted(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         await _event(client, app_id, "applied", occurred_at=_ago(50))
+        await _checked(client, app_id)
         assert (await _doctor(client))["ghosted_now"] == [app_id]
         res = await _event(client, app_id, "replied")
         assert res["status"] == "replied"
@@ -259,6 +287,7 @@ async def test_stats_never_sweeps_so_doctor_reports_every_new_ghost(authenticate
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         await _event(client, app_id, "applied", occurred_at=_ago(46))
+        await _checked(client, app_id)
         resp = await client.get("/api/applications/stats")
         assert resp.status_code == 200, resp.text
         assert (await _detail(client, app_id))["status"] == "applied"
@@ -277,6 +306,7 @@ async def test_mcp_doctor_reports_ghosted_now_like_the_route(authenticated_async
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         await _event(client, app_id, "applied", occurred_at=_ago(47))
+        await _checked(client, app_id)
         ctx = mcp_server._current_user.set(user)
         try:
             via_tool = await tools.get_tool("doctor").fn()

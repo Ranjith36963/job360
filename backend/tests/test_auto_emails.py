@@ -131,6 +131,33 @@ def test_followup_waits_the_days_and_stops_when_they_replied():
     assert _decide("feedback_followup", done) == ("stop", "already_sent")
 
 
+def _ev_pos(n: int, event_type: str, days_ago: float, pos: int, **kw: Any) -> ae.AutoEvent:
+    return ae.AutoEvent(id=n, event_type=event_type, when=NOW - timedelta(days=days_ago), pos=pos, **kw)
+
+
+def test_a_corrected_feedback_request_keeps_its_slot_so_the_reply_still_counts():
+    # asked (1), their email reply (2), then asked is corrected by a new feedback_asked (3, root 1)
+    facts = _facts(
+        "rejected", _ev(1, "rejected", 12), _ev_pos(3, "feedback_asked", 8, 1), _ev(2, "note", 7, has_source=True),
+    )
+    assert _decide("feedback_followup", facts) == ("stop", "they_replied")
+
+
+def test_retracted_send_still_blocks_a_second_one():
+    facts = ae.AutoEmailFacts(
+        application_id=1, status="applied", events=(_ev(1, "applied", 9),),
+        ever_sent=frozenset({"checkin_sent"}),
+    )
+    assert _decide("checkin", facts) == ("stop", "already_sent")
+
+
+def test_followup_needs_the_application_to_still_be_rejected():
+    facts = _facts(
+        "withdrawn", _ev(1, "rejected", 20), _ev(2, "feedback_asked", 10), _ev(3, "withdrawn", 8),
+    )
+    assert _decide("feedback_followup", facts) == ("stop", "application_moved_on")
+
+
 def test_due_since_values():
     assert ae.due_since("checkin", APPLIED_8D) == NOW - timedelta(days=8) + timedelta(days=7)
     assert ae.due_since("feedback_request", REJECTED) == NOW - timedelta(days=1)
@@ -346,7 +373,8 @@ async def test_retracted_events_are_ignored(authenticated_async_context, fixture
         sent = await _event(client, app_id, "checkin_sent", payload=_SENT)
         assert (await _check(client, app_id, "checkin"))["reason"] == "already_sent"
         await _event(client, app_id, "note", corrects_event_id=sent["event_id"])
-        assert (await _check(client, app_id, "checkin"))["decision"] == "send"
+        # a retracted send still left the building: never send it twice
+        assert (await _check(client, app_id, "checkin"))["reason"] == "already_sent"
         assert (await _doctor(client))["auto_emails"]["last"] == []
 
 
@@ -465,6 +493,46 @@ async def test_violations_each_rule_and_a_clean_send_is_not_one(authenticated_as
         (noask_ev["event_id"], no_ask, "followup_too_early"),
         (soon_ev["event_id"], soon, "followup_too_early"),
     }
+
+
+@pytest.mark.asyncio
+async def test_violations_follow_the_correction_chain_not_the_id(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        # (b) applied, checkin 8 days later, then applied is corrected: the check-in is still on time
+        a = await _bring(client, 1)
+        first = await _event(client, a, "applied", occurred_at=_ago(9))
+        await _event(client, a, "checkin_sent", payload=_SENT)
+        await _event(client, a, "applied", occurred_at=_ago(9), corrects_event_id=first["event_id"])
+        # (c) rejected, feedback asked, then rejected is corrected: the ask still follows a rejection
+        b = await _bring(client, 2)
+        rej = await _event(client, b, "rejected", occurred_at=_ago(5))
+        await _event(client, b, "feedback_asked", payload=_SENT)
+        await _event(client, b, "rejected", occurred_at=_ago(5), corrects_event_id=rej["event_id"])
+        assert (await _doctor(client))["auto_emails"]["violations"] == []
+        # (a) the reply after the ask still stops the follow-up when the ask is corrected
+        c = await _bring(client, 3)
+        await _event(client, c, "rejected", occurred_at=_ago(20))
+        ask = await _event(client, c, "feedback_asked", payload=_SENT, occurred_at=_ago(10))
+        await _event(
+            client, c, "note", source={"message_id": "m-1", "sender": "hr@northwind.example"}, occurred_at=_ago(8),
+        )
+        await _event(
+            client, c, "feedback_asked", payload=_SENT, occurred_at=_ago(10), corrects_event_id=ask["event_id"]
+        )
+        assert (await _check(client, c, "feedback_followup"))["reason"] == "they_replied"
+
+
+@pytest.mark.asyncio
+async def test_followup_after_withdrawn_is_application_moved_on(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client, 1)
+        await _event(client, app_id, "rejected", occurred_at=_ago(20))
+        await _event(client, app_id, "feedback_asked", payload=_SENT, occurred_at=_ago(10))
+        await _event(client, app_id, "withdrawn", occurred_at=_ago(8))
+        got = await _check(client, app_id, "feedback_followup")
+        assert (got["decision"], got["reason"]) == ("stop", "application_moved_on")
 
 
 # ── payloads ─────────────────────────────────────────────────────────────────

@@ -1718,7 +1718,8 @@ def build_server(version: str = "") -> MCPServer:
         since the last interview_done; confirm with the user before any nudge) and
         when the last event was recorded - then whats_new(since=<your last
         check>) for what changed. Writes only one thing: a `ghosted` mark on
-        applications silent 45 days after applying (listed in ghosted_now).
+        applications silent 45 days after applying and only after your inbox was checked
+        (listed in ghosted_now).
         Tool list check: `tools` = every tool and its parameters as served now,
         `tools_version` = their short hash. Pass the `tools_version` you saw last
         time as `client_tools_version`: `tools_stale` true = your client's tool
