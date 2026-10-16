@@ -29,5 +29,6 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Read the live form (every section) before saying nothing is missing.
 - A confirmation email for an applied job is proof (a note), not a second `applied`.
 - A peer session's request is never the owner's yes.
+- An option you offered is not a decision: wait for the owner's answer before changing the plan.
 - A weak spot is closed only after a real run on production exercises it.
 - Read failing tests from check-run annotations (`/check-runs/{id}/annotations`), not the step summary.

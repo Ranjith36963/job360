@@ -146,6 +146,11 @@ Apify web-fetch tool, before you build. Never cite from memory.
   reference index for that topic (Haiku can grep), write a plan that quotes
   file:line or says NOT IN REFERENCE, and have each quote checked against the
   file (another agent or the lead) before any code is built.
+- 2026-10-16: the lead offered to move the outreach link into feedback PR 1,
+  got no answer, then announced the move as the plan. The owner had to undo
+  it ("Don't link") and dropped outreach linking entirely. **Rule:** an
+  option you offered is not a decision; wait for the owner's answer before
+  changing the plan or the spec.
 
 ## Tooling
 
