@@ -62,6 +62,8 @@ EXPECTED_TOOLS = {
     # The outreach send gate (feature 10) and the agent doctor + missing-tool
     # report (feature 7) - 26 -> 29.
     "check_outreach",
+    # Feedback loop slice 2 (2026-10-16): the gate before an automatic employer email.
+    "check_auto_email",
     "doctor",
     "report_missing_tool",
     # The form check (weak spot #1) - which live-form questions have a saved answer - 29 -> 30.

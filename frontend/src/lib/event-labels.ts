@@ -90,8 +90,17 @@ export const EVENT_LABEL: Record<string, string> = {
   // S7 proof of application.
   proof_text: "Saved the confirmation page text",
   proof_screenshot: "Saved a screenshot of the confirmation",
+  // Automatic employer emails (sent by the assistant in the owner's name).
+  checkin_sent: "Check-in email sent to the employer",
+  feedback_asked: "Asked the employer for feedback",
+  feedback_followup_sent: "Follow-up email sent to the employer",
+  auto_email_skipped: "Automatic email skipped",
   // Simulated/test application marker.
   simulation: "Marked as a test (not a real application)",
+  // Feedback loop slice 4 (interview side).
+  interview_session: "Interview round debriefed",
+  process_friction: "Hiring-process friction noted",
+  assessment: "Skills test logged",
 };
 
 function relayedWords(payload: unknown): boolean {

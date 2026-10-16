@@ -140,8 +140,11 @@ def test_save_fit_description_states_verdict_limit():
 
     from src.api import mcp_server
 
-    src = inspect.getsource(mcp_server)
-    assert "`verdict`: one sentence, at most 200" in src
+    # Feedback loop slice 5 (DECISIONS S5 Q1): a scored fit's verdict is 1-140 characters,
+    # an unscored one stays at most 200. The save_fit description must state both limits.
+    doc = " ".join(inspect.getsource(mcp_server).split())
+    assert "one-line reason (1-140 chars)" in doc
+    assert "score `verdict` is optional (200 chars)" in doc
 
 
 # ── Review regressions ──────────────────────────────────────────────────────

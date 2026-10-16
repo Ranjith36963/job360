@@ -151,6 +151,12 @@ Apify web-fetch tool, before you build. Never cite from memory.
   it ("Don't link") and dropped outreach linking entirely. **Rule:** an
   option you offered is not a decision; wait for the owner's answer before
   changing the plan or the spec.
+- 2026-10-14 to 10-16: the owner asked again and again for "REA" (Reverse Engineer
+  Anything, github.com/morluto/rea) on competitors. The lead took "REA" to mean its own
+  page captures (/var/tmp/rea-comp) and web reads, reported "REA done" for two days, and
+  never checked the tool existed. It was never installed or run. **Rule:** when the owner
+  names a tool, check it is installed (`which`, MCP list) before claiming it ran; if it is
+  missing, say so at once and give the install steps. Label web reads as web research.
 
 ## Tooling
 

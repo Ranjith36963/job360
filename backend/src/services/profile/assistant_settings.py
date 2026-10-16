@@ -74,9 +74,10 @@ SUBMIT_MODE_PATH = f"{HEAD}.submit_mode"
 DAILY_CAP_PATH = f"{HEAD}.daily_cap"
 PAUSED_UNTIL_PATH = f"{HEAD}.paused_until"
 PAUSE_REASON_PATH = f"{HEAD}.pause_reason"
+AUTO_EMPLOYER_EMAILS_PATH = f"{HEAD}.auto_employer_emails"
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
-    DAILY_CAP_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
+    DAILY_CAP_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH, AUTO_EMPLOYER_EMAILS_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # The inbox/Gmail mode stays at its old path (an ALIAS, not a move: assistants
@@ -230,6 +231,10 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
         return _validate_pause_reason(path, value)
+    if path == AUTO_EMPLOYER_EMAILS_PATH:
+        if not isinstance(value, bool):
+            raise _bad(path, f"must be true or false, not {type(value).__name__}")
+        return value
     raise _bad(path, "is not an assistant setting")  # pragma: no cover — callers pass SETTING_PATHS
 
 
@@ -247,6 +252,7 @@ class EffectiveSettings:
     daily_cap: Optional[int]
     paused_until: str
     pause_reason: str
+    auto_employer_emails: bool = False
 
 
 def effective(s: AssistantSettings) -> EffectiveSettings:
@@ -259,6 +265,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         daily_cap=None if s.daily_cap is None else int(s.daily_cap),
         paused_until=s.paused_until or "",
         pause_reason=s.pause_reason or "",
+        auto_employer_emails=bool(s.auto_employer_emails),
     )
 
 
@@ -296,6 +303,8 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw or ""
     if path == INBOX_MODE_PATH:
         return raw or ""
+    if path == AUTO_EMPLOYER_EMAILS_PATH:
+        return bool(raw)
     raise KeyError(path)
 
 
@@ -343,6 +352,8 @@ def classify_change(
     daily_cap            raised, or a number -> none (cap removed)      none -> a number, lowered
     paused_until         cleared or moved earlier (resume)              set or extended
     pause_reason         never                                          always
+    auto_employer_       off -> on (the assistant emails employers     on -> off (the stop
+    emails               in the owner's name)                          switch; applies at once)
     preferences.         anything -> auto (the assistant sends mail     every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
@@ -370,6 +381,8 @@ def classify_change(
         return "safer"
     if path == INBOX_MODE_PATH:
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
+    if path == AUTO_EMPLOYER_EMAILS_PATH:
+        return "riskier" if (bool(after) and not bool(before)) else "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
 
 
@@ -1184,6 +1197,7 @@ def build_settings_view(
             "effective": effective_path_value(PAUSED_UNTIL_PATH, raw.paused_until, when),
         },
         "pause_reason": {"value": raw.pause_reason, "effective": eff.pause_reason},
+        "auto_employer_emails": {"value": raw.auto_employer_emails, "effective": eff.auto_employer_emails},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,

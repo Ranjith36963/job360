@@ -313,6 +313,14 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # proof_missing and the practice run never count it; a corrects_event_id
     # event retracts the mark.
     "simulation",
+    # Feedback loop slice 2: automatic employer emails. The assistant sends them from the
+    # owner's own Gmail; Job360 only records (`*_sent`, exact text) and gates (check_auto_email).
+    # `auto_email_skipped` records why a due email was NOT sent. Payloads: spine.validate_auto_email_payload.
+    "checkin_sent", "feedback_asked", "feedback_followup_sent", "auto_email_skipped",
+    # Feedback loop slice 4 (interview side): payloads checked by
+    # services/applications/interview_payloads.py. All note-family; `assessment`
+    # must never enter FEEDBACK_FUNNEL_RANK.
+    "interview_session", "process_friction", "assessment",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -360,7 +368,13 @@ APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS = int(
 
 # R5 — artifact versions. Storage decision: TEXT in Postgres, not a file store
 # (spec §Data model) — a tailored CV measured on this codebase is 2-8 KB.
-APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach")
+APPLICATION_ARTIFACT_KINDS = (
+    "cv", "cover_letter", "answers", "outreach",
+    # Feedback loop slice 4 (interview side).
+    "story_bank", "interview_transcript", "redflag_analysis",
+    # Feedback loop slice 5 (fit patterns): the learning plan.
+    "skill_gap_report",
+)
 APPLICATION_ARTIFACT_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_MAX_CHARS", "60000"))
 APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERSIONS", "200"))
 # Slice 8 (#515) — the read-only artifact diff caps each side in LINES before
@@ -485,6 +499,12 @@ APPLICATION_FOLLOW_UP_CLOSED_STATUSES = ("rejected", "withdrawn", "ghosted", "hi
 # (services/applications/ghosting.py). An operator constant, not a user setting.
 GHOSTED_AFTER_DAYS = int(os.getenv("GHOSTED_AFTER_DAYS", "45"))
 GHOSTED_SWEEP_MAX = int(os.getenv("GHOSTED_SWEEP_MAX", "200"))
+# Feedback loop slice 4 (interview side). Operator constants, not user settings.
+INTERVIEW_COURTESY_DAYS = int(os.getenv("INTERVIEW_COURTESY_DAYS", "30"))  # rejection-latency.mjs:71
+INTERVIEW_SILENT_MAX_ITEMS = int(os.getenv("INTERVIEW_SILENT_MAX_ITEMS", "20"))  # NOT IN REFERENCE - a bound
+INTERVIEW_VIEW_MAX_EVENTS = int(os.getenv("INTERVIEW_VIEW_MAX_EVENTS", "5000"))  # NOT IN REFERENCE - a bound
+FRICTION_MIN_ROUNDS = int(os.getenv("FRICTION_MIN_ROUNDS", "1"))  # process-quality.mjs:70-73, :173
+DIGEST_RECURRING_MIN = int(os.getenv("DIGEST_RECURRING_MIN", "2"))  # weekly-digest.mjs:250
 # quiet_days (R "gone quiet" list filter) — a live cap, not a hardcoded 365,
 # so a breach is a 422 an agent can read rather than a silently clipped value.
 APPLICATION_QUIET_DAYS_MAX = int(os.getenv("APPLICATION_QUIET_DAYS_MAX", "365"))
@@ -550,6 +570,11 @@ OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY
 # the window, so one company is never carpet-bombed.
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
 OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
+# Automatic employer emails (feedback loop slice 2; check_auto_email). Operator constants, not user
+# settings: how long to wait before each email, and the most that go out per user per day.
+AUTO_EMAIL_CHECKIN_DAYS = int(os.getenv("AUTO_EMAIL_CHECKIN_DAYS", "7"))
+AUTO_EMAIL_FOLLOWUP_DAYS = int(os.getenv("AUTO_EMAIL_FOLLOWUP_DAYS", "7"))
+AUTO_EMAILS_MAX_PER_DAY = int(os.getenv("AUTO_EMAILS_MAX_PER_DAY", "10"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
@@ -596,6 +621,71 @@ if not STATS_INTERVIEW_EVENT_TYPES:  # pragma: no cover — a vocabulary edit wo
         "APPLICATION_STATUS_EVENT_TYPES declares no interview_* event type; "
         "stats cannot compute an interview count"
     )
+
+# ── Feedback numbers (slice 3): operator constants, NOT user settings ────────
+# Each mirrors a career-ops constant (file:line in services/applications/
+# feedback_numbers.py). Env-backed like GHOSTED_AFTER_DAYS.
+STATS_SMALL_SAMPLE_N = int(os.getenv("STATS_SMALL_SAMPLE_N", "10"))  # stats.mjs:182
+STATS_CLAIM_MIN_N = int(os.getenv("STATS_CLAIM_MIN_N", "20"))  # funnel-velocity.mjs:26,105
+VELOCITY_HOP_MIN_N = int(os.getenv("VELOCITY_HOP_MIN_N", "3"))  # funnel-velocity.mjs:106
+CALIBRATION_MIN_BAND_N = int(os.getenv("CALIBRATION_MIN_BAND_N", "5"))  # calibrate.mjs:136
+CALIBRATION_GAP_POINTS = int(os.getenv("CALIBRATION_GAP_POINTS", "10"))  # calibrate.mjs:200
+CALIBRATION_FEEDBACK_MAX = int(os.getenv("CALIBRATION_FEEDBACK_MAX", "10"))  # calibrate.mjs:215
+# Owner #16: calibrate.mjs:84-89 (3.5/4.0/4.5 of 5) re-mapped to 0-100. Bands:
+# "<70", "70-79", "80-89", ">=90" (score >= min and < max).
+CALIBRATION_BAND_EDGES = (70, 80, 90)
+COMPANY_SILENCE_WINDOW_DAYS = int(os.getenv("COMPANY_SILENCE_WINDOW_DAYS", "28"))  # company-history.mjs:79
+COMPANY_STALE_AFTER_DAYS = int(os.getenv("COMPANY_STALE_AFTER_DAYS", "365"))  # company-history.mjs:78
+COMPANY_FACTS_MAX = int(os.getenv("COMPANY_FACTS_MAX", "50"))  # NOT IN REFERENCE - a bound
+STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
+# The `view` values of stats. "all" is computed as every member except "all", so
+# a view a later slice appends (before "all") joins it automatically.
+STATS_VIEWS = (
+    "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "all",
+)
+# Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
+# (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
+# event, so it never enters this table. brought/ghosted/withdrawn have no rank.
+FEEDBACK_FUNNEL_RANK: dict[str, int] = {
+    _status_event("applied"): 1,
+    _status_event("replied"): 2,
+    _status_event("rejected"): 2,  # a rejection is an answer
+    _status_event("interview_requested"): 4,
+    _status_event("interview_scheduled"): 4,
+    _status_event("interview_done"): 4,
+    _status_event("offer"): 5,
+    _status_event("offer_declined"): 5,  # an offer was reached (calibrate.mjs:66)
+    _status_event("hired"): 6,
+}
+# Plain strings on purpose, not validated: slice 2 adds these note types in parallel.
+FEEDBACK_FOLLOWUP_EVENT_TYPES = ("checkin_sent", "feedback_asked", "feedback_followup_sent")
+FEEDBACK_SKIP_EVENT_TYPE = "auto_email_skipped"
+
+# Slice 5 — fit and patterns
+# career-ops file:line cites are in services/applications/fit_record.py,
+# fit_patterns.py and reposts.py. Env-backed operator constants.
+FIT_SCORE_REASON_MAX_CHARS = int(os.getenv("FIT_SCORE_REASON_MAX_CHARS", "140"))  # rank-pipeline.mjs:53
+# Who/what produced the score (modes/pipeline.md:108-113). Values NOT IN REFERENCE.
+FIT_SCORE_SOURCES = ("full_ad", "listing", "owner")
+FIT_GAP_KINDS = ("hard", "soft")  # analyze-patterns.mjs:999-1002
+FIT_GAP_TEXT_MAX_CHARS = int(os.getenv("FIT_GAP_TEXT_MAX_CHARS", "200"))  # NOT IN REFERENCE - a bound
+FIT_JD_REQUIREMENTS_MAX = int(os.getenv("FIT_JD_REQUIREMENTS_MAX", "50"))  # NOT IN REFERENCE - a bound
+FIT_ARCHETYPE_MAX_CHARS = int(os.getenv("FIT_ARCHETYPE_MAX_CHARS", "80"))  # analyze-patterns.mjs:1418
+FIT_REMOTE_POLICIES = ("remote", "hybrid", "onsite")  # analyze-patterns.mjs:1095-1107
+FIT_VIA = ("agency", "direct")  # analyze-patterns.mjs:321-334
+FIT_TEAM_SIZE_MAX = 10_000_000  # a bound
+FIT_TEAM_SIZE_BUCKETS = (50, 500)  # analyze-patterns.mjs:1117-1127: <=50, <=500, else
+PATTERNS_MIN_SUBMITTED = int(os.getenv("PATTERNS_MIN_SUBMITTED", "5"))  # analyze-patterns.mjs:96
+PATTERNS_MIN_DECIDED = int(os.getenv("PATTERNS_MIN_DECIDED", "2"))  # analyze-patterns.mjs:161-164
+PATTERNS_LEAD_POINTS = int(os.getenv("PATTERNS_LEAD_POINTS", "10"))  # analyze-patterns.mjs:1569,1585
+PATTERNS_REASONS_MAX = int(os.getenv("PATTERNS_REASONS_MAX", "20"))  # NOT IN REFERENCE - a bound
+SKILL_GAPS_MIN_SCORED = int(os.getenv("SKILL_GAPS_MIN_SCORED", "5"))  # upskill.mjs:1076,483-490
+SKILL_GAPS_LOW_FIT_SCORE = int(os.getenv("SKILL_GAPS_LOW_FIT_SCORE", "80"))  # upskill.mjs:98 (4.0 of 5 x20)
+SKILL_GAPS_MAX = int(os.getenv("SKILL_GAPS_MAX", "50"))  # NOT IN REFERENCE - a bound
+SKILL_GAP_REPORT_SCHEMA = 1  # upskill.mjs:85-94
+REPOST_WINDOW_DAYS = int(os.getenv("REPOST_WINDOW_DAYS", "90"))  # detect-reposts.mjs:79
+REPOST_MIN_SPAN_DAYS = int(os.getenv("REPOST_MIN_SPAN_DAYS", "1"))  # detect-reposts.mjs:87
 
 # update_profile (R8-R11). The overlay of agent edits over extraction.
 # R9 — a CLOSED set of dotted paths into UserProfile. Each MUST be a declared
@@ -650,6 +740,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.above_line", "assistant_settings.below_line",
     "assistant_settings.submit_mode", "assistant_settings.daily_cap",
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
+    # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
+    "assistant_settings.auto_employer_emails",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

@@ -14,7 +14,9 @@ outreach. Every fact you save must say where it came from.
 3. **Research with your own tools**: what the company does, the team this role
    sits in, recent news, and whether the company has sponsored visas before
    (the ad, their careers page, public sponsor lists). Never guess: "not found"
-   is an answer.
+   is an answer. Also `stats(view="company", company=<company>)` and add one fact line
+   "Job360 history: <label> (<n> applications)". If a silence might be an unlogged reply, ask
+   the user. It is never a reason to skip the company or a follow-up.
 4. **Save it** as one `record_event` `note` on the application: 3-6 short
    lines, each ending with its source URL. Visa facts go in `save_fit`'s visa
    fields only when a source states them.

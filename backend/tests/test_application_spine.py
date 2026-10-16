@@ -455,6 +455,10 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "simulation",
         # Feedback loop slice 1 (2026-10-16).
         "hired", "offer_declined", "post_mortem",
+        # Feedback loop slice 2 (2026-10-16) - automatic employer emails.
+        "checkin_sent", "feedback_asked", "feedback_followup_sent", "auto_email_skipped",
+        # Feedback loop slice 4 (interview side).
+        "interview_session", "process_friction", "assessment",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types
@@ -507,9 +511,9 @@ async def test_save_fit_stores_the_verdict_and_keeps_both_judgements(authenticat
     async with authenticated_async_context() as client:
         app_id = (await _bring(client))["application_id"]
 
-        first = await _save_fit(client, app_id, score=40, verdict="weak match", gaps=["no Go"], reasoning="early read")
+        first = await _save_fit(client, app_id, score=40, verdict="weak match", score_source="full_ad", gaps=["no Go"], reasoning="early read")
         assert first.status_code == 200, first.text
-        second = await _save_fit(client, app_id, score=80, verdict="strong match", gaps=[], reasoning="after reading the JD closely")
+        second = await _save_fit(client, app_id, score=80, verdict="strong match", score_source="full_ad", gaps=[], reasoning="after reading the JD closely")
         assert second.status_code == 200, second.text
         assert second.json()["fit"]["score"] == 80
 
@@ -534,7 +538,7 @@ async def test_save_fit_computes_nothing(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = (await _bring(client))["application_id"]
 
-        resp = await _save_fit(client, app_id, score=70, verdict="looks fine", reasoning="agent's own read")
+        resp = await _save_fit(client, app_id, score=70, verdict="looks fine", score_source="full_ad", reasoning="agent's own read")
         assert resp.status_code == 200, resp.text
 
         detail = await _get_application(client, app_id)
@@ -776,7 +780,7 @@ async def test_audit_log_never_carries_a_body(authenticated_async_context, audit
         app_id = (await _bring(client))["application_id"]
         await _save_artifact(client, app_id, "cv", "SECRET_ARTIFACT_MARKER_TEXT")
         await _record_event(client, app_id, "note", detail="SECRET_DETAIL_MARKER", payload={"x": "SECRET_PAYLOAD_MARKER"})
-        await _save_fit(client, app_id, score=10, verdict="v", reasoning="SECRET_REASONING_MARKER")
+        await _save_fit(client, app_id, score=10, verdict="v", score_source="full_ad", reasoning="SECRET_REASONING_MARKER")
 
     markers = ("SECRET_ARTIFACT_MARKER_TEXT", "SECRET_DETAIL_MARKER", "SECRET_PAYLOAD_MARKER", "SECRET_REASONING_MARKER")
     for record in audit_capture.records:

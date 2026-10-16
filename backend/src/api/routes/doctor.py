@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.models import DoctorResponse, MissingToolRequest, MissingToolResponse
+from src.api.models import SILENT_DISCLAIMER, DoctorResponse, MissingToolRequest, MissingToolResponse
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import asks as asks_service
@@ -165,6 +165,8 @@ async def doctor(
         },
         "next_step": next_step,
         "ghosted_now": ghosted_now,
+        "auto_emails": await _auto_emails_block(db, user.id, eff, now),
+        "silent_after_interview": await _silent_after_interview(db, user.id, now),
         **_tools_block(client_tools_version, client_tools_rev),
     }
 
@@ -182,6 +184,53 @@ async def _sweep_ghosted(db: JobDatabase, user_id: str, now: datetime) -> list[i
             exc_info=True,
         )
         return []
+
+
+AUTO_EMAILS_STOP_HINT = "Say 'stop automatic emails' — the assistant sets auto_employer_emails off (applies at once)."
+AUTO_EMAILS_DUE_MAX = 20
+AUTO_EMAILS_LAST_MAX = 5
+
+
+async def _auto_emails_block(
+    db: JobDatabase, user_id: str, eff: settings_rules.EffectiveSettings, now: datetime
+) -> dict[str, Any]:
+    """Automatic employer emails, watched. Defensive like every doctor field: a failure logs and reads as
+    an empty block (never a 500)."""
+    block: dict[str, Any] = {
+        "on": bool(eff.auto_employer_emails), "sent_today": 0, "daily_max": settings.AUTO_EMAILS_MAX_PER_DAY,
+        "last": [], "due": [], "violations": [], "stop_hint": AUTO_EMAILS_STOP_HINT,
+    }
+    try:
+        from src.services.applications import auto_emails  # noqa: PLC0415
+
+        block["sent_today"] = await auto_emails.count_sent_today(db, user_id, now)
+        block["last"] = await auto_emails.recent_sends(db, user_id, AUTO_EMAILS_LAST_MAX)
+        block["due"] = (await auto_emails.due_for_user(db, user_id, eff, now))[:AUTO_EMAILS_DUE_MAX]
+        block["violations"] = await auto_emails.violations(db, user_id)
+    except Exception:  # noqa: BLE001 - doctor never 500s
+        log.warning(
+            "doctor_auto_emails_failed",
+            extra={"event": "doctor_auto_emails_failed", "user_id": safe_log_value(user_id)},
+            exc_info=True,
+        )
+        return {**block, "sent_today": 0, "last": [], "due": [], "violations": []}
+    return block
+
+
+async def _silent_after_interview(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]:
+    """Interview-stage applications with no word past the courtesy window (read-only,
+    services/applications/interview_counts.py); a failure logs and reads as an empty block."""
+    try:
+        from src.services.applications.interview_counts import silent_list  # noqa: PLC0415
+
+        return await silent_list(db, user_id, now=now)
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "doctor_silent_after_interview_failed",
+            extra={"event": "doctor_silent_after_interview_failed", "user_id": safe_log_value(user_id)},
+            exc_info=True,
+        )
+        return {"courtesy_days": settings.INTERVIEW_COURTESY_DAYS, "items": [], "disclaimer": SILENT_DISCLAIMER}
 
 
 def _tools_block(client_tools_version: str, client_tools_rev: Optional[int] = None) -> dict[str, Any]:

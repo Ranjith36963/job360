@@ -4,7 +4,7 @@
 // label for each event type stays in event-labels.ts; this only adds detail.
 //
 // Payload shapes (backend, all optional here — never invent a missing one):
-//   artifact_saved   { artifact_id, kind: cv|cover_letter|answers|outreach, version_no }
+//   artifact_saved   { artifact_id, kind: cv|cover_letter|answers|outreach|story_bank|interview_transcript|redflag_analysis, version_no }
 //   outreach_*       { contact_id, outreach_id, channel, contact_name? }
 //   `contact_name` is joined in by the backend (caller's own contacts only).
 // ---------------------------------------------------------------------------
@@ -16,6 +16,10 @@ const KIND_LABEL: Record<string, string> = {
   cover_letter: "Cover letter",
   answers: "Answers",
   outreach: "Outreach message",
+  story_bank: "Story bank",
+  interview_transcript: "Interview transcript",
+  redflag_analysis: "Red-flag analysis",
+  skill_gap_report: "Skill gap report",
 };
 
 function payloadOf(e: { payload?: unknown }): Record<string, unknown> {

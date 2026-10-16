@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
@@ -36,21 +36,23 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_request_db
-from src.api.models import FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
+from src.api.models import AutoEmailCheckResponse, FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
 from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
+from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
+from src.services.applications import interview_payloads, spine
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
 from src.services.applications import ready as ready_service
-from src.services.applications import spine
 from src.services.applications import stats as stats_service
 from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
+from src.services.applications.fit_record import fit_view
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile.models import UserProfile
@@ -123,12 +125,32 @@ class FitAxisIn(BaseModel):
     you: int = Field(..., ge=0, le=100)
 
 
+class FitItemIn(BaseModel):
+    """One gap / ad requirement with an optional hard|soft marker (slice 5).
+    The kind set and the text cap are live settings checked by
+    ``fit_record.clean_items`` (so a bad kind is a 422 naming the set)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    kind: Optional[str] = None
+
+
 class SaveFitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     score: Optional[int] = Field(None, ge=0, le=100)
+    # With a score this is the REASON (1..FIT_SCORE_REASON_MAX_CHARS, checked by
+    # fit_record); unscored it stays optional, at most 200 characters.
     verdict: Optional[str] = Field(None, max_length=200)
-    gaps: Optional[list[str]] = Field(None, max_length=50)
+    # Who/what produced the score: one of settings.FIT_SCORE_SOURCES.
+    score_source: Optional[str] = Field(None, max_length=20)
+    gaps: Optional[list[Union[str, FitItemIn]]] = Field(None, max_length=50)
+    jd_requirements: Optional[list[Union[str, FitItemIn]]] = Field(None, max_length=settings.FIT_JD_REQUIREMENTS_MAX)
+    archetype: Optional[str] = Field(None, max_length=80)
+    remote_policy: Optional[str] = Field(None, max_length=20)
+    team_size: Optional[int] = Field(None, strict=True)
+    via: Optional[str] = Field(None, max_length=20)
     reasoning: Optional[str] = None
     # The fit picture — `None`/`[]` = no chart (rule #29); part of the slot.
     axes: Optional[list[FitAxisIn]] = Field(None, max_length=50)
@@ -326,11 +348,23 @@ class FitAxisOut(BaseModel):
     you: int
 
 
+class FitItemOut(BaseModel):
+    text: str
+    kind: Optional[str] = None
+
+
 class ApplicationFitOut(BaseModel):
     score: Optional[int]
     verdict: Optional[str]
     gaps: list[str]
     reasoning: Optional[str]
+    score_source: Optional[str] = None
+    gaps_detail: list[FitItemOut] = []
+    jd_requirements: list[FitItemOut] = []
+    archetype: Optional[str] = None
+    remote_policy: Optional[str] = None
+    team_size: Optional[int] = None
+    via: Optional[str] = None
     # The fit picture's axes — `[]` when the agent gave none (drawn as nothing).
     axes: list[FitAxisOut] = []
     recorded_by: str
@@ -1318,6 +1352,8 @@ class StatsOverallOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
     # Owner decision 2026-10-14 — replied/interview/offer above count only
     # applications that ALSO have an `applied` event (so no rate exceeds 1);
     # this is how many reached a later stage with no `applied` recorded.
@@ -1342,6 +1378,8 @@ class StatsCvVersionGroupOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
 
 
 class StatsRoleGroupOut(BaseModel):
@@ -1357,6 +1395,8 @@ class StatsRoleGroupOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
 
 
 class StatsKeyedGroupOut(BaseModel):
@@ -1376,6 +1416,8 @@ class StatsKeyedGroupOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
 
 
 class StatsContactFoundViaGroupOut(BaseModel):
@@ -1403,6 +1445,245 @@ class StatsScoreLineOut(BaseModel):
     unscored: int
 
 
+class StatsFunnelOut(BaseModel):
+    n: int
+    ever_applied: int
+    ever_replied: int
+    ever_interview: int
+    ever_offer: int
+    ever_hired: int
+    reply_rate: Optional[float] = None
+    interview_rate: Optional[float] = None
+    offer_rate: Optional[float] = None
+    small_sample: bool
+    without_applied: int
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsHopOut(BaseModel):
+    key: str
+    from_: str = Field(alias="from")
+    to: str
+    n: int
+    median_days: Optional[float] = None
+    p75_days: Optional[float] = None
+    insufficient_data: bool
+    same_day_excluded: int
+    still_waiting: int
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class StatsVelocityOut(BaseModel):
+    hops: list[StatsHopOut]
+    min_n: int
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsBandOut(BaseModel):
+    band: str
+    min: Optional[int] = None
+    max: Optional[int] = None
+    n: int
+    interviews: int
+    offers: int
+    interview_rate: Optional[float] = None
+    offer_rate: Optional[float] = None
+
+
+class StatsVerdictOut(BaseModel):
+    kind: str
+    text: str
+
+
+class StatsFeedbackQuoteOut(BaseModel):
+    application_id: int
+    company: str
+    fit_score: Optional[int] = None
+    verbatim_feedback: str
+
+
+class StatsCalibrationOut(BaseModel):
+    bands: list[StatsBandOut]
+    min_band_n: int
+    resolved: int
+    in_flight: int
+    unscored: int
+    ghosted_counted_negative: int
+    verdict: StatsVerdictOut
+    feedback: list[StatsFeedbackQuoteOut]
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsCompanyFactOut(BaseModel):
+    application_id: int
+    kind: str  # "silent" | "answered"
+    stale: bool
+    applied_on: Optional[str] = None
+    silent_days: Optional[int] = None
+    checkins_sent: Optional[int] = None
+    confidence: Optional[str] = None
+    outcome: Optional[str] = None
+    on: Optional[str] = None
+    note: Optional[str] = None
+
+
+class StatsCompanyCardOut(BaseModel):
+    key: str
+    company: str
+    label: str
+    applications: int
+    facts: list[StatsCompanyFactOut]
+    facts_truncated: bool
+    truncated_hint: Optional[str] = None
+
+
+class StatsCompanyOut(BaseModel):
+    cards: list[StatsCompanyCardOut]
+    silence_window_days: int
+    stale_after_days: int
+    truncated: bool
+    since_ignored: bool
+    explanation: str
+    truncated_hint: Optional[str] = None
+
+
+class StatsLessonSideOut(BaseModel):
+    n: int
+    replied: int
+    interview: int
+    reply_rate: Optional[float] = None
+    interview_rate: Optional[float] = None
+    small_sample: bool
+    still_waiting: int
+
+
+class StatsLessonEffectRowOut(BaseModel):
+    event_id: int
+    application_id: int
+    lesson: str
+    agreed_on: Optional[str] = None
+    before: StatsLessonSideOut
+    after: StatsLessonSideOut
+    comparable: bool
+
+
+class StatsLessonEffectOut(BaseModel):
+    lessons: list[StatsLessonEffectRowOut]
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsFollowupsOut(BaseModel):
+    available: bool
+    checkins_sent: Optional[int] = None
+    feedback_asked: Optional[int] = None
+    feedback_followups_sent: Optional[int] = None
+    applications_with_checkin: Optional[int] = None
+    applied_without_checkin: Optional[int] = None
+    rejections_without_ask: Optional[int] = None
+    skipped: Optional[dict[str, int]] = None
+    checkin_days: Optional[int] = None
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsPatternRowOut(BaseModel):
+    """One group of the ``patterns`` view (counts of the user's own sent applications)."""
+
+    key: Optional[str] = None
+    label: str
+    submitted: int
+    positive: int
+    negative: int
+    awaiting: int
+    no_answer: int
+    decided: int
+    conversion_rate: Optional[float] = None
+    decided_rate: Optional[float] = None
+    small_sample: bool
+
+
+class StatsPatternSignalOut(BaseModel):
+    dimension: str
+    kind: str
+    key: str
+    label: str
+    submitted: int
+    decided: int
+    positive: int
+    decided_rate: Optional[float] = None
+    points_vs_overall: Optional[int] = None
+    clear_lead: bool
+    text: str
+
+
+class StatsReasonOut(BaseModel):
+    reason: str
+    count: int
+    application_ids: list[int]
+
+
+class StatsPatternsOut(BaseModel):
+    """``stats(view="patterns")``. ``available`` false = below the gate (``text`` says
+    how far); every other key is then null."""
+
+    available: bool
+    submitted: int
+    threshold: int
+    text: Optional[str] = None
+    withdrawn_excluded: Optional[int] = None
+    overall: Optional[StatsPatternRowOut] = None
+    by_archetype: Optional[list[StatsPatternRowOut]] = None
+    by_remote_policy: Optional[list[StatsPatternRowOut]] = None
+    by_team_size: Optional[list[StatsPatternRowOut]] = None
+    by_via: Optional[list[StatsPatternRowOut]] = None
+    signals: Optional[list[StatsPatternSignalOut]] = None
+    rejection_reasons: Optional[list[StatsReasonOut]] = None
+    reason_base: Optional[int] = None
+    groups_truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+    note: Optional[str] = None
+
+
+class StatsSkillGapOut(BaseModel):
+    key: str
+    gap: str
+    applications: int
+    low_fit: int
+    hard: int
+    soft: int
+    unmarked: int
+    weighted: float
+    tier: str
+    application_ids: list[int]
+
+
+class StatsSkillGapsOut(BaseModel):
+    """``stats(view="skill_gaps")``. ``available`` false = fewer than the threshold
+    of scored fits; every other key is then null."""
+
+    available: bool
+    scored: int
+    threshold: Optional[int] = None
+    text: Optional[str] = None
+    fits_read: Optional[int] = None
+    total_low_fit: Optional[int] = None
+    low_fit_score: Optional[int] = None
+    gaps: Optional[list[StatsSkillGapOut]] = None
+    excluded_as_known: Optional[int] = None
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+    note: Optional[str] = None
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1417,6 +1698,20 @@ class StatsResponse(BaseModel):
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
     # counted; the numbers describe that window, not the whole history.
     applications_truncated: bool
+    # `stats(view=...)` adds ONE block (or all of them); the rest stay null.
+    funnel: Optional[StatsFunnelOut] = None
+    velocity: Optional[StatsVelocityOut] = None
+    calibration: Optional[StatsCalibrationOut] = None
+    company: Optional[StatsCompanyOut] = None
+    lesson_effect: Optional[StatsLessonEffectOut] = None
+    followups: Optional[StatsFollowupsOut] = None
+    # Feedback loop slice 4 (interview side): each is null unless its stats view was asked for.
+    digest: Optional[dict[str, Any]] = None
+    friction: Optional[dict[str, Any]] = None
+    assessments: Optional[dict[str, Any]] = None
+    # Slice 5 - one block per view; null unless the call asked for it.
+    patterns: Optional[StatsPatternsOut] = None
+    skill_gaps: Optional[StatsSkillGapsOut] = None
     computed_at: str
 
 
@@ -1463,11 +1758,13 @@ async def list_lessons(
 @router.get("/applications/stats", response_model=StatsResponse, dependencies=AUTH_FIRST)
 async def stats(
     since: Optional[str] = Query(None),
+    view: Optional[str] = Query(None),
+    company: Optional[str] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        return await stats_service.compute_stats(db, user.id, since)
+        return await stats_service.compute_stats(db, user.id, since, view=view, company=company)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
@@ -1712,17 +2009,7 @@ async def application_alignment(
     app_row = await spine.get_owned_application(db, user.id, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    fit = None
-    if app_row.get("fit_recorded_at"):
-        fit = {
-            "score": app_row.get("fit_score"),
-            "verdict": app_row.get("fit_verdict"),
-            "gaps": json.loads(app_row.get("fit_gaps") or "[]"),
-            "reasoning": app_row.get("fit_reasoning"),
-            "axes": json.loads(app_row.get("fit_axes") or "[]"),
-            "recorded_by": app_row.get("fit_recorded_by") or "",
-            "recorded_at": app_row.get("fit_recorded_at") or "",
-        }
+    fit = fit_view(app_row)
     ad_text = app_row.get("job_description_snapshot") or ""
     profile = load_profile(user.id)
     skills = alignment.candidate_skills(profile) if profile is not None else []
@@ -1906,6 +2193,47 @@ async def outreach_check(
     }
 
 
+@router.get(
+    "/applications/{application_id}/auto-email-check", response_model=AutoEmailCheckResponse,
+    dependencies=AUTH_FIRST,
+)
+async def auto_email_check(
+    application_id: int,
+    kind: str = Query("", max_length=40),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """THE one gate before an automatic employer email (feedback loop slice 2).
+
+    ``kind``: checkin | feedback_request | feedback_followup. Answers ``send`` / ``ask`` / ``stop`` with a
+    closed ``reason`` through ``auto_emails.decide`` (the same function for this route and the MCP
+    ``check_auto_email`` tool). ``send`` only means the gate is open. Read-only apart from one audit line.
+    404 for an application that is not the caller's (rule #12)."""
+    now = datetime.now(timezone.utc)
+    facts = await auto_emails_service.load_facts(db, user.id, application_id, now)
+    if facts is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    profile = load_profile(user.id) or UserProfile()
+    cfg = settings_rules.effective(profile.assistant_settings)
+    verdict = auto_emails_service.decide(kind, facts, cfg, now)
+    since = auto_emails_service.due_since(kind, facts)
+    # Ids and closed codes only: never an address, a company or any text.
+    get_audit_logger().info(
+        "auto_email_check",
+        extra={
+            "event": "auto_email_check", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "application_id": application_id,
+            "kind": safe_log_value(kind, max_len=40), "decision": safe_log_value(verdict.decision, max_len=20),
+            "reason": safe_log_value(verdict.reason, max_len=60), "result": "ok",
+        },
+    )
+    return {
+        "decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail,
+        "sent_today": facts.sent_today, "daily_max": settings.AUTO_EMAILS_MAX_PER_DAY,
+        "due_since": since.isoformat() if since else "",
+    }
+
+
 @router.get("/people", response_model=ListPeopleResponse, dependencies=AUTH_FIRST)
 async def list_people(
     contact_id: Optional[int] = Query(None),
@@ -1973,6 +2301,13 @@ async def save_artifact(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _items_out(items: Optional[list[Union[str, FitItemIn]]]) -> Optional[list[Any]]:
+    """Request items -> the plain str / dict shapes ``fit_record.clean_items`` reads."""
+    if items is None:
+        return None
+    return [i.model_dump() if isinstance(i, FitItemIn) else i for i in items]
+
+
 @router.put("/applications/{application_id}/fit", response_model=SaveFitResponse, dependencies=AUTH_FIRST)
 async def save_fit(
     application_id: int,
@@ -1984,9 +2319,11 @@ async def save_fit(
         reasoning = body.clamp_reasoning()
         saved = await spine.save_fit(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
-            score=body.score, verdict=body.verdict, gaps=body.gaps, reasoning=reasoning,
+            score=body.score, verdict=body.verdict, gaps=_items_out(body.gaps), reasoning=reasoning,
             visa_signal=body.visa_signal, visa_detail=body.visa_detail, visa_country=body.visa_country,
             axes=[a.model_dump() for a in body.axes] if body.axes is not None else None,
+            score_source=body.score_source, jd_requirements=_items_out(body.jd_requirements),
+            archetype=body.archetype, remote_policy=body.remote_policy, team_size=body.team_size, via=body.via,
         )
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
         return {**saved, "line": settings_rules.line_block(body.score, cfg)}
@@ -2508,6 +2845,8 @@ async def record_event(
                 max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None,
             )
         payload = spine.validate_outcome_payload(body.event_type, payload)
+        payload = spine.validate_auto_email_payload(body.event_type, payload)
+        payload = interview_payloads.validate(body.event_type, payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
@@ -2517,6 +2856,9 @@ async def record_event(
         if await spine.get_owned_application(db, user.id, application_id) is None:
             raise SpineError(404, "application not found")
         await spine.check_outcome_event_id(db, user.id, application_id, body.event_type, payload)
+        await interview_payloads.check_refs(
+            db, user.id, application_id, body.event_type, payload, body.corrects_event_id
+        )
         if body.event_type == "submit_mode_set":
             _check_submit_mode_event(user, application_id, payload)
         if body.event_type in kit_service.KIT_EVENT_TYPES:
@@ -2556,6 +2898,8 @@ async def record_event(
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
+        if body.event_type in interview_payloads.INTERVIEW_EVENT_TYPES:
+            interview_payloads.log_recorded(user.id, application_id, int(result["event_id"]), body.event_type, payload)
         # Keep append_event's own warnings (a duplicate message_id recorded as another type)
         # and add the reply-before-applied one; never replace one list with the other.
         # Judge the STORED type: a duplicate message_id returns the existing event.

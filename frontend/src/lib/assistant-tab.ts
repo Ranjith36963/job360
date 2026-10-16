@@ -41,6 +41,14 @@ export function settingScore(f: { effective?: unknown; value?: unknown } | undef
   return Number.isFinite(n) ? n : null;
 }
 
+/** The automatic-employer-emails switch (off unless the server says true). */
+export function settingAutoEmails(f: { effective?: unknown; value?: unknown } | undefined): boolean {
+  return settingEffective(f) === true;
+}
+
+export const AUTO_EMAILS_HELP =
+  "Check-in 7 days after applying, a feedback request after a rejection, one follow-up 7 days later. Sent in your name by your assistant.";
+
 /** A line switch, narrowed to "ask" | "auto" (anything else is "ask"). */
 export function settingSwitch(f: { effective?: unknown; value?: unknown } | undefined): "ask" | "auto" {
   return settingEffective(f) === "auto" ? "auto" : "ask";
@@ -51,10 +59,11 @@ export const P_BELOW = "assistant_settings.below_line";
 export const P_SCORE = "assistant_settings.apply_min_score";
 export const P_SUBMIT = "assistant_settings.submit_mode";
 export const P_CAP = "assistant_settings.daily_cap";
+export const P_AUTO_EMAILS = "assistant_settings.auto_employer_emails";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
-export const SETTING_HISTORY_PATHS = [P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP] as const;
+export const SETTING_HISTORY_PATHS = [P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS] as const;
 export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
 export const HISTORY_PATHS: string[] = [...SETTING_HISTORY_PATHS, ...PREF_HISTORY_PATHS];
 
@@ -64,6 +73,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_BELOW]: "Jobs below your line",
   [P_SUBMIT]: "Submit mode",
   [P_CAP]: "Daily limit",
+  [P_AUTO_EMAILS]: "Automatic employer emails",
   [P_INBOX]: "Gmail check",
   [P_EVERY]: "Inbox check",
 };
@@ -82,6 +92,7 @@ export function everyText(v: unknown): string {
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
+  if (path === P_AUTO_EMAILS) return v === true ? "on" : "off";
   if (path === P_CAP) return empty ? "no limit" : String(v);
   if (empty) return "not set";
   if (path === P_ABOVE || path === P_BELOW) return LINE_SWITCH_LABEL[String(v)] ?? String(v);

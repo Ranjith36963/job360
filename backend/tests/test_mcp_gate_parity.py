@@ -99,6 +99,7 @@ TOOL_ROUTES = {
     "get_proof_upload_link": ("proof", "create_proof_link", {"application_id": 987654321}),
     # The outreach send gate (feature 10) - require_user, read-only, no email gate.
     "check_outreach": ("applications", "outreach_check", {"contact_id": 987654321, "message_id": 1}),
+    "check_auto_email": ("applications", "auto_email_check", {"application_id": 987654321, "kind": "checkin"}),
     # The agent doctor + missing-tool report (feature 7) - require_user, no email gate
     # (an unverified user is TOLD to verify by doctor, never refused by it).
     # The live-form check (weak spot #1) - require_user, read-only, no email gate.
