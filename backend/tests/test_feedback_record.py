@@ -254,23 +254,15 @@ async def test_reply_after_auto_ghost_moves_it_off_ghosted(authenticated_async_c
 
 
 @pytest.mark.asyncio
-async def test_stats_also_sweeps_and_a_sweep_failure_never_breaks_it(authenticated_async_context, monkeypatch):
+async def test_stats_never_sweeps_so_doctor_reports_every_new_ghost(authenticated_async_context):
+    """Only doctor sweeps: a stats read first must not swallow the id doctor reports in ghosted_now."""
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         await _event(client, app_id, "applied", occurred_at=_ago(46))
         resp = await client.get("/api/applications/stats")
         assert resp.status_code == 200, resp.text
-        assert (await _detail(client, app_id))["status"] == "ghosted"
-
-        from src.services.applications import ghosting
-
-        async def boom(*_a: Any, **_k: Any) -> list[int]:
-            raise RuntimeError("sweep exploded")
-
-        monkeypatch.setattr(ghosting, "sweep_ghosted", boom)
-        assert (await client.get("/api/applications/stats")).status_code == 200
-        doc = await _doctor(client)
-        assert doc["ghosted_now"] == []
+        assert (await _detail(client, app_id))["status"] == "applied"
+        assert (await _doctor(client))["ghosted_now"] == [app_id]
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,8 @@ status-family event is older than ``settings.GHOSTED_AFTER_DAYS`` gets ONE
 ``ghosted`` event through the normal spine append (never raw SQL), recorded by
 ``system``. Idempotent: the status becomes ``ghosted`` so a second sweep finds
 nothing. A later employer reply moves it off ``ghosted`` by the ordinary replay
-rule (status.replay_status). Called at the start of doctor and stats; a failure
-there is logged and never breaks them.
+rule (status.replay_status). Called only at the start of doctor (which reports
+the ids in ``ghosted_now``); a failure there is logged and never breaks it.
 """
 from __future__ import annotations
 

@@ -1467,16 +1467,6 @@ async def stats(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        from src.services.applications.ghosting import sweep_ghosted  # noqa: PLC0415
-
-        await sweep_ghosted(db, user.id)
-    except Exception:  # noqa: BLE001 - a sweep failure never breaks stats
-        get_audit_logger().warning(
-            "stats_ghost_sweep_failed",
-            extra={"event": "stats_ghost_sweep_failed", "user_id": safe_log_value(user.id)},
-            exc_info=True,
-        )
-    try:
         return await stats_service.compute_stats(db, user.id, since)
     except SpineError as exc:
         _raise(exc)
