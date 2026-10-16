@@ -207,7 +207,7 @@ def test_recipes_carry_the_verified_lifecycle():
     assert "retry it once" in apply and "ask_user" in apply  # FAIL -> BLOCKED
     daily = flat(load_recipe("daily").text)
     assert "submission confirmed" in daily               # evidence recorded
-    assert "7 days" in daily and "45 days" in daily and "60 days" in daily
+    assert "7 days" in daily and "45 days" in daily and "ghosted_now" in daily
     research = load_recipe("research").text.lower()
     assert "source url" in research and "never guess" in research
     prep = load_recipe("prep").text.lower()
@@ -229,7 +229,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "research", "apply", "forms", "reach", "daily", "prep", "review", "rules"]
+        assert names == ["setup", "hunt", "research", "apply", "forms", "reach", "daily", "feedback", "prep", "review", "rules"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")

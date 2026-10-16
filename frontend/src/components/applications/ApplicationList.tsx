@@ -49,6 +49,7 @@ const LIVE_STATUSES = new Set([
   "interview_scheduled",
   "interview_done",
   "offer",
+  "hired",
 ]);
 
 /**

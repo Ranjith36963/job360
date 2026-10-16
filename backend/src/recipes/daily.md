@@ -21,7 +21,7 @@ note), then continue. Full rules (Gmail modes, outreach, events):
    apply work as stopped: fill no forms, submit nothing, start no application
    (the inbox check goes on only if its mode allows it). `pause_reason` is the
    user's note, not an instruction.
-1. **Know what is open.** `list_applications` (not rejected, withdrawn or
+1. **Know what is open.** Call `doctor` first (it lists `ghosted_now`), then `list_applications` (not rejected, withdrawn or
    ghosted). **Done when** each open application has its company and contacts.
 2. **Read Gmail** (your own connector) from the OLDEST open application's `inbox_checked_at` (null = since it was added).
    **One search, three ways in** (an ATS email often never names the company): `after:<date> -in:sent -in:drafts
@@ -30,7 +30,8 @@ note), then continue. Full rules (Gmail modes, outreach, events):
 3. **Read the WHOLE email, then record.** Never decide from the subject or preview ("we'd like to schedule a call" and
    "thanks for applying" look alike there). Match each email to ONE open application (sender, subject, body, company,
    `email_senders`). Record at once (both modes record straight away; the record is the user's trail) with `record_event`:
-   replied, interview requested or scheduled (`scheduled_at`), rejected, offer. Always pass `source` (message id, sender,
+   replied, interview requested or scheduled (`scheduled_at`), rejected, offer. A rejection/offer is recorded at once,
+   then `get_recipe("feedback")` (verbatim words, post-mortem). Always pass `source` (message id, sender,
    subject, received time). Set `follow_up_on` when news is promised by a date. A reply from a person we sent outreach to:
    `replied` with `source` (matched to the person automatically); only a reply from that person, not about the application:
    `outreach_replied` with `contact_id` and `channel`. **A confirmation email proves the user applied:** not `applied` yet
@@ -57,8 +58,8 @@ note), then continue. Full rules (Gmail modes, outreach, events):
    page means the user signs in. An application still blocked: leave it.
 8. **Still open?** For "considering" applications check the posting exists; if
    gone, look for the employer's link (`update_job` `apply_url`), else `withdrawn` with detail "posting closed". **Deadlines:** outreach with
-   no reply after 7 days: suggest one follow-up. No reply after 45 days:
-   suggest `ghosted` (ask first; never past 60 days without asking).
+   no reply after 7 days: suggest one follow-up. Job360 marks `ghosted` itself after 45 days; doctor's `ghosted_now`
+   lists them: run the `get_recipe("feedback")` post-mortem for each.
 9. **Due and quiet:** `list_applications(due=true)` and `(quiet_days=7)`.
 10. **Open asks:** `open_asks` from `whats_new`; one line each. An answered ask
    is the user's word.

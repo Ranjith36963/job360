@@ -11,5 +11,7 @@ Print this checklist and tick each step:
    two or three applications is not a pattern; say so.
 3. **Suggest one or two changes** for next week (titles, places, CV angle)
    and ask the user which to keep.
-4. **Save what the user agrees with** as a `lesson` with `record_event` on the
-   application it came from, so the next run starts from it.
+4. **Save only what the user says yes to** as a `lesson` with `record_event` on the
+   application it came from, so the next run starts from it. Never record one
+   they did not agree to. A lesson they later disagree with: `record_event`
+   `note` with `corrects_event_id` = the lesson's event id ("removed: <why>").

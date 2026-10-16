@@ -316,6 +316,22 @@ it may not be implausibly in the future. A status event (applied/replied/
 interview_*/offer/rejected/withdrawn/ghosted) moves the application's status; a
 note-family event never does.
 
+Outcome events: `hired` (above offer) and `offer_declined` (closed, shown as
+rejected) are status events; `post_mortem` is a note. Outcome payload keys
+(all optional, checked, 422 when malformed; other keys pass through):
+rejected/ghosted/withdrawn/offer/hired/offer_declined/post_mortem take
+`verbatim_feedback` (the employer's exact words, <= 2000 chars), `reasons`
+(list of plain words, <= 10, each <= 120, no fixed list), `stage` (<= 60).
+replied/rejected/interview_*/offer also take `reply_type` (<= 40), `evidence`
+(list, <= 5, each <= 300), `confidence` (high|medium|low). `post_mortem` takes
+`what_was_sent`, `what_to_change` (lists <= 10, each <= 300), `proposed_lessons`
+(list <= 5, each <= 300) and `outcome_event_id` (an event on the same
+application). `source.kind` is `email` or `pasted`; for pasted, make your own
+stable `message_id` (e.g. "pasted:<sender>:<subject>:<date>"). Job360 marks an
+`applied` application `ghosted` itself after 45 days of silence (recorded_by
+system, payload auto=true); a later employer reply moves it off ghosted.
+Record outcomes at once; see `get_recipe("feedback")`.
+
 Wrong applied date: get_application -> timeline, take the `applied` event_id,
 then record_event `applied` with the right `occurred_at` and `corrects_event_id`
 = that id. The old event is kept and marked superseded; never record a second

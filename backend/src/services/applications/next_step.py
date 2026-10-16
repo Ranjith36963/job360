@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Optional
 
-_CLOSED = ("rejected", "withdrawn", "ghosted")
+_CLOSED = ("rejected", "withdrawn", "ghosted", "hired", "offer_declined")
 
 
 def _parse_interview_at(value: str) -> Optional[datetime]:

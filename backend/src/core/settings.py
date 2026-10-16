@@ -282,9 +282,15 @@ APPLICATION_STATUS_EVENT_TYPES = (
     "brought", "applied", "replied", "interview_requested",
     "interview_scheduled", "interview_done", "offer", "rejected",
     "withdrawn", "ghosted",
+    # Feedback loop slice 1: `hired` is a rung above `offer`; `offer_declined` is
+    # terminal (the user turned the offer down).
+    "hired", "offer_declined",
 )
 APPLICATION_NOTE_EVENT_TYPES = (
     "fit_judged", "artifact_saved", "contact_added", "outreach_sent", "outreach_replied", "note", "lesson",
+    # Feedback loop slice 1: the written look-back after an outcome (payload keys
+    # checked by spine.validate_outcome_payload).
+    "post_mortem",
     "asked", "answered", "ask_withdrawn",
     # Owner decision 2026-10-08 (S2) — the per-job submit switch
     # (payload {"submit_mode": "confirm" | "auto_when_sure" | "inherit"}). A NOTE
@@ -325,7 +331,7 @@ APPLICATION_EVENT_MAX_FUTURE_SECONDS = int(os.getenv("APPLICATION_EVENT_MAX_FUTU
 # carry the email it came from, and an interview may carry a real datetime
 # instead of prose in `detail`. Every cap a parameter; a breach is 422 naming
 # the setting (S2).
-APPLICATION_EVENT_SOURCE_KINDS = _env_list("APPLICATION_EVENT_SOURCE_KINDS", ("email",))
+APPLICATION_EVENT_SOURCE_KINDS = _env_list("APPLICATION_EVENT_SOURCE_KINDS", ("email", "pasted"))
 APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS = int(
     os.getenv("APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS", "256")
 )
@@ -473,7 +479,12 @@ APPLICATION_FOLLOW_UP_MAX_FUTURE_DAYS = int(os.getenv("APPLICATION_FOLLOW_UP_MAX
 # real closed statuses in APPLICATION_STATUS_EVENT_TYPES; there is no
 # "offer accepted" status — `offer` stays open until the caller records what
 # happened next).
-APPLICATION_FOLLOW_UP_CLOSED_STATUSES = ("rejected", "withdrawn", "ghosted")
+APPLICATION_FOLLOW_UP_CLOSED_STATUSES = ("rejected", "withdrawn", "ghosted", "hired", "offer_declined")
+# Feedback loop slice 1 (owner decisions #1, #4): an application still at `applied` this many
+# days after its newest status event is marked `ghosted` by Job360 itself
+# (services/applications/ghosting.py). An operator constant, not a user setting.
+GHOSTED_AFTER_DAYS = int(os.getenv("GHOSTED_AFTER_DAYS", "45"))
+GHOSTED_SWEEP_MAX = int(os.getenv("GHOSTED_SWEEP_MAX", "200"))
 # quiet_days (R "gone quiet" list filter) — a live cap, not a hardcoded 365,
 # so a breach is a 422 an agent can read rather than a silently clipped value.
 APPLICATION_QUIET_DAYS_MAX = int(os.getenv("APPLICATION_QUIET_DAYS_MAX", "365"))

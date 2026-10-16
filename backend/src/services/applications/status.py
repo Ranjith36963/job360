@@ -28,6 +28,8 @@ STATUS_TO_STAGE: dict[str, str] = {
     "interview_scheduled": "interview",
     "interview_done": "interview",
     "offer": "offer",
+    "hired": "offer",
+    "offer_declined": "rejected",
     "rejected": "rejected",
     "withdrawn": "rejected",
     "ghosted": "ghosted",
@@ -63,9 +65,10 @@ PROGRESS_RANK: dict[str, int] = {
     "interview_scheduled": 4,
     "interview_done": 5,
     "offer": 6,
+    "hired": 7,
 }
 # Endings the employer or the user declared. Always applied (the latest wins).
-TERMINAL_STATUSES = frozenset({"rejected", "withdrawn"})
+TERMINAL_STATUSES = frozenset({"rejected", "withdrawn", "offer_declined"})
 GHOSTED = "ghosted"
 # `ghosted` (silence) only lands while the application is at or below this
 # rung: silence after an interview is still news, silence after an OFFER is

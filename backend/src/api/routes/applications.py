@@ -2224,7 +2224,7 @@ async def mark_cv_seen(
 # approval step only exists while the status is still `considering`.
 _SEND_DECISION_CLOSED_STATUSES = frozenset({
     "applied", "replied", "interview_requested", "interview_scheduled", "interview_done",
-    "offer", "rejected", "withdrawn", "ghosted",
+    "offer", "rejected", "withdrawn", "ghosted", "hired", "offer_declined",
 })
 
 

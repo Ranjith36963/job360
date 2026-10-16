@@ -24,6 +24,8 @@ export const ACTIONS_BY_STATUS: Readonly<Record<string, readonly ApplicationActi
   interview_scheduled: POST_APPLY,
   interview_done: POST_APPLY,
   offer: POST_APPLY,
+  hired: POST_APPLY,
+  offer_declined: POST_APPLY,
   rejected: POST_APPLY,
   withdrawn: POST_APPLY,
   ghosted: POST_APPLY,

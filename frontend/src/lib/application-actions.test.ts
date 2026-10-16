@@ -10,7 +10,7 @@ describe("allowedActions", () => {
 
   it.each([
     "applied", "replied", "interview_requested", "interview_scheduled", "interview_done",
-    "offer", "rejected", "withdrawn", "ghosted",
+    "offer", "hired", "offer_declined", "rejected", "withdrawn", "ghosted",
   ])("%s allows no send decision", (status) => {
     expect(allowedActions(status)).toEqual(["mark_applied"]);
     expect(readyCardAllowed(status)).toBe(false);
