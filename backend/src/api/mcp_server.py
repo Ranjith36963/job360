@@ -1658,9 +1658,11 @@ def build_server(version: str = "") -> MCPServer:
         `next_step` (verify_email | upload_cv | setup:<round> | answer_asks |
         confirm_settings | ok). Also: how you are signed in (`auth`), what the
         profile still lacks (`missing`), open asks, waiting setting changes, the
-        pause, today's outreach (`sent_today`, `daily_max`, `blocked_today`) and
+        pause, today's outreach (`sent_today`, `daily_max`, `blocked_today`),
+        `ghosted_now` (application ids auto-marked ghosted by this call) and
         when the last event was recorded - then whats_new(since=<your last
-        check>) for what changed. Read-only.
+        check>) for what changed. Writes only one thing: a `ghosted` mark on
+        applications silent 45 days after applying (listed in ghosted_now).
         Tool list check: `tools` = every tool and its parameters as served now,
         `tools_version` = their short hash. Pass the `tools_version` you saw last
         time as `client_tools_version`: `tools_stale` true = your client's tool

@@ -69,6 +69,9 @@ describe("eventLabel", () => {
     expect(eventLabel({ event_type: "interview_scheduled" })).toBe("Status → Interview scheduled");
     expect(eventLabel({ event_type: "interview_done" })).toBe("Status → Interview done");
     expect(eventLabel({ event_type: "offer" })).toBe("Status → Offer");
+    expect(eventLabel({ event_type: "hired" })).toBe("Status → Hired");
+    expect(eventLabel({ event_type: "offer_declined" })).toBe("Status → Offer declined");
+    expect(eventLabel({ event_type: "post_mortem" })).toBe("Post-mortem: what to learn from this");
     expect(eventLabel({ event_type: "rejected" })).toBe("Status → Rejected");
     expect(eventLabel({ event_type: "withdrawn" })).toBe("Status → Withdrawn");
     expect(eventLabel({ event_type: "ghosted" })).toBe("Status → Ghosted");

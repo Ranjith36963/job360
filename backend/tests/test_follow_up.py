@@ -356,15 +356,16 @@ async def test_quiet_days_covers_every_open_status_not_just_applied(authenticate
         assert app_id in [a["id"] for a in resp.json()["applications"]]
 
 
-def test_closed_statuses_are_exactly_rejected_withdrawn_ghosted():
-    """Coordinator correction (2026-09-25) — pin the exact set: no
-    "accepted"/"hired" status exists in APPLICATION_STATUS_EVENT_TYPES, so it
-    can never be added here as if it did."""
+def test_closed_statuses_are_exactly_the_endings():
+    """Pin the exact set. Feedback loop slice 1 added `hired` and `offer_declined` as real
+    endings; `offer` itself stays open and there is still no "accepted" status."""
     from src.core import settings
 
-    assert set(settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES) == {"rejected", "withdrawn", "ghosted"}
+    assert set(settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES) == {
+        "rejected", "withdrawn", "ghosted", "hired", "offer_declined",
+    }
     assert "offer" not in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
-    assert not {"accepted", "hired"} & set(settings.APPLICATION_STATUS_EVENT_TYPES)
+    assert "accepted" not in settings.APPLICATION_STATUS_EVENT_TYPES
 
 
 # next_step's `follow_up` code is pinned in test_next_step.py's parametrized

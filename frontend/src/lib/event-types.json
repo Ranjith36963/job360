@@ -9,7 +9,9 @@
     "offer",
     "rejected",
     "withdrawn",
-    "ghosted"
+    "ghosted",
+    "hired",
+    "offer_declined"
   ],
   "note": [
     "fit_judged",
@@ -19,6 +21,7 @@
     "outreach_replied",
     "note",
     "lesson",
+    "post_mortem",
     "asked",
     "answered",
     "ask_withdrawn",

@@ -42,7 +42,7 @@ async def test_get_recipe_list_and_each_recipe_carry_same_version(authenticated_
     from src.api import mcp_server as m
     from src.api.routes.recipes import RECIPE_NAMES
 
-    assert len(RECIPE_NAMES) == 10
+    assert len(RECIPE_NAMES) == 11
     tools = m.build_server()._tool_manager
     expected = m.tools_version(m.served_tool_parameters())
     token = m._current_user.set(_user(fixture_user_id))

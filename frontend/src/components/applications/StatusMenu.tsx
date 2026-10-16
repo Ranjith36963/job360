@@ -22,6 +22,8 @@ const STATUS_MENU_EVENT_TYPES = [
   "interview_scheduled",
   "interview_done",
   "offer",
+  "hired",
+  "offer_declined",
   "rejected",
   "withdrawn",
   "ghosted",

@@ -28,6 +28,8 @@ STATUS_TO_STAGE: dict[str, str] = {
     "interview_scheduled": "interview",
     "interview_done": "interview",
     "offer": "offer",
+    "hired": "offer",
+    "offer_declined": "rejected",
     "rejected": "rejected",
     "withdrawn": "rejected",
     "ghosted": "ghosted",
@@ -63,9 +65,10 @@ PROGRESS_RANK: dict[str, int] = {
     "interview_scheduled": 4,
     "interview_done": 5,
     "offer": 6,
+    "hired": 7,
 }
 # Endings the employer or the user declared. Always applied (the latest wins).
-TERMINAL_STATUSES = frozenset({"rejected", "withdrawn"})
+TERMINAL_STATUSES = frozenset({"rejected", "withdrawn", "offer_declined"})
 GHOSTED = "ghosted"
 # `ghosted` (silence) only lands while the application is at or below this
 # rung: silence after an interview is still news, silence after an OFFER is
@@ -110,19 +113,18 @@ def replay_status(
     "Furthest stage wins" (owner decision 2026-10-14) — the status never
     slides backwards because an earlier fact was recorded late:
 
-    * A progress event (considering < applied < replied < interview_requested
-      < interview_scheduled < interview_done < offer) moves the status only
+    * A progress event (a status in ``PROGRESS_RANK``) moves the status only
       when its rung is >= the furthest rung reached so far. From ``ghosted``
       it must be strictly > that rung: a reply after silence moves it
       forward, a late-recorded ``applied`` does not undo the silence.
-    * ``rejected`` / ``withdrawn`` always apply; the latest of them wins.
-    * After a ``rejected`` / ``withdrawn``, a progress event reopens the
+    * A status in ``TERMINAL_STATUSES`` always applies; the latest of them wins.
+    * After a ``TERMINAL_STATUSES`` ending, a progress event reopens the
       application only when its ``occurred_at`` is LATER than that ending's
       ``occurred_at`` (news that happened after the ending, not a late
       record of something before it). Reopening resets the furthest rung to
       the reopening event's rung.
     * ``ghosted`` applies over considering..interview_done; it never
-      overrides an offer or a rejected/withdrawn.
+      overrides an offer or a ``TERMINAL_STATUSES`` ending.
     * The ONLY way backwards is ``corrects_event_id``: the corrected event is
       skipped as if it never happened. The correcting event itself is
       replayed like any other event — it does NOT force the status, so

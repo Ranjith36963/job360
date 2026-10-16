@@ -52,6 +52,8 @@ const STAGE_TONE: Record<string, StageTone> = {
   interview_scheduled: "go",
   interview_done: "go",
   offer: "go",
+  hired: "go",
+  offer_declined: "quiet",
 };
 
 const STAGE_TEXT: Record<StageTone, string> = {

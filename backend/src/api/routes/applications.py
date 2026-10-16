@@ -2224,7 +2224,7 @@ async def mark_cv_seen(
 # approval step only exists while the status is still `considering`.
 _SEND_DECISION_CLOSED_STATUSES = frozenset({
     "applied", "replied", "interview_requested", "interview_scheduled", "interview_done",
-    "offer", "rejected", "withdrawn", "ghosted",
+    "offer", "rejected", "withdrawn", "ghosted", "hired", "offer_declined",
 })
 
 
@@ -2507,6 +2507,7 @@ async def record_event(
                 body.payload,
                 max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None,
             )
+        payload = spine.validate_outcome_payload(body.event_type, payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
@@ -2515,6 +2516,7 @@ async def record_event(
             follow_up_on_arg = spine.parse_follow_up_on(body.follow_up_on, today)
         if await spine.get_owned_application(db, user.id, application_id) is None:
             raise SpineError(404, "application not found")
+        await spine.check_outcome_event_id(db, user.id, application_id, body.event_type, payload)
         if body.event_type == "submit_mode_set":
             _check_submit_mode_event(user, application_id, payload)
         if body.event_type in kit_service.KIT_EVENT_TYPES:
