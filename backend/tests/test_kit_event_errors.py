@@ -120,6 +120,10 @@ def test_every_example_payload_is_valid():
                 raise AssertionError(f"{event_type}: {exc.detail}") from None
         elif event_type == "proof_text":
             proof.check_proof_text(_U_PROOF, example)
+        elif event_type in ("interview_session", "process_friction", "assessment"):
+            from src.services.applications import interview_payloads
+
+            interview_payloads.validate(event_type, dict(example))
         else:
             assert kit.payload_problems(event_type, example) == [], event_type
 

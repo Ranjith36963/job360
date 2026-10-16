@@ -472,6 +472,19 @@ async def compute_stats(
             )
         )
 
+    # --- feedback slice 4: interview views (interview_counts.py) ---
+    from src.services.applications import interview_counts  # noqa: PLC0415
+
+    wanted = (
+        interview_counts.INTERVIEW_VIEWS if view == "all"
+        else ([view] if view in interview_counts.INTERVIEW_VIEWS else [])
+    )
+    for interview_view in wanted:
+        view_blocks[interview_view] = await interview_counts.build_view(
+            db, user_id, interview_view, since=since_val
+        )
+    # --- end slice 4 ---
+
     return {
         "since": since_val,
         "overall": overall,

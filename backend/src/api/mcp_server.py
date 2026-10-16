@@ -1055,7 +1055,8 @@ def build_server(version: str = "") -> MCPServer:
         """Save a CV / cover letter / answers / outreach note for this application.
         Write the tailored text YOURSELF from get_profile + get_job — Job360 has no
         LLM — then save it here (kind = "cv" | "cover_letter" | "answers" |
-        "outreach"). Every save is a NEW version: nothing is overwritten, Job360
+        "outreach" | "story_bank" | "interview_transcript" | "redflag_analysis").
+        Every save is a NEW version: nothing is overwritten, Job360
         versions it and renders DOCX / PDF from it.
 
         ATS check: run your OWN ATS check on EVERY CV you save and pass
@@ -1486,8 +1487,9 @@ def build_server(version: str = "") -> MCPServer:
         still-waiting ones left out), calibration (interview rate per fit-score band
         <70/70-79/80-89/>=90, 5 per band, with a verdict to quote as printed), company (history card
         per company; pass `company` for one), lesson_effect (rates before vs after each agreed lesson,
-        not proof of cause), followups (check-ins and feedback asks sent), or all. Every rate has its n;
-        small_sample is true under 10. Facts only: never rank or skip a job or company on these numbers."""
+        not proof of cause), followups (check-ins and feedback asks sent), digest (interview rounds this
+        week: tags, open gaps), friction (process friction + redflags per company), assessments
+        (skills tests), or all. Every rate has its n; small_sample is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.stats(since=since, view=view, company=company, db=db, user=_user())
@@ -1689,7 +1691,9 @@ def build_server(version: str = "") -> MCPServer:
         pause, today's outreach (`sent_today`, `daily_max`, `blocked_today`),
         `ghosted_now` (application ids auto-marked ghosted by this call),
         `auto_emails` (on, sent_today, last sends, due, violations: if violations
-        is not empty, send no automatic email and tell the owner) and
+        is not empty, send no automatic email and tell the owner),
+        `silent_after_interview` (interview-stage jobs with no word for over 30 days
+        since the last interview_done; confirm with the user before any nudge) and
         when the last event was recorded - then whats_new(since=<your last
         check>) for what changed. Writes only one thing: a `ghosted` mark on
         applications silent 45 days after applying (listed in ghosted_now).

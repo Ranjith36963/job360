@@ -486,6 +486,31 @@ class DoctorAutoEmails(BaseModel):
     stop_hint: str = ""
 
 
+SILENT_DISCLAIMER = (
+    "Elapsed time only \u2014 not legal advice or a claim that the employer did anything wrong."
+)
+
+
+class DoctorSilentItem(BaseModel):
+    """One interview-stage application with no word since its last interview_done."""
+
+    application_id: int
+    company: str
+    job_title: str
+    last_interview_event_id: int
+    last_interview_at: str
+    days_silent: int
+    confirmed: bool
+
+
+class DoctorSilentBlock(BaseModel):
+    """Feedback loop slice 4: interviews with silence past ``courtesy_days`` (read-only)."""
+
+    courtesy_days: int = 30
+    items: list[DoctorSilentItem] = []
+    disclaimer: str = SILENT_DISCLAIMER
+
+
 class DoctorResponse(BaseModel):
     """``GET /api/doctor`` - one read of "what state is this account in, and
     what should the assistant do next?". Every field is built defensively: a
@@ -508,6 +533,7 @@ class DoctorResponse(BaseModel):
     # Application ids this very call marked `ghosted` (no answer after GHOSTED_AFTER_DAYS).
     ghosted_now: list[int] = []
     auto_emails: DoctorAutoEmails = DoctorAutoEmails()
+    silent_after_interview: DoctorSilentBlock = DoctorSilentBlock()
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""

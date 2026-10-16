@@ -46,6 +46,9 @@
     "checkin_sent",
     "feedback_asked",
     "feedback_followup_sent",
-    "auto_email_skipped"
+    "auto_email_skipped",
+    "interview_session",
+    "process_friction",
+    "assessment"
   ]
 }

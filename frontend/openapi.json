@@ -3261,6 +3261,14 @@
           "setup": {
             "$ref": "#/components/schemas/DoctorSetup"
           },
+          "silent_after_interview": {
+            "$ref": "#/components/schemas/DoctorSilentBlock",
+            "default": {
+              "courtesy_days": 30,
+              "disclaimer": "Elapsed time only \u2014 not legal advice or a claim that the employer did anything wrong.",
+              "items": []
+            }
+          },
           "stale_hint": {
             "default": "",
             "title": "Stale Hint",
@@ -3346,6 +3354,75 @@
           "next"
         ],
         "title": "DoctorSetup",
+        "type": "object"
+      },
+      "DoctorSilentBlock": {
+        "description": "Feedback loop slice 4: interviews with silence past ``courtesy_days`` (read-only).",
+        "properties": {
+          "courtesy_days": {
+            "default": 30,
+            "title": "Courtesy Days",
+            "type": "integer"
+          },
+          "disclaimer": {
+            "default": "Elapsed time only \u2014 not legal advice or a claim that the employer did anything wrong.",
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DoctorSilentItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "DoctorSilentBlock",
+        "type": "object"
+      },
+      "DoctorSilentItem": {
+        "description": "One interview-stage application with no word since its last interview_done.",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "days_silent": {
+            "title": "Days Silent",
+            "type": "integer"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "last_interview_at": {
+            "title": "Last Interview At",
+            "type": "string"
+          },
+          "last_interview_event_id": {
+            "title": "Last Interview Event Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "application_id",
+          "company",
+          "job_title",
+          "last_interview_event_id",
+          "last_interview_at",
+          "days_silent",
+          "confirmed"
+        ],
+        "title": "DoctorSilentItem",
         "type": "object"
       },
       "EmailChangeRequest": {
@@ -9257,6 +9334,18 @@
             "title": "Applications Truncated",
             "type": "boolean"
           },
+          "assessments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assessments"
+          },
           "by_channel": {
             "items": {
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
@@ -9302,6 +9391,30 @@
           "computed_at": {
             "title": "Computed At",
             "type": "string"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "friction": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Friction"
           },
           "groups_truncated": {
             "title": "Groups Truncated",
@@ -10884,6 +10997,38 @@
                 }
               ],
               "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "View"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company"
             }
           },
           {
@@ -15649,7 +15794,7 @@
     },
     "/api/doctor": {
       "get": {
-        "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only; email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).\n\nAlso the MCP tool list as served now (``tools``, ``tools_version``) so an\nassistant can tell its client cached an old one: pass the version it saw\nlast as ``client_tools_version`` and ``tools_stale`` says whether it moved\n(null when none was passed).",
+        "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only except the auto-ghost sweep (a `ghosted` event per silent\napplication, reported in ghosted_now); email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).\n\nAlso the MCP tool list as served now (``tools``, ``tools_version``) so an\nassistant can tell its client cached an old one: pass the version it saw\nlast as ``client_tools_version`` and ``tools_stale`` says whether it moved\n(null when none was passed).",
         "operationId": "doctor_api_doctor_get",
         "parameters": [
           {
