@@ -332,6 +332,43 @@ def _selected_views(view: Optional[str]) -> list[str]:
     return every if view == "all" else [view]
 
 
+async def _fit_pattern_blocks(
+    db: JobDatabase, user_id: str, since_val: Optional[str], selected: list[str], view: Optional[str]
+) -> dict[str, Any]:
+    """The ``patterns`` / ``skill_gaps`` blocks: ONE load, counting only
+    (``fit_patterns``). An unexpected error is logged and re-raised."""
+    import time  # noqa: PLC0415
+
+    from src.services.applications import fit_patterns  # noqa: PLC0415
+    from src.utils.logger import get_audit_logger, get_logger, safe_log_value  # noqa: PLC0415
+
+    started = time.monotonic()
+    try:
+        rows, reasons = await fit_patterns.load(db, user_id, since_val)
+        blocks: dict[str, Any] = {}
+        if "patterns" in selected:
+            blocks["patterns"] = fit_patterns.patterns(rows, reasons)
+        if "skill_gaps" in selected:
+            from src.services.profile.storage import load_profile  # noqa: PLC0415 - rule 16, heavy stack
+
+            profile = load_profile(user_id)
+            known = list(profile.cv_data.skills) if profile is not None else []
+            blocks["skill_gaps"] = fit_patterns.skill_gaps(rows, known)
+    except Exception:
+        get_logger(__name__).exception("stats_view_failed", extra={"user_id": safe_log_value(user_id)})
+        raise
+    if view in ("patterns", "skill_gaps"):
+        get_audit_logger().info(
+            "stats_view",
+            extra={
+                "event": "stats_view", "user_id": safe_log_value(user_id), "view": view,
+                "applications": len(rows), "truncated": bool(rows.truncated),
+                "ms": int((time.monotonic() - started) * 1000),
+            },
+        )
+    return blocks
+
+
 async def compute_stats(
     db: JobDatabase,
     user_id: str,
@@ -471,6 +508,10 @@ async def compute_stats(
                 db, user_id, since_val, selected, company=company_filter, view=str(view)
             )
         )
+
+    # ── slice 5: patterns, skill_gaps (fit_patterns.py) ──
+    if "patterns" in selected or "skill_gaps" in selected:
+        view_blocks.update(await _fit_pattern_blocks(db, user_id, since_val, selected, view))
 
     return {
         "since": since_val,

@@ -72,7 +72,7 @@ async def _setup(client: AsyncClient, user_id: str) -> tuple[int, str]:
     resp = await client.post("/api/jobs/bring", json=_AD)
     assert resp.status_code == 200, resp.text
     app_id = int(resp.json()["application_id"])
-    assert (await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})).status_code == 200
+    assert (await client.put(f"/api/applications/{app_id}/fit", json={"score": 80, "verdict": "ok", "score_source": "full_ad"})).status_code == 200
     saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": CV_TEXT})
     assert saved.status_code == 201, saved.text
     return app_id, await _mint_token(client)

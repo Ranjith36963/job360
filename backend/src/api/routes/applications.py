@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
@@ -51,6 +51,7 @@ from src.services.applications import spine
 from src.services.applications import stats as stats_service
 from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
+from src.services.applications.fit_record import fit_view
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile.models import UserProfile
@@ -123,12 +124,32 @@ class FitAxisIn(BaseModel):
     you: int = Field(..., ge=0, le=100)
 
 
+class FitItemIn(BaseModel):
+    """One gap / ad requirement with an optional hard|soft marker (slice 5).
+    The kind set and the text cap are live settings checked by
+    ``fit_record.clean_items`` (so a bad kind is a 422 naming the set)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    kind: Optional[str] = None
+
+
 class SaveFitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     score: Optional[int] = Field(None, ge=0, le=100)
+    # With a score this is the REASON (1..FIT_SCORE_REASON_MAX_CHARS, checked by
+    # fit_record); unscored it stays optional, at most 200 characters.
     verdict: Optional[str] = Field(None, max_length=200)
-    gaps: Optional[list[str]] = Field(None, max_length=50)
+    # Who/what produced the score: one of settings.FIT_SCORE_SOURCES.
+    score_source: Optional[str] = Field(None, max_length=20)
+    gaps: Optional[list[Union[str, FitItemIn]]] = Field(None, max_length=50)
+    jd_requirements: Optional[list[Union[str, FitItemIn]]] = Field(None, max_length=settings.FIT_JD_REQUIREMENTS_MAX)
+    archetype: Optional[str] = Field(None, max_length=80)
+    remote_policy: Optional[str] = Field(None, max_length=20)
+    team_size: Optional[int] = Field(None, strict=True)
+    via: Optional[str] = Field(None, max_length=20)
     reasoning: Optional[str] = None
     # The fit picture — `None`/`[]` = no chart (rule #29); part of the slot.
     axes: Optional[list[FitAxisIn]] = Field(None, max_length=50)
@@ -326,11 +347,23 @@ class FitAxisOut(BaseModel):
     you: int
 
 
+class FitItemOut(BaseModel):
+    text: str
+    kind: Optional[str] = None
+
+
 class ApplicationFitOut(BaseModel):
     score: Optional[int]
     verdict: Optional[str]
     gaps: list[str]
     reasoning: Optional[str]
+    score_source: Optional[str] = None
+    gaps_detail: list[FitItemOut] = []
+    jd_requirements: list[FitItemOut] = []
+    archetype: Optional[str] = None
+    remote_policy: Optional[str] = None
+    team_size: Optional[int] = None
+    via: Optional[str] = None
     # The fit picture's axes — `[]` when the agent gave none (drawn as nothing).
     axes: list[FitAxisOut] = []
     recorded_by: str
@@ -1403,6 +1436,95 @@ class StatsScoreLineOut(BaseModel):
     unscored: int
 
 
+class StatsPatternRowOut(BaseModel):
+    """One group of the ``patterns`` view (counts of the user's own sent applications)."""
+
+    key: Optional[str] = None
+    label: str
+    submitted: int
+    positive: int
+    negative: int
+    awaiting: int
+    no_answer: int
+    decided: int
+    conversion_rate: Optional[float] = None
+    decided_rate: Optional[float] = None
+    small_sample: bool
+
+
+class StatsPatternSignalOut(BaseModel):
+    dimension: str
+    kind: str
+    key: str
+    label: str
+    submitted: int
+    decided: int
+    positive: int
+    decided_rate: Optional[float] = None
+    points_vs_overall: Optional[int] = None
+    clear_lead: bool
+    text: str
+
+
+class StatsReasonOut(BaseModel):
+    reason: str
+    count: int
+    application_ids: list[int]
+
+
+class StatsPatternsOut(BaseModel):
+    """``stats(view="patterns")``. ``available`` false = below the gate (``text`` says
+    how far); every other key is then null."""
+
+    available: bool
+    submitted: int
+    threshold: int
+    text: Optional[str] = None
+    withdrawn_excluded: Optional[int] = None
+    overall: Optional[StatsPatternRowOut] = None
+    by_archetype: Optional[list[StatsPatternRowOut]] = None
+    by_remote_policy: Optional[list[StatsPatternRowOut]] = None
+    by_team_size: Optional[list[StatsPatternRowOut]] = None
+    by_via: Optional[list[StatsPatternRowOut]] = None
+    signals: Optional[list[StatsPatternSignalOut]] = None
+    rejection_reasons: Optional[list[StatsReasonOut]] = None
+    reason_base: Optional[int] = None
+    groups_truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+    note: Optional[str] = None
+
+
+class StatsSkillGapOut(BaseModel):
+    key: str
+    gap: str
+    applications: int
+    low_fit: int
+    hard: int
+    soft: int
+    unmarked: int
+    weighted: float
+    tier: str
+    application_ids: list[int]
+
+
+class StatsSkillGapsOut(BaseModel):
+    """``stats(view="skill_gaps")``. ``available`` false = fewer than the threshold
+    of scored fits; every other key is then null."""
+
+    available: bool
+    scored: int
+    threshold: Optional[int] = None
+    text: Optional[str] = None
+    fits_read: Optional[int] = None
+    total_low_fit: Optional[int] = None
+    low_fit_score: Optional[int] = None
+    gaps: Optional[list[StatsSkillGapOut]] = None
+    excluded_as_known: Optional[int] = None
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+    note: Optional[str] = None
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1417,6 +1539,9 @@ class StatsResponse(BaseModel):
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
     # counted; the numbers describe that window, not the whole history.
     applications_truncated: bool
+    # Slice 5 - one block per view; null unless the call asked for it.
+    patterns: Optional[StatsPatternsOut] = None
+    skill_gaps: Optional[StatsSkillGapsOut] = None
     computed_at: str
 
 
@@ -1714,17 +1839,7 @@ async def application_alignment(
     app_row = await spine.get_owned_application(db, user.id, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    fit = None
-    if app_row.get("fit_recorded_at"):
-        fit = {
-            "score": app_row.get("fit_score"),
-            "verdict": app_row.get("fit_verdict"),
-            "gaps": json.loads(app_row.get("fit_gaps") or "[]"),
-            "reasoning": app_row.get("fit_reasoning"),
-            "axes": json.loads(app_row.get("fit_axes") or "[]"),
-            "recorded_by": app_row.get("fit_recorded_by") or "",
-            "recorded_at": app_row.get("fit_recorded_at") or "",
-        }
+    fit = fit_view(app_row)
     ad_text = app_row.get("job_description_snapshot") or ""
     profile = load_profile(user.id)
     skills = alignment.candidate_skills(profile) if profile is not None else []
@@ -1975,6 +2090,13 @@ async def save_artifact(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _items_out(items: Optional[list[Union[str, FitItemIn]]]) -> Optional[list[Any]]:
+    """Request items -> the plain str / dict shapes ``fit_record.clean_items`` reads."""
+    if items is None:
+        return None
+    return [i.model_dump() if isinstance(i, FitItemIn) else i for i in items]
+
+
 @router.put("/applications/{application_id}/fit", response_model=SaveFitResponse, dependencies=AUTH_FIRST)
 async def save_fit(
     application_id: int,
@@ -1986,9 +2108,11 @@ async def save_fit(
         reasoning = body.clamp_reasoning()
         saved = await spine.save_fit(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
-            score=body.score, verdict=body.verdict, gaps=body.gaps, reasoning=reasoning,
+            score=body.score, verdict=body.verdict, gaps=_items_out(body.gaps), reasoning=reasoning,
             visa_signal=body.visa_signal, visa_detail=body.visa_detail, visa_country=body.visa_country,
             axes=[a.model_dump() for a in body.axes] if body.axes is not None else None,
+            score_source=body.score_source, jd_requirements=_items_out(body.jd_requirements),
+            archetype=body.archetype, remote_policy=body.remote_policy, team_size=body.team_size, via=body.via,
         )
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
         return {**saved, "line": settings_rules.line_block(body.score, cfg)}

@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 4
-TOOLS_REV_FOR_HASH = "abf62e7d7568"
+TOOLS_REV = 5
+TOOLS_REV_FOR_HASH = "b0018c485dc3"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -454,7 +454,9 @@ def build_server(version: str = "") -> MCPServer:
         from src.core import settings as _s  # noqa: PLC0415
 
         return (
-            "Limits: score a whole number 0-100; verdict at most 200 chars; gaps at most 50 items; "
+            "Limits: score a whole number 0-100 and, with a score, verdict = your reason in 1-140 chars "
+            "plus score_source full_ad|listing|owner; without a score verdict at most 200 chars; "
+            'gaps at most 50 items, each a string or {"text","kind":"hard"|"soft"}; '
             f"axes {_s.APPLICATION_FIT_AXES_MIN} to {_s.APPLICATION_FIT_AXES_MAX}, each name at most "
             f"{_s.APPLICATION_FIT_AXIS_NAME_MAX_CHARS} chars with role and you 0-100. "
             'Example axes: [{"name":"Python depth","role":80,"you":70},{"name":"Domain","role":60,"you":50},'
@@ -738,9 +740,8 @@ def build_server(version: str = "") -> MCPServer:
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
         `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`
         (e.g. "GB", "DE", "IN"). If the ad says nothing, leave it out — Job360 never
-        guesses. The web compares the country with the user's own list of countries
-        where they need no sponsorship (get_profile → fields →
-        preferences.work_authorization_countries; set it with update_profile).
+        guesses. The web compares it with preferences.work_authorization_countries
+        (set with update_profile).
 
         Job facts (pass them on EVERY bring when you know them; they feed the
         user's stats): `country` = the job's ISO alpha-2 code ("FR", "US"),
@@ -751,14 +752,15 @@ def build_server(version: str = "") -> MCPServer:
 
         Ad dates (pass them when the ad shows them, YYYY-MM-DD): `posted_at` =
         the date the listing says it was posted, `employer_published_at` = the
-        date on the employer's own posting. The same link brought twice (tracking
-        parameters ignored) returns the existing job (existing=true).
+        date on the employer's own posting.
 
         The reply carries `checks`: plain facts about this ad (is the text the
         full ad or only a title/teaser, which kind of site the apply link is on,
         how old the ad is, whether it was reposted, whether pay or sponsorship
         is mentioned). Read them: if the text is title_only or partial, fetch the
-        full ad first; if the host is unknown, tell the user. They never block a bring."""
+        full ad first; if the host is unknown, tell the user. They never block a bring.
+        `repost` (not null) = among jobs YOU brought, this title at this company was first
+        brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide."""
         try:
             body = bring_route.BringJobRequest(
                 title=title, company=company, description=description, location=location, apply_url=apply_url,
@@ -781,7 +783,7 @@ def build_server(version: str = "") -> MCPServer:
                 "existing": resp.existing, "status": resp.status,
                 "country": resp.country, "remote": resp.remote, "found_on": resp.found_on,
                 "ad_posted_at": resp.ad_posted_at, "employer_published_at": resp.employer_published_at,
-                "checks": resp.checks,
+                "checks": resp.checks, "repost": resp.repost,
                 "assistant_hint": ASSISTANT_HINT,
             }
         )
@@ -1055,7 +1057,7 @@ def build_server(version: str = "") -> MCPServer:
         """Save a CV / cover letter / answers / outreach note for this application.
         Write the tailored text YOURSELF from get_profile + get_job — Job360 has no
         LLM — then save it here (kind = "cv" | "cover_letter" | "answers" |
-        "outreach"). Every save is a NEW version: nothing is overwritten, Job360
+        "outreach" | "skill_gap_report"). Every save is a NEW version: nothing is overwritten, Job360
         versions it and renders DOCX / PDF from it.
 
         ATS check: run your OWN ATS check on EVERY CV you save and pass
@@ -1138,17 +1140,31 @@ def build_server(version: str = "") -> MCPServer:
         application_id: int,
         score: Optional[int] = None,
         verdict: Optional[str] = None,
-        gaps: Optional[list[str]] = None,
+        gaps: Optional[list[str | dict[str, Any]]] = None,
         reasoning: Optional[str] = None,
         visa_signal: Optional[str] = None,
         visa_detail: str = "",
         visa_country: str = "",
         axes: Optional[list[dict[str, Any]]] = None,
+        score_source: Optional[str] = None,
+        jd_requirements: Optional[list[str | dict[str, Any]]] = None,
+        archetype: Optional[str] = None,
+        remote_policy: Optional[str] = None,
+        team_size: Optional[int] = None,
+        via: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record YOUR OWN fit judgement for this application — never computed
         by Job360 (VISION rule 4). Overwrites the current verdict; the log
-        keeps every past judgement too. `verdict`: one sentence, at most 200
-        characters. Visa (optional, same as bring_job): if
+        keeps every past judgement too. A `score` needs `verdict` = your
+        one-line reason (1-140 chars) and `score_source`: "full_ad" (you read
+        the whole ad), "listing" (only a listing or teaser) or "owner" (the
+        user gave it). No score = unscored (null), never a low score; without a
+        score `verdict` is optional (200 chars). `gaps`: strings, or {"text",
+        "kind": "hard"|"soft"} (hard = a must-have the profile lacks).
+        Optional, read off the ad: `jd_requirements` (same item shape),
+        `archetype` (your short name for the role type), `remote_policy`
+        remote|hybrid|onsite, `team_size` (people, a whole number), `via`
+        agency|direct. Every save replaces all of these. Visa (optional, same as bring_job): if
         the ad says whether the employer sponsors, pass `visa_signal`
         ("sponsors" / "no_sponsorship"), the ad sentence in `visa_detail`, and
         the job's ISO alpha-2 country in `visa_country`; leave it out when the ad
@@ -1170,9 +1186,11 @@ def build_server(version: str = "") -> MCPServer:
         save_artifact."""
         try:
             body = applications_route.SaveFitRequest(
-                score=score, verdict=verdict, gaps=gaps, reasoning=reasoning,
+                score=score, verdict=verdict, gaps=gaps, reasoning=reasoning,  # type: ignore[arg-type]
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
                 axes=axes,  # type: ignore[arg-type]
+                score_source=score_source, jd_requirements=jd_requirements,  # type: ignore[arg-type]
+                archetype=archetype, remote_policy=remote_policy, team_size=team_size, via=via,
             )
         except ValidationError as exc:
             problems = "; ".join(
@@ -1481,7 +1499,10 @@ def build_server(version: str = "") -> MCPServer:
         overall.simulations_excluded says how many. An unset value is the group with key null
         ("Not set"). `since` (an ISO date/datetime) scopes to applications
         (and contacts) added on/after that date. Nothing is inferred; every
-        number is a count of what you recorded."""
+        number is a count of what you recorded. `view` adds one block: patterns (outcome counts by archetype,
+        remote policy, team size and agency/direct, needs 5 sent; `signals` need 2 decided; ghosted is no
+        answer, never a rejection; `rejection_reasons` are exact words, group them yourself), skill_gaps
+        (the gaps you saved with save_fit, counted and tiered; needs 5 scored fits), or all."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.stats(since=since, view=view, company=company, db=db, user=_user())

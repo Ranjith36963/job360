@@ -85,7 +85,7 @@ async def test_the_route_moves_the_next_step_as_the_record_grows(authenticated_a
         app_id = await _bring(client)
         r0 = await client.get(f"/api/applications/{app_id}")
         assert r0.json()["next_step"]["code"] == "judge_fit"
-        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "good"})
+        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "good", "score_source": "full_ad"})
         r1 = await client.get(f"/api/applications/{app_id}")
         assert r1.json()["next_step"]["code"] == "write_cv"
         await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "cv v1"})
@@ -130,7 +130,7 @@ async def test_list_next_step_matches_detail_next_step(authenticated_async_conte
             assert list_step == detail_step
 
         await _assert_matches()  # judge_fit
-        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "good"})
+        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "good", "score_source": "full_ad"})
         await _assert_matches()  # write_cv
         await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "cv v1"})
         await _assert_matches()  # apply
@@ -192,7 +192,7 @@ async def test_list_summary_matches_detail_for_location_fit_receipt_interview(au
 
         # Fit judged — the list score/verdict must match the detail's fit
         # object exactly.
-        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "Strong match"})
+        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "Strong match", "score_source": "full_ad"})
         row = await _list_row()
         detail = await _detail()
         assert row["fit_score"] == detail["fit"]["score"] == 68

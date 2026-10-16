@@ -16,6 +16,7 @@ const KIND_LABEL: Record<string, string> = {
   cover_letter: "Cover letter",
   answers: "Answers",
   outreach: "Outreach message",
+  skill_gap_report: "Skill gap report",
 };
 
 function payloadOf(e: { payload?: unknown }): Record<string, unknown> {

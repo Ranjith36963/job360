@@ -593,7 +593,7 @@ async def _seen(client: AsyncClient, app_id: int) -> None:
     # score. These tests are about the OTHER rules, so put the job above a line
     # whose two switches are auto (the user's own web clicks apply at once).
     assert (await _patch(client, _e(SCORE, 50), _e(APPLY, "auto"), _e(BELOW, "auto"))).status_code == 200
-    fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})
+    fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 80, "verdict": "ok", "score_source": "full_ad"})
     assert fit.status_code == 200, fit.text
 
 
@@ -963,7 +963,7 @@ async def test_submit_check_defaults_to_ask_and_unknown_application_is_404(
         assert (body["decision"], body["reason"], body["application_id"]) == ("ask", "score_line_unknown", app_id)
         assert body["detail"]
         assert (await _patch(client, _e(SCORE, 50), _e(APPLY, "auto"), _e(BELOW, "auto"))).status_code == 200
-        assert (await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})).status_code == 200
+        assert (await client.put(f"/api/applications/{app_id}/fit", json={"score": 80, "verdict": "ok", "score_source": "full_ad"})).status_code == 200
         assert (await _check(client, app_id)).json()["reason"] == "submit_mode_confirm"
         assert (await _check(client, app_id, "")).json()["reason"] == "unknown_site"
         assert (await _check(client, 987654321, fill=False)).status_code == 404
@@ -1243,7 +1243,7 @@ async def test_mcp_has_check_submit_and_no_confirm_decline_or_take_back_tool(
             )
             verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
             assert (verdict["decision"], verdict["reason"]) == ("ask", "score_line_unknown"), "no fit saved yet"
-            fit = _payload(await mcp.call_tool("save_fit", {"application_id": app_id, "score": 10}))
+            fit = _payload(await mcp.call_tool("save_fit", {"application_id": app_id, "score": 10, "verdict": "ok", "score_source": "full_ad"}))
             assert (fit["line"]["score_line"], fit["line"]["side"], fit["line"]["switch"]) == (50, "below", "auto")
             verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
             assert (verdict["decision"], verdict["reason"]) == ("ask", "submit_mode_confirm")
@@ -1562,14 +1562,14 @@ async def test_save_fit_answers_with_the_line_and_the_list_and_stats_carry_it(
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         a1, a2, a3 = await _bring(client), await _bring(client, _AD_2), await _bring(client, _AD_3)
-        no_line = (await client.put(f"/api/applications/{a1}/fit", json={"score": 80})).json()["line"]
+        no_line = (await client.put(f"/api/applications/{a1}/fit", json={"score": 80, "verdict": "ok", "score_source": "full_ad"})).json()["line"]
         assert no_line["score_line"] is None and no_line["side"] == "unknown" and no_line["switch"] is None
         assert "No score line set" in no_line["next"] and "apply_min_score" in no_line["next"]
         assert (await _patch(client, _e(SCORE, 75), _e(BELOW, "auto"))).status_code == 200
-        above = (await client.put(f"/api/applications/{a1}/fit", json={"score": 80})).json()["line"]
+        above = (await client.put(f"/api/applications/{a1}/fit", json={"score": 80, "verdict": "ok", "score_source": "full_ad"})).json()["line"]
         assert (above["score_line"], above["side"], above["switch"]) == (75, "above", "ask")
         assert above["next"].startswith("Above your line (75). Your rule: ask - ")
-        below = (await client.put(f"/api/applications/{a2}/fit", json={"score": 40})).json()["line"]
+        below = (await client.put(f"/api/applications/{a2}/fit", json={"score": 40, "verdict": "ok", "score_source": "full_ad"})).json()["line"]
         assert (below["side"], below["switch"]) == ("below", "auto")
         listing = {a["id"]: a for a in (await client.get("/api/applications")).json()["applications"]}
         assert [listing[a]["line_side"] for a in (a1, a2, a3)] == ["above", "below", "unknown"]

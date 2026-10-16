@@ -360,7 +360,7 @@ APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS = int(
 
 # R5 — artifact versions. Storage decision: TEXT in Postgres, not a file store
 # (spec §Data model) — a tailored CV measured on this codebase is 2-8 KB.
-APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach")
+APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach", "skill_gap_report")
 APPLICATION_ARTIFACT_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_MAX_CHARS", "60000"))
 APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERSIONS", "200"))
 # Slice 8 (#515) — the read-only artifact diff caps each side in LINES before
@@ -615,7 +615,9 @@ COMPANY_FACTS_MAX = int(os.getenv("COMPANY_FACTS_MAX", "50"))  # NOT IN REFERENC
 STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # The `view` values of stats. "all" is computed as every member except "all", so
 # a view a later slice appends (before "all") joins it automatically.
-STATS_VIEWS = ("funnel", "velocity", "calibration", "company", "lesson_effect", "followups", "all")
+STATS_VIEWS = (
+    "funnel", "velocity", "calibration", "company", "lesson_effect", "followups", "patterns", "skill_gaps", "all",
+)
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
 # event, so it never enters this table. brought/ghosted/withdrawn have no rank.
@@ -633,6 +635,31 @@ FEEDBACK_FUNNEL_RANK: dict[str, int] = {
 # Plain strings on purpose, not validated: slice 2 adds these note types in parallel.
 FEEDBACK_FOLLOWUP_EVENT_TYPES = ("checkin_sent", "feedback_asked", "feedback_followup_sent")
 FEEDBACK_SKIP_EVENT_TYPE = "auto_email_skipped"
+
+# Slice 5 — fit and patterns
+# career-ops file:line cites are in services/applications/fit_record.py,
+# fit_patterns.py and reposts.py. Env-backed operator constants.
+FIT_SCORE_REASON_MAX_CHARS = int(os.getenv("FIT_SCORE_REASON_MAX_CHARS", "140"))  # rank-pipeline.mjs:53
+# Who/what produced the score (modes/pipeline.md:108-113). Values NOT IN REFERENCE.
+FIT_SCORE_SOURCES = ("full_ad", "listing", "owner")
+FIT_GAP_KINDS = ("hard", "soft")  # analyze-patterns.mjs:999-1002
+FIT_GAP_TEXT_MAX_CHARS = int(os.getenv("FIT_GAP_TEXT_MAX_CHARS", "200"))  # NOT IN REFERENCE - a bound
+FIT_JD_REQUIREMENTS_MAX = int(os.getenv("FIT_JD_REQUIREMENTS_MAX", "50"))  # NOT IN REFERENCE - a bound
+FIT_ARCHETYPE_MAX_CHARS = int(os.getenv("FIT_ARCHETYPE_MAX_CHARS", "80"))  # analyze-patterns.mjs:1418
+FIT_REMOTE_POLICIES = ("remote", "hybrid", "onsite")  # analyze-patterns.mjs:1095-1107
+FIT_VIA = ("agency", "direct")  # analyze-patterns.mjs:321-334
+FIT_TEAM_SIZE_MAX = 10_000_000  # a bound
+FIT_TEAM_SIZE_BUCKETS = (50, 500)  # analyze-patterns.mjs:1117-1127: <=50, <=500, else
+PATTERNS_MIN_SUBMITTED = int(os.getenv("PATTERNS_MIN_SUBMITTED", "5"))  # analyze-patterns.mjs:96
+PATTERNS_MIN_DECIDED = int(os.getenv("PATTERNS_MIN_DECIDED", "2"))  # analyze-patterns.mjs:161-164
+PATTERNS_LEAD_POINTS = int(os.getenv("PATTERNS_LEAD_POINTS", "10"))  # analyze-patterns.mjs:1569,1585
+PATTERNS_REASONS_MAX = int(os.getenv("PATTERNS_REASONS_MAX", "20"))  # NOT IN REFERENCE - a bound
+SKILL_GAPS_MIN_SCORED = int(os.getenv("SKILL_GAPS_MIN_SCORED", "5"))  # upskill.mjs:1076,483-490
+SKILL_GAPS_LOW_FIT_SCORE = int(os.getenv("SKILL_GAPS_LOW_FIT_SCORE", "80"))  # upskill.mjs:98 (4.0 of 5 x20)
+SKILL_GAPS_MAX = int(os.getenv("SKILL_GAPS_MAX", "50"))  # NOT IN REFERENCE - a bound
+SKILL_GAP_REPORT_SCHEMA = 1  # upskill.mjs:85-94
+REPOST_WINDOW_DAYS = int(os.getenv("REPOST_WINDOW_DAYS", "90"))  # detect-reposts.mjs:79
+REPOST_MIN_SPAN_DAYS = int(os.getenv("REPOST_MIN_SPAN_DAYS", "1"))  # detect-reposts.mjs:87
 
 # update_profile (R8-R11). The overlay of agent edits over extraction.
 # R9 — a CLOSED set of dotted paths into UserProfile. Each MUST be a declared

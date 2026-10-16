@@ -55,10 +55,11 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    and `posted_at` / `employer_published_at` as YYYY-MM-DD when the ad shows them) and ALWAYS the job facts you
    know: `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on` (`indeed`, `linkedin`,
    `company_careers`, `job_board`, `referral`, `visa_sponsor_list`, `pasted_by_user` or `other`). Leave out only
-   what you truly do not know; fix it later with `update_job`. Then `save_fit` with your score, your verdict in
-   one sentence, and the gaps. Skip the rest silently - do not bring a job just to reject it. **Done when** each
-   fit is saved. Blocked (a site will not open, a tool is missing): `ask_user`, a Needs-you note, then continue
-   with the next job.
+   what you truly do not know; fix it later with `update_job`. Then `save_fit`: your score, `score_source` and
+   your one-line reason as `verdict` (140 chars max; no score = unscored, never low), gaps marked hard or soft.
+   Skip the rest - never bring a job just to reject it - and keep a `url | reason` line for each skip in
+   `skipped.txt` beside the kit's `seen_jobs.json` (never edit that file). **Done when** each fit is saved.
+   Blocked (a site will not open, a tool is missing): `ask_user`, a Needs-you note, then continue with the next job.
 6. **Report.** First the coverage table, one line per row and source: place | source | search used | ads seen |
    ads brought | why none. A row with no line means the hunt is not done. More than 7 in 10 finds from one place
    while the brief has more rows: say so and search the thin rows again. Then two lists - "Above your line (N)"
