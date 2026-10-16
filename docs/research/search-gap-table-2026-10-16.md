@@ -112,3 +112,48 @@ The owner chose **B and C**:
 
 Still banned: Indeed app-API spoofing, copied keys or tokens, proxies, and CAPTCHA workarounds.
 Nothing has been built yet. `hunt.md:38` and the kit README still carry the old ban until a build PR changes them.
+
+## Coverage pass 2 (2026-10-16): the other 17 job-finders
+
+The owner asked that no competitor be left out. Rows 1–20 above came from 15 of the 32 job-finding tools in the 46-refs list. This pass covers the other 17, and corrects two earlier claims.
+
+- **Open-source repos** cloned and quoted with an exact-string check:
+
+  | Repo | Commit | Licence |
+  |---|---|---|
+  | job-apply-plugin | `370204c` | MIT |
+  | JobCtrl | `4c4a8ed` | **AGPL-3.0** |
+  | get_jobs | `a78db87` | **PolyForm Noncommercial** |
+  | Auto_job_applier_linkedIn | `e0b2401` | MIT |
+
+- **Closed products:** read from their public pages with curl. Massive's site would not resolve from here, so it is a web read only.
+- **Live MCP calls** were made today.
+- **Copy?** says what we may take: **code** (its licence allows copying), **idea** (rebuild it ourselves), **no** (breaks our rules, or there is nothing to take).
+
+| # | Competitor | What they do | What Job360 lacks | Copy? | How | Evidence | Verified |
+|---|---|---|---|---|---|---|---|
+| 21 | FoundRole | A **keyless MCP** at `https://www.foundrole.com/ojcp/mcp` with tools `search_jobs` (query, location, filters, pagination) and `get_job_detail`. It claims 4.3M jobs "imported straight from employer ATSs" | Not in `hunt.md` | idea (connector line) | `hunt.md`: "Add `foundrole.com/ojcp/mcp` (no key). Check `datePosted`, and follow the apply link to the employer's own posting" | live `tools/list` HTTP 200. A "machine learning engineer" search gave `total_results` 7036, 10 per call; the first hit was dated **2024-09-25** and its apply link goes via foundrole.com | yes, live |
+| 22 | FoundRole | Checks every posting for **ghost risk, pay vs market and visa sponsorship history**, and how long it has been up on the employer's own site | We check reposts and "still open"; no age or sponsor-history check | idea | `hunt.md` step 4: "How long has it been open on the employer's own board? Is it reposted? Does the employer have a public sponsorship history?" (inference) | foundrole.com page text (agent quote, raw capture kept) | page text yes |
+| 23 | LoopCV | MCP at `https://api.loopcv.com/mcp` with a personal API key that support has to enable. Daily collection from "20+ job boards" | — | no (account and key) | mention only | loopcv.pro, blog MCP guide (agent quotes) | page text yes |
+| 24 | job-apply-plugin | Hacker News via the **official Firebase API** (`hacker-news.firebaseio.com/v0/item/{id}.json`). X/Twitter search with the query `("hiring" OR "open role" OR "we're hiring" OR "join our team")` plus titles. LinkedIn through the user's **own logged-in browser** | The kit reads HN; no X/Twitter source | idea (X query as a *web-search* template); no (driving a logged-in browser) | Add the X query shape to row 9's web-search templates, run through web search, not logged into X | `skills/job-search/SKILL.md:126`, `:170`, `:68`, `:334` "Never handle credentials" | yes, code |
+| 25 | JobCtrl | Greenhouse, Lever, Ashby and Workday like ours. LinkedIn, Indeed, ZipRecruiter and Glassdoor through the third-party `jobstreaming` package, which uses LinkedIn **jobs-guest** endpoints. Does **not** check robots.txt. Optional daily schedule | Confirms row 16 (now verified) | idea only (AGPL) | — | `pyproject.toml:42` `jobstreaming==0.0.5`; `tests/test_optional_extension.py:669`; `docs/user/discovery.md:376` | yes, code (the `jobstreaming` code itself not read) |
+| 26 | get_jobs | Chinese boards (Boss Zhipin, 51job, Liepin, Zhaopin) through a **real logged-in Chrome** with anti-detection flags. The human solves slider CAPTCHAs | — | **no**: logins plus bot evasion, and a non-commercial licence | — | `Boss.java:656`; `PlaywrightManager.java:331` `--disable-blink-features=AutomationControlled`; `LICENSE:1` | yes, code |
+| 27 | Auto_job_applier_linkedIn | Logs into LinkedIn **with the user's password** (Selenium), using `undetected_chromedriver` | — | **no**: our hard line 5, never type a password | — | `runAiBot.py:187`; `modules/open_chrome.py:21` | yes, code |
+| 28 | JobCopilot | Crawls "500,000+ company career pages", "Every 2 hours", with a daily email | One run a day | idea: a more frequent scheduled run using the kit's `--history` | Fold into row 15's scheduling line (e.g. every few hours for a busy search) | jobcopilot.com page text | page text yes |
+| 29 | Wobo, AIApply, Massive, Jack & Jill | Their own servers search unnamed sources and auto-apply or introduce you | — | no code to copy. The ideas (match score, salary, autonomy levels, "a focused handful") we already have: `save_fit` score, apply modes, the above/below-line report | — | page text; Massive web read | Wobo, AIApply, J&J page text; Massive UNVERIFIED |
+| 30 | Jobright | A server feed (`/swan/recommend/*`) with sub-scores for education, industry, seniority and skill (first REA pass) | — | idea: name those four in the `save_fit` gaps (inference) | — | `rea-competitors` doc, Jobright `_app@299771` | yes, REA |
+| 31 | Simplify | Its own Typesense index, with **paid jobs pinned** on page 1 | — | no (and no paid ranking, rule 4). Its open GitHub job lists are row 8 | — | `rea-competitors` doc, `20s20tax4mrce.js@37751` | yes, REA |
+| 32 | 6figr JobGPT | MCP at `mcp.6figr.com/mcp` needs a token. Server-side `relevancyScore` | — | no (account; server-side) | — | live: HTTP 401 `invalid_token` | yes, live |
+| 33 | Kickresume, LazyApply, Teal, Sonara | Their own board or matcher, an auto-apply bot, blocked, or unreachable | — | no code to copy | — | `rea-competitors` doc addendum | yes, REA / web read |
+| 34 | Rezi | **Correction:** its MCP has **no job-search tool**. Only `list_resumes`, `read_resume`, `write_resume` (OAuth 2.1 at `api.rezi.ai/mcp`) | — | no | — | rezi.ai/rezi-docs/resume-mcp-server "Available tools"; live `api.rezi.ai/mcp` HTTP 401 | yes, page plus live |
+
+**Coverage now: all 32 job-finders are in this table** (rows 1–34). The 14 "don't find jobs" tools from the 46-refs list have no search to copy.
+
+**What "copy everything" can and cannot mean:**
+- **Code we may copy** (MIT): career-ops, JobSpy, jobspy-mcp-server, ai-job-search, jobsync, freehire, trackly-cli, job-apply-plugin, Auto_job_applier_linkedIn.
+- **Ideas only:**
+  - ApplyPilot and JobCtrl (AGPL).
+  - apply-potato (no licence file).
+  - get_jobs (non-commercial).
+  - All closed products.
+- **Never, under the owner's rules:** logins with the user's password, driving a logged-in browser to scrape, anti-detection flags, CAPTCHA solving, proxies, app spoofing.
