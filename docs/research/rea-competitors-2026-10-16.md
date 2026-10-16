@@ -363,3 +363,95 @@ Product rules 4–6: we store; the seeker's agent finds, judges and applies. Rea
 - **Feedback on bad data as a tool.** jobspipe's `give_feedback` MCP tool says "a person reads every submission". It is close to our `report_missing_tool`.
 - **Agent-friendly errors.** jobspipe's 401 body carries `how_to_fix` / `get_key`.
 - **Do not build.** Everything else is do-side and outside our mission: match scores, promoted ranking, auto-apply daily limits, alert caps, crawling. freehire's public line `An agent never submits an application for you` lines up with our hard line 1.
+
+---
+
+## Addendum (2026-10-16, second pass): four more products, and how the indexes are built
+
+Asked for by the local "apply" session. Same rules: public pages only, no logins, no bot challenge bypassed.
+**How it was captured.** REA 6.5.0 again: `capture_browser_scenario` in `connect` mode (headless Chromium 141, loopback CDP), then `inspect_web_page` with script sources, then `export_web_scripts`.
+Page text is cited as `a11y_<capture> [n]`, where n is the node's position in the captured accessibility tree.
+Repo files were read from shallow clones, cited as `repo@commit path:line`. Nothing in the clones was run.
+
+| Capture | Page | Evidence |
+|---|---|---|
+| teal-job-search | `www.tealhq.com/job-search` | ev_8a229447… |
+| kick-job-board | `www.kickresume.com/en/job-board/` | ev_c922081d… |
+| kick-ai-job-matcher | `www.kickresume.com/en/ai-job-matcher/` | ev_8a5cadd6… |
+| lazy-home / lazy-jobs / lazy-faq | `lazyapply.com/`, `/jobs`, `/faq` | ev_0edfd5ab… / ev_643f5f70… / ev_8c3d1e5e… |
+| jobspipe-home | `jobspipe.dev/` | ev_bfc345ca… |
+| freehire-home | `freehire.me/` | ev_f281abf7… |
+
+### Part A: four products
+
+| | Finds jobs for the user? | Whose AI | Sources / index size | Ranking | Alerts / schedule | MCP |
+|---|---|---|---|---|---|---|
+| **Teal** | blocked | blocked | blocked | blocked | blocked | blocked |
+| **Sonara** | unreachable | unreachable | unreachable | unreachable | unreachable | unreachable |
+| **Kickresume** | yes: a job board plus a daily matcher | its own | "4,853,650 jobs"; feed NOT FOUND | match score | "new matches every day" | NOT FOUND |
+| **LazyApply** | yes, both: a remote job board **and** an auto-apply bot | its own ("Job GPT") | "100,000+" remote jobs; feed NOT FOUND | NOT FOUND | NOT FOUND | NOT FOUND |
+
+**Teal.** Retried with a different public page, `/job-search`. REA again saw only `Attention Required! | Cloudflare` (a11y_teal-job-search [0], ev_8a229447…), and curl got HTTP 403. Not bypassed. The Chrome Web Store listing is refused by this container's proxy (`connect_rejected`).
+- Web read (search results, not REA): reviews describe Teal as a job-search *organizer*. Its parts are a tracker, a resume builder and a Chrome extension that clips postings from LinkedIn and career pages. It does not search an index of its own ([tooldirectory.ai](https://tooldirectory.ai/tools/teal), [scoutify.com](https://scoutify.com/blog/teal-review)). Unconfirmed from Teal itself.
+
+**Sonara.** `sonara.ai` resolves in DNS, but HTTPS gets no response from this container: curl times out over HTTP/1.1, the HTTP/2 stream resets, and REA's navigation failed (`cleanup_incomplete`, "Not attached to an active page"). So there is no REA evidence either way.
+- Web read: the original Sonara suspended service on 2024-02-01 for lack of funding. Two review sites say BOLD (Zety, LiveCareer) bought the brand and relaunched it as an auto-apply product that is live in 2026. A competitor's page says it "appears to have shut down" ([scoutify.com](https://scoutify.com/blog/sonara-review/), [resumly.ai](https://resumly.ai/answers/what-happened-to-sonara-ai), [loopcv.pro](https://www.loopcv.pro/directory/sonara/)).
+- The relaunch is not confirmed from an official Sonara or BOLD source. Treat it as **unclear**.
+
+**Kickresume.** Server-rendered pages. The page load fires no job API call, only the document and one CloudFront bundle (scenario seq 1, 37). So the job feed and the matching code are not in the client.
+- Board: a11y_kick-job-board [122] `4,853,650 jobs waiting for you`.
+- Matcher, which uses its own AI on the uploaded resume:
+  - [346] `We read what’s in your resume: your skills, experience, industries, and seniority.`
+  - [348] `We compare your profile against thousands of live openings and hand you a shortlist of the ones you fit best.`
+- Ranking: [291] `Job openings ranked by match score next to an analyzed resume.` The formula is NOT FOUND.
+- Schedule: [98] `Come back for new matches every day.` This is a daily pull. A push alert is NOT FOUND.
+- Source feed and MCP: NOT FOUND (searched MCP, model context, Claude, ChatGPT; no hits).
+
+**LazyApply.** It does both: it searches, and it autofills.
+- Board: a11y_lazy-jobs [124] `Search 100,000+ work from home jobs at top remote companies`. The listings are statically generated (Next.js `_next/data/…json`, scenario seq 156); their source is NOT FOUND.
+- Auto-apply on other platforms:
+  - a11y_lazy-home [557] `Our AI Job search tool automatically apply to all the jobs on platforms like Greenhouse, Dice, Indeed and Ziprecruiter using Job GPT.`
+  - [377] `Our Job GPT automatically fills the job applications based on your information.`
+  - [672] `Apply to jobs across multiple platforms with a single click. Our agent handles the entire application process.`
+- The backend is `backend.lazyapply.com/lazyapplyV2/…` (plans and payments only seen). MCP: NOT FOUND. The "Claude" and "ChatGPT" entries on /jobs ([438], [441]) are bare link labels with no MCP text.
+
+### Part B: how freehire, jobspipe and trackly collect jobs
+
+**freehire.me** is open source, under the MIT licence: `github.com/strelov1/freehire`.
+- The clone's HEAD `615cf0047e88` equals the `SENTRY_RELEASE` id in the live bundle (`B_z-JSI_2.js@151`). So the production site is built from this commit.
+- **Size.** README:222: `Live catalogue snapshot — **3,300,615 open postings** across **294,282 companies**,` from 225 live sources. ATS part (README:229): `**92 platforms · 157,399 companies · 2,644,796 open postings.**` There are 270 source adapters in `internal/ingest/sources/`.
+- **Per-ATS boards** (companies, open jobs), from `docs/sources.md`, compared with our `backend/src/hunt_kit/companies.json`:
+
+  | ATS | freehire companies | freehire open jobs | Job360 boards |
+  |---|---:|---:|---:|
+  | greenhouse | 6,863 (:30) | 155,528 | 631 |
+  | ashby | 3,994 (:34) | 56,647 | 1,875 |
+  | lever | 2,205 (:38) | 50,293 | 1,166 |
+  | workable | 1,480 (:39) | 40,563 | 5 |
+  | workday | 4,202 (:26) | 748,235 | 0 |
+
+- **The board list is a DB table, not a file.** README:245: `Adding a company is one row in the `boards` catalog`. Rows come from a site form or a curator command. `internal/ingest/ingestsched/AGENTS.md:10`: `The ROSTER is `boards`.` The public API exposes `/api/v1/sources` and `/api/v1/companies`, but no endpoint returning company→ATS slugs was found. So the list itself is **not published**.
+- **How boards are found**, which is reusable by us:
+  - `scripts/harvest_boards.py:2` `Harvest ATS board slugs from public job aggregators`. The seed files are public GitHub JSON (lines 43–49): `SimplifyJobs/New-Grad-Positions`, `SimplifyJobs/Summer2027-Internships`, `vanshb03/Summer2027-Internships`, and `crypto-jobs-fyi/crawler` (`ai_/crypto_/fin_/tech_companies.json`).
+  - It regex-extracts ATS URLs, drops ones already known, validates each live against the ATS API, then seeds the table.
+  - `scripts/discover_boards.py:4` `Run a free-text query across search channels (DuckDuckGo, Google CSE, GitHub code` search, Common Crawl), with `site:` queries per ATS host (lines 33–45).
+  - `harvest/linkedin-queries.yml:3` `Each query pages LinkedIn's public job-search listing and yields the companies behind the` postings. Those companies are then followed to their ATS boards.
+- **Crawl cadence.** `internal/ingest/ingestsched/settings.go:37` `DefaultCadence = 2 * time.Hour` per provider, with per-provider overrides. At :26, `It stopped being true on 2026-09-15, when the tail moved to 2h (freehire#2862)`: it used to be hourly.
+- Searching the index needs no key (`Searching needs no key at all.`, a11y_freehire-agents [228], ev_7f86ad31…). An MCP server is shipped as `npx -y freehire-mcp`. (inference) Any AI can already search freehire's 3.3M postings without Python.
+
+**jobspipe.dev** is closed source. No board list and no crawler code is public; the only repo it names is `jobspipe/skills`.
+- **Size.** a11y_jobspipe-home [506] `JobsPipe holds 11.3 million active job postings from 30+ sources, as of October 16, 2026.` The 10 sources are named on /signals (first pass).
+- **Cadence**, by price tier: `9381-ad7825097fccccd4.js@8551` `All sources are refreshed within 24 hours on the Free tier, within 6 hours on Builder and Growth, and within 1 hour on Scal[e]`. Also a11y_jobspipe-home [376] `Postings discovered, updated and removed within 24 hours. Subscribe to diffs via webhook.`
+- Positioning: `9381@12313` `One maintained API replaces 30+ per-site crawlers that break on every markup change`.
+- Which company boards it covers: NOT FOUND.
+
+**trackly-cli** (`github.com/kevinastuhuaman/trackly-cli`, MIT, read at `fd734f6cb9b4`) is a thin client. The 250K-job DB lives on its server, and the repo contains no crawler and no company list.
+- README:10: `Search 250K+ jobs across 5,400+ companies and 40+ ATS types`.
+- The CLI only calls a hosted API: `lib/client.js:12` `const DEFAULT_BASE_URL = 'https://closeai.mba';`. Jobs come from `bin/trackly:644` `GET /api/jobscout/jobs`. Users can ask for a company to be added: `bin/trackly:1056` `POST /api/jobscout/companies/request`.
+- The only hint of the source is in `docs/trackly-tools.md:149`: `jobs Trackly ingested from employer careers sources`.
+- How the 5,400 companies were chosen, and how often they are crawled: NOT FOUND.
+
+**For Job360 (inference, for the owner).**
+- Our 3,677 boards are about a tenth of freehire's (≈14.5K across the same four ATSs), and we have no Workday.
+- freehire's harvest method needs nothing private. It uses public GitHub listing JSONs, `site:` searches, and live ATS validation. We could reproduce it to grow `companies.json`.
+- freehire already offers keyless search and an MCP server over 3.3M postings. For an any-AI user without Python, pointing at that is an option, but sourcing jobs ourselves is against rule 4, so we would only reference it, not host an index.
