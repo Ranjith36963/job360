@@ -33,7 +33,7 @@ All paths are under `backend/src/`.
 - **Sources:**
   - `hunt_kit/companies.json` has **3,677** boards: Ashby 1,875, Lever 1,166, Greenhouse 631, Workable 5.
   - The code also reads SmartRecruiters, Recruitee, Personio, Teamtailor, BambooHR and Workday, but the starter list has no boards for those (`hunt_kit/README.md:65-67`).
-  - Optional `--universe` adds about 24k boards (`hunt_kit.py:90-91, 1536`).
+  - **Correction (REA, search-gap table):** `--universe` is **on by default** (`hunt_kit.py:1984`). A default run reads about 15.9K Greenhouse, Lever and Ashby boards from Feashliaa (`:1536`). Workday (12,884) and BambooHR (11,316) are skipped by default (`:91` `DEFAULT_SKIP`).
   - 10 open feeds: freehire, Himalayas, Remotive, Arbeitnow, RemoteOK, Jobicy, Working Nomads, WWR, The Muse, HN (`README.md:69-71`).
   - Adzuna and Jooble need the user's own free keys.
 - **Never:** we never scrape LinkedIn, Indeed or Glassdoor, and never log in (`hunt.md:38-41`). Their jobs come in through Gmail alerts or a pasted link.
@@ -72,10 +72,10 @@ All paths are under `backend/src/`.
 
 | # | Who | Where it searches | How it picks | Auto-runs? | Source |
 |---|---|---|---|---|---|
-| 1 | ApplyPilot (OSS) | scrapes Indeed, LinkedIn, Glassdoor, ZipRecruiter, Google Jobs; 48 Workday sites; 30 career sites | LLM scores 1-10, `--min-score` | `--continuous` | github.com/Pickle-Pixel/ApplyPilot |
+| 1 | ApplyPilot (OSS) | scrapes Indeed, LinkedIn, Glassdoor, ZipRecruiter, Google Jobs; 48 Workday sites; 30 career sites | LLM scores 1-10, `--min-score` | no re-search (`--continuous` re-polls the apply queue every 60 s) | github.com/Pickle-Pixel/ApplyPilot |
 | 2 | jobsync (OSS) | Greenhouse, Lever (1,160+), Ashby (1,860+) | local score, then AI | scheduled "Automations" | github.com/Gsync/jobsync |
 | 3 | JobCtrl (OSS) | Indeed, LinkedIn, ZipRecruiter, company sources | LLM scores 1-10 against evidence | Temporal; $25 a day LLM budget | github.com/ebarti/JobCtrl |
-| 4 | apply-potato (OSS) | GitHub job-list repos | hard filters, then a 0-100 score | every 30 min | github.com/coolbrother/apply-potato |
+| 4 | apply-potato (OSS) | GitHub job-list repos the user types in (none ship) | hard filters, then a 0-100 score | every 30 min | github.com/coolbrother/apply-potato |
 | 5 | get_jobs (OSS) | Boss Zhipin, 51job, Liepin, Zhilian (logged in) | rules; AI only on Boss | auto-applies | github.com/loks666/get_jobs |
 | 6 | Auto_job_applier_linkedIn (OSS) | LinkedIn, using your own account | config filters, no score | manual | github.com/GodsScion/Auto_job_applier_linkedIn |
 | 7 | JobSpy (OSS) | LinkedIn, Indeed, Glassdoor, ZipRecruiter, Bayt, Naukri and others; no AI | query params only | none | github.com/speedyapply/JobSpy |
@@ -129,7 +129,7 @@ All paths are under `backend/src/`.
 | Index | Size | How it collects | Board counts (Greenhouse / Ashby / Lever / Workable / Workday) |
 |---|---|---|---|
 | freehire (MIT, github.com/strelov1/freehire) | 3.3M postings, 294K companies | A crawl about every 2 h per provider. Boards are a private DB table, built by **public** harvest scripts: Simplify, vanshb03 and crypto-jobs-fyi GitHub listing JSONs, `site:` web searches and LinkedIn public listings. Each board is validated live against its ATS | 6,863 / 3,994 / 2,205 / 1,480 / 4,202 |
-| **Job360 hunt kit** | 3,677 boards | static `companies.json` (from jobsync and career-ops) | 631 / 1,875 / 1,166 / 5 / 0 |
+| **Job360 hunt kit** | 3,677 starter boards plus about 15.9K from `--universe` (on by default) | static `companies.json` plus the Feashliaa lists | starter 631 / 1,875 / 1,166 / 5 / 0; Workday skipped by default |
 | jobspipe | 11.3M postings | closed source; refreshed within 24 h, 6 h or 1 h by paid tier | NOT FOUND |
 | trackly-cli | 250K jobs, 5.4K companies | thin client over a hosted API (closeai.mba); no crawler in the repo | NOT FOUND |
 
