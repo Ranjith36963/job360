@@ -230,8 +230,8 @@ no `down <stem>` and no `down --all`.
 **Cause:** usually `NEXT_PUBLIC_API_URL` being SET. The browser is meant to call
 `/api/*` on its own origin and let the Next rewrite forward it; setting that variable
 sends fetches straight at the backend, where CSP `connect-src 'self'` blocks them.
-`frontend/.env.local.example` is the authority on every frontend variable (it carries
-this warning), and the proxy target is `BACKEND_ORIGIN` in `frontend/next.config.ts`.
+`frontend/.env.local.example` carries that warning; the proxy target is
+`BACKEND_ORIGIN` in `frontend/next.config.ts`.
 Otherwise: the backend is not running, or `FRONTEND_ORIGIN` does not include the
 frontend's origin — that list is read in `api/main.py`.
 

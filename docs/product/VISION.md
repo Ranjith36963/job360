@@ -82,10 +82,10 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 The tools are the `@mcp.tool()` functions in `api/mcp_server.py`; each carries its
 own docstring, which is what the agent actually reads. The exact set is pinned by
-`tests/test_outreach_people.py::test_bug1_mcp_tools_list_has_no_extra_tools` — a new
-tool fails it until the count moves deliberately. Two that are decisions, not
-mechanics: we write no CV or letter ourselves (decision 28 — the agent writes, we
-version and render), and nothing sources, ranks or recommends a job (rule 4).
+`tests/test_mcp_server.py::test_tools_list_is_exactly_the_expected_tools`. Two that
+are decisions, not mechanics: we write no CV or letter ourselves (decision 28 — the
+agent writes, we version and render), and nothing sources, ranks or recommends a
+job (rule 4).
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
