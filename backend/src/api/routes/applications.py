@@ -1463,11 +1463,13 @@ async def list_lessons(
 @router.get("/applications/stats", response_model=StatsResponse, dependencies=AUTH_FIRST)
 async def stats(
     since: Optional[str] = Query(None),
+    view: Optional[str] = Query(None),
+    company: Optional[str] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        return await stats_service.compute_stats(db, user.id, since)
+        return await stats_service.compute_stats(db, user.id, since, view=view, company=company)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

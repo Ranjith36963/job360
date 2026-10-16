@@ -130,7 +130,12 @@ def _counts(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     counts = _counts(rows)
-    return {**counts, **_rates(counts["applied"], counts["replied"], counts["interview"], counts["offer"])}
+    return {
+        **counts,
+        **_rates(counts["applied"], counts["replied"], counts["interview"], counts["offer"]),
+        # career-ops stats.mjs:182 - a rate over fewer than N applications is a hint, not a finding.
+        "small_sample": counts["applied"] < settings.STATS_SMALL_SAMPLE_N,
+    }
 
 
 def _group(
@@ -299,7 +304,41 @@ async def _score_line_counts(user_id: str, rows: list[dict[str, Any]]) -> dict[s
     return {"line": line, "above": counts["above"], "below": counts["below"], "unscored": counts["unknown"]}
 
 
-async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = None) -> dict[str, Any]:
+def _validate_view(view: Optional[str], company: Optional[str]) -> Optional[str]:
+    """422s for ``view`` / ``company`` - checked BEFORE the rate limit, for the
+    same reason as ``since``: a typo must not cost an hourly slot. Returns the
+    stripped ``company`` (``None`` when not given)."""
+    if view is not None and view not in settings.STATS_VIEWS:
+        raise SpineError(422, f"view must be one of {list(settings.STATS_VIEWS)}")
+    if company is None:
+        return None
+    if view not in ("company", "all"):
+        raise SpineError(422, "company needs view='company'")
+    cleaned = company.strip()
+    if not cleaned:
+        raise SpineError(422, "company must not be empty")
+    if len(cleaned) > settings.STATS_COMPANY_MAX_CHARS:
+        raise SpineError(422, f"company must be at most {settings.STATS_COMPANY_MAX_CHARS} characters")
+    return cleaned
+
+
+def _selected_views(view: Optional[str]) -> list[str]:
+    """The view keys one call computes. ``all`` is every member of STATS_VIEWS
+    except ``all`` itself - never a hard-coded list, so a view a later slice
+    appends joins it automatically."""
+    every = [v for v in settings.STATS_VIEWS if v != "all"]
+    if view is None:
+        return []
+    return every if view == "all" else [view]
+
+
+async def compute_stats(
+    db: JobDatabase,
+    user_id: str,
+    since: Optional[str] = None,
+    view: Optional[str] = None,
+    company: Optional[str] = None,
+) -> dict[str, Any]:
     """R5-R7 — overall counts + rates, ``by_cv_version``, ``by_role``, all
     scoped to the caller's own applications (S1: ``user_id`` filtered on
     every table in the join) and rate-limited per user (S7).
@@ -313,6 +352,7 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     has exactly one home and a rename there cannot leave a stale string here.
     """
     since_val = _parse_since(since)
+    company_filter = _validate_view(view, company)
 
     key = f"stats:{user_id}"
     if not rate_limit.check_and_record(key, max_in_window=settings.STATS_MAX_PER_HOUR, window_seconds=3600):
@@ -419,6 +459,19 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     by_contact_found_via = await _contact_found_via_groups(db, user_id, since_val)
     score_line = await _score_line_counts(user_id, rows)
 
+    # Every view key is present on every response; a view ADDS one block, the
+    # rest stay null (additive - a view never replaces the response).
+    view_blocks: dict[str, Any] = {v: None for v in settings.STATS_VIEWS if v != "all"}
+    selected = _selected_views(view)
+    if selected:
+        from src.services.applications import feedback_numbers  # noqa: PLC0415
+
+        view_blocks.update(
+            await feedback_numbers.compute_views(
+                db, user_id, since_val, selected, company=company_filter, view=str(view)
+            )
+        )
+
     return {
         "since": since_val,
         "overall": overall,
@@ -433,5 +486,6 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
             cv_truncated or role_truncated or country_truncated or source_truncated or channel_truncated
         ),
         "applications_truncated": applications_truncated,
+        **view_blocks,
         "computed_at": datetime.now(timezone.utc).isoformat(),
     }

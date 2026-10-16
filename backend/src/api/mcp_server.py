@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 2
-TOOLS_REV_FOR_HASH = "d5a0c9f452f9"
+TOOLS_REV = 4
+TOOLS_REV_FOR_HASH = "abf62e7d7568"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1467,7 +1467,9 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def stats(since: Optional[str] = None) -> dict[str, Any]:
+    async def stats(
+        since: Optional[str] = None, view: Optional[str] = None, company: Optional[str] = None
+    ) -> dict[str, Any]:
         """Counts over YOUR applications from the event log — brought,
         applied, replied, interview, offer, rejected — plus rates and
         groupings: by CV version (label the CV with save_artifact's `label`
@@ -1482,11 +1484,11 @@ def build_server(version: str = "") -> MCPServer:
         number is a count of what you recorded."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.stats(since, db, _user())
+                resp = await applications_route.stats(since=since, view=view, company=company, db=db, user=_user())
         except HTTPException as exc:
             _audit("stats", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
-        _audit("stats", "ok")
+        _audit("stats", "ok", view=view, company_filter=company is not None)
         return resp
 
     @mcp.tool()
