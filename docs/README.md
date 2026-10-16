@@ -39,6 +39,14 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 
 ---
 
+## Research
+
+| Doc | What it is |
+|---|---|
+| [`research/rea-competitors-2026-10-16.md`](research/rea-competitors-2026-10-16.md) | FROZEN record: eight competitors' public JS and network calls read with REA (finding jobs, scoring, alerts, MCP tools, feedback), every claim cited. |
+
+---
+
 ## Generated
 
 | Doc | What it is |
