@@ -297,6 +297,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/auto-email-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Auto Email Check
+         * @description THE one gate before an automatic employer email (feedback loop slice 2).
+         *
+         *     ``kind``: checkin | feedback_request | feedback_followup. Answers ``send`` / ``ask`` / ``stop`` with a
+         *     closed ``reason`` through ``auto_emails.decide`` (the same function for this route and the MCP
+         *     ``check_auto_email`` tool). ``send`` only means the gate is open. Read-only apart from one audit line.
+         *     404 for an application that is not the caller's (rule #12).
+         */
+        get: operations["auto_email_check_api_applications__application_id__auto_email_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/autofill": {
         parameters: {
             query?: never;
@@ -2969,6 +2994,8 @@ export interface components {
         };
         /** ApplicationFitOut */
         ApplicationFitOut: {
+            /** Archetype */
+            archetype?: string | null;
             /**
              * Axes
              * @default []
@@ -2976,16 +3003,34 @@ export interface components {
             axes: components["schemas"]["FitAxisOut"][];
             /** Gaps */
             gaps: string[];
+            /**
+             * Gaps Detail
+             * @default []
+             */
+            gaps_detail: components["schemas"]["FitItemOut"][];
+            /**
+             * Jd Requirements
+             * @default []
+             */
+            jd_requirements: components["schemas"]["FitItemOut"][];
             /** Reasoning */
             reasoning: string | null;
             /** Recorded At */
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+            /** Remote Policy */
+            remote_policy?: string | null;
             /** Score */
             score: number | null;
+            /** Score Source */
+            score_source?: string | null;
+            /** Team Size */
+            team_size?: number | null;
             /** Verdict */
             verdict: string | null;
+            /** Via */
+            via?: string | null;
         };
         /** ApplicationJobOut */
         ApplicationJobOut: {
@@ -3411,6 +3456,7 @@ export interface components {
         AssistantSettingsView: {
             above_line: components["schemas"]["SettingFieldOut"];
             apply_min_score: components["schemas"]["SettingFieldOut"];
+            auto_employer_emails: components["schemas"]["SettingFieldOut"];
             below_line: components["schemas"]["SettingFieldOut"];
             /**
              * Check Every
@@ -3448,6 +3494,28 @@ export interface components {
              * @default []
              */
             waiting: components["schemas"]["SettingRequestOut"][];
+        };
+        /**
+         * AutoEmailCheckResponse
+         * @description ``GET /api/applications/{id}/auto-email-check`` - the gate before an automatic employer email.
+         *     ``send`` only means the gate is open; ``due_since`` is "" when the kind has no starting event.
+         */
+        AutoEmailCheckResponse: {
+            /** Daily Max */
+            daily_max: number;
+            /** Decision */
+            decision: string;
+            /** Detail */
+            detail: string;
+            /**
+             * Due Since
+             * @default
+             */
+            due_since: string;
+            /** Reason */
+            reason: string;
+            /** Sent Today */
+            sent_today: number;
         };
         /** AutofillRequest */
         AutofillRequest: {
@@ -3554,6 +3622,10 @@ export interface components {
             job: components["schemas"]["JobResponse"];
             /** Remote */
             remote?: boolean | null;
+            /** Repost */
+            repost?: {
+                [key: string]: unknown;
+            } | null;
             /** Status */
             status: string;
         };
@@ -3879,6 +3951,85 @@ export interface components {
             /** Kind */
             kind: string;
         };
+        /** DoctorAutoEmailDue */
+        DoctorAutoEmailDue: {
+            /** Application Id */
+            application_id: number;
+            /**
+             * Due Since
+             * @default
+             */
+            due_since: string;
+            /** Kind */
+            kind: string;
+        };
+        /** DoctorAutoEmailLast */
+        DoctorAutoEmailLast: {
+            /** Application Id */
+            application_id: number;
+            /** At */
+            at: string;
+            /**
+             * Company
+             * @default
+             */
+            company: string;
+            /** Event Id */
+            event_id: number;
+            /** Kind */
+            kind: string;
+        };
+        /** DoctorAutoEmailViolation */
+        DoctorAutoEmailViolation: {
+            /** Application Id */
+            application_id: number;
+            /** Event Id */
+            event_id: number;
+            /** Rule */
+            rule: string;
+        };
+        /**
+         * DoctorAutoEmails
+         * @description Automatic employer emails, watched: the switch, today's count, the last sends (company, never the
+         *     address), what is due, and any send that broke a guardrail.
+         */
+        DoctorAutoEmails: {
+            /**
+             * Daily Max
+             * @default 0
+             */
+            daily_max: number;
+            /**
+             * Due
+             * @default []
+             */
+            due: components["schemas"]["DoctorAutoEmailDue"][];
+            /**
+             * Last
+             * @default []
+             */
+            last: components["schemas"]["DoctorAutoEmailLast"][];
+            /**
+             * On
+             * @default false
+             */
+            on: boolean;
+            /**
+             * Sent Today
+             * @default 0
+             */
+            sent_today: number;
+            /**
+             * Stop Hint
+             * @default
+             */
+            stop_hint: string;
+            /**
+             * Violations
+             * @default []
+             */
+            violations: components["schemas"]["DoctorAutoEmailViolation"][];
+        };
         /**
          * DoctorMissingItem
          * @description One thing the profile lacks: a path-like ``key`` and a plain ``why``.
@@ -3911,6 +4062,18 @@ export interface components {
          */
         DoctorResponse: {
             auth: components["schemas"]["DoctorAuth"];
+            /**
+             * @default {
+             *       "daily_max": 0,
+             *       "due": [],
+             *       "last": [],
+             *       "on": false,
+             *       "sent_today": 0,
+             *       "stop_hint": "",
+             *       "violations": []
+             *     }
+             */
+            auto_emails: components["schemas"]["DoctorAutoEmails"];
             /** Email Verified */
             email_verified: boolean;
             /**
@@ -4277,6 +4440,25 @@ export interface components {
             role: number;
             /** You */
             you: number;
+        };
+        /**
+         * FitItemIn
+         * @description One gap / ad requirement with an optional hard|soft marker (slice 5).
+         *     The kind set and the text cap are live settings checked by
+         *     ``fit_record.clean_items`` (so a bad kind is a 422 naming the set).
+         */
+        FitItemIn: {
+            /** Kind */
+            kind?: string | null;
+            /** Text */
+            text: string;
+        };
+        /** FitItemOut */
+        FitItemOut: {
+            /** Kind */
+            kind?: string | null;
+            /** Text */
+            text: string;
         };
         /** FormAnsweredOut */
         FormAnsweredOut: {
@@ -6071,16 +6253,28 @@ export interface components {
         };
         /** SaveFitRequest */
         SaveFitRequest: {
+            /** Archetype */
+            archetype?: string | null;
             /** Axes */
             axes?: components["schemas"]["FitAxisIn"][] | null;
             /** Gaps */
-            gaps?: string[] | null;
+            gaps?: (string | components["schemas"]["FitItemIn"])[] | null;
+            /** Jd Requirements */
+            jd_requirements?: (string | components["schemas"]["FitItemIn"])[] | null;
             /** Reasoning */
             reasoning?: string | null;
+            /** Remote Policy */
+            remote_policy?: string | null;
             /** Score */
             score?: number | null;
+            /** Score Source */
+            score_source?: string | null;
+            /** Team Size */
+            team_size?: number | null;
             /** Verdict */
             verdict?: string | null;
+            /** Via */
+            via?: string | null;
             /** Visa Country */
             visa_country?: string | null;
             /** Visa Detail */
@@ -6211,6 +6405,106 @@ export interface components {
              */
             total: number;
         };
+        /** StatsBandOut */
+        StatsBandOut: {
+            /** Band */
+            band: string;
+            /** Interview Rate */
+            interview_rate?: number | null;
+            /** Interviews */
+            interviews: number;
+            /** Max */
+            max?: number | null;
+            /** Min */
+            min?: number | null;
+            /** N */
+            n: number;
+            /** Offer Rate */
+            offer_rate?: number | null;
+            /** Offers */
+            offers: number;
+        };
+        /** StatsCalibrationOut */
+        StatsCalibrationOut: {
+            /** Bands */
+            bands: components["schemas"]["StatsBandOut"][];
+            /** Feedback */
+            feedback: components["schemas"]["StatsFeedbackQuoteOut"][];
+            /** Ghosted Counted Negative */
+            ghosted_counted_negative: number;
+            /** In Flight */
+            in_flight: number;
+            /** Min Band N */
+            min_band_n: number;
+            /** Note */
+            note: string;
+            /** Resolved */
+            resolved: number;
+            /** Truncated */
+            truncated?: boolean | null;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+            /** Unscored */
+            unscored: number;
+            verdict: components["schemas"]["StatsVerdictOut"];
+        };
+        /** StatsCompanyCardOut */
+        StatsCompanyCardOut: {
+            /** Applications */
+            applications: number;
+            /** Company */
+            company: string;
+            /** Facts */
+            facts: components["schemas"]["StatsCompanyFactOut"][];
+            /** Facts Truncated */
+            facts_truncated: boolean;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+        };
+        /** StatsCompanyFactOut */
+        StatsCompanyFactOut: {
+            /** Application Id */
+            application_id: number;
+            /** Applied On */
+            applied_on?: string | null;
+            /** Checkins Sent */
+            checkins_sent?: number | null;
+            /** Confidence */
+            confidence?: string | null;
+            /** Kind */
+            kind: string;
+            /** Note */
+            note?: string | null;
+            /** On */
+            on?: string | null;
+            /** Outcome */
+            outcome?: string | null;
+            /** Silent Days */
+            silent_days?: number | null;
+            /** Stale */
+            stale: boolean;
+        };
+        /** StatsCompanyOut */
+        StatsCompanyOut: {
+            /** Cards */
+            cards: components["schemas"]["StatsCompanyCardOut"][];
+            /** Explanation */
+            explanation: string;
+            /** Silence Window Days */
+            silence_window_days: number;
+            /** Since Ignored */
+            since_ignored: boolean;
+            /** Stale After Days */
+            stale_after_days: number;
+            /** Truncated */
+            truncated: boolean;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+        };
         /**
          * StatsContactFoundViaGroupOut
          * @description Owner decision 2026-10-04 — per current contact ``found_via``: how
@@ -6258,6 +6552,101 @@ export interface components {
             replied: number;
             /** Reply Rate */
             reply_rate: number | null;
+            /**
+             * Small Sample
+             * @default false
+             */
+            small_sample: boolean;
+        };
+        /** StatsFeedbackQuoteOut */
+        StatsFeedbackQuoteOut: {
+            /** Application Id */
+            application_id: number;
+            /** Company */
+            company: string;
+            /** Fit Score */
+            fit_score?: number | null;
+            /** Verbatim Feedback */
+            verbatim_feedback: string;
+        };
+        /** StatsFollowupsOut */
+        StatsFollowupsOut: {
+            /** Applications With Checkin */
+            applications_with_checkin?: number | null;
+            /** Applied Without Checkin */
+            applied_without_checkin?: number | null;
+            /** Available */
+            available: boolean;
+            /** Checkin Days */
+            checkin_days?: number | null;
+            /** Checkins Sent */
+            checkins_sent?: number | null;
+            /** Feedback Asked */
+            feedback_asked?: number | null;
+            /** Feedback Followups Sent */
+            feedback_followups_sent?: number | null;
+            /** Rejections Without Ask */
+            rejections_without_ask?: number | null;
+            /** Skipped */
+            skipped?: {
+                [key: string]: number;
+            } | null;
+            /** Truncated */
+            truncated?: boolean | null;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+        };
+        /** StatsFunnelOut */
+        StatsFunnelOut: {
+            /** Ever Applied */
+            ever_applied: number;
+            /** Ever Hired */
+            ever_hired: number;
+            /** Ever Interview */
+            ever_interview: number;
+            /** Ever Offer */
+            ever_offer: number;
+            /** Ever Replied */
+            ever_replied: number;
+            /** Interview Rate */
+            interview_rate?: number | null;
+            /** N */
+            n: number;
+            /** Note */
+            note: string;
+            /** Offer Rate */
+            offer_rate?: number | null;
+            /** Reply Rate */
+            reply_rate?: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+            /** Truncated */
+            truncated?: boolean | null;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+            /** Without Applied */
+            without_applied: number;
+        };
+        /** StatsHopOut */
+        StatsHopOut: {
+            /** From */
+            from: string;
+            /** Insufficient Data */
+            insufficient_data: boolean;
+            /** Key */
+            key: string;
+            /** Median Days */
+            median_days?: number | null;
+            /** N */
+            n: number;
+            /** P75 Days */
+            p75_days?: number | null;
+            /** Same Day Excluded */
+            same_day_excluded: number;
+            /** Still Waiting */
+            still_waiting: number;
+            /** To */
+            to: string;
         };
         /**
          * StatsKeyedGroupOut
@@ -6289,6 +6678,54 @@ export interface components {
             replied: number;
             /** Reply Rate */
             reply_rate: number | null;
+            /**
+             * Small Sample
+             * @default false
+             */
+            small_sample: boolean;
+        };
+        /** StatsLessonEffectOut */
+        StatsLessonEffectOut: {
+            /** Lessons */
+            lessons: components["schemas"]["StatsLessonEffectRowOut"][];
+            /** Note */
+            note: string;
+            /** Truncated */
+            truncated?: boolean | null;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+        };
+        /** StatsLessonEffectRowOut */
+        StatsLessonEffectRowOut: {
+            after: components["schemas"]["StatsLessonSideOut"];
+            /** Agreed On */
+            agreed_on?: string | null;
+            /** Application Id */
+            application_id: number;
+            before: components["schemas"]["StatsLessonSideOut"];
+            /** Comparable */
+            comparable: boolean;
+            /** Event Id */
+            event_id: number;
+            /** Lesson */
+            lesson: string;
+        };
+        /** StatsLessonSideOut */
+        StatsLessonSideOut: {
+            /** Interview */
+            interview: number;
+            /** Interview Rate */
+            interview_rate?: number | null;
+            /** N */
+            n: number;
+            /** Replied */
+            replied: number;
+            /** Reply Rate */
+            reply_rate?: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+            /** Still Waiting */
+            still_waiting: number;
         };
         /** StatsOverallOut */
         StatsOverallOut: {
@@ -6320,6 +6757,111 @@ export interface components {
              * @default 0
              */
             simulations_excluded: number;
+            /**
+             * Small Sample
+             * @default false
+             */
+            small_sample: boolean;
+        };
+        /**
+         * StatsPatternRowOut
+         * @description One group of the ``patterns`` view (counts of the user's own sent applications).
+         */
+        StatsPatternRowOut: {
+            /** Awaiting */
+            awaiting: number;
+            /** Conversion Rate */
+            conversion_rate?: number | null;
+            /** Decided */
+            decided: number;
+            /** Decided Rate */
+            decided_rate?: number | null;
+            /** Key */
+            key?: string | null;
+            /** Label */
+            label: string;
+            /** Negative */
+            negative: number;
+            /** No Answer */
+            no_answer: number;
+            /** Positive */
+            positive: number;
+            /** Small Sample */
+            small_sample: boolean;
+            /** Submitted */
+            submitted: number;
+        };
+        /** StatsPatternSignalOut */
+        StatsPatternSignalOut: {
+            /** Clear Lead */
+            clear_lead: boolean;
+            /** Decided */
+            decided: number;
+            /** Decided Rate */
+            decided_rate?: number | null;
+            /** Dimension */
+            dimension: string;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Points Vs Overall */
+            points_vs_overall?: number | null;
+            /** Positive */
+            positive: number;
+            /** Submitted */
+            submitted: number;
+            /** Text */
+            text: string;
+        };
+        /**
+         * StatsPatternsOut
+         * @description ``stats(view="patterns")``. ``available`` false = below the gate (``text`` says
+         *     how far); every other key is then null.
+         */
+        StatsPatternsOut: {
+            /** Available */
+            available: boolean;
+            /** By Archetype */
+            by_archetype?: components["schemas"]["StatsPatternRowOut"][] | null;
+            /** By Remote Policy */
+            by_remote_policy?: components["schemas"]["StatsPatternRowOut"][] | null;
+            /** By Team Size */
+            by_team_size?: components["schemas"]["StatsPatternRowOut"][] | null;
+            /** By Via */
+            by_via?: components["schemas"]["StatsPatternRowOut"][] | null;
+            /** Groups Truncated */
+            groups_truncated?: boolean | null;
+            /** Note */
+            note?: string | null;
+            overall?: components["schemas"]["StatsPatternRowOut"] | null;
+            /** Reason Base */
+            reason_base?: number | null;
+            /** Rejection Reasons */
+            rejection_reasons?: components["schemas"]["StatsReasonOut"][] | null;
+            /** Signals */
+            signals?: components["schemas"]["StatsPatternSignalOut"][] | null;
+            /** Submitted */
+            submitted: number;
+            /** Text */
+            text?: string | null;
+            /** Threshold */
+            threshold: number;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+            /** Withdrawn Excluded */
+            withdrawn_excluded?: number | null;
+        };
+        /** StatsReasonOut */
+        StatsReasonOut: {
+            /** Application Ids */
+            application_ids: number[];
+            /** Count */
+            count: number;
+            /** Reason */
+            reason: string;
         };
         /** StatsResponse */
         StatsResponse: {
@@ -6341,22 +6883,30 @@ export interface components {
             by_job_source: components["schemas"]["StatsKeyedGroupOut"][];
             /** By Role */
             by_role: components["schemas"]["StatsRoleGroupOut"][];
+            calibration?: components["schemas"]["StatsCalibrationOut"] | null;
+            company?: components["schemas"]["StatsCompanyOut"] | null;
             /** Computed At */
             computed_at: string;
             /** Digest */
             digest?: {
                 [key: string]: unknown;
             } | null;
+            followups?: components["schemas"]["StatsFollowupsOut"] | null;
             /** Friction */
             friction?: {
                 [key: string]: unknown;
             } | null;
+            funnel?: components["schemas"]["StatsFunnelOut"] | null;
             /** Groups Truncated */
             groups_truncated: boolean;
+            lesson_effect?: components["schemas"]["StatsLessonEffectOut"] | null;
             overall: components["schemas"]["StatsOverallOut"];
+            patterns?: components["schemas"]["StatsPatternsOut"] | null;
             score_line: components["schemas"]["StatsScoreLineOut"];
             /** Since */
             since: string | null;
+            skill_gaps?: components["schemas"]["StatsSkillGapsOut"] | null;
+            velocity?: components["schemas"]["StatsVelocityOut"] | null;
         };
         /** StatsRoleGroupOut */
         StatsRoleGroupOut: {
@@ -6382,6 +6932,11 @@ export interface components {
             reply_rate: number | null;
             /** Role */
             role: string | null;
+            /**
+             * Small Sample
+             * @default false
+             */
+            small_sample: boolean;
         };
         /**
          * StatsScoreLineOut
@@ -6398,6 +6953,80 @@ export interface components {
             line?: number | null;
             /** Unscored */
             unscored: number;
+        };
+        /** StatsSkillGapOut */
+        StatsSkillGapOut: {
+            /** Application Ids */
+            application_ids: number[];
+            /** Applications */
+            applications: number;
+            /** Gap */
+            gap: string;
+            /** Hard */
+            hard: number;
+            /** Key */
+            key: string;
+            /** Low Fit */
+            low_fit: number;
+            /** Soft */
+            soft: number;
+            /** Tier */
+            tier: string;
+            /** Unmarked */
+            unmarked: number;
+            /** Weighted */
+            weighted: number;
+        };
+        /**
+         * StatsSkillGapsOut
+         * @description ``stats(view="skill_gaps")``. ``available`` false = fewer than the threshold
+         *     of scored fits; every other key is then null.
+         */
+        StatsSkillGapsOut: {
+            /** Available */
+            available: boolean;
+            /** Excluded As Known */
+            excluded_as_known?: number | null;
+            /** Fits Read */
+            fits_read?: number | null;
+            /** Gaps */
+            gaps?: components["schemas"]["StatsSkillGapOut"][] | null;
+            /** Low Fit Score */
+            low_fit_score?: number | null;
+            /** Note */
+            note?: string | null;
+            /** Scored */
+            scored: number;
+            /** Text */
+            text?: string | null;
+            /** Threshold */
+            threshold?: number | null;
+            /** Total Low Fit */
+            total_low_fit?: number | null;
+            /** Truncated */
+            truncated?: boolean | null;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+        };
+        /** StatsVelocityOut */
+        StatsVelocityOut: {
+            /** Hops */
+            hops: components["schemas"]["StatsHopOut"][];
+            /** Min N */
+            min_n: number;
+            /** Note */
+            note: string;
+            /** Truncated */
+            truncated?: boolean | null;
+            /** Truncated Hint */
+            truncated_hint?: string | null;
+        };
+        /** StatsVerdictOut */
+        StatsVerdictOut: {
+            /** Kind */
+            kind: string;
+            /** Text */
+            text: string;
         };
         /** StatusResponse */
         StatusResponse: {
@@ -7202,6 +7831,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_email_check_api_applications__application_id__auto_email_check_get: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoEmailCheckResponse"];
                 };
             };
             /** @description Validation Error */

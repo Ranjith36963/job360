@@ -810,6 +810,17 @@
       },
       "ApplicationFitOut": {
         "properties": {
+          "archetype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archetype"
+          },
           "axes": {
             "default": [],
             "items": {
@@ -823,6 +834,22 @@
               "type": "string"
             },
             "title": "Gaps",
+            "type": "array"
+          },
+          "gaps_detail": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FitItemOut"
+            },
+            "title": "Gaps Detail",
+            "type": "array"
+          },
+          "jd_requirements": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FitItemOut"
+            },
+            "title": "Jd Requirements",
             "type": "array"
           },
           "reasoning": {
@@ -844,6 +871,17 @@
             "title": "Recorded By",
             "type": "string"
           },
+          "remote_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Policy"
+          },
           "score": {
             "anyOf": [
               {
@@ -855,6 +893,28 @@
             ],
             "title": "Score"
           },
+          "score_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Source"
+          },
+          "team_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Size"
+          },
           "verdict": {
             "anyOf": [
               {
@@ -865,6 +925,17 @@
               }
             ],
             "title": "Verdict"
+          },
+          "via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via"
           }
         },
         "required": [
@@ -2035,6 +2106,9 @@
           "apply_min_score": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "auto_employer_emails": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "below_line": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2101,10 +2175,50 @@
           "daily_cap",
           "paused_until",
           "pause_reason",
+          "auto_employer_emails",
           "paused",
           "practice_run"
         ],
         "title": "AssistantSettingsView",
+        "type": "object"
+      },
+      "AutoEmailCheckResponse": {
+        "description": "``GET /api/applications/{id}/auto-email-check`` - the gate before an automatic employer email.\n``send`` only means the gate is open; ``due_since`` is \"\" when the kind has no starting event.",
+        "properties": {
+          "daily_max": {
+            "title": "Daily Max",
+            "type": "integer"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "due_since": {
+            "default": "",
+            "title": "Due Since",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "sent_today": {
+            "title": "Sent Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decision",
+          "reason",
+          "detail",
+          "sent_today",
+          "daily_max"
+        ],
+        "title": "AutoEmailCheckResponse",
         "type": "object"
       },
       "AutofillRequest": {
@@ -2418,6 +2532,18 @@
               }
             ],
             "title": "Remote"
+          },
+          "repost": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repost"
           },
           "status": {
             "title": "Status",
@@ -3156,6 +3282,136 @@
         "title": "DoctorAuth",
         "type": "object"
       },
+      "DoctorAutoEmailDue": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "due_since": {
+            "default": "",
+            "title": "Due Since",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "kind"
+        ],
+        "title": "DoctorAutoEmailDue",
+        "type": "object"
+      },
+      "DoctorAutoEmailLast": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "company": {
+            "default": "",
+            "title": "Company",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "kind",
+          "at"
+        ],
+        "title": "DoctorAutoEmailLast",
+        "type": "object"
+      },
+      "DoctorAutoEmailViolation": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "rule"
+        ],
+        "title": "DoctorAutoEmailViolation",
+        "type": "object"
+      },
+      "DoctorAutoEmails": {
+        "description": "Automatic employer emails, watched: the switch, today's count, the last sends (company, never the\naddress), what is due, and any send that broke a guardrail.",
+        "properties": {
+          "daily_max": {
+            "default": 0,
+            "title": "Daily Max",
+            "type": "integer"
+          },
+          "due": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DoctorAutoEmailDue"
+            },
+            "title": "Due",
+            "type": "array"
+          },
+          "last": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DoctorAutoEmailLast"
+            },
+            "title": "Last",
+            "type": "array"
+          },
+          "on": {
+            "default": false,
+            "title": "On",
+            "type": "boolean"
+          },
+          "sent_today": {
+            "default": 0,
+            "title": "Sent Today",
+            "type": "integer"
+          },
+          "stop_hint": {
+            "default": "",
+            "title": "Stop Hint",
+            "type": "string"
+          },
+          "violations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DoctorAutoEmailViolation"
+            },
+            "title": "Violations",
+            "type": "array"
+          }
+        },
+        "title": "DoctorAutoEmails",
+        "type": "object"
+      },
       "DoctorMissingItem": {
         "description": "One thing the profile lacks: a path-like ``key`` and a plain ``why``.",
         "properties": {
@@ -3204,6 +3460,18 @@
         "properties": {
           "auth": {
             "$ref": "#/components/schemas/DoctorAuth"
+          },
+          "auto_emails": {
+            "$ref": "#/components/schemas/DoctorAutoEmails",
+            "default": {
+              "daily_max": 0,
+              "due": [],
+              "last": [],
+              "on": false,
+              "sent_today": 0,
+              "stop_hint": "",
+              "violations": []
+            }
           },
           "email_verified": {
             "title": "Email Verified",
@@ -4019,6 +4287,56 @@
           "you"
         ],
         "title": "FitAxisOut",
+        "type": "object"
+      },
+      "FitItemIn": {
+        "additionalProperties": false,
+        "description": "One gap / ad requirement with an optional hard|soft marker (slice 5).\nThe kind set and the text cap are live settings checked by\n``fit_record.clean_items`` (so a bad kind is a 422 naming the set).",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "FitItemIn",
+        "type": "object"
+      },
+      "FitItemOut": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "FitItemOut",
         "type": "object"
       },
       "FormAnsweredOut": {
@@ -8631,6 +8949,18 @@
       "SaveFitRequest": {
         "additionalProperties": false,
         "properties": {
+          "archetype": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archetype"
+          },
           "axes": {
             "anyOf": [
               {
@@ -8650,7 +8980,14 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FitItemIn"
+                    }
+                  ]
                 },
                 "maxItems": 50,
                 "type": "array"
@@ -8660,6 +8997,28 @@
               }
             ],
             "title": "Gaps"
+          },
+          "jd_requirements": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FitItemIn"
+                    }
+                  ]
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jd Requirements"
           },
           "reasoning": {
             "anyOf": [
@@ -8671,6 +9030,18 @@
               }
             ],
             "title": "Reasoning"
+          },
+          "remote_policy": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Policy"
           },
           "score": {
             "anyOf": [
@@ -8685,6 +9056,29 @@
             ],
             "title": "Score"
           },
+          "score_source": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Source"
+          },
+          "team_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Size"
+          },
           "verdict": {
             "anyOf": [
               {
@@ -8696,6 +9090,18 @@
               }
             ],
             "title": "Verdict"
+          },
+          "via": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via"
           },
           "visa_country": {
             "anyOf": [
@@ -8993,6 +9399,362 @@
         "title": "SetupProgressOut",
         "type": "object"
       },
+      "StatsBandOut": {
+        "properties": {
+          "band": {
+            "title": "Band",
+            "type": "string"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "interviews": {
+            "title": "Interviews",
+            "type": "integer"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "offers": {
+            "title": "Offers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "band",
+          "n",
+          "interviews",
+          "offers"
+        ],
+        "title": "StatsBandOut",
+        "type": "object"
+      },
+      "StatsCalibrationOut": {
+        "properties": {
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/StatsBandOut"
+            },
+            "title": "Bands",
+            "type": "array"
+          },
+          "feedback": {
+            "items": {
+              "$ref": "#/components/schemas/StatsFeedbackQuoteOut"
+            },
+            "title": "Feedback",
+            "type": "array"
+          },
+          "ghosted_counted_negative": {
+            "title": "Ghosted Counted Negative",
+            "type": "integer"
+          },
+          "in_flight": {
+            "title": "In Flight",
+            "type": "integer"
+          },
+          "min_band_n": {
+            "title": "Min Band N",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "integer"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          },
+          "unscored": {
+            "title": "Unscored",
+            "type": "integer"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/StatsVerdictOut"
+          }
+        },
+        "required": [
+          "bands",
+          "min_band_n",
+          "resolved",
+          "in_flight",
+          "unscored",
+          "ghosted_counted_negative",
+          "verdict",
+          "feedback",
+          "note"
+        ],
+        "title": "StatsCalibrationOut",
+        "type": "object"
+      },
+      "StatsCompanyCardOut": {
+        "properties": {
+          "applications": {
+            "title": "Applications",
+            "type": "integer"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/StatsCompanyFactOut"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "facts_truncated": {
+            "title": "Facts Truncated",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          }
+        },
+        "required": [
+          "key",
+          "company",
+          "label",
+          "applications",
+          "facts",
+          "facts_truncated"
+        ],
+        "title": "StatsCompanyCardOut",
+        "type": "object"
+      },
+      "StatsCompanyFactOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "applied_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied On"
+          },
+          "checkins_sent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkins Sent"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "silent_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Silent Days"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "application_id",
+          "kind",
+          "stale"
+        ],
+        "title": "StatsCompanyFactOut",
+        "type": "object"
+      },
+      "StatsCompanyOut": {
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/StatsCompanyCardOut"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "silence_window_days": {
+            "title": "Silence Window Days",
+            "type": "integer"
+          },
+          "since_ignored": {
+            "title": "Since Ignored",
+            "type": "boolean"
+          },
+          "stale_after_days": {
+            "title": "Stale After Days",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          }
+        },
+        "required": [
+          "cards",
+          "silence_window_days",
+          "stale_after_days",
+          "truncated",
+          "since_ignored",
+          "explanation"
+        ],
+        "title": "StatsCompanyOut",
+        "type": "object"
+      },
       "StatsContactFoundViaGroupOut": {
         "description": "Owner decision 2026-10-04 \u2014 per current contact ``found_via``: how\nmany contacts, how many had an outreach marked sent / a reply recorded,\nand ``reply_rate`` = contacts with both / contacts with a sent mark\n(``null`` when nothing was sent).",
         "properties": {
@@ -9133,6 +9895,11 @@
               }
             ],
             "title": "Reply Rate"
+          },
+          "small_sample": {
+            "default": false,
+            "title": "Small Sample",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9150,6 +9917,339 @@
           "offer_rate"
         ],
         "title": "StatsCvVersionGroupOut",
+        "type": "object"
+      },
+      "StatsFeedbackQuoteOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "fit_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fit Score"
+          },
+          "verbatim_feedback": {
+            "title": "Verbatim Feedback",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "company",
+          "verbatim_feedback"
+        ],
+        "title": "StatsFeedbackQuoteOut",
+        "type": "object"
+      },
+      "StatsFollowupsOut": {
+        "properties": {
+          "applications_with_checkin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applications With Checkin"
+          },
+          "applied_without_checkin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Without Checkin"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "checkin_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkin Days"
+          },
+          "checkins_sent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkins Sent"
+          },
+          "feedback_asked": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Asked"
+          },
+          "feedback_followups_sent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Followups Sent"
+          },
+          "rejections_without_ask": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejections Without Ask"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "StatsFollowupsOut",
+        "type": "object"
+      },
+      "StatsFunnelOut": {
+        "properties": {
+          "ever_applied": {
+            "title": "Ever Applied",
+            "type": "integer"
+          },
+          "ever_hired": {
+            "title": "Ever Hired",
+            "type": "integer"
+          },
+          "ever_interview": {
+            "title": "Ever Interview",
+            "type": "integer"
+          },
+          "ever_offer": {
+            "title": "Ever Offer",
+            "type": "integer"
+          },
+          "ever_replied": {
+            "title": "Ever Replied",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          },
+          "without_applied": {
+            "title": "Without Applied",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n",
+          "ever_applied",
+          "ever_replied",
+          "ever_interview",
+          "ever_offer",
+          "ever_hired",
+          "small_sample",
+          "without_applied",
+          "note"
+        ],
+        "title": "StatsFunnelOut",
+        "type": "object"
+      },
+      "StatsHopOut": {
+        "properties": {
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "insufficient_data": {
+            "title": "Insufficient Data",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "median_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Days"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "p75_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P75 Days"
+          },
+          "same_day_excluded": {
+            "title": "Same Day Excluded",
+            "type": "integer"
+          },
+          "still_waiting": {
+            "title": "Still Waiting",
+            "type": "integer"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "from",
+          "to",
+          "n",
+          "insufficient_data",
+          "same_day_excluded",
+          "still_waiting"
+        ],
+        "title": "StatsHopOut",
         "type": "object"
       },
       "StatsKeyedGroupOut": {
@@ -9226,6 +10326,11 @@
               }
             ],
             "title": "Reply Rate"
+          },
+          "small_sample": {
+            "default": false,
+            "title": "Small Sample",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9242,6 +10347,151 @@
           "offer_rate"
         ],
         "title": "StatsKeyedGroupOut",
+        "type": "object"
+      },
+      "StatsLessonEffectOut": {
+        "properties": {
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/StatsLessonEffectRowOut"
+            },
+            "title": "Lessons",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          }
+        },
+        "required": [
+          "lessons",
+          "note"
+        ],
+        "title": "StatsLessonEffectOut",
+        "type": "object"
+      },
+      "StatsLessonEffectRowOut": {
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/StatsLessonSideOut"
+          },
+          "agreed_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreed On"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "before": {
+            "$ref": "#/components/schemas/StatsLessonSideOut"
+          },
+          "comparable": {
+            "title": "Comparable",
+            "type": "boolean"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "lesson": {
+            "title": "Lesson",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "lesson",
+          "before",
+          "after",
+          "comparable"
+        ],
+        "title": "StatsLessonEffectRowOut",
+        "type": "object"
+      },
+      "StatsLessonSideOut": {
+        "properties": {
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          },
+          "still_waiting": {
+            "title": "Still Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n",
+          "replied",
+          "interview",
+          "small_sample",
+          "still_waiting"
+        ],
+        "title": "StatsLessonSideOut",
         "type": "object"
       },
       "StatsOverallOut": {
@@ -9312,6 +10562,11 @@
             "default": 0,
             "title": "Simulations Excluded",
             "type": "integer"
+          },
+          "small_sample": {
+            "default": false,
+            "title": "Small Sample",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9326,6 +10581,373 @@
           "offer_rate"
         ],
         "title": "StatsOverallOut",
+        "type": "object"
+      },
+      "StatsPatternRowOut": {
+        "description": "One group of the ``patterns`` view (counts of the user's own sent applications).",
+        "properties": {
+          "awaiting": {
+            "title": "Awaiting",
+            "type": "integer"
+          },
+          "conversion_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversion Rate"
+          },
+          "decided": {
+            "title": "Decided",
+            "type": "integer"
+          },
+          "decided_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided Rate"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "negative": {
+            "title": "Negative",
+            "type": "integer"
+          },
+          "no_answer": {
+            "title": "No Answer",
+            "type": "integer"
+          },
+          "positive": {
+            "title": "Positive",
+            "type": "integer"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "submitted",
+          "positive",
+          "negative",
+          "awaiting",
+          "no_answer",
+          "decided",
+          "small_sample"
+        ],
+        "title": "StatsPatternRowOut",
+        "type": "object"
+      },
+      "StatsPatternSignalOut": {
+        "properties": {
+          "clear_lead": {
+            "title": "Clear Lead",
+            "type": "boolean"
+          },
+          "decided": {
+            "title": "Decided",
+            "type": "integer"
+          },
+          "decided_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided Rate"
+          },
+          "dimension": {
+            "title": "Dimension",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "points_vs_overall": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points Vs Overall"
+          },
+          "positive": {
+            "title": "Positive",
+            "type": "integer"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dimension",
+          "kind",
+          "key",
+          "label",
+          "submitted",
+          "decided",
+          "positive",
+          "clear_lead",
+          "text"
+        ],
+        "title": "StatsPatternSignalOut",
+        "type": "object"
+      },
+      "StatsPatternsOut": {
+        "description": "``stats(view=\"patterns\")``. ``available`` false = below the gate (``text`` says\nhow far); every other key is then null.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "by_archetype": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StatsPatternRowOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Archetype"
+          },
+          "by_remote_policy": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StatsPatternRowOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Remote Policy"
+          },
+          "by_team_size": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StatsPatternRowOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Team Size"
+          },
+          "by_via": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StatsPatternRowOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Via"
+          },
+          "groups_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Groups Truncated"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "overall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsPatternRowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason_base": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Base"
+          },
+          "rejection_reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StatsReasonOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reasons"
+          },
+          "signals": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StatsPatternSignalOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signals"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "integer"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "integer"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          },
+          "withdrawn_excluded": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn Excluded"
+          }
+        },
+        "required": [
+          "available",
+          "submitted",
+          "threshold"
+        ],
+        "title": "StatsPatternsOut",
+        "type": "object"
+      },
+      "StatsReasonOut": {
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "count",
+          "application_ids"
+        ],
+        "title": "StatsReasonOut",
         "type": "object"
       },
       "StatsResponse": {
@@ -9388,6 +11010,26 @@
             "title": "By Role",
             "type": "array"
           },
+          "calibration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsCalibrationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "company": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsCompanyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "computed_at": {
             "title": "Computed At",
             "type": "string"
@@ -9404,6 +11046,16 @@
             ],
             "title": "Digest"
           },
+          "followups": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsFollowupsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "friction": {
             "anyOf": [
               {
@@ -9416,12 +11068,42 @@
             ],
             "title": "Friction"
           },
+          "funnel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsFunnelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "groups_truncated": {
             "title": "Groups Truncated",
             "type": "boolean"
           },
+          "lesson_effect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsLessonEffectOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "overall": {
             "$ref": "#/components/schemas/StatsOverallOut"
+          },
+          "patterns": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsPatternsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "score_line": {
             "$ref": "#/components/schemas/StatsScoreLineOut"
@@ -9436,6 +11118,26 @@
               }
             ],
             "title": "Since"
+          },
+          "skill_gaps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsSkillGapsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "velocity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsVelocityOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -9535,6 +11237,11 @@
               }
             ],
             "title": "Role"
+          },
+          "small_sample": {
+            "default": false,
+            "title": "Small Sample",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9586,6 +11293,265 @@
           "unscored"
         ],
         "title": "StatsScoreLineOut",
+        "type": "object"
+      },
+      "StatsSkillGapOut": {
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "applications": {
+            "title": "Applications",
+            "type": "integer"
+          },
+          "gap": {
+            "title": "Gap",
+            "type": "string"
+          },
+          "hard": {
+            "title": "Hard",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "low_fit": {
+            "title": "Low Fit",
+            "type": "integer"
+          },
+          "soft": {
+            "title": "Soft",
+            "type": "integer"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "unmarked": {
+            "title": "Unmarked",
+            "type": "integer"
+          },
+          "weighted": {
+            "title": "Weighted",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "gap",
+          "applications",
+          "low_fit",
+          "hard",
+          "soft",
+          "unmarked",
+          "weighted",
+          "tier",
+          "application_ids"
+        ],
+        "title": "StatsSkillGapOut",
+        "type": "object"
+      },
+      "StatsSkillGapsOut": {
+        "description": "``stats(view=\"skill_gaps\")``. ``available`` false = fewer than the threshold\nof scored fits; every other key is then null.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "excluded_as_known": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded As Known"
+          },
+          "fits_read": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fits Read"
+          },
+          "gaps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StatsSkillGapOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gaps"
+          },
+          "low_fit_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Fit Score"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "scored": {
+            "title": "Scored",
+            "type": "integer"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          },
+          "total_low_fit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Low Fit"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          }
+        },
+        "required": [
+          "available",
+          "scored"
+        ],
+        "title": "StatsSkillGapsOut",
+        "type": "object"
+      },
+      "StatsVelocityOut": {
+        "properties": {
+          "hops": {
+            "items": {
+              "$ref": "#/components/schemas/StatsHopOut"
+            },
+            "title": "Hops",
+            "type": "array"
+          },
+          "min_n": {
+            "title": "Min N",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          },
+          "truncated_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated Hint"
+          }
+        },
+        "required": [
+          "hops",
+          "min_n",
+          "note"
+        ],
+        "title": "StatsVelocityOut",
+        "type": "object"
+      },
+      "StatsVerdictOut": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "StatsVerdictOut",
         "type": "object"
       },
       "StatusResponse": {
@@ -11603,6 +13569,92 @@
           }
         },
         "summary": "Download Application Artifact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/auto-email-check": {
+      "get": {
+        "description": "THE one gate before an automatic employer email (feedback loop slice 2).\n\n``kind``: checkin | feedback_request | feedback_followup. Answers ``send`` / ``ask`` / ``stop`` with a\nclosed ``reason`` through ``auto_emails.decide`` (the same function for this route and the MCP\n``check_auto_email`` tool). ``send`` only means the gate is open. Read-only apart from one audit line.\n404 for an application that is not the caller's (rule #12).",
+        "operationId": "auto_email_check_api_applications__application_id__auto_email_check_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 40,
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoEmailCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auto Email Check",
         "tags": [
           "applications"
         ]
