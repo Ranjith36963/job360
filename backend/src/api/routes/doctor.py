@@ -120,7 +120,8 @@ async def doctor(
 ) -> dict[str, Any]:
     """The account's state in one read, plus ONE closed ``next_step``:
     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
-    Read-only; email verification is NOT required (an unverified user is told
+    Read-only except the auto-ghost sweep (a `ghosted` event per silent
+    application, reported in ghosted_now); email verification is NOT required (an unverified user is told
     to verify). No 404 when there is no profile (``profile_exists: false``).
 
     Also the MCP tool list as served now (``tools``, ``tools_version``) so an
