@@ -1318,6 +1318,8 @@ class StatsOverallOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
     # Owner decision 2026-10-14 — replied/interview/offer above count only
     # applications that ALSO have an `applied` event (so no rate exceeds 1);
     # this is how many reached a later stage with no `applied` recorded.
@@ -1342,6 +1344,8 @@ class StatsCvVersionGroupOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
 
 
 class StatsRoleGroupOut(BaseModel):
@@ -1357,6 +1361,8 @@ class StatsRoleGroupOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
 
 
 class StatsKeyedGroupOut(BaseModel):
@@ -1376,6 +1382,8 @@ class StatsKeyedGroupOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # True when fewer than STATS_SMALL_SAMPLE_N applications: a hint, not a finding.
+    small_sample: bool = False
 
 
 class StatsContactFoundViaGroupOut(BaseModel):
@@ -1403,6 +1411,156 @@ class StatsScoreLineOut(BaseModel):
     unscored: int
 
 
+class StatsFunnelOut(BaseModel):
+    n: int
+    ever_applied: int
+    ever_replied: int
+    ever_interview: int
+    ever_offer: int
+    ever_hired: int
+    reply_rate: Optional[float] = None
+    interview_rate: Optional[float] = None
+    offer_rate: Optional[float] = None
+    small_sample: bool
+    without_applied: int
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsHopOut(BaseModel):
+    key: str
+    from_: str = Field(alias="from")
+    to: str
+    n: int
+    median_days: Optional[float] = None
+    p75_days: Optional[float] = None
+    insufficient_data: bool
+    same_day_excluded: int
+    still_waiting: int
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class StatsVelocityOut(BaseModel):
+    hops: list[StatsHopOut]
+    min_n: int
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsBandOut(BaseModel):
+    band: str
+    min: Optional[int] = None
+    max: Optional[int] = None
+    n: int
+    interviews: int
+    offers: int
+    interview_rate: Optional[float] = None
+    offer_rate: Optional[float] = None
+
+
+class StatsVerdictOut(BaseModel):
+    kind: str
+    text: str
+
+
+class StatsFeedbackQuoteOut(BaseModel):
+    application_id: int
+    company: str
+    fit_score: Optional[int] = None
+    verbatim_feedback: str
+
+
+class StatsCalibrationOut(BaseModel):
+    bands: list[StatsBandOut]
+    min_band_n: int
+    resolved: int
+    in_flight: int
+    unscored: int
+    ghosted_counted_negative: int
+    verdict: StatsVerdictOut
+    feedback: list[StatsFeedbackQuoteOut]
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsCompanyFactOut(BaseModel):
+    application_id: int
+    kind: str  # "silent" | "answered"
+    stale: bool
+    applied_on: Optional[str] = None
+    silent_days: Optional[int] = None
+    checkins_sent: Optional[int] = None
+    confidence: Optional[str] = None
+    outcome: Optional[str] = None
+    on: Optional[str] = None
+    note: Optional[str] = None
+
+
+class StatsCompanyCardOut(BaseModel):
+    key: str
+    company: str
+    label: str
+    applications: int
+    facts: list[StatsCompanyFactOut]
+    facts_truncated: bool
+    truncated_hint: Optional[str] = None
+
+
+class StatsCompanyOut(BaseModel):
+    cards: list[StatsCompanyCardOut]
+    silence_window_days: int
+    stale_after_days: int
+    truncated: bool
+    since_ignored: bool
+    explanation: str
+    truncated_hint: Optional[str] = None
+
+
+class StatsLessonSideOut(BaseModel):
+    n: int
+    replied: int
+    interview: int
+    reply_rate: Optional[float] = None
+    interview_rate: Optional[float] = None
+    small_sample: bool
+    still_waiting: int
+
+
+class StatsLessonEffectRowOut(BaseModel):
+    event_id: int
+    application_id: int
+    lesson: str
+    agreed_on: Optional[str] = None
+    before: StatsLessonSideOut
+    after: StatsLessonSideOut
+    comparable: bool
+
+
+class StatsLessonEffectOut(BaseModel):
+    lessons: list[StatsLessonEffectRowOut]
+    note: str
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
+class StatsFollowupsOut(BaseModel):
+    available: bool
+    checkins_sent: Optional[int] = None
+    feedback_asked: Optional[int] = None
+    feedback_followups_sent: Optional[int] = None
+    applications_with_checkin: Optional[int] = None
+    applied_without_checkin: Optional[int] = None
+    rejections_without_ask: Optional[int] = None
+    skipped: Optional[dict[str, int]] = None
+    checkin_days: Optional[int] = None
+    truncated: Optional[bool] = None
+    truncated_hint: Optional[str] = None
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1417,6 +1575,13 @@ class StatsResponse(BaseModel):
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
     # counted; the numbers describe that window, not the whole history.
     applications_truncated: bool
+    # `stats(view=...)` adds ONE block (or all of them); the rest stay null.
+    funnel: Optional[StatsFunnelOut] = None
+    velocity: Optional[StatsVelocityOut] = None
+    calibration: Optional[StatsCalibrationOut] = None
+    company: Optional[StatsCompanyOut] = None
+    lesson_effect: Optional[StatsLessonEffectOut] = None
+    followups: Optional[StatsFollowupsOut] = None
     computed_at: str
 
 

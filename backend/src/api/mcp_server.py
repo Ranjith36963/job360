@@ -1481,7 +1481,13 @@ def build_server(version: str = "") -> MCPServer:
         overall.simulations_excluded says how many. An unset value is the group with key null
         ("Not set"). `since` (an ISO date/datetime) scopes to applications
         (and contacts) added on/after that date. Nothing is inferred; every
-        number is a count of what you recorded."""
+        number is a count of what you recorded. `view` adds one block: funnel (furthest
+        stage reached; a rejection counts as a reply), velocity (median and p75 days per stage hop;
+        still-waiting ones left out), calibration (interview rate per fit-score band
+        <70/70-79/80-89/>=90, 5 per band, with a verdict to quote as printed), company (history card
+        per company; pass `company` for one), lesson_effect (rates before vs after each agreed lesson,
+        not proof of cause), followups (check-ins and feedback asks sent), or all. Every rate has its n;
+        small_sample is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.stats(since=since, view=view, company=company, db=db, user=_user())
