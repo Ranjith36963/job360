@@ -20,6 +20,19 @@ changed, what worked".
 
 Job boards find jobs. Agents think and act. Job360 remembers.
 
+## How a job gets in (decided 2026-10-16, the owner)
+
+Jobs enter the apply process in two ways:
+
+1. **The assistant finds it.** It searches for you ("run 360 hunt").
+2. **You bring it.** Two ways:
+   - a. Paste the **link**.
+   - b. Copy-paste the **whole job description**.
+
+All three land in the same place: `bring_job` births one Application, and the
+same apply process runs from there. There is no fourth way — Job360 never
+finds jobs itself.
+
 ## Why this and not the old Job360
 
 Job360 spent a year sourcing and ranking jobs. Every board already does that
