@@ -60,7 +60,8 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
       ├── Contacts[]        name, role, email, linkedin — found by the agent
       ├── Receipt           frozen on "I applied": artifact versions sent, fields filled, answers,
       │                     confirmation text/number, channel, sent_at — append-only
-      └── Events[]          the history; the current status is the furthest stage reached (a rejection/withdrawal always applies; only a correction moves it back)
+      └── Events[]          the history; the status is replayed from it by
+                            services/applications/status.replay_status
 ```
 
 **Event types are a fixed list plus free-text detail.** The list is
@@ -79,36 +80,12 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 ## The agent surface (MCP + same REST)
 
-| Tool | Does |
-|---|---|
-| `get_profile` / `update_profile` | structured candidate context; agent may fix or add fields |
-| `bring_job` | link or text → Application (status `considering`) |
-| `get_application` / `list_applications` | full object with events and artifact versions |
-| `save_artifact` | new version of cv / cover_letter / answers / outreach |
-| `save_fit` | agent's verdict + gaps on this application |
-| `add_contact` | recruiter / hiring manager on this application |
-| `record_event` | typed event, free-text detail |
-| `record_application` | the receipt — what was actually sent |
-| `whats_new` | everything since a timestamp (replaces push for now) |
-| `export_history` | applications + events + versions + outcomes as clean JSON |
-| `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `update_contact` | correct a contact's details; the old value is kept in its edit history |
-| `list_people` | every person you've added, grouped so one recruiter on two jobs shows once; `contact_id` gives one in full |
-| `list_receipts` | the user's application receipts, newest first; optionally filtered by job |
-| `get_receipt` | one receipt in full: the job as it read, the exact CV / cover letter sent, and what was recorded |
-| `get_job` | an ad the user brought, by job id: full text, apply link, dates and recorded facts |
-| `update_job` | set or fix the job facts on an application (country, remote, found-on, posted dates) |
-| `check_submit` | may the agent press the final submit? One decision (`submit` / `ask` / `stop`) from the user's settings |
-| `get_application_kit` | everything for filling ONE application form: CV, cover letter, stored answers, and what is missing |
-| `check_form` | before typing into a form: the agent lists every question on the live form; for each, Job360 says whether a saved answer exists (kit key verified, or exact wording of an approved answer) or it is `missing`; read-only |
-| `get_proof_upload_link` | a one-time link to upload the proof screenshot of one application |
-| `get_recipe` | the "run 360" playbooks: numbered steps for the agent to follow (no name = the list) |
-| `ask_user` | raise a question the user must answer when the agent is stuck or would have to guess |
-| `answer_ask` | record the answer the user gave in chat to an ask |
-| `check_outreach` | the send gate: right before pressing Send on an outreach email, `send` / `ask` (Gmail draft + `ask_user`) / `stop`; read-only, counts only recorded sends |
-| `doctor` | one read of the account's state (auth kind, what the profile lacks, asks, waiting settings, pause, today's outreach) and one closed `next_step` |
-| `report_missing_tool` | stores "a tool I needed does not exist" for the owner; does nothing else |
-| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
+The tools are the `@mcp.tool()` functions in `api/mcp_server.py`; each carries its
+own docstring, which is what the agent actually reads. The exact set is pinned by
+`tests/test_outreach_people.py::test_bug1_mcp_tools_list_has_no_extra_tools` — a new
+tool fails it until the count moves deliberately. Two that are decisions, not
+mechanics: we write no CV or letter ourselves (decision 28 — the agent writes, we
+version and render), and nothing sources, ranks or recommends a job (rule 4).
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.

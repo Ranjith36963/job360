@@ -227,28 +227,12 @@ no `down <stem>` and no `down --all`.
 
 **Symptom:** Network panel shows CORS error or `TypeError: Failed to fetch` when the dashboard calls the backend.
 
-**Cause:** One of:
-- FastAPI not running on the expected port.
-- `NEXT_PUBLIC_API_URL` in `frontend/.env.local` doesn't match the URL the backend is actually listening on.
-- `FRONTEND_ORIGIN` on the backend doesn't include the frontend's origin (CORS rejects the preflight).
-
-**Fix:** Verify both halves match.
-
-```bash
-# Terminal 1 — backend
-cd backend
-FRONTEND_ORIGIN=http://localhost:3000 python main.py
-
-# Terminal 2 — frontend (and check frontend/.env.local)
-cd frontend
-cat .env.local   # must contain NEXT_PUBLIC_API_URL=http://localhost:8000
-npm run dev
-```
-
-If running on a non-default host (e.g. LAN IP for mobile testing), pass a comma-separated list:
-
-```bash
-FRONTEND_ORIGIN=http://localhost:3000,http://192.168.1.10:3000 python main.py
-```
+**Cause:** usually `NEXT_PUBLIC_API_URL` being SET. The browser is meant to call
+`/api/*` on its own origin and let the Next rewrite forward it; setting that variable
+sends fetches straight at the backend, where CSP `connect-src 'self'` blocks them.
+`frontend/.env.local.example` is the authority on every frontend variable (it carries
+this warning), and the proxy target is `BACKEND_ORIGIN` in `frontend/next.config.ts`.
+Otherwise: the backend is not running, or `FRONTEND_ORIGIN` does not include the
+frontend's origin — that list is read in `api/main.py`.
 
 ---
