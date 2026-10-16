@@ -330,7 +330,8 @@ def log_recorded(user_id: str, application_id: int, event_id: int, event_type: s
         "interview_event_recorded",
         extra={
             "event": "interview_event_recorded", "user_id": safe_log_value(user_id),
-            "application_id": application_id, "event_id": event_id, "event_type": event_type,
+            "application_id": application_id, "event_id": event_id,
+            "event_type": safe_log_value(event_type, max_len=40),
             "tags": len(payload.get("competency_tags") or []), "gaps": len(payload.get("gaps") or []),
             "signals": len(payload.get("signals") or []),
         },

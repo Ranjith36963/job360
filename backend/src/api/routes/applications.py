@@ -2223,8 +2223,8 @@ async def auto_email_check(
         extra={
             "event": "auto_email_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
-            "kind": safe_log_value(kind, max_len=40), "decision": verdict.decision, "reason": verdict.reason,
-            "result": "ok",
+            "kind": safe_log_value(kind, max_len=40), "decision": safe_log_value(verdict.decision, max_len=20),
+            "reason": safe_log_value(verdict.reason, max_len=60), "result": "ok",
         },
     )
     return {

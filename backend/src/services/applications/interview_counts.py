@@ -457,13 +457,14 @@ async def build_view(
     except Exception:
         log.warning(
             "interview_view_failed",
-            extra={"event": "interview_view_failed", "user_id": safe_log_value(user_id), "view": view},
+            extra={"event": "interview_view_failed", "user_id": safe_log_value(user_id),
+                   "view": safe_log_value(view, max_len=40)},
             exc_info=True,
         )
         raise
     get_audit_logger().info(
         "interview_view",
-        extra={"event": "interview_view", "user_id": safe_log_value(user_id), "view": view,
+        extra={"event": "interview_view", "user_id": safe_log_value(user_id), "view": safe_log_value(view, max_len=40),
                "rows": len(rows), "truncated": truncated},
     )
     return result

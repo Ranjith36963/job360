@@ -1517,9 +1517,9 @@ async def save_fit(
         "fit_saved",
         extra={
             "event": "fit_saved", "application_id": application_id, "scored": score is not None,
-            "score_source": score_source, "gaps": len(gaps_list),
+            "score_source": safe_log_value(score_source, max_len=40), "gaps": len(gaps_list),
             "hard_gaps": sum(1 for g in gaps_detail if g["kind"] == "hard"),
-            "jd_requirements": len(jd_list), "extras": extras,
+            "jd_requirements": len(jd_list), "extras": safe_log_value(extras, max_len=200),
         },
     )
     fit = fit_record.fit_view({

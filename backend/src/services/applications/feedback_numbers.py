@@ -666,12 +666,13 @@ async def compute_views(
                         "pass since=YYYY-MM-DD to narrow"
                     )
     except Exception:
-        log.exception("stats_view_failed", extra={"user_id": safe_log_value(user_id), "view": view})
+        log.exception("stats_view_failed", extra={"user_id": safe_log_value(user_id),
+                                                  "view": safe_log_value(view, max_len=40)})
         raise
     get_audit_logger().info(
         "stats_view",
         extra={
-            "event": "stats_view", "user_id": safe_log_value(user_id), "view": view,
+            "event": "stats_view", "user_id": safe_log_value(user_id), "view": safe_log_value(view, max_len=40),
             "applications": len(facts.apps), "events": facts.n_events, "truncated": facts.truncated,
             "ms": round((time.monotonic() - started) * 1000),
         },
