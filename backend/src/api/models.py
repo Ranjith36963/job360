@@ -459,6 +459,8 @@ class DoctorResponse(BaseModel):
     whats_new_hint: str
     outreach: DoctorOutreach
     next_step: str
+    # Application ids this very call marked `ghosted` (no answer after GHOSTED_AFTER_DAYS).
+    ghosted_now: list[int] = []
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""

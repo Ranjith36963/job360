@@ -453,6 +453,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "proof_text", "proof_screenshot",
         # Simulated/test application marker (2026-10-15).
         "simulation",
+        # Feedback loop slice 1 (2026-10-16).
+        "hired", "offer_declined", "post_mortem",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

@@ -128,6 +128,7 @@ async def doctor(
     last as ``client_tools_version`` and ``tools_stale`` says whether it moved
     (null when none was passed)."""
     now = datetime.now(timezone.utc)
+    ghosted_now = await _sweep_ghosted(db, user.id, now)
     loaded, overlay = load_profile_with_overlay(user.id)
     profile = loaded or UserProfile()
     has_cv = bool((profile.cv_data.raw_text or "").strip())
@@ -162,8 +163,24 @@ async def doctor(
             "blocked_today": await _blocked_today(db, user.id, now),
         },
         "next_step": next_step,
+        "ghosted_now": ghosted_now,
         **_tools_block(client_tools_version, client_tools_rev),
     }
+
+
+async def _sweep_ghosted(db: JobDatabase, user_id: str, now: datetime) -> list[int]:
+    """Auto-ghost silent applications (services/applications/ghosting.py); a failure logs and reads as none."""
+    try:
+        from src.services.applications.ghosting import sweep_ghosted  # noqa: PLC0415
+
+        return await sweep_ghosted(db, user_id, now)
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "doctor_ghost_sweep_failed",
+            extra={"event": "doctor_ghost_sweep_failed", "user_id": safe_log_value(user_id)},
+            exc_info=True,
+        )
+        return []
 
 
 def _tools_block(client_tools_version: str, client_tools_rev: Optional[int] = None) -> dict[str, Any]:

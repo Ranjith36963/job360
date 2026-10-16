@@ -36,7 +36,7 @@ describe("the table drives every button", () => {
   it("considering allows all four; later statuses only Mark Applied", () => {
     expect(allowedActions("considering")).toEqual(["send_approve", "send_decline", "ready_card", "mark_applied"]);
     expect(allowedActions("applied")).toEqual(["mark_applied"]);
-    expect(Object.keys(ACTIONS_BY_STATUS)).toHaveLength(10);
+    expect(Object.keys(ACTIONS_BY_STATUS)).toHaveLength(12);
   });
 
   it("Mark Applied hides once a receipt exists, in any status", () => {

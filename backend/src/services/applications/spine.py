@@ -106,6 +106,102 @@ def validate_payload(payload: Any, *, max_bytes: Optional[int] = None) -> dict[s
     return payload
 
 
+# ── Outcome payloads (feedback loop slice 1) ─────────────────────────────────
+# Only the NAMED optional keys are type-checked; unknown extra keys stay allowed.
+OUTCOME_EVENT_TYPES = frozenset({"rejected", "ghosted", "withdrawn", "offer", "hired", "offer_declined", "post_mortem"})
+REPLY_CLASSIFIED_EVENT_TYPES = frozenset({
+    "replied", "rejected", "interview_requested", "interview_scheduled", "interview_done", "offer",
+})
+REPLY_CONFIDENCE = ("high", "medium", "low")
+VERBATIM_FEEDBACK_MAX_CHARS = 2000
+REASONS_MAX_ITEMS = 10
+REASON_MAX_CHARS = 120
+STAGE_MAX_CHARS = 60
+REPLY_TYPE_MAX_CHARS = 40
+EVIDENCE_MAX_ITEMS = 5
+EVIDENCE_MAX_CHARS = 300
+POST_MORTEM_LIST_KEYS = {  # key -> (max items, max chars each)
+    "what_was_sent": (10, 300),
+    "what_to_change": (10, 300),
+    "proposed_lessons": (5, 300),
+}
+
+
+def _payload_str(payload: dict[str, Any], key: str, max_chars: int) -> None:
+    if key in payload:
+        value = payload[key]
+        if not isinstance(value, str):
+            raise SpineError(422, f"payload.{key} must be a string")
+        if len(value) > max_chars:
+            raise SpineError(422, f"payload.{key} exceeds {max_chars} chars")
+
+
+def _payload_str_list(
+    payload: dict[str, Any], key: str, max_items: int, max_chars: int, *, drop_empty: bool = False
+) -> None:
+    if key not in payload:
+        return
+    value = payload[key]
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise SpineError(422, f"payload.{key} must be a list of strings")
+    cleaned = [v.strip() for v in value]
+    if drop_empty:
+        cleaned = [v for v in cleaned if v]
+    if len(cleaned) > max_items:
+        raise SpineError(422, f"payload.{key} has more than {max_items} items")
+    for item in cleaned:
+        if len(item) > max_chars or (drop_empty and not item):
+            raise SpineError(422, f"payload.{key} items must be 1 to {max_chars} chars")
+    payload[key] = cleaned
+
+
+def validate_outcome_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The optional outcome / reply-classification / post-mortem keys (422 naming the key).
+
+    Returns the payload with ``reasons`` stripped and empties dropped. Run AFTER ``validate_payload``.
+    """
+    if event_type in OUTCOME_EVENT_TYPES:
+        _payload_str(payload, "verbatim_feedback", VERBATIM_FEEDBACK_MAX_CHARS)
+        _payload_str(payload, "stage", STAGE_MAX_CHARS)
+        if "reasons" in payload:
+            raw = payload["reasons"]
+            if not isinstance(raw, list) or not all(isinstance(v, str) for v in raw):
+                raise SpineError(422, "payload.reasons must be a list of strings")
+            reasons = [v.strip() for v in raw if v.strip()]
+            if len(reasons) > REASONS_MAX_ITEMS:
+                raise SpineError(422, f"payload.reasons has more than {REASONS_MAX_ITEMS} items")
+            if any(len(v) > REASON_MAX_CHARS for v in reasons):
+                raise SpineError(422, f"payload.reasons items must be 1 to {REASON_MAX_CHARS} chars")
+            payload["reasons"] = reasons
+    if event_type in REPLY_CLASSIFIED_EVENT_TYPES:
+        _payload_str(payload, "reply_type", REPLY_TYPE_MAX_CHARS)
+        _payload_str_list(payload, "evidence", EVIDENCE_MAX_ITEMS, EVIDENCE_MAX_CHARS)
+        if "confidence" in payload and payload["confidence"] not in REPLY_CONFIDENCE:
+            raise SpineError(422, f"payload.confidence must be one of {list(REPLY_CONFIDENCE)}")
+    if event_type == "post_mortem":
+        for key, (max_items, max_chars) in POST_MORTEM_LIST_KEYS.items():
+            _payload_str_list(payload, key, max_items, max_chars)
+        if "outcome_event_id" in payload:
+            value = payload["outcome_event_id"]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise SpineError(422, "payload.outcome_event_id must be a whole number")
+    return payload
+
+
+async def check_outcome_event_id(
+    db: JobDatabase, user_id: str, application_id: int, event_type: str, payload: Mapping[str, Any]
+) -> None:
+    """A post_mortem's ``outcome_event_id`` must be an event on THIS application (422 otherwise)."""
+    if event_type != "post_mortem" or "outcome_event_id" not in payload:
+        return
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events WHERE id = ? AND user_id = ? AND application_id = ?",
+        (payload["outcome_event_id"], user_id, application_id),
+    )
+    if await cur.fetchone() is None:
+        raise SpineError(422, "payload.outcome_event_id must be an event on this application")
+
+
 def _parse_bounded_iso(
     raw: str,
     *,
