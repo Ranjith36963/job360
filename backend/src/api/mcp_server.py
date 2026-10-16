@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 3
-TOOLS_REV_FOR_HASH = "0093e3c3076f"
+TOOLS_REV = 4
+TOOLS_REV_FOR_HASH = "ceb1e73edc48"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1467,7 +1467,9 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def stats(since: Optional[str] = None) -> dict[str, Any]:
+    async def stats(
+        since: Optional[str] = None, view: Optional[str] = None, company: Optional[str] = None
+    ) -> dict[str, Any]:
         """Counts over YOUR applications from the event log — brought,
         applied, replied, interview, offer, rejected — plus rates and
         groupings: by CV version (label the CV with save_artifact's `label`
@@ -1479,14 +1481,20 @@ def build_server(version: str = "") -> MCPServer:
         overall.simulations_excluded says how many. An unset value is the group with key null
         ("Not set"). `since` (an ISO date/datetime) scopes to applications
         (and contacts) added on/after that date. Nothing is inferred; every
-        number is a count of what you recorded."""
+        number is a count of what you recorded. `view` adds one block: funnel (furthest
+        stage reached; a rejection counts as a reply), velocity (median and p75 days per stage hop;
+        still-waiting ones left out), calibration (interview rate per fit-score band
+        <70/70-79/80-89/>=90, 5 per band, with a verdict to quote as printed), company (history card
+        per company; pass `company` for one), lesson_effect (rates before vs after each agreed lesson,
+        not proof of cause), followups (check-ins and feedback asks sent), or all. Every rate has its n;
+        small_sample is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.stats(since, db, _user())
+                resp = await applications_route.stats(since=since, view=view, company=company, db=db, user=_user())
         except HTTPException as exc:
             _audit("stats", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
-        _audit("stats", "ok")
+        _audit("stats", "ok", view=view, company_filter=company is not None)
         return resp
 
     @mcp.tool()

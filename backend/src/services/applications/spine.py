@@ -550,21 +550,24 @@ def parse_follow_up_on(raw: str, today: date) -> Optional[str]:
     return parsed.isoformat()
 
 
-async def user_today(db: JobDatabase, user_id: str, *, now: Optional[datetime] = None) -> date:
-    """The caller's own "today", in ``users.timezone`` (migration 0012 —
-    default ``'UTC'``; the column has existed since then but nothing set or
-    read it before this feature). An unset or unrecognised zone name falls
-    back to UTC rather than 500ing — a bad string in that column must degrade,
-    never break every read that touches it. ``now`` exists only so a test can
-    pin the instant; real callers never pass it."""
+async def user_zone(db: JobDatabase, user_id: str) -> ZoneInfo:
+    """The caller's own time zone (``users.timezone``, migration 0012 - default
+    ``'UTC'``). An unset or unrecognised zone name falls back to UTC rather than
+    500ing - a bad string in that column must degrade, never break every read."""
     cur = await db._db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
     row = await cur.fetchone()
     raw_zone = (dict(row).get("timezone") if row else None) or "UTC"
-    when = now if now is not None else datetime.now(timezone.utc)
     try:
-        zone: ZoneInfo = ZoneInfo(raw_zone)
+        return ZoneInfo(raw_zone)
     except (ZoneInfoNotFoundError, ValueError):
-        zone = ZoneInfo("UTC")
+        return ZoneInfo("UTC")
+
+
+async def user_today(db: JobDatabase, user_id: str, *, now: Optional[datetime] = None) -> date:
+    """The caller's own "today", in ``users.timezone`` (see ``user_zone``).
+    ``now`` exists only so a test can pin the instant; real callers never pass it."""
+    zone = await user_zone(db, user_id)
+    when = now if now is not None else datetime.now(timezone.utc)
     return when.astimezone(zone).date()
 
 

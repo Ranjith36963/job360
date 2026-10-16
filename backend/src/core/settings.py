@@ -606,6 +606,43 @@ if not STATS_INTERVIEW_EVENT_TYPES:  # pragma: no cover — a vocabulary edit wo
         "stats cannot compute an interview count"
     )
 
+# ── Feedback numbers (slice 3): operator constants, NOT user settings ────────
+# Each mirrors a career-ops constant (file:line in services/applications/
+# feedback_numbers.py). Env-backed like GHOSTED_AFTER_DAYS.
+STATS_SMALL_SAMPLE_N = int(os.getenv("STATS_SMALL_SAMPLE_N", "10"))  # stats.mjs:182
+STATS_CLAIM_MIN_N = int(os.getenv("STATS_CLAIM_MIN_N", "20"))  # funnel-velocity.mjs:26,105
+VELOCITY_HOP_MIN_N = int(os.getenv("VELOCITY_HOP_MIN_N", "3"))  # funnel-velocity.mjs:106
+CALIBRATION_MIN_BAND_N = int(os.getenv("CALIBRATION_MIN_BAND_N", "5"))  # calibrate.mjs:136
+CALIBRATION_GAP_POINTS = int(os.getenv("CALIBRATION_GAP_POINTS", "10"))  # calibrate.mjs:200
+CALIBRATION_FEEDBACK_MAX = int(os.getenv("CALIBRATION_FEEDBACK_MAX", "10"))  # calibrate.mjs:215
+# Owner #16: calibrate.mjs:84-89 (3.5/4.0/4.5 of 5) re-mapped to 0-100. Bands:
+# "<70", "70-79", "80-89", ">=90" (score >= min and < max).
+CALIBRATION_BAND_EDGES = (70, 80, 90)
+COMPANY_SILENCE_WINDOW_DAYS = int(os.getenv("COMPANY_SILENCE_WINDOW_DAYS", "28"))  # company-history.mjs:79
+COMPANY_STALE_AFTER_DAYS = int(os.getenv("COMPANY_STALE_AFTER_DAYS", "365"))  # company-history.mjs:78
+COMPANY_FACTS_MAX = int(os.getenv("COMPANY_FACTS_MAX", "50"))  # NOT IN REFERENCE - a bound
+STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
+# The `view` values of stats. "all" is computed as every member except "all", so
+# a view a later slice appends (before "all") joins it automatically.
+STATS_VIEWS = ("funnel", "velocity", "calibration", "company", "lesson_effect", "followups", "all")
+# Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
+# (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
+# event, so it never enters this table. brought/ghosted/withdrawn have no rank.
+FEEDBACK_FUNNEL_RANK: dict[str, int] = {
+    _status_event("applied"): 1,
+    _status_event("replied"): 2,
+    _status_event("rejected"): 2,  # a rejection is an answer
+    _status_event("interview_requested"): 4,
+    _status_event("interview_scheduled"): 4,
+    _status_event("interview_done"): 4,
+    _status_event("offer"): 5,
+    _status_event("offer_declined"): 5,  # an offer was reached (calibrate.mjs:66)
+    _status_event("hired"): 6,
+}
+# Plain strings on purpose, not validated: slice 2 adds these note types in parallel.
+FEEDBACK_FOLLOWUP_EVENT_TYPES = ("checkin_sent", "feedback_asked", "feedback_followup_sent")
+FEEDBACK_SKIP_EVENT_TYPE = "auto_email_skipped"
+
 # update_profile (R8-R11). The overlay of agent edits over extraction.
 # R9 — a CLOSED set of dotted paths into UserProfile. Each MUST be a declared
 # dataclass field (S8); src/services/profile/edits.py asserts that at import.
