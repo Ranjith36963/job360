@@ -27,12 +27,13 @@ log = get_logger(__name__)
 SYSTEM_ACTOR = "system"
 
 
-async def sweep_ghosted(db: "JobDatabase", user_id: str, now: Optional[datetime] = None) -> list[int]:
+async def sweep_ghosted(db: JobDatabase, user_id: str, now: Optional[datetime] = None) -> list[int]:
     """Mark the user's silent ``applied`` applications ``ghosted``; return the new ids."""
     now = now or datetime.now(timezone.utc)
     days = settings.GHOSTED_AFTER_DAYS
     cutoff = now - timedelta(days=days)
-    types = tuple(settings.APPLICATION_STATUS_EVENT_TYPES)
+    # `brought` is when the ad was saved, not news from the employer or the user's own applying.
+    types = tuple(t for t in settings.APPLICATION_STATUS_EVENT_TYPES if t != "brought")
     marks = ", ".join("?" for _ in types)
     cur = await db._db.execute(
         "SELECT e.application_id, e.occurred_at, e.recorded_at "  # noqa: S608 - placeholders only

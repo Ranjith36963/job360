@@ -3912,6 +3912,11 @@ export interface components {
             auth: components["schemas"]["DoctorAuth"];
             /** Email Verified */
             email_verified: boolean;
+            /**
+             * Ghosted Now
+             * @default []
+             */
+            ghosted_now: number[];
             /** Latest Event Recorded At */
             latest_event_recorded_at?: string | null;
             /** Missing */

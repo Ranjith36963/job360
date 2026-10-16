@@ -3209,6 +3209,14 @@
             "title": "Email Verified",
             "type": "boolean"
           },
+          "ghosted_now": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ghosted Now",
+            "type": "array"
+          },
           "latest_event_recorded_at": {
             "anyOf": [
               {
