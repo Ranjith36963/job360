@@ -92,6 +92,10 @@ export const EVENT_LABEL: Record<string, string> = {
   proof_screenshot: "Saved a screenshot of the confirmation",
   // Simulated/test application marker.
   simulation: "Marked as a test (not a real application)",
+  // Feedback loop slice 4 (interview side).
+  interview_session: "Interview round debriefed",
+  process_friction: "Hiring-process friction noted",
+  assessment: "Skills test logged",
 };
 
 function relayedWords(payload: unknown): boolean {

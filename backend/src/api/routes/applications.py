@@ -43,11 +43,11 @@ from src.repositories.database import JobDatabase
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
+from src.services.applications import interview_payloads, spine
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
 from src.services.applications import ready as ready_service
-from src.services.applications import spine
 from src.services.applications import stats as stats_service
 from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
@@ -1417,6 +1417,10 @@ class StatsResponse(BaseModel):
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
     # counted; the numbers describe that window, not the whole history.
     applications_truncated: bool
+    # Feedback loop slice 4 (interview side): each is null unless its stats view was asked for.
+    digest: Optional[dict[str, Any]] = None
+    friction: Optional[dict[str, Any]] = None
+    assessments: Optional[dict[str, Any]] = None
     computed_at: str
 
 
@@ -2510,6 +2514,7 @@ async def record_event(
                 max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None,
             )
         payload = spine.validate_outcome_payload(body.event_type, payload)
+        payload = interview_payloads.validate(body.event_type, payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
@@ -2519,6 +2524,9 @@ async def record_event(
         if await spine.get_owned_application(db, user.id, application_id) is None:
             raise SpineError(404, "application not found")
         await spine.check_outcome_event_id(db, user.id, application_id, body.event_type, payload)
+        await interview_payloads.check_refs(
+            db, user.id, application_id, body.event_type, payload, body.corrects_event_id
+        )
         if body.event_type == "submit_mode_set":
             _check_submit_mode_event(user, application_id, payload)
         if body.event_type in kit_service.KIT_EVENT_TYPES:
@@ -2558,6 +2566,8 @@ async def record_event(
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
+        if body.event_type in interview_payloads.INTERVIEW_EVENT_TYPES:
+            interview_payloads.log_recorded(user.id, application_id, int(result["event_id"]), body.event_type, payload)
         # Keep append_event's own warnings (a duplicate message_id recorded as another type)
         # and add the reply-before-applied one; never replace one list with the other.
         # Judge the STORED type: a duplicate message_id returns the existing event.

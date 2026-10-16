@@ -60,6 +60,7 @@ note), then continue. Full rules (Gmail modes, outreach, events):
    gone, look for the employer's link (`update_job` `apply_url`), else `withdrawn` with detail "posting closed". **Deadlines:** outreach with
    no reply after 7 days: suggest one follow-up. Job360 marks `ghosted` itself after 45 days; doctor's `ghosted_now`
    lists them: run the `get_recipe("feedback")` post-mortem for each.
+   doctor `silent_after_interview` not empty -> `get_recipe("debrief")` step 8 (confirm first; drafts only).
 9. **Due and quiet:** `list_applications(due=true)` and `(quiet_days=7)`.
 10. **Open asks:** `open_asks` from `whats_new`; one line each. An answered ask
    is the user's word.

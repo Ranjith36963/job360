@@ -211,7 +211,11 @@ def test_recipes_carry_the_verified_lifecycle():
     research = load_recipe("research").text.lower()
     assert "source url" in research and "never guess" in research
     prep = load_recipe("prep").text.lower()
-    assert "only true facts" in prep and "interview_done" in prep
+    assert "only true facts" in prep and "interview_done" in prep and "story_bank" in prep
+    debrief = flat(load_recipe("debrief").text)
+    assert "print this checklist" in debrief and "stop" in debrief and "**done when**" in debrief
+    assert "word for word" in debrief and "never guess" in debrief and "silence_confirmed" in debrief
+    assert "use this when" in debrief
 
 
 @pytest.mark.asyncio
@@ -229,7 +233,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "research", "apply", "forms", "reach", "daily", "feedback", "prep", "review", "rules"]
+        assert names == ["setup", "hunt", "research", "apply", "forms", "reach", "daily", "feedback", "prep", "debrief", "review", "rules"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")

@@ -42,6 +42,9 @@
     "unblocked",
     "proof_text",
     "proof_screenshot",
-    "simulation"
+    "simulation",
+    "interview_session",
+    "process_friction",
+    "assessment"
   ]
 }

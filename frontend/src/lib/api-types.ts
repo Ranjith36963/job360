@@ -1508,7 +1508,8 @@ export interface paths {
          * Doctor
          * @description The account's state in one read, plus ONE closed ``next_step``:
          *     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
-         *     Read-only; email verification is NOT required (an unverified user is told
+         *     Read-only except the auto-ghost sweep (a `ghosted` event per silent
+         *     application, reported in ghosted_now); email verification is NOT required (an unverified user is told
          *     to verify). No 404 when there is no profile (``profile_exists: false``).
          *
          *     Also the MCP tool list as served now (``tools``, ``tools_version``) so an
@@ -3934,6 +3935,14 @@ export interface components {
             profile_exists: boolean;
             setup: components["schemas"]["DoctorSetup"];
             /**
+             * @default {
+             *       "courtesy_days": 30,
+             *       "disclaimer": "Elapsed time only — not legal advice or a claim that the employer did anything wrong.",
+             *       "items": []
+             *     }
+             */
+            silent_after_interview: components["schemas"]["DoctorSilentBlock"];
+            /**
              * Stale Hint
              * @default
              */
@@ -3973,6 +3982,47 @@ export interface components {
             next: string;
             /** Total */
             total: number;
+        };
+        /**
+         * DoctorSilentBlock
+         * @description Feedback loop slice 4: interviews with silence past ``courtesy_days`` (read-only).
+         */
+        DoctorSilentBlock: {
+            /**
+             * Courtesy Days
+             * @default 30
+             */
+            courtesy_days: number;
+            /**
+             * Disclaimer
+             * @default Elapsed time only — not legal advice or a claim that the employer did anything wrong.
+             */
+            disclaimer: string;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["DoctorSilentItem"][];
+        };
+        /**
+         * DoctorSilentItem
+         * @description One interview-stage application with no word since its last interview_done.
+         */
+        DoctorSilentItem: {
+            /** Application Id */
+            application_id: number;
+            /** Company */
+            company: string;
+            /** Confirmed */
+            confirmed: boolean;
+            /** Days Silent */
+            days_silent: number;
+            /** Job Title */
+            job_title: string;
+            /** Last Interview At */
+            last_interview_at: string;
+            /** Last Interview Event Id */
+            last_interview_event_id: number;
         };
         /** EmailChangeRequest */
         EmailChangeRequest: {
@@ -6275,6 +6325,10 @@ export interface components {
         StatsResponse: {
             /** Applications Truncated */
             applications_truncated: boolean;
+            /** Assessments */
+            assessments?: {
+                [key: string]: unknown;
+            } | null;
             /** By Channel */
             by_channel: components["schemas"]["StatsKeyedGroupOut"][];
             /** By Contact Found Via */
@@ -6289,6 +6343,14 @@ export interface components {
             by_role: components["schemas"]["StatsRoleGroupOut"][];
             /** Computed At */
             computed_at: string;
+            /** Digest */
+            digest?: {
+                [key: string]: unknown;
+            } | null;
+            /** Friction */
+            friction?: {
+                [key: string]: unknown;
+            } | null;
             /** Groups Truncated */
             groups_truncated: boolean;
             overall: components["schemas"]["StatsOverallOut"];
@@ -6895,6 +6957,8 @@ export interface operations {
         parameters: {
             query?: {
                 since?: string | null;
+                view?: string | null;
+                company?: string | null;
             };
             header?: {
                 authorization?: string | null;

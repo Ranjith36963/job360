@@ -313,6 +313,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # proof_missing and the practice run never count it; a corrects_event_id
     # event retracts the mark.
     "simulation",
+    # Feedback loop slice 4 (interview side): payloads checked by
+    # services/applications/interview_payloads.py. All note-family; `assessment`
+    # must never enter FEEDBACK_FUNNEL_RANK.
+    "interview_session", "process_friction", "assessment",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -360,7 +364,11 @@ APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS = int(
 
 # R5 — artifact versions. Storage decision: TEXT in Postgres, not a file store
 # (spec §Data model) — a tailored CV measured on this codebase is 2-8 KB.
-APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach")
+APPLICATION_ARTIFACT_KINDS = (
+    "cv", "cover_letter", "answers", "outreach",
+    # Feedback loop slice 4 (interview side).
+    "story_bank", "interview_transcript", "redflag_analysis",
+)
 APPLICATION_ARTIFACT_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_MAX_CHARS", "60000"))
 APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERSIONS", "200"))
 # Slice 8 (#515) — the read-only artifact diff caps each side in LINES before
@@ -485,6 +493,12 @@ APPLICATION_FOLLOW_UP_CLOSED_STATUSES = ("rejected", "withdrawn", "ghosted", "hi
 # (services/applications/ghosting.py). An operator constant, not a user setting.
 GHOSTED_AFTER_DAYS = int(os.getenv("GHOSTED_AFTER_DAYS", "45"))
 GHOSTED_SWEEP_MAX = int(os.getenv("GHOSTED_SWEEP_MAX", "200"))
+# Feedback loop slice 4 (interview side). Operator constants, not user settings.
+INTERVIEW_COURTESY_DAYS = int(os.getenv("INTERVIEW_COURTESY_DAYS", "30"))  # rejection-latency.mjs:71
+INTERVIEW_SILENT_MAX_ITEMS = int(os.getenv("INTERVIEW_SILENT_MAX_ITEMS", "20"))  # NOT IN REFERENCE - a bound
+INTERVIEW_VIEW_MAX_EVENTS = int(os.getenv("INTERVIEW_VIEW_MAX_EVENTS", "5000"))  # NOT IN REFERENCE - a bound
+FRICTION_MIN_ROUNDS = int(os.getenv("FRICTION_MIN_ROUNDS", "1"))  # process-quality.mjs:70-73, :173
+DIGEST_RECURRING_MIN = int(os.getenv("DIGEST_RECURRING_MIN", "2"))  # weekly-digest.mjs:250
 # quiet_days (R "gone quiet" list filter) — a live cap, not a hardcoded 365,
 # so a breach is a 422 an agent can read rather than a silently clipped value.
 APPLICATION_QUIET_DAYS_MAX = int(os.getenv("APPLICATION_QUIET_DAYS_MAX", "365"))
@@ -615,7 +629,8 @@ COMPANY_FACTS_MAX = int(os.getenv("COMPANY_FACTS_MAX", "50"))  # NOT IN REFERENC
 STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # The `view` values of stats. "all" is computed as every member except "all", so
 # a view a later slice appends (before "all") joins it automatically.
-STATS_VIEWS = ("funnel", "velocity", "calibration", "company", "lesson_effect", "followups", "all")
+STATS_VIEWS = ("funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
+              "digest", "friction", "assessments", "all")
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
 # event, so it never enters this table. brought/ghosted/withdrawn have no rank.

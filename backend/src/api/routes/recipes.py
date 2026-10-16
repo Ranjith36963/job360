@@ -28,7 +28,7 @@ RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 # Order is the order a new user runs them in. Adding a recipe = add the file
 # AND a row here; tests/test_recipes.py pins that the two agree.
 RECIPE_NAMES: tuple[str, ...] = (
-    "setup", "hunt", "research", "apply", "forms", "reach", "daily", "feedback", "prep", "review", "rules",
+    "setup", "hunt", "research", "apply", "forms", "reach", "daily", "feedback", "prep", "debrief", "review", "rules",
 )
 
 

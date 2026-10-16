@@ -1055,7 +1055,8 @@ def build_server(version: str = "") -> MCPServer:
         """Save a CV / cover letter / answers / outreach note for this application.
         Write the tailored text YOURSELF from get_profile + get_job — Job360 has no
         LLM — then save it here (kind = "cv" | "cover_letter" | "answers" |
-        "outreach"). Every save is a NEW version: nothing is overwritten, Job360
+        "outreach" | "story_bank" | "interview_transcript" | "redflag_analysis").
+        Every save is a NEW version: nothing is overwritten, Job360
         versions it and renders DOCX / PDF from it.
 
         ATS check: run your OWN ATS check on EVERY CV you save and pass
@@ -1481,7 +1482,9 @@ def build_server(version: str = "") -> MCPServer:
         overall.simulations_excluded says how many. An unset value is the group with key null
         ("Not set"). `since` (an ISO date/datetime) scopes to applications
         (and contacts) added on/after that date. Nothing is inferred; every
-        number is a count of what you recorded."""
+        number is a count of what you recorded. view=digest (interview rounds this
+        week: tags, open gaps), friction (process friction + redflags per company),
+        assessments (skills tests)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.stats(since=since, view=view, company=company, db=db, user=_user())
@@ -1661,7 +1664,9 @@ def build_server(version: str = "") -> MCPServer:
         confirm_settings | ok). Also: how you are signed in (`auth`), what the
         profile still lacks (`missing`), open asks, waiting setting changes, the
         pause, today's outreach (`sent_today`, `daily_max`, `blocked_today`),
-        `ghosted_now` (application ids auto-marked ghosted by this call) and
+        `ghosted_now` (application ids auto-marked ghosted by this call),
+        `silent_after_interview` (interview-stage jobs with no word for over 30 days
+        since the last interview_done; confirm with the user before any nudge) and
         when the last event was recorded - then whats_new(since=<your last
         check>) for what changed. Writes only one thing: a `ghosted` mark on
         applications silent 45 days after applying (listed in ghosted_now).
