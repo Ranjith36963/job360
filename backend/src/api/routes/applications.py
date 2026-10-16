@@ -36,10 +36,11 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_request_db
-from src.api.models import FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
+from src.api.models import AutoEmailCheckResponse, FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
 from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
+from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
@@ -1916,6 +1917,47 @@ async def outreach_check(
     }
 
 
+@router.get(
+    "/applications/{application_id}/auto-email-check", response_model=AutoEmailCheckResponse,
+    dependencies=AUTH_FIRST,
+)
+async def auto_email_check(
+    application_id: int,
+    kind: str = Query("", max_length=40),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """THE one gate before an automatic employer email (feedback loop slice 2).
+
+    ``kind``: checkin | feedback_request | feedback_followup. Answers ``send`` / ``ask`` / ``stop`` with a
+    closed ``reason`` through ``auto_emails.decide`` (the same function for this route and the MCP
+    ``check_auto_email`` tool). ``send`` only means the gate is open. Read-only apart from one audit line.
+    404 for an application that is not the caller's (rule #12)."""
+    now = datetime.now(timezone.utc)
+    facts = await auto_emails_service.load_facts(db, user.id, application_id, now)
+    if facts is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    profile = load_profile(user.id) or UserProfile()
+    cfg = settings_rules.effective(profile.assistant_settings)
+    verdict = auto_emails_service.decide(kind, facts, cfg, now)
+    since = auto_emails_service.due_since(kind, facts)
+    # Ids and closed codes only: never an address, a company or any text.
+    get_audit_logger().info(
+        "auto_email_check",
+        extra={
+            "event": "auto_email_check", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "application_id": application_id,
+            "kind": safe_log_value(kind, max_len=40), "decision": verdict.decision, "reason": verdict.reason,
+            "result": "ok",
+        },
+    )
+    return {
+        "decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail,
+        "sent_today": facts.sent_today, "daily_max": settings.AUTO_EMAILS_MAX_PER_DAY,
+        "due_since": since.isoformat() if since else "",
+    }
+
+
 @router.get("/people", response_model=ListPeopleResponse, dependencies=AUTH_FIRST)
 async def list_people(
     contact_id: Optional[int] = Query(None),
@@ -2518,6 +2560,7 @@ async def record_event(
                 max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None,
             )
         payload = spine.validate_outcome_payload(body.event_type, payload)
+        payload = spine.validate_auto_email_payload(body.event_type, payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET

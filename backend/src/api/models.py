@@ -271,6 +271,7 @@ class AssistantSettingsView(BaseModel):
     daily_cap: SettingFieldOut
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
+    auto_employer_emails: SettingFieldOut
     paused: bool
     inbox_mode: str = ""
     check_every: str = ""
@@ -440,6 +441,51 @@ class DoctorOutreach(BaseModel):
     blocked_today: int
 
 
+class AutoEmailCheckResponse(BaseModel):
+    """``GET /api/applications/{id}/auto-email-check`` - the gate before an automatic employer email.
+    ``send`` only means the gate is open; ``due_since`` is "" when the kind has no starting event."""
+
+    decision: str
+    reason: str
+    detail: str
+    sent_today: int
+    daily_max: int
+    due_since: str = ""
+
+
+class DoctorAutoEmailLast(BaseModel):
+    event_id: int
+    application_id: int
+    company: str = ""
+    kind: str
+    at: str
+
+
+class DoctorAutoEmailDue(BaseModel):
+    application_id: int
+    kind: str
+    due_since: str = ""
+
+
+class DoctorAutoEmailViolation(BaseModel):
+    event_id: int
+    application_id: int
+    rule: str
+
+
+class DoctorAutoEmails(BaseModel):
+    """Automatic employer emails, watched: the switch, today's count, the last sends (company, never the
+    address), what is due, and any send that broke a guardrail."""
+
+    on: bool = False
+    sent_today: int = 0
+    daily_max: int = 0
+    last: list[DoctorAutoEmailLast] = []
+    due: list[DoctorAutoEmailDue] = []
+    violations: list[DoctorAutoEmailViolation] = []
+    stop_hint: str = ""
+
+
 class DoctorResponse(BaseModel):
     """``GET /api/doctor`` - one read of "what state is this account in, and
     what should the assistant do next?". Every field is built defensively: a
@@ -461,6 +507,7 @@ class DoctorResponse(BaseModel):
     next_step: str
     # Application ids this very call marked `ghosted` (no answer after GHOSTED_AFTER_DAYS).
     ghosted_now: list[int] = []
+    auto_emails: DoctorAutoEmails = DoctorAutoEmails()
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""

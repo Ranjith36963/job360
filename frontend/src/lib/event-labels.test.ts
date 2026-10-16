@@ -45,6 +45,15 @@ describe("EVENT_LABEL", () => {
   });
 });
 
+describe("automatic employer email labels", () => {
+  it("labels the four new event types in plain words", () => {
+    expect(eventLabel({ event_type: "checkin_sent" })).toBe("Check-in email sent to the employer");
+    expect(eventLabel({ event_type: "feedback_asked" })).toBe("Asked the employer for feedback");
+    expect(eventLabel({ event_type: "feedback_followup_sent" })).toBe("Follow-up email sent to the employer");
+    expect(eventLabel({ event_type: "auto_email_skipped" })).toBe("Automatic email skipped");
+  });
+});
+
 describe("event labels are plain words", () => {
   it("no note-family label is the raw event name", () => {
     for (const type of APPLICATION_NOTE_EVENT_TYPES) {

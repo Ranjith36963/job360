@@ -313,6 +313,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # proof_missing and the practice run never count it; a corrects_event_id
     # event retracts the mark.
     "simulation",
+    # Feedback loop slice 2: automatic employer emails. The assistant sends them from the
+    # owner's own Gmail; Job360 only records (`*_sent`, exact text) and gates (check_auto_email).
+    # `auto_email_skipped` records why a due email was NOT sent. Payloads: spine.validate_auto_email_payload.
+    "checkin_sent", "feedback_asked", "feedback_followup_sent", "auto_email_skipped",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -550,6 +554,11 @@ OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY
 # the window, so one company is never carpet-bombed.
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
 OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
+# Automatic employer emails (feedback loop slice 2; check_auto_email). Operator constants, not user
+# settings: how long to wait before each email, and the most that go out per user per day.
+AUTO_EMAIL_CHECKIN_DAYS = int(os.getenv("AUTO_EMAIL_CHECKIN_DAYS", "7"))
+AUTO_EMAIL_FOLLOWUP_DAYS = int(os.getenv("AUTO_EMAIL_FOLLOWUP_DAYS", "7"))
+AUTO_EMAILS_MAX_PER_DAY = int(os.getenv("AUTO_EMAILS_MAX_PER_DAY", "10"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
@@ -650,6 +659,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.above_line", "assistant_settings.below_line",
     "assistant_settings.submit_mode", "assistant_settings.daily_cap",
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
+    # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
+    "assistant_settings.auto_employer_emails",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

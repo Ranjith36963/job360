@@ -164,6 +164,7 @@ async def doctor(
         },
         "next_step": next_step,
         "ghosted_now": ghosted_now,
+        "auto_emails": await _auto_emails_block(db, user.id, eff, now),
         **_tools_block(client_tools_version, client_tools_rev),
     }
 
@@ -181,6 +182,37 @@ async def _sweep_ghosted(db: JobDatabase, user_id: str, now: datetime) -> list[i
             exc_info=True,
         )
         return []
+
+
+AUTO_EMAILS_STOP_HINT = "Say 'stop automatic emails' — the assistant sets auto_employer_emails off (applies at once)."
+AUTO_EMAILS_DUE_MAX = 20
+AUTO_EMAILS_LAST_MAX = 5
+
+
+async def _auto_emails_block(
+    db: JobDatabase, user_id: str, eff: settings_rules.EffectiveSettings, now: datetime
+) -> dict[str, Any]:
+    """Automatic employer emails, watched. Defensive like every doctor field: a failure logs and reads as
+    an empty block (never a 500)."""
+    block: dict[str, Any] = {
+        "on": bool(eff.auto_employer_emails), "sent_today": 0, "daily_max": settings.AUTO_EMAILS_MAX_PER_DAY,
+        "last": [], "due": [], "violations": [], "stop_hint": AUTO_EMAILS_STOP_HINT,
+    }
+    try:
+        from src.services.applications import auto_emails  # noqa: PLC0415
+
+        block["sent_today"] = await auto_emails.count_sent_today(db, user_id, now)
+        block["last"] = await auto_emails.recent_sends(db, user_id, AUTO_EMAILS_LAST_MAX)
+        block["due"] = (await auto_emails.due_for_user(db, user_id, eff, now))[:AUTO_EMAILS_DUE_MAX]
+        block["violations"] = await auto_emails.violations(db, user_id)
+    except Exception:  # noqa: BLE001 - doctor never 500s
+        log.warning(
+            "doctor_auto_emails_failed",
+            extra={"event": "doctor_auto_emails_failed", "user_id": safe_log_value(user_id)},
+            exc_info=True,
+        )
+        return {**block, "sent_today": 0, "last": [], "due": [], "violations": []}
+    return block
 
 
 def _tools_block(client_tools_version: str, client_tools_rev: Optional[int] = None) -> dict[str, Any]:

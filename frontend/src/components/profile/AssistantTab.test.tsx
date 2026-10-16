@@ -106,6 +106,36 @@ describe("AssistantTab", () => {
     expect(getAssistantSettings.mock.calls.length).toBeGreaterThan(5);
   });
 
+  it("automatic employer emails: turning on asks to confirm first, turning off applies at once", async () => {
+    await ready();
+    const toggle = screen.getByTestId("auto-employer-emails-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent(
+      "Check-in 7 days after applying, a feedback request after a rejection, one follow-up 7 days later. Sent in your name by your assistant.",
+    );
+    fireEvent.click(toggle);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("auto-employer-emails-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.auto_employer_emails", value: true }]),
+    );
+  });
+
+  it("automatic employer emails: Cancel sends nothing; off is one click", async () => {
+    await ready();
+    fireEvent.click(screen.getByTestId("auto-employer-emails-toggle"));
+    fireEvent.click(screen.getByTestId("auto-employer-emails-cancel"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    getAssistantSettings.mockResolvedValue(view({ auto_employer_emails: field(true, true) }));
+    await ready();
+    const on = screen.getAllByTestId("auto-employer-emails-toggle").find((t) => t.getAttribute("aria-checked") === "true");
+    expect(on).toBeTruthy();
+    fireEvent.click(on!);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.auto_employer_emails", value: false }]),
+    );
+  });
+
   it("a blank daily limit clears it (no limit)", async () => {
     getAssistantSettings.mockResolvedValue(view({ daily_cap: field(10, 10) }));
     await ready();

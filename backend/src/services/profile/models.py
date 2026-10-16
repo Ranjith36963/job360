@@ -709,6 +709,9 @@ class AssistantSettings:
     daily_cap: Optional[int] = None
     paused_until: str = ""
     pause_reason: str = ""
+    # Feedback loop slice 2: may the assistant send the check-in / feedback emails on its own?
+    # False (default) = it may only draft. Turning it ON is a riskier change.
+    auto_employer_emails: bool = False
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

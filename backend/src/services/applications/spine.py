@@ -188,6 +188,50 @@ def validate_outcome_payload(event_type: str, payload: dict[str, Any]) -> dict[s
     return payload
 
 
+# ── Automatic employer emails (feedback loop slice 2) ────────────────────────
+AUTO_EMAIL_SENT_TYPES = frozenset({"checkin_sent", "feedback_asked", "feedback_followup_sent"})
+AUTO_EMAIL_SKIPPED_TYPE = "auto_email_skipped"
+AUTO_EMAIL_KINDS = ("checkin", "feedback_request", "feedback_followup")
+AUTO_EMAIL_TO_KINDS = ("person", "careers_address")
+AUTO_EMAIL_TO_MAX_CHARS = 320
+AUTO_EMAIL_THREAD_MAX_CHARS = 256
+AUTO_EMAIL_SUBJECT_MAX_CHARS = 300
+AUTO_EMAIL_TEXT_MAX_CHARS = 3000
+AUTO_EMAIL_REASON_MAX_CHARS = 200
+
+
+def _payload_required_str(payload: dict[str, Any], key: str, max_chars: int) -> None:
+    if key not in payload:
+        raise SpineError(422, f"payload.{key} is required")
+    _payload_str(payload, key, max_chars)
+    if not payload[key].strip():
+        raise SpineError(422, f"payload.{key} must not be empty")
+
+
+def validate_auto_email_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload of the four automatic-employer-email events (422 naming the key).
+
+    The three ``*_sent`` types need ``to``, ``text`` (the exact text sent) and ``to_kind``;
+    ``thread_id`` / ``subject`` are optional. ``auto_email_skipped`` needs ``kind`` and ``reason``.
+    Run AFTER ``validate_payload``."""
+    if event_type in AUTO_EMAIL_SENT_TYPES:
+        _payload_required_str(payload, "to", AUTO_EMAIL_TO_MAX_CHARS)
+        _payload_required_str(payload, "text", AUTO_EMAIL_TEXT_MAX_CHARS)
+        _payload_str(payload, "thread_id", AUTO_EMAIL_THREAD_MAX_CHARS)
+        _payload_str(payload, "subject", AUTO_EMAIL_SUBJECT_MAX_CHARS)
+        if "to_kind" not in payload:
+            raise SpineError(422, "payload.to_kind is required")
+        if payload["to_kind"] not in AUTO_EMAIL_TO_KINDS:
+            raise SpineError(422, f"payload.to_kind must be one of {list(AUTO_EMAIL_TO_KINDS)}")
+    elif event_type == AUTO_EMAIL_SKIPPED_TYPE:
+        if "kind" not in payload:
+            raise SpineError(422, "payload.kind is required")
+        if payload["kind"] not in AUTO_EMAIL_KINDS:
+            raise SpineError(422, f"payload.kind must be one of {list(AUTO_EMAIL_KINDS)}")
+        _payload_required_str(payload, "reason", AUTO_EMAIL_REASON_MAX_CHARS)
+    return payload
+
+
 async def check_outcome_event_id(
     db: JobDatabase, user_id: str, application_id: int, event_type: str, payload: Mapping[str, Any]
 ) -> None:
