@@ -52,6 +52,12 @@ delete a lesson; if one stops being true, say so on its line and why.
   type the instruction in THAT session. Don't retry through the peer.
 - The desktop session has no send_message tool, so it cannot reply. **Rule:**
   read its answer from its transcript (list_events), and say so in the hand-off.
+- 2026-10-16: the owner asked for a prompt to check a new session's setup
+  (Wakaru installed for REA). The prompt also told the new session to
+  re-capture seven competitor sites and rewrite the research doc, so a
+  one-minute check ran for an hour until the owner stopped it. **Rule:** a
+  hand-off prompt does only what the owner asked for. Put any follow-on work
+  in a separate prompt and let the owner choose to run it.
 
 ## The cloud container and job sites
 
