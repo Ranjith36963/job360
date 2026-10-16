@@ -81,6 +81,14 @@ export function describeSettingRequest(
         title: "Daily limit",
         change: value === null || value === undefined ? "No daily limit" : `Up to ${String(value)} applications a day`,
       };
+    case "assistant_settings.auto_employer_emails":
+      return {
+        title: "Automatic employer emails",
+        change:
+          value === true
+            ? "Let your assistant email employers in your name: a check-in 7 days after applying, a feedback request after a rejection, one follow-up 7 days later"
+            : "Stop automatic employer emails",
+      };
     case "assistant_settings.paused_until":
       if (value === "" || value === null || value === undefined) {
         return { title: "Pause", change: "Start applying again" };

@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 2
-TOOLS_REV_FOR_HASH = "d5a0c9f452f9"
+TOOLS_REV = 3
+TOOLS_REV_FOR_HASH = "0093e3c3076f"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1653,13 +1653,35 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
+    async def check_auto_email(application_id: int, kind: str) -> dict[str, Any]:
+        """Call before any automatic employer email. `kind` = checkin (7 days after
+        applying) | feedback_request (after a rejection) | feedback_followup (7 days
+        after the request, once). send = the gate is open, no more: you still write in
+        the owner's name, reply in the same thread, then record the checkin_sent /
+        feedback_asked / feedback_followup_sent event with the exact text. ask = save a
+        Gmail draft and ask_user; stop = send nothing. Stop reasons: paused, unknown_kind,
+        already_sent, already_skipped, daily_cap_reached, not_due, application_moved_on,
+        not_rejected, they_replied, no_feedback_request. Ask: auto_off. Send: auto_on.
+        `due_since` = when it became due. Read-only."""
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.auto_email_check(application_id, kind, db, _user())
+        except HTTPException as exc:
+            _audit("check_auto_email", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("check_auto_email", "ok", application_id=application_id, decision=resp["decision"])
+        return resp
+
+    @mcp.tool()
     async def doctor(client_tools_version: str = "", client_tools_rev: Optional[int] = None) -> dict[str, Any]:
         """Call first when something seems wrong or at the start of a run; read
         `next_step` (verify_email | upload_cv | setup:<round> | answer_asks |
         confirm_settings | ok). Also: how you are signed in (`auth`), what the
         profile still lacks (`missing`), open asks, waiting setting changes, the
         pause, today's outreach (`sent_today`, `daily_max`, `blocked_today`),
-        `ghosted_now` (application ids auto-marked ghosted by this call) and
+        `ghosted_now` (application ids auto-marked ghosted by this call),
+        `auto_emails` (on, sent_today, last sends, due, violations: if violations
+        is not empty, send no automatic email and tell the owner) and
         when the last event was recorded - then whats_new(since=<your last
         check>) for what changed. Writes only one thing: a `ghosted` mark on
         applications silent 45 days after applying (listed in ghosted_now).
