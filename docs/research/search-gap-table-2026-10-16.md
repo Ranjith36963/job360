@@ -103,3 +103,12 @@ Rows are ordered by how much they widen the search, most first.
 4. Owner decision: the LinkedIn and Indeed options above.
 
 Raw clones and live outputs are in the cloud session's scratchpad and die with the container. Before building any row, re-clone at the commit above and re-check the quote (session-lessons).
+
+## Owner decision (2026-10-16)
+
+The owner chose **B and C**:
+- **B.** The user's AI may open Indeed search and job pages itself, slowly, with no login.
+- **C.** It may read LinkedIn's logged-out ("jobs-guest") job pages at very low volume.
+
+Still banned: Indeed app-API spoofing, copied keys or tokens, proxies, and CAPTCHA workarounds.
+Nothing has been built yet. `hunt.md:38` and the kit README still carry the old ban until a build PR changes them.
