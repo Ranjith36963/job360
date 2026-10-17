@@ -10,15 +10,21 @@ each row says where it came from. Full licence texts follow below.
 - **career-ops** (career-ops-hq/career-ops), `career-ops` rows
 - **jobsync** (Gsync/jobsync), `jobsync` rows
 - **job-board-aggregator** (Feashliaa/job-board-aggregator), `job-board-aggregator` rows (Greenhouse, Lever, Ashby, BambooHR and Workday boards)
+- `harvest` rows: board addresses found in public job lists on GitHub (SimplifyJobs New-Grad-Positions and Summer2027-Internships, vanshb03 Summer2027-Internships, crypto-jobs-fyi crawler) by `backend/scripts/harvest_hunt_boards.py`. Only the company name and board address were kept. The script is a Python re-write of freehire's `scripts/harvest_boards.py` and `scripts/ats_boards.py` (MIT, licence below).
 
 ## Methods
 
 The endpoint patterns for the extra company-board types (Workday, Workable, Recruitee, Personio,
 Teamtailor, BambooHR) and the ideas of country-eligibility locks, board discovery, liveness checks
 and a seen-jobs history follow the MIT-licensed career-ops (santifer, career-ops-hq) and
-ai-job-search projects. The code in this folder is original.
+ai-job-search projects. Apart from the re-writes named below, the code in this folder is original.
 
 - `kit_ats.py`: endpoint patterns for Workday CXS, Workable, Recruitee, Personio, Teamtailor and BambooHR adapted from career-ops providers (https://github.com/career-ops-hq/career-ops, MIT licence); no code copied. Workday's pattern was also checked against ApplyPilot (AGPL) as a pattern-only reference; no code copied.
+- `kit_ats.py`: the iCIMS, Oracle Recruiting Cloud, SuccessFactors, Taleo, Jobvite and Eightfold readers are Python re-writes of career-ops `providers/icims.mjs`, `oraclecloud.mjs`, `successfactors.mjs`, `taleo.mjs`, `jobvite.mjs` and `eightfold.mjs` (MIT, licence below). Same public endpoints and fields; page caps are lower and the kit sends its own honest User-Agent.
+
+## Search guidance (README "Search every source", "Indeed and LinkedIn")
+
+Instructions only, no code copied. The `site:` query idea follows career-ops (MIT, `modes/scan.md` "Level 3"); the social "hiring" query follows job-apply-plugin (MIT, `skills/job-search/SKILL.md`); the low-volume LinkedIn logged-out pages and the stop-at-a-login-page rule follow ai-job-search (MIT, `linkedin-search` and `/add-portal`) and JobSpy (MIT). Connector addresses are the public endpoints published by freehire, Himalayas and FoundRole.
 
 ## Feeds (`kit_feeds.py`)
 
@@ -35,6 +41,8 @@ Open feeds are read through their public APIs. Link back to the original listing
 - RemoteOK API (link back and mention the source; kept in `extra.attribution`)
 - Adzuna API (needs your own free key)
 - Jooble API (needs your own free key)
+- National job services: Bundesagentur fuer Arbeit Jobsuche API (public client id from its own site), Arbetsformedlingen JobTech search API, MyCareersFuture search API, Job Bank search feed. Endpoints and field names follow career-ops' providers (MIT: `arbeitsagentur.mjs`, `platsbanken.mjs`, `mycareersfuture.mjs`, `jobbankca.mjs`); no code copied. Link back to the original listing.
+- SimplifyJobs New-Grad-Positions and Summer2027-Internships `listings.json` on GitHub (public lists, no licence file; read at run time, never stored; link back to the original listing). The idea of reading them follows freehire (MIT, `scripts/harvest_boards.py`).
 
 Patterns studied from career-ops (MIT) and ai-job-search (MIT); no code copied.
 
@@ -102,6 +110,32 @@ SOFTWARE.
 MIT License
 
 Copyright (c) 2026 Riley Dorrington
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## freehire (MIT)
+
+MIT License
+
+Copyright (c) 2026 freehire contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

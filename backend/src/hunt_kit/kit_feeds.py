@@ -597,6 +597,212 @@ def fetch_jooble(queries: list[str], http: HttpFn, stats: Stats, *, days: int, c
     return _keep(jobs, queries, days, search=False)
 
 
+# ---------------------------------------------------------------------------- GitHub job lists
+# Open new-grad and intern lists kept on GitHub by SimplifyJobs (the same files freehire's
+# harvest reads). Read at run time; nothing is stored. They carry no description: open the link.
+GITHUB_LISTS = (
+    "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
+    "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+)
+
+
+def parse_githublists(payload: Any, list_url: str = "") -> list[Job]:
+    """Parse one SimplifyJobs ``listings.json`` (a JSON array); only active, visible rows."""
+    out: list[Job] = []
+    for r in payload if isinstance(payload, list) else []:
+        if not isinstance(r, dict) or not r.get("active") or r.get("is_visible") is False:
+            continue
+        locs = [str(x) for x in r.get("locations") or [] if x]
+        out.append(_job(
+            title=r.get("title"), company=r.get("company_name"), url=r.get("url"),
+            location=" | ".join(locs), posted=_date(r.get("date_posted")),
+            source="feed:githublists", board="githublists",
+            remote=True if any("remote" in x.lower() for x in locs) else None,
+            extra={"sponsorship": r.get("sponsorship"), "category": r.get("category"),
+                   "list": list_url.split("/SimplifyJobs/", 1)[-1].split("/", 1)[0],
+                   "attribution": "SimplifyJobs GitHub list", "title_only": True}))
+    return out
+
+
+@_feed
+def fetch_githublists(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """SimplifyJobs new-grad and intern lists on GitHub, keyword-matched locally (title only)."""
+    jobs: list[Job] = []
+    for url in GITHUB_LISTS:
+        jobs += parse_githublists(_get(http, stats, url), url)
+    return _keep(jobs, queries, days)
+
+
+# ---------------------------------------------------------------------------- national job services
+# Public government job searches, run only when the user's countries include that country.
+# Endpoints and field names follow career-ops' providers (MIT): arbeitsagentur.mjs, platsbanken.mjs,
+# mycareersfuture.mjs, jobbankca.mjs. No code copied.
+ARBEITSAGENTUR_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs"
+ARBEITSAGENTUR_KEY = "jobboerse-jobsuche"  # the public client id arbeitsagentur.de's own pages send
+JOBTECH_URL = "https://jobsearch.api.jobtechdev.se/search"
+MCF_URL = "https://api.mycareersfuture.gov.sg/v2/search"
+JOBBANK_URL = "https://www.jobbank.gc.ca/jobsearch/feed/jobSearchRSSfeed"
+NATIONAL_PAGES = 2  # pages per title per service
+
+
+def parse_arbeitsagentur(payload: Any) -> list[Job]:
+    """Parse a Jobsuche v6 search (``ergebnisliste``). Title, employer and place; open the link for the ad."""
+    out: list[Job] = []
+    for r in (payload or {}).get("ergebnisliste") or [] if isinstance(payload, dict) else []:
+        if not isinstance(r, dict) or not r.get("referenznummer"):
+            continue
+        locs = r.get("stellenlokationen") or []
+        adr = (locs[0] or {}).get("adresse") if locs and isinstance(locs[0], dict) else None
+        place = str((adr or {}).get("ort") or "").strip() if isinstance(adr, dict) else ""
+        out.append(_job(
+            title=r.get("stellenangebotsTitel"), company=r.get("firma"),
+            url="https://www.arbeitsagentur.de/jobsuche/jobdetail/" + quote(str(r["referenznummer"]), safe=""),
+            location=_join_place(place, "Germany"), source="feed:arbeitsagentur", board="arbeitsagentur",
+            extra={"title_only": True, "attribution": "Bundesagentur fuer Arbeit"}))
+    return out
+
+
+def parse_jobtech(payload: Any) -> list[Job]:
+    """Parse a Swedish JobTech (Platsbanken) search (``hits``), full description included."""
+    out: list[Job] = []
+    for r in (payload or {}).get("hits") or [] if isinstance(payload, dict) else []:
+        if not isinstance(r, dict) or r.get("id") in (None, ""):
+            continue
+        wa = r.get("workplace_address") or {}
+        place = next((str(wa.get(k)) for k in ("city", "municipality", "region") if wa.get(k)), "")
+        out.append(_job(
+            title=r.get("headline"), company=(r.get("employer") or {}).get("name"),
+            url="https://arbetsformedlingen.se/platsbanken/annonser/" + quote(str(r["id"]).strip(), safe=""),
+            location=_join_place(place, str(wa.get("country") or "Sweden")),
+            posted=_date(r.get("publication_date")), description=(r.get("description") or {}).get("text"),
+            source="feed:jobtech", board="platsbanken", extra={"attribution": "Arbetsformedlingen JobTech"}))
+    return out
+
+
+def parse_mycareersfuture(payload: Any) -> list[Job]:
+    """Parse a Singapore MyCareersFuture search (``results``)."""
+    out: list[Job] = []
+    for r in (payload or {}).get("results") or [] if isinstance(payload, dict) else []:
+        if not isinstance(r, dict):
+            continue
+        md = r.get("metadata") or {}
+        districts = (r.get("address") or {}).get("districts") or []
+        place = ", ".join(str(d.get("location")) for d in districts if isinstance(d, dict) and d.get("location"))
+        out.append(_job(
+            title=r.get("title"), url=md.get("jobDetailsUrl"),
+            company=(r.get("hiringCompany") or {}).get("name") or (r.get("postedCompany") or {}).get("name"),
+            location=_join_place(place, "Singapore"), posted=_date(md.get("newPostingDate")),
+            description=r.get("description"), source="feed:mycareersfuture", board="mycareersfuture",
+            extra={"attribution": "MyCareersFuture"}))
+    return out
+
+
+_ATOM = "{http://www.w3.org/2005/Atom}"
+
+
+def _summary_field(summary: str, label: str) -> str:
+    m = re.search(rf"<strong>{re.escape(label)}:</strong>\s*(.*?)\s*(?:<br\s*/?>|$)", summary, re.I | re.S)
+    return strip_html(_html.unescape(m.group(1))).strip() if m else ""
+
+
+def parse_jobbank(xml_text: str) -> list[Job]:
+    """Parse Canada Job Bank's public search feed (Atom despite the RSS name)."""
+    root = safe_fromstring(xml_text)
+    if root is None:
+        return []
+    out: list[Job] = []
+    for e in root.iter(_ATOM + "entry"):
+        links = e.findall(_ATOM + "link")
+        alt = next((x for x in links if (x.get("rel") or "alternate") == "alternate"), links[0] if links else None)
+        summary = e.findtext(_ATOM + "summary") or ""
+        place = _summary_field(summary, "Location")
+        out.append(_job(
+            title=e.findtext(_ATOM + "title"), company=_summary_field(summary, "Employer"),
+            url=(alt.get("href") if alt is not None else ""), location=_join_place(place, "Canada"),
+            posted=_date(e.findtext(_ATOM + "updated")), source="feed:jobbank", board="jobbank",
+            extra={"title_only": True, "attribution": "Job Bank (Government of Canada)"}))
+    return out
+
+
+def _join_place(place: str, country: str) -> str:
+    return ", ".join(x for x in (place.strip(), country) if x) if country.lower() not in place.lower() else place
+
+
+@_feed
+def fetch_arbeitsagentur(
+    queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]
+) -> list[Job]:
+    """Germany's Bundesagentur fuer Arbeit job search, only when DE is one of the user's countries."""
+    if "DE" not in {c.upper() for c in countries}:
+        return []
+    jobs: list[Job] = []
+    for q in _queries(queries):
+        for page in range(1, NATIONAL_PAGES + 1):
+            params: dict[str, Any] = {"was": q, "size": 100, "page": page, "angebotsart": 1}
+            if days and days > 0:  # no age limit = leave the window out, like the other feeds
+                params["veroeffentlichtseit"] = min(days, 100)
+            qs = urlencode(params)
+            got = parse_arbeitsagentur(_get(http, stats, f"{ARBEITSAGENTUR_URL}?{qs}",
+                                            headers={"X-API-Key": ARBEITSAGENTUR_KEY, "Accept": "application/json"}))
+            jobs += got
+            if len(got) < 100:
+                break
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
+
+
+@_feed
+def fetch_jobtech(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """Sweden's JobTech (Platsbanken) search, only when SE is one of the user's countries."""
+    if "SE" not in {c.upper() for c in countries}:
+        return []
+    jobs: list[Job] = []
+    for q in _queries(queries):
+        for page in range(NATIONAL_PAGES):
+            qs = urlencode({"q": q, "limit": 100, "offset": page * 100})
+            got = parse_jobtech(_get(http, stats, f"{JOBTECH_URL}?{qs}"))
+            jobs += got
+            if len(got) < 100:
+                break
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
+
+
+@_feed
+def fetch_mycareersfuture(
+    queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]
+) -> list[Job]:
+    """Singapore's MyCareersFuture search (POST; the query string's page pages), only for SG users."""
+    if "SG" not in {c.upper() for c in countries}:
+        return []
+    jobs: list[Job] = []
+    for q in _queries(queries):
+        for page in range(NATIONAL_PAGES):
+            body = json.dumps({"search": q, "sortBy": ["new_posting_date"], "page": page}).encode()
+            got = parse_mycareersfuture(_get(http, stats, f"{MCF_URL}?limit=100&page={page}", method="POST",
+                                             data=body, headers={"Content-Type": "application/json"}))
+            jobs += got
+            if len(got) < 100:
+                break
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
+
+
+@_feed
+def fetch_jobbank(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """Canada's Job Bank search feed, only when CA is one of the user's countries."""
+    if "CA" not in {c.upper() for c in countries}:
+        return []
+    jobs: list[Job] = []
+    for q in _queries(queries):
+        for page in range(1, NATIONAL_PAGES + 1):
+            qs = urlencode({"searchstring": q, "locationstring": "", "page": page})
+            body = _get(http, stats, f"{JOBBANK_URL}?{qs}", as_json=False)
+            known = {j["url"] for j in jobs}
+            got = [j for j in parse_jobbank(body if isinstance(body, str) else "") if j["url"] not in known]
+            jobs += got
+            if not got:  # empty, or a page that repeats the last one
+                break
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
+
+
 FEEDS: dict[str, Callable[..., list[Job]]] = {
     "hn": fetch_hn,
     "jobicy": fetch_jobicy,
@@ -609,4 +815,9 @@ FEEDS: dict[str, Callable[..., list[Job]]] = {
     "remoteok": fetch_remoteok,
     "adzuna": fetch_adzuna,
     "jooble": fetch_jooble,
+    "githublists": fetch_githublists,
+    "arbeitsagentur": fetch_arbeitsagentur,
+    "jobtech": fetch_jobtech,
+    "mycareersfuture": fetch_mycareersfuture,
+    "jobbank": fetch_jobbank,
 }

@@ -52,8 +52,9 @@ def _check_shape(jobs, source):
         assert j["posted"] == "" or len(j["posted"]) == 10
 
 
-def test_registry_has_all_six():
-    assert set(kit_ats.ATS_FETCHERS) == {"workday", "workable", "recruitee", "personio", "teamtailor", "bamboohr"}
+def test_registry_has_all_twelve():
+    assert set(kit_ats.ATS_FETCHERS) == {"workday", "workable", "recruitee", "personio", "teamtailor", "bamboohr",
+                                       "icims", "oraclecloud", "successfactors", "taleo", "jobvite", "eightfold"}
 
 
 def test_workday_parses_list_and_detail():
@@ -190,3 +191,37 @@ def test_garbage_and_raising_http_return_empty(name):
 def test_import_has_no_side_effects():
     src = KIT.read_text(encoding="utf-8")
     assert "import urllib" not in src and "import requests" not in src
+
+
+def test_workday_searches_each_title_and_dedupes():
+    lst = _json("workday_list.json")
+    http = _stub({"/jobs": (200, lst)})
+    row = {"name": "NVIDIA", "ats": "workday", "token": "nvidia", "tenant": "nvidia", "wd": "wd5",
+           "site": "NVIDIAExternalCareerSite", "search_texts": ["ai engineer", "llm engineer"]}
+    jobs = kit_ats.fetch_workday(row, http, {})
+    posts = [json.loads(c[2]) for c in http.calls if c[1] == "POST"]
+    assert [p["searchText"] for p in posts] == ["ai engineer", "llm engineer"]
+    # the same postings came back for both titles: each is kept (and detail-fetched) once
+    assert len(jobs) == len(lst["jobPostings"])
+    gets = [c for c in http.calls if c[1] == "GET"]
+    assert len(gets) == len(lst["jobPostings"])
+
+
+def test_workday_search_pages_are_capped_per_title():
+    full = {"total": 5000, "jobPostings": [{"title": f"t{i}", "externalPath": f"/job/x/t{i}"} for i in range(20)]}
+    http = _stub({"/jobs": (200, full)})
+    row = {"name": "X", "token": "x", "wd": 1, "site": "s", "search_texts": ["a", "b"]}
+    kit_ats.fetch_workday(row, http, {})
+    posts = [json.loads(c[2]) for c in http.calls if c[1] == "POST"]
+    # the cap applies to EACH title, not once across all of them
+    assert [(p["searchText"], p["offset"]) for p in posts] == [
+        ("a", 0), ("a", kit_ats.WORKDAY_PAGE), ("b", 0), ("b", kit_ats.WORKDAY_PAGE)]
+    assert kit_ats.SEARCH_PAGES == 2
+
+
+def test_workday_accepts_titles_as_the_run_passes_them():
+    """hunt_kit.run passes the titles as one newline-joined string (board rows hold strings)."""
+    http = _stub({"/jobs": (200, {"total": 0, "jobPostings": []})})
+    row = {"name": "X", "token": "x", "wd": 1, "site": "s", "search_texts": "ai engineer\nllm engineer"}
+    kit_ats.fetch_workday(row, http, {})
+    assert [json.loads(c[2])["searchText"] for c in http.calls if c[1] == "POST"] == ["ai engineer", "llm engineer"]
