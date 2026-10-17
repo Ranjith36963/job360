@@ -56,6 +56,14 @@ def test_fingerprint_matches_career_ops():
     assert format(posting_history.fingerprint(text), "016x") == "783338025e0a0e43"
 
 
+def test_many_angle_brackets_stay_fast():
+    import time
+
+    start = time.perf_counter()
+    posting_history.normalize_ad_text("<" * 50_000)
+    assert time.perf_counter() - start < 0.2
+
+
 def test_short_text_never_matches():
     assert posting_history.fingerprint("Python, SQL") is None
     assert posting_history.similarity(None, posting_history.fingerprint(_LONG)) == 0.0

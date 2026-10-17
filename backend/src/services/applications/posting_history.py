@@ -41,7 +41,7 @@ log = logging.getLogger("job360.posting_history")
 
 # ── SimHash (fingerprint-core.mjs) ───────────────────────────────────────────
 
-_TAG_RE = re.compile(r"<[^>]*>")
+_TAG_RE = re.compile(r"<[^<>]*>")  # no "<" inside: linear on "<<<<..." (CodeQL py/polynomial-redos)
 _ENTITY_RE = re.compile(r"&[a-z#0-9]+;", re.IGNORECASE)
 _URL_RE = re.compile(r"https?://\S+")
 _NON_WORD_RE = re.compile(r"[\W_]+")
