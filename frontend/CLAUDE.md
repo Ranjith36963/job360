@@ -27,9 +27,8 @@ Preference inputs (salary range, locations, remote/hybrid/office, experience
 level, about_me) are OPTIONAL and must read as optional. Never block a save
 on an unfilled preference, and never write a default value the user didn't
 choose — a silently-written default is indistinguishable from a real choice
-and turns "don't care" into a fake constraint. The backend treats empty as
-"dimension off"; the UI must not manufacture emptiness away. Details:
-`../docs/product/product_design_rules.md` (root CLAUDE.md rule #29).
+and turns "don't care" into a fake constraint. Rule #29 in full:
+`../.claude/skills/hard-rules/SKILL.md`.
 
 ## ⚠️ Next.js 16 — this is NOT the Next.js your training data knows (root rule #22)
 

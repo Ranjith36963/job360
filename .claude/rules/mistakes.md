@@ -25,6 +25,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
 - Read CI failures from the job summary, not the log tail (Postgres noise).
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
+- To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,
+  `@mcp.tool()`, the decorator) — never X's importers; they cannot show a second doer.
 
 ## Real applications for the owner
 - An answer that is not clearly yes/no gets one clarifying question.

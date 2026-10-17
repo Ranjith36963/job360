@@ -158,6 +158,11 @@ Apify web-fetch tool, before you build. Never cite from memory.
   names a tool, check it is available (`which`, MCP list) - that only shows availability;
   claim it ran only after an actual REA MCP call or CLI run (including `npx rea-agents`).
   If it is missing, say so at once and give the install steps. Label web reads as web research.
+- 2026-10-17: the daily doc truth check shortened the root `CLAUDE.md` bullet calling
+  `repositories/pg.py` "the single DB door" without questioning the claim; CodeRabbit found
+  it. The sweep had enumerated `pg` importers, which can never reveal that `pgsync.py` opens
+  its own psycopg connection on the profile path. **Rule:** to test a "single/only X" claim,
+  enumerate what performs X, never what imports X.
 
 ## Tooling
 
