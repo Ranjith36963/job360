@@ -47,8 +47,7 @@ job360/
 │   └── tests/                        # file count: `docs/GENERATED.md` (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4
 │   └── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
-├── docs/
-│   └── product/                      # VISION.md (the mission), product_design_rules.md
+├── docs/                             # every doc, indexed: docs/README.md
 ├── .env.example
 └── CLAUDE.md                         # Canonical AI agent instructions
 ```
