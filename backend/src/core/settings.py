@@ -686,6 +686,16 @@ SKILL_GAPS_MAX = int(os.getenv("SKILL_GAPS_MAX", "50"))  # NOT IN REFERENCE - a 
 SKILL_GAP_REPORT_SCHEMA = 1  # upskill.mjs:85-94
 REPOST_WINDOW_DAYS = int(os.getenv("REPOST_WINDOW_DAYS", "90"))  # detect-reposts.mjs:79
 REPOST_MIN_SPAN_DAYS = int(os.getenv("REPOST_MIN_SPAN_DAYS", "1"))  # detect-reposts.mjs:87
+# Similar-ad check (posting_history.py): career-ops fingerprint-core.mjs. Same ad text,
+# another link / title / company, among THIS user's own brings in the repost window.
+SIMILAR_AD_MIN_TEXT = 200  # fingerprint-core.mjs:26 FINGERPRINT_MIN_TEXT
+SIMILAR_AD_THRESHOLD = 0.92  # fingerprint-core.mjs:30 CROSSLIST_THRESHOLD (at most 5 of 64 bits differ)
+SIMILAR_AD_MAX_ROWS = int(os.getenv("SIMILAR_AD_MAX_ROWS", "500"))  # NOT IN REFERENCE - a bound
+SIMILAR_AD_MAX_LISTED = 3  # NOT IN REFERENCE - a bound
+# Posting signs (posting_history.py): freehire internal/job/jobreality/classify.go:21
+# oldAgeDays = 90, and ghost/classify.go:90 convergence = 2 (one sign alone says nothing).
+POSTING_SIGN_OLD_DAYS = 90
+POSTING_SIGNS_CONVERGE = 2
 
 # update_profile (R8-R11). The overlay of agent edits over extraction.
 # R9 — a CLOSED set of dotted paths into UserProfile. Each MUST be a declared

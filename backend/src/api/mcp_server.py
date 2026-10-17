@@ -812,10 +812,15 @@ def build_server(version: str = "") -> MCPServer:
         out.update(job_facts_view(app_row or {}))
         from src.services.applications.job_checks import checks_for_application  # noqa: PLC0415
 
-        out["checks"] = checks_for_application(
-            {**(app_row or {}), "job_url": resp.apply_url or (app_row or {}).get("job_url")},
-            description=resp.description or "",
-        )
+        own_row = {**(app_row or {}), "job_url": resp.apply_url or (app_row or {}).get("job_url")}
+        out["checks"] = checks_for_application(own_row, description=resp.description or "")
+        if app_row:
+            from src.services.applications.posting_history import history_checks  # noqa: PLC0415
+
+            async with _request_db() as db:
+                out["checks"] += await history_checks(
+                    db, _user().id, own_row, out["checks"], description=resp.description or "",
+                )
         return out
 
     @mcp.tool()
@@ -1111,7 +1116,7 @@ def build_server(version: str = "") -> MCPServer:
                 "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
                 "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": model,
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": resp["event_id"],
-                "contact_id": contact_id,
+                "contact_id": contact_id, "checks": outreach.get("checks", []),
             }
         if contact_id is None and kind == "outreach":
             _audit("save_artifact", "error", application_id=application_id, http_status=422)
@@ -1635,7 +1640,8 @@ def build_server(version: str = "") -> MCPServer:
         form_count_mismatch, unreadable_fields (`stop`: re-read, sweep again),
         form_check_missing (`stop`: call check_form),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), held_by_other_session (another assistant
+        in auto mode, else `ask`), cv_unsupported_claims (`ask`: the CV's checks
+        list numbers or terms not in the profile), held_by_other_session (another assistant
         session read this kit recently and did not record `hold_released`),
         unknown_site (`form_url` is not one plain
         http(s) address - no user@, % or backslash before the path, ASCII host),

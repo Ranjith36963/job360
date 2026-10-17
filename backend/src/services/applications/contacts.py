@@ -1000,6 +1000,12 @@ async def record_outreach(
         "version_no": version_no, "occurred_at": occurred, "recorded_at": now, "recorded_by": actor,
         "source_message_id": source_message_id or "",
     }
+    if entry == "message":
+        # Warn-only writing checks (cv_checks.check_text): stock phrases, leaked chat.
+        # Returned with the reply, not stored; the message is saved as written.
+        from src.services.applications import cv_checks  # noqa: PLC0415
+
+        outreach["checks"] = cv_checks.check_text("outreach", clean_text, None)
     return {
         "outreach": outreach, "already_existed": False, "event_id": event_id,
         "follow_up_on": final_follow_up_on,

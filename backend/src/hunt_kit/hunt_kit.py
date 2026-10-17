@@ -50,7 +50,7 @@ import uuid
 from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
-from typing import Any, Callable, Iterable, cast
+from typing import Any, Callable, Iterable, NamedTuple, cast
 
 USER_AGENT = "job360-hunt-kit/1.0 (+https://job360.uk)"
 MAX_WORKERS = 8
@@ -179,12 +179,6 @@ def visa_negated(sentence: str) -> bool:
 
 
 YRS = re.compile(r"(\d{1,2})\s*(?:\+|\s*(?:-|–|to)\s*(\d{1,2}))?\s*\+?\s*(?:years|yrs)", re.I)
-DEAD_PAGE = re.compile(
-    r"no longer (accepting|available)|position (has been|is) (filled|closed)|"
-    r"job (is )?(no longer|has expired)|this job (has )?expired|page not found|"
-    r"posting (has been )?(closed|removed)",
-    re.I,
-)
 # ================================================================ places
 # All place matching (country names, aliases, cities, region words) lives in kit_places.py
 # and places.json, built from open datasets.  Nothing country-specific is hand-typed here.
@@ -591,7 +585,27 @@ def _open(req: urllib.request.Request, timeout: int) -> Any:
     return _OPENER.open(req, timeout=timeout)
 
 
+_STATUS_TL = threading.local()  # a board task sets .log; http_request then notes every status it returns
+
+
 def http_request(
+    url: str,
+    params: Any = None,
+    data: bytes | None = None,
+    retries: int = RETRIES_429,
+    max_bytes: int = 20_000_000,
+    method: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, str, bytes]:
+    """GET (or POST/other when `data`/`method` is given); see _http_request. Notes the status for dead-board memory."""
+    res = _http_request(url, params, data, retries, max_bytes, method, headers)
+    log = getattr(_STATUS_TL, "log", None)
+    if log is not None:
+        log.append(res[0])
+    return res
+
+
+def _http_request(
     url: str,
     params: Any = None,
     data: bytes | None = None,
@@ -815,6 +829,7 @@ FINGERPRINT_ARGS = (
     "titles", "exclude_title_words", "work_countries", "remote", "visa_onsite", "maybe_relocation",
     "only_countries", "exclude_countries", "any_location", "max_years", "days", "sources", "companies",
     "universe", "companies_extra", "skip_companies", "limit_boards", "freehire_pages", "workday_max",
+    "retry_dead",
 )
 
 
@@ -1232,6 +1247,8 @@ class Collector:
         self.seen_key: dict[str, str] = {}
         self.failed: list[dict[str, str]] = []  # sources that raised: {source, error}
         self.skipped_seen = 0  # jobs dropped at output because history already has them
+        self.dead_skipped = 0  # boards not fetched because they answered 404 on DEAD_BOARD_MISSES runs in a row
+        self.board_outcomes: dict[str, str] = {}  # "ats:token" -> "ok" | "404" for boards that gave a clear answer
         self.matcher = make_title_matcher(args.titles, args.exclude_title_words)
         self.prefs = make_prefs(
             args.work_countries,
@@ -1733,6 +1750,11 @@ def run(args: argparse.Namespace) -> Collector:
             seen_b.add(k)
             uniq.append(r)
     boards = [r for r in uniq if r["ats"] in sources and not col.skipped(r["name"], r["token"])]
+    if not getattr(args, "retry_dead", False):  # boards that answered 404 on DEAD_BOARD_MISSES runs in a row
+        dead = load_dead_boards(getattr(args, "history", None))
+        live = [r for r in boards if not is_dead_board(dead.get("%s:%s" % (r["ats"], r["token"].lower())))]
+        col.dead_skipped = len(boards) - len(live)
+        boards = live
     boards = rotate_workday(boards, getattr(args, "workday_max", WORKDAY_MAX))
     wd_titles = "\n".join(queries[:WORKDAY_SEARCH_TITLES])  # board rows hold strings; kit_ats splits it
     boards = [dict(b, search_texts=wd_titles) if b["ats"] == "workday" else b for b in boards]
@@ -1747,14 +1769,14 @@ def run(args: argparse.Namespace) -> Collector:
     kit_ats = _import_kit("kit_ats") if any(b["ats"] not in _BOARD_FN for b in boards) else None
     ats_fetchers = getattr(kit_ats, "ATS_FETCHERS", {}) if kit_ats else {}
     for b in boards:
+        bkey = "%s:%s" % (b["ats"], b["token"].lower())
         if b["ats"] in _BOARD_FN:
-            tasks.append((b["ats"], "%s:%s" % (b["ats"], b["token"].lower()),
-                          functools.partial(_BOARD_FN[b["ats"]], col, b)))
+            tasks.append((b["ats"], bkey, functools.partial(
+                _track_board, col, bkey, functools.partial(_BOARD_FN[b["ats"]], col, b))))
         elif b["ats"] in ats_fetchers:
             call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
-            tasks.append((b["ats"], "%s:%s" % (b["ats"], b["token"].lower()),
-                          functools.partial(_module_task, col, b["ats"], call,
-                                          "%s:%s" % (b["ats"], b["token"].lower()))))
+            tasks.append((b["ats"], bkey, functools.partial(
+                _track_board, col, bkey, functools.partial(_module_task, col, b["ats"], call, bkey))))
     if "freehire" in sources:
         tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
@@ -1893,9 +1915,9 @@ def load_history_runs(path: str | None) -> list[dict[str, Any]]:
 
 def save_history(
     path: str | None, urls: set[str], keys: set[str], results: list[dict[str, Any]],
-    run: dict[str, Any] | None = None,
+    run: dict[str, Any] | None = None, boards: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """Add this run's output (and its skipped_* counters) to the history file, atomically.
+    """Add this run's output (and its skipped_* counters, and the dead-board counters) to the history file.
 
     Written to a temp file and swapped in with os.replace, so a kill mid-write leaves the old file whole.
     """
@@ -1906,38 +1928,450 @@ def save_history(
     runs = load_history_runs(path)
     if run:
         runs = (runs + [run])[-HISTORY_RUNS_KEPT:]
-    _atomic_write_text(path, json.dumps({"urls": u, "keys": k, "runs": runs}))
+    kept_boards = load_dead_boards(path) if boards is None else boards  # no change asked: keep what is there
+    _atomic_write_text(path, json.dumps({"urls": u, "keys": k, "runs": runs, "boards": kept_boards}))
 
 
 # ------------------------------------------------------------ check-live
-def is_dead_page(status: int, final_url: str, text: str) -> bool:
-    """True if a job page shows the posting is gone (404/410, redirect with error, closed wording)."""
+# "Is this posting still open?" is a pure function of one fetch (status, urls, body). It answers with
+# one of three states and a reason code. ONLY "closed" drops a job; "unknown" and "alive" keep it.
+# A wrongly dropped live job is the expensive error, so "closed" needs a positive death signal:
+# HTTP 404/410, an error redirect, a curated closed phrase, or a near-empty page that has no app shell.
+# Ported from career-ops liveness-core.mjs (MIT) and freehire internal/job/liveness/liveness.go (MIT);
+# line numbers below refer to those files.
+LIVE_ALIVE, LIVE_CLOSED, LIVE_UNKNOWN = "alive", "closed", "unknown"
+
+
+class Liveness(NamedTuple):
+    """Verdict of classify_liveness: state is 'alive', 'closed' or 'unknown'; code says why."""
+
+    state: str
+    code: str
+
+
+def normalize_for_match(text: str, keep_line_breaks: bool = False) -> str:
+    """Fold typographic quotes, strip accents, collapse whitespace (career-ops liveness-core.mjs:13-21).
+
+    Portals write "n’est plus disponible" with U+2019 and accents; the patterns below are spelled in the
+    normalised alphabet (ASCII quotes, no diacritics). One whitespace run becomes one character, so the
+    with-breaks and without-breaks forms of a text line up index for index.
+    """
+    if not isinstance(text, str):
+        return ""
+    t = re.sub("[‘’ʼ′´`]", "'", text)
+    t = re.sub("[“”″]", '"', t)
+    t = "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", lambda m: "\n" if keep_line_breaks and "\n" in m.group(0) else " ", t)
+
+
+_MON = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+# Closed-posting phrases. English: career-ops liveness-core.mjs:24-66 (HARD_EXPIRED_PATTERNS). The
+# non-English ones are kept as the references spell them: German :67, Dutch :70, Spanish :75, French
+# :78-83 (career-ops) and German/French/Russian in freehire liveness.go:65-66, 70.
+# Differences from the references: Python has no variable-width lookbehind, so career-ops :34's
+# (?<!\b(?:application|form)\s) is two lookbehinds; "job.*no longer open" (career-ops :25, freehire liveness.go:51)
+# is bounded to 80 characters so a stray "job" at the top of a page cannot pair with a footer line.
+_HARD_CLOSED = [re.compile(p, re.I) for p in (
+    r"job (is )?no longer available",                                     # career-ops :24, freehire liveness.go:50
+    r"job.{0,80}no longer open",                                          # career-ops :25
+    r"\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?"
+    r"\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?"
+    r"(?<!\bapplication\s)(?<!\bform\s)has been filled\b(?!\s+out)",      # career-ops :34 (not a filled-in form)
+    r"this job has expired",                                              # career-ops :35, freehire :53
+    r"job posting has expired",                                           # career-ops :36
+    r"no longer accepting applications",                                  # career-ops :37
+    r"this (position|role|job) (is )?no longer",                          # career-ops :38
+    r"this (?:job|role|position)(?: listing)? is closed\b(?!-)",          # career-ops :52 (not "closed-loop")
+    r"this job post is closed",                                           # freehire liveness.go:61
+    r"job (listing )?not found",                                          # career-ops :53
+    r"can't view this job because it's not available",                    # career-ops :59
+    r"the page you are looking for doesn.t exist",                        # career-ops :60
+    r"applications?\s+(?:(?:have|are|is)\s+)?closed",                     # career-ops :61
+    r"(?<!\bbe\s)closed on \d{1,2}\s+" + _MON,                            # career-ops :65 (a past date)
+    r"(?<!\bbe\s)closed on " + _MON + r"\w*\s+\d{1,2}",                   # career-ops :66
+    r"diese stelle (ist )?(nicht mehr|bereits) besetzt",                  # German: career-ops :67
+    r"deze vacature is niet meer gepubliceerd",                           # Dutch: career-ops :70
+    r"\boferta cerrada el \d{1,2}/\d{1,2}/\d{4}",                         # Spanish: career-ops :75
+    r"offre (expiree|n'est plus disponible)",                             # French: career-ops :78
+    r"(cette )?offre n'est plus (disponible|en ligne|active)",            # French: career-ops :79
+    r"(offre|poste|annonce) (deja )?pourvu(e)?",                          # French: career-ops :80
+    r"offre (cloturee|desactivee|terminee)",                              # French: career-ops :81
+    r"ce poste n'est plus (disponible|a pourvoir|ouvert)",                # French: career-ops :82
+    r"recrutement (termine|cloture)",                                     # French: career-ops :83
+    r"candidatures (closes|cloturees)",                                   # French: career-ops :84
+    r"ваканси\S* (в архиве|закрыта|неактивна)",                           # Russian: freehire liveness.go:70
+)]
+_LISTING_PAGE = re.compile(r"\d+\s+jobs?\s+found|search for jobs page is loaded", re.I)  # career-ops :88-89
+_EXPIRED_URL = re.compile(r"[?&]error=true", re.I)                        # career-ops :137, freehire :81
+# Anti-bot walls: never read as closed (career-ops :124-134).
+_BOT_WALL = re.compile(
+    r"just a moment|performing security verification|checking your browser before|"
+    r"verify you are (a |not a )?human|enable javascript and cookies to continue|"
+    r"attention required.*cloudflare|\bray id\b|\bcf-ray\b|please complete the security check", re.I)
+# Apply-control words, career-ops :141-157
+_APPLY_WORD = re.compile(r"\b(?:apply|solicitar|bewerben|postuler|aplikuj|sollicit(?:eer|eren))\b|"
+                         r"submit application|easy apply|start application|ich bewerbe mich", re.I)
+_JOB_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{5,}", re.I)  # :174
+_APP_SHELL = re.compile(r"<noscript|id=[\"'](?:root|app|__next|__nuxt)[\"']|<script\b", re.I)
+_MIN_CONTENT_CHARS = 300                                                  # career-ops :169, freehire :43
+# A closure phrase inside a clause that opens with a time or condition word is a promise, not a banner:
+# "applications are accepted until the position has been filled" (career-ops :203-204, firstStatedMatch :210).
+_CONDITION_CLAUSE = re.compile(
+    r"\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as) "
+    r"(?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+\Z", re.I)
+
+
+def _stated_closed(lines: str) -> re.Pattern[str] | None:
+    """The first closed phrase that really is a statement about this posting, else None."""
+    text = lines.replace("\n", " ")
+    for pat in _HARD_CLOSED:
+        for m in pat.finditer(text):
+            if not _CONDITION_CLAUSE.search(lines[: m.end()]):
+                return pat
+    return None
+
+
+def _visible_text(raw: str) -> str:
+    """Text a visitor would see: scripts, styles, comments and tags removed (freehire measures visible text)."""
+    t = re.sub(r"(?is)<(script|style|noscript|template|svg)\b.*?</\1\s*>|<!--.*?-->", " ", raw)
+    t = html.unescape(re.sub(r"<[^>]+>", " ", t))
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def classify_liveness(status: int, requested_url: str, final_url: str, text: str) -> Liveness:
+    """Pure verdict on one job page fetch: (alive | closed | unknown, reason code). Never touches the network.
+
+    closed  only on a positive death signal: http_gone (404/410), expired_url (error redirect),
+            expired_body (a curated closed phrase, any language), listing_page (the URL fell back to a
+            search page), insufficient_content (a near-empty page with no script app shell).
+    alive   a healthy 2xx page with no death signal.
+    unknown everything else: a fetch failure, 403/429/5xx, a bot wall, a redirect that lost the job id,
+            a JavaScript shell whose closed notice never renders server-side.
+    Order and thresholds follow career-ops liveness-core.mjs:224-306 and freehire liveness.go:86-108.
+    """
     if status in (404, 410):
-        return True
-    if status != 200:
-        return False
-    if re.search(r"[?&]error=true", final_url or ""):
-        return True
-    return bool(DEAD_PAGE.search(text[:200_000]))
+        return Liveness(LIVE_CLOSED, "http_gone")                          # career-ops :229, freehire :87
+    if not 200 <= status < 300:
+        # 0 = fetch failed; 403/429/503 = blocked or throttled (career-ops :248); other 5xx = transient (:256)
+        return Liveness(LIVE_UNKNOWN, "fetch_failed" if status == 0 else "status_%d" % status)
+    lines = normalize_for_match(text[:200_000], keep_line_breaks=True)
+    body = lines.replace("\n", " ")
+    if _BOT_WALL.search(body):
+        return Liveness(LIVE_UNKNOWN, "bot_challenge")                     # career-ops :237
+    if _EXPIRED_URL.search(final_url or ""):
+        return Liveness(LIVE_CLOSED, "expired_url")                        # career-ops :260, freehire :95
+    if _stated_closed(lines):
+        return Liveness(LIVE_CLOSED, "expired_body")                       # career-ops :265, freehire :98
+    ids = _JOB_ID.findall(requested_url or "")
+    if ids and final_url and ids[-1].lower() not in final_url.lower():
+        # A dead permalink that redirects to a generic page: a portal move can do that to live jobs too.
+        return Liveness(LIVE_UNKNOWN, "redirected_off_posting")            # career-ops :277-284
+    if _LISTING_PAGE.search(body):
+        return Liveness(LIVE_CLOSED, "listing_page")                       # career-ops :297, freehire :101
+    if len(_visible_text(text)) < _MIN_CONTENT_CHARS:
+        if _APP_SHELL.search(text):
+            # Nothing rendered yet, or a JS-only shell: unconfirmed, not closed (career-ops :325-330).
+            return Liveness(LIVE_UNKNOWN, "js_shell")
+        if _APPLY_WORD.search(body):
+            return Liveness(LIVE_UNKNOWN, "short_page_with_apply")         # career-ops :286
+        return Liveness(LIVE_CLOSED, "insufficient_content")               # career-ops :302, freehire :104
+    return Liveness(LIVE_ALIVE, "no_death_signal")
+
+
+def is_dead_page(status: int, final_url: str, text: str) -> bool:
+    """True only when classify_liveness says closed (kept for callers of the older bool API)."""
+    return classify_liveness(status, "", final_url, text).state == LIVE_CLOSED
 
 
 def check_live(col: Collector, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Re-fetch each kept job once and drop the ones that are gone."""
+    """Re-fetch each kept job once and drop the ones that are closed. Alive and unknown jobs stay."""
 
     def one(rec: dict[str, Any]) -> bool:
         try:
             st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000)
-            dead = is_dead_page(st, final, body.decode("utf-8", "replace"))
+            verdict = classify_liveness(st, rec["url"], final, body.decode("utf-8", "replace"))
         except Exception:  # a failed check keeps the job (never abort the run)
             return True
         col.bump(rec["source"], "live_checked")
-        if dead:
+        if verdict.state == LIVE_CLOSED:
             col.bump(rec["source"], "live_dead")
-        return not dead
+        elif verdict.state == LIVE_UNKNOWN:
+            col.bump(rec["source"], "live_unknown")
+        return verdict.state != LIVE_CLOSED
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         flags = list(ex.map(one, results))
     return [r for r, ok in zip(results, flags) if ok]
+
+
+# ---------------------------------------------------------- dead boards
+# A board whose address answers a real HTTP 404 run after run is gone; skipping it saves a request per run.
+# Only 404 is evidence. Throttles (429), blocks (403), 5xx and transport errors mean "unknown": they never
+# advance the counter. Ported from career-ops dead-boards.mjs (MIT): DEAD_BOARD_MISSES = 3 (:9) and
+# DEAD_BOARD_RECHECK_DAYS = 30 (:10), the skip test (:31-34) and the update rule (:36-53).
+# Difference: there an unknown answer resets a counter below 3 (:43-47); here it leaves the counter alone,
+# so "consecutive" means consecutive 404 answers and a throttled run neither helps nor hurts a board.
+DEAD_BOARD_MISSES = 3
+DEAD_BOARD_RECHECK_DAYS = 30
+
+
+def board_outcome(statuses: list[int]) -> str:
+    """'ok' if any request got a 2xx, '404' if every answer was 404, else '' (no clear answer)."""
+    if any(200 <= s < 300 for s in statuses):
+        return "ok"
+    if statuses and all(s == 404 for s in statuses):
+        return "404"
+    return ""
+
+
+def load_dead_boards(path: str | None) -> dict[str, dict[str, Any]]:
+    """The per-board 404 counters saved in the history file ({} for a missing, old-format or damaged file)."""
+    if not path or path.lower() == "none":
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f).get("boards", {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        ok = isinstance(v, dict) and isinstance(v.get("misses"), int) and isinstance(v.get("last"), str)
+        if ok and v["misses"] >= 1:
+            out[str(k)] = {"misses": v["misses"], "last": v["last"]}
+    return out
+
+
+def is_dead_board(entry: dict[str, Any] | None, today: _dt.date | None = None) -> bool:
+    """True when the board has DEAD_BOARD_MISSES 404s in a row and was last seen less than 30 days ago."""
+    if not entry or entry.get("misses", 0) < DEAD_BOARD_MISSES:
+        return False
+    try:
+        last = _dt.date.fromisoformat(str(entry.get("last")))
+    except ValueError:
+        return False
+    return ((today or _dt.date.today()) - last).days < DEAD_BOARD_RECHECK_DAYS
+
+
+def update_dead_boards(
+    prev: dict[str, dict[str, Any]], outcomes: dict[str, str], today: _dt.date | None = None
+) -> dict[str, dict[str, Any]]:
+    """Counters after this run: '404' adds one miss (capped), 'ok' forgets the board, boards not fetched stay."""
+    day = (today or _dt.date.today()).isoformat()
+    out = {k: dict(v) for k, v in prev.items()}
+    for key, result in outcomes.items():
+        if result == "ok":
+            out.pop(key, None)
+        elif result == "404":
+            out[key] = {"misses": min(DEAD_BOARD_MISSES, out.get(key, {}).get("misses", 0) + 1), "last": day}
+    return out
+
+
+def _track_board(col: Collector, key: str, work: Callable[[], None]) -> None:
+    """Run one board task and record whether the board clearly answered (2xx) or clearly was not there (404)."""
+    log: list[int] = []
+    _STATUS_TL.log = log
+    try:
+        work()
+    finally:
+        _STATUS_TL.log = None
+        result = board_outcome(log)
+        if result:
+            with col.lock:
+                col.board_outcomes[key] = result
+
+
+# ---------------------------------------------------------- why missed
+# --why-missed URL: a job the run did not show. Offline: no request is made, no file is written.
+# The idea (a closed verdict set, one proposed change, never edits config) follows career-ops
+# coverage-check.mjs (MIT) :1-11 and its GAPS :40-50; the ATS-from-URL table follows atsFromUrl :54-82
+# (greenhouse, lever, ashby, workable, workday, icims) and, for the other boards the kit reads, the
+# patterns in backend/scripts/harvest_hunt_boards.py (SLUG_PATTERNS, TALEO_RE, ORACLE_RE, WORKDAY_RE).
+# The verdict names are the kit's own (NOT IN REFERENCE).
+WHY_VERDICTS = {
+    "not_a_board_url": "a job-search site or aggregator; the kit never reads these",
+    "ats_not_supported": "a job site the kit has no reader for, or a board address that cannot be told from the link",
+    "board_in_list_source_skipped": "the board is known but its job site is not in --sources",
+    "skipped_by_option": "the company matches --skip-companies",
+    "board_marked_dead": "the board answered 404 on %d runs in a row and is skipped" % DEAD_BOARD_MISSES,
+    "board_not_in_list": "the kit does not know this board",
+    "universe_not_cached": "not in your list, and the open company list is not cached, so it cannot be checked offline",
+    "board_covered": "the kit reads this board; the job was filtered out, closed, or posted after the last run",
+}
+_AGGREGATOR_HOSTS = re.compile(
+    r"(?:^|\.)(?:linkedin\.com|lnkd\.in|indeed\.[a-z.]+|glassdoor\.[a-z.]+|ziprecruiter\.[a-z.]+|monster\.[a-z.]+|"
+    r"reed\.co\.uk|totaljobs\.com|cv-library\.co\.uk|jooble\.org|adzuna\.[a-z.]+|jobrapido\.com|simplyhired\.com|"
+    r"careerbuilder\.com|naukri\.com|stepstone\.[a-z.]+|seek\.com\.au|jobstreet\.com|dice\.com|wellfound\.com|"
+    r"builtin\.com|otta\.com|welcometothejungle\.com|hiring\.cafe|ycombinator\.com)$", re.I)
+_SLUG = r"([A-Za-z0-9_.-]+)"
+_SLUG_BLOCK = {"embed", "jobs", "job", "j", "o", "share", "api", "widget", "www", "app", "v1", "careers",
+               "en-us", "en-gb"}
+# (ats, host regex); ordered, the first host match wins. Group 1 of the host regex is the token where it is in the host.
+_HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("greenhouse", re.compile(r"(?:^|\.)greenhouse\.io$")),
+    ("lever", re.compile(r"(?:^|\.)lever\.co$")),
+    ("ashby", re.compile(r"^jobs\.ashbyhq\.com$")),
+    ("smartrecruiters", re.compile(r"^(?:jobs|careers|api)\.smartrecruiters\.com$")),
+    ("workable", re.compile(r"^apply\.workable\.com$")),
+    ("recruitee", re.compile(r"^([a-z0-9-]+)\.recruitee\.com$")),
+    ("personio", re.compile(r"^([a-z0-9-]+)\.jobs\.personio\.(?:de|com)$")),
+    ("teamtailor", re.compile(r"^([a-z0-9-]+)\.teamtailor\.com$")),
+    ("bamboohr", re.compile(r"^([a-z0-9-]+)\.bamboohr\.com$")),
+    ("workday", re.compile(r"^([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com$")),
+    ("icims", re.compile(r"^([a-z0-9-]+)\.icims\.com$")),
+    ("taleo", re.compile(r"^([a-z0-9-]+)\.taleo\.net$")),
+    ("oraclecloud", re.compile(r"^([a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud(?:[1-9][0-9]?)?\.com)$")),
+    ("successfactors", re.compile(r"^(career[a-z0-9-]*\.successfactors\.(?:eu|com))$")),
+    ("jobvite", re.compile(r"^jobs\.jobvite\.com$")),
+    ("eightfold", re.compile(r"^([a-z0-9-]+)\.eightfold\.ai$")),
+]
+# Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
+_UNSUPPORTED_HOSTS = re.compile(
+    r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|comeet\.com|join\.com|rippling\.com|dover\.com|"
+    r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|avature\.net|csod\.com|"
+    r"trakstar\.com|zohorecruit\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
+
+
+def board_from_job_url(url: str) -> dict[str, Any]:
+    """Read a job URL without any request: {'kind': 'invalid'|'aggregator'|'ats'|'other', 'ats', 'token', 'host'}.
+
+    'ats' rows carry the kit's board token (workday 'tenant|wdN|site', taleo 'tenant/section',
+    oraclecloud 'host/siteNumber'); token is '' when the link does not contain it (e.g. a custom domain
+    that embeds Greenhouse with ?gh_jid=). Hosts of known aggregators give kind 'aggregator'.
+    """
+    try:
+        u = urllib.parse.urlsplit(url.strip())
+        host = (u.hostname or "").lower()
+    except ValueError:
+        return {"kind": "invalid", "ats": "", "token": "", "host": ""}
+    if u.scheme not in ("http", "https") or not host:
+        return {"kind": "invalid", "ats": "", "token": "", "host": host}
+    seg = [urllib.parse.unquote(x) for x in u.path.split("/") if x]
+    q = urllib.parse.parse_qs(u.query)
+    if _AGGREGATOR_HOSTS.search(host):
+        return {"kind": "aggregator", "ats": "", "token": "", "host": host}
+    for ats, rx in _HOST_RULES:
+        m = rx.search(host)
+        if not m:
+            continue
+        tok = ""
+        if ats in ("greenhouse", "lever", "ashby", "smartrecruiters", "workable", "jobvite"):
+            first = seg[0] if seg else ""
+            if first in ("v0", "v1") and len(seg) > 2:
+                first = seg[2]  # api.lever.co/v0/postings/{t}, boards-api.greenhouse.io/v1/boards/{t}
+            if ats == "greenhouse" and (not first or first.lower() in _SLUG_BLOCK):
+                first = (q.get("for") or [""])[0]
+            tok = first if re.fullmatch(_SLUG, first or "") and first.lower() not in _SLUG_BLOCK else ""
+        elif ats == "workday":
+            wd = m.group(2)
+            if "job" in seg and seg.index("job") > 0:
+                site = seg[seg.index("job") - 1]
+            else:
+                site = next((s for s in seg if not re.fullmatch(r"[a-z]{2}-[A-Za-z]{2}", s)), "")
+            tok = "%s|%s|%s" % (m.group(1), wd, site) if site else ""
+        elif ats == "taleo":
+            sec = seg[seg.index("careersection") + 1] if "careersection" in seg[:-1] else ""
+            tok = "%s/%s" % (m.group(1), sec) if sec else ""
+        elif ats == "oraclecloud":
+            site = seg[seg.index("sites") + 1] if "sites" in seg[:-1] else ""
+            tok = "%s/%s" % (m.group(1), site) if site else ""
+        else:
+            tok = m.group(1)
+        return {"kind": "ats", "ats": ats, "token": tok.lower(), "host": host}
+    if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
+        return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
+    return {"kind": "unsupported" if _UNSUPPORTED_HOSTS.search(host) else "other", "ats": "", "token": "", "host": host}
+
+
+def cached_universe(ats_list: Iterable[str], cache_dir: Path | None = None) -> tuple[list[dict[str, str]], list[str]]:
+    """Universe rows from files already on disk, no download. Returns (rows, ats names with no readable cache)."""
+    cache = cache_dir or (HERE / "universe_cache")
+    rows: list[dict[str, str]] = []
+    missing: list[str] = []
+    for ats in ats_list:
+        if ats not in UNIVERSE_ATS:
+            continue
+        try:
+            data = json.loads((cache / ("%s_companies.json" % ats)).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            missing.append(ats)
+            continue
+        rows += universe_rows(ats, data)
+    return rows, missing
+
+
+def why_missed(args: argparse.Namespace, url: str, today: _dt.date | None = None) -> dict[str, Any]:
+    """One verdict from WHY_VERDICTS for a job the run did not show, plus ONE proposed change. Offline."""
+    info = board_from_job_url(url)
+    ats, tok, host = info["ats"], info["token"], info["host"]
+    out: dict[str, Any] = {"url": url, "ats": ats, "board": "", "verdict": "", "evidence": [], "change": ""}
+
+    def done(verdict: str, change: str, *evidence: str) -> dict[str, Any]:
+        out.update(verdict=verdict, meaning=WHY_VERDICTS[verdict], change=change)
+        out["evidence"] += list(evidence)
+        return out
+
+    if info["kind"] == "invalid":
+        out.update(verdict="invalid_url", meaning="not an http(s) link", change="give the full job link")
+        return out
+    if info["kind"] == "aggregator":
+        return done("not_a_board_url", "bring this link yourself (bring_job), or turn on Gmail job alerts for the site",
+                    "%s is a job-search site; the kit never reads it" % host)
+    if info["kind"] in ("other", "unsupported"):
+        return done("ats_not_supported", "bring this link yourself (bring_job); the kit cannot read this site",
+                    "no board reader matches %s" % host)
+    if not tok:
+        return done("ats_not_supported",
+                    'find the board address on the employer page, then add --companies-extra "%s:<token>"' % ats,
+                    "this is a %s job on %s, but the link does not show the board token" % (ats, host))
+    out["board"] = key = "%s:%s" % (ats, tok)
+    sources = select_sources(args.sources)
+    if ats not in sources:
+        shown = (args.sources or "default")
+        change = "--sources %s,%s" % (shown, ats)
+        if shown == "default":
+            change = "--sources all (adds the large BambooHR list)"
+        return done("board_in_list_source_skipped", change, "%s is not in --sources %s" % (ats, shown))
+    names = [tok.split("|")[0].split("/")[0]]
+    if any(s in " ".join(names + [tok]).lower() for s in split_csv(args.skip_companies or "")):
+        return done("skipped_by_option", "remove it from --skip-companies", "%s matches --skip-companies" % key)
+    if is_dead_board(load_dead_boards(args.history).get(key), today) and not getattr(args, "retry_dead", False):
+        return done("board_marked_dead", "run once with --retry-dead",
+                    "%s answered 404 on %d runs in a row (history %s)" % (key, DEAD_BOARD_MISSES, args.history))
+    known: dict[tuple[str, str], str] = {}
+    for r in parse_extra(args.companies_extra):
+        known[(r["ats"], r["token"].lower())] = "--companies-extra"
+    try:
+        for r in load_companies(Path(args.companies)):
+            known.setdefault((r["ats"], r["token"].lower()), "companies.json")
+    except (OSError, ValueError, AttributeError):
+        pass
+    missing: list[str] = []
+    if args.universe and ats in UNIVERSE_ATS:
+        rows, missing = cached_universe([ats])
+        for r in rows:
+            known.setdefault((r["ats"], r["token"].lower()), "the cached open company list")
+    where = known.get((ats, tok.lower()))
+    if where:
+        note = ["%s is in %s" % (key, where)]
+        if ats == "workday" and where != "companies.json" and where != "--companies-extra":
+            note.append("open-list Workday boards run in a daily slice (--workday-max), so it may not run today")
+        return done("board_covered", "none: check the job's title, place and age against your options", *note)
+    add = 'add --companies-extra "%s"' % key
+    if missing:
+        return done("universe_not_cached", add + " (or do one normal run to cache the open company list)",
+                    "%s is not in %s and the %s company list is not cached" % (key, Path(args.companies).name, ats))
+    return done("board_not_in_list", add, "%s is not in the company list" % key)
+
+
+def format_why_missed(res: dict[str, Any]) -> str:
+    """Short plain answer for --why-missed."""
+    lines = ["Why missed: %s" % res["url"]]
+    if res.get("board"):
+        lines.append("Board: %s" % res["board"])
+    lines.append("Verdict: %s (%s)" % (res["verdict"], res.get("meaning", "")))
+    lines += ["  - %s" % e for e in res["evidence"]]
+    lines.append("Change: %s" % res["change"])
+    return "\n".join(lines)
 
 
 # -------------------------------------------------------------- discover
@@ -1996,9 +2430,10 @@ def format_stats(col: Collector, skipped_seen: int = 0) -> str:
         if st["errors"]:
             note += "  errors=%d" % st["errors"]
         if st["live_checked"]:
-            note += "  live_checked=%d dead=%d" % (st["live_checked"], st["live_dead"])
+            note += "  live_checked=%d dead=%d unknown=%d" % (st["live_checked"], st["live_dead"], st["live_unknown"])
         lines.append("%-22s" % s + "".join("%17d" % st[c] for c in cols) + note)
-    lines.append("total kept: %d   skipped as already seen: %d" % (len(col.results), skipped_seen))
+    lines.append("total kept: %d   skipped as already seen: %d   boards skipped as dead: %d"
+                 % (len(col.results), skipped_seen, col.dead_skipped))
     return "\n".join(lines)
 
 
@@ -2055,7 +2490,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit-boards", type=int, default=0, help="max boards per ATS (quick runs)")
     p.add_argument("--workers", type=int, default=MAX_WORKERS, help="parallel workers (max 8)")
     p.add_argument("--discover", default="", help='probe board tokens for "Company A,Company B" and print hits')
-    p.add_argument("--check-live", action="store_true", help="re-fetch each kept job once; drop 404/410/closed")
+    p.add_argument("--check-live", action="store_true",
+                   help="re-fetch each kept job once; drop only jobs shown closed (404/410, closed wording)")
+    p.add_argument("--retry-dead", action="store_true",
+                   help="also fetch boards that answered 404 on 3 runs in a row (skipped by default)")
+    p.add_argument("--why-missed", default="", metavar="URL",
+                   help="say why a job link was not in the results and propose one change (offline), then exit")
     p.add_argument(
         "--history", default="seen_jobs.json", help="remember output; next run shows only NEW jobs ('none' = off)"
     )
@@ -2103,6 +2543,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.discover:
         for hit in discover(split_csv(args.discover)):
             print(json.dumps(hit, ensure_ascii=False))
+        return 0
+    if args.why_missed:  # offline: reads the lists and the history file, makes no request, writes nothing
+        print(format_why_missed(why_missed(args, args.why_missed)))
         return 0
     stream_path = args.stream or ("hunt_stream.jsonl" if args.out == "-" else args.out + ".stream")
     lock = RunLock(stream_path)
@@ -2164,11 +2607,15 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
                     row = {k: snap[k] for k in ("end", "found", "skipped_seen", "skipped_company",
                                                 "skipped_bad_url", "skipped_dead", "failed")}
                     row["kept"] = len(results)
-                    save_history(args.history, urls, keys, results, run=row)
+                    boards = update_dead_boards(load_dead_boards(args.history), col.board_outcomes)
+                    save_history(args.history, urls, keys, results, run=row, boards=boards)
                 except OSError as e:
                     print("warning: could not write history: %s" % e, file=sys.stderr)
             if args.stats or skipped:
                 print(format_stats(col, skipped), file=sys.stderr)
+            if col.dead_skipped:
+                print("skipped %d board%s as dead (404 on %d runs in a row); --retry-dead tries them again"
+                      % (col.dead_skipped, "" if col.dead_skipped == 1 else "s", DEAD_BOARD_MISSES), file=sys.stderr)
             if col.failed:
                 print(format_failed(col), file=sys.stderr)
             if partial:

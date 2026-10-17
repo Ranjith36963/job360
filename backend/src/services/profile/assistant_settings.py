@@ -498,6 +498,11 @@ class SubmitFacts:
     # withdrawn / rejected / hold_released (``kit.session_hold``). ``None`` =
     # nobody else is on it. Asks ``held_by_other_session``; a yes never clears it.
     other_session_hold: Optional[tuple[str, str, str]] = None
+    # The newest CV's save-time checks (cv_checks.py) found numbers or terms that are
+    # not in the profile (``unsupported_numbers`` / ``unsupported_terms``). Asks
+    # ``cv_unsupported_claims``; a yes for THIS CV clears it (2026-10-17, career-ops
+    # verify-cv-facts.mjs blocks invented metrics; here it is an ask, not a stop).
+    cv_unsupported: bool = False
 
 
 @dataclass(frozen=True)
@@ -663,6 +668,8 @@ def may_submit(
         ``unknown_site`` (a yes does NOT clear it)
     5e. ``form_url``'s host is not the host of the newest ``form_filled`` -> ask
         ``form_host_mismatch`` (a yes does NOT clear it)
+    5b2. the newest CV has save-time checks for numbers or terms not in the profile -> ask
+        ``cv_unsupported_claims`` (inside ``_first_ask``, right after the duplicate ask; a yes clears it)
     5c. the fit score vs the user's score line (``line_side``): no line or no fit
         yet -> ask ``score_line_unknown``; the switch for that side
         (``above_line`` / ``below_line``) is ``ask`` -> ask ``line_ask_above`` /
@@ -786,6 +793,12 @@ def _first_ask(
         return SubmitDecision(
             "ask", "duplicate_job",
             "Possible duplicate: this job was already applied to. Fill the form, stop before submit and ask yes.",
+        )
+    if application.cv_unsupported:
+        return SubmitDecision(
+            "ask", "cv_unsupported_claims",
+            "The CV has numbers or terms that are not in the profile (see the CV's checks in the kit). "
+            "Show them to the user: fix the CV, or get their yes that each one is true, then ask yes.",
         )
     side = line_side(application.fit_score, cfg.apply_min_score)
     if side == "unknown":

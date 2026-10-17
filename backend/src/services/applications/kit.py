@@ -458,7 +458,20 @@ async def gate_facts(
         form_host=await _newest_form_host(db, user_id, application_id),
         email_verified=email_verified,
         other_session_hold=other_session_hold,
+        cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
     )
+
+
+_UNSUPPORTED_CODES = frozenset({"unsupported_numbers", "unsupported_terms"})
+
+
+async def _cv_unsupported(db: JobDatabase, user_id: str, artifact_id: int) -> bool:
+    """The CV version's stored save-time checks name numbers or terms not in the profile."""
+    cur = await db._db.execute(
+        "SELECT checks_json FROM application_artifacts WHERE id = ? AND user_id = ?", (artifact_id, user_id)
+    )
+    got = await cur.fetchone()
+    return any(c.get("code") in _UNSUPPORTED_CODES for c in _stored_checks(got[0] if got else None))
 
 
 async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
@@ -1575,6 +1588,11 @@ async def build_kit(
 
     apply_url = str(app_row.get("job_url") or "")
     remote = app_row.get("job_remote")
+    # Plus the facts from this user's own records (posting_history.py); never raises.
+    from src.services.applications.posting_history import history_checks  # noqa: PLC0415
+
+    base_checks = checks_for_application(app_row)
+    base_checks += await history_checks(db, user.id, app_row, list(base_checks))
     job = {
         "job_id": app_row.get("job_id"), "title": app_row.get("job_title") or "",
         "company": app_row.get("job_company") or "", "location": app_row.get("job_location") or "",
@@ -1583,7 +1601,7 @@ async def build_kit(
         "ad_posted_at": app_row.get("ad_posted_at") or None,
         "employer_published_at": app_row.get("employer_published_at") or None,
         # Plain facts about this ad (job_checks.py) - never a verdict, never a sort key.
-        "checks": checks_for_application(app_row),
+        "checks": base_checks,
     }
     application = {
         "id": application_id, "status": app_row["status"], "follow_up_on": app_row.get("follow_up_on"),

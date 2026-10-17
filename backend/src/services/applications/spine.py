@@ -1168,13 +1168,13 @@ async def _artifact_version_count_and_max(db: JobDatabase, application_id: int, 
 
 
 async def _run_save_checks(user_id: str, kind: str, text: str) -> list[dict[str, str]]:
-    """The deterministic checks (``cv_checks``) for a CV / cover letter being saved.
+    """The deterministic checks (``cv_checks``) for a CV / cover letter / outreach / answers being saved.
 
     Never raises and never blocks a save: any failure just yields fewer checks.
     The PDF is rendered here (CV only) so what the checks read is exactly what the
     kit and the download will hand out.
     """
-    if kind not in ("cv", "cover_letter"):
+    if kind not in ("cv", "cover_letter", "outreach", "answers"):
         return []
     import asyncio  # noqa: PLC0415
 
