@@ -33,9 +33,8 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    c. **Without Python:** read the kit's `companies.json` and call the boards' public APIs yourself: Greenhouse
       `boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`, Lever `api.lever.co/v0/postings/<token>`,
       Ashby `api.ashbyhq.com/posting-api/job-board/<token>` (token from the careers link); `target_companies` first.
-   d. **Web search and open lists:** run the kit README's "Search every source" queries (`site:` per job board,
-      Hacker News "Who is hiring", the row's country job service). **Job alerts:** suggest the user turns on
-      LinkedIn, Indeed, freehire and Himalayas alerts; the daily check reads them from Gmail.
+   d. **Web search:** the kit README's "Search every source" queries (`site:` per board, HN, the country's job
+      service). **Job alerts:** suggest LinkedIn, Indeed, freehire, Himalayas; the daily check reads them from Gmail.
    e. **Indeed and LinkedIn (owner, 2026-10-16):** open Indeed search and job pages yourself, slowly; read LinkedIn's
       logged-out job pages at very low volume (README "Indeed and LinkedIn"). Never log in, spoof an app, use copied
       keys or proxies. A login wall, CAPTCHA or bot check = stop that site, never solve or dodge it; tell the user.
