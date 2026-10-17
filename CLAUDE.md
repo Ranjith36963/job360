@@ -71,7 +71,7 @@ npm run dev | build | lint | type-check | test:unit | test:e2e
 
 **Product path:** `POST /jobs/bring` (`api/routes/bring.py`) stores the ad as a `jobs` row and births one Application (`services/applications/spine.py`: `applications` + append-only `application_events` / `application_artifacts` / `application_receipts`) → tailoring as web fallback (`api/routes/tailor.py`) → MCP server `api/mcp_server.py` (tool count: measure with `grep -cF '@mcp.tool()' backend/src/api/mcp_server.py`; bearer tokens `j360_…` or OAuth 2.1; `/api/mcp`). Nothing scores, ranks, dedups or enriches a job — that pipeline was deleted in slice 5 (#483).
 
-- `src/repositories/pg.py` is the single DB door — an `aiosqlite`-shaped async driver whose `translate()` rewrites legacy SQLite SQL to Postgres at runtime. It is production-critical, not test-only (guard: `tests/test_pg_translate.py`).
+- Two DB doors, both rewriting legacy SQLite SQL to Postgres at runtime via `pg.translate()`: `repositories/pg.py` (async) and `pgsync.py` (sync, own psycopg connection). Not test-only (guard: `tests/test_pg_translate.py`).
 - `ARCHITECTURE.md` — system overview, full directory tree, DB schema, dependencies. Env vars are read off `core/settings.py`, never a doc table.
 - `docs/README.md` — index of every surviving doc (product, operations, harness). History lives in git log, not in docs.
 - `STATUS.md` — current phase, what is live on main. `CONTRIBUTING.md` — branch/commit/PR conventions. `backend/README.md` / `frontend/README.md` — install + run.
