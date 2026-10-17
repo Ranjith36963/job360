@@ -7,8 +7,8 @@ search for you. Job360 only stores what your assistant brings back.
 
 It uses the same no-login methods as career-ops, jobsync and ai-job-search:
 company job boards that companies publish themselves, plus open feeds.
-It never logs in, and it never reads LinkedIn, Indeed, Glassdoor or other big job
-sites: their terms forbid automated access. Python 3.10+, standard library only.
+It never logs in. Big job sites (Indeed, LinkedIn) are left to the assistant itself,
+slowly and logged out (see "Indeed and LinkedIn"). Python 3.10+, standard library only.
 
 It never ranks or scores. It filters by words and sorts newest first.
 The assistant judges fit.
@@ -101,11 +101,39 @@ two-letter codes are only read in patterns like "Remote - US".
   Ads in other languages can slip past them. The assistant must read the ad itself.
 - Country locks are found in ad text by sentence patterns. They can miss odd wording.
 
-## LinkedIn, Indeed and other big job sites
+## Search every source (any AI, with or without Python)
 
-The kit does not read them: their terms forbid automated access. Their jobs still
-reach you through their own job-alert emails; the assistant reads Gmail and takes
-the links from those mails. No scraping.
+The kit is one source. Use all of these too, for every row's place x title.
+
+**Connectors (no key).** Add them to your assistant as remote MCP servers:
+- freehire `https://freehire.me/api/v1/mcp`: about 3.3M postings from company boards. Tools `search_jobs`, `get_job`, `check_jobs_open`.
+- Himalayas `https://mcp.himalayas.app/mcp`: remote jobs (about 125K). Credit Himalayas with a link.
+- FoundRole `https://www.foundrole.com/ojcp/mcp`: `search_jobs`, `get_job_detail`. Check `datePosted` (old ads appear) and follow the link to the employer's own posting.
+- Indeed's official connector, if your assistant has it (Claude): search, then read each job.
+
+**Web search, one query per board type.** These find employers that are on no list:
+- `site:boards.greenhouse.io OR site:job-boards.greenhouse.io "<title>" <place>`
+- `site:jobs.lever.co "<title>" <place>`, `site:jobs.ashbyhq.com "<title>" <place>`
+- `site:myworkdayjobs.com "<title>" <place>`, `site:icims.com "<title>" <place>`, `site:apply.workable.com "<title>" <place>`
+- Social posts: `("hiring" OR "open role" OR "we're hiring" OR "join our team") "<title>"` with `site:x.com` or `site:linkedin.com/posts`, read through web search only (no login).
+A new employer board found this way can be added with `--companies-extra "ats:token"`.
+
+**A country no source covers.** Find that country's public job service or main job site. If its listings open without a login and its robots.txt allows it, search it; if not, tell the user.
+Known public services: Germany `rest.arbeitsagentur.de/jobboerse/jobsuche-service`, Sweden `jobsearch.api.jobtechdev.se/search`, Canada Job Bank RSS, Singapore `api.mycareersfuture.gov.sg/v2/search`.
+
+**Before you bring a job**, also check: how long it has been open on the employer's own board, whether it is a repost, and (for visa rows) whether the employer has a public sponsorship record.
+
+**Schedules and alerts.** Offer to put `run 360 daily` in the user's own scheduler (a scheduled task, cron); with `--history` each run shows only new jobs. A busy search can run every few hours. Free job alerts (freehire saved searches, Himalayas, LinkedIn, Indeed) land in Gmail, where the daily check reads them.
+
+## Indeed and LinkedIn
+
+Owner rule, 2026-10-16. The assistant itself, never this script, with no login:
+
+- **Indeed:** open Indeed search pages (`/jobs?q=<title>&l=<place>`, at most 10 pages, `&start=0` to `&start=90`) and job pages yourself, slowly: one page at a time, a few seconds apart. Indeed's robots.txt allows assistant agents (`Claude-User`, `ChatGPT-User`) on those pages; its terms still bar scraping, so keep it small.
+- **LinkedIn:** read the logged-out job pages at very low volume: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<title>&location=<place>&start=<0,10,20>` (10 jobs a page, at most 3 pages a query, 5+ seconds apart), then `https://www.linkedin.com/jobs/view/<id>` for one job. This is against LinkedIn's terms; the risk is a block, not the user's account.
+- **Stop rule:** a login page, a CAPTCHA, a "security check", HTTP 429 or any other non-200 answer = stop that site for the run. Never solve, skip or get around it, and never retry harder. Tell the user; they can open the page themselves.
+- **Never:** log in or type a password, pretend to be an app, use keys or tokens copied from an app, use proxies or rotate IPs, use anti-detection browser flags.
+- Prefer the employer's own posting: follow "Apply on company site" and bring that link.
 
 ## What the assistant must do next
 

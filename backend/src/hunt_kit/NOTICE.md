@@ -20,6 +20,10 @@ ai-job-search projects. The code in this folder is original.
 
 - `kit_ats.py`: endpoint patterns for Workday CXS, Workable, Recruitee, Personio, Teamtailor and BambooHR adapted from career-ops providers (https://github.com/career-ops-hq/career-ops, MIT licence); no code copied. Workday's pattern was also checked against ApplyPilot (AGPL) as a pattern-only reference; no code copied.
 
+## Search guidance (README "Search every source", "Indeed and LinkedIn")
+
+Instructions only, no code copied. The `site:` query idea follows career-ops (MIT, `modes/scan.md` "Level 3"); the social "hiring" query follows job-apply-plugin (MIT, `skills/job-search/SKILL.md`); the low-volume LinkedIn logged-out pages and the stop-at-a-login-page rule follow ai-job-search (MIT, `linkedin-search` and `/add-portal`) and JobSpy (MIT). Connector addresses are the public endpoints published by freehire, Himalayas and FoundRole.
+
 ## Feeds (`kit_feeds.py`)
 
 Open feeds are read through their public APIs. Link back to the original listing when you show a job.

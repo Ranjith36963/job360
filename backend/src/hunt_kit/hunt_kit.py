@@ -6,8 +6,8 @@ Lever, Ashby, SmartRecruiters, Workable, Recruitee, Personio, Teamtailor, Bamboo
 Workday) plus open job feeds (freehire.me, Himalayas, Remotive, Arbeitnow, RemoteOK,
 Jobicy, Working Nomads, We Work Remotely, The Muse, Hacker News "Who is hiring").
 Official keyed APIs (Adzuna, Jooble) run only if you set their env vars.  It never
-touches LinkedIn, Indeed, Glassdoor or other big job sites (their terms forbid
-automated access); the user searches those themselves.
+reads Indeed, LinkedIn, Glassdoor or other big job sites; the assistant opens Indeed
+and LinkedIn's logged-out pages itself, slowly (README "Indeed and LinkedIn").
 
 It never logs in.  Standard library only (Python 3.10+).  It never ranks or scores:
 it filters by words and sorts newest first.  Your assistant reads each kept job's

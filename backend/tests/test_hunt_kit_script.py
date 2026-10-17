@@ -380,7 +380,10 @@ def test_hunt_kit_has_no_board_scraper() -> None:
     assert not (KIT_DIR / "kit_boards.py").exists()
     for f in (p for p in KIT_DIR.iterdir() if p.suffix in {".py", ".md", ".json"}):
         text = f.read_text(encoding="utf-8")
-        assert not re.search(r"kit_boards|--boards\b|jobspy|scrape_jobs", text, re.I), f.name
+        assert not re.search(r"kit_boards|--boards\b|scrape_jobs", text, re.I), f.name
+        # NOTICE.md may credit JobSpy for an idea; no kit file may import it.
+        if f.suffix == ".py":
+            assert not re.search(r"^\s*(import|from)\s+jobspy\b", text, re.I | re.M), f.name
     with pytest.raises(SystemExit):
         hk.build_parser().parse_args(["--boards", "linkedin"])
     args = hk.build_parser().parse_args([])
