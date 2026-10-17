@@ -165,7 +165,9 @@ async def test_save_artifact_reply_carries_checks(authenticated_async_context):
         codes = {c["code"] for c in r.json()["checks"]}
         assert "leaked_chatter" in codes and "pdf_space" in codes
         r2 = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "answers", "text": text})
-        assert r2.status_code == 201 and r2.json()["checks"] == []
+        # 2026-10-17: answers get the writing checks too (chatter, stock phrases), never the PDF ones.
+        assert r2.status_code == 201
+        assert {c["code"] for c in r2.json()["checks"]} == {"leaked_chatter"}
 
 
 def test_a_letter_date_is_never_an_unsupported_number():

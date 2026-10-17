@@ -1640,23 +1640,21 @@ def build_server(version: str = "") -> MCPServer:
         form_count_mismatch, unreadable_fields (`stop`: re-read, sweep again),
         form_check_missing (`stop`: call check_form),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), cv_unsupported_claims (`ask`: the CV's checks
-        list numbers or terms not in the profile), held_by_other_session (another assistant
+        in auto mode, else `ask`), cv_unsupported_claims (CV claims not in the
+        profile), held_by_other_session (another assistant
         session read this kit recently and did not record `hold_released`),
-        unknown_site (`form_url` is not one plain
-        http(s) address - no user@, % or backslash before the path, ASCII host),
+        unknown_site (`form_url` is not one plain http(s) address: no user@, %
+        or backslash before the path, ASCII host),
         form_host_mismatch (`form_url` is not the site of your latest
         `form_filled`), email_not_verified (the user has not confirmed their
         email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
         user has not seen the latest CV), practice_run, user_approved (the user
         said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
         `blocked`, no `unblocked` yet: `ask`). Indeed and LinkedIn answer
-        `ask` unless the user said yes to this CV. The first application after
-        the user turns auto-submit on is a practice run (`ask`, reason
-        `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
+        `ask` unless the user said yes to this CV; so does the first application after
+        auto-submit is turned on (`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
         email_not_verified, blocked or held_by_other_session: do not submit, tell
-        the user. Read-only: it records nothing - after a real submit, record it
-        with `record_application`."""
+        the user. Read-only; after a real submit, call `record_application`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.submit_check(
