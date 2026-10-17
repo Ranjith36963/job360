@@ -137,7 +137,7 @@ Known public services: Germany `rest.arbeitsagentur.de/jobboerse/jobsuche-servic
 
 Owner rule, 2026-10-16. The assistant itself, never this script, with no login:
 
-- **Indeed:** open Indeed search pages (`/jobs?q=<title>&l=<place>`, at most 10 pages, `&start=0` to `&start=90`) and job pages yourself, slowly: one page at a time, a few seconds apart. Indeed's robots.txt allows assistant agents (`Claude-User`, `ChatGPT-User`) on those pages; its terms still bar scraping, so keep it small.
+- **Indeed:** open Indeed search pages (`/jobs?q=<title>&l=<place>`, at most 10 pages, `&start=0&` to `&start=90&`; keep the trailing `&`, robots.txt allows only that form) and job pages yourself, slowly: one page at a time, a few seconds apart. Indeed's robots.txt allows assistant agents (`Claude-User`, `ChatGPT-User`) on those pages; its terms still bar scraping, so keep it small.
 - **LinkedIn:** read the logged-out job pages at very low volume: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<title>&location=<place>&start=<0,10,20>` (10 jobs a page, at most 3 pages a query, 5+ seconds apart), then `https://www.linkedin.com/jobs/view/<id>` for one job. This is against LinkedIn's terms; the risk is a block, not the user's account.
 - **Stop rule:** a login page, a CAPTCHA, a "security check", HTTP 429 or any other non-200 answer = stop that site for the run. Never solve, skip or get around it, and never retry harder. Tell the user; they can open the page themselves.
 - **Never:** log in or type a password, pretend to be an app, use keys or tokens copied from an app, use proxies or rotate IPs, use anti-detection browser flags.

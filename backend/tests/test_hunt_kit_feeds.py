@@ -387,6 +387,8 @@ def test_mycareersfuture_posts_and_pages_by_query_string():
                          "hiringCompany": {"name": "GovTech"}, "postedCompany": {"name": "Agency"},
                          "address": {"districts": [{"location": "Central"}]}}]}
     http = _rec_http({"mycareersfuture": (200, body)})
+    assert kf.fetch_mycareersfuture(["machine learning engineer"], http, {}, days=36500, countries=["GB"]) == []
+    assert http.calls == []
     jobs = kf.fetch_mycareersfuture(["machine learning engineer"], http, {}, days=36500, countries=["SG"])
     assert [j["company"] for j in jobs] == ["GovTech"] and jobs[0]["location"] == "Central, Singapore"
     url, method, data, _h = http.calls[0]
@@ -412,3 +414,17 @@ def test_jobbank_parses_atom_for_canada_only():
     assert j["company"] == "Maple AI Inc." and j["location"] == "Toronto (ON), Canada"
     assert j["url"] == "https://www.jobbank.gc.ca/jobsearch/jobposting/45678901" and j["posted"] == "2026-10-11"
     assert kf.parse_jobbank("<!DOCTYPE x [<!ENTITY a 'b'>]><feed/>") == []  # entity feeds refused
+
+
+def test_national_services_keep_local_language_titles_and_no_age_limit():
+    """The services match the query themselves (in their own language): no English re-filter,
+    and days<=0 sends no age window (review 2026-10-17)."""
+    body = {"ergebnisliste": [{"referenznummer": "r1", "stellenangebotsTitel": "Softwareentwickler (m/w/d)",
+                               "firma": "Acme GmbH"}]}
+    http = _rec_http({"rest.arbeitsagentur.de": (200, body)})
+    jobs = kf.fetch_arbeitsagentur(["software engineer"], http, {}, days=0, countries=["DE"])
+    assert [j["title"] for j in jobs] == ["Softwareentwickler (m/w/d)"]
+    assert "veroeffentlichtseit" not in http.calls[0][0]
+    http2 = _rec_http({"rest.arbeitsagentur.de": (200, body)})
+    kf.fetch_arbeitsagentur(["software engineer"], http2, {}, days=7, countries=["DE"])
+    assert "veroeffentlichtseit=7" in http2.calls[0][0]

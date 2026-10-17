@@ -209,9 +209,13 @@ def test_workday_searches_each_title_and_dedupes():
 def test_workday_search_pages_are_capped_per_title():
     full = {"total": 5000, "jobPostings": [{"title": f"t{i}", "externalPath": f"/job/x/t{i}"} for i in range(20)]}
     http = _stub({"/jobs": (200, full)})
-    row = {"name": "X", "token": "x", "wd": 1, "site": "s", "search_texts": ["a"]}
+    row = {"name": "X", "token": "x", "wd": 1, "site": "s", "search_texts": ["a", "b"]}
     kit_ats.fetch_workday(row, http, {})
-    assert len([c for c in http.calls if c[1] == "POST"]) == kit_ats.SEARCH_PAGES
+    posts = [json.loads(c[2]) for c in http.calls if c[1] == "POST"]
+    # the cap applies to EACH title, not once across all of them
+    assert [(p["searchText"], p["offset"]) for p in posts] == [
+        ("a", 0), ("a", kit_ats.WORKDAY_PAGE), ("b", 0), ("b", kit_ats.WORKDAY_PAGE)]
+    assert kit_ats.SEARCH_PAGES == 2
 
 
 def test_workday_accepts_titles_as_the_run_passes_them():

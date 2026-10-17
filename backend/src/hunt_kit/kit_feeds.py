@@ -738,14 +738,16 @@ def fetch_arbeitsagentur(
     jobs: list[Job] = []
     for q in _queries(queries):
         for page in range(1, NATIONAL_PAGES + 1):
-            qs = urlencode({"was": q, "size": 100, "page": page, "angebotsart": 1,
-                                         "veroeffentlichtseit": max(1, min(days or 30, 100))})
+            params: dict[str, Any] = {"was": q, "size": 100, "page": page, "angebotsart": 1}
+            if days and days > 0:  # no age limit = leave the window out, like the other feeds
+                params["veroeffentlichtseit"] = min(days, 100)
+            qs = urlencode(params)
             got = parse_arbeitsagentur(_get(http, stats, f"{ARBEITSAGENTUR_URL}?{qs}",
                                             headers={"X-API-Key": ARBEITSAGENTUR_KEY, "Accept": "application/json"}))
             jobs += got
             if len(got) < 100:
                 break
-    return _keep(jobs, queries, days)
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
 
 
 @_feed
@@ -761,7 +763,7 @@ def fetch_jobtech(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
             jobs += got
             if len(got) < 100:
                 break
-    return _keep(jobs, queries, days)
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
 
 
 @_feed
@@ -780,7 +782,7 @@ def fetch_mycareersfuture(
             jobs += got
             if len(got) < 100:
                 break
-    return _keep(jobs, queries, days)
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
 
 
 @_feed
@@ -798,7 +800,7 @@ def fetch_jobbank(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
             jobs += got
             if not got:  # empty, or a page that repeats the last one
                 break
-    return _keep(jobs, queries, days)
+    return _keep(jobs, queries, days, search=False)  # the service matched the query itself
 
 
 FEEDS: dict[str, Callable[..., list[Job]]] = {
