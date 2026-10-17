@@ -32,7 +32,13 @@
       "Bash(rg:*)",
       "Bash(find:*)",
       "mcp__plugin_context7_context7__query-docs",
-      "mcp__plugin_context7_context7__resolve-library-id"
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__claude-in-chrome__find",
+      "Bash(railway deployment list *)",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude_ai_job360__get_application_kit",
+      "Bash(railway logs *)"
     ],
     "deny": [
       "Skill(ralph-loop:ralph-loop)",
