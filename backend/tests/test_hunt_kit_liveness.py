@@ -55,6 +55,7 @@ def test_error_redirect_is_closed() -> None:
     "phrase",
     [
         "Sorry, this job is no longer available.",
+        "This position has been filled.",
         "This role is closed.",
         "Applications closed on 15 December 2025.",
         "Diese Stelle ist bereits besetzt.",  # German
@@ -75,9 +76,10 @@ def test_closed_phrases_in_many_languages(phrase: str) -> None:
     "prose",
     [
         "Applications will be accepted until the position has been filled.",  # a promise, not a banner
+        "We review every job posting until the role has been filled by the right person.",
         "We will contact shortlisted candidates once applications have closed.",
         "This role is closed-loop control of the platform.",
-        "Once the application form has been filled you will get an email.",
+        "Your job application form has been filled from your CV; check it before you send.",  # form lookbehind
     ],
 )
 def test_live_posting_copy_is_not_read_as_closed(prose: str) -> None:
@@ -247,7 +249,8 @@ def why_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(hk, "_open", boom)
     monkeypatch.setattr(hk, "http_request", boom)
     companies = tmp_path / "companies.json"
-    companies.write_text(json.dumps([{"name": "Known", "ats": "greenhouse", "board": "known", "source": "t"}]))
+    companies.write_text(json.dumps([{"name": "Known", "ats": "greenhouse", "board": "known", "source": "t"},
+                                     {"name": "Acme Corp", "ats": "greenhouse", "board": "acx", "source": "t"}]))
     cache = tmp_path / "cache"
     cache.mkdir()
     (cache / "lever_companies.json").write_text(json.dumps(["inuniverse"]))
@@ -279,6 +282,10 @@ def test_why_missed_verdicts(why_setup, tmp_path: Path) -> None:
     r = ask("https://boards.greenhouse.io/known/jobs/1", sources="lever")
     assert r["verdict"] == "board_in_list_source_skipped" and r["change"] == "--sources lever,greenhouse"
     assert ask("https://boards.greenhouse.io/known/jobs/1", skip_companies="known")["verdict"] == "skipped_by_option"
+    # the run lowercases the skip words and also matches the row's company name
+    assert ask("https://boards.greenhouse.io/known/jobs/1", skip_companies="KNOWN")["verdict"] == "skipped_by_option"
+    assert ask("https://boards.greenhouse.io/acx/jobs/1")["verdict"] == "board_covered"
+    assert ask("https://boards.greenhouse.io/acx/jobs/1", skip_companies="Acme")["verdict"] == "skipped_by_option"
 
 
 def test_why_missed_other_verdicts(why_setup, tmp_path: Path) -> None:

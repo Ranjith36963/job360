@@ -1975,7 +1975,6 @@ _HARD_CLOSED = [re.compile(p, re.I) for p in (
     r"job (is )?no longer available",                                     # career-ops :24, freehire liveness.go:50
     r"job.{0,80}no longer open",                                          # career-ops :25
     r"\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?"
-    r"\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?"
     r"(?<!\bapplication\s)(?<!\bform\s)has been filled\b(?!\s+out)",      # career-ops :34 (not a filled-in form)
     r"this job has expired",                                              # career-ops :35, freehire :53
     r"job posting has expired",                                           # career-ops :36
@@ -2331,26 +2330,34 @@ def why_missed(args: argparse.Namespace, url: str, today: _dt.date | None = None
         if shown == "default":
             change = "--sources all (adds the large BambooHR list)"
         return done("board_in_list_source_skipped", change, "%s is not in --sources %s" % (ats, shown))
-    names = [tok.split("|")[0].split("/")[0]]
-    if any(s in " ".join(names + [tok]).lower() for s in split_csv(args.skip_companies or "")):
+    skip = [s.lower() for s in split_csv(args.skip_companies or "")]  # the run lowercases them too (Collector)
+
+    def is_skipped(*names: str) -> bool:
+        low = " ".join(n.lower() for n in names if n)
+        return any(s in low for s in skip)
+
+    if is_skipped(tok.split("|")[0].split("/")[0], tok):
         return done("skipped_by_option", "remove it from --skip-companies", "%s matches --skip-companies" % key)
     if is_dead_board(load_dead_boards(args.history).get(key), today) and not getattr(args, "retry_dead", False):
         return done("board_marked_dead", "run once with --retry-dead",
                     "%s answered 404 on %d runs in a row (history %s)" % (key, DEAD_BOARD_MISSES, args.history))
-    known: dict[tuple[str, str], str] = {}
+    known: dict[tuple[str, str], tuple[str, str]] = {}  # (ats, token) -> (where, company name)
     for r in parse_extra(args.companies_extra):
-        known[(r["ats"], r["token"].lower())] = "--companies-extra"
+        known[(r["ats"], r["token"].lower())] = ("--companies-extra", str(r.get("name") or ""))
     try:
         for r in load_companies(Path(args.companies)):
-            known.setdefault((r["ats"], r["token"].lower()), "companies.json")
+            known.setdefault((r["ats"], r["token"].lower()), ("companies.json", str(r.get("name") or "")))
     except (OSError, ValueError, AttributeError):
         pass
     missing: list[str] = []
     if args.universe and ats in UNIVERSE_ATS:
         rows, missing = cached_universe([ats])
         for r in rows:
-            known.setdefault((r["ats"], r["token"].lower()), "the cached open company list")
-    where = known.get((ats, tok.lower()))
+            known.setdefault((r["ats"], r["token"].lower()), ("the cached open company list", str(r.get("name") or "")))
+    where, company_name = known.get((ats, tok.lower()), ("", ""))
+    if where and is_skipped(company_name):  # the run also matches the row's company name
+        return done("skipped_by_option", "remove it from --skip-companies",
+                    "%s (%s) matches --skip-companies" % (key, company_name))
     if where:
         note = ["%s is in %s" % (key, where)]
         if ats == "workday" and where != "companies.json" and where != "--companies-extra":

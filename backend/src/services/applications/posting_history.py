@@ -26,6 +26,7 @@ the word "ghost" is never shown. Never raises: a failure yields no rows.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import hashlib
 import logging
@@ -215,12 +216,16 @@ async def similar_ads(
     )
     own_link = canonical_url(apply_url or "")
     want_company = normalized_company_key(company or "")
+    rows = [dict(r) for r in await cur.fetchall()]
+    # the same link is the same posting, not a re-post
+    rows = [r for r in rows if not (own_link and canonical_url(str(r.get("job_url") or "")) == own_link)]
+    # Hashing up to SIMILAR_AD_MAX_ROWS ads is CPU work: keep it off the event loop.
+    prints = await asyncio.to_thread(
+        lambda: [fingerprint(str(r.get("job_description_snapshot") or "")) for r in rows]
+    )
     matches: list[dict[str, Any]] = []
-    for r in await cur.fetchall():
-        row = dict(r)
-        if own_link and canonical_url(str(row.get("job_url") or "")) == own_link:
-            continue  # the same link is the same posting, not a re-post
-        score = similarity(mine, fingerprint(str(row.get("job_description_snapshot") or "")))
+    for row, theirs in zip(rows, prints):
+        score = similarity(mine, theirs)
         if score < settings.SIMILAR_AD_THRESHOLD:
             continue
         created = _parse(row.get("created_at"))
