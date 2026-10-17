@@ -164,6 +164,12 @@ Apify web-fetch tool, before you build. Never cite from memory.
   its own psycopg connection on the profile path. **Rule:** to test a "single/only X" claim,
   enumerate what performs X, never what imports X.
 
+- 2026-10-17: reviewing a worker's port, the lead "restored" a career-ops regex prefix by
+  grepping a diff that showed only one line of a two-line string, and so added the prefix a
+  SECOND time. "This position has been filled." stopped reading as closed; CodeRabbit caught
+  it on PR #875. **Rule:** before editing a multi-line expression, print the whole expression
+  (sed -n) and diff it against the reference line, then run a test that hits that exact branch.
+
 ## Tooling
 
 - `scripts/gen-api-types.sh` calls plain `python`. **Rule:** run it with the

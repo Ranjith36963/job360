@@ -16,6 +16,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Have every quote checked against the file before code is built.
 
 ## Parallel workers and PRs
+- Before editing a multi-line regex or string, print it whole and diff it against the reference.
 - Every worker prompt starts with "read session-lessons". Workers run targeted tests
   only; CI runs the full suite.
 - Before every backend push: `ruff check .` and `python scripts/mypy_ratchet.py`.
