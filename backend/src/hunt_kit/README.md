@@ -70,7 +70,8 @@ Teamtailor, BambooHR, Workday.
 
 Open feeds (no key): freehire.me, Himalayas, Remotive, Arbeitnow (uses its
 remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
-The Muse, Hacker News "Who is hiring" (latest monthly thread).
+The Muse, Hacker News "Who is hiring" (latest monthly thread), and the SimplifyJobs
+new-grad and intern lists on GitHub (`githublists`: title only, open the link for the ad).
 
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.

@@ -39,6 +39,7 @@ Open feeds are read through their public APIs. Link back to the original listing
 - RemoteOK API (link back and mention the source; kept in `extra.attribution`)
 - Adzuna API (needs your own free key)
 - Jooble API (needs your own free key)
+- SimplifyJobs New-Grad-Positions and Summer2027-Internships `listings.json` on GitHub (public lists, no licence file; read at run time, never stored; link back to the original listing). The idea of reading them follows freehire (MIT, `scripts/harvest_boards.py`).
 
 Patterns studied from career-ops (MIT) and ai-job-search (MIT); no code copied.
 

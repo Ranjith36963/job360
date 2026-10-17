@@ -291,5 +291,42 @@ def test_jooble_with_key_posts_json(monkeypatch):
 
 def test_feeds_registry_matches_contract():
     assert set(kf.FEEDS) == {"hn", "jobicy", "workingnomads", "wwr", "themuse", "arbeitnow",
-                             "himalayas", "remotive", "remoteok", "adzuna", "jooble"}
+                             "himalayas", "remotive", "remoteok", "adzuna", "jooble", "githublists"}
     assert all(callable(f) for f in kf.FEEDS.values())
+
+
+# ---- GitHub job lists (SimplifyJobs listings.json), 2026-10-17
+_GH_ROWS = [
+    {"company_name": "Starling Bank", "title": "Machine Learning Engineer", "active": True, "is_visible": True,
+     "url": "https://apply.workable.com/starling-bank/j/0A13F0BEE0/apply", "locations": ["London, UK"],
+     "date_posted": 1792229415, "sponsorship": "Other", "category": "AI/ML"},
+    {"company_name": "Old Co", "title": "Machine Learning Engineer", "active": False, "url": "https://x.example/1",
+     "locations": ["NYC"], "date_posted": 1792229415},
+    {"company_name": "Hidden Co", "title": "Machine Learning Engineer", "active": True, "is_visible": False,
+     "url": "https://x.example/2", "locations": ["Remote in USA"], "date_posted": 1792229415},
+    "not a row",
+]
+
+
+def test_githublists_keeps_only_active_visible_rows():
+    jobs = kf.parse_githublists(_GH_ROWS, kf.GITHUB_LISTS[0])
+    assert [j["company"] for j in jobs] == ["Starling Bank"]
+    j = jobs[0]
+    assert j["location"] == "London, UK" and j["posted"] and j["source"] == "feed:githublists"
+    assert j["description"] == "" and j["extra"]["title_only"] is True
+    assert j["extra"]["sponsorship"] == "Other" and j["extra"]["list"] == "New-Grad-Positions"
+    assert kf.parse_githublists({"not": "a list"}) == []
+
+
+def test_githublists_reads_both_lists_and_matches_titles():
+    seen: list[str] = []
+
+    def http(url, **kw):
+        seen.append(url)
+        return 200, _GH_ROWS
+
+    stats: dict = {}
+    jobs = kf.fetch_githublists(["machine learning engineer"], http, stats, days=36500)
+    assert seen == list(kf.GITHUB_LISTS)
+    assert len(jobs) == 2 and stats["jobs"] == 2  # one active row from each list
+    assert kf.fetch_githublists(["chef"], http, {}, days=36500) == []

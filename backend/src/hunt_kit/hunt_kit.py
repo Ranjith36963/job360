@@ -84,8 +84,9 @@ FEED_SOURCES = (
     "hn",
     "adzuna",
     "jooble",
+    "githublists",
 )
-SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn"}
+SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn", "simplify": "githublists"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
 # "default" skips the giant unvetted BambooHR list (~11k boards). Workday runs by default, but only a
 # daily rotating slice of its open list (--workday-max), each board searched by the user's titles.

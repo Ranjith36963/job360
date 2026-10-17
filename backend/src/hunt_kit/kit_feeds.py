@@ -597,6 +597,42 @@ def fetch_jooble(queries: list[str], http: HttpFn, stats: Stats, *, days: int, c
     return _keep(jobs, queries, days, search=False)
 
 
+# ---------------------------------------------------------------------------- GitHub job lists
+# Open new-grad and intern lists kept on GitHub by SimplifyJobs (the same files freehire's
+# harvest reads). Read at run time; nothing is stored. They carry no description: open the link.
+GITHUB_LISTS = (
+    "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
+    "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+)
+
+
+def parse_githublists(payload: Any, list_url: str = "") -> list[Job]:
+    """Parse one SimplifyJobs ``listings.json`` (a JSON array); only active, visible rows."""
+    out: list[Job] = []
+    for r in payload if isinstance(payload, list) else []:
+        if not isinstance(r, dict) or not r.get("active") or r.get("is_visible") is False:
+            continue
+        locs = [str(x) for x in r.get("locations") or [] if x]
+        out.append(_job(
+            title=r.get("title"), company=r.get("company_name"), url=r.get("url"),
+            location=" | ".join(locs), posted=_date(r.get("date_posted")),
+            source="feed:githublists", board="githublists",
+            remote=True if any("remote" in x.lower() for x in locs) else None,
+            extra={"sponsorship": r.get("sponsorship"), "category": r.get("category"),
+                   "list": list_url.split("/SimplifyJobs/", 1)[-1].split("/", 1)[0],
+                   "attribution": "SimplifyJobs GitHub list", "title_only": True}))
+    return out
+
+
+@_feed
+def fetch_githublists(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """SimplifyJobs new-grad and intern lists on GitHub, keyword-matched locally (title only)."""
+    jobs: list[Job] = []
+    for url in GITHUB_LISTS:
+        jobs += parse_githublists(_get(http, stats, url), url)
+    return _keep(jobs, queries, days)
+
+
 FEEDS: dict[str, Callable[..., list[Job]]] = {
     "hn": fetch_hn,
     "jobicy": fetch_jobicy,
@@ -609,4 +645,5 @@ FEEDS: dict[str, Callable[..., list[Job]]] = {
     "remoteok": fetch_remoteok,
     "adzuna": fetch_adzuna,
     "jooble": fetch_jooble,
+    "githublists": fetch_githublists,
 }
