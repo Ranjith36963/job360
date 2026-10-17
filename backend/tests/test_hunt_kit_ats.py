@@ -190,3 +190,25 @@ def test_garbage_and_raising_http_return_empty(name):
 def test_import_has_no_side_effects():
     src = KIT.read_text(encoding="utf-8")
     assert "import urllib" not in src and "import requests" not in src
+
+
+def test_workday_searches_each_title_and_dedupes():
+    lst = _json("workday_list.json")
+    http = _stub({"/jobs": (200, lst)})
+    row = {"name": "NVIDIA", "ats": "workday", "token": "nvidia", "tenant": "nvidia", "wd": "wd5",
+           "site": "NVIDIAExternalCareerSite", "search_texts": ["ai engineer", "llm engineer"]}
+    jobs = kit_ats.fetch_workday(row, http, {})
+    posts = [json.loads(c[2]) for c in http.calls if c[1] == "POST"]
+    assert [p["searchText"] for p in posts] == ["ai engineer", "llm engineer"]
+    # the same postings came back for both titles: each is kept (and detail-fetched) once
+    assert len(jobs) == len(lst["jobPostings"])
+    gets = [c for c in http.calls if c[1] == "GET"]
+    assert len(gets) == len(lst["jobPostings"])
+
+
+def test_workday_search_pages_are_capped_per_title():
+    full = {"total": 5000, "jobPostings": [{"title": f"t{i}", "externalPath": f"/job/x/t{i}"} for i in range(20)]}
+    http = _stub({"/jobs": (200, full)})
+    row = {"name": "X", "token": "x", "wd": 1, "site": "s", "search_texts": ["a"]}
+    kit_ats.fetch_workday(row, http, {})
+    assert len([c for c in http.calls if c[1] == "POST"]) == kit_ats.SEARCH_PAGES

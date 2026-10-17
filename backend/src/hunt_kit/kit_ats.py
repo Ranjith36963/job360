@@ -37,6 +37,7 @@ Job = dict[str, Any]
 Http = Callable[..., "tuple[int, Any]"]
 
 MAX_PAGES = 10  # hard cap on pages per board
+SEARCH_PAGES = 2  # Workday: pages per searched title
 WORKDAY_PAGE = 20
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -172,18 +173,27 @@ def fetch_workday(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> lis
         hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
         postings: list[dict[str, Any]] = []
         ok = False
-        for page in range(MAX_PAGES):
-            body = json.dumps({"appliedFacets": {}, "limit": WORKDAY_PAGE,
-                               "offset": page * WORKDAY_PAGE, "searchText": ""}).encode()
-            status, data = _get(http, api, method="POST", data=body, headers=hdrs)
-            if status != 200 or not isinstance(data, dict):
-                break
-            ok = True
-            batch = data.get("jobPostings") or []
-            postings.extend(p for p in batch if isinstance(p, dict))
-            total = data.get("total")
-            if len(batch) < WORKDAY_PAGE or (isinstance(total, int) and (page + 1) * WORKDAY_PAGE >= total):
-                break
+        # With the user's titles, ask the board's own search for each one (a few pages), so only
+        # matching postings get a detail fetch. Without them, list the whole board (capped).
+        texts = [str(s) for s in row.get("search_texts") or [] if str(s).strip()]
+        seen_paths: set[str] = set()
+        for text, max_pages in ([(s, SEARCH_PAGES) for s in texts] or [("", MAX_PAGES)]):
+            for page in range(max_pages):
+                body = json.dumps({"appliedFacets": {}, "limit": WORKDAY_PAGE,
+                                   "offset": page * WORKDAY_PAGE, "searchText": text}).encode()
+                status, data = _get(http, api, method="POST", data=body, headers=hdrs)
+                if status != 200 or not isinstance(data, dict):
+                    break
+                ok = True
+                batch = data.get("jobPostings") or []
+                for p in batch:
+                    key = str(p.get("externalPath") or "") if isinstance(p, dict) else ""
+                    if isinstance(p, dict) and key not in seen_paths:
+                        seen_paths.add(key)
+                        postings.append(p)
+                total = data.get("total")
+                if len(batch) < WORKDAY_PAGE or (isinstance(total, int) and (page + 1) * WORKDAY_PAGE >= total):
+                    break
         jobs: list[Job] = []
         for p in postings:
             path = str(p.get("externalPath") or "")

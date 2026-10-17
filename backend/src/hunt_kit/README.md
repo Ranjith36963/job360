@@ -36,7 +36,9 @@ What the options mean:
 - `--maybe-relocation` also keep ads that only say "relocation".
 - `--only-countries`, `--exclude-countries` optional ISO2 filters. `--any-location` keeps every title match.
 - `--titles`, `--exclude-title-words`, `--max-years 5` (drop jobs asking 5+ years), `--days 30`.
-- `--sources` default skips the two giant lists (bamboohr, workday). `all` runs everything. Or give a list: `greenhouse,lever,ashby,hn,jobicy`.
+- `--sources` default skips only the giant BambooHR list. `all` runs everything. Or give a list: `greenhouse,lever,ashby,hn,jobicy`.
+- `--workday-max 300` Workday sites from the open list per run (default 300; 0 = all ~13k). The slice moves every day, so daily runs cover the whole list over time. Each Workday site is searched by your titles (up to 6), so only matching jobs are fetched.
+- `--freehire-pages 10` freehire pages of 100 per title and place (default 10, at most 100).
 - `--limit-boards 40` quick test run. `--companies PATH` your own list. `--companies-extra "ashby:acme,lever:foo"` your own boards, run first.
 - `--history seen_jobs.json` (default) remembers what was output. The next run shows only NEW jobs and tells you how many were skipped as seen. `--all` ignores history, `--history none` turns it off.
 - `--check-live` re-fetches each kept job once and drops 404, 410 and "closed" pages.

@@ -87,8 +87,11 @@ FEED_SOURCES = (
 )
 SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
-# "default" skips the two giant unvetted lists (bamboohr, workday: ~24k boards).
-DEFAULT_SKIP = ("bamboohr", "workday")
+# "default" skips the giant unvetted BambooHR list (~11k boards). Workday runs by default, but only a
+# daily rotating slice of its open list (--workday-max), each board searched by the user's titles.
+DEFAULT_SKIP = ("bamboohr",)
+WORKDAY_MAX = 300  # universe Workday boards per run; the slice moves every day
+WORKDAY_SEARCH_TITLES = 6  # Workday boards are searched by at most this many titles
 
 DEFAULT_TITLES = (
     "ai engineer, llm engineer, agent engineer, agentic engineer, generative ai engineer, "
@@ -800,7 +803,7 @@ def _now() -> float:
 FINGERPRINT_ARGS = (
     "titles", "exclude_title_words", "work_countries", "remote", "visa_onsite", "maybe_relocation",
     "only_countries", "exclude_countries", "any_location", "max_years", "days", "sources", "companies",
-    "universe", "companies_extra", "skip_companies", "limit_boards",
+    "universe", "companies_extra", "skip_companies", "limit_boards", "freehire_pages", "workday_max",
 )
 
 
@@ -1457,6 +1460,10 @@ def _freehire_offer(col: Collector, r: dict[str, Any], seen_rows: set[str]) -> N
     )
 
 
+FREEHIRE_PAGE = 100  # the agent search's largest page (checked live 2026-10-17)
+FREEHIRE_MAX_OFFSET = 10_000  # offset + limit may not pass this ("pagination too deep")
+
+
 def _freehire(col: Collector, queries: list[str]) -> None:
     pr = col.prefs
     pl = get_places()
@@ -1469,16 +1476,16 @@ def _freehire(col: Collector, queries: list[str]) -> None:
     if not filters:
         filters.append({})
     seen_rows: set[str] = set()
+    # freehire pages are at most 100 rows and offset+limit may not pass 10,000.
+    pages = max(1, min(int(getattr(col.args, "freehire_pages", 10) or 10), FREEHIRE_MAX_OFFSET // FREEHIRE_PAGE))
     for q in queries:
         for f in filters:
-            for page in range(4):
+            for page in range(pages):
                 col.bump("freehire", "boards_tried")
                 p = dict(
                     q=q,
-                    limit=50,
-                    offset=page * 50,
-                    semantic_ratio=0,
-                    include_description="true",
+                    limit=FREEHIRE_PAGE,
+                    offset=page * FREEHIRE_PAGE,
                     description_format="text",
                     posted_within_days=col.args.days,
                 )
@@ -1492,7 +1499,7 @@ def _freehire(col: Collector, queries: list[str]) -> None:
                 for r in rows:  # one row at a time, straight to the filters: never hold every query's ads
                     _freehire_offer(col, r, seen_rows)
                 del rows, d
-                if n_rows < 50:
+                if n_rows < FREEHIRE_PAGE:
                     break
 
 
@@ -1614,8 +1621,24 @@ def load_universe(
     return rows
 
 
+def rotate_workday(
+    boards: list[dict[str, Any]], limit: int | None, today: _dt.date | None = None
+) -> list[dict[str, Any]]:
+    """Keep every non-universe board; keep only a daily rotating slice of the open Workday list.
+
+    The open list has ~13k Workday sites, too many for one run. Each day takes the next ``limit``
+    of them (wrapping round), so a daily run covers the whole list over time. 0 or None = all.
+    """
+    pool = [b for b in boards if b["ats"] == "workday" and b.get("source") == "universe"]
+    if not limit or limit <= 0 or len(pool) <= limit:
+        return boards
+    start = ((today or _dt.date.today()).toordinal() * limit) % len(pool)
+    keep = {id(b) for b in (pool + pool)[start:start + limit]}
+    return [b for b in boards if not (b["ats"] == "workday" and b.get("source") == "universe") or id(b) in keep]
+
+
 def select_sources(value: str) -> list[str]:
-    """'all' = everything; 'default' = all except the two giant lists; else a comma list."""
+    """'all' = everything; 'default' = all except the giant BambooHR list; else a comma list."""
     v = (value or "default").strip().lower()
     if v == "all":
         return list(ALL_SOURCES)
@@ -1682,6 +1705,9 @@ def run(args: argparse.Namespace) -> Collector:
             seen_b.add(k)
             uniq.append(r)
     boards = [r for r in uniq if r["ats"] in sources and not col.skipped(r["name"], r["token"])]
+    boards = rotate_workday(boards, getattr(args, "workday_max", WORKDAY_MAX))
+    boards = [dict(b, search_texts=queries[:WORKDAY_SEARCH_TITLES]) if b["ats"] == "workday" else b
+              for b in boards]
     if args.limit_boards:
         counts: collections.Counter[str] = collections.Counter()
         picked = []
@@ -1973,9 +1999,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-years", type=int, default=5, help="drop jobs whose minimum stated years >= N")
     p.add_argument("--days", type=int, default=30, help="only jobs posted in the last N days")
     p.add_argument(
+        "--workday-max",
+        type=int,
+        default=WORKDAY_MAX,
+        help="open-list Workday boards per run, a slice that moves daily (default 300; 0 = all)",
+    )
+    p.add_argument(
+        "--freehire-pages",
+        type=int,
+        default=10,
+        help="freehire pages of 100 per title and place (default 10; at most 100)",
+    )
+    p.add_argument(
         "--sources",
         default="default",
-        help="'default', 'all' (adds bamboohr+workday), or a comma list of: " + ",".join(ALL_SOURCES),
+        help="'default', 'all' (adds bamboohr), or a comma list of: " + ",".join(ALL_SOURCES),
     )
     p.add_argument("--companies", default=str(Path(__file__).resolve().parent / "companies.json"))
     p.add_argument(

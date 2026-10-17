@@ -305,7 +305,10 @@ def test_arbeitnow_style_visa_flag_becomes_a_visa_line() -> None:
 
 
 def test_select_sources_and_aliases() -> None:
-    assert "workday" not in hk.select_sources("default") and "workday" in hk.select_sources("all")
+    # 2026-10-17 (owner: search wider): Workday runs by default as a rotating slice;
+    # only the giant BambooHR list stays opt-in.
+    assert "workday" in hk.select_sources("default") and "bamboohr" not in hk.select_sources("default")
+    assert "bamboohr" in hk.select_sources("all")
     assert hk.select_sources("weworkremotely,hn") == ["wwr", "hn"]
 
 
@@ -677,3 +680,47 @@ def test_freehire_maps_posted_at_to_posted(monkeypatch: pytest.MonkeyPatch) -> N
     col = hk.Collector(_args(work_countries="IN", days=3650, titles="ai engineer"))
     hk._freehire(col, ["ai engineer"])
     assert [r["posted"] for r in col.results] == ["2026-10-14"]
+
+
+# ---- wider search (2026-10-17)
+def test_freehire_pages_deeper_in_pages_of_100(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict] = []
+
+    def fake(url, params=None, **k):
+        calls.append(dict(params or {}))
+        n = 100 if len(calls) < 3 else 7  # two full pages, then a short one
+        return 200, {"data": [{"public_slug": "j%d-%d" % (len(calls), i), "url": "https://x.example/%d/%d" % (len(calls), i),
+                               "title": "AI Engineer", "company": "Acme", "countries": ["in"]} for i in range(n)]}
+
+    monkeypatch.setattr(hk, "http_get_json", fake)
+    col = hk.Collector(_args(work_countries="IN", remote=False, days=3650, titles="ai engineer"))
+    hk._freehire(col, ["ai engineer"])
+    assert [c["limit"] for c in calls] == [100, 100, 100]
+    assert [c["offset"] for c in calls] == [0, 100, 200]
+    assert all("semantic_ratio" not in c and "include_description" not in c for c in calls)
+
+
+def test_freehire_pages_flag_is_capped_at_the_api_depth(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict] = []
+    monkeypatch.setattr(hk, "http_get_json", lambda url, params=None, **k: (calls.append(params), (200, {"data": [
+        {"public_slug": "s%d-%d" % (len(calls), i), "url": "https://x.example/%d/%d" % (len(calls), i),
+         "title": "x", "countries": ["in"]} for i in range(100)]}))[1])
+    col = hk.Collector(_args(work_countries="IN", remote=False, days=3650, freehire_pages=500))
+    hk._freehire(col, ["ai engineer"])
+    assert len(calls) == hk.FREEHIRE_MAX_OFFSET // hk.FREEHIRE_PAGE
+    assert max(c["offset"] + c["limit"] for c in calls) == hk.FREEHIRE_MAX_OFFSET
+
+
+def test_rotate_workday_takes_a_daily_slice_of_the_open_list_only() -> None:
+    import datetime as dt
+
+    uni = [{"ats": "workday", "token": "t%d|wd1|s" % i, "source": "universe"} for i in range(10)]
+    own = [{"ats": "workday", "token": "mine|wd5|s", "source": "user"}, {"ats": "greenhouse", "token": "g", "source": "jobsync"}]
+    day = dt.date(2026, 10, 17)
+    a = hk.rotate_workday(own + uni, 3, today=day)
+    b = hk.rotate_workday(own + uni, 3, today=day + dt.timedelta(days=1))
+    assert own[0] in a and own[1] in a  # the user's own and other boards always run
+    pick = lambda r: [x["token"] for x in r if x.get("source") == "universe"]  # noqa: E731
+    assert len(pick(a)) == len(pick(b)) == 3 and pick(a) != pick(b)
+    assert hk.rotate_workday(own + uni, 0, today=day) == own + uni  # 0 = all
+    assert hk.build_parser().parse_args([]).workday_max == hk.WORKDAY_MAX
