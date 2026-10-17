@@ -2,7 +2,7 @@
 """THE WIP LIMIT — refuse a 3rd open PR by PARKING it, never by losing it.
 
 OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)". Refuse does NOT
-mean discard. A pull request opened while `wip.limit` (2) other real PRs are
+mean discard. A pull request opened while `wip.limit` (5 since 2026-10-17; was 2) other real PRs are
 already open gets PARKED, a comment says why and how to undo it, and the
 owner is told in Slack once.
 

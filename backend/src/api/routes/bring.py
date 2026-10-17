@@ -497,6 +497,15 @@ async def bring_job(
     checks = checks_for_application(
         app_now, description=str(app_now.get("job_description_snapshot") or body.description)
     )
+    # Facts from THIS user's own records: company history, a near-identical ad
+    # brought before, and the posting signs (posting_history.py). Never raises.
+    from src.services.applications.posting_history import history_checks  # noqa: PLC0415
+
+    if app_now:
+        checks += await history_checks(
+            db, user.id, app_now, checks,
+            description=str(app_now.get("job_description_snapshot") or body.description),
+        )
 
     get_audit_logger().info(
         "job_brought",

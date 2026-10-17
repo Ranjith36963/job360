@@ -17,6 +17,7 @@ update of the slot is explicitly not history) and, once, a legacy
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
@@ -1168,13 +1169,13 @@ async def _artifact_version_count_and_max(db: JobDatabase, application_id: int, 
 
 
 async def _run_save_checks(user_id: str, kind: str, text: str) -> list[dict[str, str]]:
-    """The deterministic checks (``cv_checks``) for a CV / cover letter being saved.
+    """The deterministic checks (``cv_checks``) for a CV / cover letter / outreach / answers being saved.
 
     Never raises and never blocks a save: any failure just yields fewer checks.
     The PDF is rendered here (CV only) so what the checks read is exactly what the
     kit and the download will hand out.
     """
-    if kind not in ("cv", "cover_letter"):
+    if kind not in ("cv", "cover_letter", "outreach", "answers"):
         return []
     import asyncio  # noqa: PLC0415
 
@@ -1186,6 +1187,11 @@ async def _run_save_checks(user_id: str, kind: str, text: str) -> list[dict[str,
 
         profile = await asyncio.to_thread(load_profile, user_id)
     except Exception:  # noqa: BLE001 - checks are advisory; a profile read must not break a save
+        # Loud, not silent: without the profile the claim checks cannot run, and check_submit's
+        # cv_unsupported_claims ask reads them (broken must not look like "nothing unsupported").
+        logging.getLogger("job360.spine").exception(
+            "save_checks_profile_unavailable", extra={"kind": safe_log_value(kind)},
+        )
         profile = None
     checks = cv_checks.check_text(kind, text, profile)
     if kind == "cv":

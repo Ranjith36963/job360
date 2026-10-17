@@ -65,6 +65,8 @@ daily limit is reached). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, duplicate_job
 (same job already applied to: `stop` in auto mode, else `ask`),
+cv_unsupported_claims (`ask`: the CV's checks list numbers or terms that are not
+in the profile; show them, fix the CV or get the user's yes that each is true),
 held_by_other_session (another assistant session read this application's kit
 recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
@@ -697,6 +699,23 @@ Job360 counts what you saved; it never ranks or recommends a job. `save_fit` sto
 - `bring_job` can return `repost`: among the jobs the user brought, this title at this company was first
   brought on `first_seen`, 1-90 days ago, under another link. Tell the user; they decide. Never skip a job
   because of it. A 409 from `bring_job` carries the same sentence.
+- `checks` (bring_job, get_job, the kit) also carry facts from the user's OWN records:
+  `company_history` (earlier applications here: answered, or no answer after 28+ days; a rejection is
+  an answer), `similar_ad` (an ad brought in the last 90 days with near-identical text under another
+  link, title or company: a re-post, or an agency's copy) and `posting_signs` (how many of 5 signs -
+  old ad, re-posted, talent-pool wording, job-board link, company silent before - apply). Tell the
+  user; 2+ signs are worth a look, never a verdict and never a reason to skip a job.
+- IS IT STILL OPEN (before writing a CV): call it closed ONLY on clear proof - HTTP 404/410, a redirect
+  to a search or listing page, the board's own API no longer listing the job, or the page saying it is
+  closed or filled (in any language). A blank page, a bot check, a timeout or a page you cannot read is
+  NOT proof: say "could not check" and go on. Ask the board's API first when there is one:
+  Greenhouse `boards-api.greenhouse.io/v1/boards/<board>/jobs/<id>`, Ashby
+  `api.ashbyhq.com/posting-api/job-board/<board>` (is the id in the list?), Lever
+  `api.lever.co/v0/postings/<board>/<id>` (a Lever 404 is NOT proof: some live jobs are hidden from it;
+  open the page). Closed = `withdrawn` with detail "posting closed".
+- WHY DID THE HUNT MISS IT: when the user brings a job your hunt did not find, run the kit's
+  `--why-missed <link>` (or check `companies.json` yourself) and tell them the one change that would
+  have caught it, e.g. `--companies-extra "ashby:acme"`.
 - `stats(view="patterns")`: outcome counts by archetype, remote policy, team size (1-50, 51-500, 501+)
   and agency/direct. Needs 5 sent applications. A `signal` needs 2 decided applications; `clear_lead` =
   10+ points over the overall rate. `rejection_reasons` are exact words: group them yourself.

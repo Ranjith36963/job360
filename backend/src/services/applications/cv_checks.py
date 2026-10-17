@@ -1,4 +1,4 @@
-"""Deterministic save-time checks for a saved CV / cover letter (no LLM, never blocks).
+"""Deterministic save-time checks for a saved CV / cover letter / message (no LLM, never blocks).
 
 Job360 has no model of its own: the assistant writes the CV, we only compare the
 text against the user's OWN profile data and look at the rendered PDF. Every
@@ -14,6 +14,8 @@ Borrowed ideas (patterns only, rewritten for this codebase):
   * MadsLorentzen/ai-job-search (MIT) tools/verify_layout.py - "final page ends early" measure.
   * Pickle-Pixel/ApplyPilot validator.py (AGPL) - IDEA ONLY (flag leaked assistant
     chatter); the phrase lists below are our own, no code or list copied.
+  * kevinastuhuaman/trackly-cli (MIT) lib/application-text.js:6-9 - the stock-phrase
+    patterns in :func:`stock_phrases` (see there).
 """
 
 from __future__ import annotations
@@ -499,6 +501,33 @@ def letter_no_header(text: str, profile: Any = None) -> Optional[dict[str, str]]
     )
 
 
+# ── (f) writing: stock phrases in a letter, message or answer ───────────────
+
+# kevinastuhuaman/trackly-cli (MIT) lib/application-text.js:6-9 GENERIC_PATTERNS
+# (generic_ai_filler, formulaic_contrast), and career-ops (MIT) modes/followup.md:115
+# (the four follow-up stock phrases rules.md already bans for employer emails).
+# Writing phrases, not skills (hard rule #28 is about profile extraction).
+_AI_FILLER_RE = re.compile(r"\b(?:delve|leverage my unique|thrilled to apply|dynamic team|esteemed company)\b", re.I)
+_CONTRAST_RE = re.compile(r"\bnot just\b[^.]{0,160}\bbut also\b", re.I)
+_STOCK_FOLLOW_UP_RE = re.compile(r"\b(?:just checking in|just following up|touching base|circling back)\b", re.I)
+WRITING_KINDS = ("cover_letter", "outreach", "answers")
+
+
+def stock_phrases(text: str) -> Optional[dict[str, str]]:
+    """Phrases that read as generic AI or stock writing. Warn only: the user decides."""
+    hits: list[str] = []
+    for rx in (_AI_FILLER_RE, _STOCK_FOLLOW_UP_RE):
+        hits.extend(f'"{m.group(0)}"' for m in rx.finditer(text))
+    if _CONTRAST_RE.search(text):
+        hits.append('"not just ... but also"')
+    if not hits:
+        return None
+    return _issue(
+        "stock_phrases", "warn",
+        f"Reads as stock or AI writing: {_listed(hits)}. Say it plainly in the user's own words.",
+    )
+
+
 # ── entry points ────────────────────────────────────────────────────────────
 
 
@@ -506,6 +535,8 @@ def check_text(kind: str, text: str, profile: Any) -> list[dict[str, str]]:
     """All text checks for one saved version. ``profile`` may be ``None`` (then only
     chatter runs - an empty source would flag everything)."""
     out: list[Optional[dict[str, str]]] = [leaked_chatter(text)]
+    if kind in WRITING_KINDS:
+        out.append(stock_phrases(text))
     if kind == "cover_letter":
         out.append(letter_no_header(text, profile))
     if profile is not None:
