@@ -70,6 +70,12 @@ BOARD_SOURCES = (
     "teamtailor",
     "bamboohr",
     "workday",
+    "icims",
+    "oraclecloud",
+    "successfactors",
+    "taleo",
+    "jobvite",
+    "eightfold",
 )
 FEED_SOURCES = (
     "freehire",
@@ -1518,13 +1524,27 @@ _BOARD_FN: dict[str, Callable[[Collector, dict[str, Any]], None]] = {
 _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
+_TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
+
+
 def parse_extra(value: str | None) -> list[dict[str, str]]:
-    """Parse --companies-extra "ats:token,ats:token" into board rows (these run first)."""
+    """Parse --companies-extra "ats:token,ats:token" into board rows (these run first).
+
+    Most boards are ``ats:slug``. Taleo is ``taleo:tenant/section``, Oracle is
+    ``oraclecloud:host/siteNumber`` and SuccessFactors is ``successfactors:host[/brand]``.
+    """
     out: list[dict[str, str]] = []
     for item in split_csv(value):
         ats, _, tok = item.partition(":")
         ats, tok = ats.strip().lower(), tok.strip()
-        if ats in BOARD_SOURCES and ats != "workday" and re.fullmatch(r"[A-Za-z0-9_.-]+", tok):
+        if ats in _TWO_PART and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", tok):
+            first, second = tok.split("/")  # taleo tenant/section, oraclecloud host/siteNumber
+            out.append({"name": first, "ats": ats, "token": tok, _TWO_PART[ats][0]: first,
+                        _TWO_PART[ats][1]: second, "source": "user"})
+        elif ats == "successfactors" and re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", tok):
+            out.append({"name": tok.split("/")[0], "ats": ats, "token": tok, "source": "user"})  # site host[/brand]
+        elif ats in BOARD_SOURCES and ats not in _TWO_PART and ats != "workday" \
+                and re.fullmatch(r"[A-Za-z0-9_.-]+", tok):
             out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
     return out
 
@@ -1626,20 +1646,23 @@ def load_universe(
     return rows
 
 
+_OPEN_LISTS = ("universe", "harvest")  # unvetted lists: their Workday rows share the daily slice
+
+
 def rotate_workday(
     boards: list[dict[str, Any]], limit: int | None, today: _dt.date | None = None
 ) -> list[dict[str, Any]]:
-    """Keep every non-universe board; keep only a daily rotating slice of the open Workday list.
+    """Keep every vetted board; keep only a daily rotating slice of the open Workday lists.
 
     The open list has ~13k Workday sites, too many for one run. Each day takes the next ``limit``
     of them (wrapping round), so a daily run covers the whole list over time. 0 or None = all.
     """
-    pool = [b for b in boards if b["ats"] == "workday" and b.get("source") == "universe"]
+    pool = [b for b in boards if b["ats"] == "workday" and b.get("source") in _OPEN_LISTS]
     if not limit or limit <= 0 or len(pool) <= limit:
         return boards
     start = ((today or _dt.date.today()).toordinal() * limit) % len(pool)
     keep = {id(b) for b in (pool + pool)[start:start + limit]}
-    return [b for b in boards if not (b["ats"] == "workday" and b.get("source") == "universe") or id(b) in keep]
+    return [b for b in boards if not (b["ats"] == "workday" and b.get("source") in _OPEN_LISTS) or id(b) in keep]
 
 
 def select_sources(value: str) -> list[str]:
@@ -2027,7 +2050,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="also fetch the open job-board-aggregator company lists (cached 7 days)",
     )
-    p.add_argument("--companies-extra", default="", help="your own boards first, e.g. ashby:acme,lever:foo")
+    p.add_argument("--companies-extra", default="", help="your own boards first, e.g. ashby:acme,taleo:acme/2")
     p.add_argument("--skip-companies", default="", help="comma list; names or tokens containing these are skipped")
     p.add_argument("--limit-boards", type=int, default=0, help="max boards per ATS (quick runs)")
     p.add_argument("--workers", type=int, default=MAX_WORKERS, help="parallel workers (max 8)")

@@ -363,12 +363,22 @@ def test_companies_json_valid() -> None:
         "personio",
         "teamtailor",
         "bamboohr",
+        "icims",
+        "oraclecloud",
+        "successfactors",
+        "taleo",
+        "jobvite",
+        "eightfold",
     }
     seen = set()
     for r in rows:
         assert r["ats"] in ok and r["token"].strip()
         if r["ats"] == "workday":
             assert r["tenant"] and r["wd"] and r["site"]
+        if r["ats"] == "taleo":
+            assert r["tenant"] and r["section"]
+        if r["ats"] == "oraclecloud":
+            assert r["host"] and r["siteNumber"]
         k = (r["ats"], r["token"].lower())
         assert k not in seen
         seen.add(k)
@@ -724,3 +734,21 @@ def test_rotate_workday_takes_a_daily_slice_of_the_open_list_only() -> None:
     assert len(pick(a)) == len(pick(b)) == 3 and pick(a) != pick(b)
     assert hk.rotate_workday(own + uni, 0, today=day) == own + uni  # 0 = all
     assert hk.build_parser().parse_args([]).workday_max == hk.WORKDAY_MAX
+
+
+def test_parse_extra_new_ats() -> None:
+    rows = hk.parse_extra("icims:careers-acme,taleo:acme/2,oraclecloud:jpmc.fa.oraclecloud.com/CX_1002,"
+                          "successfactors:jobs.zf.com,taleo:bad,eightfold:bayer")
+    by = {r["ats"]: r for r in rows}
+    assert by["icims"]["token"] == "careers-acme" and by["eightfold"]["token"] == "bayer"
+    assert (by["taleo"]["tenant"], by["taleo"]["section"]) == ("acme", "2")
+    assert (by["oraclecloud"]["host"], by["oraclecloud"]["siteNumber"]) == ("jpmc.fa.oraclecloud.com", "CX_1002")
+    assert by["successfactors"]["token"] == "jobs.zf.com"
+    assert sum(r["ats"] == "taleo" for r in rows) == 1  # "taleo:bad" has no section
+
+
+def test_harvest_workday_rows_rotate() -> None:
+    rows = [{"ats": "workday", "token": "t%d|wd1|s" % i, "source": "harvest"} for i in range(10)]
+    rows.append({"ats": "workday", "token": "mine|wd1|s", "source": "user"})
+    kept = hk.rotate_workday(rows, 3)
+    assert len(kept) == 4 and any(r["source"] == "user" for r in kept)

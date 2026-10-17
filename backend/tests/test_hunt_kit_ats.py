@@ -52,8 +52,9 @@ def _check_shape(jobs, source):
         assert j["posted"] == "" or len(j["posted"]) == 10
 
 
-def test_registry_has_all_six():
-    assert set(kit_ats.ATS_FETCHERS) == {"workday", "workable", "recruitee", "personio", "teamtailor", "bamboohr"}
+def test_registry_has_all_twelve():
+    assert set(kit_ats.ATS_FETCHERS) == {"workday", "workable", "recruitee", "personio", "teamtailor", "bamboohr",
+                                       "icims", "oraclecloud", "successfactors", "taleo", "jobvite", "eightfold"}
 
 
 def test_workday_parses_list_and_detail():

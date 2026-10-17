@@ -66,7 +66,9 @@ retries twice on 429, 30 second timeout.
 
 Company boards (from `companies.json`, no key needed):
 Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, Personio,
-Teamtailor, BambooHR, Workday.
+Teamtailor, BambooHR, Workday, iCIMS, Oracle Recruiting Cloud (`oraclecloud`),
+SuccessFactors, Taleo, Jobvite, Eightfold. iCIMS reads the date and description
+from the first 20 ads of each board only; the rest come back undated.
 
 Open feeds (no key): freehire.me, Himalayas, Remotive, Arbeitnow (uses its
 remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
@@ -92,6 +94,12 @@ and job-board-aggregator, all MIT, see `NOTICE.md`). Many tokens are dead; that
 is fine, they answer 404 fast. Job360 never runs, ranks or uses this list.
 The user's own `preferences.target_companies` come first: pass them with
 `--companies-extra "ashby:acme,lever:foo"` (format `ats:token`) or edit the file.
+Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/section/`),
+`oraclecloud:host/siteNumber` (from `host/hcmUI/CandidateExperience/en/sites/CX_1/`), and
+`successfactors:jobs.example.com` (the career-site host). iCIMS is `icims:careers-acme`
+(from `careers-acme.icims.com`), Jobvite `jobvite:slug`, Eightfold `eightfold:tenant`.
+Maintainers grow the list with `python scripts/harvest_hunt_boards.py` (from `backend/`;
+see its docstring). Its Workday rows share the daily `--workday-max` slice.
 The assistant may copy good entries into the user's target_companies with
 `update_profile`.
 
@@ -158,7 +166,7 @@ Never bring jobs in bulk without reading them.
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
 - `kit_ats.py` the other company-board types, `kit_feeds.py` open and keyed feeds
 - `kit_places.py`, `places.json`, `build_places.py` place data
-- `companies.json` board list (`name`, `ats`, `token`, `source`; Workday rows also `tenant`, `wd`, `site`)
+- `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`)
 - `NOTICE.md` where the data came from, with licences
 
 ## Safety
