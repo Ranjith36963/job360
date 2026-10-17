@@ -85,6 +85,10 @@ FEED_SOURCES = (
     "adzuna",
     "jooble",
     "githublists",
+    "arbeitsagentur",
+    "jobtech",
+    "mycareersfuture",
+    "jobbank",
 )
 SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn", "simplify": "githublists"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
@@ -1707,8 +1711,8 @@ def run(args: argparse.Namespace) -> Collector:
             uniq.append(r)
     boards = [r for r in uniq if r["ats"] in sources and not col.skipped(r["name"], r["token"])]
     boards = rotate_workday(boards, getattr(args, "workday_max", WORKDAY_MAX))
-    boards = [dict(b, search_texts=queries[:WORKDAY_SEARCH_TITLES]) if b["ats"] == "workday" else b
-              for b in boards]
+    wd_titles = "\n".join(queries[:WORKDAY_SEARCH_TITLES])  # board rows hold strings; kit_ats splits it
+    boards = [dict(b, search_texts=wd_titles) if b["ats"] == "workday" else b for b in boards]
     if args.limit_boards:
         counts: collections.Counter[str] = collections.Counter()
         picked = []

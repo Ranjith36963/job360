@@ -291,7 +291,8 @@ def test_jooble_with_key_posts_json(monkeypatch):
 
 def test_feeds_registry_matches_contract():
     assert set(kf.FEEDS) == {"hn", "jobicy", "workingnomads", "wwr", "themuse", "arbeitnow",
-                             "himalayas", "remotive", "remoteok", "adzuna", "jooble", "githublists"}
+                             "himalayas", "remotive", "remoteok", "adzuna", "jooble", "githublists",
+                             "arbeitsagentur", "jobtech", "mycareersfuture", "jobbank"}
     assert all(callable(f) for f in kf.FEEDS.values())
 
 
@@ -330,3 +331,84 @@ def test_githublists_reads_both_lists_and_matches_titles():
     assert seen == list(kf.GITHUB_LISTS)
     assert len(jobs) == 2 and stats["jobs"] == 2  # one active row from each list
     assert kf.fetch_githublists(["chef"], http, {}, days=36500) == []
+
+
+# ---- national job services (shapes follow career-ops' providers, MIT), 2026-10-17
+def _rec_http(routes):
+    calls: list = []
+
+    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+        calls.append((url, method, data, headers or {}))
+        for frag, resp in routes.items():
+            if frag in url:
+                return resp
+        return 404, None
+
+    http.calls = calls
+    return http
+
+
+_BA = {"ergebnisliste": [
+    {"referenznummer": "10001-1000123456-S", "stellenangebotsTitel": "Machine Learning Engineer (m/w/d)",
+     "firma": "Acme GmbH", "stellenlokationen": [{"adresse": {"ort": "Berlin", "region": "BERLIN"}}]},
+    {"stellenangebotsTitel": "no ref"},
+]}
+
+
+def test_arbeitsagentur_runs_only_for_germany_and_sends_the_public_client_id():
+    http = _rec_http({"rest.arbeitsagentur.de": (200, _BA)})
+    assert kf.fetch_arbeitsagentur(["machine learning engineer"], http, {}, days=30, countries=["GB"]) == []
+    assert http.calls == []
+    jobs = kf.fetch_arbeitsagentur(["machine learning engineer"], http, {}, days=30, countries=["DE", "GB"])
+    assert [j["company"] for j in jobs] == ["Acme GmbH"]
+    assert jobs[0]["url"] == "https://www.arbeitsagentur.de/jobsuche/jobdetail/10001-1000123456-S"
+    assert jobs[0]["location"] == "Berlin, Germany"
+    url, _m, _d, hdrs = http.calls[0]
+    assert "pc/v6/jobs?" in url and "was=machine+learning+engineer" in url and "angebotsart=1" in url
+    assert hdrs.get("X-API-Key") == kf.ARBEITSAGENTUR_KEY
+
+
+def test_jobtech_parses_hits_for_sweden_only():
+    body = {"hits": [{"id": 29876543, "headline": "Machine Learning Engineer", "employer": {"name": "Spotify"},
+                      "description": {"text": "Build ML."}, "publication_date": "2026-10-10T08:00:00",
+                      "workplace_address": {"municipality": "Stockholm", "country": "Sverige"}}, {"headline": "no id"}]}
+    http = _rec_http({"jobtechdev.se": (200, body)})
+    assert kf.fetch_jobtech(["machine learning engineer"], http, {}, days=36500, countries=["NO"]) == []
+    jobs = kf.fetch_jobtech(["machine learning engineer"], http, {}, days=36500, countries=["SE"])
+    assert len(jobs) == 1 and jobs[0]["url"] == "https://arbetsformedlingen.se/platsbanken/annonser/29876543"
+    assert jobs[0]["description"] == "Build ML." and jobs[0]["posted"] == "2026-10-10"
+    assert "offset=0" in http.calls[0][0] and "limit=100" in http.calls[0][0]
+
+
+def test_mycareersfuture_posts_and_pages_by_query_string():
+    body = {"results": [{"title": "Machine Learning Engineer", "description": "<p>Build</p>",
+                         "metadata": {"jobPostId": "abc", "jobDetailsUrl": "https://www.mycareersfuture.gov.sg/job/x-abc",
+                                      "newPostingDate": "2026-10-12"},
+                         "hiringCompany": {"name": "GovTech"}, "postedCompany": {"name": "Agency"},
+                         "address": {"districts": [{"location": "Central"}]}}]}
+    http = _rec_http({"mycareersfuture": (200, body)})
+    jobs = kf.fetch_mycareersfuture(["machine learning engineer"], http, {}, days=36500, countries=["SG"])
+    assert [j["company"] for j in jobs] == ["GovTech"] and jobs[0]["location"] == "Central, Singapore"
+    url, method, data, _h = http.calls[0]
+    assert method == "POST" and url.endswith("?limit=100&page=0")
+    assert json.loads(data) == {"search": "machine learning engineer", "sortBy": ["new_posting_date"], "page": 0}
+
+
+_JOBBANK_ATOM = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Job Bank</title>
+<entry><title>Machine learning engineer</title>
+<link rel="alternate" type="text/html" href="https://www.jobbank.gc.ca/jobsearch/jobposting/45678901"/>
+<updated>2026-10-11T10:00:00-04:00</updated>
+<summary type="html">&lt;strong&gt;Employer:&lt;/strong&gt; Maple AI Inc.&lt;br&gt;&lt;strong&gt;Location:&lt;/strong&gt; Toronto (ON)&lt;br&gt;</summary>
+</entry></feed>"""
+
+
+def test_jobbank_parses_atom_for_canada_only():
+    http = _rec_http({"jobbank.gc.ca": (200, _JOBBANK_ATOM)})
+    assert kf.fetch_jobbank(["machine learning engineer"], http, {}, days=36500, countries=["US"]) == []
+    jobs = kf.fetch_jobbank(["machine learning engineer"], http, {}, days=36500, countries=["CA"])
+    assert len(jobs) == 1
+    j = jobs[0]
+    assert j["company"] == "Maple AI Inc." and j["location"] == "Toronto (ON), Canada"
+    assert j["url"] == "https://www.jobbank.gc.ca/jobsearch/jobposting/45678901" and j["posted"] == "2026-10-11"
+    assert kf.parse_jobbank("<!DOCTYPE x [<!ENTITY a 'b'>]><feed/>") == []  # entity feeds refused

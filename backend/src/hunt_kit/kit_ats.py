@@ -175,7 +175,8 @@ def fetch_workday(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> lis
         ok = False
         # With the user's titles, ask the board's own search for each one (a few pages), so only
         # matching postings get a detail fetch. Without them, list the whole board (capped).
-        texts = [str(s) for s in row.get("search_texts") or [] if str(s).strip()]
+        raw = row.get("search_texts") or []
+        texts = [str(s) for s in (raw.split("\n") if isinstance(raw, str) else raw) if str(s).strip()]
         seen_paths: set[str] = set()
         for text, max_pages in ([(s, SEARCH_PAGES) for s in texts] or [("", MAX_PAGES)]):
             for page in range(max_pages):

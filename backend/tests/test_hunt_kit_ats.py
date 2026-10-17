@@ -212,3 +212,11 @@ def test_workday_search_pages_are_capped_per_title():
     row = {"name": "X", "token": "x", "wd": 1, "site": "s", "search_texts": ["a"]}
     kit_ats.fetch_workday(row, http, {})
     assert len([c for c in http.calls if c[1] == "POST"]) == kit_ats.SEARCH_PAGES
+
+
+def test_workday_accepts_titles_as_the_run_passes_them():
+    """hunt_kit.run passes the titles as one newline-joined string (board rows hold strings)."""
+    http = _stub({"/jobs": (200, {"total": 0, "jobPostings": []})})
+    row = {"name": "X", "token": "x", "wd": 1, "site": "s", "search_texts": "ai engineer\nllm engineer"}
+    kit_ats.fetch_workday(row, http, {})
+    assert [json.loads(c[2])["searchText"] for c in http.calls if c[1] == "POST"] == ["ai engineer", "llm engineer"]

@@ -73,6 +73,11 @@ remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
 The Muse, Hacker News "Who is hiring" (latest monthly thread), and the SimplifyJobs
 new-grad and intern lists on GitHub (`githublists`: title only, open the link for the ad).
 
+National job services (no key; each runs only when its country is one of yours):
+Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech /
+Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
+(`jobbank`, title only).
+
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
 - Jooble: get a free key at https://jooble.org/api/about . Set `JOOBLE_KEY`. Jooble gives short snippets.

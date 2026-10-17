@@ -129,8 +129,11 @@ def test_hunt_recipe_reads_the_brief_and_names_no_country():
 
     text = load_recipe("hunt").text
     flat = " ".join(text.split()).lower()
+    # Owner 2026-10-16 (B+C) replaced the big-site ban with: the assistant opens Indeed slowly and
+    # LinkedIn's logged-out pages at very low volume; a login wall/CAPTCHA/bot check stops that site.
     for words in ("search_brief", "counts_if", "coverage table", "word for word", "never your own summary",
-                  "never scrape or browser-search linkedin", "terms forbid automated access", "7 in 10"):
+                  "open indeed search and job pages yourself, slowly", "logged-out job pages at very low volume",
+                  "never solve or dodge it", "7 in 10"):
         assert words in flat, words
     # the old rule that turned "remote worldwide" into "remote from where you live"
     assert "work from where they are" not in flat
