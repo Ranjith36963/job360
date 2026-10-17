@@ -24,7 +24,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   and `test_outreach_people` (MCP tool count).
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
 - Read CI failures from the job summary, not the log tail (Postgres noise).
-- Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 2).
+- Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
 
 ## Real applications for the owner
 - An answer that is not clearly yes/no gets one clarifying question.
