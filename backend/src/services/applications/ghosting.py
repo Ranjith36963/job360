@@ -1,11 +1,14 @@
-"""Automatic ``ghosted`` (feedback loop slice 1, owner decisions #1 and #4).
+"""Automatic ``ghosted`` (feedback loop slice 1, owner decisions #1, #4 and #18).
 
 An application whose status is still exactly ``applied`` and whose newest
 status-family event is older than ``settings.GHOSTED_AFTER_DAYS`` gets ONE
 ``ghosted`` event through the normal spine append (never raw SQL), recorded by
 ``system``. Idempotent: the status becomes ``ghosted`` so a second sweep finds
 nothing. A later employer reply moves it off ``ghosted`` by the ordinary replay
-rule (status.replay_status). Called only at the start of doctor (which reports
+rule (status.replay_status). Decision 18: silence only counts after the
+assistant has read the inbox - the application's ``inbox_checked_at`` must be set and
+at or after (newest status event + GHOSTED_AFTER_DAYS); never checked = never
+auto-ghosted. Called only at the start of doctor (which reports
 the ids in ``ghosted_now``); a failure there is logged and never breaks it.
 """
 from __future__ import annotations
@@ -16,7 +19,7 @@ from typing import TYPE_CHECKING, Optional
 from src.core import settings
 from src.services.applications import spine
 from src.services.applications.stats import _SIMULATED_SQL
-from src.services.applications.status import _event_when
+from src.services.applications.status import _event_when, _when
 from src.utils.logger import get_audit_logger, get_logger, safe_log_value
 
 if TYPE_CHECKING:
@@ -36,7 +39,7 @@ async def sweep_ghosted(db: JobDatabase, user_id: str, now: Optional[datetime] =
     types = tuple(t for t in settings.APPLICATION_STATUS_EVENT_TYPES if t != "brought")
     marks = ", ".join("?" for _ in types)
     cur = await db._db.execute(
-        "SELECT e.application_id, e.occurred_at, e.recorded_at "  # noqa: S608 - placeholders only
+        "SELECT e.application_id, e.occurred_at, e.recorded_at, a.inbox_checked_at "  # noqa: S608 - placeholders only
         "FROM application_events e JOIN applications a ON a.id = e.application_id "
         "WHERE a.user_id = ? AND a.status = 'applied' AND e.user_id = ? "
         f"AND e.event_type IN ({marks}) "
@@ -45,14 +48,20 @@ async def sweep_ghosted(db: JobDatabase, user_id: str, now: Optional[datetime] =
         (user_id, user_id, *types, user_id, settings.SIMULATION_EVENT_TYPE),
     )
     newest: dict[int, datetime] = {}
+    checked: dict[int, Optional[datetime]] = {}
     for row in await cur.fetchall():
         when = _event_when({"occurred_at": row["occurred_at"], "recorded_at": row["recorded_at"]})
         if when is None:
             continue
         app_id = int(row["application_id"])
+        checked[app_id] = _when(row["inbox_checked_at"])
         if app_id not in newest or when > newest[app_id]:
             newest[app_id] = when
-    due = sorted(app_id for app_id, when in newest.items() if when < cutoff)
+    # Never checked (or an unreadable cursor) = never auto-ghosted: the mail may hold the answer.
+    due = sorted(
+        app_id for app_id, when in newest.items()
+        if when < cutoff and (seen := checked.get(app_id)) is not None and seen >= when + timedelta(days=days)
+    )
     marked: list[int] = []
     for app_id in due[: settings.GHOSTED_SWEEP_MAX]:
         try:

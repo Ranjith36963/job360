@@ -41,6 +41,18 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
     },
     "unblocked": {"resolution": "retried"},
     "proof_text": {"text": "Thank you, your application has been received.", "page_host": "jobs.example.com"},
+    # Feedback loop slice 4 (interview side); checked by interview_payloads.validate.
+    "interview_session": {
+        "round": "technical", "date": "2026-10-14", "source": "debrief", "input_source": "recall",
+        "interviewer_role": "engineering manager", "competency_tags": ["system-design", "sql"],
+        "gaps": [{"topic": "query planning", "status": "gap"}],
+        "signals": [{"signal": "scope_ambiguity", "quote": "We will see what the role becomes."}],
+    },
+    "process_friction": {"reason": "rescheduled twice"},
+    "assessment": {
+        "platform": "HackerRank", "subject": "SQL", "threshold_pct": 70, "score_pct": 82,
+        "stale_note": "questions looked out of date",
+    },
 }
 
 

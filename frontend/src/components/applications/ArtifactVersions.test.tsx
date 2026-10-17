@@ -125,6 +125,11 @@ describe("ArtifactVersions — Compare", () => {
     expect(screen.queryByTestId("artifact-ats")).toBeNull();
     expect(screen.queryByText(/ATS/)).toBeNull();
   });
+
+  it("writes every underscore of a kind as a space (skill_gap_report)", () => {
+    render(<ArtifactVersions applicationId={1} artifacts={[{ ...artifact(905, 1), kind: "skill_gap_report" }]} />);
+    expect(screen.getByText("skill gap report")).toBeInTheDocument();
+  });
 });
 
 describe("ArtifactVersions — Copy / Word / PDF", () => {

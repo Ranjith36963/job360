@@ -188,6 +188,50 @@ def validate_outcome_payload(event_type: str, payload: dict[str, Any]) -> dict[s
     return payload
 
 
+# ── Automatic employer emails (feedback loop slice 2) ────────────────────────
+AUTO_EMAIL_SENT_TYPES = frozenset({"checkin_sent", "feedback_asked", "feedback_followup_sent"})
+AUTO_EMAIL_SKIPPED_TYPE = "auto_email_skipped"
+AUTO_EMAIL_KINDS = ("checkin", "feedback_request", "feedback_followup")
+AUTO_EMAIL_TO_KINDS = ("person", "careers_address")
+AUTO_EMAIL_TO_MAX_CHARS = 320
+AUTO_EMAIL_THREAD_MAX_CHARS = 256
+AUTO_EMAIL_SUBJECT_MAX_CHARS = 300
+AUTO_EMAIL_TEXT_MAX_CHARS = 3000
+AUTO_EMAIL_REASON_MAX_CHARS = 200
+
+
+def _payload_required_str(payload: dict[str, Any], key: str, max_chars: int) -> None:
+    if key not in payload:
+        raise SpineError(422, f"payload.{key} is required")
+    _payload_str(payload, key, max_chars)
+    if not payload[key].strip():
+        raise SpineError(422, f"payload.{key} must not be empty")
+
+
+def validate_auto_email_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload of the four automatic-employer-email events (422 naming the key).
+
+    The three ``*_sent`` types need ``to``, ``text`` (the exact text sent) and ``to_kind``;
+    ``thread_id`` / ``subject`` are optional. ``auto_email_skipped`` needs ``kind`` and ``reason``.
+    Run AFTER ``validate_payload``."""
+    if event_type in AUTO_EMAIL_SENT_TYPES:
+        _payload_required_str(payload, "to", AUTO_EMAIL_TO_MAX_CHARS)
+        _payload_required_str(payload, "text", AUTO_EMAIL_TEXT_MAX_CHARS)
+        _payload_str(payload, "thread_id", AUTO_EMAIL_THREAD_MAX_CHARS)
+        _payload_str(payload, "subject", AUTO_EMAIL_SUBJECT_MAX_CHARS)
+        if "to_kind" not in payload:
+            raise SpineError(422, "payload.to_kind is required")
+        if payload["to_kind"] not in AUTO_EMAIL_TO_KINDS:
+            raise SpineError(422, f"payload.to_kind must be one of {list(AUTO_EMAIL_TO_KINDS)}")
+    elif event_type == AUTO_EMAIL_SKIPPED_TYPE:
+        if "kind" not in payload:
+            raise SpineError(422, "payload.kind is required")
+        if payload["kind"] not in AUTO_EMAIL_KINDS:
+            raise SpineError(422, f"payload.kind must be one of {list(AUTO_EMAIL_KINDS)}")
+        _payload_required_str(payload, "reason", AUTO_EMAIL_REASON_MAX_CHARS)
+    return payload
+
+
 async def check_outcome_event_id(
     db: JobDatabase, user_id: str, application_id: int, event_type: str, payload: Mapping[str, Any]
 ) -> None:
@@ -506,21 +550,24 @@ def parse_follow_up_on(raw: str, today: date) -> Optional[str]:
     return parsed.isoformat()
 
 
-async def user_today(db: JobDatabase, user_id: str, *, now: Optional[datetime] = None) -> date:
-    """The caller's own "today", in ``users.timezone`` (migration 0012 —
-    default ``'UTC'``; the column has existed since then but nothing set or
-    read it before this feature). An unset or unrecognised zone name falls
-    back to UTC rather than 500ing — a bad string in that column must degrade,
-    never break every read that touches it. ``now`` exists only so a test can
-    pin the instant; real callers never pass it."""
+async def user_zone(db: JobDatabase, user_id: str) -> ZoneInfo:
+    """The caller's own time zone (``users.timezone``, migration 0012 - default
+    ``'UTC'``). An unset or unrecognised zone name falls back to UTC rather than
+    500ing - a bad string in that column must degrade, never break every read."""
     cur = await db._db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
     row = await cur.fetchone()
     raw_zone = (dict(row).get("timezone") if row else None) or "UTC"
-    when = now if now is not None else datetime.now(timezone.utc)
     try:
-        zone: ZoneInfo = ZoneInfo(raw_zone)
+        return ZoneInfo(raw_zone)
     except (ZoneInfoNotFoundError, ValueError):
-        zone = ZoneInfo("UTC")
+        return ZoneInfo("UTC")
+
+
+async def user_today(db: JobDatabase, user_id: str, *, now: Optional[datetime] = None) -> date:
+    """The caller's own "today", in ``users.timezone`` (see ``user_zone``).
+    ``now`` exists only so a test can pin the instant; real callers never pass it."""
+    zone = await user_zone(db, user_id)
+    when = now if now is not None else datetime.now(timezone.utc)
     return when.astimezone(zone).date()
 
 
@@ -1386,12 +1433,18 @@ async def save_fit(
     recorded_by: str,
     score: Optional[int],
     verdict: Optional[str],
-    gaps: Optional[list[str]],
+    gaps: Optional[list[Any]],
     reasoning: Optional[str],
     visa_signal: Optional[str] = None,
     visa_detail: Optional[str] = None,
     visa_country: Optional[str] = None,
     axes: Optional[list[dict[str, Any]]] = None,
+    score_source: Optional[str] = None,
+    jd_requirements: Optional[list[Any]] = None,
+    archetype: Optional[str] = None,
+    remote_policy: Optional[str] = None,
+    team_size: Optional[int] = None,
+    via: Optional[str] = None,
 ) -> dict[str, Any]:
     """R6 — overwrite the fit-verdict SLOT on ``applications`` (the current
     answer) and append a ``fit_judged`` event carrying the whole verdict (the
@@ -1402,8 +1455,12 @@ async def save_fit(
     and the event payload carries it, so the judgement is history too.
     ``axes`` (2026-09-20): the fit picture — the agent's own named dimensions
     with a role/you number on each (``validate_axes``); part of the slot, so
-    a save without axes clears them."""
-    # Lazy: visa.py imports SpineError / get_owned_application from here.
+    a save without axes clears them. Slice 5: a score needs ``verdict`` (its
+    reason) and ``score_source``; gaps carry hard/soft kinds; ``jd_requirements``
+    and four extras (archetype, remote_policy, team_size, via) are part of the
+    slot too - every save replaces them (``fit_record.validate_fit_record``)."""
+    # Lazy: visa.py / fit_record.py import SpineError / get_owned_application from here.
+    from src.services.applications import fit_record  # noqa: PLC0415
     from src.services.applications import visa as visa_service  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
@@ -1411,16 +1468,31 @@ async def save_fit(
         raise SpineError(404, "application not found")
 
     axes_list = validate_axes(axes)
+    rec = fit_record.validate_fit_record(
+        score=score, verdict=verdict, score_source=score_source, gaps=gaps,
+        jd_requirements=jd_requirements, archetype=archetype, remote_policy=remote_policy,
+        team_size=team_size, via=via,
+    )
     now = datetime.now(timezone.utc).isoformat()
-    gaps_list = gaps or []
-    gaps_json = json.dumps(gaps_list)
+    gaps_detail = rec["gaps"]
+    gaps_list = [g["text"] for g in gaps_detail]
+    jd_list = rec["jd_requirements"]
     await db._db.execute(
         "UPDATE applications SET fit_score = ?, fit_verdict = ?, fit_gaps = ?, fit_reasoning = ?, "
-        "fit_axes = ?, fit_recorded_by = ?, fit_recorded_at = ?, updated_at = ? WHERE id = ?",
-        (score, verdict, gaps_json, reasoning, json.dumps(axes_list), recorded_by, now, now, application_id),
+        "fit_axes = ?, fit_recorded_by = ?, fit_recorded_at = ?, fit_score_source = ?, "
+        "fit_gaps_detail = ?, fit_jd_requirements = ?, fit_archetype = ?, fit_remote_policy = ?, "
+        "fit_team_size = ?, fit_via = ?, updated_at = ? WHERE id = ?",
+        (
+            score, verdict, json.dumps(gaps_list), reasoning, json.dumps(axes_list), recorded_by, now,
+            score_source, json.dumps(gaps_detail), json.dumps(jd_list), rec["archetype"],
+            rec["remote_policy"], rec["team_size"], rec["via"], now, application_id,
+        ),
     )
     payload: dict[str, Any] = {
         "score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning, "axes": axes_list,
+        "score_source": score_source, "gaps_detail": gaps_detail, "jd_requirements": jd_list,
+        "archetype": rec["archetype"], "remote_policy": rec["remote_policy"],
+        "team_size": rec["team_size"], "via": rec["via"],
     }
     visa: Optional[dict[str, Any]] = None
     if visa_signal is not None or visa_detail or visa_country:
@@ -1435,13 +1507,33 @@ async def save_fit(
         db, user_id=user_id, application_id=application_id, event_type="fit_judged",
         payload=payload, occurred_at=now, recorded_by=recorded_by,
     )
-    get_audit_logger().info("fit_saved", extra={"event": "fit_saved", "application_id": application_id})
+    extras = [
+        name for name, val in (
+            ("archetype", rec["archetype"]), ("remote_policy", rec["remote_policy"]),
+            ("team_size", rec["team_size"]), ("via", rec["via"]),
+        ) if val is not None
+    ]
+    get_audit_logger().info(
+        "fit_saved",
+        extra={
+            "event": "fit_saved", "application_id": safe_log_value(application_id),
+            "scored": score is not None,
+            "score_source": safe_log_value(score_source, max_len=40), "gaps": len(gaps_list),
+            "hard_gaps": sum(1 for g in gaps_detail if g["kind"] == "hard"),
+            "jd_requirements": len(jd_list), "extras": safe_log_value(extras, max_len=200),
+        },
+    )
+    fit = fit_record.fit_view({
+        "fit_recorded_at": now, "fit_score": score, "fit_verdict": verdict,
+        "fit_score_source": score_source, "fit_gaps": json.dumps(gaps_list),
+        "fit_gaps_detail": json.dumps(gaps_detail), "fit_jd_requirements": json.dumps(jd_list),
+        "fit_reasoning": reasoning, "fit_axes": json.dumps(axes_list), "fit_archetype": rec["archetype"],
+        "fit_remote_policy": rec["remote_policy"], "fit_team_size": rec["team_size"], "fit_via": rec["via"],
+        "fit_recorded_by": recorded_by,
+    })
     return {
         "application_id": application_id,
-        "fit": {
-            "score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning,
-            "axes": axes_list, "recorded_by": recorded_by, "recorded_at": now,
-        },
+        "fit": fit,
         "visa": visa,
         "event_id": event["event_id"],
     }
@@ -1921,17 +2013,9 @@ async def get_application_detail(
     cur = await db._db.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,))
     catalog_present = (await cur.fetchone()) is not None
 
-    fit = None
-    if app_row.get("fit_recorded_at"):
-        fit = {
-            "score": app_row.get("fit_score"),
-            "verdict": app_row.get("fit_verdict"),
-            "gaps": json.loads(app_row.get("fit_gaps") or "[]"),
-            "reasoning": app_row.get("fit_reasoning"),
-            "axes": json.loads(app_row.get("fit_axes") or "[]"),
-            "recorded_by": app_row.get("fit_recorded_by"),
-            "recorded_at": app_row.get("fit_recorded_at"),
-        }
+    from src.services.applications.fit_record import fit_view  # noqa: PLC0415
+
+    fit = fit_view(app_row)
 
     events = await list_events_for_display(db, application_id)
     # R4 — the newest NON-superseded event that carries a scheduled_at (a

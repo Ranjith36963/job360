@@ -11,6 +11,9 @@ describe("eventTitle", () => {
     expect(eventTitle({ event_type: "artifact_saved", payload: { kind: "outreach", version_no: 3 } })).toBe(
       "Outreach message saved",
     );
+    expect(eventTitle({ event_type: "artifact_saved", payload: { kind: "story_bank", version_no: 2 } })).toBe(
+      "Story bank v2 saved",
+    );
   });
 
   it("falls back to the plain label when the payload names no kind", () => {

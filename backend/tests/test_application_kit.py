@@ -101,7 +101,7 @@ async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
     assert resp.status_code == 200, resp.text
     app_id = int(resp.json()["application_id"])
     # The gate also reads a fit score (rule 5c): 80 sits above the seeded line of 50.
-    fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})
+    fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 80, "verdict": "ok", "score_source": "full_ad"})
     assert fit.status_code == 200, fit.text
     return app_id
 

@@ -18,7 +18,9 @@ import {
   HISTORY_PATHS,
   INBOX_MODES,
   LINE_SWITCHES,
+  AUTO_EMAILS_HELP,
   P_ABOVE,
+  P_AUTO_EMAILS,
   P_BELOW,
   P_CAP,
   P_EVERY,
@@ -31,6 +33,7 @@ import {
   historyWhen,
   inboxKey,
   mergeHistory,
+  settingAutoEmails,
   settingScore,
   settingSwitch,
 } from "@/lib/assistant-tab";
@@ -154,6 +157,7 @@ export function AssistantTab() {
   const [busy, setBusy] = useState(false);
   const [score, setScore] = useState("");
   const [cap, setCap] = useState("");
+  const [confirmAuto, setConfirmAuto] = useState(false);
   const enterDone = useRef(false);
 
   const readHistory = useCallback(async () => {
@@ -239,6 +243,7 @@ export function AssistantTab() {
 
   const aboveLine = settingSwitch(view.above_line);
   const belowLine = settingSwitch(view.below_line);
+  const autoEmails = settingAutoEmails(view.auto_employer_emails);
   const submit_mode = String(eff(view.submit_mode) ?? "confirm");
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
@@ -408,6 +413,58 @@ export function AssistantTab() {
               </select>
               {every === "1h" ? "hour" : "hours"}
             </label>
+          </Row>
+        </Section>
+
+        <Section title="Employer emails" hint="Sent in your name by your assistant">
+          <Row title="Automatic employer emails" sub={AUTO_EMAILS_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoEmails}
+              aria-label="Automatic employer emails"
+              data-testid="auto-employer-emails-toggle"
+              disabled={busy}
+              onClick={() => {
+                if (autoEmails) {
+                  setConfirmAuto(false);
+                  void save(P_AUTO_EMAILS, false); // the stop switch applies at once
+                } else {
+                  setConfirmAuto(true);
+                }
+              }}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                autoEmails ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {autoEmails ? "On" : "Off"}
+            </button>
+            {confirmAuto && !autoEmails && (
+              <span className="flex items-center gap-2 text-[13px]">
+                Let your assistant email employers in your name?
+                <button
+                  type="button"
+                  data-testid="auto-employer-emails-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmAuto(false);
+                    void save(P_AUTO_EMAILS, true);
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  data-testid="auto-employer-emails-cancel"
+                  onClick={() => setConfirmAuto(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
           </Row>
         </Section>
 

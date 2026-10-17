@@ -132,7 +132,7 @@ async def test_save_fit_changes_the_slot_and_the_event_carries_it(authenticated_
         app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="DE")
         fit = await client.put(
             f"/api/applications/{app_id}/fit",
-            json={"score": 70, "verdict": "good", "visa_signal": "sponsors", "visa_country": "DE",
+            json={"score": 70, "verdict": "good", "score_source": "full_ad", "visa_signal": "sponsors", "visa_country": "DE",
                   "visa_detail": "Visa sponsorship available."},
         )
         assert fit.status_code == 200, fit.text
@@ -150,7 +150,7 @@ async def test_save_fit_changes_the_slot_and_the_event_carries_it(authenticated_
 async def test_save_fit_without_visa_leaves_the_slot_alone(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="DE")
-        fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 40})
+        fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 40, "verdict": "ok", "score_source": "full_ad"})
         assert fit.status_code == 200, fit.text
         detail = await _detail(client, app_id)
     assert fit.json()["visa"] is None

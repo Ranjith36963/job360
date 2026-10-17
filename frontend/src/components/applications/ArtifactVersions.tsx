@@ -151,7 +151,7 @@ export function ArtifactVersions({
           applicationId,
           artifact.id,
           fmt,
-          `${artifact.kind.replace("_", "-")}-v${artifact.version_no}`
+          `${artifact.kind.replace(/_/g, "-")}-v${artifact.version_no}`
         );
       } catch (err) {
         toast.apiError(err, "Download failed");
@@ -233,7 +233,7 @@ export function ArtifactVersions({
       {[...byKind.entries()].map(([kind, versions]) => (
         <div key={kind}>
           <p className="mb-1 font-mono text-[11px] uppercase tracking-wider text-faint">
-            {kind.replace("_", " ")}
+            {kind.replace(/_/g, " ")}
           </p>
           <div className="flex flex-col">
             {versions.map((artifact) => {

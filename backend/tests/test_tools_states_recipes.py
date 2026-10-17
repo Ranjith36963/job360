@@ -108,7 +108,7 @@ def test_kit_flags_newest_wins_and_decline_clears():
 async def _ready(client: AsyncClient) -> int:
     resp = await client.post("/api/jobs/bring", json=_AD)
     app_id = int(resp.json()["application_id"])
-    await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "good"})
+    await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "good", "score_source": "full_ad"})
     await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": CV})
     return app_id
 
