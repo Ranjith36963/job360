@@ -22,6 +22,7 @@ ai-job-search projects. Apart from the re-writes named below, the code in this f
 - `kit_ats.py`: endpoint patterns for Workday CXS, Workable, Recruitee, Personio, Teamtailor and BambooHR adapted from career-ops providers (https://github.com/career-ops-hq/career-ops, MIT licence); no code copied. Workday's pattern was also checked against ApplyPilot (AGPL) as a pattern-only reference; no code copied.
 - `kit_ats.py`: the iCIMS, Oracle Recruiting Cloud, SuccessFactors, Taleo, Jobvite and Eightfold readers are Python re-writes of career-ops `providers/icims.mjs`, `oraclecloud.mjs`, `successfactors.mjs`, `taleo.mjs`, `jobvite.mjs` and `eightfold.mjs` (MIT, licence below). Same public endpoints and fields; page caps are lower and the kit sends its own honest User-Agent.
 
+- `kit_ats_more.py`: the Rippling, Breezy, Pinpoint, Phenom, UKG UltiPro, ADP Workforce Now, Cornerstone, Gem, JazzHR, Softgarden, JOIN and Jibe readers are Python re-writes of career-ops `providers/rippling.mjs`, `breezy.mjs`, `pinpoint.mjs`, `phenom.mjs`, `ultipro.mjs`, `adp-workforcenow.mjs`, `csod.mjs`, `gem.mjs`, `jazzhr.mjs`, `softgarden.mjs`, `join.mjs` and `jibeapply.mjs` (https://github.com/career-ops-hq/career-ops, MIT, commit 1d5e39a), plus the Pinpoint description fields from freehire `internal/ingest/sources/pinpoint.go` (https://github.com/strelov1/freehire, MIT, commit 615cf00). Same public endpoints and fields; the kit sends its own honest User-Agent and caps pages lower. The tests use the sample responses in career-ops `tests/providers/*.test.mjs`. The `companies.json` rows with `source` `career-ops` for these boards come from career-ops `templates/portals.example.yml` (and its provider tests for Breezy and Pinpoint).
 - `hunt_kit.py` `classify_liveness` (the `--check-live` check): the check order, the closed-posting phrases (English, German, Dutch, Spanish, French) and the "a promise is not a closed notice" clause guard follow career-ops `liveness-core.mjs` (MIT, commit 1d5e39a: `HARD_EXPIRED_PATTERNS` lines 24-84, `normalizeForMatch` 13-21, bot walls 124-134, `classifyLiveness` 224-306); the rule that only a positive death signal closes a job, and the Russian and "job post is closed" phrases, follow freehire `internal/job/liveness/liveness.go` (MIT, commit 615cf00, lines 49-108; upstream has since moved). Re-written in Python; the phrases are kept as the references spell them.
 - `hunt_kit.py` dead-board memory (`--retry-dead`): the 3-miss limit, the 30-day recheck and the rule that only a real 404 counts follow career-ops `dead-boards.mjs` (MIT, lines 9-10, 31-53). The history-file field and the handling of throttled runs are the kit's own.
 - `hunt_kit.py` `--why-missed`: the idea (a closed set of reasons, one proposed change, nothing edited, no network) and the board-from-link table follow career-ops `coverage-check.mjs` (MIT, lines 1-11, 40-50, 54-82) and, for the other boards, `backend/scripts/harvest_hunt_boards.py`. The verdict names are the kit's own.
@@ -46,9 +47,28 @@ Open feeds are read through their public APIs. Link back to the original listing
 - Adzuna API (needs your own free key)
 - Jooble API (needs your own free key)
 - National job services: Bundesagentur fuer Arbeit Jobsuche API (public client id from its own site), Arbetsformedlingen JobTech search API, MyCareersFuture search API, Job Bank search feed. Endpoints and field names follow career-ops' providers (MIT: `arbeitsagentur.mjs`, `platsbanken.mjs`, `mycareersfuture.mjs`, `jobbankca.mjs`); no code copied. Link back to the original listing.
+- `kit_gov.py` (more national job services; Python re-writes of the endpoints, parameters and field names below, no code copied; unofficial site APIs, link back to the original listing). Each fetcher cites file and line in its header comment. All MIT; licence texts are in each repository.
+  - freehire (https://github.com/strelov1/freehire, commit 615cf00): `internal/ingest/sources/eures.go`, `jobnet.go`, `tyomarkkinatori.go`, `trudvsem.go` (EURES, Jobnet, Job Market Finland, Rabota Rossii)
+  - career-ops (https://github.com/career-ops-hq/career-ops, commit 1d5e39a): `providers/vdab.mjs`, `providers/jobstreet.mjs` (VDAB incl. its public front-end key; SEEK, Jobstreet, JobsDB)
+  - ai-job-search (https://github.com/MadsLorentzen/ai-job-search, MIT, Copyright (c) 2026 Mads Lorentzen, commit 407dc34): `.agents/skills/jobnet-search/cli/src/commands/search.ts`, `helpers.ts` (Jobnet search parameters and the `x-csrf` header)
 - SimplifyJobs New-Grad-Positions and Summer2027-Internships `listings.json` on GitHub (public lists, no licence file; read at run time, never stored; link back to the original listing). The idea of reading them follows freehire (MIT, `scripts/harvest_boards.py`).
+- Keyed official APIs (`kit_keyed.py`): Reed, USAJOBS and WhatJobs. Endpoints, parameters, auth headers, paging rules and field names follow freehire (https://github.com/strelov1/freehire, MIT licence, licence text below), commit 615cf00, files `internal/ingest/sources/reed.go`, `usajobs.go`, `whatjobs.go` and the response shapes in `reed_test.go`, `whatjobs_test.go` and `testdata/reed_search.json`, `testdata/usajobs_search.json`. Python re-write; no code copied. Each needs your own free key, read only from the environment. Link back to the original listing.
 
 Patterns studied from career-ops (MIT) and ai-job-search (MIT); no code copied.
+
+## Niche boards (`kit_niche.py`)
+
+Endpoints, query parameters, paging and field names follow the references below, re-written in Python
+(no code copied). Public JSON and RSS only: no key, no login. Link back to the original listing.
+
+- career-ops (https://github.com/career-ops-hq/career-ops, MIT, commit 1d5e39a): `providers/` files
+  `4dayweek.mjs`, `landingjobs.mjs`, `getonbrd.mjs`, `manfred.mjs`, `thehub.mjs`, `remotli.mjs`,
+  `a16z-speedrun-talent.mjs`, `jobspresso.mjs`, `nodesk.mjs`, `cryptocurrencyjobs.mjs`, `pythonorg.mjs`,
+  `larajobs.mjs`, `startup-jobs.mjs`, `nofluffjobs.mjs`, `justjoin.mjs`, `solidjobs.mjs`, `higheredjobs.mjs`.
+- freehire (https://github.com/strelov1/freehire, MIT, commit 615cf00): `internal/ingest/sources/`
+  files `fourdayweek.go` (the /api/v2 feed that robots.txt allows), `powertofly.go`, `jobstash.go`.
+- Test fixtures are shaped like those projects' own test data (`tests/providers/*.test.mjs`,
+  `internal/ingest/sources/*_test.go`).
 
 ## Place data (`places.json`, built by `build_places.py`)
 

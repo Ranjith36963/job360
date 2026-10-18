@@ -292,11 +292,17 @@ def test_why_missed_other_verdicts(why_setup, tmp_path: Path) -> None:
     ask = why_setup
     assert ask("https://www.linkedin.com/jobs/view/123456")["verdict"] == "not_a_board_url"
     assert ask("https://uk.indeed.com/viewjob?jk=abc")["verdict"] == "not_a_board_url"
-    assert ask("https://acme.breezy.hr/p/abc")["verdict"] == "ats_not_supported"
+    assert ask("https://acme.comeet.com/jobs/abc")["verdict"] == "ats_not_supported"  # breezy is read since kit_ats_more
     assert ask("https://careers.example.com/jobs/1")["verdict"] == "ats_not_supported"
     r = ask("https://careers.example.com/jobs/1?gh_jid=555")  # Greenhouse embedded on a company domain
     assert r["verdict"] == "ats_not_supported" and "greenhouse" in r["change"]
     assert ask("not a url")["verdict"] == "invalid_url"
+    # job sites the kit reads as a feed are not "aggregators the kit never reads"
+    r = ask("https://www.reed.co.uk/jobs/data-engineer/123")
+    assert (r["verdict"], r["board"]) == ("feed_covered", "feed:reed")
+    assert ask("https://my.jobstreet.com/job/88")["verdict"] == "feed_covered"
+    r = ask("https://www.seek.com.au/job/92996157", sources="greenhouse")
+    assert r["verdict"] == "board_in_list_source_skipped" and r["change"] == "--sources greenhouse,jobstreet"
     (tmp_path / "seen.json").write_text(json.dumps({"boards": {"greenhouse:known": {"misses": 3, "last": "2026-09-25"}}}))
     r = ask("https://boards.greenhouse.io/known/jobs/1")
     assert r["verdict"] == "board_marked_dead" and "--retry-dead" in r["change"]
