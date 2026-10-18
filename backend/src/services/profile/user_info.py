@@ -83,6 +83,7 @@ _EQUALITY: dict[str, str] = {
     "gender": "line_or_bool", "ethnicity": "line_or_bool", "disability": "line_or_bool",
     "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
 }
+EQUALITY_KEYS: frozenset[str] = frozenset(_EQUALITY)
 _ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company", "topic", "aliases")
 _SALARY_KEYS = ("country", "min", "max", "currency", "period")
 _SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored

@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core import settings
 from src.services.applications import kit, spine
 from src.services.applications.kit import _json
+from src.services.profile import edits as profile_edits
+from src.services.profile import user_info
+from src.services.profile.edits import is_assistant_actor
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -131,10 +134,82 @@ async def _doc(db: JobDatabase, user_id: str, application_id: int, kind: str) ->
     }
 
 
+def _norm(text: Any) -> str:
+    """Compare answers the way a person reads them: case and spacing do not matter."""
+    return " ".join(str(text).split()).casefold()
+
+
+def _field_target(key: str) -> Optional[tuple[str, str]]:
+    """``(overlay path, field)`` for a memory key that is one plain text field the user
+    can change in place (equality, email, phone); None for everything else."""
+    head, _, field = key.partition(".")
+    if head == "equality" and field in user_info.EQUALITY_KEYS:
+        return "user_info.equality", field
+    if key in ("contact.email", "contact.phone"):
+        return "user_info.contact", field
+    return None
+
+
+def _company_key(company: str) -> Optional[str]:
+    return kit.normalized_company_key(company) if company.strip() else None
+
+
+def _approved_for(profile: Any, question: str, company_key: Optional[str]) -> Optional[str]:
+    """The user's approved answer to ``question`` (or one of its other wordings), for this
+    company or any company; the last one in the list wins. None when there is none."""
+    q = _norm(question)
+    hit: Optional[str] = None
+    for rec in kit._records(profile.user_info.answers):
+        if rec.get("approved") is not True or not kit._present(rec.get("answer")):
+            continue
+        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
+        if q not in {_norm(w) for w in wordings if isinstance(w, str)}:
+            continue
+        scoped = str(rec.get("company") or "").strip()
+        if scoped and kit.normalized_company_key(scoped) != company_key:
+            continue
+        hit = str(rec["answer"])
+    return hit
+
+
+def _memory_text(profile: Any, key: str) -> Optional[str]:
+    """The saved text behind a ``contact.*`` / ``equality.*`` / ``logistics.*`` key; None
+    when the value is not one plain text (a yes/no, a list, a salary)."""
+    head, _, field = key.partition(".")
+    block = {"contact": profile.user_info.contact, "equality": profile.user_info.equality,
+             "logistics": profile.user_info.logistics}.get(head)
+    value = block.get(field) if isinstance(block, dict) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _user_check(
+    a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]], company_key: Optional[str],
+    have: dict[str, dict[str, Any]],
+) -> tuple[bool, Optional[str]]:
+    """(verified, changed_to) for one typed answer, read from the user's OWN word:
+    their approved answer to this question, else a memory row they saved on the web
+    that still holds this key. ``changed_to`` = the user's word when it differs from
+    what the assistant typed."""
+    typed = _norm(a["answer"])
+    word = _approved_for(profile, a["question"], company_key)
+    if word is not None:
+        return (True, None) if _norm(word) == typed else (False, word)
+    key = str(a.get("key") or "")
+    path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
+    by = saved.get(path, (None, None))[0] if a["source"] == "memory" and path and key in have else None
+    if not by or is_assistant_actor(str(by)):
+        return False, None
+    text = _memory_text(profile, key)
+    if text is not None and _norm(text) != typed:
+        return False, text if _field_target(key) else None
+    return True, None
+
+
 def _answer_rows(
-    typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]]
+    typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
+    profile: Any = None, company_key: Optional[str] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """(answers with saved_by / saved_at, the flags they raise)."""
+    """(answers with saved_by / saved_at / verified / changed_to, the flags they raise)."""
     answers: list[dict[str, Any]] = []
     flags: list[dict[str, Any]] = []
     for a in typed:
@@ -144,12 +219,20 @@ def _answer_rows(
             at = have[key]["saved_at"]
             if src == "memory":
                 by, at = saved.get(_BLOCK_PATH.get(str(key).split(".", 1)[0], ""), (None, at))
-        answers.append({**a, "key": key, "saved_by": by, "saved_at": at})
-        if src == "guessed":
+        verified, changed_to = (
+            _user_check(a, profile, saved, company_key, have) if profile is not None else (False, None)
+        )
+        answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
+                        "changed_to": changed_to})
+        if changed_to is not None:
+            flags.append(_flag("changed", f"You changed an answer: {a['question']} {_DASH} your assistant must "
+                                          "fill the form again before it can go", key))
+            continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
+        if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
         if not a["answer"]:
             flags.append(_flag("blank", f"An answer is blank: {a['question']}", key))
-        if src in ("memory", "approved") and key and key not in have:
+        if src in ("memory", "approved") and key and key not in have and not verified:
             flags.append(_flag("not_in_memory", f"No longer in memory: {a['question']}", key))
     return answers, flags
 
@@ -184,7 +267,7 @@ async def ready_cards(
         if not isinstance(typed, list) or not typed:
             flags.append(_flag("no_answers", "Your assistant did not list the answers it typed"))
             typed = []
-        answers, answer_flags = _answer_rows(typed, have, saved)
+        answers, answer_flags = _answer_rows(typed, have, saved, profile, _company_key(r["job_company"] or ""))
         flags += answer_flags + _missing_flags(profile, missing, country)
         cv = await _doc(db, user_id, app_id, "cv")
         letter = await _doc(db, user_id, app_id, "cover_letter")
@@ -207,3 +290,92 @@ async def ready_cards(
             "cv": cv, "cover_letter": letter, "answers": answers, "flags": flags,
         })
     return cards
+
+
+# -- Verify / Edit one answer (owner decision 2026-10-18) ---------------------
+# The user stands behind an answer (Verify) or types the right one (Edit). Both
+# save it as the user's own word, so the assistant reads it next time:
+# * a memory answer: its memory row is saved again by the user (it reads
+#   confirmed); an equality / email / phone answer sets that field;
+# * every other answer, and a non-sensitive memory one: the exact question ->
+#   answer is saved as an approved answer (kit ``approved_text``).
+# Sensitive answers (equality, salary, visa) stay out of the approved list when
+# memory holds them. The filled form itself never changes: an edited answer
+# flags the card until the assistant fills the form again with the user's word.
+
+
+def _path_value(profile: Any, path: str) -> Any:
+    head, _, name = path.partition(".")
+    return getattr(profile.user_info if head == "user_info" else profile.preferences, name, None)
+
+
+def _with_approved(profile: Any, question: str, text: str, company_key: Optional[str]) -> list[dict[str, Any]]:
+    """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
+    to the same question (unscoped, or scoped to this company)."""
+    q = _norm(question)
+    keep = [
+        dict(r) for r in kit._records(profile.user_info.answers)
+        if not (_norm(r.get("question") or "") == q and (
+            not str(r.get("company") or "").strip()
+            or kit.normalized_company_key(str(r["company"])) == company_key))
+    ]
+    return [*keep, {"question": question, "answer": text, "approved": True}]
+
+
+def answer_edits(
+    profile: Any, answer: dict[str, Any], text: str, *, edited: bool, company_key: Optional[str]
+) -> list[tuple[str, Any]]:
+    """The memory writes that make ``text`` the user's own answer to ``answer``."""
+    key = str(answer.get("key") or "")
+    memory = answer["source"] == "memory" and bool(key)
+    sensitive = memory and kit._is_sensitive(key.split(".", 1)[0], key)
+    out: list[tuple[str, Any]] = []
+    target = _field_target(key) if memory else None
+    if target is not None:
+        path, field = target
+        out.append((path, {**(_path_value(profile, path) or {}), field: text}))
+    elif memory and not edited:
+        path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
+        value = _path_value(profile, path) if path else None
+        if kit._present(value):
+            out.append((path, value))  # the same value, now saved by the user
+    if not sensitive or not out:
+        out.append((user_info.USER_INFO_ANSWERS_PATH, _with_approved(profile, answer["question"], text, company_key)))
+    return out
+
+
+async def confirm_answer(
+    db: JobDatabase, user_id: str, actor: str, application_id: int, *,
+    form_filled_event_id: int, index: int, new_text: Optional[str],
+) -> list[str]:
+    """Verify (``new_text`` None) or Edit one answer on a ready card; returns the paths
+    written. Raises ``ProfileEditError`` 404 / 409 / 422 and writes nothing on a refusal."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile, load_profile_with_overlay, save_profile  # noqa: PLC0415
+
+    cards = await ready_cards(db, user_id, limit=1, application_id=application_id)
+    if not cards:
+        raise profile_edits.ProfileEditError(404, "This form is no longer waiting for you")
+    card = cards[0]
+    if card["form_filled_event_id"] != form_filled_event_id:
+        raise profile_edits.ProfileEditError(409, "The filled form changed since you looked - look again")
+    if not 0 <= index < len(card["answers"]):
+        raise profile_edits.ProfileEditError(422, "No such answer on this form")
+    answer = card["answers"][index]
+    text = (answer["answer"] if new_text is None else new_text).strip()
+    if not text:
+        raise profile_edits.ProfileEditError(
+            422, "This answer is blank - use Edit to type it" if new_text is None else "Type an answer first"
+        )
+    loaded, _ = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    writes = answer_edits(profile, answer, text, edited=new_text is not None,
+                          company_key=_company_key(card["job_company"]))
+    for path, value in writes:
+        profile_edits.validate_edit(path, value)  # all-or-nothing: a bad value writes nothing
+    if load_profile(user_id, with_overlay=False) is None:
+        save_profile(UserProfile(), user_id, source_action="agent_edit")
+    profile_edits.record_edits(
+        user_id, actor, writes, enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
+    )
+    return [path for path, _ in writes]

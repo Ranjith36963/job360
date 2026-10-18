@@ -2600,6 +2600,13 @@ async def approve_send(
     if form_filled_event_id is not None:
         if await ready_service.newest_fill_id(db, user.id, application_id) != form_filled_event_id:
             raise HTTPException(status_code=409, detail="the filled form changed since you looked - look again")
+    # Owner decision 2026-10-18 - an answer the user edited is not in the form yet: no yes for the old one.
+    card = await ready_service.ready_cards(db, user.id, limit=1, application_id=application_id)
+    if card and any(f["code"] == "changed" for f in card[0]["flags"]):
+        raise HTTPException(
+            status_code=409,
+            detail="you changed an answer - ask your assistant to fill the form again, then Send",
+        )
     payload = {"artifact_id": cv["id"], "sha256": kit_service.sha256_text(cv["text"]), "where": "web"}
     await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
     await _web_decision(db, user, application_id, "submit_approved", payload)
