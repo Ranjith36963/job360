@@ -37,6 +37,7 @@ KIT_FILES: dict[str, str] = {
     "kit_feeds.py": "text/plain; charset=utf-8",
     "kit_gov.py": "text/plain; charset=utf-8",
     "kit_keyed.py": "text/plain; charset=utf-8",
+    "kit_niche.py": "text/plain; charset=utf-8",
     "kit_places.py": "text/plain; charset=utf-8",
     "kit_xml.py": "text/plain; charset=utf-8",
     "companies.json": "application/json",

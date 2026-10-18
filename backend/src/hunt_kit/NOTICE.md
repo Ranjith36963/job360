@@ -51,10 +51,23 @@ Open feeds are read through their public APIs. Link back to the original listing
   - career-ops (https://github.com/career-ops-hq/career-ops, commit 1d5e39a): `providers/vdab.mjs`, `providers/jobstreet.mjs` (VDAB incl. its public front-end key; SEEK, Jobstreet, JobsDB)
   - ai-job-search (https://github.com/MadsLorentzen/ai-job-search, MIT, Copyright (c) 2026 Mads Lorentzen, commit 407dc34): `.agents/skills/jobnet-search/cli/src/commands/search.ts`, `helpers.ts` (Jobnet search parameters and the `x-csrf` header)
 - SimplifyJobs New-Grad-Positions and Summer2027-Internships `listings.json` on GitHub (public lists, no licence file; read at run time, never stored; link back to the original listing). The idea of reading them follows freehire (MIT, `scripts/harvest_boards.py`).
-
 - Keyed official APIs (`kit_keyed.py`): Reed, USAJOBS and WhatJobs. Endpoints, parameters, auth headers, paging rules and field names follow freehire (https://github.com/strelov1/freehire, MIT licence, licence text below), commit 615cf00, files `internal/ingest/sources/reed.go`, `usajobs.go`, `whatjobs.go` and the response shapes in `reed_test.go`, `whatjobs_test.go` and `testdata/reed_search.json`, `testdata/usajobs_search.json`. Python re-write; no code copied. Each needs your own free key, read only from the environment. Link back to the original listing.
 
 Patterns studied from career-ops (MIT) and ai-job-search (MIT); no code copied.
+
+## Niche boards (`kit_niche.py`)
+
+Endpoints, query parameters, paging and field names follow the references below, re-written in Python
+(no code copied). Public JSON and RSS only: no key, no login. Link back to the original listing.
+
+- career-ops (https://github.com/career-ops-hq/career-ops, MIT, commit 1d5e39a): `providers/` files
+  `4dayweek.mjs`, `landingjobs.mjs`, `getonbrd.mjs`, `manfred.mjs`, `thehub.mjs`, `remotli.mjs`,
+  `a16z-speedrun-talent.mjs`, `jobspresso.mjs`, `nodesk.mjs`, `cryptocurrencyjobs.mjs`, `pythonorg.mjs`,
+  `larajobs.mjs`, `startup-jobs.mjs`, `nofluffjobs.mjs`, `justjoin.mjs`, `solidjobs.mjs`, `higheredjobs.mjs`.
+- freehire (https://github.com/strelov1/freehire, MIT, commit 615cf00): `internal/ingest/sources/`
+  files `fourdayweek.go` (the /api/v2 feed that robots.txt allows), `powertofly.go`, `jobstash.go`.
+- Test fixtures are shaped like those projects' own test data (`tests/providers/*.test.mjs`,
+  `internal/ingest/sources/*_test.go`).
 
 ## Place data (`places.json`, built by `build_places.py`)
 

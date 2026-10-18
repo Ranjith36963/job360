@@ -77,6 +77,13 @@ remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
 The Muse, Hacker News "Who is hiring" (latest monthly thread), and the SimplifyJobs
 new-grad and intern lists on GitHub (`githublists`: title only, open the link for the ad).
 
+Niche boards (no key; `kit_niche.py`): 4 Day Week (`4dayweek`), Landing.jobs, Get on Board, getManfred,
+The Hub (Nordics and EU), Remotli (Swiss remote), a16z speedrun talent network, Jobspresso, NoDesk,
+CryptocurrencyJobs, Python.org jobs (`pythonjobs`), LaraJobs, Startup Jobs (`startupjobs`, RSS only),
+PowerToFly, JobStash (Web3) and HigherEdJobs (US universities). The Polish boards `nofluffjobs`,
+`justjoin` and `solidjobs` keep every job when PL is one of your countries and only the remote jobs
+otherwise. Each board is one request, or a few pages, and your words are matched locally.
+
 National job services (no key; each runs only when its country is one of yours):
 Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech /
 Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
