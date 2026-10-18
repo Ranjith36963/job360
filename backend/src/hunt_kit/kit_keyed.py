@@ -202,7 +202,7 @@ def fetch_usajobs(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
 # "gb:" is accepted in the env list too).
 WHATJOBS_URL = "https://api.whatjobs.com/api/v1/jobs.json"
 WHATJOBS_PAGE = 50
-WHATJOBS_CRAWL_IP = "0.0.0.0"  # noqa: S104 - a placeholder user_ip sent to the feed, not a bind address
+WHATJOBS_CRAWL_IP = "0.0.0.0"  # noqa: S104  # nosec B104 - a user_ip value sent to the feed, not a bind address
 WHATJOBS_MARKETS = {  # code -> country name (whatjobs.go:78-130)
     "us": "United States", "br": "Brazil", "de": "Germany", "fr": "France", "ar": "Argentina",
     "at": "Austria", "uk": "United Kingdom", "be": "Belgium", "vn": "Vietnam", "bh": "Bahrain",
