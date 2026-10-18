@@ -85,6 +85,9 @@ Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada J
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
 - Jooble: get a free key at https://jooble.org/api/about . Set `JOOBLE_KEY`. Jooble gives short snippets.
+- Reed: get a free key from https://www.reed.co.uk . Set `REED_API_KEY`. Runs only when GB is one of your countries. Reed gives short snippets.
+- USAJOBS: get a free key from https://www.usajobs.gov . Set `USAJOBS_API_KEY` and `USAJOBS_EMAIL` (the email you registered the key with). Runs only when US is one of your countries.
+- WhatJobs: get a publisher id per country from https://www.whatjobs.com . Set `WHATJOBS_PUBLISHER_IDS` as `gb:123,us:456` (country code, then your id for that country; about 50 countries). Runs only for the countries you gave an id.
 
 For snippet sources the assistant must open the link to read the full ad.
 When you show a job to the user, link back to the original listing (several feeds require it).
@@ -128,6 +131,8 @@ The kit is one source. Use all of these too, for every row's place x title.
 - Himalayas `https://mcp.himalayas.app/mcp`: remote jobs (about 125K). Credit Himalayas with a link.
 - FoundRole `https://www.foundrole.com/ojcp/mcp`: `search_jobs`, `get_job_detail`. Check `datePosted` (old ads appear) and follow the link to the employer's own posting.
 - Indeed's official connector, if your assistant has it (Claude): search, then read each job.
+- ZipRecruiter's official connector, if your assistant has it (Claude): search, then read each job.
+- Dice's official connector, if your assistant has it (Claude): search, then read each job.
 
 **Web search, one query per board type.** These find employers that are on no list:
 - `site:boards.greenhouse.io OR site:job-boards.greenhouse.io "<title>" <place>`

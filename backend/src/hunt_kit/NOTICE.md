@@ -48,6 +48,8 @@ Open feeds are read through their public APIs. Link back to the original listing
 - National job services: Bundesagentur fuer Arbeit Jobsuche API (public client id from its own site), Arbetsformedlingen JobTech search API, MyCareersFuture search API, Job Bank search feed. Endpoints and field names follow career-ops' providers (MIT: `arbeitsagentur.mjs`, `platsbanken.mjs`, `mycareersfuture.mjs`, `jobbankca.mjs`); no code copied. Link back to the original listing.
 - SimplifyJobs New-Grad-Positions and Summer2027-Internships `listings.json` on GitHub (public lists, no licence file; read at run time, never stored; link back to the original listing). The idea of reading them follows freehire (MIT, `scripts/harvest_boards.py`).
 
+- Keyed official APIs (`kit_keyed.py`): Reed, USAJOBS and WhatJobs. Endpoints, parameters, auth headers, paging rules and field names follow freehire (https://github.com/strelov1/freehire, MIT licence, licence text below), commit 615cf00, files `internal/ingest/sources/reed.go`, `usajobs.go`, `whatjobs.go` and the response shapes in `reed_test.go`, `whatjobs_test.go` and `testdata/reed_search.json`, `testdata/usajobs_search.json`. Python re-write; no code copied. Each needs your own free key, read only from the environment. Link back to the original listing.
+
 Patterns studied from career-ops (MIT) and ai-job-search (MIT); no code copied.
 
 ## Place data (`places.json`, built by `build_places.py`)
