@@ -3294,6 +3294,10 @@ export interface components {
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
             proof: components["schemas"]["ProofOut"];
+            /** Queue Position */
+            queue_position?: number | null;
+            /** Queued At */
+            queued_at?: string | null;
             /** Receipts */
             receipts: number;
             /** Remote */
@@ -3463,6 +3467,8 @@ export interface components {
              * @default
              */
             check_every: string;
+            company_cap: components["schemas"]["SettingFieldOut"];
+            company_cap_days: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
             /**
              * Inbox Mode
@@ -5095,6 +5101,10 @@ export interface components {
             apply_min_score?: number | null;
             /** Below Line */
             below_line: string;
+            /** Company Cap */
+            company_cap?: number | null;
+            /** Company Cap Days */
+            company_cap_days?: number | null;
             /** Daily Cap */
             daily_cap?: number | null;
             /** Paused */
@@ -7416,6 +7426,7 @@ export interface operations {
                 due?: boolean;
                 quiet_days?: number | null;
                 in_flight?: boolean;
+                queued?: boolean;
             };
             header?: {
                 authorization?: string | null;

@@ -36,7 +36,11 @@ PAUSE = "assistant_settings.paused_until"
 REASON = "assistant_settings.pause_reason"
 INBOX = "preferences.daily_check"
 # Slice 2 added `auto_employer_emails` (a gated bool setting; tests/test_auto_emails.py).
-SIX = (APPLY, BELOW, SCORE, SUBMIT, CAP, PAUSE, REASON, "assistant_settings.auto_employer_emails")
+# 2026-10-18 added `company_cap` + `company_cap_days` (tests/test_batch_and_company_cap.py).
+SIX = (
+    APPLY, BELOW, SCORE, SUBMIT, CAP, PAUSE, REASON, "assistant_settings.auto_employer_emails",
+    "assistant_settings.company_cap", "assistant_settings.company_cap_days",
+)
 PROGRESS = "assistant_settings.setup_progress"
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)

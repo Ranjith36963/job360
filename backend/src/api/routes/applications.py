@@ -766,6 +766,10 @@ class ApplicationSummaryOut(BaseModel):
     # Weak spot #3 wave 2 - same pair as ApplicationDetailOut, batched for the page.
     hold: Optional[KitHoldOut] = None
     stage: str = ""
+    # Batch queue (owner decision 2026-10-18): when it was queued and its 1-based place in the
+    # user's whole open queue; both null when it is not on the queue.
+    queued_at: Optional[str] = None
+    queue_position: Optional[int] = None
 
 
 class ListApplicationsResponse(BaseModel):
@@ -1783,13 +1787,15 @@ async def list_applications(
     quiet_days: Optional[int] = Query(None, ge=1, le=settings.APPLICATION_QUIET_DAYS_MAX),
     # Weak spot #3 wave 2 - only applications another assistant session holds right now.
     in_flight: bool = Query(False),
+    # Batch queue (2026-10-18) - only the open queue, first in first out (rows carry `queue_position`).
+    queued: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
-            due=due, quiet_days=quiet_days, in_flight=in_flight,
+            due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2711,7 +2717,9 @@ async def submit_check(
             raise SpineError(404, "application not found")
         now = datetime.now(timezone.utc)
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
-        counts = await settings_rules.load_submit_counts(db, user.id, now)
+        counts = await settings_rules.load_submit_counts(
+            db, user.id, now, application_id, window_days=cfg.company_cap_days
+        )
         hold = await kit_service.live_hold(db, user, application_id, now, label)
         facts = await kit_service.gate_facts(
             db, user.id, app_row, email_verified=email_verification_satisfied(user),
@@ -2862,6 +2870,8 @@ async def record_event(
         )
         if body.event_type == "submit_mode_set":
             _check_submit_mode_event(user, application_id, payload)
+        if body.event_type in _QUEUE_EVENT_TYPES:
+            await _check_queue_event(db, user, application_id, body.event_type, payload, body.corrects_event_id)
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             # S3: closed payloads + who may write which (the MCP tool inherits this).
             payload = await kit_service.check_kit_event(db, user, application_id, body.event_type, payload)
@@ -2910,6 +2920,76 @@ async def record_event(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+
+
+_QUEUE_EVENT_TYPES = ("queued", "unqueued")
+
+
+def _queue_refused(user: CurrentUser, application_id: int, event_type: str, status: int, reason: str) -> SpineError:
+    """Audit a refused batch-queue event (who, which application, a CLOSED reason - never free
+    text or the company) and return the error to raise."""
+    get_audit_logger().warning(
+        "queue_event_refused",
+        extra={
+            "event": "queue_event_refused", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "application_id": application_id,
+            "event_type": event_type, "status": status, "reason": reason, "result": "refused",
+        },
+    )
+    detail = {
+        "payload_not_empty": f"{event_type} takes no payload",
+        "not_open": "not open",
+        "already_queued": "already queued",
+        "not_queued": "not queued",
+        "corrects_non_queue_event": f"{event_type} may only correct a queued or unqueued event",
+    }[reason]
+    return SpineError(status, detail)
+
+
+async def _check_queue_event(
+    db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any],
+    corrects_event_id: Optional[int],
+) -> None:
+    """The batch queue (owner decision 2026-10-18): ``queued`` / ``unqueued`` are note events
+    with NO payload. 422 for a payload. ``queued`` needs an open application (status
+    ``considering`` and no receipt): 409 ``not open`` otherwise. 409 ``already queued`` when it
+    is on the queue now, 409 ``not queued`` for an ``unqueued`` when it is not (a correction
+    via ``corrects_event_id`` re-derives the queue, so it skips these two). Lives in the ROUTE
+    function, so the MCP ``record_event`` tool inherits it."""
+    if payload:
+        raise _queue_refused(user, application_id, event_type, 422, "payload_not_empty")
+    if event_type == "queued":
+        app_row = await spine.get_owned_application(db, user.id, application_id)
+        cur = await db._db.execute(
+            "SELECT COUNT(*) FROM application_receipts WHERE application_id = ? AND user_id = ?",
+            (application_id, user.id),
+        )
+        has_receipt = int((await cur.fetchone())[0]) > 0
+        if app_row is None or app_row["status"] != "considering" or has_receipt:
+            raise _queue_refused(user, application_id, event_type, 409, "not_open")
+    if corrects_event_id is not None:
+        # A queue event may only retract a queue event (security review 2026-10-18), never
+        # hide a kit, decline or status event of the same application.
+        cur = await db._db.execute(
+            "SELECT 1 FROM application_events WHERE id = ? AND user_id = ? AND application_id = ? "
+            "AND event_type IN ('queued', 'unqueued')",
+            (corrects_event_id, user.id, application_id),
+        )
+        if await cur.fetchone() is None:
+            raise _queue_refused(user, application_id, event_type, 422, "corrects_non_queue_event")
+    if corrects_event_id is None:
+        is_queued = application_id in await spine.queued_at_by_app(db, user.id, [application_id])
+        if event_type == "queued" and is_queued:
+            raise _queue_refused(user, application_id, event_type, 409, "already_queued")
+        if event_type == "unqueued" and not is_queued:
+            raise _queue_refused(user, application_id, event_type, 409, "not_queued")
+    get_audit_logger().info(
+        "queue_event",
+        extra={
+            "event": "queue_event", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
+            "application_id": application_id, "event_type": event_type, "result": "ok",
+        },
+    )
 
 
 def _check_submit_mode_event(user: CurrentUser, application_id: int, payload: dict[str, Any]) -> None:

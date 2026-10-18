@@ -269,6 +269,8 @@ class AssistantSettingsView(BaseModel):
     below_line: SettingFieldOut
     submit_mode: SettingFieldOut
     daily_cap: SettingFieldOut
+    company_cap: SettingFieldOut
+    company_cap_days: SettingFieldOut
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut

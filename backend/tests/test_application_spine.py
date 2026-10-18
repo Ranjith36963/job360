@@ -459,6 +459,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "checkin_sent", "feedback_asked", "feedback_followup_sent", "auto_email_skipped",
         # Feedback loop slice 4 (interview side).
         "interview_session", "process_friction", "assessment",
+        # Batch queue (2026-10-18).
+        "queued", "unqueued",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 5
-TOOLS_REV_FOR_HASH = "622847d9dab0"
+TOOLS_REV = 6
+TOOLS_REV_FOR_HASH = "3071a11b0b36"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -93,9 +93,9 @@ INSTRUCTIONS = "\n".join(
         "anything. You find jobs with your own tools, judge fit, write the CV and letter; Job360 stores your "
         "verdict, every version, every event and the receipt.",
         "RUN 360: when the user types \"run 360\" (or \"/run 360\"), call get_recipe(\"setup\") and follow it "
-        "(it resumes at the first unfinished round). \"run 360 daily\" = get_recipe(\"daily\"); \"run 360 hunt\" = "
-        "get_recipe(\"hunt\"); \"run 360 apply <link>\" = get_recipe(\"apply\") for that link. "
-        "get_recipe() lists the rest.",
+        "(it resumes at the first unfinished round). "
+        "\"run 360 <daily|hunt|batch>\" = get_recipe(\"<daily|hunt|batch>\"); "
+        "\"run 360 apply <link>\" = get_recipe(\"apply\") for that link. get_recipe() lists the rest.",
         "RULES: before your first apply, outreach, inbox or profile write in a conversation, read "
         "get_recipe(\"rules\") — settings, the apply kit, Gmail modes, outreach, events and profile field "
         "shapes. A recipe is numbered steps: print its checklist, tick each step, stop where it says STOP.",
@@ -998,6 +998,7 @@ def build_server(version: str = "") -> MCPServer:
         due: bool = False,
         quiet_days: Optional[int] = None,
         in_flight: bool = False,
+        queued: bool = False,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1014,12 +1015,13 @@ def build_server(version: str = "") -> MCPServer:
         of each. Gmail check: `email_senders` = the ATS domains to add as
         `from:` (mail that never names the company), `inbox_checked_at` = read
         only mail after it (null = since the application was added). `in_flight=true` —
-        only applications another session holds now; rows carry `hold` and `stage`."""
+        only applications another session holds now; rows carry `hold` and `stage`.
+        `queued=true` - the batch queue in order (`queue_position`); work it top-down."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
-                    due=due, quiet_days=quiet_days, in_flight=in_flight, db=db, user=_user(),
+                    due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)
@@ -1635,8 +1637,8 @@ def build_server(version: str = "") -> MCPServer:
         the user yes for this one application; `stop` - do not submit. `reason`
         is a short code and `detail` one plain sentence you can show the user. Reasons:
         paused, already_applied, user_declined (the user said don't send),
-        daily_cap_reached, form_not_recorded (`stop`: no `form_filled` yet - fill, record it),
-        form_not_swept (`stop`: no `form_swept` after the latest `form_filled` - re-read every field, fix, record it),
+        daily_cap_reached, company_cap_reached, form_not_recorded (`stop`: record `form_filled`),
+        form_not_swept (`stop`: no `form_swept` after the latest `form_filled`: re-read every field, record it),
         form_count_mismatch, unreadable_fields (`stop`: re-read, sweep again),
         form_check_missing (`stop`: call check_form),
         duplicate_job (same job already applied to: `stop`
@@ -1859,8 +1861,8 @@ def build_server(version: str = "") -> MCPServer:
     async def get_recipe(name: str = "") -> dict[str, Any]:
         """The run 360 playbooks — numbered steps for YOU to follow. No name = the list; a name = its full text. "run
         360" = setup (resumes where the user stopped); "run 360 daily" = daily; "run 360 hunt" = hunt; "run 360
-        apply <link>" = apply. "rules" holds the full rules every recipe relies on. Every result carries
-        `tools_version` + `tools_rev`: a change from the last you saw = reconnect Job360."""
+        apply <link>" = apply; "run 360 batch" = batch. "rules" holds the full rules every recipe relies on.
+        Every result carries `tools_version` + `tools_rev`: a change from the last you saw = reconnect Job360."""
         try:
             if not name:
                 rows = await recipes_route.list_recipes(_user())

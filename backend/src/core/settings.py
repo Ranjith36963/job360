@@ -321,6 +321,11 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # services/applications/interview_payloads.py. All note-family; `assessment`
     # must never enter FEEDBACK_FUNNEL_RANK.
     "interview_session", "process_friction", "assessment",
+    # Owner decision 2026-10-18: the batch queue. `queued` puts a considering application on
+    # the user's queue, `unqueued` takes it off. Note-family, never moves the status; no
+    # payload, detail optional. Checked in the record_event ROUTE (applications._check_queue_event);
+    # read by spine.queued_at_by_app.
+    "queued", "unqueued",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -749,6 +754,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.apply_min_score",
     "assistant_settings.above_line", "assistant_settings.below_line",
     "assistant_settings.submit_mode", "assistant_settings.daily_cap",
+    # Owner decision 2026-10-18 - the per-company limit and its window in days.
+    "assistant_settings.company_cap", "assistant_settings.company_cap_days",
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
     # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
     "assistant_settings.auto_employer_emails",
@@ -780,6 +787,12 @@ PROFILE_NOTE_MAX_CHARS = int(os.getenv("PROFILE_NOTE_MAX_CHARS", "200"))
 # user may cap themselves to per day; no cap is the default (owner: "no cap by
 # default"), this is only the ceiling a typed cap may take.
 ASSISTANT_DAILY_CAP_MAX = int(os.getenv("ASSISTANT_DAILY_CAP_MAX", "500"))
+# Owner decision 2026-10-18: the per-company limit (applications to ONE company
+# inside a window). Like the daily cap there is no limit by default; these are only
+# the ceiling a typed limit may take and the window used when the user set a limit
+# without choosing days.
+ASSISTANT_COMPANY_CAP_MAX = int(os.getenv("ASSISTANT_COMPANY_CAP_MAX", "50"))
+ASSISTANT_COMPANY_CAP_DEFAULT_DAYS = int(os.getenv("ASSISTANT_COMPANY_CAP_DEFAULT_DAYS", "180"))
 # A waiting (riskier) change request the user never answered stops counting
 # after this many days; the assistant has to ask again.
 ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TTL_DAYS", "7"))

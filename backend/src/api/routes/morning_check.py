@@ -57,6 +57,8 @@ class MorningState(BaseModel):
     below_line: str
     submit_mode: str
     daily_cap: Optional[int] = None
+    company_cap: Optional[int] = None
+    company_cap_days: Optional[int] = None
     applied_today: int
 
 
@@ -173,7 +175,9 @@ async def morning_check(
             apply_min_score=view["apply_min_score"]["effective"],
             above_line=view["above_line"]["effective"], below_line=view["below_line"]["effective"],
             submit_mode=view["submit_mode"]["effective"],
-            daily_cap=view["daily_cap"]["effective"], applied_today=counts.submitted_today,
+            daily_cap=view["daily_cap"]["effective"],
+            company_cap=view["company_cap"]["effective"], company_cap_days=view["company_cap_days"]["effective"],
+            applied_today=counts.submitted_today,
         ),
         tally=tally,
     )

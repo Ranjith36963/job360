@@ -543,6 +543,7 @@ _SETTING_LOG_VALUE_PATHS = frozenset(
     {
         settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH, settings_rules.SUBMIT_MODE_PATH,
         settings_rules.APPLY_MIN_SCORE_PATH, settings_rules.DAILY_CAP_PATH,
+        settings_rules.COMPANY_CAP_PATH, settings_rules.COMPANY_CAP_DAYS_PATH,
     }
 )
 

@@ -707,6 +707,11 @@ class AssistantSettings:
     below_line: str = ""
     submit_mode: str = ""
     daily_cap: Optional[int] = None
+    # Owner decision 2026-10-18: at most this many applications to ONE company inside
+    # ``company_cap_days`` days. None = no limit (rule #29: an empty shelf stays silent);
+    # ``company_cap_days`` None = the operator default window.
+    company_cap: Optional[int] = None
+    company_cap_days: Optional[int] = None
     paused_until: str = ""
     pause_reason: str = ""
     # Feedback loop slice 2: may the assistant send the check-in / feedback emails on its own?

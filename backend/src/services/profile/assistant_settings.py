@@ -11,6 +11,9 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   ``apply_mode`` is RETIRED (the field stays so old stored rows still load).
 * ``submit_mode`` — ``confirm`` (default) | ``auto_when_sure``
 * ``daily_cap`` — most submits per day; ``None`` = no cap (owner: no cap by default)
+* ``company_cap`` / ``company_cap_days`` — most applications to ONE company inside a
+  window of days (owner 2026-10-18); ``None`` = no limit, and no days = the operator
+  default window (``ASSISTANT_COMPANY_CAP_DEFAULT_DAYS``)
 * ``paused_until`` — ``""`` | ``"until_resumed"`` | an ISO-8601 time in the future
 * ``pause_reason`` — one short line for the user's own memory
 
@@ -72,12 +75,16 @@ ABOVE_LINE_PATH = f"{HEAD}.above_line"
 BELOW_LINE_PATH = f"{HEAD}.below_line"
 SUBMIT_MODE_PATH = f"{HEAD}.submit_mode"
 DAILY_CAP_PATH = f"{HEAD}.daily_cap"
+COMPANY_CAP_PATH = f"{HEAD}.company_cap"
+COMPANY_CAP_DAYS_PATH = f"{HEAD}.company_cap_days"
+COMPANY_CAP_DAYS_MAX = 365
 PAUSED_UNTIL_PATH = f"{HEAD}.paused_until"
 PAUSE_REASON_PATH = f"{HEAD}.pause_reason"
 AUTO_EMPLOYER_EMAILS_PATH = f"{HEAD}.auto_employer_emails"
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
-    DAILY_CAP_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH, AUTO_EMPLOYER_EMAILS_PATH,
+    DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
+    AUTO_EMPLOYER_EMAILS_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # The inbox/Gmail mode stays at its old path (an ALIAS, not a move: assistants
@@ -227,6 +234,10 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _int_in_range(path, value, 0, 100)
     if path == DAILY_CAP_PATH:
         return _int_in_range(path, value, 1, settings.ASSISTANT_DAILY_CAP_MAX)
+    if path == COMPANY_CAP_PATH:
+        return _int_in_range(path, value, 1, settings.ASSISTANT_COMPANY_CAP_MAX)
+    if path == COMPANY_CAP_DAYS_PATH:
+        return _int_in_range(path, value, 1, COMPANY_CAP_DAYS_MAX)
     if path == PAUSED_UNTIL_PATH:
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
@@ -253,10 +264,14 @@ class EffectiveSettings:
     paused_until: str
     pause_reason: str
     auto_employer_emails: bool = False
+    # Owner decision 2026-10-18: None = no per-company limit; the window is always a number.
+    company_cap: Optional[int] = None
+    company_cap_days: int = settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS
 
 
 def effective(s: AssistantSettings) -> EffectiveSettings:
-    """Fill the safe defaults: no score line / ask / ask / confirm / no cap / not paused."""
+    """Fill the safe defaults: no score line / ask / ask / confirm / no cap / not paused /
+    no company limit (and the default window when the user set a limit without days)."""
     return EffectiveSettings(
         apply_min_score=None if s.apply_min_score is None else int(s.apply_min_score),
         above_line=s.above_line or DEFAULT_LINE_SWITCH,
@@ -266,6 +281,10 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         paused_until=s.paused_until or "",
         pause_reason=s.pause_reason or "",
         auto_employer_emails=bool(s.auto_employer_emails),
+        company_cap=None if s.company_cap is None else int(s.company_cap),
+        company_cap_days=(
+            settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS if s.company_cap_days is None else int(s.company_cap_days)
+        ),
     )
 
 
@@ -295,8 +314,10 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw  # None stays None: the line has no default
     if path == SUBMIT_MODE_PATH:
         return raw or DEFAULT_SUBMIT_MODE
-    if path == DAILY_CAP_PATH:
+    if path in (DAILY_CAP_PATH, COMPANY_CAP_PATH):
         return raw
+    if path == COMPANY_CAP_DAYS_PATH:
+        return settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS if raw is None else raw
     if path == PAUSED_UNTIL_PATH:
         return (raw or "") if is_paused(raw or "", when) else ""
     if path == PAUSE_REASON_PATH:
@@ -350,6 +371,9 @@ def classify_change(
                          and above=ask                                  otherwise
     submit_mode          confirm -> auto_when_sure                      -> confirm
     daily_cap            raised, or a number -> none (cap removed)      none -> a number, lowered
+    company_cap          raised, or a number -> none (limit removed)    none -> a number, lowered
+    company_cap_days     LOWERED (a shorter window frees the           raised
+                         assistant)
     paused_until         cleared or moved earlier (resume)              set or extended
     pause_reason         never                                          always
     auto_employer_       off -> on (the assistant emails employers     on -> off (the stop
@@ -371,10 +395,12 @@ def classify_change(
         return "riskier" if (below_auto and not above_auto) else "safer"
     if path == SUBMIT_MODE_PATH:
         return "riskier" if (after == AUTO_SUBMIT_MODE and before != AUTO_SUBMIT_MODE) else "safer"
-    if path == DAILY_CAP_PATH:
+    if path in (DAILY_CAP_PATH, COMPANY_CAP_PATH):
         before_rank = float("inf") if before is None else before
         after_rank = float("inf") if after is None else after
         return "riskier" if after_rank > before_rank else "safer"
+    if path == COMPANY_CAP_DAYS_PATH:
+        return "riskier" if after < before else "safer"
     if path == PAUSED_UNTIL_PATH:
         return "riskier" if _pause_rank(after) < _pause_rank(before) else "safer"
     if path == PAUSE_REASON_PATH:
@@ -442,6 +468,10 @@ class SubmitCounts:
 
     submitted_today: int
     applied_since_auto_on: int
+    # Owner decision 2026-10-18: OTHER applications of this user with an ``applied`` event at
+    # the same company inside the user's ``company_cap_days`` (0 when no application was given
+    # to :func:`load_submit_counts`, or the company is blank / unknown).
+    company_applied_in_window: int = 0
 
 
 @dataclass(frozen=True)
@@ -517,7 +547,8 @@ class SubmitDecision:
 
 
 REASONS: tuple[str, ...] = (
-    "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
+    "paused", "already_applied", "user_declined", "daily_cap_reached", "company_cap_reached", "duplicate_job",
+    "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
@@ -647,6 +678,8 @@ def may_submit(
     2. receipt exists, or status is not ``considering`` -> stop ``already_applied``
     3. the user said "don't send" (newer than any yes) -> stop ``user_declined``
     4. daily cap reached -> stop ``daily_cap_reached``
+    4a. ``company_cap`` applications to this company inside ``company_cap_days`` already -> stop
+        ``company_cap_reached`` (a stored yes does NOT clear it; the user raises the limit)
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
@@ -684,7 +717,7 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4c, the auto-mode duplicate stop, the other
+    ``user_approved``. Rules 1-4c (4a included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (4d)
     are NEVER cleared by a yes.
     """
@@ -698,6 +731,12 @@ def may_submit(
         )
     if cfg.daily_cap is not None and counts.submitted_today >= cfg.daily_cap:
         return SubmitDecision("stop", "daily_cap_reached", "The daily limit of applications is reached. Try tomorrow.")
+    if cfg.company_cap is not None and counts.company_applied_in_window >= cfg.company_cap:
+        return SubmitDecision(
+            "stop", "company_cap_reached",
+            f"You set a limit of {cfg.company_cap} applications per company in {cfg.company_cap_days} days, "
+            "and it is reached for this company. Do not submit; the user can raise the limit.",
+        )
     if not application.form_filled:
         return SubmitDecision(
             "stop", "form_not_recorded",
@@ -1050,9 +1089,53 @@ async def count_on_user_today(
     return count
 
 
-async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> SubmitCounts:
+async def company_applied_count(
+    db: JobDatabase, user_id: str, application_id: int, now: datetime, window_days: int
+) -> int:
+    """DISTINCT OTHER applications of this user with an ``applied`` event inside
+    ``window_days`` at the same ``jobs.normalized_company`` as ``application_id``'s job.
+    A blank or ``unknown`` company counts 0 (we never guess a match). Applications marked
+    by a non-retracted ``simulation`` event recorded BEFORE the ``applied`` are left out
+    (same shape as :func:`practice_info`); a mark recorded after the ``applied`` cannot
+    re-label it (security review 2026-10-18). An ``applied`` replaced by a correction never
+    counts (the ``_has_surviving_applied`` rule). The window is on ``occurred_at``, the date
+    the user applied: a stop no yes clears must not fire on history recorded late (review
+    2026-10-18 chose this over ``recorded_at``). Scoped by ``user_id`` (rule #12)."""
+    cur = await db._db.execute(
+        "SELECT j.normalized_company FROM applications a JOIN jobs j ON j.id = a.job_id "
+        "WHERE a.id = ? AND a.user_id = ?",
+        (application_id, user_id),
+    )
+    row = await cur.fetchone()
+    company = str(dict(row).get("normalized_company") or "").strip() if row else ""
+    if not company or company.lower() == "unknown":
+        return 0
+    cutoff = (now - timedelta(days=window_days)).isoformat()
+    cur = await db._db.execute(
+        "SELECT COUNT(DISTINCT e.application_id) FROM application_events e "
+        "JOIN applications a ON a.id = e.application_id JOIN jobs j ON j.id = a.job_id "
+        "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'applied' "
+        "AND e.occurred_at >= ? "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "AND e.application_id <> ? AND j.normalized_company = ? "
+        "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
+        "AND s.user_id = e.user_id AND s.event_type = ? AND s.id < e.id AND s.id NOT IN "
+        "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))",
+        (user_id, user_id, cutoff, application_id, company, settings.SIMULATION_EVENT_TYPE, user_id),
+    )
+    got = await cur.fetchone()
+    return int(got[0]) if got else 0
+
+
+async def load_submit_counts(
+    db: JobDatabase, user_id: str, now: datetime, application_id: Optional[int] = None,
+    *, window_days: Optional[int] = None,
+) -> SubmitCounts:
     """Count what :func:`may_submit` needs for this user: submits today (in the
-    user's OWN timezone, ``spine.user_today``) and the practice-run counter."""
+    user's OWN timezone, ``spine.user_today``), the practice-run counter and, when
+    ``application_id`` is given, the applications at that application's company inside
+    ``window_days`` (the caller passes ``cfg.company_cap_days``; the operator default
+    when omitted). Without an application the company count stays 0 (morning_check)."""
     submitted = await count_on_user_today(
         db, user_id, now,
         "SELECT recorded_at FROM application_events "
@@ -1060,7 +1143,13 @@ async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> Su
         (user_id,),
     )
     _since, applied_since = practice_info(user_id)
-    return SubmitCounts(submitted_today=submitted, applied_since_auto_on=applied_since)
+    company = 0
+    if application_id is not None:
+        days = window_days if window_days is not None else settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS
+        company = await company_applied_count(db, user_id, application_id, now, days)
+    return SubmitCounts(
+        submitted_today=submitted, applied_since_auto_on=applied_since, company_applied_in_window=company,
+    )
 
 
 async def load_outreach_counts(
@@ -1205,6 +1294,8 @@ def build_settings_view(
         "below_line": {"value": raw.below_line, "effective": eff.below_line},
         "submit_mode": {"value": raw.submit_mode, "effective": eff.submit_mode},
         "daily_cap": {"value": raw.daily_cap, "effective": eff.daily_cap},
+        "company_cap": {"value": raw.company_cap, "effective": eff.company_cap},
+        "company_cap_days": {"value": raw.company_cap_days, "effective": eff.company_cap_days},
         "paused_until": {
             "value": raw.paused_until,
             "effective": effective_path_value(PAUSED_UNTIL_PATH, raw.paused_until, when),

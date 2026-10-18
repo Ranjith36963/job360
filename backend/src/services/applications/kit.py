@@ -498,7 +498,9 @@ async def submit_verdict(
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
-    counts = await settings_rules.load_submit_counts(db, user_id, now)
+    counts = await settings_rules.load_submit_counts(
+        db, user_id, now, int(app_row["id"]), window_days=cfg.company_cap_days
+    )
     facts = await gate_facts(
         db, user_id, app_row, email_verified=email_verified, other_session_hold=other_session_hold
     )
