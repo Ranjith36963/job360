@@ -43,7 +43,7 @@ What the options mean:
 - `--history seen_jobs.json` (default) remembers what was output. The next run shows only NEW jobs and tells you how many were skipped as seen. `--all` ignores history, `--history none` turns it off.
 - `--check-live` re-fetches each kept job once and drops it only when the page shows it is closed: HTTP 404 or 410, an error redirect, a closed notice (English, German, Dutch, Spanish, French or Russian), or a page with almost no text. A blocked or failed fetch, a bot wall, or a page that only loads with JavaScript counts as "unknown" and the job is kept. `--stats` shows `live_dead` and `live_unknown`.
 - `--retry-dead` also fetches boards that answered a real HTTP 404 on 3 runs in a row. By default the kit skips them (and rechecks after 30 days) and says how many it skipped. The counters sit in the `--history` file, under `boards`. A throttle, a block or a network error never counts as a miss, and any good answer clears the counter.
-- `--why-missed URL` explains why a job link was not in your results and proposes one change, then exits. It makes no request and writes nothing. It uses the same `--companies`, `--companies-extra`, `--sources`, `--universe` and `--history` as a real run, and reads the open company list only if it is already cached. Answers: `board_not_in_list`, `universe_not_cached`, `board_in_list_source_skipped`, `skipped_by_option`, `board_marked_dead`, `board_covered`, `ats_not_supported`, `not_a_board_url`.
+- `--why-missed URL` explains why a job link was not in your results and proposes one change, then exits. It makes no request and writes nothing. It uses the same `--companies`, `--companies-extra`, `--sources`, `--universe` and `--history` as a real run, and reads the open company list only if it is already cached. Answers: `board_not_in_list`, `universe_not_cached`, `board_in_list_source_skipped`, `skipped_by_option`, `board_marked_dead`, `board_covered`, `feed_covered`, `ats_not_supported`, `not_a_board_url`.
 - `--discover "Company A,Company B"` probes likely board names on Greenhouse, Lever, Ashby, Workable and Recruitee and prints the ones that answer with jobs. The assistant can add good ones to the user's `target_companies`.
 
 - `--out found.jsonl` the final file, written at the end. `--stream PATH` where jobs are saved as they are found (default `found.jsonl.stream`, or `hunt_stream.jsonl` when `--out` is stdout). `--resume` continues a stopped run. `--max-minutes 15` (default; 0 = no limit) and `--max-sources N` stop the run cleanly when spent.
@@ -92,7 +92,7 @@ Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech
 Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
 (`jobbank`, title only).
 More (`kit_gov.py`; unofficial site APIs that can change, and a country is skipped if it blocks scripts):
-EU/EEA/CH EURES (`eures`, any of 31 countries, matched locally), Belgium VDAB (`vdab`),
+EU/EEA/CH EURES (`eures`, any of 31 countries, matched locally; it asks only for ads from the last three days, whatever `--days` says), Belgium VDAB (`vdab`),
 Denmark Jobnet (`jobnet`), Finland Job Market Finland (`tyomarkkinatori`, title only),
 Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
 (`jobstreet`: AU NZ MY SG ID HK, short teaser).

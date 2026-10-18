@@ -674,7 +674,7 @@ def _http_request(
 
     429 backs off, retries twice; 502/503/504 on a GET retry once; other 4xx never retry.
     Status 0 = network error or refused URL. Max 3 in flight per host.
-    Only public http(s) hosts are contacted. The User-Agent is always ours. Never raises.
+    Only public http(s) hosts are contacted. The User-Agent is ours unless the caller sets one. Never raises.
     """
     try:
         if params:
@@ -686,7 +686,7 @@ def _http_request(
         return 0, str(url), b""
     hdrs = {"Accept": "application/json, text/xml, text/html;q=0.8, */*;q=0.5"}
     hdrs.update(headers or {})
-    hdrs["User-Agent"] = USER_AGENT
+    hdrs.setdefault("User-Agent", USER_AGENT)  # a feed may set its own (USAJOBS wants the account email)
     wait = 0
     retried_5xx = False
     attempt = 0  # counts 429 retries only; the one 5xx retry never eats one
@@ -2252,7 +2252,16 @@ WHY_VERDICTS = {
     "board_not_in_list": "the kit does not know this board",
     "universe_not_cached": "not in your list, and the open company list is not cached, so it cannot be checked offline",
     "board_covered": "the kit reads this board; the job was filtered out, closed, or posted after the last run",
+    "feed_covered": "the kit reads this site as a feed; the job was filtered out, outside your countries, "
+                    "or the feed needs a key you have not set",
 }
+# Job sites the kit reads as a feed (host -> feed name). Checked before the aggregator list.
+_FEED_HOSTS = (
+    ("reed", re.compile(r"(?:^|\.)reed\.co\.uk$", re.I)),
+    ("jobstreet", re.compile(r"(?:^|\.)(?:seek\.com\.au|seek\.co\.nz|jobstreet\.com|jobsdb\.com)$", re.I)),
+    ("adzuna", re.compile(r"(?:^|\.)adzuna\.[a-z.]+$", re.I)),
+    ("jooble", re.compile(r"(?:^|\.)jooble\.org$", re.I)),
+)
 _AGGREGATOR_HOSTS = re.compile(
     r"(?:^|\.)(?:linkedin\.com|lnkd\.in|indeed\.[a-z.]+|glassdoor\.[a-z.]+|ziprecruiter\.[a-z.]+|monster\.[a-z.]+|"
     r"reed\.co\.uk|totaljobs\.com|cv-library\.co\.uk|jooble\.org|adzuna\.[a-z.]+|jobrapido\.com|simplyhired\.com|"
@@ -2393,6 +2402,15 @@ def why_missed(args: argparse.Namespace, url: str, today: _dt.date | None = None
     if info["kind"] == "invalid":
         out.update(verdict="invalid_url", meaning="not an http(s) link", change="give the full job link")
         return out
+    feed = next((name for name, rx in _FEED_HOSTS if host and rx.search(host)), "")
+    if feed:
+        out["board"] = "feed:" + feed
+        if feed not in select_sources(args.sources):
+            shown = args.sources or "default"
+            return done("board_in_list_source_skipped", "--sources %s,%s" % (shown, feed),
+                        "%s is the %s feed, which is not in --sources %s" % (host, feed, shown))
+        return done("feed_covered", "check --work-countries, --titles and --days, and that the feed's key is set",
+                    "%s is read as the %s feed" % (host, feed))
     if info["kind"] == "aggregator":
         return done("not_a_board_url", "bring this link yourself (bring_job), or turn on Gmail job alerts for the site",
                     "%s is a job-search site; the kit never reads it" % host)

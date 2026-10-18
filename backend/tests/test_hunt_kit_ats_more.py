@@ -365,7 +365,7 @@ def test_jibe_parse_and_paging():
 def test_board_from_job_url_new_hosts(url: str, ats: str, token: str) -> None:
     info = hk.board_from_job_url(url)
     assert (info["kind"], info["ats"], info["token"]) == ("ats", ats, token)
-    assert [r["token"] for r in hk.parse_extra(f"{ats}:{token}")] in ([token], [])  # a board address the kit can also run
+    assert [r["token"] for r in hk.parse_extra(f"{ats}:{token}")] == [token]  # a board address the kit can also run
 
 
 def test_board_from_job_url_without_token_and_extra_tokens():

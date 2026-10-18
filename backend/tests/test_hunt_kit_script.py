@@ -208,6 +208,8 @@ def test_http_helper_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     assert hk.http("https://h.example/x", as_json=False) == (200, '{"a": 1}')
     assert hk.http("https://h.example/x", method="POST", data=b"{}")[0] == 200
     assert seen["method"] == "POST" and seen["ua"].startswith("job360-hunt-kit")
+    hk.http("https://h.example/x", headers={"User-Agent": "me@example.com"})  # USAJOBS wants the account email
+    assert seen["ua"] == "me@example.com"
 
 
 # ---- pipeline: contract Jobs through the collector
@@ -369,7 +371,8 @@ def test_companies_json_valid() -> None:
         "taleo",
         "jobvite",
         "eightfold",
-    } | set(hk.BOARD_SOURCES[16:])  # the kit_ats_more types
+    } | {"rippling", "breezy", "pinpoint", "phenom", "ultipro", "adp", "cornerstone", "gem",
+         "jazzhr", "softgarden", "join", "jibe"}  # the kit_ats_more types
     seen = set()
     for r in rows:
         assert r["ats"] in ok and r["token"].strip()

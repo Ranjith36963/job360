@@ -170,9 +170,9 @@ def test_eures_sends_the_users_countries_and_stops_on_a_short_page():
     full = {"numberRecords": 120, "jvs": [{"id": f"I{i}", "title": "Python Engineer", "employer": {"name": "Co"},
                                            "locationMap": {"DE": []}} for i in range(50)]}
     http = _http({"jv-search/search": (200, full)})
-    # every page is full and reports 120 records: stops once the pages are capped
+    # every page is full and reports 120 records: stops once 120 rows are read (page 3)
     jobs = kg.fetch_eures(["python"], http, {}, days=BIG, countries=["DE", "GR", "GB"])
-    assert len(http.calls) == kg.LOCAL_PAGES or len(jobs) == 50  # same ids on every page are de-duplicated
+    assert len(http.calls) == 3 and len(jobs) == 50  # same ids on every page are de-duplicated
     body = json.loads(http.calls[0]["data"])
     assert http.calls[0]["method"] == "POST" and body["locationCodes"] == ["de", "el"] and body["resultsPerPage"] == 50
     assert body["publicationPeriod"] == "LAST_THREE_DAYS" and body["keywords"] == []
