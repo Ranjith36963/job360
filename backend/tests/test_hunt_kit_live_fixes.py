@@ -243,3 +243,20 @@ def test_eightfold_pcsx_without_a_domain_tries_the_tenant_dot_com() -> None:
     kit_ats.fetch_eightfold({"name": "Qualcomm", "tenant": "qualcomm"}, http, {})
     assert urls == ["https://qualcomm.eightfold.ai/api/apply/v2/jobs?start=0&num=10",
                     "https://qualcomm.eightfold.ai/api/pcsx/search?domain=qualcomm.com&start=0"]
+
+
+def test_a_feed_ad_without_an_employer_is_not_credited_to_the_feed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    body = {"jvs": [{"id": "E1", "title": "AI Engineer", "locationMap": {"NL": []}}], "numberRecords": 1}
+
+    def fake(url, params=None, data=None, retries=0, max_bytes=0, method=None, headers=None):
+        return 200, url, json.dumps(body).encode()
+
+    monkeypatch.setattr(hk, "_http_request", fake)
+    out = tmp_path / "o.jsonl"
+    rc = hk.main(["--sources", "eures", "--titles", "AI Engineer", "--work-countries", "NL", "--history", "none",
+                  "--companies", "none", "--no-universe", "--run-log", "none", "--out", str(out),
+                  "--stream", str(tmp_path / "s.jsonl"), "--days", "36500"])
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert rc == 0 and len(rows) == 1 and rows[0]["company"] == ""  # was "eures"

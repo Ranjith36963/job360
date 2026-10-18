@@ -1401,7 +1401,8 @@ class Collector:
             lines = ["Feed field says visa sponsorship is offered."]
         rec = {
             "title": title,
-            "company": raw.get("company") or raw.get("board") or "",
+            # a company board's token names the company; a feed's board is the feed itself ("eures"), never one
+            "company": raw.get("company") or (raw.get("board") if raw.get("board") != source else "") or "",
             "url": url,
             "location": re.sub(r"\s*\|\s*", " | ", (raw.get("loc") or "").strip(" |")),
             "posted": raw.get("posted", ""),
