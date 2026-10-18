@@ -136,7 +136,16 @@ def fetch_eures(queries: list[str], http: HttpFn, stats: Stats, *, days: int, co
                 "locationCodes": [_eures_code(c) for c in iso], "euresFlagCodes": [],
                 "otherBenefitsCodes": [], "requiredLanguages": [], "sessionId": "hunt-kit",
                 "requestLanguage": "en"}
-        resp = _get(http, stats, EURES_SEARCH, method="POST", data=json.dumps(body).encode(), headers=_JSON)
+        # freehire eures.go:208 posts exactly this JSON (Content-Type + Accept only, no other header,
+        # sources/http.go:733-744). The status is logged, so a refusal never reads as "answered nothing".
+        stats["tried"] = stats.get("tried", 0) + 1
+        status, resp = http(EURES_SEARCH, method="POST", data=json.dumps(body).encode(),
+                            headers={**_JSON, "Accept": "application/json"})
+        if status == 200 and resp is not None:
+            stats["ok"] = stats.get("ok", 0) + 1
+        else:
+            resp = None
+            print(f"warning: eures answered HTTP {status} on page {page} (nothing read)", file=sys.stderr)
         got = parse_eures(resp, fallback)
         jobs += got
         total = int((resp or {}).get("numberRecords") or 0) if isinstance(resp, dict) else 0

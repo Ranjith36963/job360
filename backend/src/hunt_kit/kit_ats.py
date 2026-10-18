@@ -17,6 +17,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import sys
 import xml.etree.ElementTree as ET
 
 try:  # shared safe-XML helper (same folder)
@@ -1018,6 +1019,49 @@ def _taleo_description(page: Any) -> str:
     return ""
 
 
+# NOT IN REFERENCE: own fallback, page shape from kearney.taleo.net 2026-10-18.
+# Some sections 302 jobsearch.ftl to joblist.ftl, whose shell carries no portal id but does carry the FIRST page
+# of the list (10 rows, whatever the total) in <input id="initialHistory" value="...">, a '!|!'-delimited token
+# stream. A row starts with id,title,id,title,id x5 then schedule, location, more-locations flag; the posting date
+# ("Oct 13, 2026") is followed by the requisition number that jobdetail.ftl?job= takes.
+_TALEO_HIST_RE = re.compile(r"""id=["']initialHistory["'][^>]*value=["']([^"']*)["']""", re.I)
+_TALEO_NB_RE = re.compile(r"""id=["']listRequisition\.nbElements["'][^>]*value=["'](\d+)["']""", re.I)
+_TALEO_DATE_TOKEN = re.compile(r"[A-Z][a-z]{2} \d{1,2}, \d{4}")
+
+
+def _taleo_inline(page: Any) -> tuple[list[tuple[str, str, str, str]], int]:
+    """(title, requisition number, location, posted) of the rows inline in a joblist.ftl shell, and the
+    shell's own total ('listRequisition.nbElements'; 0 when absent)."""
+    text = str(page or "")
+    m = _TALEO_HIST_RE.search(text)
+    n = _TALEO_NB_RE.search(text)
+    total = int(n.group(1)) if n else 0
+    if not m:
+        return [], total
+    tok = [unquote(t) for t in html.unescape(m.group(1)).split("!|!")]
+    out: list[tuple[str, str, str, str]] = []
+    i = 0
+    while i + 12 < len(tok):
+        t = tok[i]
+        if not (t.isdigit() and tok[i + 3] == tok[i + 1] and all(tok[i + k] == t for k in (2, 4, 5, 6, 7, 8))):
+            i += 1
+            continue
+        title, loc, more = _text(tok[i + 1]), tok[i + 10], tok[i + 11] == "true"
+        j = i + 12
+        extra = ""
+        while j < len(tok) and j < i + 30 and not _TALEO_DATE_TOKEN.fullmatch(tok[j]):
+            if more and tok[j].startswith(", "):
+                extra = tok[j]
+            j += 1
+        if j + 1 < len(tok) and _TALEO_DATE_TOKEN.fullmatch(tok[j]) and tok[j + 1].strip():
+            where = _text(loc + extra)
+            out.append((title, tok[j + 1].strip(), where, _taleo_posted(tok[j])))
+            i = j + 2
+        else:
+            i += 1
+    return out, total
+
+
 def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Taleo Enterprise Edition: GET jobsearch.ftl for the portal id + column headings, then replay
     the anonymous POST /careersection/rest/jobboard/searchjobs (pageNo 1..MAX_PAGES).
@@ -1036,6 +1080,17 @@ def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[
         shell_url = f"{base}/{section}/jobsearch.ftl?lang={lang}"
         st, page = _get(http, shell_url, as_json=False, headers={"Accept": "text/html"})
         portal = _taleo_portal(page) if st == 200 else ""
+        if not portal and st == 200:
+            inline, inline_total = _taleo_inline(page)  # no portal id: keep the first page the shell carries
+            if inline:
+                if inline_total > len(inline):
+                    print(f"note: taleo {tenant}: no portal id; read {len(inline)} of {inline_total} jobs from the page",
+                          file=sys.stderr)
+                found = [_job(row, "taleo", title=t, url=f"{base}/{section}/jobdetail.ftl?job={quote(rid, safe='')}&lang={lang}",
+                             location=loc, posted=posted, remote=_remote_from(loc), extra={"req_id": rid})
+                        for t, rid, loc, posted in inline]
+                _count(stats, ok=True, jobs=len(found))
+                return found
         if not portal:  # private, unavailable, or no public portal id
             _count(stats, ok=False)
             return []
