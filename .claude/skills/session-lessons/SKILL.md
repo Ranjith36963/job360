@@ -41,12 +41,6 @@ delete a lesson; if one stops being true, say so on its line and why.
   a CONFLICTING PR runs no CI.
 - CodeRabbit's free tier rate-limits after a few reviews an hour. **Rule:** never
   wait on it; the repo's own reviewer-bugs / reviewer-security / CI are the gate.
-- 2026-10-18: a finished Needs-you feature sat unpushed while the session
-  described "next steps: draft PR"; the owner asked why auto-merge was not used.
-  The repo has `allow_auto_merge: true` and the `main-production-gate` ruleset
-  requires 13 checks (both AI reviewers included). **Rule:** every PR, not a
-  draft, gets `gh pr merge <n> --auto --squash` as soon as it is opened; then
-  confirm the Railway deploy on the merge sha.
 
 ## Handing work to another Claude session
 
