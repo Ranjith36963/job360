@@ -176,6 +176,9 @@ def test_eures_sends_the_users_countries_and_stops_on_a_short_page():
     body = json.loads(http.calls[0]["data"])
     assert http.calls[0]["method"] == "POST" and body["locationCodes"] == ["de", "el"] and body["resultsPerPage"] == 50
     assert body["publicationPeriod"] == "LAST_THREE_DAYS" and body["keywords"] == [{"keyword": "python", "specificSearchCode": "TITLE"}]
+    browse = _http({"jv-search/search": (200, EURES)})
+    kg.fetch_eures([], browse, {}, days=BIG, countries=["DE"])  # no titles: the newest ads, unfiltered
+    assert json.loads(browse.calls[0]["data"])["keywords"] == []
     short = _http({"jv-search/search": (200, EURES)})
     out = kg.fetch_eures(["software"], short, {}, days=BIG, countries=["DE"])
     assert len(short.calls) == 1 and len(out) == 1  # short page: no second request

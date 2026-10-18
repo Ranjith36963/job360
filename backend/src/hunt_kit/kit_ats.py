@@ -1071,13 +1071,19 @@ def _taleo_enrich(row: dict[str, Any], http: Http, jobs: list[Job]) -> None:
     except (TypeError, ValueError, OverflowError):
         limit = TALEO_DETAIL_LIMIT
     limit = max(1, min(limit, TALEO_DETAIL_MAX))
+    failed = 0
     for j in jobs[:limit]:
         try:  # best-effort enrichment: a bad detail page must never drop the listing
             st, det = _get(http, j["url"], as_json=False, headers={"Accept": "text/html"})
             if st == 200:
                 j["description"] = _taleo_description(det)
-        except Exception:  # noqa: BLE001, S112
-            continue
+            else:
+                failed += 1
+        except Exception:  # noqa: BLE001
+            failed += 1
+    if failed:
+        print(f"note: taleo {row.get('tenant') or row.get('token')}: {failed} of {min(limit, len(jobs))} detail pages "
+              "not read; those jobs keep no description", file=sys.stderr)
 
 
 def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:

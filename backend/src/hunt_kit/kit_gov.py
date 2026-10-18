@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote, urlencode
@@ -41,6 +42,7 @@ _join_place: Callable[[str, str], str] = _kf._join_place
 strip_html: Callable[[Any], str] = _kf.strip_html
 NATIONAL_PAGES: int = _kf.NATIONAL_PAGES
 # NATIONAL_PAGES (from kit_feeds) caps pages per query for services that search server-side.
+EURES_RETRY_WAIT_S = 2  # pause before retrying a dropped EURES connection
 LOCAL_PAGES = 5  # pages for the two services that cannot search (EURES, Trudvsem): matched locally
 _JSON = {"Content-Type": "application/json"}
 
@@ -153,7 +155,9 @@ def _eures_series(q: str, iso: list[str], fallback: str, http: HttpFn, stats: St
         # freehire eures.go:208 posts exactly this JSON (Content-Type + Accept only, no other header,
         # sources/http.go:733-744). The status is logged, so a refusal never reads as "answered nothing".
         stats["tried"] = stats.get("tried", 0) + 1
-        for _ in range(2):  # the connection drops now and then (status 0, live 2026-10-18): one retry
+        for attempt in range(2):  # the connection drops now and then (status 0, live 2026-10-18): one retry
+            if attempt:
+                time.sleep(EURES_RETRY_WAIT_S)
             status, resp = http(EURES_SEARCH, method="POST", data=json.dumps(body).encode(),
                                 headers={**_JSON, "Accept": "application/json"})
             if status != 0:

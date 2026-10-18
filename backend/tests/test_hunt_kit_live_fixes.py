@@ -216,7 +216,9 @@ def test_taleo_inline_jobs_get_details_when_asked() -> None:
 
 
 # ---------------------------------------------------------------- PC smoke round 3 (d834b71c)
-def test_eures_searches_each_title_and_retries_a_dropped_connection() -> None:
+def test_eures_searches_each_title_and_retries_a_dropped_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    waits: list[float] = []
+    monkeypatch.setattr(kit_gov.time, "sleep", waits.append)
     sent: list[dict[str, Any]] = []
     answers = iter([(0, None), (200, {"jvs": [], "numberRecords": 0}), (200, {"jvs": [], "numberRecords": 0})])
 
@@ -231,6 +233,7 @@ def test_eures_searches_each_title_and_retries_a_dropped_connection() -> None:
         [{"keyword": "Machine Learning Engineer", "specificSearchCode": "TITLE"}],  # the one retry
         [{"keyword": "AI Engineer", "specificSearchCode": "TITLE"}]]
     assert stats["tried"] == 2 and stats["ok"] == 2  # a retried request counts once
+    assert waits == [kit_gov.EURES_RETRY_WAIT_S]  # a pause before the retry only
 
 
 def test_eightfold_pcsx_without_a_domain_tries_the_tenant_dot_com() -> None:
@@ -260,3 +263,15 @@ def test_a_feed_ad_without_an_employer_is_not_credited_to_the_feed(
                   "--stream", str(tmp_path / "s.jsonl"), "--days", "36500"])
     rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
     assert rc == 0 and len(rows) == 1 and rows[0]["company"] == ""  # was "eures"
+
+
+def test_taleo_says_when_detail_pages_are_not_read(capsys: pytest.CaptureFixture[str]) -> None:
+    page = (FIXTURES / "taleo_joblist.html").read_text(encoding="utf-8")
+
+    def http(url: str, **kw: Any):
+        return (403, "") if "jobdetail.ftl" in url else (200, page)
+
+    row = {"name": "kearney", "tenant": "kearney", "section": "01", "fetch_details": True, "detail_limit": 2}
+    jobs = kit_ats.fetch_taleo(row, http, {})
+    assert len(jobs) == 3 and not any(j["description"] for j in jobs)  # the listing is kept
+    assert "taleo kearney: 2 of 2 detail pages not read" in capsys.readouterr().err
