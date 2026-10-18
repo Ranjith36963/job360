@@ -7,6 +7,7 @@ import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAs
 import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
 import { ReadyToSend } from "./ReadyToSend";
+import { StartedNotConfirmed } from "./StartedNotConfirmed";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
@@ -351,6 +352,7 @@ export function NeedsYou() {
     <div className="flex max-w-3xl flex-col gap-8">
       <MorningCheck />
       <ReadyToSend onTotal={setReadyTotal} />
+      <StartedNotConfirmed />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>

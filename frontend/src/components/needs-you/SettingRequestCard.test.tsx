@@ -180,3 +180,13 @@ describe("Needs-you page", () => {
     expect(screen.queryByText("Waiting for your OK")).toBeNull();
   });
 });
+
+describe("describeSettingRequest - pace and auto run", () => {
+  it("says each new setting in plain words", () => {
+    expect(describeSettingRequest("assistant_settings.company_cap", 3).change).toBe("At most 3 applications per company");
+    expect(describeSettingRequest("assistant_settings.weekly_cap", null).change).toBe("No weekly limit");
+    expect(describeSettingRequest("assistant_settings.min_gap_minutes", 20).change).toBe("Wait at least 20 minutes between applications");
+    expect(describeSettingRequest("assistant_settings.apply_hours", { from: "09:00", to: "17:00" }).change).toBe("Only apply between 09:00 and 17:00");
+    expect(describeSettingRequest("assistant_settings.auto_grant_count", 5).change).toBe("Apply on its own for my next 5 applications");
+  });
+});

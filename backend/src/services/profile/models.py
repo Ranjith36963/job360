@@ -712,6 +712,16 @@ class AssistantSettings:
     # ``company_cap_days`` None = the operator default window.
     company_cap: Optional[int] = None
     company_cap_days: Optional[int] = None
+    # Bulk-apply C2: most applications per Monday-Sunday week in the user's own timezone. None = no cap.
+    weekly_cap: Optional[int] = None
+    # Bulk-apply C1: the user's OWN fixed pace. ``min_gap_minutes`` 0-240 (None = none); ``apply_hours``
+    # = {"from": "HH:MM", "to": "HH:MM"} in the user's timezone (None = any time). Never randomized.
+    min_gap_minutes: Optional[int] = None
+    apply_hours: Optional[dict[str, str]] = None
+    # Bulk-apply R1: "auto for my next N until <time>". While now < until and fewer than N applied events
+    # since the grant began, the submit mode resolves to auto; after that it is the user's own submit_mode.
+    auto_grant_count: Optional[int] = None
+    auto_grant_until: str = ""
     paused_until: str = ""
     pause_reason: str = ""
     # Feedback loop slice 2: may the assistant send the check-in / feedback emails on its own?

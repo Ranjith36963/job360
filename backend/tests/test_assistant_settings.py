@@ -40,6 +40,9 @@ INBOX = "preferences.daily_check"
 SIX = (
     APPLY, BELOW, SCORE, SUBMIT, CAP, PAUSE, REASON, "assistant_settings.auto_employer_emails",
     "assistant_settings.company_cap", "assistant_settings.company_cap_days",
+    # 2026-10-18 bulk-apply C1 / C2 / R1 (tests/test_bulk_pacing_grants_pages.py).
+    "assistant_settings.weekly_cap", "assistant_settings.min_gap_minutes", "assistant_settings.apply_hours",
+    "assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until",
 )
 PROGRESS = "assistant_settings.setup_progress"
 

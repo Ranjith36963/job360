@@ -271,6 +271,11 @@ class AssistantSettingsView(BaseModel):
     daily_cap: SettingFieldOut
     company_cap: SettingFieldOut
     company_cap_days: SettingFieldOut
+    weekly_cap: SettingFieldOut
+    min_gap_minutes: SettingFieldOut
+    apply_hours: SettingFieldOut
+    auto_grant_count: SettingFieldOut
+    auto_grant_until: SettingFieldOut
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut

@@ -44,7 +44,7 @@ from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
-from src.services.applications import interview_payloads, spine
+from src.services.applications import interview_payloads, queue_preflight, spine
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
@@ -770,11 +770,15 @@ class ApplicationSummaryOut(BaseModel):
     # user's whole open queue; both null when it is not on the queue.
     queued_at: Optional[str] = None
     queue_position: Optional[int] = None
+    # Bulk-apply Q1: derived problems of a queued row (queued=true only; null otherwise).
+    preflight: Optional[dict[str, Any]] = None
 
 
 class ListApplicationsResponse(BaseModel):
     applications: list[ApplicationSummaryOut]
     total: int
+    # Bulk-apply Q2: the whole open queue at a glance (queued=true only; null otherwise).
+    queue_summary: Optional[dict[str, Any]] = None
 
 
 class InboxCheckedIn(BaseModel):
@@ -1193,6 +1197,9 @@ class SubmitCheckResponse(BaseModel):
     decision: Literal["submit", "ask", "stop"]
     reason: str
     detail: str
+    # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
+    daily_left: Optional[int] = None
+    company_left: Optional[int] = None
 
 
 class OutreachCheckResponse(BaseModel):
@@ -2777,6 +2784,9 @@ async def submit_check(
     return {
         "application_id": application_id, "decision": verdict.decision,
         "reason": verdict.reason, "detail": verdict.detail,
+        # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
+        "daily_left": settings_rules.daily_left(cfg, counts),
+        "company_left": settings_rules.company_left(cfg, counts.company_applied_in_window),
     }
 
 
@@ -2906,6 +2916,8 @@ async def record_event(
         )
         if body.event_type == "submit_mode_set":
             _check_submit_mode_event(user, application_id, payload)
+        if body.event_type == "answer_corrected":
+            _check_answer_corrected(user, application_id, payload)
         if body.event_type in _QUEUE_EVENT_TYPES:
             await _check_queue_event(db, user, application_id, body.event_type, payload, body.corrects_event_id)
         if body.event_type in kit_service.KIT_EVENT_TYPES:
@@ -2974,6 +2986,7 @@ def _queue_refused(user: CurrentUser, application_id: int, event_type: str, stat
     )
     detail = {
         "payload_not_empty": f"{event_type} takes no payload",
+        "bad_reason": "unqueued takes only an optional reason: " + ", ".join(queue_preflight.UNQUEUE_REASONS),
         "not_open": "not open",
         "already_queued": "already queued",
         "not_queued": "not queued",
@@ -2992,7 +3005,11 @@ async def _check_queue_event(
     is on the queue now, 409 ``not queued`` for an ``unqueued`` when it is not (a correction
     via ``corrects_event_id`` re-derives the queue, so it skips these two). Lives in the ROUTE
     function, so the MCP ``record_event`` tool inherits it."""
-    if payload:
+    if event_type == "unqueued":
+        # Bulk-apply M1: an optional closed reason (what queue_summary counts).
+        if queue_preflight.check_unqueue_payload(payload):
+            raise _queue_refused(user, application_id, event_type, 422, "bad_reason")
+    elif payload:
         raise _queue_refused(user, application_id, event_type, 422, "payload_not_empty")
     if event_type == "queued":
         app_row = await spine.get_owned_application(db, user.id, application_id)
@@ -3024,6 +3041,31 @@ async def _check_queue_event(
         extra={
             "event": "queue_event", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
             "application_id": application_id, "event_type": event_type, "result": "ok",
+            "reason": payload.get("reason") if event_type == "unqueued" else None,
+        },
+    )
+
+
+def _check_answer_corrected(user: CurrentUser, application_id: int, payload: dict[str, Any]) -> None:
+    """Bulk-apply F4: the user changed an answer the assistant wrote or guessed. Payload
+    ``{key | question, was_source}`` (``was_source`` = ``written`` or ``guessed``), nothing else. A note: it
+    saves nothing to memory (that stays a separate ``update_profile`` after the user's yes)."""
+    key, question = payload.get("key"), payload.get("question")
+    ok = (
+        set(payload) <= {"key", "question", "was_source"}
+        and payload.get("was_source") in ("written", "guessed")
+        and any(isinstance(v, str) and v.strip() for v in (key, question))
+        and all(v is None or (isinstance(v, str) and len(v) <= 300) for v in (key, question))
+    )
+    if not ok:
+        raise SpineError(
+            422, 'answer_corrected needs payload {key or question (text, max 300), was_source: "written"|"guessed"}'
+        )
+    get_audit_logger().info(
+        "answer_corrected",
+        extra={
+            "event": "answer_corrected", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
+            "application_id": application_id, "was_source": payload["was_source"], "result": "ok",
         },
     )
 

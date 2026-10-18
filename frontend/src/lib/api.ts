@@ -755,6 +755,8 @@ export async function listApplications(
     quiet_days?: number;
     // Weak spot #3 wave 2 — only applications another assistant session holds now.
     in_flight?: boolean;
+    // Batch queue: only queued applications, in queue order, with preflight + queue_summary.
+    queued?: boolean;
   } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
   const query = { limit: 20, ...params };
@@ -1019,6 +1021,11 @@ export async function deleteProofScreenshot(applicationId: number, screenshotId:
   return request(`/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { method: "DELETE" });
 }
 
+/** "It was not sent" - a started submit never went out; records `submit_resolved` {outcome: not_sent}. */
+export async function resolveSubmit(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/submit/resolve`, { method: "POST" });
+}
+
 /** "Mark resolved" - the user sorted out what stopped their assistant; records `unblocked` {resolution: user_did_it}. */
 /** Free an application another assistant session holds (appends `hold_released`). */
 export async function releaseHold(applicationId: number): Promise<{ released: boolean }> {
@@ -1042,8 +1049,9 @@ export async function whatsNew(
 }
 
 /** The hunt in counts (brought / applied / replied / interview …). */
-export async function getStats(): Promise<StatsResponse> {
-  return request("/api/applications/stats");
+export async function getStats(view?: string): Promise<StatsResponse> {
+  // A view only ADDS one block to the response (e.g. "sites"); the rest is unchanged.
+  return request(`/api/applications/stats${qs({ view })}`);
 }
 /** Add a person to an application (spec R1/R2). 201 for a new row, 200
  * (`already_existed: true`) for the same non-empty email seen again on this

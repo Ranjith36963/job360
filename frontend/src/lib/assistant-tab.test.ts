@@ -62,3 +62,12 @@ describe("setup rounds", () => {
     expect(ROUNDS.map((r) => r.id)).toEqual(["targets", "you", "visa", "logistics", "equality", "settings"]);
   });
 });
+
+describe("new setting words", () => {
+  it("valueText", () => {
+    expect(valueText("assistant_settings.company_cap", null)).toBe("no limit");
+    expect(valueText("assistant_settings.min_gap_minutes", 15)).toBe("15 minutes");
+    expect(valueText("assistant_settings.apply_hours", { from: "09:00", to: "17:00" })).toBe("09:00 to 17:00");
+    expect(valueText("assistant_settings.apply_hours", null)).toBe("any time");
+  });
+});

@@ -107,6 +107,8 @@ export const EVENT_LABEL: Record<string, string> = {
   // Bulk-apply D1 (2026-10-18).
   submit_attempted: "Submit started",
   submit_resolved: "Submit marked as not sent",
+  // Bulk-apply F4 (2026-10-18).
+  answer_corrected: "Answer corrected by you",
 };
 
 function relayedWords(payload: unknown): boolean {

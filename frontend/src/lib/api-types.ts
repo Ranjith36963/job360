@@ -1144,7 +1144,10 @@ export interface paths {
         get?: never;
         /**
          * Set Timezone
-         * @description Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
+         * @description Web session only (security review 2026-10-18): the user's timezone sets their day, week and
+         *     ``apply_hours``, so an assistant's token must not move it.
+         *
+         *     Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
          *     (browser-prefilled on the account settings page, but only ever SAVED
          *     here, on an explicit press — rule #29). A name `ZoneInfo` cannot resolve
          *     is refused with 422 naming the bad value; a valid one is stored and used
@@ -3315,6 +3318,10 @@ export interface components {
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
+            /** Preflight */
+            preflight?: {
+                [key: string]: unknown;
+            } | null;
             proof: components["schemas"]["ProofOut"];
             /** Queue Position */
             queue_position?: number | null;
@@ -3481,8 +3488,11 @@ export interface components {
          */
         AssistantSettingsView: {
             above_line: components["schemas"]["SettingFieldOut"];
+            apply_hours: components["schemas"]["SettingFieldOut"];
             apply_min_score: components["schemas"]["SettingFieldOut"];
             auto_employer_emails: components["schemas"]["SettingFieldOut"];
+            auto_grant_count: components["schemas"]["SettingFieldOut"];
+            auto_grant_until: components["schemas"]["SettingFieldOut"];
             below_line: components["schemas"]["SettingFieldOut"];
             /**
              * Check Every
@@ -3497,6 +3507,7 @@ export interface components {
              * @default
              */
             inbox_mode: string;
+            min_gap_minutes: components["schemas"]["SettingFieldOut"];
             /**
              * Notes
              * @default []
@@ -3522,6 +3533,7 @@ export interface components {
              * @default []
              */
             waiting: components["schemas"]["SettingRequestOut"][];
+            weekly_cap: components["schemas"]["SettingFieldOut"];
         };
         /**
          * AutoEmailCheckResponse
@@ -5025,6 +5037,10 @@ export interface components {
         ListApplicationsResponse: {
             /** Applications */
             applications: components["schemas"]["ApplicationSummaryOut"][];
+            /** Queue Summary */
+            queue_summary?: {
+                [key: string]: unknown;
+            } | null;
             /** Total */
             total: number;
         };
@@ -7111,6 +7127,10 @@ export interface components {
         SubmitCheckResponse: {
             /** Application Id */
             application_id: number;
+            /** Company Left */
+            company_left?: number | null;
+            /** Daily Left */
+            daily_left?: number | null;
             /**
              * Decision
              * @enum {string}

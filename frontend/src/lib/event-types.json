@@ -53,6 +53,7 @@
     "queued",
     "unqueued",
     "submit_attempted",
-    "submit_resolved"
+    "submit_resolved",
+    "answer_corrected"
   ]
 }

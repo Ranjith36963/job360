@@ -417,22 +417,91 @@ async def _swept_after_fill(db: JobDatabase, user_id: str, application_id: int) 
     return bool(fills and sweeps and max(sweeps) > max(fills))
 
 
-async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) -> tuple[bool, bool]:
-    """``(count_short, unreadable)`` from the NEWEST ``form_checked`` / ``form_swept``.
+def _page_of(event: dict[str, Any]) -> Optional[int]:
+    page = event["payload"].get("page")
+    return page if isinstance(page, int) and not isinstance(page, bool) else None
+
+
+async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) -> tuple[bool, bool, bool]:
+    """``(count_short, unreadable, pages_incomplete)`` from the NEWEST ``form_checked`` / ``form_swept``.
     ``count_short``: the sweep read fewer fields than the form check listed questions.
     NOT IN REFERENCE (career-ops apply.md:315-321 asserts each required control holds a value, it never
-    compares an earlier count). No ``form_checked`` on record = no shortfall (older applications)."""
+    compares an earlier count). No ``form_checked`` on record = no shortfall (older applications).
+    A multi-page form (bulk-apply F2: ``page`` / ``pages_total`` on the newest check or sweep) is judged page
+    by page in :func:`_paged_shortfalls`; an application with no ``page`` anywhere is judged exactly as before."""
     events = await _events(db, user_id, application_id, ("form_checked", "form_swept"))
     checked = next((e for e in events if e["event_type"] == "form_checked"), None)
     swept = next((e for e in events if e["event_type"] == "form_swept"), None)
+    # Once ANY event carries a page the form is judged page by page (security review 2026-10-18: dropping
+    # back to unpaged events must not switch the per-page rule off).
+    if any(_page_of(e) is not None for e in events):
+        fills = await _events(db, user_id, application_id, ("form_filled",))
+        filled = fills[0]["payload"].get("fields_count") if fills else None
+        short, unreadable, incomplete = _paged_shortfalls(events, filled if isinstance(filled, int) else None)
+        # A mix of paged and unpaged events must never switch the unpaged checks OFF (review 2026-10-18):
+        # the newest UNPAGED sweep's unreadable list always counts, and so does its count against the
+        # newest unpaged check (a whole-form re-check that found more questions).
+        flat = [e for e in events if _page_of(e) is None]
+        flat_sweep = next((e for e in flat if e["event_type"] == "form_swept"), None)
+        flat_check = next((e for e in flat if e["event_type"] == "form_checked"), None)
+        if flat_sweep is not None:
+            unreadable = unreadable or bool(flat_sweep["payload"].get("unreadable"))
+            want, got = (flat_check or {"payload": {}})["payload"].get("questions_count"), flat_sweep["payload"].get(
+                "fields_checked"
+            )
+            short = short or (isinstance(want, int) and isinstance(got, int) and got < want)
+        return short, unreadable, incomplete
     if swept is None:
-        return False, False
+        return False, False, False
     unreadable = bool(swept["payload"].get("unreadable"))
     if checked is None:
-        return False, unreadable
+        return False, unreadable, False
     want, got = checked["payload"].get("questions_count"), swept["payload"].get("fields_checked")
     short = isinstance(want, int) and isinstance(got, int) and got < want
-    return short, unreadable
+    return short, unreadable, False
+
+
+def _paged_shortfalls(events: list[dict[str, Any]], filled: Optional[int]) -> tuple[bool, bool, bool]:
+    """Bulk-apply F2, newest-first ``events`` of a multi-page form. Only events carrying a ``page`` count.
+    N = ``pages_total`` of the newest paged event. For every page 1..N: the newest ``form_swept`` of that page
+    must exist and be NEWER than the newest ``form_checked`` of that page (a page checked again after its sweep
+    is open again; a page that was never swept is incomplete). The count is judged per page (its newest sweep
+    read at least as many fields as its newest check listed), the unreadable list over every page's newest
+    sweep, and the pages' sweeps together must reach the newest ``form_filled`` ``fields_count``.
+    NOT IN REFERENCE as a gate: career-ops apply.md:315-342 repeats its sweep before every Next by prompt only."""
+    paged = [e for e in events if _page_of(e) is not None]
+    # The LARGEST pages_total ever declared (security review 2026-10-18): a later, smaller number cannot
+    # shrink the form to skip its unswept pages.
+    total = max(
+        (
+            e["payload"]["pages_total"] for e in paged
+            if isinstance(e["payload"].get("pages_total"), int) and not isinstance(e["payload"]["pages_total"], bool)
+        ),
+        default=0,
+    )
+    newest_check: dict[int, dict[str, Any]] = {}
+    newest_sweep: dict[int, dict[str, Any]] = {}
+    for e in paged:  # newest first: the first seen per page wins
+        page = int(_page_of(e) or 0)
+        bucket = newest_check if e["event_type"] == "form_checked" else newest_sweep
+        bucket.setdefault(page, e)
+    incomplete = short = unreadable = False
+    swept_total = 0
+    for page in range(1, total + 1):
+        sweep, check = newest_sweep.get(page), newest_check.get(page)
+        if sweep is None or (check is not None and check["id"] > sweep["id"]):
+            incomplete = True
+            continue
+        got = sweep["payload"].get("fields_checked")
+        want = check["payload"].get("questions_count") if check is not None else None
+        if isinstance(got, int):
+            swept_total += got
+            if isinstance(want, int) and got < want:
+                short = True
+        unreadable = unreadable or bool(sweep["payload"].get("unreadable"))
+    if filled is not None and not incomplete and swept_total < filled:
+        short = True
+    return short, unreadable, incomplete
 
 
 # Weak spot #1b (c): applications CREATED on or after this day must have a ``form_checked`` on record
@@ -509,6 +578,7 @@ async def gate_facts(
         form_swept=await _swept_after_fill(db, user_id, application_id),
         form_count_short=shortfalls[0],
         unreadable_fields=shortfalls[1],
+        form_pages_incomplete=shortfalls[2],
         form_check_missing=await _form_check_missing(db, user_id, app_row),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
@@ -519,7 +589,7 @@ async def gate_facts(
     )
 
 
-def company_avoided(user_id: str, app_row: dict[str, Any]) -> bool:
+def company_avoided(user_id: str, app_row: dict[str, Any], entries: Optional[list[Any]] = None) -> bool:
     """Bulk-apply D2: the job's company is on the user's OWN ``preferences.avoid_companies`` list.
     Exact match of :func:`normalized_company_key` on both sides (no fuzzy match); a blank or
     ``unknown`` key never matches. The user's stop list, never a recommendation."""
@@ -529,7 +599,8 @@ def company_avoided(user_id: str, app_row: dict[str, Any]) -> bool:
     mine = normalized_company_key(str(app_row.get("job_company") or ""))
     if not mine or mine == "unknown":
         return False
-    entries = (load_profile(user_id) or UserProfile()).preferences.avoid_companies
+    if entries is None:  # callers that loop pass the list once (queue preflight, review 2026-10-18)
+        entries = (load_profile(user_id) or UserProfile()).preferences.avoid_companies
     return any(isinstance(e, str) and normalized_company_key(e) == mine for e in entries or [])
 
 
@@ -618,7 +689,7 @@ async def submit_verdict(
         # shows a form_host_mismatch for a form that is not filled yet.
         facts = replace(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
-            form_check_missing=False,
+            form_check_missing=False, form_pages_incomplete=False,
             form_host=settings_rules.screen_form_url(form_url),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
@@ -654,7 +725,7 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
-    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable"}),
+    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total"}),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
@@ -666,7 +737,8 @@ FORM_SWEPT_NOTES_MAX = 300
 FORM_SWEPT_UNREADABLE_MAX = 50
 # ``form_checked`` (weak spot #1b): what check_form found, COUNTS and wording only - never an answer value.
 FORM_CHECKED_REQUIRED = frozenset({"questions_count", "answered", "missing"})
-FORM_CHECKED_OPTIONAL = frozenset({"answers"})
+FORM_CHECKED_OPTIONAL = frozenset({"answers", "page", "pages_total"})
+FORM_PAGES_MAX = 20  # bulk-apply F2: the most pages one form may declare
 FORM_CHECKED_ANSWER_KEYS = frozenset({"question", "key", "source", "needs_confirmation"})
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
 ANSWER_QUESTION_MAX = 300
@@ -774,6 +846,23 @@ def _keys_problem(
 def _count_problem(name: str, value: Any, problems: list[str]) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= settings.KIT_FORM_FIELDS_MAX:
         problems.append(f"{name} must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
+
+
+def _pages_problems(payload: dict[str, Any], problems: list[str]) -> None:
+    """Bulk-apply F2: ``page`` and ``pages_total`` come together (whole numbers, 1..FORM_PAGES_MAX), page <= total."""
+    if "page" not in payload and "pages_total" not in payload:
+        return
+    if "page" not in payload or "pages_total" not in payload:
+        problems.append("page and pages_total go together (send both, or neither for a one-page form)")
+        return
+    ok = True
+    for name in ("page", "pages_total"):
+        value = payload[name]
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= FORM_PAGES_MAX:
+            problems.append(f"{name} must be a whole number from 1 to {FORM_PAGES_MAX}")
+            ok = False
+    if ok and payload["page"] > payload["pages_total"]:
+        problems.append("page cannot be more than pages_total")
 
 
 def _clean_text(value: Any, name: str, limit: int, problems: list[str]) -> str:
@@ -889,8 +978,10 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 problems.append(f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
         if "unreadable" in payload:
             _unreadable_list(payload["unreadable"], problems)
+        _pages_problems(payload, problems)
     elif event_type == "form_checked":
         problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
+        _pages_problems(payload, problems)
         for name in ("questions_count", "answered", "missing"):
             if name in payload:
                 _count_problem(name, payload[name], problems)
@@ -1022,13 +1113,16 @@ async def _check_kit_event(
             raise SpineError(422, "fixed cannot be more than fields_checked")
         fills = await _events(db, user.id, application_id, ("form_filled",))
         filled = fills[0]["payload"].get("fields_count") if fills else None
-        if isinstance(filled, int) and not isinstance(filled, bool) and checked < filled:
+        paged = "page" in payload  # bulk-apply F2: one page's sweep is judged against its own check, not the form total
+        if not paged and isinstance(filled, int) and not isinstance(filled, bool) and checked < filled:
             raise SpineError(
                 422,
                 f"fields_checked must be at least {filled} (the fields_count of the latest form_filled): "
                 "re-read every field on the page, then record the sweep",
             )
         swept: dict[str, Any] = {"fields_checked": checked, "fixed": fixed, "by": actor}
+        if paged:
+            swept["page"], swept["pages_total"] = payload["page"], payload["pages_total"]
         if "notes" in payload:
             raw_notes = payload["notes"]
             if not isinstance(raw_notes, str):
@@ -1054,6 +1148,8 @@ async def _check_kit_event(
         stored_checked: dict[str, Any] = {k: payload[k] for k in ("questions_count", "answered", "missing")}
         if "answers" in payload:
             stored_checked["answers"] = _checked_answers(payload["answers"], [])
+        if "page" in payload:
+            stored_checked["page"], stored_checked["pages_total"] = payload["page"], payload["pages_total"]
         stored_checked["by"] = actor
         return stored_checked
     if event_type == "hold_released":

@@ -2351,6 +2351,17 @@ async def list_applications(
 
     proofs = await proof_for(db, user_id, app_ids)
     holds = await kit_service.holds_for_apps(db, user_id, app_ids, datetime.now(timezone.utc))
+    preflights: dict[int, dict[str, Any]] = {}
+    summary: Optional[dict[str, Any]] = None
+    if queued:
+        # Bulk-apply Q1/Q2: derived, no table; the order above stays first in first out.
+        from src.services.applications import queue_preflight  # noqa: PLC0415 - imports spine
+        from src.services.profile.models import UserProfile  # noqa: PLC0415
+        from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+        cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+        preflights = await queue_preflight.preflight_rows(db, user_id, rows, queued_at, holds, cfg)
+        summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg)
     out = []
     for r in rows:
         app_id = r["id"]
@@ -2386,6 +2397,7 @@ async def list_applications(
                 # The batch queue (2026-10-18): null when the application is not on the open queue.
                 "queued_at": queued_at.get(app_id),
                 "queue_position": queue_position.get(app_id),
+                "preflight": preflights.get(app_id),
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
                 "inbox_checked_at": r.get("inbox_checked_at"),
@@ -2405,7 +2417,7 @@ async def list_applications(
                 ),
             }
         )
-    return {"applications": out, "total": total}
+    return {"applications": out, "total": total, "queue_summary": summary}
 
 
 # ── R9 — whats_new ────────────────────────────────────────────────────────────

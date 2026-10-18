@@ -14,6 +14,11 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
 * ``company_cap`` / ``company_cap_days`` — most applications to ONE company inside a
   window of days (owner 2026-10-18); ``None`` = no limit, and no days = the operator
   default window (``ASSISTANT_COMPANY_CAP_DEFAULT_DAYS``)
+* ``weekly_cap`` — most submits per Monday-Sunday week in the user's own timezone (bulk-apply C2)
+* ``min_gap_minutes`` / ``apply_hours`` — the user's own FIXED pace: a minimum gap between submits
+  and a daily window ``{"from": "HH:MM", "to": "HH:MM"}`` in their timezone (bulk-apply C1; never randomized)
+* ``auto_grant_count`` / ``auto_grant_until`` — "auto for my next N until <time>" (bulk-apply R1): while
+  active the mode resolves to auto, after that it is the user's own ``submit_mode``
 * ``paused_until`` — ``""`` | ``"until_resumed"`` | an ISO-8601 time in the future
 * ``pause_reason`` — one short line for the user's own memory
 
@@ -78,13 +83,20 @@ DAILY_CAP_PATH = f"{HEAD}.daily_cap"
 COMPANY_CAP_PATH = f"{HEAD}.company_cap"
 COMPANY_CAP_DAYS_PATH = f"{HEAD}.company_cap_days"
 COMPANY_CAP_DAYS_MAX = 365
+WEEKLY_CAP_PATH = f"{HEAD}.weekly_cap"
+MIN_GAP_PATH = f"{HEAD}.min_gap_minutes"
+MIN_GAP_MAX = 240
+APPLY_HOURS_PATH = f"{HEAD}.apply_hours"
+AUTO_GRANT_COUNT_PATH = f"{HEAD}.auto_grant_count"
+AUTO_GRANT_UNTIL_PATH = f"{HEAD}.auto_grant_until"
 PAUSED_UNTIL_PATH = f"{HEAD}.paused_until"
 PAUSE_REASON_PATH = f"{HEAD}.pause_reason"
 AUTO_EMPLOYER_EMAILS_PATH = f"{HEAD}.auto_employer_emails"
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
-    AUTO_EMPLOYER_EMAILS_PATH,
+    AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
+    AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # The inbox/Gmail mode stays at its old path (an ALIAS, not a move: assistants
@@ -171,6 +183,47 @@ def _validate_paused_until(path: str, value: Any, now: datetime) -> str:
     return when.isoformat()
 
 
+_HHMM_RE = re.compile(r"^([01][0-9]|2[0-3]):([0-5][0-9])$")
+
+
+def _hhmm_minutes(text: str) -> int:
+    """Minutes since midnight of a validated ``HH:MM``."""
+    return int(text[:2]) * 60 + int(text[3:])
+
+
+def _validate_apply_hours(path: str, value: Any) -> dict[str, str]:
+    """``{"from": "HH:MM", "to": "HH:MM"}`` (24-hour, the user's own timezone), the two different.
+    ``from`` later than ``to`` is an overnight window (22:00 to 06:00)."""
+    if not isinstance(value, dict) or set(value) != {"from", "to"}:
+        raise _bad(path, 'must be an object with exactly "from" and "to", each "HH:MM" (24-hour, your timezone)')
+    out: dict[str, str] = {}
+    for key in ("from", "to"):
+        raw = value[key]
+        if not isinstance(raw, str) or not _HHMM_RE.match(raw.strip()):
+            raise _bad(path, f'"{key}" must be a time like 09:00 (24-hour HH:MM)')
+        out[key] = raw.strip()
+    if out["from"] == out["to"]:
+        raise _bad(path, '"from" and "to" must be different times')
+    return out
+
+
+def _validate_grant_until(path: str, value: Any, now: datetime) -> str:
+    """The end of a counted auto grant: an ISO-8601 time WITH an offset, in the future, at most
+    ``ASSISTANT_AUTO_GRANT_MAX_DAYS`` ahead. No "until_resumed": a grant always ends."""
+    if not isinstance(value, str):
+        raise _bad(path, f"must be a string, not {type(value).__name__}")
+    text = value.strip()
+    try:
+        when = parse_iso_with_offset(text)
+    except ValueError:
+        raise _bad(path, "must be an ISO-8601 time with an offset like 2026-10-20T18:00:00+01:00") from None
+    if when <= now:
+        raise _bad(path, "must be a time in the future")
+    if when > now + timedelta(days=settings.ASSISTANT_AUTO_GRANT_MAX_DAYS):
+        raise _bad(path, f"must be at most {settings.ASSISTANT_AUTO_GRANT_MAX_DAYS} days ahead")
+    return when.isoformat()
+
+
 def _validate_pause_reason(path: str, value: Any) -> str:
     if not isinstance(value, str):
         raise _bad(path, f"must be a string, not {type(value).__name__}")
@@ -238,6 +291,16 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _int_in_range(path, value, 1, settings.ASSISTANT_COMPANY_CAP_MAX)
     if path == COMPANY_CAP_DAYS_PATH:
         return _int_in_range(path, value, 1, COMPANY_CAP_DAYS_MAX)
+    if path == WEEKLY_CAP_PATH:
+        return _int_in_range(path, value, 1, settings.ASSISTANT_WEEKLY_CAP_MAX)
+    if path == MIN_GAP_PATH:
+        return _int_in_range(path, value, 0, MIN_GAP_MAX)
+    if path == APPLY_HOURS_PATH:
+        return _validate_apply_hours(path, value)
+    if path == AUTO_GRANT_COUNT_PATH:
+        return _int_in_range(path, value, 1, settings.ASSISTANT_AUTO_GRANT_MAX)
+    if path == AUTO_GRANT_UNTIL_PATH:
+        return _validate_grant_until(path, value, when)
     if path == PAUSED_UNTIL_PATH:
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
@@ -267,6 +330,20 @@ class EffectiveSettings:
     # Owner decision 2026-10-18: None = no per-company limit; the window is always a number.
     company_cap: Optional[int] = None
     company_cap_days: int = settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS
+    # Bulk-apply C1 / C2 / R1 (None / "" = not set).
+    weekly_cap: Optional[int] = None
+    min_gap_minutes: Optional[int] = None
+    apply_hours: Optional[tuple[str, str]] = None
+    auto_grant_count: Optional[int] = None
+    auto_grant_until: str = ""
+
+
+def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
+    """The stored ``{"from","to"}`` as a tuple; anything unreadable (a historical row) reads as no window."""
+    if isinstance(raw, dict) and isinstance(raw.get("from"), str) and isinstance(raw.get("to"), str):
+        if _HHMM_RE.match(raw["from"]) and _HHMM_RE.match(raw["to"]) and raw["from"] != raw["to"]:
+            return raw["from"], raw["to"]
+    return None
 
 
 def effective(s: AssistantSettings) -> EffectiveSettings:
@@ -285,6 +362,11 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         company_cap_days=(
             settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS if s.company_cap_days is None else int(s.company_cap_days)
         ),
+        weekly_cap=None if s.weekly_cap is None else int(s.weekly_cap),
+        min_gap_minutes=None if not s.min_gap_minutes else int(s.min_gap_minutes),
+        apply_hours=_hours_tuple(s.apply_hours),
+        auto_grant_count=None if s.auto_grant_count is None else int(s.auto_grant_count),
+        auto_grant_until=s.auto_grant_until or "",
     )
 
 
@@ -314,8 +396,15 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw  # None stays None: the line has no default
     if path == SUBMIT_MODE_PATH:
         return raw or DEFAULT_SUBMIT_MODE
-    if path in (DAILY_CAP_PATH, COMPANY_CAP_PATH):
+    if path in (DAILY_CAP_PATH, COMPANY_CAP_PATH, WEEKLY_CAP_PATH, AUTO_GRANT_COUNT_PATH):
         return raw
+    if path == MIN_GAP_PATH:
+        return raw or None  # 0 and null both mean "no gap"
+    if path == APPLY_HOURS_PATH:
+        hours = _hours_tuple(raw)
+        return None if hours is None else {"from": hours[0], "to": hours[1]}
+    if path == AUTO_GRANT_UNTIL_PATH:
+        return (raw or "") if _grant_not_over(raw or "", when) else ""
     if path == COMPANY_CAP_DAYS_PATH:
         return settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS if raw is None else raw
     if path == PAUSED_UNTIL_PATH:
@@ -342,6 +431,37 @@ def _pause_rank(value: str) -> float:
         return parse_iso_with_offset(value).timestamp()
     except ValueError:
         return 0.0
+
+
+def _grant_not_over(until: str, now: datetime) -> bool:
+    """A stored grant end that is still in the future. Unreadable / empty = over."""
+    if not until:
+        return False
+    try:
+        return parse_iso_with_offset(until) > now
+    except ValueError:
+        return False
+
+
+def _grant_until_rank(value: str) -> float:
+    """How long a grant lasts: none = 0, else its epoch seconds. LOWER = the assistant is less free."""
+    if not value:
+        return 0.0
+    try:
+        return parse_iso_with_offset(value).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _hours_minutes(value: Any) -> frozenset[int]:
+    """The minutes of the day (0-1439) an ``apply_hours`` window allows; no window = all of them."""
+    hours = _hours_tuple(value)
+    if hours is None:
+        return frozenset(range(1440))
+    start, end = _hhmm_minutes(hours[0]), _hhmm_minutes(hours[1])
+    if start < end:
+        return frozenset(range(start, end))
+    return frozenset(range(start, 1440)) | frozenset(range(0, end))
 
 
 def _is_auto_inbox(value: Any) -> bool:
@@ -374,6 +494,12 @@ def classify_change(
     company_cap          raised, or a number -> none (limit removed)    none -> a number, lowered
     company_cap_days     LOWERED (a shorter window frees the           raised
                          assistant)
+    weekly_cap           raised, or a number -> none (cap removed)      none -> a number, lowered
+    min_gap_minutes      lowered, or removed (null / 0)                 raised, or set from none
+    apply_hours          any minute of the day newly allowed (wider,    narrowed to a subset;
+                         moved, or removed)                             none -> a window
+    auto_grant_count     raised, or none -> a number                    lowered, or cleared
+    auto_grant_until     a LATER end, or none -> a time                 an earlier end, or cleared
     paused_until         cleared or moved earlier (resume)              set or extended
     pause_reason         never                                          always
     auto_employer_       off -> on (the assistant emails employers     on -> off (the stop
@@ -395,10 +521,18 @@ def classify_change(
         return "riskier" if (below_auto and not above_auto) else "safer"
     if path == SUBMIT_MODE_PATH:
         return "riskier" if (after == AUTO_SUBMIT_MODE and before != AUTO_SUBMIT_MODE) else "safer"
-    if path in (DAILY_CAP_PATH, COMPANY_CAP_PATH):
+    if path in (DAILY_CAP_PATH, COMPANY_CAP_PATH, WEEKLY_CAP_PATH):
         before_rank = float("inf") if before is None else before
         after_rank = float("inf") if after is None else after
         return "riskier" if after_rank > before_rank else "safer"
+    if path == MIN_GAP_PATH:
+        return "riskier" if (after or 0) < (before or 0) else "safer"
+    if path == APPLY_HOURS_PATH:
+        return "riskier" if (_hours_minutes(after) - _hours_minutes(before)) else "safer"
+    if path == AUTO_GRANT_COUNT_PATH:
+        return "riskier" if (after or 0) > (before or 0) else "safer"
+    if path == AUTO_GRANT_UNTIL_PATH:
+        return "riskier" if _grant_until_rank(after or "") > _grant_until_rank(before or "") else "safer"
     if path == COMPANY_CAP_DAYS_PATH:
         return "riskier" if after < before else "safer"
     if path == PAUSED_UNTIL_PATH:
@@ -472,6 +606,14 @@ class SubmitCounts:
     # the same company inside the user's ``company_cap_days`` (0 when no application was given
     # to :func:`load_submit_counts`, or the company is blank / unknown).
     company_applied_in_window: int = 0
+    # Bulk-apply C2: submits in the user's current Monday-Sunday week.
+    submitted_this_week: int = 0
+    # Bulk-apply C1: when the newest real ``applied`` was recorded (``None`` = none yet) and the user's
+    # IANA timezone (the gap's exact next time and the apply hours are read in it).
+    last_applied_at: Optional[datetime] = None
+    user_tz: str = "UTC"
+    # Bulk-apply R1: ``applied`` events since the current auto grant began (see :func:`grant_info`).
+    applied_since_grant: int = 0
 
 
 @dataclass(frozen=True)
@@ -546,6 +688,9 @@ class SubmitFacts:
     # Bulk-apply R2: the form host has no earlier applied application of this user. Asks
     # ``new_site_first_time`` in auto mode; a yes clears it.
     new_site: bool = False
+    # Bulk-apply F2: a multi-page form (``page`` / ``pages_total`` on form_checked / form_swept) has a page
+    # 1..N without a sweep newer than its check. STOP ``form_pages_incomplete``; a yes never clears it.
+    form_pages_incomplete: bool = False
 
 
 @dataclass(frozen=True)
@@ -560,12 +705,12 @@ class SubmitDecision:
 
 
 REASONS: tuple[str, ...] = (
-    "paused", "already_applied", "user_declined", "daily_cap_reached", "company_cap_reached", "duplicate_job",
-    "unknown_site",
+    "paused", "already_applied", "user_declined", "daily_cap_reached", "company_cap_reached",
+    "weekly_cap_reached", "pace_wait", "outside_hours", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
-    "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time",
+    "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
 )
 
 
@@ -694,8 +839,11 @@ def may_submit(
     4. daily cap reached -> stop ``daily_cap_reached``
     4a. ``company_cap`` applications to this company inside ``company_cap_days`` already -> stop
         ``company_cap_reached`` (a stored yes does NOT clear it; the user raises the limit)
+    4a1. ``weekly_cap`` submits already in the user's Monday-Sunday week -> stop ``weekly_cap_reached``
     4a2. the company is on the user's own ``avoid_companies`` list -> stop ``company_avoided``
         (exact normalized match; a yes does NOT clear it; the user edits their list)
+    4a3. outside the user's ``apply_hours`` -> stop ``outside_hours``; less than ``min_gap_minutes`` since the
+        newest applied -> stop ``pace_wait`` with the exact next allowed time (fixed values, a yes never clears them)
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
@@ -704,6 +852,8 @@ def may_submit(
         fewer fields than the newest ``form_checked`` listed questions -> stop ``form_count_mismatch``
     4c3. an application created after ``kit.FORM_CHECK_REQUIRED_FROM`` has no ``form_checked`` -> stop
         ``form_check_missing`` (older in-flight applications are exempt)
+    4c4. a multi-page form has a page 1..N with no ``form_swept`` newer than its ``form_checked`` -> stop
+        ``form_pages_incomplete`` (older single-page applications are unchanged; a yes does not clear it)
     4d2. a ``submit_attempted`` with no later surviving ``applied`` or web ``submit_resolved`` -> stop
         ``submit_unconfirmed`` (a submit was started and never confirmed; a yes does NOT clear it;
         the user records the outcome)
@@ -731,7 +881,8 @@ def may_submit(
         duplicate ask, so a stored yes still clears it.
     6. site unknown -> ask ``unknown_site``
     7. Indeed / LinkedIn style site -> ask ``ask_always_site``
-    8. the mode (the job's override, else ``submit_mode``) is ``confirm`` -> ask
+    8. the mode (the job's override, else ``submit_mode`` - or auto while a counted ``auto_grant`` is active:
+       now before ``auto_grant_until`` and fewer than ``auto_grant_count`` applied since it began) is ``confirm`` -> ask
     9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``
     10. first application since auto-submit was turned on -> ask ``practice_run``
     10b. auto mode and the form host has no earlier applied application -> ask ``new_site_first_time``
@@ -739,7 +890,7 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4c (4a, 4a2 and 4d2 included), the auto-mode duplicate stop, the other
+    ``user_approved``. Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (4d)
     are NEVER cleared by a yes.
     """
@@ -759,12 +910,21 @@ def may_submit(
             f"You set a limit of {cfg.company_cap} applications per company in {cfg.company_cap_days} days, "
             "and it is reached for this company. Do not submit; the user can raise the limit.",
         )
+    if cfg.weekly_cap is not None and counts.submitted_this_week >= cfg.weekly_cap:
+        return SubmitDecision(
+            "stop", "weekly_cap_reached",
+            f"You set a limit of {cfg.weekly_cap} applications per week (Monday to Sunday) and it is reached. "
+            "Do not submit; the user can raise the limit.",
+        )
     if application.company_avoided:
         return SubmitDecision(
             "stop", "company_avoided",
             "This company is on your own never-apply list. Do not submit; the user removes it from the list "
             "to allow it.",
         )
+    pace = _pace_stop(cfg, counts, now)
+    if pace is not None:
+        return pace
     if not application.form_filled:
         return SubmitDecision(
             "stop", "form_not_recorded",
@@ -796,6 +956,12 @@ def may_submit(
             "tell the user about any knockouts, record_event form_checked, sweep again "
             "and call check_submit again.",
         )
+    if application.form_pages_incomplete:
+        return SubmitDecision(
+            "stop", "form_pages_incomplete",
+            "A page of this multi-page form has no sweep newer than its check. For every page 1..N: "
+            "check_form, form_checked, fill, form_swept (with page and pages_total); then check_submit again.",
+        )
     if application.submit_unconfirmed:
         return SubmitDecision(
             "stop", "submit_unconfirmed",
@@ -809,7 +975,8 @@ def may_submit(
             "the user confirms it on Job360 first, or submits this one themselves.",
         )
     override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
-    mode = override or cfg.submit_mode
+    base_mode = AUTO_SUBMIT_MODE if grant_active(cfg, counts, now) else cfg.submit_mode
+    mode = override or base_mode
     auto = mode == AUTO_SUBMIT_MODE
     if application.duplicate_job and auto:
         return SubmitDecision(
@@ -850,6 +1017,66 @@ def may_submit(
             "submit", "user_approved", "The user said yes to sending this application with this CV. You may submit."
         )
     return ask
+
+
+def grant_active(cfg: EffectiveSettings, counts: SubmitCounts, now: datetime) -> bool:
+    """Bulk-apply R1: a counted auto grant is in force - both settings set, now before the end, and fewer
+    than ``auto_grant_count`` applied events since it began. Pure."""
+    if cfg.auto_grant_count is None or not cfg.auto_grant_until:
+        return False
+    return _grant_not_over(cfg.auto_grant_until, now) and counts.applied_since_grant < cfg.auto_grant_count
+
+
+def _zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
+def _in_hours(local: datetime, hours: tuple[str, str]) -> bool:
+    minute = local.hour * 60 + local.minute
+    start, end = _hhmm_minutes(hours[0]), _hhmm_minutes(hours[1])
+    return start <= minute < end if start < end else (minute >= start or minute < end)
+
+
+def _next_opening(local: datetime, hours: tuple[str, str]) -> datetime:
+    """The first moment at or after ``local`` that falls inside the window (``local`` itself when inside)."""
+    if _in_hours(local, hours):
+        return local
+    start = _hhmm_minutes(hours[0])
+    opening = local.replace(hour=start // 60, minute=start % 60, second=0, microsecond=0)
+    return opening if opening > local else opening + timedelta(days=1)
+
+
+def _pace_stop(cfg: EffectiveSettings, counts: SubmitCounts, now: datetime) -> Optional[SubmitDecision]:
+    """Rule 4a3 (bulk-apply C1): the user's own fixed pace. ``outside_hours`` first, then ``pace_wait`` with the
+    exact next allowed time (in the user's timezone; moved to the next opening when it falls outside the hours).
+    Nothing is randomized and a yes clears neither."""
+    zone = _zone(counts.user_tz)
+    local = now.astimezone(zone)
+    hours = cfg.apply_hours
+    if hours is not None and not _in_hours(local, hours):
+        opening = _next_opening(local, hours)
+        return SubmitDecision(
+            "stop", "outside_hours",
+            f"You set apply hours of {hours[0]} to {hours[1]} (your time). Do not submit now; "
+            f"the next allowed time is {opening.isoformat(timespec='minutes')}.",
+        )
+    if cfg.min_gap_minutes and counts.last_applied_at is not None:
+        last = counts.last_applied_at if counts.last_applied_at.tzinfo else counts.last_applied_at.replace(
+            tzinfo=timezone.utc
+        )
+        nxt = (last + timedelta(minutes=cfg.min_gap_minutes)).astimezone(zone)
+        if nxt > local:
+            if hours is not None:
+                nxt = _next_opening(nxt, hours)
+            return SubmitDecision(
+                "stop", "pace_wait",
+                f"You set a gap of {cfg.min_gap_minutes} minutes between applications. Do not submit before "
+                f"{nxt.isoformat(timespec='minutes')} (your time); work another application or wait.",
+            )
+    return None
 
 
 def _first_ask(
@@ -1065,6 +1292,60 @@ def may_send_outreach(
 # ── Loaders (the only I/O here) ──────────────────────────────────────────────
 
 
+def _applied_after(conn: Any, user_id: str, since: Optional[str]) -> int:
+    """This user's real ``applied`` events recorded after ``since`` (``None`` = ever): not a simulation
+    marked BEFORE it (a mark recorded after a real submit never gives a grant slot back: review
+    2026-10-18) and not a corrected one. The ONE count the practice run and the auto grant share."""
+    cnt = conn.execute(
+        "SELECT COUNT(*) FROM application_events e "
+        "WHERE e.user_id = ? AND e.event_type = 'applied' AND e.recorded_at > ? "
+        "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
+        "AND s.user_id = e.user_id AND s.event_type = ? AND s.id < e.id AND s.id NOT IN "
+        "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))",
+        (user_id, since or "", settings.SIMULATION_EVENT_TYPE, user_id),
+    ).fetchone()
+    return int(cnt[0]) if cnt else 0
+
+
+def grant_info(user_id: str) -> tuple[Optional[str], int]:
+    """``(began_at, applied_since)`` of the counted auto grant (bulk-apply R1) - DERIVED from the
+    ``auto_grant_until`` history, never stored. A new grant begins when the end is set while none was in force
+    (cleared, or already over), or when it is moved LATER. A shorter end or any change of the count does not
+    restart the count, so a "safer" edit can never free more auto applications. ``(None, n)`` = no history:
+    every real applied counts (the safe direction). Read from the overlay rows, oldest first."""
+    with pgsync.connect(str(settings.DB_PATH)) as conn:
+        rows = conn.execute(
+            "SELECT value, set_at FROM profile_edits WHERE user_id = ? AND path = ? ORDER BY id",
+            (user_id, AUTO_GRANT_UNTIL_PATH),
+        ).fetchall()
+        began: Optional[str] = None
+        current = ""
+        for raw, set_at in rows:
+            try:
+                value = json.loads(raw) if raw is not None else None
+            except ValueError:
+                value = None
+            text = value if isinstance(value, str) else ""
+            if not text:
+                current = ""
+                continue
+            try:
+                set_time = parse_iso_with_offset(str(set_at))
+            except ValueError:
+                set_time = datetime.min.replace(tzinfo=timezone.utc)
+            over = not _grant_not_over(current, set_time)
+            if over or _grant_until_rank(text) > _grant_until_rank(current):
+                began = str(set_at)
+            current = text
+        # Every real `applied` recorded since the grant began, with NO simulation or correction
+        # exclusion (security review 2026-10-18): relabelling a submit must never give a slot back.
+        cnt = conn.execute(
+            "SELECT COUNT(*) FROM application_events WHERE user_id = ? AND event_type = 'applied' AND recorded_at > ?",
+            (user_id, began or ""),
+        ).fetchone()
+        return began, int(cnt[0]) if cnt else 0
+
+
 def practice_info(user_id: str) -> tuple[Optional[str], int]:
     """``(auto_on_since, applied_since_auto_on)`` — DERIVED, never stored.
 
@@ -1089,17 +1370,18 @@ def practice_info(user_id: str) -> tuple[Optional[str], int]:
                 (user_id, f'%"{AUTO_SUBMIT_MODE}"%'),
             ).fetchone()
             since = ev[0] if ev and ev[0] else None
+        # Bulk-apply R1: the FIRST counted auto grant also starts the practice run (an account that
+        # only ever used grants is turning auto on for the first time then).
+        grant = conn.execute(
+            "SELECT MIN(set_at) FROM profile_edits WHERE user_id = ? AND path = ? AND value IS NOT NULL "
+            "AND value <> 'null'",
+            (user_id, AUTO_GRANT_UNTIL_PATH),
+        ).fetchone()
+        if grant and grant[0] and (since is None or str(grant[0]) < since):
+            since = str(grant[0])
         if since is None:
             return None, 0
-        cnt = conn.execute(
-            "SELECT COUNT(*) FROM application_events e "
-            "WHERE e.user_id = ? AND e.event_type = 'applied' AND e.recorded_at > ? "
-            "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
-            "AND s.user_id = e.user_id AND s.event_type = ? AND s.id NOT IN "
-            "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))",
-            (user_id, since, settings.SIMULATION_EVENT_TYPE, user_id),
-        ).fetchone()
-        return since, int(cnt[0]) if cnt else 0
+        return since, _applied_after(conn, user_id, since)
 
 
 async def count_on_user_today(
@@ -1133,6 +1415,59 @@ async def count_on_user_today(
         if at.astimezone(zone).date() == today:
             count += 1
     return count
+
+
+async def count_on_user_week(
+    db: JobDatabase, user_id: str, now: datetime, sql: str, params: tuple[Any, ...]
+) -> int:
+    """Like :func:`count_on_user_today` for the user's Monday-Sunday week (bulk-apply C2): ``sql`` selects one
+    ``recorded_at`` column and ends with ``recorded_at >= ?``; the floor (now - 9 days) is appended here."""
+    from src.services.applications import spine  # noqa: PLC0415 — spine imports the profile package
+
+    today = await spine.user_today(db, user_id, now=now)
+    monday = today - timedelta(days=today.weekday())
+    zone = _zone(await _user_timezone(db, user_id))
+    floor = (now - timedelta(days=9)).isoformat()
+    cur = await db._db.execute(sql, (*params, floor))
+    count = 0
+    for r in await cur.fetchall():
+        try:
+            at = datetime.fromisoformat(str(dict(r)["recorded_at"]))
+        except ValueError:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if monday <= at.astimezone(zone).date() <= today:
+            count += 1
+    return count
+
+
+async def _user_timezone(db: JobDatabase, user_id: str) -> str:
+    cur = await db._db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
+    row = await cur.fetchone()
+    return str((dict(row).get("timezone") if row else None) or "UTC")
+
+
+async def last_applied_at(db: JobDatabase, user_id: str) -> Optional[datetime]:
+    """When this user's newest ``applied`` was recorded (bulk-apply C1), with NO exclusions: a pace limit
+    counts every submit the server saw, so a later simulation mark or correction can never move the
+    anchor back (security review 2026-10-18). ``None`` = none."""
+    cur = await db._db.execute(
+        "SELECT e.recorded_at FROM application_events e "
+        "WHERE e.user_id = ? AND e.event_type = 'applied' ORDER BY e.id DESC LIMIT 20",
+        (user_id,),
+    )
+    newest: Optional[datetime] = None
+    for r in await cur.fetchall():
+        try:
+            at = datetime.fromisoformat(str(dict(r)["recorded_at"]))
+        except ValueError:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if newest is None or at > newest:
+            newest = at
+    return newest
 
 
 async def company_applied_count(
@@ -1189,13 +1524,38 @@ async def load_submit_counts(
         (user_id,),
     )
     _since, applied_since = practice_info(user_id)
+    week = await count_on_user_week(
+        db, user_id, now,
+        "SELECT recorded_at FROM application_events "
+        "WHERE user_id = ? AND event_type = 'applied' AND recorded_at >= ?",
+        (user_id,),
+    )
+    last = await last_applied_at(db, user_id)
+    tz = await _user_timezone(db, user_id)
+    _began, grant_applied = grant_info(user_id)
     company = 0
     if application_id is not None:
         days = window_days if window_days is not None else settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS
         company = await company_applied_count(db, user_id, application_id, now, days)
     return SubmitCounts(
         submitted_today=submitted, applied_since_auto_on=applied_since, company_applied_in_window=company,
+        submitted_this_week=week, last_applied_at=last, user_tz=tz, applied_since_grant=grant_applied,
     )
+
+
+def daily_left(cfg: EffectiveSettings, counts: SubmitCounts) -> Optional[int]:
+    """Bulk-apply Q2: submits left today under ``daily_cap`` (never below 0); ``None`` = no cap."""
+    if cfg.daily_cap is None:
+        return None
+    return max(0, cfg.daily_cap - counts.submitted_today)
+
+
+def company_left(cfg: EffectiveSettings, company_applied: int) -> Optional[int]:
+    """Bulk-apply Q1/Q2: applications left at one company inside ``company_cap_days`` (never below 0);
+    ``None`` = no ``company_cap``. ``company_applied`` = :func:`company_applied_count`."""
+    if cfg.company_cap is None:
+        return None
+    return max(0, cfg.company_cap - company_applied)
 
 
 async def load_outreach_counts(
@@ -1342,6 +1702,17 @@ def build_settings_view(
         "daily_cap": {"value": raw.daily_cap, "effective": eff.daily_cap},
         "company_cap": {"value": raw.company_cap, "effective": eff.company_cap},
         "company_cap_days": {"value": raw.company_cap_days, "effective": eff.company_cap_days},
+        "weekly_cap": {"value": raw.weekly_cap, "effective": eff.weekly_cap},
+        "min_gap_minutes": {"value": raw.min_gap_minutes, "effective": eff.min_gap_minutes},
+        "apply_hours": {
+            "value": raw.apply_hours,
+            "effective": None if eff.apply_hours is None else {"from": eff.apply_hours[0], "to": eff.apply_hours[1]},
+        },
+        "auto_grant_count": {"value": raw.auto_grant_count, "effective": eff.auto_grant_count},
+        "auto_grant_until": {
+            "value": raw.auto_grant_until,
+            "effective": effective_path_value(AUTO_GRANT_UNTIL_PATH, raw.auto_grant_until, when),
+        },
         "paused_until": {
             "value": raw.paused_until,
             "effective": effective_path_value(PAUSED_UNTIL_PATH, raw.paused_until, when),

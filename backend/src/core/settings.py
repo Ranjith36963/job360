@@ -330,6 +330,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # assistant right before the final click; `submit_resolved` {outcome: "not_sent"} is WEB ONLY
     # (the user says the submit never went out). Checked in services/applications/kit.py.
     "submit_attempted", "submit_resolved",
+    # Owner decision 2026-10-18 (bulk-apply F4): the user changed an answer the assistant wrote or
+    # guessed; payload {key | question, was_source}. A note: saving it to memory is a separate,
+    # user-approved update_profile. Checked in the record_event ROUTE (_check_answer_corrected).
+    "answer_corrected",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -760,6 +764,9 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.submit_mode", "assistant_settings.daily_cap",
     # Owner decision 2026-10-18 - the per-company limit and its window in days.
     "assistant_settings.company_cap", "assistant_settings.company_cap_days",
+    # Bulk-apply C1 / C2 / R1 - the weekly cap, the pace (gap + apply hours) and the counted auto grant.
+    "assistant_settings.weekly_cap", "assistant_settings.min_gap_minutes", "assistant_settings.apply_hours",
+    "assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until",
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
     # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
     "assistant_settings.auto_employer_emails",
@@ -797,6 +804,11 @@ ASSISTANT_DAILY_CAP_MAX = int(os.getenv("ASSISTANT_DAILY_CAP_MAX", "500"))
 # without choosing days.
 ASSISTANT_COMPANY_CAP_MAX = int(os.getenv("ASSISTANT_COMPANY_CAP_MAX", "50"))
 ASSISTANT_COMPANY_CAP_DEFAULT_DAYS = int(os.getenv("ASSISTANT_COMPANY_CAP_DEFAULT_DAYS", "180"))
+# Bulk-apply C2 / R1: the ceiling a typed weekly cap may take, the most a counted auto grant may allow,
+# and how far ahead its end may be (a grant that never ends would be the old standing auto mode).
+ASSISTANT_WEEKLY_CAP_MAX = int(os.getenv("ASSISTANT_WEEKLY_CAP_MAX", "2000"))
+ASSISTANT_AUTO_GRANT_MAX = int(os.getenv("ASSISTANT_AUTO_GRANT_MAX", "100"))
+ASSISTANT_AUTO_GRANT_MAX_DAYS = int(os.getenv("ASSISTANT_AUTO_GRANT_MAX_DAYS", "7"))
 # A waiting (riskier) change request the user never answered stops counting
 # after this many days; the assistant has to ask again.
 ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TTL_DAYS", "7"))
