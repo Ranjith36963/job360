@@ -506,9 +506,8 @@ async def compute_stats(
 
     # Slice 3's loader only for slice 3's own views: a single slice-4/5 view must not
     # pay for (or audit-log) a load it does not use.
-    numbers_selected = [
-        v for v in selected if v not in interview_counts.INTERVIEW_VIEWS and v not in ("patterns", "skill_gaps")
-    ]
+    other_views = ("patterns", "skill_gaps", "sites")
+    numbers_selected = [v for v in selected if v not in interview_counts.INTERVIEW_VIEWS and v not in other_views]
     if numbers_selected:
         from src.services.applications import feedback_numbers  # noqa: PLC0415
 
@@ -532,6 +531,11 @@ async def compute_stats(
     # ── slice 5: patterns, skill_gaps (fit_patterns.py) ──
     if "patterns" in selected or "skill_gaps" in selected:
         view_blocks.update(await _fit_pattern_blocks(db, user_id, since_val, selected, view))
+
+    if "sites" in selected:
+        from src.services.applications import site_stats  # noqa: PLC0415
+
+        view_blocks["sites"] = await site_stats.build(db, user_id, rows)
 
     return {
         "since": since_val,

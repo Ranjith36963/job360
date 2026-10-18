@@ -49,6 +49,11 @@
     "auto_email_skipped",
     "interview_session",
     "process_friction",
-    "assessment"
+    "assessment",
+    "queued",
+    "unqueued",
+    "submit_attempted",
+    "submit_resolved",
+    "answer_corrected"
   ]
 }

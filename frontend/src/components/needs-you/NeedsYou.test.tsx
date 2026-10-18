@@ -19,6 +19,8 @@ vi.mock("@/lib/api", () => ({
   declineSettingRequest: vi.fn(),
 }));
 // The morning check has its own tests (MorningCheck.test.tsx).
+// The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
+vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
 // Ready to send has its own tests (ReadyToSend.test.tsx).
 // Ready to send has its own tests; this stand-in only reports its total for the badge.

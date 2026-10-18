@@ -101,6 +101,14 @@ export const EVENT_LABEL: Record<string, string> = {
   interview_session: "Interview round debriefed",
   process_friction: "Hiring-process friction noted",
   assessment: "Skills test logged",
+  // Batch queue (2026-10-18).
+  queued: "Added to the batch",
+  unqueued: "Removed from the batch",
+  // Bulk-apply D1 (2026-10-18).
+  submit_attempted: "Submit started",
+  submit_resolved: "Submit marked as not sent",
+  // Bulk-apply F4 (2026-10-18).
+  answer_corrected: "Answer corrected by you",
 };
 
 function relayedWords(payload: unknown): boolean {

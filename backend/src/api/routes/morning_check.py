@@ -18,8 +18,10 @@ from src.api.dependencies import get_request_db
 from src.api.routes.profile import settings_view
 from src.core import settings
 from src.repositories.database import JobDatabase
+from src.services.applications import kit as kit_service
 from src.services.applications import ready as ready_service
 from src.services.applications.authorship import actor_for
+from src.services.applications.blocked import BLOCKED_REASONS
 from src.services.applications.kit import _json
 from src.services.profile import assistant_settings as rules
 from src.services.profile import edits as profile_edits
@@ -46,6 +48,8 @@ class TallyItem(BaseModel):
 class TallyBucket(BaseModel):
     count: int
     items: list[TallyItem]
+    # Blocked bucket only: applications per newest blocked reason (closed set), so the page can group them.
+    reasons: dict[str, int] = {}
 
 
 class MorningState(BaseModel):
@@ -57,6 +61,8 @@ class MorningState(BaseModel):
     below_line: str
     submit_mode: str
     daily_cap: Optional[int] = None
+    company_cap: Optional[int] = None
+    company_cap_days: Optional[int] = None
     applied_today: int
 
 
@@ -118,13 +124,31 @@ async def _stopped(db: JobDatabase, user_id: str, since: str) -> tuple[TallyBuck
         (user_id, since, _EVENT_SCAN),
     )
     seen: dict[str, dict[int, TallyItem]] = {"blocked": {}, "failed": {}}
+    why: dict[int, str] = {}
     for d in (dict(r) for r in await cur.fetchall()):
         # S6: a `blocked` record counts as blocked, like a sign-in wall.
         is_blocked = d["event_type"] in ("account_needed", "blocked")
         reason = "blocked" if is_blocked else _json(d["payload"]).get("reason")
         if reason in seen and d["application_id"] not in seen[reason]:
             seen[reason][d["application_id"]] = _item(d, d["recorded_at"])
+            if is_blocked:
+                got = _json(d["payload"]).get("reason") if d["event_type"] == "blocked" else "account_needed"
+                why[d["application_id"]] = got if got in BLOCKED_REASONS or got == "account_needed" else "other"
+    # Bulk-apply D1: a started submit that is still unconfirmed counts as failed.
+    cur = await db._db.execute(
+        "SELECT e.application_id, e.event_type, e.payload, e.recorded_at, a.job_company, a.job_title "
+        "FROM application_events e JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
+        "WHERE e.user_id = ? AND e.event_type = 'submit_attempted' AND e.recorded_at > ? "
+        "ORDER BY e.id DESC LIMIT ?",
+        (user_id, since, _EVENT_SCAN),
+    )
+    for d in (dict(r) for r in await cur.fetchall()):
+        app_id = d["application_id"]
+        if app_id not in seen["failed"] and await kit_service.submit_unconfirmed(db, user_id, app_id):
+            seen["failed"][app_id] = _item(d, d["recorded_at"])
     pack = [TallyBucket(count=len(b), items=list(b.values())[:ITEMS_PER_BUCKET]) for b in seen.values()]
+    for reason_key in why.values():
+        pack[0].reasons[reason_key] = pack[0].reasons.get(reason_key, 0) + 1
     return pack[0], pack[1]
 
 
@@ -173,7 +197,9 @@ async def morning_check(
             apply_min_score=view["apply_min_score"]["effective"],
             above_line=view["above_line"]["effective"], below_line=view["below_line"]["effective"],
             submit_mode=view["submit_mode"]["effective"],
-            daily_cap=view["daily_cap"]["effective"], applied_today=counts.submitted_today,
+            daily_cap=view["daily_cap"]["effective"],
+            company_cap=view["company_cap"]["effective"], company_cap_days=view["company_cap_days"]["effective"],
+            applied_today=counts.submitted_today,
         ),
         tally=tally,
     )

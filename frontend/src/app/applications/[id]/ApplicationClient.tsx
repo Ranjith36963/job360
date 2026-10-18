@@ -13,8 +13,10 @@ import {
 } from "@/lib/api";
 import type { ApplicationControls, ApplicationDetail, Ask, ReadyCardData, VisaShape } from "@/lib/api";
 import { ReadyCard } from "@/components/needs-you/ReadyCard";
-import { allowedActions, changesSinceApprovedCv } from "@/lib/application-actions";
+import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
+import { BatchButton } from "@/components/applications/BatchButton";
+import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
 import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
@@ -200,6 +202,8 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   // The one table (lib/application-actions) decides which buttons show.
   const actions = allowedActions(detail.status, { hasReceipt: detail.receipts.length > 0 });
   const place = detail.job.job_location;
+  const unconfirmed = submitUnconfirmed(detail.events);
+  const queued = isQueued(detail.events);
 
   return (
     <PageContainer className="flex flex-col gap-8 py-8">
@@ -239,6 +243,8 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         />
         <PayAdvertised pay={detail.job.pay_advertised} />
       </header>
+
+      {unconfirmed && <SubmitUnconfirmedBanner applicationId={detail.id} onChanged={reloadAfterAsk} />}
 
       {detail.hold && (
         <section
@@ -407,6 +413,9 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                   </button>
                 </div>
               ))}
+            {detail.status === "considering" && (
+              <BatchButton applicationId={detail.id} queued={queued} onRecorded={load} />
+            )}
             {detail.job.job_url && (
               <a
                 href={detail.job.job_url}

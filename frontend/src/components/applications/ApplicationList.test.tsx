@@ -393,3 +393,48 @@ describe("ApplicationList — Job priority (owner decision, 2026-10-19)", () => 
     expect(tags[0]).toHaveTextContent("Highest priority");
   });
 });
+
+describe("ApplicationList — Queued filter (batch queue)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("asks for queued rows, shows the summary line, the place in line and the problems", async () => {
+    listApplications.mockImplementation(async (params: { queued?: boolean }) =>
+      params.queued
+        ? {
+            applications: [
+              summary({
+                id: 5, job_title: "Queued Job", queue_position: 1,
+                preflight: { kit_missing: ["a"], has_cv: false, duplicate_flag: "", avoided: true, company_left: null, blocked_count: 2, hold: null },
+              } as never),
+            ],
+            total: 1,
+            queue_summary: { queued: 8, ready_to_send: 5, asked: 1, blocked: 1, daily_left: 3 },
+          }
+        : { applications: [summary()], total: 1 },
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("queued-filter"));
+    await screen.findByText("Queued Job");
+    expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, queued: true });
+    expect(screen.getByTestId("queue-summary")).toHaveTextContent("8 queued · 5 ready · 2 need you · 3 left today");
+    expect(screen.getByTestId("row-queue-position")).toHaveTextContent("#1 in batch");
+    const problems = screen.getByTestId("row-preflight");
+    expect(problems).toHaveTextContent("Missing 1 answer");
+    expect(problems).toHaveTextContent("No CV yet");
+    expect(problems).toHaveTextContent("On your never-apply list");
+    expect(problems).toHaveTextContent("Blocked 2 times");
+  });
+
+  it("says so when the batch is empty", async () => {
+    listApplications.mockImplementation(async (params: { queued?: boolean }) =>
+      params.queued ? { applications: [], total: 0, queue_summary: { queued: 0 } } : { applications: [summary()], total: 1 },
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("queued-filter"));
+    await screen.findByText("Nothing is in your batch.");
+  });
+});

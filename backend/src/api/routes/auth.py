@@ -19,6 +19,7 @@ from src.api.auth_deps import (
     SESSION_COOKIE_NAME,
     CurrentUser,
     _secret,
+    require_session_user,
     require_user,
 )
 from src.api.dependencies import get_request_db
@@ -343,9 +344,12 @@ class TimezoneResponse(BaseModel):
 async def set_timezone(
     body: TimezoneRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-    user: CurrentUser = Depends(require_user),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
+    """Web session only (security review 2026-10-18): the user's timezone sets their day, week and
+    ``apply_hours``, so an assistant's token must not move it.
+
+    Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
     (browser-prefilled on the account settings page, but only ever SAVED
     here, on an explicit press — rule #29). A name `ZoneInfo` cannot resolve
     is refused with 422 naming the bad value; a valid one is stored and used

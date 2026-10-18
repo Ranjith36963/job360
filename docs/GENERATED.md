@@ -17,9 +17,9 @@
 | --- | --- | --- |
 | Migration head | **0064** | `backend/migrations/` |
 | Migration files | **65** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 21 route modules (127 endpoints) | `backend/src/api/routes/` |
-| Test files | across 223 `test_*.py` files | `backend/tests/` |
-| GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
+| FastAPI surface | 21 route modules (128 endpoints) | `backend/src/api/routes/` |
+| Test files | across 228 `test_*.py` files | `backend/tests/` |
+| GitHub Actions | 30 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
 
@@ -62,6 +62,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/applications/{application_id}/send/approve` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/send/decline` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/submit-check` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/submit/resolve` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/visa` | `applications.py` |
 | `POST` | `/api/contacts` | `applications.py` |
 | `PATCH` | `/api/contacts/{contact_id}` | `applications.py` |
@@ -161,5 +162,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**127 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**128 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
