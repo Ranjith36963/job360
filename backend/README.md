@@ -103,13 +103,6 @@ python -m migrations.runner down       # reverse last migration
 
 The API also auto-applies on boot via `lifespan`.
 
-## Cross-wiring with the frontend
-
-The frontend reaches the API via `NEXT_PUBLIC_API_URL` (frontend env, default
-`http://localhost:8000`). The API in turn whitelists the browser origin via
-`FRONTEND_ORIGIN` (backend env, comma-separated, default
-`http://localhost:3000`). Mismatch = CORS preflight failure.
-
 ## Further reading
 
 - [`docs/README.md`](../docs/README.md) — full docs index

@@ -20,16 +20,9 @@ npm install
 ## Environment
 
 `.env*` is gitignored (`frontend/.gitignore`), so a fresh clone has no
-`.env.local`. Create it:
-
-```bash
-# frontend/.env.local
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-Point it at whatever host and port the FastAPI backend is running on.
-`NEXT_PUBLIC_*` vars are inlined into the client bundle at build time, so a
-rebuild is needed after changing them.
+`.env.local`. Copy `.env.local.example` and read its comments before setting
+anything — they say which vars must stay UNSET for local dev, and what breaks
+when they are not.
 
 ## Run
 
@@ -55,12 +48,9 @@ server. Counts are not written down here — measure them.
 
 ## Cross-wiring with the backend
 
-1. The backend must be running on the URL in `NEXT_PUBLIC_API_URL`
-   (default `http://localhost:8000`). See
-   [`../backend/README.md`](../backend/README.md).
-2. The backend's `FRONTEND_ORIGIN` env var must include this frontend's
-   origin (default `http://localhost:3000`). Without it, the browser blocks
-   the API calls at the CORS preflight.
+Browser calls go to this app's own origin and are proxied; the target is
+`BACKEND_ORIGIN` in `next.config.ts`. The backend's own browser-origin
+allow-list is read in `api.main`.
 
 ## Further reading
 
