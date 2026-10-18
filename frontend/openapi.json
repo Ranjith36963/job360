@@ -1690,8 +1690,42 @@
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
           },
+          "preflight": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preflight"
+          },
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
+          },
+          "queue_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Position"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
           },
           "receipts": {
             "title": "Receipts",
@@ -2103,10 +2137,19 @@
           "above_line": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "apply_hours": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "apply_min_score": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
           "auto_employer_emails": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "auto_grant_count": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "auto_grant_until": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
           "below_line": {
@@ -2117,6 +2160,12 @@
             "title": "Check Every",
             "type": "string"
           },
+          "company_cap": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "company_cap_days": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "daily_cap": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2124,6 +2173,9 @@
             "default": "",
             "title": "Inbox Mode",
             "type": "string"
+          },
+          "min_gap_minutes": {
+            "$ref": "#/components/schemas/SettingFieldOut"
           },
           "notes": {
             "default": [],
@@ -2165,6 +2217,9 @@
             },
             "title": "Waiting",
             "type": "array"
+          },
+          "weekly_cap": {
+            "$ref": "#/components/schemas/SettingFieldOut"
           }
         },
         "required": [
@@ -2173,6 +2228,13 @@
           "below_line",
           "submit_mode",
           "daily_cap",
+          "company_cap",
+          "company_cap_days",
+          "weekly_cap",
+          "min_gap_minutes",
+          "apply_hours",
+          "auto_grant_count",
+          "auto_grant_until",
           "paused_until",
           "pause_reason",
           "auto_employer_emails",
@@ -2255,7 +2317,7 @@
       "Body_upload_cv_api_profile_cv_post": {
         "properties": {
           "cv": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "Cv",
             "type": "string"
           }
@@ -2282,7 +2344,7 @@
       "Body_upload_linkedin_api_profile_linkedin_post": {
         "properties": {
           "file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
           }
@@ -2309,7 +2371,7 @@
       "Body_upsert_profile_api_profile_post": {
         "properties": {
           "cv": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "Cv",
             "type": "string"
           },
@@ -5865,6 +5927,18 @@
             "title": "Applications",
             "type": "array"
           },
+          "queue_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Summary"
+          },
           "total": {
             "title": "Total",
             "type": "integer"
@@ -6089,6 +6163,28 @@
           "below_line": {
             "title": "Below Line",
             "type": "string"
+          },
+          "company_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Cap"
+          },
+          "company_cap_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Cap Days"
           },
           "daily_cap": {
             "anyOf": [
@@ -11172,6 +11268,16 @@
             ],
             "title": "Since"
           },
+          "sites": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsSitesOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "skill_gaps": {
             "anyOf": [
               {
@@ -11346,6 +11452,84 @@
           "unscored"
         ],
         "title": "StatsScoreLineOut",
+        "type": "object"
+      },
+      "StatsSiteOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "blocked": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Blocked",
+            "type": "object"
+          },
+          "blocked_total": {
+            "title": "Blocked Total",
+            "type": "integer"
+          },
+          "forms_filled": {
+            "title": "Forms Filled",
+            "type": "integer"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host",
+          "n",
+          "forms_filled",
+          "applied",
+          "blocked",
+          "blocked_total"
+        ],
+        "title": "StatsSiteOut",
+        "type": "object"
+      },
+      "StatsSitesOut": {
+        "description": "``stats(view=\"sites\")``: counts per form host. Facts only, never a ranking.",
+        "properties": {
+          "applications_without_host": {
+            "title": "Applications Without Host",
+            "type": "integer"
+          },
+          "hosts": {
+            "title": "Hosts",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "sites": {
+            "items": {
+              "$ref": "#/components/schemas/StatsSiteOut"
+            },
+            "title": "Sites",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hosts",
+          "sites",
+          "truncated",
+          "applications_without_host",
+          "note"
+        ],
+        "title": "StatsSitesOut",
         "type": "object"
       },
       "StatsSkillGapOut": {
@@ -11627,6 +11811,28 @@
             "title": "Application Id",
             "type": "integer"
           },
+          "company_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Left"
+          },
+          "daily_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Left"
+          },
           "decision": {
             "enum": [
               "submit",
@@ -11766,6 +11972,14 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Reasons",
+            "type": "object"
           }
         },
         "required": [
@@ -12578,6 +12792,16 @@
             "schema": {
               "default": false,
               "title": "In Flight",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "queued",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Queued",
               "type": "boolean"
             }
           },
@@ -15642,6 +15866,81 @@
         ]
       }
     },
+    "/api/applications/{application_id}/submit/resolve": {
+      "post": {
+        "description": "\"It was not sent\" - the user says a started submit (``submit_attempted``) never went out, which\nends the ``submit_unconfirmed`` stop. Appends ``submit_resolved`` {outcome: not_sent}. Web only;\n409 when no started submit is waiting. A submit that WAS sent is recorded as ``applied``.",
+        "operationId": "resolve_submit_api_applications__application_id__submit_resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Submit",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}/visa": {
       "put": {
         "operationId": "set_visa_api_applications__application_id__visa_put",
@@ -16796,7 +17095,7 @@
     },
     "/api/auth/me/timezone": {
       "put": {
-        "description": "Owner decision, 2026-09-25 \u2014 the ONE write door for `users.timezone`\n(browser-prefilled on the account settings page, but only ever SAVED\nhere, on an explicit press \u2014 rule #29). A name `ZoneInfo` cannot resolve\nis refused with 422 naming the bad value; a valid one is stored and used\nby `spine.user_today` for every \"what's due today\" read from then on.",
+        "description": "Web session only (security review 2026-10-18): the user's timezone sets their day, week and\n``apply_hours``, so an assistant's token must not move it.\n\nOwner decision, 2026-09-25 \u2014 the ONE write door for `users.timezone`\n(browser-prefilled on the account settings page, but only ever SAVED\nhere, on an explicit press \u2014 rule #29). A name `ZoneInfo` cannot resolve\nis refused with 422 naming the bad value; a valid one is stored and used\nby `spine.user_today` for every \"what's due today\" read from then on.",
         "operationId": "set_timezone_api_auth_me_timezone_put",
         "parameters": [
           {

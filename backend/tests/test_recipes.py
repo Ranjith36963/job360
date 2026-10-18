@@ -233,7 +233,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "research", "apply", "forms", "reach", "daily", "feedback", "prep", "debrief", "review", "rules"]
+        assert names == ["setup", "hunt", "research", "apply", "batch", "forms", "ats", "reach", "daily", "feedback", "prep", "debrief", "review", "rules"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")
@@ -329,7 +329,7 @@ def test_forms_recipe_is_listed_served_and_under_the_cap():
     tab, CV first, real keyboard, read back everything, per-ATS table, no CAPTCHA."""
     from src.api.routes.recipes import RECIPE_NAMES, load_recipe
 
-    assert RECIPE_NAMES.index("forms") == RECIPE_NAMES.index("apply") + 1
+    assert RECIPE_NAMES.index("forms") == RECIPE_NAMES.index("apply") + 2  # "batch" sits between (2026-10-18)
     recipe = load_recipe("forms")
     assert recipe.title == "360-forms — fill an application form reliably, per ATS"
     assert len(recipe.text.splitlines()) <= 70

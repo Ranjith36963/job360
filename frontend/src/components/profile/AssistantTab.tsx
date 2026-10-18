@@ -13,7 +13,6 @@ import {
 import type { AssistantSettingsView, MorningCheck } from "@/lib/api";
 import {
   CHECK_EVERY,
-  DAILY_CAP_MAX,
   HARD_STOPS,
   HISTORY_PATHS,
   INBOX_MODES,
@@ -22,7 +21,6 @@ import {
   P_ABOVE,
   P_AUTO_EMAILS,
   P_BELOW,
-  P_CAP,
   P_EVERY,
   P_INBOX,
   P_SCORE,
@@ -40,10 +38,7 @@ import {
 import type { ChangeRow, HistRow } from "@/lib/assistant-tab";
 import { LINE_SWITCH_LABEL, SUBMIT_MODE_LABEL, quotaText, scoreLineText } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
-
-const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
-const NUMBOX =
-  "min-h-11 w-24 rounded-lg border border-border bg-card px-3 py-1.5 text-center font-mono text-sm md:min-h-9";
+import { BatchRuleRows, LABEL, NUMBOX, Row } from "./BatchRuleRows";
 
 const Section = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
   <section className="flex flex-col">
@@ -53,16 +48,6 @@ const Section = ({ title, hint, children }: { title: string; hint?: string; chil
     </div>
     {children}
   </section>
-);
-
-const Row = ({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) => (
-  <div className="flex flex-wrap items-center gap-x-[18px] gap-y-2.5 border-t border-border py-3">
-    <div className="min-w-0 flex-1 basis-56">
-      <div className="font-medium">{title}</div>
-      <div className="text-[12.5px] text-muted-foreground">{sub}</div>
-    </div>
-    {children}
-  </div>
 );
 
 function Option({
@@ -156,7 +141,6 @@ export function AssistantTab() {
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [score, setScore] = useState("");
-  const [cap, setCap] = useState("");
   const [confirmAuto, setConfirmAuto] = useState(false);
   const enterDone = useRef(false);
 
@@ -177,7 +161,6 @@ export function AssistantTab() {
   const apply = useCallback((v: AssistantSettingsView) => {
     setView(v);
     setScore(settingScore(v.apply_min_score) == null ? "" : String(settingScore(v.apply_min_score)));
-    setCap(v.daily_cap.value == null ? "" : String(v.daily_cap.value));
   }, []);
 
   const load = useCallback(async () => {
@@ -215,6 +198,19 @@ export function AssistantTab() {
     }
   }
 
+  async function saveMany(changes: { path: string; value: unknown }[]) {
+    setBusy(true);
+    try {
+      await updateProfileFields(changes);
+      toast.success("Saved.");
+    } catch {
+      toast.error("Could not save. Try again.");
+    } finally {
+      await load();
+      setBusy(false);
+    }
+  }
+
   async function takeBack(r: ChangeRow) {
     setBusy(true);
     try {
@@ -248,8 +244,6 @@ export function AssistantTab() {
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
   const savedScore: number | null = settingScore(view.apply_min_score);
-  const savedCap = view.daily_cap.value == null ? "" : String(view.daily_cap.value);
-
   function commitScore() {
     const t = score.trim();
     if (t === "") {
@@ -264,17 +258,6 @@ export function AssistantTab() {
       return;
     }
     if (n !== savedScore) void save(P_SCORE, n);
-  }
-  function commitCap() {
-    const t = cap.trim();
-    if (t === savedCap) return;
-    const n = Number(t);
-    if (t === "") void save(P_CAP, null);
-    else if (Number.isInteger(n) && n >= 1 && n <= DAILY_CAP_MAX) void save(P_CAP, n);
-    else {
-      toast.error(`Daily limit must be a whole number from 1 to ${DAILY_CAP_MAX}, or blank for no limit. Not saved.`);
-      setCap(savedCap);
-    }
   }
   /** Enter commits exactly like blur; the blur that may follow must not commit twice. */
   const onEnter = (commit: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -353,26 +336,7 @@ export function AssistantTab() {
         </Section>
 
         <Section title="Limits & inbox">
-          <Row title="Daily limit" sub="Most applications per day. Leave blank for no limit.">
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={DAILY_CAP_MAX}
-              aria-label="Daily limit"
-              data-testid="daily-cap"
-              placeholder="No limit"
-              value={cap}
-              disabled={busy}
-              onChange={(e) => {
-                enterDone.current = false;
-                setCap(e.target.value);
-              }}
-              onBlur={onBlurCommit(commitCap)}
-              onKeyDown={onEnter(commitCap)}
-              className={cn(NUMBOX, "w-32 min-w-[11ch] max-w-full")}
-            />
-          </Row>
+          <BatchRuleRows view={view} busy={busy} save={save} saveMany={saveMany} />
           <Row title="Gmail check" sub="Your assistant reads your inbox and records replies.">
             <div role="radiogroup" aria-label="Gmail check" className="inline-flex overflow-hidden rounded-lg border border-border">
               {INBOX_MODES.map((m, i) => (

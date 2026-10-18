@@ -9,6 +9,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    "Send all" on Needs-you. Fill and submit each now: held tabs vanish. **Done when** each job has its yes.
 2. **Open one form, in ONE foreground tab.** Typing only lands in the foreground tab. One browser action at a time
    (two uploads at once both fail). Close the tab after submit. Greenhouse: use the plain embed URL (table).
+   Name the site; if it is not in the table below, read `get_recipe("ats")`.
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
    user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
@@ -19,14 +20,16 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    read the state. A script-set value can show on screen but be missing in the site's own state. A click on a button
    that already looks selected can switch it OFF: read first. **Done when** every field has been typed or clicked.
 5. **Read back EVERY value** (text, dropdowns, checkboxes, the CV name). Fix what differs. `record_event`
-   `form_filled`, then `form_swept` {fields_checked, fixed}. **Done when** each value matches the kit answer.
+   `form_filled`, then `form_swept` {fields_checked, fixed} (multi-page: also `page`, `pages_total` of the page you are on). **Done when** each value matches the kit answer.
+   Several pages: after every Next or conditional reveal, `check_form` the new page, then sweep; repeat until a pass
+   adds no new required field. Send `page` and `pages_total` on `form_checked` and `form_swept` for every page.
 6. **Gate.** Get the yes BEFORE the click: best is the user's own click on Job360 (Needs-you Send / Send all, i.e.
    `POST /api/applications/{id}/send/approve`) or a yes in chat naming this job. Show the user what you entered,
    including the salary band you chose. Then call `check_submit`. Submit only
    as the apply recipe says. **Done when** it says `submit`, or `ask` plus the user's yes for this one application.
-7. **Press Submit, then check the page changed.** A confirmation or thank-you text means it worked. No change: scan
+7. **Press Submit, then check the page changed.** Right before the click `record_event` `submit_attempted` (no payload). A confirmation or thank-you text means it worked. No change: scan
    for required or invalid fields (`aria-invalid`, red text, below the fold), read ALL the errors, fix exactly those,
-   press Submit ONCE more. Still stuck: `blocked`, STOP. If your own tool, permission prompt or safety classifier
+   then `blocked` {reason: site_error, detail: "field errors after submit"} and STOP: never click again without a fresh `check_submit` `submit` (the user clicks "It was not sent" on Job360 first). Still stuck: `blocked`, STOP. If your own tool, permission prompt or safety classifier
    refuses the Submit click: do NOT click again, do not try another way (keyboard, script, other tab). `record_event`
    `blocked` {reason: safety_block, step: "final submit", page_host}, `hold_released` {reason: blocked}, leave the
    filled tab open and tell the user to press Submit themselves. When they say it went: `unblocked`

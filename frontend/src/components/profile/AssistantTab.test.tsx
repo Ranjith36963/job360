@@ -266,4 +266,80 @@ describe("AssistantTab", () => {
     fireEvent.click(await screen.findByTestId("assistant-retry"));
     await screen.findByTestId("assistant-tab");
   });
+
+  it("pace limits save as numbers, blank clears (never a default)", async () => {
+    getAssistantSettings.mockResolvedValue(view({ company_cap: field(2, 2), weekly_cap: field(null, null) }));
+    await ready();
+    expect((screen.getByTestId("company-cap") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByTestId("company-cap-days") as HTMLInputElement).value).toBe("");
+    const days = screen.getByTestId("company-cap-days");
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.blur(days);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.company_cap_days", value: 30 }]));
+    const cap = screen.getByTestId("company-cap");
+    fireEvent.change(cap, { target: { value: "" } });
+    fireEvent.blur(cap);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.company_cap", value: null }]));
+    const weekly = screen.getByTestId("weekly-cap");
+    fireEvent.change(weekly, { target: { value: "20" } });
+    fireEvent.blur(weekly);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.weekly_cap", value: 20 }]));
+    const gap = screen.getByTestId("min-gap");
+    fireEvent.change(gap, { target: { value: "15" } });
+    fireEvent.blur(gap);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.min_gap_minutes", value: 15 }]));
+  });
+
+  it("a bad pace number says so and is not sent", async () => {
+    await ready();
+    const weekly = screen.getByTestId("weekly-cap");
+    fireEvent.change(weekly, { target: { value: "0" } });
+    fireEvent.blur(weekly);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalled();
+  });
+
+  it("apply hours save only as a pair, and clear to nothing", async () => {
+    await ready();
+    const from = screen.getByTestId("apply-hours-from");
+    const to = screen.getByTestId("apply-hours-to");
+    fireEvent.change(from, { target: { value: "09:00" } });
+    fireEvent.blur(from);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("Pick two different times, or clear both. Not saved.");
+    fireEvent.change(from, { target: { value: "09:00" } });
+    fireEvent.change(to, { target: { value: "17:30" } });
+    fireEvent.blur(to);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_hours", value: { from: "09:00", to: "17:30" } }]),
+    );
+  });
+
+  it("auto for my next N applications: asks to confirm, then saves count and time together", async () => {
+    await ready();
+    fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "5" } });
+    fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: "2099-01-02T18:00" } });
+    fireEvent.click(screen.getByTestId("auto-grant-save"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("auto-grant-confirm"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
+    const sent = updateProfileFields.mock.calls[0][0] as { path: string; value: unknown }[];
+    expect(sent[0]).toEqual({ path: "assistant_settings.auto_grant_count", value: 5 });
+    expect(sent[1].path).toBe("assistant_settings.auto_grant_until");
+    expect(new Date(String(sent[1].value)).getFullYear()).toBe(2099);
+  });
+
+  it("a running grant is shown in words and can be stopped", async () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    getAssistantSettings.mockResolvedValue(view({ auto_grant_count: field(5, 5), auto_grant_until: field(until, until) }));
+    await ready();
+    expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Auto for my next 5 applications until");
+    fireEvent.click(screen.getByTestId("auto-grant-stop"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([
+        { path: "assistant_settings.auto_grant_count", value: null },
+        { path: "assistant_settings.auto_grant_until", value: null },
+      ]),
+    );
+  });
 });

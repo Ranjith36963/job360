@@ -81,6 +81,40 @@ export function describeSettingRequest(
         title: "Daily limit",
         change: value === null || value === undefined ? "No daily limit" : `Up to ${String(value)} applications a day`,
       };
+    case "assistant_settings.company_cap":
+      return {
+        title: "Applications per company",
+        change: value == null || value === "" ? "No limit per company" : `At most ${String(value)} applications per company`,
+      };
+    case "assistant_settings.company_cap_days":
+      return { title: "Days for the company limit", change: `Count applications to one company over ${String(value)} days` };
+    case "assistant_settings.weekly_cap":
+      return {
+        title: "Weekly limit",
+        change: value == null || value === "" ? "No weekly limit" : `Up to ${String(value)} applications a week`,
+      };
+    case "assistant_settings.min_gap_minutes":
+      return {
+        title: "Wait between applications",
+        change: !value ? "No wait between applications" : `Wait at least ${String(value)} minutes between applications`,
+      };
+    case "assistant_settings.apply_hours": {
+      const h = value as { from?: unknown; to?: unknown } | null;
+      return {
+        title: "Hours to apply",
+        change: h && typeof h === "object" && h.from && h.to ? `Only apply between ${String(h.from)} and ${String(h.to)}` : "Apply at any time of day",
+      };
+    }
+    case "assistant_settings.auto_grant_count":
+      return {
+        title: "Auto for my next applications",
+        change: value == null || value === "" ? "Stop the auto run" : `Apply on its own for my next ${String(value)} applications`,
+      };
+    case "assistant_settings.auto_grant_until":
+      return {
+        title: "Auto lasts until",
+        change: value == null || value === "" ? "End the auto run" : `Apply on its own until ${new Date(String(value)).toLocaleString("en-GB")}, then go back to asking`,
+      };
     case "assistant_settings.auto_employer_emails":
       return {
         title: "Automatic employer emails",

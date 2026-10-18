@@ -59,11 +59,28 @@ export const P_BELOW = "assistant_settings.below_line";
 export const P_SCORE = "assistant_settings.apply_min_score";
 export const P_SUBMIT = "assistant_settings.submit_mode";
 export const P_CAP = "assistant_settings.daily_cap";
+export const P_COMPANY_CAP = "assistant_settings.company_cap";
+export const P_COMPANY_DAYS = "assistant_settings.company_cap_days";
+export const P_WEEKLY_CAP = "assistant_settings.weekly_cap";
+export const P_MIN_GAP = "assistant_settings.min_gap_minutes";
+export const P_HOURS = "assistant_settings.apply_hours";
+export const P_GRANT_COUNT = "assistant_settings.auto_grant_count";
+export const P_GRANT_UNTIL = "assistant_settings.auto_grant_until";
+/** Server limits (core/settings.py + assistant_settings.py); the server re-checks every save. */
+export const COMPANY_CAP_MAX = 50;
+export const COMPANY_DAYS_MAX = 365;
+export const WEEKLY_CAP_MAX = 2000;
+export const MIN_GAP_MAX = 240;
+export const GRANT_COUNT_MAX = 100;
+export const GRANT_MAX_DAYS = 7;
 export const P_AUTO_EMAILS = "assistant_settings.auto_employer_emails";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
-export const SETTING_HISTORY_PATHS = [P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS] as const;
+export const SETTING_HISTORY_PATHS = [
+  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS,
+  P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL,
+] as const;
 export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
 export const HISTORY_PATHS: string[] = [...SETTING_HISTORY_PATHS, ...PREF_HISTORY_PATHS];
 
@@ -74,6 +91,13 @@ const KEY_LABEL: Record<string, string> = {
   [P_SUBMIT]: "Submit mode",
   [P_CAP]: "Daily limit",
   [P_AUTO_EMAILS]: "Automatic employer emails",
+  [P_COMPANY_CAP]: "Applications per company",
+  [P_COMPANY_DAYS]: "Days for the company limit",
+  [P_WEEKLY_CAP]: "Weekly limit",
+  [P_MIN_GAP]: "Wait between applications",
+  [P_HOURS]: "Hours to apply",
+  [P_GRANT_COUNT]: "Auto for my next applications",
+  [P_GRANT_UNTIL]: "Auto lasts until",
   [P_INBOX]: "Gmail check",
   [P_EVERY]: "Inbox check",
 };
@@ -93,7 +117,13 @@ export function everyText(v: unknown): string {
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
   if (path === P_AUTO_EMAILS) return v === true ? "on" : "off";
-  if (path === P_CAP) return empty ? "no limit" : String(v);
+  if (path === P_CAP || path === P_COMPANY_CAP || path === P_WEEKLY_CAP) return empty ? "no limit" : String(v);
+  if (path === P_MIN_GAP) return empty || v === 0 ? "no wait" : `${String(v)} minutes`;
+  if (path === P_HOURS) {
+    const h = v as { from?: unknown; to?: unknown } | null;
+    return h && typeof h === "object" && h.from && h.to ? `${String(h.from)} to ${String(h.to)}` : "any time";
+  }
+  if (path === P_GRANT_UNTIL) return empty ? "not set" : historyWhen(String(v));
   if (empty) return "not set";
   if (path === P_ABOVE || path === P_BELOW) return LINE_SWITCH_LABEL[String(v)] ?? String(v);
   if (path === P_SUBMIT) return SUBMIT_MODE_LABEL[String(v)] ?? String(v);
@@ -166,4 +196,43 @@ export function roundLabel(id: string): string {
 export function doneDate(iso: string | undefined): string {
   const d = new Date(iso ?? "");
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+
+/** A stored whole number as input text ("" when not set). */
+export function numText(f: { effective?: unknown; value?: unknown } | undefined): string {
+  const v = f?.value;
+  return v == null || v === "" ? "" : String(v);
+}
+
+/** The saved apply window as two "HH:MM" strings ("" = not set). */
+export function hoursOf(f: { effective?: unknown; value?: unknown } | undefined): { from: string; to: string } {
+  const v = f?.value as { from?: unknown; to?: unknown } | null | undefined;
+  return v && typeof v === "object" ? { from: String(v.from ?? ""), to: String(v.to ?? "") } : { from: "", to: "" };
+}
+
+/** An ISO time as the `datetime-local` input wants it, in the user's own clock ("" if bad). */
+export function isoToLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** A `datetime-local` value (the user's clock) as an ISO time with an offset ("" if bad). */
+export function localInputToIso(local: string): string {
+  const d = new Date(local);
+  return local && !Number.isNaN(d.getTime()) ? d.toISOString() : "";
+}
+
+/** Is the grant still running? (a count and a future end). */
+export function grantActive(count: unknown, until: unknown, now: Date = new Date()): boolean {
+  if (count == null || count === "" || typeof until !== "string" || !until) return false;
+  const t = new Date(until).getTime();
+  return !Number.isNaN(t) && t > now.getTime();
+}
+
+/** Plain words for the grant. */
+export function grantText(count: unknown, until: string): string {
+  return `Auto for my next ${String(count)} applications until ${historyWhen(until)}, then back to asking`;
 }

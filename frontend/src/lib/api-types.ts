@@ -811,6 +811,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/submit/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Submit
+         * @description "It was not sent" - the user says a started submit (``submit_attempted``) never went out, which
+         *     ends the ``submit_unconfirmed`` stop. Appends ``submit_resolved`` {outcome: not_sent}. Web only;
+         *     409 when no started submit is waiting. A submit that WAS sent is recorded as ``applied``.
+         */
+        post: operations["resolve_submit_api_applications__application_id__submit_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/visa": {
         parameters: {
             query?: never;
@@ -1145,7 +1167,10 @@ export interface paths {
         get?: never;
         /**
          * Set Timezone
-         * @description Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
+         * @description Web session only (security review 2026-10-18): the user's timezone sets their day, week and
+         *     ``apply_hours``, so an assistant's token must not move it.
+         *
+         *     Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
          *     (browser-prefilled on the account settings page, but only ever SAVED
          *     here, on an explicit press — rule #29). A name `ZoneInfo` cannot resolve
          *     is refused with 422 naming the bad value; a valid one is stored and used
@@ -3316,7 +3341,15 @@ export interface components {
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
+            /** Preflight */
+            preflight?: {
+                [key: string]: unknown;
+            } | null;
             proof: components["schemas"]["ProofOut"];
+            /** Queue Position */
+            queue_position?: number | null;
+            /** Queued At */
+            queued_at?: string | null;
             /** Receipts */
             receipts: number;
             /** Remote */
@@ -3478,20 +3511,26 @@ export interface components {
          */
         AssistantSettingsView: {
             above_line: components["schemas"]["SettingFieldOut"];
+            apply_hours: components["schemas"]["SettingFieldOut"];
             apply_min_score: components["schemas"]["SettingFieldOut"];
             auto_employer_emails: components["schemas"]["SettingFieldOut"];
+            auto_grant_count: components["schemas"]["SettingFieldOut"];
+            auto_grant_until: components["schemas"]["SettingFieldOut"];
             below_line: components["schemas"]["SettingFieldOut"];
             /**
              * Check Every
              * @default
              */
             check_every: string;
+            company_cap: components["schemas"]["SettingFieldOut"];
+            company_cap_days: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
             /**
              * Inbox Mode
              * @default
              */
             inbox_mode: string;
+            min_gap_minutes: components["schemas"]["SettingFieldOut"];
             /**
              * Notes
              * @default []
@@ -3517,6 +3556,7 @@ export interface components {
              * @default []
              */
             waiting: components["schemas"]["SettingRequestOut"][];
+            weekly_cap: components["schemas"]["SettingFieldOut"];
         };
         /**
          * AutoEmailCheckResponse
@@ -3555,10 +3595,7 @@ export interface components {
         };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv: string;
         };
         /** Body_upload_github_api_profile_github_post */
@@ -3568,10 +3605,7 @@ export interface components {
         };
         /** Body_upload_linkedin_api_profile_linkedin_post */
         Body_upload_linkedin_api_profile_linkedin_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upsert_preferences_api_profile_preferences_post */
@@ -3581,10 +3615,7 @@ export interface components {
         };
         /** Body_upsert_profile_api_profile_post */
         Body_upsert_profile_api_profile_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv?: string;
             /** Preferences */
             preferences?: string;
@@ -5036,6 +5067,10 @@ export interface components {
         ListApplicationsResponse: {
             /** Applications */
             applications: components["schemas"]["ApplicationSummaryOut"][];
+            /** Queue Summary */
+            queue_summary?: {
+                [key: string]: unknown;
+            } | null;
             /** Total */
             total: number;
         };
@@ -5125,6 +5160,10 @@ export interface components {
             apply_min_score?: number | null;
             /** Below Line */
             below_line: string;
+            /** Company Cap */
+            company_cap?: number | null;
+            /** Company Cap Days */
+            company_cap_days?: number | null;
             /** Daily Cap */
             daily_cap?: number | null;
             /** Paused */
@@ -6953,6 +6992,7 @@ export interface components {
             score_line: components["schemas"]["StatsScoreLineOut"];
             /** Since */
             since: string | null;
+            sites?: components["schemas"]["StatsSitesOut"] | null;
             skill_gaps?: components["schemas"]["StatsSkillGapsOut"] | null;
             velocity?: components["schemas"]["StatsVelocityOut"] | null;
         };
@@ -7001,6 +7041,39 @@ export interface components {
             line?: number | null;
             /** Unscored */
             unscored: number;
+        };
+        /** StatsSiteOut */
+        StatsSiteOut: {
+            /** Applied */
+            applied: number;
+            /** Blocked */
+            blocked: {
+                [key: string]: number;
+            };
+            /** Blocked Total */
+            blocked_total: number;
+            /** Forms Filled */
+            forms_filled: number;
+            /** Host */
+            host: string;
+            /** N */
+            n: number;
+        };
+        /**
+         * StatsSitesOut
+         * @description ``stats(view="sites")``: counts per form host. Facts only, never a ranking.
+         */
+        StatsSitesOut: {
+            /** Applications Without Host */
+            applications_without_host: number;
+            /** Hosts */
+            hosts: number;
+            /** Note */
+            note: string;
+            /** Sites */
+            sites: components["schemas"]["StatsSiteOut"][];
+            /** Truncated */
+            truncated: boolean;
         };
         /** StatsSkillGapOut */
         StatsSkillGapOut: {
@@ -7091,6 +7164,10 @@ export interface components {
         SubmitCheckResponse: {
             /** Application Id */
             application_id: number;
+            /** Company Left */
+            company_left?: number | null;
+            /** Daily Left */
+            daily_left?: number | null;
             /**
              * Decision
              * @enum {string}
@@ -7149,6 +7226,13 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["TallyItem"][];
+            /**
+             * Reasons
+             * @default {}
+             */
+            reasons: {
+                [key: string]: number;
+            };
         };
         /** TallyItem */
         TallyItem: {
@@ -7453,6 +7537,7 @@ export interface operations {
                 due?: boolean;
                 quiet_days?: number | null;
                 in_flight?: boolean;
+                queued?: boolean;
             };
             header?: {
                 authorization?: string | null;
@@ -8783,6 +8868,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_submit_api_applications__application_id__submit_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
                 };
             };
             /** @description Validation Error */
