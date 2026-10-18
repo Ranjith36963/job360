@@ -976,6 +976,23 @@ export async function approveSend(
   return request(`/api/applications/${applicationId}/send/approve${q}`, { method: "POST" });
 }
 
+/** Verify (`answer` omitted: the typed answer is right) or Edit (`answer`: the
+ * right one) one answer on a ready card. Saved as the user's own word in memory,
+ * so the assistant uses it next time. 409 when the fill changed. Returns the card. */
+export async function confirmAnswer(
+  applicationId: number,
+  index: number,
+  formFilledEventId: number,
+  answer?: string,
+): Promise<ReadyCardData> {
+  return request<ReadyCardData>(`/api/applications/${applicationId}/answers/${index}/confirm`, {
+    method: "POST",
+    body: JSON.stringify(answer === undefined
+      ? { form_filled_event_id: formFilledEventId }
+      : { form_filled_event_id: formFilledEventId, answer }),
+  });
+}
+
 /** "Don't send" - the gate stops until a later "Send this one". */
 export async function declineSend(applicationId: number): Promise<ApplicationControls> {
   return request(`/api/applications/${applicationId}/send/decline`, { method: "POST" });

@@ -11,9 +11,9 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.routes.profile import settings_view
 from src.core import settings
@@ -21,6 +21,7 @@ from src.repositories.database import JobDatabase
 from src.services.applications import ready as ready_service
 from src.services.applications import spine
 from src.services.applications.authorship import actor_for
+from src.services.profile.edits import ProfileEditError
 from src.services.profile.models import UserProfile
 from src.services.profile.storage import load_profile
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -42,6 +43,10 @@ class ReadyAnswer(BaseModel):
     key: Optional[str] = None
     saved_by: Optional[str] = None
     saved_at: Optional[str] = None
+    # Owner decision 2026-10-18 - the user's own word: their saved answer matches
+    # what was typed (verified), or differs (changed_to = what they said instead).
+    verified: bool = False
+    changed_to: Optional[str] = None
 
 
 class ReadyFlag(BaseModel):
@@ -106,3 +111,46 @@ async def ready_to_send(
         paused=paused, total=len(cards), unflagged=len(cards) - flagged,
         items=[ReadyCard(**c) for c in cards[:limit]],
     )
+
+
+class ConfirmAnswerRequest(BaseModel):
+    form_filled_event_id: int = Field(..., ge=1)
+    # None = Verify (the typed answer is right); text = Edit (this is the right answer).
+    answer: Optional[str] = Field(None, max_length=settings.USER_INFO_ANSWER_MAX_CHARS)
+
+
+@router.post(
+    "/applications/{application_id}/answers/{index}/confirm", response_model=ReadyCard, dependencies=AUTH_FIRST,
+)
+async def confirm_answer(
+    application_id: int,
+    index: int,
+    body: ConfirmAnswerRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 - FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> ReadyCard:
+    """Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is
+    saved as the user's own word in memory, so the assistant uses it next time.
+    Session only - an assistant can never vouch for its own answer. Returns the
+    card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only."""
+    if await spine.get_owned_application(db, user.id, application_id) is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    try:
+        paths = await ready_service.confirm_answer(
+            db, user.id, actor_for(user), application_id,
+            form_filled_event_id=body.form_filled_event_id, index=index, new_text=body.answer,
+        )
+    except ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    get_audit_logger().info(
+        "ready_answer_confirmed",
+        extra={
+            "event": "ready_answer_confirmed", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "edited": body.answer is not None,
+            "paths": paths, "result": "ok",
+        },
+    )
+    cards = await ready_service.ready_cards(db, user.id, limit=1, application_id=application_id)
+    if not cards:  # pragma: no cover - a memory write never takes a card off the list
+        raise HTTPException(status_code=404, detail="This form is no longer waiting for you")
+    return ReadyCard(**cards[0])

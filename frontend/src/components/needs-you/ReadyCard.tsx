@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { CheckCheck, Pencil } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { approveSend, declineSend } from "@/lib/api";
+import { approveSend, confirmAnswer, declineSend } from "@/lib/api";
 import { ApiError } from "@/lib/api-error";
-import type { ReadyCardData } from "@/lib/api";
-import { clock, docText, flagText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
+import type { ReadyAnswer, ReadyCardData } from "@/lib/api";
+import { canCheck, clock, docText, flagText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
 import type { ChipTone } from "@/lib/ready-to-send";
 import { whoLabel } from "@/lib/event-labels";
 import { nothingSent } from "@/lib/application-actions";
@@ -46,6 +47,8 @@ export function ReadyCard({
   const [busy, setBusy] = useState(false);
   const preparer = whoLabel(card.filled_by).name;
   const prepared = clock(card.filled_at);
+  // An answer the user edited is not in the form yet: no Send until the assistant fills it again.
+  const changed = card.answers.some((a) => a.changed_to != null);
 
   async function decide(send: boolean) {
     setBusy(true);
@@ -124,18 +127,15 @@ export function ReadyCard({
         <div className="flex flex-col gap-1.5">
           <h4 className={label}>Every answer that will go out</h4>
           <ul className="flex flex-col divide-y divide-border">
-            {card.answers.map((a, i) => {
-              const chip = sourceChip(a, card.filled_by);
-              return (
-                <li key={`${a.question}-${i}`} className="grid gap-x-4 gap-y-1 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
-                  <span className="text-muted-foreground">{a.question}</span>
-                  <span className="whitespace-pre-wrap break-words">{a.answer || "(blank)"}</span>
-                  <span className={cn("self-start whitespace-nowrap rounded-full border px-2 py-px font-mono text-[11px] font-medium", CHIP[chip.tone])}>
-                    {chip.text}
-                  </span>
-                </li>
-              );
-            })}
+            {card.answers.map((a, i) => (
+              <AnswerRow
+                key={`${a.question}-${i}`}
+                answer={a}
+                index={i}
+                card={card}
+                onSaved={onChanged}
+              />
+            ))}
           </ul>
         </div>
       )}
@@ -144,7 +144,8 @@ export function ReadyCard({
         <button
           type="button"
           data-testid={`ready-send-${card.application_id}`}
-          disabled={busy || paused}
+          disabled={busy || paused || changed}
+          title={changed ? "You changed an answer. Ask your assistant to fill the form again first." : undefined}
           onClick={() => void decide(true)}
           className={cn(tap, "rounded-lg bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50")}
         >
@@ -170,8 +171,148 @@ export function ReadyCard({
             )}
           </p>
         )}
-        <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
+        {changed ? (
+          <span data-testid={`ready-changed-${card.application_id}`} className="text-xs text-warning">
+            You changed an answer. Ask your assistant to fill the form again, then Send.
+          </span>
+        ) : (
+          <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
+        )}
       </div>
     </article>
+  );
+}
+
+/** One answer: what was typed, where it came from, and - for a memory answer or a
+ * guess - Verify (the user stands behind it, blue double tick) or Edit (the right
+ * answer). Both save the user's word in memory so the assistant learns it. */
+function AnswerRow({
+  answer: a,
+  index,
+  card,
+  onSaved,
+}: {
+  answer: ReadyAnswer;
+  index: number;
+  card: ReadyCardData;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const chip = sourceChip(a, card.filled_by);
+  const checkable = canCheck(a);
+  const id = `${card.application_id}-${index}`;
+
+  async function save(text?: string) {
+    setSaving(true);
+    try {
+      await confirmAnswer(card.application_id, index, card.form_filled_event_id, text);
+      toast.success(text === undefined ? "Verified. Saved as your answer." : "Saved. Your assistant will use it next time.");
+      setEditing(false);
+      onSaved();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error("This changed since you looked. Check it again.");
+        onSaved();
+        return;
+      }
+      toast.error(err instanceof ApiError && err.status === 422 ? err.message : "Could not save that. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <li data-testid={`ready-answer-${id}`} className="grid gap-x-4 gap-y-1 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
+      <span className="text-muted-foreground">{a.question}</span>
+      {editing ? (
+        <div className="flex flex-col gap-2">
+          <textarea
+            data-testid={`ready-answer-input-${id}`}
+            aria-label={`Your answer to: ${a.question}`}
+            value={draft}
+            maxLength={2000}
+            rows={2}
+            onChange={(e) => setDraft(e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              data-testid={`ready-answer-save-${id}`}
+              disabled={saving || !draft.trim()}
+              onClick={() => void save(draft)}
+              className={cn(tap, "rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-50")}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => setEditing(false)}
+              className={cn(tap, "rounded-md border border-border px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50")}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : a.changed_to != null ? (
+        <span className="flex flex-col gap-0.5 break-words">
+          <span className="text-muted-foreground line-through">{a.answer || "(blank)"}</span>
+          <span data-testid={`ready-answer-changed-${id}`} className="whitespace-pre-wrap font-medium">
+            {a.changed_to}
+          </span>
+          <span className="text-xs text-warning">Your answer. Not in the form yet.</span>
+        </span>
+      ) : (
+        <span className="whitespace-pre-wrap break-words">{a.answer || "(blank)"}</span>
+      )}
+      <span className="flex flex-wrap items-start gap-1.5 sm:justify-end">
+        <span className={cn("whitespace-nowrap rounded-full border px-2 py-px font-mono text-[11px] font-medium", CHIP[chip.tone])}>
+          {chip.text}
+        </span>
+        {a.verified && (
+          <span
+            data-testid={`ready-answer-verified-${id}`}
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-info-soft px-2 py-px font-mono text-[11px] font-medium text-info"
+          >
+            <CheckCheck aria-hidden className="size-3.5" />
+            Verified
+          </span>
+        )}
+        {checkable && !editing && (
+          <>
+            {!a.verified && a.changed_to == null && a.answer && (
+              <button
+                type="button"
+                data-testid={`ready-answer-verify-${id}`}
+                disabled={saving}
+                onClick={() => void save()}
+                aria-label={`Verify: ${a.question}`}
+                className={cn(tap, "inline-flex items-center gap-1 rounded-full border border-info px-2 py-px text-[11px] font-medium text-info hover:bg-info-soft disabled:opacity-50")}
+              >
+                <CheckCheck aria-hidden className="size-3.5" />
+                Verify
+              </button>
+            )}
+            <button
+              type="button"
+              data-testid={`ready-answer-edit-${id}`}
+              disabled={saving}
+              onClick={() => {
+                setDraft(a.changed_to ?? a.answer ?? "");
+                setEditing(true);
+              }}
+              aria-label={`Edit: ${a.question}`}
+              className={cn(tap, "inline-flex items-center gap-1 rounded-full border border-border px-2 py-px text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50")}
+            >
+              <Pencil aria-hidden className="size-3" />
+              Edit
+            </button>
+          </>
+        )}
+      </span>
+    </li>
   );
 }
