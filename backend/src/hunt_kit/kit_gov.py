@@ -151,7 +151,9 @@ def fetch_eures(queries: list[str], http: HttpFn, stats: Stats, *, days: int, co
 # eerstePublicatieDatum), :53 (detail URL). Skipped: its 403 key self-heal and the detail fetch.
 VDAB_SEARCH = "https://www.vdab.be/rest/vindeenjob/v4/vacatureLight/zoek"
 VDAB_JOB = "https://www.vdab.be/vindeenjob/vacatures/"
-VDAB_KEY = "b277002f-e1fa-4fc5-868a-fdab633c3851"
+# The public build-time constant VDAB's own front-end JS stamps on every request (vdab.mjs:44-48:
+# "not a per-visitor session token"). Not a credential.
+VDAB_FRONTEND_ID = "b277002f-e1fa-4fc5-868a-fdab633c3851"
 
 
 def parse_vdab(payload: Any) -> list[Job]:
@@ -185,7 +187,7 @@ def fetch_vdab(queries: list[str], http: HttpFn, stats: Stats, *, days: int, cou
                                  "sorteerVeld": "STANDAARD"},
                     "pagina": page, "zoekmodus": "C2", "paginaGrootte": 100}
             got = parse_vdab(_get(http, stats, VDAB_SEARCH, method="POST", data=json.dumps(body).encode(),
-                                  headers={**_JSON, "vej-key-monitor": VDAB_KEY}))
+                                  headers={**_JSON, "vej-key-monitor": VDAB_FRONTEND_ID}))
             jobs += got
             if len(got) < 100:
                 break

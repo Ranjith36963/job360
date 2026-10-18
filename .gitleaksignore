@@ -53,3 +53,11 @@ e0db04e8f28b908a7e3e96e704b35baaca96c5fa:docs/superpowers/plans/2026-04-07-fasta
 01b064c6db16f30a1d60d26399cf80d42c096446:backend/src/hunt_kit/companies.json:generic-api-key:1884
 01b064c6db16f30a1d60d26399cf80d42c096446:backend/src/hunt_kit/companies.json:generic-api-key:2839
 01b064c6db16f30a1d60d26399cf80d42c096446:backend/src/hunt_kit/companies.json:generic-api-key:3642
+
+# 5. False positive: VDAB's (Flanders public employment service) public front-end
+#    constant, sent as the `vej-key-monitor` header by vdab.be's own JavaScript to
+#    anonymous visitors (career-ops providers/vdab.mjs:44-48: "Public, build-time
+#    constant baked into VDAB's own frontend JS bundle ... not a per-visitor
+#    session token"). It was named VDAB_KEY in this one branch commit; the next
+#    commit renamed it VDAB_FRONTEND_ID, so the rule no longer matches.
+96073718c146586c2121a9fff54b0add28737ef9:backend/src/hunt_kit/kit_gov.py:generic-api-key:154

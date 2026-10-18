@@ -190,7 +190,7 @@ def test_vdab_pages_by_zero_based_index_with_the_public_key():
     first = json.loads(http.calls[0]["data"])
     assert first["pagina"] == 0 and first["criteria"]["trefwoord"] == "python" and first["criteria"]["onlineSindsCode"] == "30"
     assert json.loads(http.calls[1]["data"])["pagina"] == 1
-    assert http.calls[0]["headers"]["vej-key-monitor"] == kg.VDAB_KEY
+    assert http.calls[0]["headers"]["vej-key-monitor"] == kg.VDAB_FRONTEND_ID
     short = _http({"vacatureLight/zoek": (200, VDAB)})
     assert len(kg.fetch_vdab(["data"], short, {}, days=BIG, countries=["BE"])) == 1 and len(short.calls) == 1
 
