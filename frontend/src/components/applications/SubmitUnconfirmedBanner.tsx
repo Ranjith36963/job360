@@ -11,9 +11,15 @@ import { apiErrorMessage } from "@/lib/api-error";
 export function SubmitUnconfirmedBanner({
   applicationId,
   onChanged,
+  compact = false,
+  idSuffix = "",
 }: {
   applicationId: number;
   onChanged: () => Promise<void> | void;
+  /** Just the two answers, no warning box or sentence (used inside a list row). */
+  compact?: boolean;
+  /** Added to every data-testid so several can sit on one page. */
+  idSuffix?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -31,21 +37,24 @@ export function SubmitUnconfirmedBanner({
     }
   }
 
+  const Wrapper = compact ? "div" : "section";
   return (
-    <section
-      role="alert"
-      data-testid="submit-unconfirmed"
-      className="flex flex-col gap-3 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm"
+    <Wrapper
+      {...(compact ? {} : { role: "alert" })}
+      data-testid={`submit-unconfirmed${idSuffix}`}
+      className={compact ? "flex flex-col gap-3 text-sm" : "flex flex-col gap-3 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm"}
     >
-      <p>
-        Your assistant started submitting this and it was never confirmed. Check the employer&apos;s email or site.
-      </p>
+      {!compact && (
+        <p>
+          Your assistant started submitting this and it was never confirmed. Check the employer&apos;s email or site.
+        </p>
+      )}
       {confirming ? (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span>Record that you applied? This creates a receipt that can&apos;t be deleted.</span>
           <button
             type="button"
-            data-testid="submit-sent-confirm"
+            data-testid={`submit-sent-confirm${idSuffix}`}
             disabled={busy}
             onClick={() => void run(() => recordApplicationReceipt(applicationId, {}), "Could not record this application.")}
             className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-50"
@@ -54,7 +63,7 @@ export function SubmitUnconfirmedBanner({
           </button>
           <button
             type="button"
-            data-testid="submit-sent-cancel"
+            data-testid={`submit-sent-cancel${idSuffix}`}
             disabled={busy}
             onClick={() => setConfirming(false)}
             className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground disabled:opacity-50"
@@ -66,7 +75,7 @@ export function SubmitUnconfirmedBanner({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            data-testid="submit-was-sent"
+            data-testid={`submit-was-sent${idSuffix}`}
             disabled={busy}
             onClick={() => setConfirming(true)}
             className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-50"
@@ -75,7 +84,7 @@ export function SubmitUnconfirmedBanner({
           </button>
           <button
             type="button"
-            data-testid="submit-not-sent"
+            data-testid={`submit-not-sent${idSuffix}`}
             disabled={busy}
             onClick={() => void run(() => resolveSubmit(applicationId), "Could not save that. Try again.")}
             className="rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground disabled:opacity-50"
@@ -84,6 +93,6 @@ export function SubmitUnconfirmedBanner({
           </button>
         </div>
       )}
-    </section>
+    </Wrapper>
   );
 }

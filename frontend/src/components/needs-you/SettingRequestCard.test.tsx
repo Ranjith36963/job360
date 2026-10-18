@@ -18,6 +18,7 @@ vi.mock("@/lib/api", () => ({
   confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
   declineSettingRequest: (...a: unknown[]) => declineSettingRequest(...a),
 }));
+vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
 // Ready to send has its own tests; this stand-in only reports its total for the badge.
 const readyMock = vi.hoisted(() => ({ total: 0 }));

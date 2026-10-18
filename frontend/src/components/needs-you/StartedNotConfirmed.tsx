@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
 import { fetchWhatsNewPages } from "@/lib/home-fetch";
 import { submitUnconfirmed } from "@/lib/application-actions";
 import { relativeTime } from "@/lib/utils";
@@ -48,25 +49,35 @@ export function startedNotConfirmed(
 export function StartedNotConfirmed() {
   const [rows, setRows] = useState<StartedRow[]>([]);
 
+  const fetchRows = useCallback(async (): Promise<StartedRow[]> => {
+    try {
+      const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
+      const feed = await fetchWhatsNewPages(since, PAGES);
+      return startedNotConfirmed(feed.events, feed.applications);
+    } catch {
+      return [];
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
-        const feed = await fetchWhatsNewPages(since, PAGES);
-        if (!cancelled) setRows(startedNotConfirmed(feed.events, feed.applications));
-      } catch {
-        if (!cancelled) setRows([]);
-      }
-    })();
+    void fetchRows().then((r) => {
+      if (!cancelled) setRows(r);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fetchRows]);
+
+  const refresh = useCallback(async () => setRows(await fetchRows()), [fetchRows]);
 
   if (rows.length === 0) return null;
   return (
-    <section aria-labelledby="started-not-confirmed" data-testid="started-not-confirmed" className="flex flex-col gap-3">
+    <section
+      aria-labelledby="started-not-confirmed"
+      data-testid="started-not-confirmed"
+      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-card"
+    >
       <h2 id="started-not-confirmed" className={sectionLabel}>
         Started, not confirmed
       </h2>
@@ -84,6 +95,7 @@ export function StartedNotConfirmed() {
               Your assistant started submitting this and it was never confirmed. Check the employer&apos;s email or site.
               {r.at && <span className="font-mono"> {relativeTime(r.at)}</span>}
             </p>
+            <SubmitUnconfirmedBanner applicationId={r.id} compact idSuffix={`-${r.id}`} onChanged={refresh} />
           </li>
         ))}
       </ul>

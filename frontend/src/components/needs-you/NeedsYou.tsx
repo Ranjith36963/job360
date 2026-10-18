@@ -7,7 +7,7 @@ import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAs
 import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
 import { ReadyToSend } from "./ReadyToSend";
-import { StartedNotConfirmed } from "./StartedNotConfirmed";
+import { BatchApplyPanel } from "./BatchApplyPanel";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
@@ -349,10 +349,10 @@ export function NeedsYou() {
   }
 
   return (
-    <div className="flex max-w-3xl flex-col gap-8">
+    <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
+    <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
       <MorningCheck />
       <ReadyToSend onTotal={setReadyTotal} />
-      <StartedNotConfirmed />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -415,6 +415,8 @@ export function NeedsYou() {
           )}
         </section>
       )}
+    </div>
+    <BatchApplyPanel />
     </div>
   );
 }
