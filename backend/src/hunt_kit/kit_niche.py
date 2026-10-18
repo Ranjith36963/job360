@@ -329,8 +329,8 @@ def fetch_speedrun(queries: list[str], http: Any, stats: Any, *, days: int, coun
 # title, link, pubDate, job_listing:company, job_listing:location).
 def parse_jobspresso(xml_text: Any) -> list[Job]:
     return [_job(title=r.get("title"), company=r.get("job_listing_company"), url=r.get("link"),
-                 location=r.get("job_listing_location"), posted=_date(r.get("pubDate")),
-                 source="feed:jobspresso", board="jobspresso") for r in _items(xml_text)]
+                 location=r.get("job_listing_location"), posted=_date(r.get("pubDate")), remote=True,
+                 source="feed:jobspresso", board="jobspresso") for r in _items(xml_text)]  # a remote-only board
 
 
 fetch_jobspresso = _one("https://jobspresso.co/?feed=job_feed", parse_jobspresso, text=True)
