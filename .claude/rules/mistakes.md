@@ -23,6 +23,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - After merging main into a PR: never chain past a conflict; regenerate
   `docs/GENERATED.md` and frontend types; re-run `test_recipes` (70-line recipe cap)
   and `test_outreach_people` (MCP tool count).
+- Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
+  GitHub merges it when the 13 required checks are green. Never leave finished work unpushed.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
 - Read CI failures from the job summary, not the log tail (Postgres noise).
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
