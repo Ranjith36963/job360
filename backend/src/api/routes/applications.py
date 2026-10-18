@@ -873,7 +873,7 @@ class RecordApplicationReceiptResponse(BaseModel):
     confirmation: str
     url: str
     event_id: int
-    # S3 - '' | same_job | same_company. A flag, never a block.
+    # S3 - '' | same_job | same_role | same_company. A flag, never a block.
     possible_duplicate: str = ""
 
 
@@ -2656,6 +2656,22 @@ async def clear_duplicate(
     """"Not a duplicate, go ahead" - clears the duplicate-job ask and the unattended
     duplicate stop for THIS application. Web only."""
     await _web_decision(db, user, application_id, "duplicate_cleared", {"where": "web"})
+    return await _controls(db, user, application_id)
+
+
+@router.post(
+    "/applications/{application_id}/submit/resolve", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def resolve_submit(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"It was not sent" - the user says a started submit (``submit_attempted``) never went out, which
+    ends the ``submit_unconfirmed`` stop. Appends ``submit_resolved`` {outcome: not_sent}. Web only;
+    409 when no started submit is waiting. A submit that WAS sent is recorded as ``applied``."""
+    await _web_decision(db, user, application_id, "submit_resolved", {"outcome": "not_sent"})
     return await _controls(db, user, application_id)
 
 

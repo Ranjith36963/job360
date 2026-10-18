@@ -70,7 +70,7 @@ class Receipt(BaseModel):
     guessed_count: int = 0
     form_host: str = ""
     recorded_by: str | None = None
-    # S3 - '' | same_job | same_company, the kit the assistant filled from. Set
+    # S3 - '' | same_job | same_role | same_company, the kit the assistant filled from. Set
     # at INSERT; a receipt made without a kit reads '' / None / ''.
     possible_duplicate: str = ""
     kit_event_id: int | None = None

@@ -51,6 +51,8 @@
     "process_friction",
     "assessment",
     "queued",
-    "unqueued"
+    "unqueued",
+    "submit_attempted",
+    "submit_resolved"
   ]
 }

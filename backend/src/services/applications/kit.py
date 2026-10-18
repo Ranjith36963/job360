@@ -52,7 +52,9 @@ SERVER_ONLY_EVENTS = frozenset({"kit_read"})
 KIT_EVENT_TYPES = frozenset({
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
     "form_filled", "form_swept", "hold_released", "site_account", "account_needed", "form_checked",
+    "submit_attempted", "submit_resolved",
 })
+SUBMIT_MARK_EVENTS = ("submit_attempted", "applied", "blocked", "submit_resolved")
 HOLD_RELEASE_REASONS = frozenset({"done", "blocked", "stopped", "failed"})
 SEEN_WHERE = frozenset({"web", "chat"})
 EQUALITY_LABEL = "equality / voluntary"
@@ -242,10 +244,14 @@ async def duplicate_facts(
     application of the user's (never this one) whose receipt has the same job id
     or the same normalised URL. ``include_self`` is only for the moment a receipt is
     about to be written: an existing receipt on this very application then means a
-    second receipt, a real duplicate. Every read leaves it False. ``same_company_30d``: OTHER
+    second receipt, a real duplicate. Every read leaves it False. ``same_role`` (bulk-apply D3):
+    ANOTHER application of the user's with a surviving ``applied`` event inside
+    ``DUPLICATE_ROLE_WINDOW_DAYS`` at the same ``normalized_company`` AND the same title
+    (:func:`normalized_title`, exact equality only: a repost on another board has a new URL).
+    ``same_company_30d``: OTHER
     applications of the user's with an ``applied`` event inside the window at the
     same company (the rule-1 ``normalized_company`` key; blank / ``unknown`` skipped).
-    Flag: same_job beats same_company beats ''. Never blocks anything."""
+    Flag: same_job beats same_role beats same_company beats ''. Never blocks anything."""
     application_id = int(app_row["id"])
     cur = await db._db.execute(
         "SELECT r.application_id, r.job_id, r.job_apply_url, r.sent_at, a.status "
@@ -271,6 +277,7 @@ async def duplicate_facts(
     row = await cur.fetchone()
     if row is not None:
         company = str(dict(row).get("normalized_company") or "")
+    same_role = await _same_role(db, user_id, application_id, company, now)
     same_company = 0
     if company and company != "unknown":
         cutoff = (now - timedelta(days=settings.DUPLICATE_COMPANY_WINDOW_DAYS)).isoformat()
@@ -283,8 +290,49 @@ async def duplicate_facts(
         )
         got = await cur.fetchone()
         same_company = int(got[0]) if got else 0
-    flag = "same_job" if same_job else ("same_company" if same_company else "")
-    return {"same_job": same_job, "same_company_30d": same_company, "flag": flag}
+    flag = "same_job" if same_job else ("same_role" if same_role else ("same_company" if same_company else ""))
+    return {"same_job": same_job, "same_role": same_role, "same_company_30d": same_company, "flag": flag}
+
+
+_TITLE_PUNCT_RE = re.compile(r"[^\w]+", re.UNICODE)
+
+
+def normalized_title(title: str) -> str:
+    """A job title for the ``same_role`` match: casefolded, punctuation removed, spaces collapsed.
+    Exact equality of this string is the whole rule (no fuzzy match, no seniority stripping)."""
+    return " ".join(_TITLE_PUNCT_RE.sub(" ", unicodedata.normalize("NFKC", title or "").casefold()).split())
+
+
+async def _same_role(
+    db: JobDatabase, user_id: str, application_id: int, company: str, now: datetime
+) -> Optional[dict[str, Any]]:
+    """The newest OTHER application of this user with a surviving ``applied`` event inside
+    ``DUPLICATE_ROLE_WINDOW_DAYS`` at the same normalized company and the same normalized title."""
+    if not company or company == "unknown":
+        return None
+    cur = await db._db.execute(
+        "SELECT job_title FROM applications WHERE id = ? AND user_id = ?", (application_id, user_id)
+    )
+    mine_row = await cur.fetchone()
+    mine = normalized_title(str(dict(mine_row).get("job_title") or "")) if mine_row else ""
+    if not mine:
+        return None
+    cutoff = (now - timedelta(days=settings.DUPLICATE_ROLE_WINDOW_DAYS)).isoformat()
+    cur = await db._db.execute(
+        "SELECT e.application_id, a.job_title, a.status, e.occurred_at FROM application_events e "
+        "JOIN applications a ON a.id = e.application_id JOIN jobs j ON j.id = a.job_id "
+        "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'applied' AND e.occurred_at >= ? "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "AND e.application_id <> ? AND j.normalized_company = ? ORDER BY e.id DESC LIMIT 200",
+        (user_id, user_id, cutoff, application_id, company),
+    )
+    for r in (dict(x) for x in await cur.fetchall()):
+        if normalized_title(str(r.get("job_title") or "")) == mine:
+            return {
+                "application_id": r["application_id"], "status": r["status"] or "",
+                "applied_at": str(r["occurred_at"]),
+            }
+    return None
 
 
 # ── The decision state (what the web buttons show, what the gate reads) ──────
@@ -439,11 +487,16 @@ async def gate_facts(
     cv = state["cv"]
     approved = state["cv"]["approved"] is not None if cv else await _approved_without_cv(db, user_id, application_id)
     dup = state["duplicate"]
+    form_host = await _newest_form_host(db, user_id, application_id)
     return settings_rules.SubmitFacts(
         status=str(app_row["status"]),
         has_receipt=has_receipt,
         submit_override=await spine.submit_override(db, user_id, application_id),
         duplicate_job=bool(dup["same_job"]) and dup["cleared"] is None,
+        duplicate_role=bool(dup.get("same_role")) and dup["cleared"] is None,
+        company_avoided=company_avoided(user_id, app_row),
+        submit_unconfirmed=await submit_unconfirmed(db, user_id, application_id),
+        new_site=await _new_site(db, user_id, application_id, form_host),
         cv_seen=bool(cv and cv["seen"] is not None),
         approved=bool(approved),
         declined=state["declined"] is not None,
@@ -455,11 +508,53 @@ async def gate_facts(
         form_check_missing=await _form_check_missing(db, user_id, app_row),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
-        form_host=await _newest_form_host(db, user_id, application_id),
+        form_host=form_host,
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
     )
+
+
+def company_avoided(user_id: str, app_row: dict[str, Any]) -> bool:
+    """Bulk-apply D2: the job's company is on the user's OWN ``preferences.avoid_companies`` list.
+    Exact match of :func:`normalized_company_key` on both sides (no fuzzy match); a blank or
+    ``unknown`` key never matches. The user's stop list, never a recommendation."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    mine = normalized_company_key(str(app_row.get("job_company") or ""))
+    if not mine or mine == "unknown":
+        return False
+    entries = (load_profile(user_id) or UserProfile()).preferences.avoid_companies
+    return any(isinstance(e, str) and normalized_company_key(e) == mine for e in entries or [])
+
+
+async def submit_unconfirmed(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """Bulk-apply D1: the newest of ``submit_attempted`` / ``applied`` / ``blocked`` /
+    ``submit_resolved`` is a ``submit_attempted`` (a submit was started and never confirmed).
+    Corrections are deliberately ignored: nothing an assistant retracts can clear this."""
+    rows = await _events(db, user_id, application_id, SUBMIT_MARK_EVENTS)
+    return bool(rows) and rows[0]["event_type"] == "submit_attempted"
+
+
+async def _new_site(db: JobDatabase, user_id: str, application_id: int, host: Optional[str]) -> bool:
+    """Bulk-apply R2: ``host`` (the newest ``form_filled``'s) has no earlier application of this
+    user that was applied (a surviving ``applied``, not a ``simulation``) with a ``form_filled`` on
+    that same host. ``False`` when there is no host (``unknown_site`` handles that)."""
+    if not host:
+        return False
+    cur = await db._db.execute(
+        "SELECT f.payload FROM application_events f WHERE f.user_id = ? AND f.event_type = 'form_filled' "
+        "AND f.application_id <> ? AND EXISTS (SELECT 1 FROM application_events e WHERE "
+        "e.application_id = f.application_id AND e.user_id = f.user_id AND e.event_type = 'applied' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
+        "AND s.user_id = e.user_id AND s.event_type = ? AND s.id < e.id AND s.id NOT IN "
+        "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))) "
+        "ORDER BY f.id DESC LIMIT 2000",
+        (user_id, application_id, settings.SIMULATION_EVENT_TYPE, user_id),
+    )
+    return not any(_json(dict(r).get("payload")).get("host") == host for r in await cur.fetchall())
 
 
 _UNSUPPORTED_CODES = frozenset({"unsupported_numbers", "unsupported_terms"})
@@ -734,6 +829,12 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
         problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
         if payload.get("mode") not in ("allow", "deny"):
             problems.append('mode must be "allow" or "deny"')
+    elif event_type == "submit_attempted":
+        problems += _keys_problem(payload, frozenset(), frozenset())
+    elif event_type == "submit_resolved":
+        problems += _keys_problem(payload, frozenset({"outcome"}), frozenset({"outcome"}))
+        if payload.get("outcome") != "not_sent":
+            problems.append('outcome must be "not_sent" (a submit that WAS sent is recorded with record_application)')
     elif event_type == "hold_released":
         problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
         if payload.get("reason") not in HOLD_RELEASE_REASONS:
@@ -847,6 +948,17 @@ async def _check_kit_event(
             _refuse(user, event_type, 403)
             raise SpineError(403, "this needs your click on the Job360 website")
         return {"where": "web", "by": actor}
+    if event_type == "submit_attempted":
+        _closed_payload(event_type, payload, frozenset())
+        return {"by": actor}
+    if event_type == "submit_resolved":
+        _closed_payload(event_type, payload, {"outcome"})
+        if actor != "web" or payload.get("outcome") != "not_sent":
+            _refuse(user, event_type, 403)
+            raise SpineError(403, "this needs your click on the Job360 website")
+        if not await submit_unconfirmed(db, user.id, application_id):
+            raise SpineError(409, "no unconfirmed submit to resolve")
+        return {"outcome": "not_sent", "where": "web", "by": actor}
     if event_type == "form_filled":
         if not FORM_FILLED_REQUIRED <= set(payload) <= FORM_FILLED_REQUIRED | FORM_FILLED_OPTIONAL:
             raise SpineError(

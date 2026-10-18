@@ -326,6 +326,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # payload, detail optional. Checked in the record_event ROUTE (applications._check_queue_event);
     # read by spine.queued_at_by_app.
     "queued", "unqueued",
+    # Owner decision 2026-10-18 (bulk-apply D1): `submit_attempted` (no payload) is written by the
+    # assistant right before the final click; `submit_resolved` {outcome: "not_sent"} is WEB ONLY
+    # (the user says the submit never went out). Checked in services/applications/kit.py.
+    "submit_attempted", "submit_resolved",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -828,6 +832,9 @@ CALENDAR_FEED_LOOKBACK_DAYS = int(os.getenv("CALENDAR_FEED_LOOKBACK_DAYS", "30")
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
+# Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
+# asks `duplicate_role` (a repost on another board has a new URL). Exact equality only.
+DUPLICATE_ROLE_WINDOW_DAYS = int(os.getenv("DUPLICATE_ROLE_WINDOW_DAYS", "180"))
 # Hosts that need an account before you can apply (seed list; the user's own
 # `account_needed` events add more). Registrable-domain match, subdomains included.
 ACCOUNT_REQUIRED_HOST_SUFFIXES = _env_list(

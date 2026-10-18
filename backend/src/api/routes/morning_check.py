@@ -18,6 +18,7 @@ from src.api.dependencies import get_request_db
 from src.api.routes.profile import settings_view
 from src.core import settings
 from src.repositories.database import JobDatabase
+from src.services.applications import kit as kit_service
 from src.services.applications import ready as ready_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.kit import _json
@@ -126,6 +127,18 @@ async def _stopped(db: JobDatabase, user_id: str, since: str) -> tuple[TallyBuck
         reason = "blocked" if is_blocked else _json(d["payload"]).get("reason")
         if reason in seen and d["application_id"] not in seen[reason]:
             seen[reason][d["application_id"]] = _item(d, d["recorded_at"])
+    # Bulk-apply D1: a started submit that is still unconfirmed counts as failed.
+    cur = await db._db.execute(
+        "SELECT e.application_id, e.event_type, e.payload, e.recorded_at, a.job_company, a.job_title "
+        "FROM application_events e JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
+        "WHERE e.user_id = ? AND e.event_type = 'submit_attempted' AND e.recorded_at > ? "
+        "ORDER BY e.id DESC LIMIT ?",
+        (user_id, since, _EVENT_SCAN),
+    )
+    for d in (dict(r) for r in await cur.fetchall()):
+        app_id = d["application_id"]
+        if app_id not in seen["failed"] and await kit_service.submit_unconfirmed(db, user_id, app_id):
+            seen["failed"][app_id] = _item(d, d["recorded_at"])
     pack = [TallyBucket(count=len(b), items=list(b.values())[:ITEMS_PER_BUCKET]) for b in seen.values()]
     return pack[0], pack[1]
 

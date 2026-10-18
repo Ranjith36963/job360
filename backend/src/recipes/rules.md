@@ -68,7 +68,13 @@ daily limit is reached). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, company_cap_reached
 (`stop`: the user's per-company limit is reached - tell them, they can raise it), duplicate_job
-(same job already applied to: `stop` in auto mode, else `ask`),
+(same job already applied to: `stop` in auto mode, else `ask`), duplicate_role (`ask`: same company and title
+already applied to inside the window - a repost; the user's "not a duplicate" click or a yes clears it),
+company_avoided (`stop`: the company is on the user's own `preferences.avoid_companies` list; only the user
+edits that list - never remove an entry unless they ask in chat), submit_unconfirmed (`stop`: you recorded
+`submit_attempted` and nothing after it; check the employer's email or site, never submit again; only the user
+records the outcome, and a yes does not clear it), new_site_first_time (`ask`, auto mode: first application on
+this site; a yes clears it),
 cv_unsupported_claims (`ask`: the CV's checks list numbers or terms that are not
 in the profile; show them, fix the CV or get the user's yes that each is true),
 held_by_other_session (another assistant session read this application's kit
@@ -83,7 +89,7 @@ recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Inde
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
-email_not_verified, blocked or held_by_other_session: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
+email_not_verified, blocked, held_by_other_session, company_avoided or submit_unconfirmed: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason
@@ -420,7 +426,9 @@ one job always ask before submit, whatever the account setting says. You can
 only send "confirm"; "auto_when_sure" and "inherit" need the user's own click on
 the Job360 website (403).
 
-`queued` / `unqueued` (no payload, `detail` optional) put a considering application on the user's batch
+`submit_attempted` (no payload): record it right before the final submit click; the user's website click
+`submit_resolved` {outcome:"not_sent"} (403 from you) says it never went out. A submit that WAS sent is
+`record_application`. `queued` / `unqueued` (no payload, `detail` optional) put a considering application on the user's batch
 queue and take it off (`list_applications queued=true` reads it in order; 409 `not open` / `already queued` /
 `not queued`). See `get_recipe("batch")`.
 
@@ -443,7 +451,7 @@ and `source`/`key` are returned when you read the receipt. Examples:
 `blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried"};
 `proof_text` {"text":"Thank you, application received.","page_host":"jobs.example.com"}.
 A CV that changed since you read it is 409:
-get the kit again. `duplicate_cleared` and where="web" need the user's own click
+get the kit again. `duplicate_cleared`, `submit_resolved` and where="web" need the user's own click
 on the website (403). `kit_read` is written by Job360 itself.
 
 STUCK (the blocked record): when you get stuck on a form, record_event

@@ -461,6 +461,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "interview_session", "process_friction", "assessment",
         # Batch queue (2026-10-18).
         "queued", "unqueued",
+        # Bulk-apply D1 (2026-10-18).
+        "submit_attempted", "submit_resolved",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

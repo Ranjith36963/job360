@@ -533,6 +533,19 @@ class SubmitFacts:
     # ``cv_unsupported_claims``; a yes for THIS CV clears it (2026-10-17, career-ops
     # verify-cv-facts.mjs blocks invented metrics; here it is an ask, not a stop).
     cv_unsupported: bool = False
+    # Bulk-apply D1: a ``submit_attempted`` is the newest of submit_attempted / applied / blocked /
+    # submit_resolved. STOP ``submit_unconfirmed``; a yes never clears it.
+    submit_unconfirmed: bool = False
+    # Bulk-apply D2: the job's company is on the user's own ``preferences.avoid_companies`` list
+    # (exact normalized match). STOP ``company_avoided``; a yes never clears it.
+    company_avoided: bool = False
+    # Bulk-apply D3: another application of this user, applied inside DUPLICATE_ROLE_WINDOW_DAYS,
+    # has the same company and the same title, and ``duplicate_cleared`` was not clicked. Asks
+    # ``duplicate_role`` (auto mode asks too: titles can legitimately repeat).
+    duplicate_role: bool = False
+    # Bulk-apply R2: the form host has no earlier applied application of this user. Asks
+    # ``new_site_first_time`` in auto mode; a yes clears it.
+    new_site: bool = False
 
 
 @dataclass(frozen=True)
@@ -552,6 +565,7 @@ REASONS: tuple[str, ...] = (
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
+    "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time",
 )
 
 
@@ -680,6 +694,8 @@ def may_submit(
     4. daily cap reached -> stop ``daily_cap_reached``
     4a. ``company_cap`` applications to this company inside ``company_cap_days`` already -> stop
         ``company_cap_reached`` (a stored yes does NOT clear it; the user raises the limit)
+    4a2. the company is on the user's own ``avoid_companies`` list -> stop ``company_avoided``
+        (exact normalized match; a yes does NOT clear it; the user edits their list)
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
@@ -688,10 +704,15 @@ def may_submit(
         fewer fields than the newest ``form_checked`` listed questions -> stop ``form_count_mismatch``
     4c3. an application created after ``kit.FORM_CHECK_REQUIRED_FROM`` has no ``form_checked`` -> stop
         ``form_check_missing`` (older in-flight applications are exempt)
+    4d2. a ``submit_attempted`` with no later ``applied`` / ``blocked`` / ``submit_resolved`` -> stop
+        ``submit_unconfirmed`` (a submit was started and never confirmed; a yes does NOT clear it;
+        the user records the outcome)
     4d. the account's email is not confirmed -> ask ``email_not_verified`` (a
         yes does NOT clear it; after the stops so a stop is never softened to an ask)
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
+    5-role. same company + same title applied to inside ``DUPLICATE_ROLE_WINDOW_DAYS`` -> ask
+        ``duplicate_role`` (inside ``_first_ask`` after the duplicate_job ask; ``duplicate_cleared`` or a yes clears it)
     5a. another assistant session read this application's kit inside
         ``KIT_HOLD_MINUTES`` and has not released it -> ask
         ``held_by_other_session`` (a yes does NOT clear it; after every stop)
@@ -713,11 +734,12 @@ def may_submit(
     8. the mode (the job's override, else ``submit_mode``) is ``confirm`` -> ask
     9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``
     10. first application since auto-submit was turned on -> ask ``practice_run``
+    10b. auto mode and the form host has no earlier applied application -> ask ``new_site_first_time``
     11. otherwise -> submit ``auto_when_sure``
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4c (4a included), the auto-mode duplicate stop, the other
+    ``user_approved``. Rules 1-4c (4a, 4a2 and 4d2 included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (4d)
     are NEVER cleared by a yes.
     """
@@ -736,6 +758,12 @@ def may_submit(
             "stop", "company_cap_reached",
             f"You set a limit of {cfg.company_cap} applications per company in {cfg.company_cap_days} days, "
             "and it is reached for this company. Do not submit; the user can raise the limit.",
+        )
+    if application.company_avoided:
+        return SubmitDecision(
+            "stop", "company_avoided",
+            "This company is on your own never-apply list. Do not submit; the user removes it from the list "
+            "to allow it.",
         )
     if not application.form_filled:
         return SubmitDecision(
@@ -767,6 +795,12 @@ def may_submit(
             "check_form was not used for this form. Call check_form with every question on the live form, "
             "tell the user about any knockouts, record_event form_checked, sweep again "
             "and call check_submit again.",
+        )
+    if application.submit_unconfirmed:
+        return SubmitDecision(
+            "stop", "submit_unconfirmed",
+            "A submit was started and never confirmed. Check the employer's email or site; the user "
+            "records the outcome. Do not submit again.",
         )
     if not application.email_verified:
         return SubmitDecision(
@@ -833,6 +867,12 @@ def _first_ask(
             "ask", "duplicate_job",
             "Possible duplicate: this job was already applied to. Fill the form, stop before submit and ask yes.",
         )
+    if application.duplicate_role:
+        return SubmitDecision(
+            "ask", "duplicate_role",
+            "Possible repost: an application to the same company with the same title was already sent. "
+            "Fill the form, stop before submit and ask yes.",
+        )
     if application.cv_unsupported:
         return SubmitDecision(
             "ask", "cv_unsupported_claims",
@@ -880,6 +920,12 @@ def _first_ask(
             "ask", "practice_run",
             "First application since auto-submit was turned on: a practice run. "
             "Fill the form, stop before submit and let the user check it.",
+        )
+    if application.new_site:
+        return SubmitDecision(
+            "ask", "new_site_first_time",
+            "First application on this site: the user takes one look. "
+            "Fill the form, stop before submit and ask yes.",
         )
     return None
 

@@ -104,6 +104,9 @@ export const EVENT_LABEL: Record<string, string> = {
   // Batch queue (2026-10-18).
   queued: "Added to the batch",
   unqueued: "Removed from the batch",
+  // Bulk-apply D1 (2026-10-18).
+  submit_attempted: "Submit started",
+  submit_resolved: "Submit marked as not sent",
 };
 
 function relayedWords(payload: unknown): boolean {

@@ -24,9 +24,9 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    `POST /api/applications/{id}/send/approve`) or a yes in chat naming this job. Show the user what you entered,
    including the salary band you chose. Then call `check_submit`. Submit only
    as the apply recipe says. **Done when** it says `submit`, or `ask` plus the user's yes for this one application.
-7. **Press Submit, then check the page changed.** A confirmation or thank-you text means it worked. No change: scan
+7. **Press Submit, then check the page changed.** Right before the click `record_event` `submit_attempted` (no payload). A confirmation or thank-you text means it worked. No change: scan
    for required or invalid fields (`aria-invalid`, red text, below the fold), read ALL the errors, fix exactly those,
-   press Submit ONCE more. Still stuck: `blocked`, STOP. If your own tool, permission prompt or safety classifier
+   press Submit ONCE more (only if the page proved the first click sent nothing; else `submit_unconfirmed`, STOP). Still stuck: `blocked`, STOP. If your own tool, permission prompt or safety classifier
    refuses the Submit click: do NOT click again, do not try another way (keyboard, script, other tab). `record_event`
    `blocked` {reason: safety_block, step: "final submit", page_host}, `hold_released` {reason: blocked}, leave the
    filled tab open and tell the user to press Submit themselves. When they say it went: `unblocked`
