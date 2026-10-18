@@ -576,6 +576,58 @@ def _remember_line(path: str) -> str:
     )
 
 
+AVOID_COMPANIES_PATH = "preferences.avoid_companies"
+
+
+def _refuse_avoid_list_removal(user_id: str, actor: str, pairs: list[tuple[str, Any]]) -> None:
+    """Security review 2026-10-18: ``preferences.avoid_companies`` drives the ``company_avoided``
+    STOP in ``check_submit``. An assistant (any non-web actor) may ADD companies to it, never
+    remove one or clear it: that would switch off a stop "a yes never clears". 403 naming the
+    path; the user removes entries on the website. Compared by the gate's normalized key."""
+    if actor == profile_edits.WEB_ACTOR or not any(p == AVOID_COMPANIES_PATH for p, _ in pairs):
+        return
+    from src.services.applications.kit import normalized_company_key  # noqa: PLC0415 - kit imports profile
+
+    current = load_profile(user_id) or UserProfile()
+    have = {normalized_company_key(str(c)) for c in current.preferences.avoid_companies} - {""}
+    for path, value in pairs:
+        if path != AVOID_COMPANIES_PATH:
+            continue
+        after = (
+            {normalized_company_key(str(c)) for c in (value or [])} - {""}
+            if isinstance(value, list) or value is None else None
+        )
+        if after is None or not have <= after:
+            _log_edit_rejected(user_id, actor, pairs, AVOID_COMPANIES_PATH, 403, "avoid_list_removal")
+            raise EditRefused(
+                403,
+                f"{AVOID_COMPANIES_PATH}: an assistant may add companies to the user's never-apply list but "
+                "never remove one; the user removes entries on the Job360 website.",
+                "avoid_list_removal",
+            )
+        have = after
+
+
+def _guard_avoid_list(user: CurrentUser, after: Optional[list[Any]]) -> None:
+    """The same never-remove rule for the other doors that write preferences (POST
+    /profile/preferences, POST /profile with preferences, POST /profile/clear): a non-web
+    caller whose write would drop any entry of the CURRENT effective list gets the same 403
+    (bug review 2026-10-18). ``after`` = the list the write leaves (``None`` = cleared)."""
+    actor = actor_for(user)
+    if actor == profile_edits.WEB_ACTOR:
+        return
+    _refuse_avoid_list_removal(user.id, actor, [(AVOID_COMPANIES_PATH, list(after or []))])
+
+
+def _sends_avoid_list(preferences_json: str) -> bool:
+    """True when the preferences form names ``avoid_companies`` (absent = left as it is)."""
+    try:
+        sent = json.loads(preferences_json)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(sent, dict) and "avoid_companies" in sent
+
+
 def _split_gated(
     user_id: str, actor: str, pairs: list[tuple[str, Any]]
 ) -> tuple[list[tuple[str, Any]], list[tuple[str, Any]], dict[str, str]]:
@@ -837,6 +889,7 @@ async def update_profile(
     # hourly budget for held requests is checked HERE, before any write of the
     # call, so a 429 changes nothing.
     write_now, hold, risk = _split_gated(user.id, actor, pairs)
+    _refuse_avoid_list_removal(user.id, actor, pairs)
     # Weak spot #6 wave 2 - permission to fill is not permission to remember (answer-memory
     # SKILL.md L151; job-apply-store.py L503-507: "sensitive answer value requires explicit
     # remember consent"). An assistant's sensitive value without remember:true is NOT written.
@@ -1584,6 +1637,8 @@ async def upsert_preferences(
     profile = load_profile(user.id, with_overlay=False) or UserProfile()
     base_prefs = copy.deepcopy(profile.preferences)
     _apply_preferences(preferences, profile)
+    if _sends_avoid_list(preferences):
+        _guard_avoid_list(user, profile.preferences.avoid_companies)
     kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     _record_web_preference_changes(preferences, before, profile, user, skip=kept)
@@ -1613,6 +1668,8 @@ async def upsert_profile(
     if preferences is not None and before is not None:
         base_prefs = copy.deepcopy(profile.preferences)
         _apply_preferences(preferences, profile)
+        if _sends_avoid_list(preferences):
+            _guard_avoid_list(user, profile.preferences.avoid_companies)
         kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     if preferences is not None and before is not None:
@@ -2021,6 +2078,8 @@ async def clear_profile_section(
             status_code=400,
             detail=f"section must be one of: {', '.join(_CLEAR_SCOPES)}",
         )
+    if section in ("preferences", "all"):
+        _guard_avoid_list(user, None)
     # S2 injection guard — this route takes a bearer token too, and "all" resets
     # the assistant settings. A reset that would LOOSEN one (end a pause, remove a
     # daily cap) is a riskier change: only the user's own web click may make it,

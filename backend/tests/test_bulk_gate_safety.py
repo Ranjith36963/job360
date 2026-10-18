@@ -253,7 +253,7 @@ async def test_attempt_without_an_outcome_stops_the_gate_and_a_yes_does_not_clea
 
 
 @pytest.mark.asyncio
-async def test_the_stop_is_cleared_by_applied_blocked_or_a_web_resolve(authenticated_async_context, fixture_user_id):
+async def test_the_stop_is_cleared_by_applied_or_a_web_resolve_never_by_blocked(authenticated_async_context, fixture_user_id):
     from src.services.applications import kit
 
     async with authenticated_async_context() as client:
@@ -270,7 +270,8 @@ async def test_the_stop_is_cleared_by_applied_blocked_or_a_web_resolve(authentic
             payload={"reason": "captcha", "step": "final submit", "page_host": HOST, "detail": "CAPTCHA"},
         )
         assert blocked.status_code == 201, blocked.text
-        assert await kit.submit_unconfirmed(db, fixture_user_id, b) is False
+        # a block after the click cannot prove nothing was sent (review 2026-10-18)
+        assert await kit.submit_unconfirmed(db, fixture_user_id, b) is True
         resolved = await client.post(f"/api/applications/{c}/submit/resolve")
         assert resolved.status_code == 201, resolved.text
         assert await kit.submit_unconfirmed(db, fixture_user_id, c) is False
@@ -438,12 +439,18 @@ async def test_the_role_window_is_respected_and_same_job_keeps_priority(
         old = await _bring(client, _ad(1, title="Data Engineer (Remote)"))
         repost = await _bring(client, _ad(2, title="Data Engineer - Remote"))
         await _applied_at(client, old, now - timedelta(days=200))
+        # a truly old record: recorded 200 days ago too (the window reads either date)
+        from src.repositories import pgsync
+
+        conn = pgsync.connect(str(settings.DB_PATH))
+        conn.execute("UPDATE application_events SET recorded_at = occurred_at WHERE application_id = ?", (old,))
+        conn.commit()
+        conn.close()
         db = await _db()
         row = await spine.get_owned_application(db, fixture_user_id, repost)
         assert (await kit.duplicate_facts(db, fixture_user_id, row, now))["same_role"] is None
         monkeypatch.setattr(settings, "DUPLICATE_ROLE_WINDOW_DAYS", 365)
         assert (await kit.duplicate_facts(db, fixture_user_id, row, now))["flag"] == "same_role"
-        # a corrected applied date that leaves the window frees it again
         monkeypatch.setattr(settings, "DUPLICATE_ROLE_WINDOW_DAYS", 180)
         assert (await kit.duplicate_facts(db, fixture_user_id, row, now))["flag"] == ""
 
@@ -469,7 +476,10 @@ async def test_new_site_is_true_until_an_application_was_applied_from_that_host(
         await _fill(client, first)
         # filled but not applied: still new
         assert await kit._new_site(db, fixture_user_id, second, HOST) is True
+        # a bare `applied` event is not enough (security review 2026-10-18): a receipt is
         await _applied_at(client, first, datetime.now(timezone.utc))
+        assert await kit._new_site(db, fixture_user_id, second, HOST) is True
+        assert (await client.post(f"/api/applications/{first}/receipt", json={"channel": "company_site"})).status_code == 201
         assert await kit._new_site(db, fixture_user_id, second, HOST) is False
         assert await kit._new_site(db, fixture_user_id, second, "jobs.other.example") is True
         # this application's own fill never counts for itself
@@ -477,8 +487,15 @@ async def test_new_site_is_true_until_an_application_was_applied_from_that_host(
         # a simulation does not earn trust for a site
         assert (await _event(client, sim, "simulation")).status_code == 201
         await _fill(client, sim, "https://careers.simulated.example/apply/1")
-        await _applied_at(client, sim, datetime.now(timezone.utc))
+        assert (await client.post(f"/api/applications/{sim}/receipt", json={"channel": "company_site"})).status_code == 201
         assert await kit._new_site(db, fixture_user_id, second, "careers.simulated.example") is True
+        # a simulation mark recorded AFTER the receipt still keeps a site untrusted
+        late = await _bring(client, _ad(4))
+        await _fill(client, late, "https://careers.late.example/apply/1")
+        assert (await client.post(f"/api/applications/{late}/receipt", json={"channel": "company_site"})).status_code == 201
+        assert await kit._new_site(db, fixture_user_id, second, "careers.late.example") is False
+        assert (await _event(client, late, "simulation")).status_code == 201
+        assert await kit._new_site(db, fixture_user_id, second, "careers.late.example") is True
 
 
 @pytest.mark.asyncio
@@ -498,3 +515,93 @@ async def test_gate_facts_carry_the_new_facts(authenticated_async_context, fixtu
         assert (await _event(client, app_id, "submit_attempted")).status_code == 201
         facts = await kit.gate_facts(db, fixture_user_id, row, email_verified=True)
         assert facts.submit_unconfirmed is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Security review 2026-10-18 regressions
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_a_retracted_applied_does_not_clear_an_unconfirmed_submit(authenticated_async_context, fixture_user_id):
+    from src.services.applications import kit
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client, _ad(1))
+        assert (await _event(client, app_id, "submit_attempted")).status_code == 201
+        applied = await _event(client, app_id, "applied")
+        assert applied.status_code == 201
+        db = await _db()
+        assert await kit.submit_unconfirmed(db, fixture_user_id, app_id) is False
+        undo = await _event(client, app_id, "note", detail="not really", corrects_event_id=applied.json()["event_id"])
+        assert undo.status_code == 201, undo.text
+        assert await kit.submit_unconfirmed(db, fixture_user_id, app_id) is True
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_may_add_to_the_avoid_list_but_never_remove(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+        ok = await client.patch("/api/profile", json={"edits": [{"path": "preferences.avoid_companies", "value": ["Northwind"]}]})
+        assert ok.status_code == 200, ok.text
+    async with _bearer(token) as bot:
+        add = await bot.patch(
+            "/api/profile", json={"edits": [{"path": "preferences.avoid_companies", "value": ["Northwind", "Acme"]}]}
+        )
+        assert add.status_code == 200, add.text
+        for value in ([], ["Acme"], None):
+            gone = await bot.patch("/api/profile", json={"edits": [{"path": "preferences.avoid_companies", "value": value}]})
+            assert gone.status_code == 403, (value, gone.text)
+            assert "never remove" in gone.text
+    async with authenticated_async_context() as client:
+        # the user's own web edit removes at once
+        web = await client.patch("/api/profile", json={"edits": [{"path": "preferences.avoid_companies", "value": []}]})
+        assert web.status_code == 200, web.text
+
+
+@pytest.mark.asyncio
+async def test_back_dating_the_earlier_applied_still_asks_duplicate_role(authenticated_async_context, fixture_user_id):
+    from src.services.applications import kit, spine
+
+    now = datetime.now(timezone.utc)
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        first = await _bring(client, _ad(1, title="Data Engineer (Remote)"))
+        repost = await _bring(client, _ad(2, title="Data Engineer - Remote"))
+        applied = await _event(client, first, "applied")
+        assert applied.status_code == 201
+        moved = await _event(
+            client, first, "applied", occurred_at="2024-01-01T00:00:00+00:00",
+            corrects_event_id=applied.json()["event_id"],
+        )
+        assert moved.status_code == 201, moved.text
+        db = await _db()
+        row = await spine.get_owned_application(db, fixture_user_id, repost)
+        assert (await kit.duplicate_facts(db, fixture_user_id, row, now))["flag"] == "same_role"
+
+
+@pytest.mark.asyncio
+async def test_the_other_preference_doors_also_refuse_an_assistant_removing_from_the_avoid_list(
+    authenticated_async_context, fixture_user_id
+):
+    """Bug review 2026-10-18: POST /profile/preferences and POST /profile/clear must not
+    empty the never-apply list for a token either."""
+    import json as _json
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+        ok = await client.post("/api/profile/preferences", data={"preferences": _json.dumps({"avoid_companies": ["Northwind"]})})
+        assert ok.status_code == 200, ok.text
+    async with _bearer(token) as bot:
+        wipe = await bot.post("/api/profile/preferences", data={"preferences": _json.dumps({"avoid_companies": []})})
+        assert wipe.status_code == 403, wipe.text
+        other = await bot.post("/api/profile/preferences", data={"preferences": _json.dumps({"avoid_companies": ["Northwind", "Acme"]})})
+        assert other.status_code == 200, other.text
+        cleared = await bot.post("/api/profile/clear", data={"section": "preferences"})
+        assert cleared.status_code == 403, cleared.text
+    async with authenticated_async_context() as client:
+        prof = (await client.get("/api/profile")).json()
+        assert "Northwind" in str(prof)

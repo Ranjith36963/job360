@@ -788,6 +788,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/submit/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Submit
+         * @description "It was not sent" - the user says a started submit (``submit_attempted``) never went out, which
+         *     ends the ``submit_unconfirmed`` stop. Appends ``submit_resolved`` {outcome: not_sent}. Web only;
+         *     409 when no started submit is waiting. A submit that WAS sent is recorded as ``applied``.
+         */
+        post: operations["resolve_submit_api_applications__application_id__submit_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/visa": {
         parameters: {
             query?: never;
@@ -3538,10 +3560,7 @@ export interface components {
         };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv: string;
         };
         /** Body_upload_github_api_profile_github_post */
@@ -3551,10 +3570,7 @@ export interface components {
         };
         /** Body_upload_linkedin_api_profile_linkedin_post */
         Body_upload_linkedin_api_profile_linkedin_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upsert_preferences_api_profile_preferences_post */
@@ -3564,10 +3580,7 @@ export interface components {
         };
         /** Body_upsert_profile_api_profile_post */
         Body_upsert_profile_api_profile_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv?: string;
             /** Preferences */
             preferences?: string;
@@ -6926,6 +6939,7 @@ export interface components {
             score_line: components["schemas"]["StatsScoreLineOut"];
             /** Since */
             since: string | null;
+            sites?: components["schemas"]["StatsSitesOut"] | null;
             skill_gaps?: components["schemas"]["StatsSkillGapsOut"] | null;
             velocity?: components["schemas"]["StatsVelocityOut"] | null;
         };
@@ -6974,6 +6988,39 @@ export interface components {
             line?: number | null;
             /** Unscored */
             unscored: number;
+        };
+        /** StatsSiteOut */
+        StatsSiteOut: {
+            /** Applied */
+            applied: number;
+            /** Blocked */
+            blocked: {
+                [key: string]: number;
+            };
+            /** Blocked Total */
+            blocked_total: number;
+            /** Forms Filled */
+            forms_filled: number;
+            /** Host */
+            host: string;
+            /** N */
+            n: number;
+        };
+        /**
+         * StatsSitesOut
+         * @description ``stats(view="sites")``: counts per form host. Facts only, never a ranking.
+         */
+        StatsSitesOut: {
+            /** Applications Without Host */
+            applications_without_host: number;
+            /** Hosts */
+            hosts: number;
+            /** Note */
+            note: string;
+            /** Sites */
+            sites: components["schemas"]["StatsSiteOut"][];
+            /** Truncated */
+            truncated: boolean;
         };
         /** StatsSkillGapOut */
         StatsSkillGapOut: {
@@ -7122,6 +7169,13 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["TallyItem"][];
+            /**
+             * Reasons
+             * @default {}
+             */
+            reasons: {
+                [key: string]: number;
+            };
         };
         /** TallyItem */
         TallyItem: {
@@ -8717,6 +8771,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_submit_api_applications__application_id__submit_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
                 };
             };
             /** @description Validation Error */

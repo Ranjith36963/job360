@@ -2285,7 +2285,7 @@
       "Body_upload_cv_api_profile_cv_post": {
         "properties": {
           "cv": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "Cv",
             "type": "string"
           }
@@ -2312,7 +2312,7 @@
       "Body_upload_linkedin_api_profile_linkedin_post": {
         "properties": {
           "file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
           }
@@ -2339,7 +2339,7 @@
       "Body_upsert_profile_api_profile_post": {
         "properties": {
           "cv": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "Cv",
             "type": "string"
           },
@@ -11182,6 +11182,16 @@
             ],
             "title": "Since"
           },
+          "sites": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsSitesOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "skill_gaps": {
             "anyOf": [
               {
@@ -11356,6 +11366,84 @@
           "unscored"
         ],
         "title": "StatsScoreLineOut",
+        "type": "object"
+      },
+      "StatsSiteOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "blocked": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Blocked",
+            "type": "object"
+          },
+          "blocked_total": {
+            "title": "Blocked Total",
+            "type": "integer"
+          },
+          "forms_filled": {
+            "title": "Forms Filled",
+            "type": "integer"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host",
+          "n",
+          "forms_filled",
+          "applied",
+          "blocked",
+          "blocked_total"
+        ],
+        "title": "StatsSiteOut",
+        "type": "object"
+      },
+      "StatsSitesOut": {
+        "description": "``stats(view=\"sites\")``: counts per form host. Facts only, never a ranking.",
+        "properties": {
+          "applications_without_host": {
+            "title": "Applications Without Host",
+            "type": "integer"
+          },
+          "hosts": {
+            "title": "Hosts",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "sites": {
+            "items": {
+              "$ref": "#/components/schemas/StatsSiteOut"
+            },
+            "title": "Sites",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hosts",
+          "sites",
+          "truncated",
+          "applications_without_host",
+          "note"
+        ],
+        "title": "StatsSitesOut",
         "type": "object"
       },
       "StatsSkillGapOut": {
@@ -11776,6 +11864,14 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Reasons",
+            "type": "object"
           }
         },
         "required": [
@@ -15563,6 +15659,81 @@
           }
         },
         "summary": "Submit Check",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/submit/resolve": {
+      "post": {
+        "description": "\"It was not sent\" - the user says a started submit (``submit_attempted``) never went out, which\nends the ``submit_unconfirmed`` stop. Appends ``submit_resolved`` {outcome: not_sent}. Web only;\n409 when no started submit is waiting. A submit that WAS sent is recorded as ``applied``.",
+        "operationId": "resolve_submit_api_applications__application_id__submit_resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Submit",
         "tags": [
           "applications"
         ]

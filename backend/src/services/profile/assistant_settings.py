@@ -533,8 +533,8 @@ class SubmitFacts:
     # ``cv_unsupported_claims``; a yes for THIS CV clears it (2026-10-17, career-ops
     # verify-cv-facts.mjs blocks invented metrics; here it is an ask, not a stop).
     cv_unsupported: bool = False
-    # Bulk-apply D1: a ``submit_attempted`` is the newest of submit_attempted / applied / blocked /
-    # submit_resolved. STOP ``submit_unconfirmed``; a yes never clears it.
+    # Bulk-apply D1: a ``submit_attempted`` is the newest of submit_attempted / applied /
+    # submit_resolved (a later `blocked` does not clear it). STOP ``submit_unconfirmed``; a yes never clears it.
     submit_unconfirmed: bool = False
     # Bulk-apply D2: the job's company is on the user's own ``preferences.avoid_companies`` list
     # (exact normalized match). STOP ``company_avoided``; a yes never clears it.
@@ -704,7 +704,7 @@ def may_submit(
         fewer fields than the newest ``form_checked`` listed questions -> stop ``form_count_mismatch``
     4c3. an application created after ``kit.FORM_CHECK_REQUIRED_FROM`` has no ``form_checked`` -> stop
         ``form_check_missing`` (older in-flight applications are exempt)
-    4d2. a ``submit_attempted`` with no later ``applied`` / ``blocked`` / ``submit_resolved`` -> stop
+    4d2. a ``submit_attempted`` with no later surviving ``applied`` or web ``submit_resolved`` -> stop
         ``submit_unconfirmed`` (a submit was started and never confirmed; a yes does NOT clear it;
         the user records the outcome)
     4d. the account's email is not confirmed -> ask ``email_not_verified`` (a

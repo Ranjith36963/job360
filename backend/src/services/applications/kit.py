@@ -54,7 +54,9 @@ KIT_EVENT_TYPES = frozenset({
     "form_filled", "form_swept", "hold_released", "site_account", "account_needed", "form_checked",
     "submit_attempted", "submit_resolved",
 })
-SUBMIT_MARK_EVENTS = ("submit_attempted", "applied", "blocked", "submit_resolved")
+# `blocked` is NOT here (review 2026-10-18): a block recorded after the click cannot prove the click sent
+# nothing, and the user's later `unblocked` would let the same application be submitted twice.
+SUBMIT_MARK_EVENTS = ("submit_attempted", "applied", "submit_resolved")
 HOLD_RELEASE_REASONS = frozenset({"done", "blocked", "stopped", "failed"})
 SEEN_WHERE = frozenset({"web", "chat"})
 EQUALITY_LABEL = "equality / voluntary"
@@ -306,8 +308,10 @@ def normalized_title(title: str) -> str:
 async def _same_role(
     db: JobDatabase, user_id: str, application_id: int, company: str, now: datetime
 ) -> Optional[dict[str, Any]]:
-    """The newest OTHER application of this user with a surviving ``applied`` event inside
-    ``DUPLICATE_ROLE_WINDOW_DAYS`` at the same normalized company and the same normalized title."""
+    """The newest OTHER application of this user with an ``applied`` event inside
+    ``DUPLICATE_ROLE_WINDOW_DAYS`` (by the date it says OR the day it was recorded) at the same
+    normalized company and the same normalized title. Corrected ``applied`` rows still count:
+    this only ASKS, so back-dating or retracting cannot hide a repeat (security review 2026-10-18)."""
     if not company or company == "unknown":
         return None
     cur = await db._db.execute(
@@ -321,10 +325,10 @@ async def _same_role(
     cur = await db._db.execute(
         "SELECT e.application_id, a.job_title, a.status, e.occurred_at FROM application_events e "
         "JOIN applications a ON a.id = e.application_id JOIN jobs j ON j.id = a.job_id "
-        "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'applied' AND e.occurred_at >= ? "
-        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'applied' "
+        "AND (e.occurred_at >= ? OR e.recorded_at >= ?) "
         "AND e.application_id <> ? AND j.normalized_company = ? ORDER BY e.id DESC LIMIT 200",
-        (user_id, user_id, cutoff, application_id, company),
+        (user_id, user_id, cutoff, cutoff, application_id, company),
     )
     for r in (dict(x) for x in await cur.fetchall()):
         if normalized_title(str(r.get("job_title") or "")) == mine:
@@ -530,27 +534,37 @@ def company_avoided(user_id: str, app_row: dict[str, Any]) -> bool:
 
 
 async def submit_unconfirmed(db: JobDatabase, user_id: str, application_id: int) -> bool:
-    """Bulk-apply D1: the newest of ``submit_attempted`` / ``applied`` / ``blocked`` /
-    ``submit_resolved`` is a ``submit_attempted`` (a submit was started and never confirmed).
+    """Bulk-apply D1: the newest of ``submit_attempted`` / ``applied`` /
+    ``submit_resolved`` (web only) is a ``submit_attempted`` (a submit was started and never confirmed).
     Corrections are deliberately ignored: nothing an assistant retracts can clear this."""
     rows = await _events(db, user_id, application_id, SUBMIT_MARK_EVENTS)
+    # An ``applied`` that a later event corrects (retracts) resolves nothing (security review
+    # 2026-10-18): otherwise applied + a retracting note would clear the stop. A corrected
+    # ``submit_attempted`` still counts, so a retraction can never clear it either.
+    cur = await db._db.execute(
+        "SELECT corrects_event_id FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND corrects_event_id IS NOT NULL",
+        (application_id, user_id),
+    )
+    retracted = {int(dict(r)["corrects_event_id"]) for r in await cur.fetchall()}
+    rows = [r for r in rows if not (r["event_type"] == "applied" and int(r["id"]) in retracted)]
     return bool(rows) and rows[0]["event_type"] == "submit_attempted"
 
 
 async def _new_site(db: JobDatabase, user_id: str, application_id: int, host: Optional[str]) -> bool:
     """Bulk-apply R2: ``host`` (the newest ``form_filled``'s) has no earlier application of this
-    user that was applied (a surviving ``applied``, not a ``simulation``) with a ``form_filled`` on
-    that same host. ``False`` when there is no host (``unknown_site`` handles that)."""
+    user with a RECEIPT (``record_application``; a bare ``applied`` event is not enough) that is not
+    marked ``simulation`` (at any position) and has a ``form_filled`` on that same host (security
+    review 2026-10-18). ``False`` when there is no host (``unknown_site`` handles that)."""
     if not host:
         return False
     cur = await db._db.execute(
         "SELECT f.payload FROM application_events f WHERE f.user_id = ? AND f.event_type = 'form_filled' "
-        "AND f.application_id <> ? AND EXISTS (SELECT 1 FROM application_events e WHERE "
-        "e.application_id = f.application_id AND e.user_id = f.user_id AND e.event_type = 'applied' "
-        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
-        "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
-        "AND s.user_id = e.user_id AND s.event_type = ? AND s.id < e.id AND s.id NOT IN "
-        "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))) "
+        "AND f.application_id <> ? AND EXISTS (SELECT 1 FROM application_receipts r WHERE "
+        "r.application_id = f.application_id AND r.user_id = f.user_id) "
+        "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = f.application_id "
+        "AND s.user_id = f.user_id AND s.event_type = ? AND s.id NOT IN "
+        "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL)) "
         "ORDER BY f.id DESC LIMIT 2000",
         (user_id, application_id, settings.SIMULATION_EVENT_TYPE, user_id),
     )

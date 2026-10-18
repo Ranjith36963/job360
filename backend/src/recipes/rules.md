@@ -71,9 +71,9 @@ user_declined (the user said don't send), daily_cap_reached, company_cap_reached
 (same job already applied to: `stop` in auto mode, else `ask`), duplicate_role (`ask`: same company and title
 already applied to inside the window - a repost; the user's "not a duplicate" click or a yes clears it),
 company_avoided (`stop`: the company is on the user's own `preferences.avoid_companies` list; only the user
-edits that list - never remove an entry unless they ask in chat), submit_unconfirmed (`stop`: you recorded
-`submit_attempted` and nothing after it; check the employer's email or site, never submit again; only the user
-records the outcome, and a yes does not clear it), new_site_first_time (`ask`, auto mode: first application on
+edits that list - never remove an entry unless they ask in chat), submit_unconfirmed (`stop`: a `submit_attempted`
+has no later `applied` - `record_application` once you SEE proof it went, e.g. the confirmation email - and the
+user has not clicked "It was not sent" on Job360; a `blocked` or a yes does not clear it; never submit again), new_site_first_time (`ask`, auto mode: first application on
 this site; a yes clears it),
 cv_unsupported_claims (`ask`: the CV's checks list numbers or terms that are not
 in the profile; show them, fix the CV or get the user's yes that each is true),
@@ -458,11 +458,16 @@ STUCK (the blocked record): when you get stuck on a form, record_event
 `blocked` {reason, step, page_host, detail}, then stop that application and
 move on to the next. `reason` is one of captcha, bot_check, login_needed,
 site_error, upload_failed, unknown_question, safety_block,
-quick_apply_warning, other; `step` is plain text up to 120 characters;
+quick_apply_warning, posting_closed, account_creation, otp_needed,
+id_or_payment_asked, assessment_required, manual_only, site_limit_reached, other
+(`posting_closed` = the page says it is filled or closed; `account_creation` = a sign-up wall; `otp_needed` = a
+one-time code; `id_or_payment_asked` = selfie, ID, card or SSN: never entered, never retried; `assessment_required`
+= timed test or video; `manual_only` = the site cannot be filled; `site_limit_reached` = the site's own daily
+limit message: stop this site for the run); `step` is plain text up to 120 characters;
 `page_host` is the host only (jobs.example.com), never a full URL; `detail`
 is up to 300 plain characters. Any other key is 422; never put a password, a
 token or page text in it. Job360 fills in who you are and opens one Needs-you
-ask for the user. Never retry a CAPTCHA or bot check and never bypass one; a
+ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
 login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with
