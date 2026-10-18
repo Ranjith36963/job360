@@ -885,6 +885,8 @@ _TALEO_PORTAL_RES = (
     re.compile(r"[?&]portal=([0-9]+)", re.I),
     re.compile(r"""["']portal(?:Id)?["']?\s*[:=]\s*["']?([0-9]+)""", re.I),
     re.compile(r"""name=["']portal["'][^>]*value=["']([0-9]+)""", re.I),
+    # freehire internal/ingest/sources/taleo.go:72-74: the shell's JS config block says `portalNo: '101430233'`
+    re.compile(r"""portalNo["']?\s*[:=]\s*["']?([0-9]+)""", re.I),
 )
 _TALEO_LDJSON_RE = re.compile(
     r"""<script\b[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>([\s\S]*?)</script>""", re.I)
@@ -1227,6 +1229,8 @@ def fetch_jobvite(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> lis
 # --------------------------------------------------------------------------- Eightfold
 # Port of career-ops providers/eightfold.mjs (MIT). Row: {name, ats: "eightfold", tenant, domain?}.
 _EF_TENANT_RE = re.compile(r"^[a-z0-9-]+$", re.I)
+EIGHTFOLD_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/151.0.0.0 Safari/537.36")  # career-ops user-agent.mjs:22-23
 EIGHTFOLD_PAGE = 10  # the API caps a page at 10 rows whatever `num` says
 
 
@@ -1291,7 +1295,9 @@ def fetch_eightfold(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> l
             return []
         host = f"{tenant}.eightfold.ai"
         dq = f"domain={quote(domain, safe='')}&" if domain else ""
-        hdr = {"Accept": "application/json"}
+        # career-ops eightfold.mjs:392 sends a browser-like User-Agent on every call; its header (:44-48) says
+        # several tenants WAF-403 anything else. Ours would be read as a bot.
+        hdr = {"Accept": "application/json", "User-Agent": EIGHTFOLD_UA}
         api = "v2"
         jobs: list[Job] = []
         seen: set[str] = set()

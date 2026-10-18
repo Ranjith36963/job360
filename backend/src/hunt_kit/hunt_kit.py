@@ -550,6 +550,18 @@ def classify_location(
     visa_onsite (on-site elsewhere and the ad says it sponsors), maybe_relocation, any.
     """
     p = prefs or Prefs()
+    row = _classify_place(loc, desc, p, visa_flag)
+    if row is None and p.any_row:
+        # --any-location keeps every title match: the "remote but not open to you" and "locked to
+        # another country" dead ends must not drop an ad. Only the user's own --only/--exclude
+        # countries still can.
+        c = parse_loc(loc or "").countries
+        if not (c and p.exclude and c <= p.exclude) and not (p.only and not (c & p.only)):
+            return "any"
+    return row
+
+
+def _classify_place(loc: str, desc: str, p: Prefs, visa_flag: bool) -> str | None:
     loc = loc or ""
     desc = desc or ""
     info = parse_loc(loc)
@@ -1633,6 +1645,8 @@ def load_companies(path: Path) -> list[dict[str, str]]:
     key. Rows keep a ``token`` key in memory, which every fetcher reads; an older
     file that still says ``token`` loads too.
     """
+    if str(path).strip().lower() == "none":  # --companies none: no company list, like --history none
+        return []
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     for r in data:
@@ -1795,7 +1809,7 @@ def run(args: argparse.Namespace) -> Collector:
     countries = sorted(col.prefs.only or col.prefs.work)
     # "*" lets the country-gated national services run everywhere when on-site jobs abroad count
     # (--visa-onsite, the default): their ads are then kept only when they say they sponsor a visa.
-    feed_countries = countries + (["*"] if col.prefs.visa_onsite and not col.prefs.only else [])
+    feed_countries = countries + (["*"] if (col.prefs.visa_onsite or col.prefs.any_row) and not col.prefs.only else [])
     sink = col.sink
     if sink is not None:
         sink.seed(col)

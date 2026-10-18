@@ -7,7 +7,8 @@ ranks or scores; ``queries`` is a plain keyword match, done locally when the boa
 Networking goes only through the ``http`` callable the core passes in. Standard library only.
 
 The Polish boards (nofluffjobs, justjoin, solidjobs) keep every job when PL is one of the user's
-countries and only the remote jobs otherwise.
+countries (or the core passes "*": on-site abroad counts, or --any-location) and only the remote
+jobs otherwise.
 """
 from __future__ import annotations
 
@@ -114,8 +115,10 @@ def _unique(jobs: list[Job]) -> list[Job]:
 
 
 def _poland(jobs: list[Job], countries: list[str]) -> list[Job]:
-    """PL is one of the user's countries: keep all; otherwise only the remote jobs."""
-    return jobs if "PL" in {c.upper() for c in countries} else [j for j in jobs if j["remote"]]
+    """PL is one of the user's countries, or "*" (on-site abroad counts / --any-location): keep all;
+    otherwise only the remote jobs."""
+    have = {c.upper() for c in countries}
+    return jobs if "PL" in have or "*" in have else [j for j in jobs if j["remote"]]
 
 
 # ------------------------------------------------------------------------------ 4dayweek
@@ -510,21 +513,28 @@ def fetch_justjoin(queries: list[str], http: Any, stats: Any, *, days: int, coun
 
 # Borrowed from career-ops providers/solidjobs.mjs:4-8 (GET /public-api/offers/<division>; division it),
 # :60-80 (jobs[]: title, url, company, locations as a list; no date).
+# freehire internal/ingest/sources/solidjobs.go:17-19,34-36 (the endpoint REQUIRES a ?campaign=<lowercase-alnum-dash>
+# query param; it is echoed into every posting url), :51-61 (jobOfferKey, isRemote, validFrom, description inline).
+SOLIDJOBS_URL = "https://solid.jobs/public-api/offers/it?campaign=job360"
+
+
 def parse_solidjobs(body: Any) -> list[Job]:
     out: list[Job] = []
     for r in _list(body, "jobs"):
         places = r.get("locations")
         places = [places] if isinstance(places, str) else [x for x in places or [] if isinstance(x, str)]
+        remote = True if r.get("isRemote") is True or any(p.lower() == "remote" for p in places) else None
         out.append(_job(title=r.get("title"), company=r.get("company"), url=r.get("url"),
-                        location=_where(*places), source="feed:solidjobs", board="solidjobs",
-                        remote=True if any(p.lower() == "remote" for p in places) else None))
+                        location=_where(*places), posted=_date(r.get("validFrom")),
+                        description=r.get("description"), source="feed:solidjobs", board="solidjobs",
+                        remote=remote))
     return out
 
 
 @_feed
 def fetch_solidjobs(queries: list[str], http: Any, stats: Any, *, days: int, countries: list[str]) -> list[Job]:
     """SolidJobs (Poland, IT division): one request, keyword-matched locally; remote only unless PL is yours."""
-    jobs = parse_solidjobs(_get(http, stats, "https://solid.jobs/public-api/offers/it"))
+    jobs = parse_solidjobs(_get(http, stats, SOLIDJOBS_URL))
     return _keep(_poland(jobs, countries), queries, days)
 
 
