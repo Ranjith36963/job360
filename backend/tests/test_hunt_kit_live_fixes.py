@@ -213,3 +213,33 @@ def test_taleo_inline_jobs_get_details_when_asked() -> None:
     jobs = kit_ats.fetch_taleo(row, http, {})
     assert len(jobs) == 3
     assert [bool(j["description"]) for j in jobs] == [True, True, False]
+
+
+# ---------------------------------------------------------------- PC smoke round 3 (d834b71c)
+def test_eures_searches_each_title_and_retries_a_dropped_connection() -> None:
+    sent: list[dict[str, Any]] = []
+    answers = iter([(0, None), (200, {"jvs": [], "numberRecords": 0}), (200, {"jvs": [], "numberRecords": 0})])
+
+    def http(url: str, *, method: str = "GET", data: Any = None, headers: Any = None, as_json: bool = True):
+        sent.append(json.loads(data))
+        return next(answers)
+
+    stats: dict[str, int] = {}
+    kit_gov.fetch_eures(["Machine Learning Engineer", "AI Engineer"], http, stats, days=30, countries=["DE"])
+    assert [b["keywords"] for b in sent] == [
+        [{"keyword": "Machine Learning Engineer", "specificSearchCode": "TITLE"}],  # dropped (status 0)
+        [{"keyword": "Machine Learning Engineer", "specificSearchCode": "TITLE"}],  # the one retry
+        [{"keyword": "AI Engineer", "specificSearchCode": "TITLE"}]]
+    assert stats["tried"] == 2 and stats["ok"] == 2  # a retried request counts once
+
+
+def test_eightfold_pcsx_without_a_domain_tries_the_tenant_dot_com() -> None:
+    urls: list[str] = []
+
+    def http(url: str, **kw: Any):
+        urls.append(url)
+        return (403, None) if "/api/apply/v2/jobs" in url else (200, {"data": {"count": 0, "positions": []}})
+
+    kit_ats.fetch_eightfold({"name": "Qualcomm", "tenant": "qualcomm"}, http, {})
+    assert urls == ["https://qualcomm.eightfold.ai/api/apply/v2/jobs?start=0&num=10",
+                    "https://qualcomm.eightfold.ai/api/pcsx/search?domain=qualcomm.com&start=0"]

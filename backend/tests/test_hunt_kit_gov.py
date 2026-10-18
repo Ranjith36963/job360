@@ -175,7 +175,7 @@ def test_eures_sends_the_users_countries_and_stops_on_a_short_page():
     assert len(http.calls) == 3 and len(jobs) == 50  # same ids on every page are de-duplicated
     body = json.loads(http.calls[0]["data"])
     assert http.calls[0]["method"] == "POST" and body["locationCodes"] == ["de", "el"] and body["resultsPerPage"] == 50
-    assert body["publicationPeriod"] == "LAST_THREE_DAYS" and body["keywords"] == []
+    assert body["publicationPeriod"] == "LAST_THREE_DAYS" and body["keywords"] == [{"keyword": "python", "specificSearchCode": "TITLE"}]
     short = _http({"jv-search/search": (200, EURES)})
     out = kg.fetch_eures(["software"], short, {}, days=BIG, countries=["DE"])
     assert len(short.calls) == 1 and len(out) == 1  # short page: no second request

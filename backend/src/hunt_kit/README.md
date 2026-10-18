@@ -92,7 +92,7 @@ Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech
 Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
 (`jobbank`, title only).
 More (`kit_gov.py`; unofficial site APIs that can change, and a country is skipped if it blocks scripts):
-EU/EEA/CH EURES (`eures`, any of 31 countries, matched locally; it asks only for ads from the last three days, whatever `--days` says), Belgium VDAB (`vdab`),
+EU/EEA/CH EURES (`eures`, any of 31 countries, searched by job title (up to 5 titles); it asks only for ads from the last three days, whatever `--days` says), Belgium VDAB (`vdab`),
 Denmark Jobnet (`jobnet`), Finland Job Market Finland (`tyomarkkinatori`, title only),
 Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
 (`jobstreet`: AU NZ MY SG ID HK, short teaser).
@@ -114,7 +114,7 @@ and job-board-aggregator, all MIT, see `NOTICE.md`). Many tokens are dead; that
 is fine, they answer 404 fast. Job360 never runs, ranks or uses this list.
 The user's own `preferences.target_companies` come first: pass them with
 `--companies-extra "ashby:acme,lever:foo"` (format `ats:token`) or edit the file.
-Taleo sections that redirect to `joblist.ftl` and show no portal id are read from the first page the shell carries inline (about 10 jobs, logged as `N of M`). EURES logs the HTTP status of a refused request. Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/section/`),
+Taleo sections that redirect to `joblist.ftl` and show no portal id are read from the first page the shell carries inline (about 10 jobs, logged as `N of M`). EURES retries a dropped connection once and logs the HTTP status of a refused request. Eightfold tenants that moved to PCSX need their company domain: add `"domain"` to the row, or the kit tries `<tenant>.com`. Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/section/`),
 `oraclecloud:host/siteNumber` (from `host/hcmUI/CandidateExperience/en/sites/CX_1/`), and
 `successfactors:jobs.example.com` (the career-site host). iCIMS is `icims:careers-acme`
 (from `careers-acme.icims.com`), Jobvite `jobvite:slug`, Eightfold `eightfold:tenant`.
