@@ -197,6 +197,22 @@ def _import_kit(name: str) -> Any:
         return None
 
 
+# Sibling modules that provide fetchers, merged in this order (a later module never
+# replaces a name an earlier one already provides).
+ATS_MODULES = ("kit_ats",)
+FEED_MODULES = ("kit_feeds",)
+
+
+def _merged(attr: str, modules: tuple[str, ...]) -> dict[str, Any]:
+    """The `attr` dict (ATS_FETCHERS or FEEDS) of every module that imports; a missing one is skipped."""
+    out: dict[str, Any] = {}
+    for name in modules:
+        mod = _import_kit(name)
+        for key, fn in (getattr(mod, attr, {}) if mod else {}).items():
+            out.setdefault(key, fn)
+    return out
+
+
 def get_places() -> Any:
     """Load the Places object once (reads places.json lazily, never at import time)."""
     global _PLACES
@@ -1766,8 +1782,7 @@ def run(args: argparse.Namespace) -> Collector:
                 counts[b["ats"]] += 1
                 picked.append(b)
         boards = picked
-    kit_ats = _import_kit("kit_ats") if any(b["ats"] not in _BOARD_FN for b in boards) else None
-    ats_fetchers = getattr(kit_ats, "ATS_FETCHERS", {}) if kit_ats else {}
+    ats_fetchers = _merged("ATS_FETCHERS", ATS_MODULES) if any(b["ats"] not in _BOARD_FN for b in boards) else {}
     for b in boards:
         bkey = "%s:%s" % (b["ats"], b["token"].lower())
         if b["ats"] in _BOARD_FN:
@@ -1781,16 +1796,15 @@ def run(args: argparse.Namespace) -> Collector:
         tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
     if wanted_feeds:
-        kit_feeds = _import_kit("kit_feeds")
-        feeds = getattr(kit_feeds, "FEEDS", {}) if kit_feeds else {}
+        feeds = _merged("FEEDS", FEED_MODULES)
         for name in wanted_feeds:
             if name in feeds:
                 tasks.append((name, "feed:" + name, functools.partial(
                     _module_task, col, name,
                     functools.partial(_feed_call, feeds[name], queries, args.days, countries), "feed:" + name,
                 )))
-            elif kit_feeds is not None:
-                print("note: feed %s not provided by kit_feeds; skipped" % name, file=sys.stderr)
+            else:
+                print("note: feed %s not provided by %s; skipped" % (name, ", ".join(FEED_MODULES)), file=sys.stderr)
 
     if sink is not None and sink.done:
         before = len(tasks)
