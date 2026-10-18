@@ -76,6 +76,18 @@ BOARD_SOURCES = (
     "taleo",
     "jobvite",
     "eightfold",
+    "rippling",
+    "breezy",
+    "pinpoint",
+    "phenom",
+    "ultipro",
+    "adp",
+    "cornerstone",
+    "gem",
+    "jazzhr",
+    "softgarden",
+    "join",
+    "jibe",
 )
 FEED_SOURCES = (
     "freehire",
@@ -227,7 +239,7 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats",)
+ATS_MODULES = ("kit_ats", "kit_ats_more")
 FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche")
 
 
@@ -1586,6 +1598,7 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
+_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0}  # ats -> token part used as the name
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:
@@ -1602,8 +1615,10 @@ def parse_extra(value: str | None) -> list[dict[str, str]]:
             first, second = tok.split("/")  # taleo tenant/section, oraclecloud host/siteNumber
             out.append({"name": first, "ats": ats, "token": tok, _TWO_PART[ats][0]: first,
                         _TWO_PART[ats][1]: second, "source": "user"})
-        elif ats == "successfactors" and re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", tok):
-            out.append({"name": tok.split("/")[0], "ats": ats, "token": tok, "source": "user"})  # site host[/brand]
+        elif ats in _PATH_TOKEN and re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", tok):
+            parts = tok.split("/")  # successfactors host[/brand], ultipro host/tenant/id, adp cid/ccId
+            name = parts[min(_PATH_TOKEN[ats], len(parts) - 1)]
+            out.append({"name": name, "ats": ats, "token": tok, "source": "user"})
         elif ats in BOARD_SOURCES and ats not in _TWO_PART and ats != "workday" \
                 and re.fullmatch(r"[A-Za-z0-9_.-]+", tok):
             out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
@@ -2264,6 +2279,17 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("successfactors", re.compile(r"^(career[a-z0-9-]*\.successfactors\.(?:eu|com))$")),
     ("jobvite", re.compile(r"^jobs\.jobvite\.com$")),
     ("eightfold", re.compile(r"^([a-z0-9-]+)\.eightfold\.ai$")),
+    ("rippling", re.compile(r"^ats\.rippling\.com$")),
+    ("breezy", re.compile(r"^([a-z0-9-]+)\.breezy\.hr$")),
+    ("pinpoint", re.compile(r"^([a-z0-9-]+)\.pinpointhq\.com$")),
+    ("ultipro", re.compile(r"^(recruiting[0-9]*\.ultipro\.(?:com|ca))$")),
+    ("adp", re.compile(r"^workforcenow\.adp\.com$")),
+    ("cornerstone", re.compile(r"^([a-z0-9-]+)\.csod\.com$")),
+    ("gem", re.compile(r"^jobs\.gem\.com$")),
+    ("jazzhr", re.compile(r"^([a-z0-9-]+)\.applytojob\.com$")),
+    ("softgarden", re.compile(r"^([a-z0-9-]+)\.softgarden\.io$")),
+    ("join", re.compile(r"^join\.com$")),
+    ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
@@ -2295,7 +2321,7 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         if not m:
             continue
         tok = ""
-        if ats in ("greenhouse", "lever", "ashby", "smartrecruiters", "workable", "jobvite"):
+        if ats in ("greenhouse", "lever", "ashby", "smartrecruiters", "workable", "jobvite", "rippling", "gem"):
             first = seg[0] if seg else ""
             if first in ("v0", "v1") and len(seg) > 2:
                 first = seg[2]  # api.lever.co/v0/postings/{t}, boards-api.greenhouse.io/v1/boards/{t}
@@ -2315,9 +2341,22 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         elif ats == "oraclecloud":
             site = seg[seg.index("sites") + 1] if "sites" in seg[:-1] else ""
             tok = "%s/%s" % (m.group(1), site) if site else ""
+        elif ats == "ultipro":  # https://recruiting.ultipro.ca/<tenant>/JobBoard/<boardId>/...
+            at = seg.index("JobBoard") if "JobBoard" in seg[1:-1] else 0
+            tok = "%s/%s/%s" % (m.group(1), seg[at - 1], seg[at + 1]) if at else ""
+        elif ats == "adp":  # ...recruitment.html?cid=<cid>&ccId=<ccId>
+            cid, cc = (q.get("cid") or [""])[0], (q.get("ccId") or [""])[0]
+            tok = "%s/%s" % (cid, cc) if cid and cc else ""
+        elif ats == "cornerstone":  # https://<tenant>.csod.com/ux/ats/careersite/<siteId>/home
+            site = seg[seg.index("careersite") + 1] if "careersite" in seg[:-1] else ""
+            tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
+        elif ats == "join":  # https://join.com/companies/<slug>/...
+            tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
         else:
             tok = m.group(1)
-        return {"kind": "ats", "ats": ats, "token": tok.lower(), "host": host}
+        # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.
+        keep = ats in ("ultipro", "adp", "cornerstone")
+        return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
     return {"kind": "unsupported" if _UNSUPPORTED_HOSTS.search(host) else "other", "ats": "", "token": "", "host": host}

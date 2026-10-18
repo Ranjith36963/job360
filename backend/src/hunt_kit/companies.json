@@ -5211,5 +5211,15 @@
 {"name":"Xcel Energy","ats":"workday","board":"xcelenergy|wd1|External","source":"harvest","tenant":"xcelenergy","wd":"wd1","site":"External"},
 {"name":"Zekelman Industries","ats":"workday","board":"zekelman|wd12|Careers","source":"harvest","tenant":"zekelman","wd":"wd12","site":"Careers"},
 {"name":"Zoetis Services","ats":"workday","board":"zoetis|wd5|zoetis","source":"harvest","tenant":"zoetis","wd":"wd5","site":"zoetis"},
-{"name":"ZRS Management","ats":"workday","board":"zrsmanagement|wd5|zrs_careers","source":"harvest","tenant":"zrsmanagement","wd":"wd5","site":"zrs_careers"}
+{"name":"ZRS Management","ats":"workday","board":"zrsmanagement|wd5|zrs_careers","source":"harvest","tenant":"zrsmanagement","wd":"wd5","site":"zrs_careers"},
+{"name":"YMCA of Greater Toronto","ats":"ultipro","board":"recruiting.ultipro.ca/YMC5001YMGT/7fde8f3e-7920-4d9d-8394-87bd44cc2330","source":"career-ops"},
+{"name":"Ivey Business School","ats":"adp","board":"ffe28c5e-dcff-41b8-b801-1ae1a70edb00/19000101_000001","source":"career-ops"},
+{"name":"Allianz","ats":"phenom","board":"careers.allianz.com","source":"career-ops"},
+{"name":"Retool","ats":"gem","board":"retool","source":"career-ops"},
+{"name":"OHB","ats":"cornerstone","board":"career-ohb/4","source":"career-ops"},
+{"name":"RENK","ats":"softgarden","board":"renk-group","source":"career-ops"},
+{"name":"Ratehub","ats":"jazzhr","board":"ratehubinc","source":"career-ops"},
+{"name":"Booking.com","ats":"jibe","board":"booking","source":"career-ops","host":"jobs.booking.com"},
+{"name":"New Incentives","ats":"breezy","board":"new-incentives","source":"career-ops"},
+{"name":"Pinpoint","ats":"pinpoint","board":"workwithus","source":"career-ops"}
 ]

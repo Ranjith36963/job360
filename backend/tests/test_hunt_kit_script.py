@@ -369,7 +369,7 @@ def test_companies_json_valid() -> None:
         "taleo",
         "jobvite",
         "eightfold",
-    }
+    } | set(hk.BOARD_SOURCES[16:])  # the kit_ats_more types
     seen = set()
     for r in rows:
         assert r["ats"] in ok and r["token"].strip()

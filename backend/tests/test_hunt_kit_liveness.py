@@ -292,7 +292,7 @@ def test_why_missed_other_verdicts(why_setup, tmp_path: Path) -> None:
     ask = why_setup
     assert ask("https://www.linkedin.com/jobs/view/123456")["verdict"] == "not_a_board_url"
     assert ask("https://uk.indeed.com/viewjob?jk=abc")["verdict"] == "not_a_board_url"
-    assert ask("https://acme.breezy.hr/p/abc")["verdict"] == "ats_not_supported"
+    assert ask("https://acme.comeet.com/jobs/abc")["verdict"] == "ats_not_supported"  # breezy is read since kit_ats_more
     assert ask("https://careers.example.com/jobs/1")["verdict"] == "ats_not_supported"
     r = ask("https://careers.example.com/jobs/1?gh_jid=555")  # Greenhouse embedded on a company domain
     assert r["verdict"] == "ats_not_supported" and "greenhouse" in r["change"]

@@ -71,6 +71,9 @@ Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, Personio,
 Teamtailor, BambooHR, Workday, iCIMS, Oracle Recruiting Cloud (`oraclecloud`),
 SuccessFactors, Taleo, Jobvite, Eightfold. iCIMS reads the date and description
 from the first 20 ads of each board only; the rest come back undated.
+`kit_ats_more.py` adds Rippling, Breezy, Pinpoint, Phenom (branded career host), UKG
+UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN and
+Jibe. Phenom, UltiPro, ADP and Cornerstone list ads only (no description).
 
 Open feeds (no key): freehire.me, Himalayas, Remotive, Arbeitnow (uses its
 remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
@@ -115,6 +118,12 @@ Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/se
 `oraclecloud:host/siteNumber` (from `host/hcmUI/CandidateExperience/en/sites/CX_1/`), and
 `successfactors:jobs.example.com` (the career-site host). iCIMS is `icims:careers-acme`
 (from `careers-acme.icims.com`), Jobvite `jobvite:slug`, Eightfold `eightfold:tenant`.
+Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT/JobBoard/BOARDID/`),
+`adp:cid/ccId` (from `workforcenow.adp.com/...recruitment.html?cid=..&ccId=..`),
+`cornerstone:tenant/siteId` (from `tenant.csod.com/ux/ats/careersite/4/home`), `phenom:careers.example.com`
+(the branded career host). One slug each: `rippling:slug` (`ats.rippling.com/slug/jobs`), `breezy:tenant`,
+`pinpoint:tenant`, `jazzhr:tenant` (`tenant.applytojob.com`), `softgarden:tenant`, `jibe:slug`, `gem:id`
+(`jobs.gem.com/id`), `join:slug` (`join.com/companies/slug`). Cornerstone sites that need a session cookie return no ads.
 Maintainers grow the list with `python scripts/harvest_hunt_boards.py` (from `backend/`;
 see its docstring). Its Workday rows share the daily `--workday-max` slice.
 The assistant may copy good entries into the user's target_companies with
@@ -184,7 +193,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` the other company-board types, `kit_feeds.py` open and keyed feeds, `kit_gov.py` more national job services
+- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`)
 - `NOTICE.md` where the data came from, with licences

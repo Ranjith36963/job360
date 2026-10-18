@@ -34,6 +34,7 @@ KIT_FILES: dict[str, str] = {
     "README.md": "text/markdown; charset=utf-8",
     "hunt_kit.py": "text/plain; charset=utf-8",
     "kit_ats.py": "text/plain; charset=utf-8",
+    "kit_ats_more.py": "text/plain; charset=utf-8",
     "kit_feeds.py": "text/plain; charset=utf-8",
     "kit_gov.py": "text/plain; charset=utf-8",
     "kit_keyed.py": "text/plain; charset=utf-8",
