@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getMorningCheck } from "@/lib/api";
+import { toast } from "sonner";
+import { getMorningCheck, updateProfileFields } from "@/lib/api";
 import type { MorningCheck as MorningCheckData } from "@/lib/api";
+import { LINE_SWITCHES, P_ABOVE, P_BELOW, P_SCORE, P_SUBMIT, SUBMIT_MODES } from "@/lib/assistant-tab";
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { formatFeedTime, hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
 import {
@@ -19,7 +21,7 @@ import {
   sinceText,
 } from "@/lib/morning-check";
 import { asLineSwitch } from "@/lib/morning-check";
-import type { Bucket } from "@/lib/morning-check";
+import type { Bucket, LineSwitch } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 
 // Company, title and every label here are written by the user's assistants -
@@ -27,6 +29,66 @@ import { cn } from "@/lib/utils";
 
 const sectionLabel = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 const linkBtn = "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
+const numBox = "min-h-11 w-24 rounded-lg border border-border bg-card px-3 py-1.5 text-center font-mono text-sm md:min-h-9";
+
+/** What the inline editor holds before Save. `score` is the raw text box. */
+type Draft = { score: string; above: LineSwitch; below: LineSwitch; submit: string };
+
+/** The PATCH edits for the fields that differ from what the server holds. */
+export function diffEdits(
+  state: { apply_min_score?: number | null; above_line?: string | null; below_line?: string | null; submit_mode?: string },
+  d: { scoreValue: number | null; above: LineSwitch; below: LineSwitch; submit: string },
+): { path: string; value: unknown }[] {
+  const out: { path: string; value: unknown }[] = [];
+  if (d.scoreValue !== (state.apply_min_score ?? null)) out.push({ path: P_SCORE, value: d.scoreValue });
+  if (d.above !== asLineSwitch(state.above_line)) out.push({ path: P_ABOVE, value: d.above });
+  if (d.below !== asLineSwitch(state.below_line)) out.push({ path: P_BELOW, value: d.below });
+  if (d.submit !== (state.submit_mode ?? "confirm")) out.push({ path: P_SUBMIT, value: d.submit });
+  return out;
+}
+
+/** One row of the editor: a title and a two-way radio. */
+function Switch({
+  title,
+  testPrefix,
+  options,
+  current,
+  disabled,
+  onPick,
+}: {
+  title: string;
+  testPrefix: string;
+  options: { value: string; label: string }[];
+  current: string;
+  disabled: boolean;
+  onPick: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-sm">
+      <span className="min-w-[9rem] font-medium">{title}</span>
+      <div role="radiogroup" aria-label={title} className="inline-flex overflow-hidden rounded-lg border border-border">
+        {options.map((o, i) => (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={current === o.value}
+            data-testid={`${testPrefix}-${o.value}`}
+            disabled={disabled}
+            onClick={() => onPick(o.value)}
+            className={cn(
+              "min-h-11 px-3.5 text-sm font-medium md:min-h-9",
+              i > 0 && "border-l border-border",
+              current === o.value ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * The top of "Needs you" (owner decision 2026-10-09): are the assistants
@@ -37,6 +99,15 @@ export function MorningCheck() {
   const [data, setData] = useState<MorningCheckData | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<Bucket | null>(null);
+  // The inline editor (owner ask 2026-10-18): change the line, both switches and
+  // the submit mode right here, then Save. Nothing is written until Save.
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<Draft>({ score: "", above: "ask", below: "ask", submit: "confirm" });
+  // What the editor opened on. Save diffs against THIS, not the live strip: a
+  // re-read mid-edit (pause, a Send below) must not turn an assistant's newer
+  // change into an edit the user never made.
+  const [base, setBase] = useState<MorningCheckData["state"] | null>(null);
   // One window per page view: a retry or a pause toggle keeps it. `last` is null on a first visit.
   // The words show the server's `since`: it clamps a stale (>30 days) or future stamp.
   const [win] = useState(() => {
@@ -105,6 +176,43 @@ export function MorningCheck() {
   const { state, tally } = data;
   const lineSet = state.apply_min_score != null;
   const sep = <span aria-hidden="true" className="text-faint">·</span>;
+
+  const startEdit = () => {
+    setDraft({
+      score: state.apply_min_score == null ? "" : String(state.apply_min_score),
+      above: asLineSwitch(state.above_line),
+      below: asLineSwitch(state.below_line),
+      submit: state.submit_mode === "auto_when_sure" ? "auto_when_sure" : "confirm",
+    });
+    setBase(state);
+    setEditing(true);
+  };
+
+  /** Only the fields that differ from the server go out, each as the web user. */
+  async function saveEdit() {
+    const t = draft.score.trim();
+    const score: number | null = t === "" ? null : Number(t);
+    if (score !== null && (!Number.isInteger(score) || score < 0 || score > 100)) {
+      toast.error("Score line must be a whole number from 0 to 100. Not saved.");
+      return;
+    }
+    const edits = diffEdits(base ?? state, { ...draft, scoreValue: score });
+    if (edits.length === 0) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateProfileFields(edits);
+      toast.success("Saved.");
+      setEditing(false);
+      load();
+    } catch {
+      toast.error("Could not save. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <section aria-labelledby="morning-check" data-testid="morning-check" className="flex flex-col gap-2.5">
       {heading}
@@ -137,8 +245,86 @@ export function MorningCheck() {
         )}
         {sep}
         <span className="text-[13.5px] text-muted-foreground">{SUBMIT_MODE_LABEL[state.submit_mode] ?? state.submit_mode}</span>
-        <span className="ml-auto font-mono text-[12.5px] font-medium">{quotaText(state.applied_today, state.daily_cap)}</span>
+        <span className="ml-auto inline-flex items-center gap-3">
+          <span data-testid="mc-quota" className="font-mono text-[12.5px] font-medium">{quotaText(state.applied_today, state.daily_cap)}</span>
+          {!editing && (
+            <button type="button" data-testid="mc-edit" onClick={startEdit} className={linkBtn}>
+              Change
+            </button>
+          )}
+        </span>
       </div>
+      {editing && (
+        <form
+          data-testid="mc-editor"
+          aria-label="Change assistant settings"
+          // Our own check and words (same as Profile -> Assistant), not the browser's bubble.
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void saveEdit();
+          }}
+          className="flex flex-col gap-4 rounded-xl border border-border bg-card px-4 py-4 shadow-card"
+        >
+          <label className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="min-w-[9rem] font-medium">Score line</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={100}
+              aria-label="Score line"
+              data-testid="mc-score-input"
+              placeholder="Not set"
+              value={draft.score}
+              disabled={saving}
+              onChange={(e) => setDraft({ ...draft, score: e.target.value })}
+              className={numBox}
+            />
+            <span className="text-[12.5px] text-muted-foreground">0 to 100. Blank = not set; your assistant asks you.</span>
+          </label>
+          <Switch
+            title="Jobs at or above your line"
+            testPrefix="mc-above"
+            options={LINE_SWITCHES}
+            current={draft.above}
+            disabled={saving}
+            onPick={(v) => setDraft({ ...draft, above: v as LineSwitch })}
+          />
+          <Switch
+            title="Jobs below your line"
+            testPrefix="mc-below"
+            options={LINE_SWITCHES}
+            current={draft.below}
+            disabled={saving}
+            onPick={(v) => setDraft({ ...draft, below: v as LineSwitch })}
+          />
+          <Switch
+            title="Submit mode"
+            testPrefix="mc-submit"
+            options={SUBMIT_MODES.map((m) => ({ value: m.value, label: SUBMIT_MODE_LABEL[m.value] ?? m.value }))}
+            current={draft.submit}
+            disabled={saving}
+            onPick={(v) => setDraft({ ...draft, submit: v })}
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              data-testid="mc-save"
+              disabled={saving}
+              className="min-h-11 rounded-lg bg-foreground px-4 text-sm font-medium text-background disabled:opacity-60 md:min-h-9"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button type="button" data-testid="mc-cancel" disabled={saving} onClick={() => setEditing(false)} className={linkBtn}>
+              Cancel
+            </button>
+            <Link href="/profile?tab=assistant" className={cn(linkBtn, "ml-auto")}>
+              More in Profile → Assistant
+            </Link>
+          </div>
+        </form>
+      )}
       {state.paused && state.paused_by && state.paused_at && (
         <p data-testid="mc-paused-by" className="px-1 font-mono text-xs text-faint">
           {pausedByText(state.paused_by, state.paused_at)}
