@@ -292,8 +292,24 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # `harness_owner` names the caged workflows individually (auto-merge.yml,
     # verify-live.yml, revert-main.yml, ...), and deleting the three blanket
     # lines in merge-policy.yml hands the rest back to this fast lane.
-    check("harness: a workflow edit is the OWNER's (blanket .github/**)",
-          classify([".github/workflows/uptime.yml"], policy)["lane"], "harness_owner")
+    #
+    # TAKEN 2026-10-18, owner: "let PRs touching .claude/**, .github/** or
+    # scripts/** auto-merge". An ordinary workflow, script or `.claude/` note is
+    # now fast-lane; the NAMED cage and the six check factories stay the owner's.
+    for fast in (".github/workflows/uptime.yml", "scripts/stale_path_check.py",
+                 ".claude/rules/mistakes.md"):
+        v_fast = classify([fast], policy)
+        check(f"harness: an ordinary harness file auto-merges: {fast}",
+              (v_fast["lane"], v_fast["auto_merge"]), ("harness", True))
+    for factory in (".github/workflows/ci.yml", ".github/workflows/ci-offline.yml",
+                    ".github/workflows/security.yml", ".github/workflows/codeql.yml",
+                    ".github/workflows/review-bugs.yml", ".github/workflows/review-security.yml"):
+        v_fac = classify([factory], policy)
+        check(f"a workflow that PRODUCES a required check is still the owner's: {factory}",
+              (v_fac["lane"], v_fac["auto_merge"]), ("harness_owner", False))
+    check("an ordinary workflow beside a check factory is still harness_owner",
+          classify([".github/workflows/uptime.yml", ".github/workflows/review-bugs.yml"],
+                   policy)["lane"], "harness_owner")
     check("harness: a doc edit", classify(["docs/README.md"], policy)["lane"], "harness")
 
     # 2. Product code takes the watched lane.
