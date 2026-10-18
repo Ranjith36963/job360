@@ -171,7 +171,7 @@ CASES = [
     ("speedrun", "speedrun-talent-network.com", SPEEDRUN, dict(title="Founding Engineer", company="Light",
      remote=None, url="https://speedrun-talent-network.com/jobs/founding-engineer-light-abc123",
      location="New York, NY", posted="2026-07-01")),
-    ("jobspresso", "jobspresso.co", JOBSPRESSO, dict(title="Senior Backend Engineer", company="Acme", remote=None,
+    ("jobspresso", "jobspresso.co", JOBSPRESSO, dict(title="Senior Backend Engineer", company="Acme", remote=True,
      url="https://jobspresso.co/job/acme/backend", location="Remote", posted="2025-06-02")),
     ("nodesk", "nodesk.co", NODESK, dict(title="Senior Backend Engineer", company="Acme", remote=True,
      url="https://nodesk.co/remote-jobs/acme-senior-backend-engineer/", location="Remote", posted="2025-06-02")),

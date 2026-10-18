@@ -33,6 +33,7 @@ import hashlib
 import html
 import importlib
 import ipaddress
+import itertools
 import json
 import os
 import re
@@ -550,6 +551,18 @@ def classify_location(
     visa_onsite (on-site elsewhere and the ad says it sponsors), maybe_relocation, any.
     """
     p = prefs or Prefs()
+    row = _classify_place(loc, desc, p, visa_flag)
+    if row is None and p.any_row:
+        # --any-location keeps every title match: the "remote but not open to you" and "locked to
+        # another country" dead ends must not drop an ad. Only the user's own --only/--exclude
+        # countries still can.
+        c = parse_loc(loc or "").countries
+        if not (c and p.exclude and c <= p.exclude) and not (p.only and not (c & p.only)):
+            return "any"
+    return row
+
+
+def _classify_place(loc: str, desc: str, p: Prefs, visa_flag: bool) -> str | None:
     loc = loc or ""
     desc = desc or ""
     info = parse_loc(loc)
@@ -1388,7 +1401,8 @@ class Collector:
             lines = ["Feed field says visa sponsorship is offered."]
         rec = {
             "title": title,
-            "company": raw.get("company") or raw.get("board") or "",
+            # a company board's token names the company; a feed's board is the feed itself ("eures"), never one
+            "company": raw.get("company") or (raw.get("board") if raw.get("board") != source else "") or "",
             "url": url,
             "location": re.sub(r"\s*\|\s*", " | ", (raw.get("loc") or "").strip(" |")),
             "posted": raw.get("posted", ""),
@@ -1633,6 +1647,8 @@ def load_companies(path: Path) -> list[dict[str, str]]:
     key. Rows keep a ``token`` key in memory, which every fetcher reads; an older
     file that still says ``token`` loads too.
     """
+    if str(path).strip().lower() == "none":  # --companies none: no company list, like --history none
+        return []
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     for r in data:
@@ -1647,8 +1663,16 @@ UNIVERSE_MAX_AGE_DAYS = 7
 BIG_BOARD_NAME = re.compile(r"linkedin|indeed|glassdoor", re.I)
 
 
-def universe_rows(ats: str, data: Any) -> list[dict[str, str]]:
-    """Turn one downloaded universe list (list of tokens; workday 'tenant|wd|site') into board rows."""
+WD_HOST_TENANT = re.compile(r"wd\d+")  # a Workday host label ("wd5"), never a tenant name
+
+
+def universe_rows(ats: str, data: Any, dropped: list[int] | None = None) -> list[dict[str, str]]:
+    """Turn one downloaded universe list (list of tokens; workday 'tenant|wd|site') into board rows.
+
+    Workday rows whose tenant is itself a host label ("wd5|wd1|rydercareers") are junk in the open list:
+    the kit would build https://wd5.wd1.myworkdayjobs.com/... and get 422. They are dropped, and counted
+    into ``dropped[0]`` when a list is given.
+    """
     out: list[dict[str, str]] = []
     for t in data if isinstance(data, list) else []:
         if not isinstance(t, str) or BIG_BOARD_NAME.search(t):
@@ -1656,6 +1680,10 @@ def universe_rows(ats: str, data: Any) -> list[dict[str, str]]:
         if ats == "workday":
             parts = t.split("|")
             if len(parts) != 3 or not all(re.fullmatch(r"[A-Za-z0-9_.-]+", x) for x in parts):
+                continue
+            if WD_HOST_TENANT.fullmatch(parts[0]):
+                if dropped:
+                    dropped[0] += 1
                 continue
             out.append(
                 {
@@ -1686,6 +1714,7 @@ def load_universe(
     cache = cache_dir or (HERE / "universe_cache")
     t_now = time.time() if now is None else now
     rows: list[dict[str, str]] = []
+    dropped = [0]
     for ats in ats_list:
         if ats not in UNIVERSE_ATS:
             continue
@@ -1718,7 +1747,10 @@ def load_universe(
                     data = json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
                 except (OSError, ValueError):
                     data = None
-        rows += universe_rows(ats, data)
+        rows += universe_rows(ats, data, dropped)
+    if dropped[0]:
+        print("note: dropped %d junk Workday rows from the open list (tenant looks like wdN)" % dropped[0],
+              file=sys.stderr)
     return rows
 
 
@@ -1784,6 +1816,24 @@ def _feed_call(fetch: Callable[..., list[dict[str, Any]]], queries: list[str], d
     return fetch(queries, http, st, days=days, countries=countries)
 
 
+def order_tasks(
+    own: list[tuple[str, str, Callable[[], None], bool]],
+    feeds: list[tuple[str, str, Callable[[], None]]],
+    sweep: list[tuple[str, str, Callable[[], None], bool]],
+) -> list[tuple[str, str, Callable[[], None]]]:
+    """Run order, so a time budget never starves the cheap sources.
+
+    The user's own boards first, then freehire and every feed (a few requests each), then the board
+    sweep round-robin across ATS types (one greenhouse, one ashby, one lever, ... rather than all of
+    greenhouse's 4,000 boards first). Task ids are untouched, so --resume still matches.
+    """
+    by_ats: dict[str, list[tuple[str, str, Callable[[], None]]]] = {}
+    for ats, tid, work, _ in sweep:
+        by_ats.setdefault(ats, []).append((ats, tid, work))
+    mixed = [t for row in itertools.zip_longest(*by_ats.values()) for t in row if t is not None]
+    return [(a, t, w) for a, t, w, _ in own] + list(feeds) + mixed
+
+
 def run(args: argparse.Namespace) -> Collector:
     """Fetch every selected source and return the Collector with results and stats."""
     col = Collector(args)
@@ -1793,10 +1843,12 @@ def run(args: argparse.Namespace) -> Collector:
     sources = select_sources(args.sources)
     queries = split_csv(args.titles or DEFAULT_TITLES)[:12]
     countries = sorted(col.prefs.only or col.prefs.work)
+    # "*" lets the country-gated national services run everywhere when on-site jobs abroad count
+    # (--visa-onsite, the default): their ads are then kept only when they say they sponsor a visa.
+    feed_countries = countries + (["*"] if (col.prefs.visa_onsite or col.prefs.any_row) and not col.prefs.only else [])
     sink = col.sink
     if sink is not None:
         sink.seed(col)
-    tasks: list[tuple[str, str, Callable[[], None]]] = []  # (source label, task id, work)
 
     base = load_companies(Path(args.companies))
     extra_universe = load_universe([a for a in UNIVERSE_ATS if a in sources]) if args.universe else []
@@ -1826,28 +1878,33 @@ def run(args: argparse.Namespace) -> Collector:
                 picked.append(b)
         boards = picked
     ats_fetchers = _merged("ATS_FETCHERS", ATS_MODULES) if any(b["ats"] not in _BOARD_FN for b in boards) else {}
+    board_tasks: list[tuple[str, str, Callable[[], None], bool]] = []  # (ats, task id, work, is the user's own)
     for b in boards:
         bkey = "%s:%s" % (b["ats"], b["token"].lower())
         if b["ats"] in _BOARD_FN:
-            tasks.append((b["ats"], bkey, functools.partial(
-                _track_board, col, bkey, functools.partial(_BOARD_FN[b["ats"]], col, b))))
+            board_tasks.append((b["ats"], bkey, functools.partial(
+                _track_board, col, bkey, functools.partial(_BOARD_FN[b["ats"]], col, b)), b.get("source") == "user"))
         elif b["ats"] in ats_fetchers:
             call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
-            tasks.append((b["ats"], bkey, functools.partial(
-                _track_board, col, bkey, functools.partial(_module_task, col, b["ats"], call, bkey))))
+            board_tasks.append((b["ats"], bkey, functools.partial(
+                _track_board, col, bkey, functools.partial(_module_task, col, b["ats"], call, bkey)),
+                b.get("source") == "user"))
+    feed_tasks: list[tuple[str, str, Callable[[], None]]] = []
     if "freehire" in sources:
-        tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
+        feed_tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
     if wanted_feeds:
         feeds = _merged("FEEDS", FEED_MODULES)
         for name in wanted_feeds:
             if name in feeds:
-                tasks.append((name, "feed:" + name, functools.partial(
+                feed_tasks.append((name, "feed:" + name, functools.partial(
                     _module_task, col, name,
-                    functools.partial(_feed_call, feeds[name], queries, args.days, countries), "feed:" + name,
+                    functools.partial(_feed_call, feeds[name], queries, args.days, feed_countries), "feed:" + name,
                 )))
             else:
                 print("note: feed %s not provided by %s; skipped" % (name, ", ".join(FEED_MODULES)), file=sys.stderr)
+
+    tasks = order_tasks([t for t in board_tasks if t[3]], feed_tasks, [t for t in board_tasks if not t[3]])
 
     if sink is not None and sink.done:
         before = len(tasks)

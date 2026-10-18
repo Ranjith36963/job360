@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote, urlencode
@@ -41,13 +42,16 @@ _join_place: Callable[[str, str], str] = _kf._join_place
 strip_html: Callable[[Any], str] = _kf.strip_html
 NATIONAL_PAGES: int = _kf.NATIONAL_PAGES
 # NATIONAL_PAGES (from kit_feeds) caps pages per query for services that search server-side.
+EURES_RETRY_WAIT_S = 2  # pause before retrying a dropped EURES connection
 LOCAL_PAGES = 5  # pages for the two services that cannot search (EURES, Trudvsem): matched locally
 _JSON = {"Content-Type": "application/json"}
 
 
 def _wanted(countries: list[str], *codes: str) -> list[str]:
-    """The given ISO codes that appear in the user's countries (in the order given)."""
+    """The given ISO codes that appear in the user's countries (in the order given), or all of them for "*"."""
     have = {c.upper() for c in countries}
+    if "*" in have:  # --visa-onsite: run everywhere; the core keeps only ads that sponsor a visa
+        return list(codes)
     return [c for c in codes if c in have]
 
 
@@ -124,23 +128,51 @@ def fetch_eures(queries: list[str], http: HttpFn, stats: Stats, *, days: int, co
     iso = _wanted(countries, *EURES_COUNTRIES)
     if not iso:
         return []
-    fallback = ", ".join(EURES_COUNTRIES[c] for c in iso)
+    # an ad with no locationMap is placed by the request's countries, but never when "*" spread the request
+    # over every EURES country: that would make an unplaced ad look like it sits in the user's country
+    fallback = "" if "*" in countries else ", ".join(EURES_COUNTRIES[c] for c in iso)
+    jobs: list[Job] = []
+    for q in _queries(queries) or [""]:
+        jobs += _eures_series(q, iso, fallback, http, stats)
+    return _keep(_unique(jobs), queries, days)
+
+
+def _eures_series(q: str, iso: list[str], fallback: str, http: HttpFn, stats: Stats) -> list[Job]:
+    """One EURES request series (up to LOCAL_PAGES pages) for one title, or the newest ads when q is empty."""
+    # NOT IN REFERENCE (freehire sends keywords: []): with no keyword EURES serves the newest of ~343K ads, so
+    # the ~250 read hold almost no title match. A TITLE keyword object narrows DE/FR/NL "machine learning
+    # engineer" to 16,467 (tested live from the owner's PC, 2026-10-18); a plain string answers 400.
+    keywords = [{"keyword": q, "specificSearchCode": "TITLE"}] if q else []
     jobs: list[Job] = []
     for page in range(1, LOCAL_PAGES + 1):
-        body = {"resultsPerPage": 50, "page": page, "sortSearch": "MOST_RECENT", "keywords": [],
+        body = {"resultsPerPage": 50, "page": page, "sortSearch": "MOST_RECENT", "keywords": keywords,
                 "publicationPeriod": "LAST_THREE_DAYS", "occupationUris": [], "skillUris": [],
                 "requiredExperienceCodes": [], "positionScheduleCodes": [], "sectorCodes": [],
                 "educationAndQualificationLevelCodes": [], "positionOfferingCodes": [],
                 "locationCodes": [_eures_code(c) for c in iso], "euresFlagCodes": [],
                 "otherBenefitsCodes": [], "requiredLanguages": [], "sessionId": "hunt-kit",
                 "requestLanguage": "en"}
-        resp = _get(http, stats, EURES_SEARCH, method="POST", data=json.dumps(body).encode(), headers=_JSON)
+        # freehire eures.go:208 posts exactly this JSON (Content-Type + Accept only, no other header,
+        # sources/http.go:733-744). The status is logged, so a refusal never reads as "answered nothing".
+        stats["tried"] = stats.get("tried", 0) + 1
+        for attempt in range(2):  # the connection drops now and then (status 0, live 2026-10-18): one retry
+            if attempt:
+                time.sleep(EURES_RETRY_WAIT_S)
+            status, resp = http(EURES_SEARCH, method="POST", data=json.dumps(body).encode(),
+                                headers={**_JSON, "Accept": "application/json"})
+            if status != 0:
+                break
+        if status == 200 and resp is not None:
+            stats["ok"] = stats.get("ok", 0) + 1
+        else:
+            resp = None
+            print(f"warning: eures answered HTTP {status} on page {page} (nothing read)", file=sys.stderr)
         got = parse_eures(resp, fallback)
         jobs += got
         total = int((resp or {}).get("numberRecords") or 0) if isinstance(resp, dict) else 0
         if len(got) < 50 or len(jobs) >= total:
             break
-    return _keep(_unique(jobs), queries, days)
+    return jobs
 
 
 # -------------------------------------------------------------------------------------- VDAB

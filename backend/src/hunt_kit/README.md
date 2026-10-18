@@ -37,9 +37,9 @@ What the options mean:
 - `--only-countries`, `--exclude-countries` optional ISO2 filters. `--any-location` keeps every title match.
 - `--titles`, `--exclude-title-words`, `--max-years 5` (drop jobs asking 5+ years), `--days 30`.
 - `--sources` default skips only the giant BambooHR list. `all` runs everything. Or give a list: `greenhouse,lever,ashby,hn,jobicy`.
-- `--workday-max 300` Workday sites from the open list per run (default 300; 0 = all ~13k). The slice moves every day, so daily runs cover the whole list over time. Each Workday site is searched by your titles (up to 6), so only matching jobs are fetched.
+- `--workday-max 300` Workday sites from the open list per run (default 300; 0 = all ~13k). The slice moves every day, so daily runs cover the whole list over time. Each Workday site is searched by your titles (up to 6), so only matching jobs are fetched. Junk rows in the open list whose tenant is a host label (`wd5|wd1|site`, about 6,000 of 12,884) are dropped and counted on stderr.
 - `--freehire-pages 10` freehire pages of 100 per title and place (default 10, at most 100).
-- `--limit-boards 40` quick test run. `--companies PATH` your own list. `--companies-extra "ashby:acme,lever:foo"` your own boards, run first.
+- Run order: your `--companies-extra` boards, then freehire and every feed (a few requests each), then the board sweep round-robin across ATS types, so a time budget never starves the feeds. `--limit-boards 40` quick test run. `--companies PATH` your own list (`--companies none` = no company list; add `--no-universe` too to drop the open company lists, leaving only `--companies-extra` and the open feeds). `--companies-extra "ashby:acme,lever:foo"` your own boards, run first.
 - `--history seen_jobs.json` (default) remembers what was output. The next run shows only NEW jobs and tells you how many were skipped as seen. `--all` ignores history, `--history none` turns it off.
 - `--check-live` re-fetches each kept job once and drops it only when the page shows it is closed: HTTP 404 or 410, an error redirect, a closed notice (English, German, Dutch, Spanish, French or Russian), or a page with almost no text. A blocked or failed fetch, a bot wall, or a page that only loads with JavaScript counts as "unknown" and the job is kept. `--stats` shows `live_dead` and `live_unknown`.
 - `--retry-dead` also fetches boards that answered a real HTTP 404 on 3 runs in a row. By default the kit skips them (and rechecks after 30 days) and says how many it skipped. The counters sit in the `--history` file, under `boards`. A throttle, a block or a network error never counts as a miss, and any good answer clears the counter.
@@ -87,12 +87,12 @@ PowerToFly, JobStash (Web3) and HigherEdJobs (US universities). The Polish board
 `justjoin` and `solidjobs` keep every job when PL is one of your countries and only the remote jobs
 otherwise. Each board is one request, or a few pages, and your words are matched locally.
 
-National job services (no key; each runs only when its country is one of yours):
+National job services (no key; each runs when its country is one of yours, and also everywhere when `--visa-onsite` (the default) or `--any-location` is on and `--only-countries` is not set. With `--visa-onsite`, ads outside your countries are kept only when they say they sponsor a visa; `--any-location` keeps them without that):
 Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech /
 Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
 (`jobbank`, title only).
 More (`kit_gov.py`; unofficial site APIs that can change, and a country is skipped if it blocks scripts):
-EU/EEA/CH EURES (`eures`, any of 31 countries, matched locally; it asks only for ads from the last three days, whatever `--days` says), Belgium VDAB (`vdab`),
+EU/EEA/CH EURES (`eures`, any of 31 countries, searched by job title (up to 5 titles); it asks only for ads from the last three days, whatever `--days` says), Belgium VDAB (`vdab`),
 Denmark Jobnet (`jobnet`), Finland Job Market Finland (`tyomarkkinatori`, title only),
 Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
 (`jobstreet`: AU NZ MY SG ID HK, short teaser).
@@ -114,7 +114,7 @@ and job-board-aggregator, all MIT, see `NOTICE.md`). Many tokens are dead; that
 is fine, they answer 404 fast. Job360 never runs, ranks or uses this list.
 The user's own `preferences.target_companies` come first: pass them with
 `--companies-extra "ashby:acme,lever:foo"` (format `ats:token`) or edit the file.
-Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/section/`),
+Taleo sections that redirect to `joblist.ftl` and show no portal id are read from the first page the shell carries inline (about 10 jobs, logged as `N of M`). EURES retries a dropped connection once and logs the HTTP status of a refused request. Eightfold tenants that moved to PCSX need their company domain: add `"domain"` to the row, or the kit tries `<tenant>.com`. Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/section/`),
 `oraclecloud:host/siteNumber` (from `host/hcmUI/CandidateExperience/en/sites/CX_1/`), and
 `successfactors:jobs.example.com` (the career-site host). iCIMS is `icims:careers-acme`
 (from `careers-acme.icims.com`), Jobvite `jobvite:slug`, Eightfold `eightfold:tenant`.

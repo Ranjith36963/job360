@@ -428,3 +428,21 @@ def test_national_services_keep_local_language_titles_and_no_age_limit():
     http2 = _rec_http({"rest.arbeitsagentur.de": (200, body)})
     kf.fetch_arbeitsagentur(["software engineer"], http2, {}, days=7, countries=["DE"])
     assert "veroeffentlichtseit=7" in http2.calls[0][0]
+
+
+def test_himalayas_uses_its_search_api_per_query():
+    page = _j("himalayas.json")
+    http = FakeHttp({"himalayas.app": page})
+    kf.fetch_himalayas(["AI Engineer"], http, _stats(), days=BIG_DAYS, countries=[])
+    assert http.calls and all("/jobs/api/search?" in c["url"] and "q=AI+Engineer" in c["url"] for c in http.calls)
+    assert "offset=" not in http.calls[0]["url"]  # offset paging is deprecated by Himalayas (2026-08-21)
+
+
+def test_national_services_run_everywhere_for_visa_onsite():
+    # the core adds "*" when on-site jobs abroad count; each service then runs, and the core
+    # keeps only the ads that say they sponsor a visa
+    http = FakeHttp({"": {}})
+    kf.fetch_jobtech(["engineer"], http, _stats(), days=30, countries=["IN"])
+    assert http.calls == []
+    kf.fetch_jobtech(["engineer"], http, _stats(), days=30, countries=["IN", "*"])
+    assert http.calls and "jobtechdev.se" in http.calls[0]["url"]

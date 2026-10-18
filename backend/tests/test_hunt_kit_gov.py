@@ -175,7 +175,10 @@ def test_eures_sends_the_users_countries_and_stops_on_a_short_page():
     assert len(http.calls) == 3 and len(jobs) == 50  # same ids on every page are de-duplicated
     body = json.loads(http.calls[0]["data"])
     assert http.calls[0]["method"] == "POST" and body["locationCodes"] == ["de", "el"] and body["resultsPerPage"] == 50
-    assert body["publicationPeriod"] == "LAST_THREE_DAYS" and body["keywords"] == []
+    assert body["publicationPeriod"] == "LAST_THREE_DAYS" and body["keywords"] == [{"keyword": "python", "specificSearchCode": "TITLE"}]
+    browse = _http({"jv-search/search": (200, EURES)})
+    kg.fetch_eures([], browse, {}, days=BIG, countries=["DE"])  # no titles: the newest ads, unfiltered
+    assert json.loads(browse.calls[0]["data"])["keywords"] == []
     short = _http({"jv-search/search": (200, EURES)})
     out = kg.fetch_eures(["software"], short, {}, days=BIG, countries=["DE"])
     assert len(short.calls) == 1 and len(out) == 1  # short page: no second request
@@ -262,3 +265,11 @@ def test_a_failing_service_never_raises():
         stats: dict = {}
         assert kg.FEEDS[name](["x"], boom, stats, days=30, countries=countries) == []
         assert stats["jobs"] == 0
+
+
+def test_star_runs_every_market_for_visa_onsite():
+    http = _http({"": (200, {"data": []})})
+    kg.fetch_jobstreet(["dev"], http, {}, days=30, countries=["IN", "*"])
+    hosts = {c["url"].split("/api/")[0] for c in http.calls}
+    assert hosts == {"https://www.seek.com.au", "https://www.seek.co.nz", "https://my.jobstreet.com",
+                     "https://sg.jobstreet.com", "https://id.jobstreet.com", "https://hk.jobsdb.com"}
