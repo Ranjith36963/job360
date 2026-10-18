@@ -46,8 +46,10 @@ _JSON = {"Content-Type": "application/json"}
 
 
 def _wanted(countries: list[str], *codes: str) -> list[str]:
-    """The given ISO codes that appear in the user's countries (in the order given)."""
+    """The given ISO codes that appear in the user's countries (in the order given), or all of them for "*"."""
     have = {c.upper() for c in countries}
+    if "*" in have:  # --visa-onsite: run everywhere; the core keeps only ads that sponsor a visa
+        return list(codes)
     return [c for c in codes if c in have]
 
 

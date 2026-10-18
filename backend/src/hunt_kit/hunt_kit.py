@@ -1793,6 +1793,9 @@ def run(args: argparse.Namespace) -> Collector:
     sources = select_sources(args.sources)
     queries = split_csv(args.titles or DEFAULT_TITLES)[:12]
     countries = sorted(col.prefs.only or col.prefs.work)
+    # "*" lets the country-gated national services run everywhere when on-site jobs abroad count
+    # (--visa-onsite, the default): their ads are then kept only when they say they sponsor a visa.
+    feed_countries = countries + (["*"] if col.prefs.visa_onsite and not col.prefs.only else [])
     sink = col.sink
     if sink is not None:
         sink.seed(col)
@@ -1844,7 +1847,7 @@ def run(args: argparse.Namespace) -> Collector:
             if name in feeds:
                 tasks.append((name, "feed:" + name, functools.partial(
                     _module_task, col, name,
-                    functools.partial(_feed_call, feeds[name], queries, args.days, countries), "feed:" + name,
+                    functools.partial(_feed_call, feeds[name], queries, args.days, feed_countries), "feed:" + name,
                 )))
             else:
                 print("note: feed %s not provided by %s; skipped" % (name, ", ".join(FEED_MODULES)), file=sys.stderr)

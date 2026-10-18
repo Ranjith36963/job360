@@ -168,6 +168,12 @@ def _queries(queries: list[str]) -> list[str]:
     return seen[:MAX_QUERIES]
 
 
+def _gated(countries: list[str], code: str) -> bool:
+    """A national service runs for its country, or everywhere when the core passes "*" (--visa-onsite)."""
+    have = {c.upper() for c in countries}
+    return code in have or "*" in have
+
+
 def _feed(fn: Callable[..., list[Job]]) -> Callable[..., list[Job]]:
     """Wrap a fetcher: never raise, always count ``stats['jobs']``."""
     @functools.wraps(fn)
@@ -454,18 +460,35 @@ def parse_himalayas(payload: dict[str, Any]) -> list[Job]:
     return out
 
 
+HIMALAYAS_PAGE = 20  # the size the API serves, whatever limit is asked
+
+
 @_feed
 def fetch_himalayas(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
-    """Himalayas remote jobs: up to MAX_PAGES pages of 100, keyword-matched locally."""
+    """Himalayas remote jobs: its search API per query (pages of 20), then keyword-matched locally.
+
+    The list feed (/jobs/api) caps a page at 20 whatever limit is asked and has deprecated offset
+    paging (its own notice, 2026-08-21), so a fixed 100-row stride read only 1 row in 5 of the newest
+    jobs. /jobs/api/search?q= answers each query server-side with the same job fields (checked live
+    2026-10-18).
+    """
     jobs: list[Job] = []
-    for page in range(MAX_PAGES):
-        body = _get(http, stats, f"https://himalayas.app/jobs/api?limit=100&offset={page * 100}")
-        page_jobs = parse_himalayas(body if isinstance(body, dict) else {})
-        if not page_jobs:
-            break
-        jobs += page_jobs
-        if (page + 1) * 100 >= int((body or {}).get("totalCount") or 0):
-            break
+    seen: set[str] = set()
+    for q in _queries(queries) or [""]:
+        cursor = ""
+        for page in range(1, MAX_PAGES + 1):
+            if q:
+                url = f"https://himalayas.app/jobs/api/search?{urlencode({'q': q, 'page': page})}"
+            else:  # no words given: the newest jobs, paged by the cursor the feed hands back
+                url = "https://himalayas.app/jobs/api" + (f"?{urlencode({'cursor': cursor})}" if cursor else "")
+            body = _get(http, stats, url)
+            got = [j for j in parse_himalayas(body if isinstance(body, dict) else {}) if j["url"] not in seen]
+            seen.update(j["url"] for j in got)
+            jobs += got
+            served = len(body.get("jobs") or []) if isinstance(body, dict) else 0
+            cursor = str(body.get("nextCursor") or "") if isinstance(body, dict) else ""
+            if served < HIMALAYAS_PAGE or not (q or cursor):  # a short or failed page is the last one
+                break
     return _keep(jobs, queries, days)
 
 
@@ -581,7 +604,7 @@ def fetch_jooble(queries: list[str], http: HttpFn, stats: Stats, *, days: int, c
     key = os.environ.get("JOOBLE_KEY", "")
     if not key:
         return []
-    locs = [_COUNTRY_NAMES.get(c.upper(), c) for c in dict.fromkeys(countries or []) if c] or [""]
+    locs = [_COUNTRY_NAMES.get(c.upper(), c) for c in dict.fromkeys(countries or []) if c and c != "*"] or [""]
     jobs: list[Job] = []
     for loc in locs:
         for q in (_queries(queries) or [""]):
@@ -733,7 +756,7 @@ def fetch_arbeitsagentur(
     queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]
 ) -> list[Job]:
     """Germany's Bundesagentur fuer Arbeit job search, only when DE is one of the user's countries."""
-    if "DE" not in {c.upper() for c in countries}:
+    if not _gated(countries, "DE"):
         return []
     jobs: list[Job] = []
     for q in _queries(queries):
@@ -753,7 +776,7 @@ def fetch_arbeitsagentur(
 @_feed
 def fetch_jobtech(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Sweden's JobTech (Platsbanken) search, only when SE is one of the user's countries."""
-    if "SE" not in {c.upper() for c in countries}:
+    if not _gated(countries, "SE"):
         return []
     jobs: list[Job] = []
     for q in _queries(queries):
@@ -771,7 +794,7 @@ def fetch_mycareersfuture(
     queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]
 ) -> list[Job]:
     """Singapore's MyCareersFuture search (POST; the query string's page pages), only for SG users."""
-    if "SG" not in {c.upper() for c in countries}:
+    if not _gated(countries, "SG"):
         return []
     jobs: list[Job] = []
     for q in _queries(queries):
@@ -788,7 +811,7 @@ def fetch_mycareersfuture(
 @_feed
 def fetch_jobbank(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Canada's Job Bank search feed, only when CA is one of the user's countries."""
-    if "CA" not in {c.upper() for c in countries}:
+    if not _gated(countries, "CA"):
         return []
     jobs: list[Job] = []
     for q in _queries(queries):

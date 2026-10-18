@@ -262,3 +262,10 @@ def test_a_failing_service_never_raises():
         stats: dict = {}
         assert kg.FEEDS[name](["x"], boom, stats, days=30, countries=countries) == []
         assert stats["jobs"] == 0
+
+
+def test_star_runs_every_market_for_visa_onsite():
+    http = _http({"": (200, {"data": []})})
+    kg.fetch_jobstreet(["dev"], http, {}, days=30, countries=["IN", "*"])
+    hosts = {c["url"].split("/api/")[0] for c in http.calls}
+    assert hosts == {o for o, _, _ in kg.JOBSTREET_MARKETS.values()}

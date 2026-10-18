@@ -87,7 +87,7 @@ PowerToFly, JobStash (Web3) and HigherEdJobs (US universities). The Polish board
 `justjoin` and `solidjobs` keep every job when PL is one of your countries and only the remote jobs
 otherwise. Each board is one request, or a few pages, and your words are matched locally.
 
-National job services (no key; each runs only when its country is one of yours):
+National job services (no key; each runs when its country is one of yours, and also everywhere when `--visa-onsite` is on, the default: then only ads that say they sponsor a visa are kept, unless the country is one of yours):
 Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech /
 Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
 (`jobbank`, title only).
