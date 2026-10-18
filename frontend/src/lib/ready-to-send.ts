@@ -49,6 +49,11 @@ export function sourceChip(a: ReadyAnswer, filledBy: string): { text: string; to
   }
 }
 
+/** Verify / Edit sit on the answers the user should vouch for: memory and guesses. */
+export function canCheck(a: ReadyAnswer): boolean {
+  return a.source === "memory" || a.source === "guessed";
+}
+
 /** "APP-064 · brought by Claude · 08 Oct" - stored facts only. */
 export function readyEyebrow(c: ReadyCardData): string {
   const id = `APP-${String(c.application_id).padStart(3, "0")}`;

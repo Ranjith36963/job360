@@ -33,6 +33,7 @@ import hashlib
 import html
 import importlib
 import ipaddress
+import itertools
 import json
 import os
 import re
@@ -76,6 +77,18 @@ BOARD_SOURCES = (
     "taleo",
     "jobvite",
     "eightfold",
+    "rippling",
+    "breezy",
+    "pinpoint",
+    "phenom",
+    "ultipro",
+    "adp",
+    "cornerstone",
+    "gem",
+    "jazzhr",
+    "softgarden",
+    "join",
+    "jibe",
 )
 FEED_SOURCES = (
     "freehire",
@@ -95,6 +108,34 @@ FEED_SOURCES = (
     "jobtech",
     "mycareersfuture",
     "jobbank",
+    "eures",
+    "vdab",
+    "jobnet",
+    "tyomarkkinatori",
+    "trudvsem",
+    "jobstreet",
+    "reed",
+    "usajobs",
+    "whatjobs",
+    "4dayweek",
+    "landingjobs",
+    "getonbrd",
+    "manfred",
+    "thehub",
+    "remotli",
+    "speedrun",
+    "jobspresso",
+    "nodesk",
+    "cryptojobs",
+    "pythonjobs",
+    "larajobs",
+    "startupjobs",
+    "nofluffjobs",
+    "justjoin",
+    "solidjobs",
+    "powertofly",
+    "jobstash",
+    "higheredjobs",
 )
 SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn", "simplify": "githublists"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
@@ -195,6 +236,22 @@ def _import_kit(name: str) -> Any:
     except ImportError as e:
         print("note: %s unavailable (%s); its sources are skipped" % (name, e), file=sys.stderr)
         return None
+
+
+# Sibling modules that provide fetchers, merged in this order (a later module never
+# replaces a name an earlier one already provides).
+ATS_MODULES = ("kit_ats", "kit_ats_more")
+FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche")
+
+
+def _merged(attr: str, modules: tuple[str, ...]) -> dict[str, Any]:
+    """The `attr` dict (ATS_FETCHERS or FEEDS) of every module that imports; a missing one is skipped."""
+    out: dict[str, Any] = {}
+    for name in modules:
+        mod = _import_kit(name)
+        for key, fn in (getattr(mod, attr, {}) if mod else {}).items():
+            out.setdefault(key, fn)
+    return out
 
 
 def get_places() -> Any:
@@ -494,6 +551,18 @@ def classify_location(
     visa_onsite (on-site elsewhere and the ad says it sponsors), maybe_relocation, any.
     """
     p = prefs or Prefs()
+    row = _classify_place(loc, desc, p, visa_flag)
+    if row is None and p.any_row:
+        # --any-location keeps every title match: the "remote but not open to you" and "locked to
+        # another country" dead ends must not drop an ad. Only the user's own --only/--exclude
+        # countries still can.
+        c = parse_loc(loc or "").countries
+        if not (c and p.exclude and c <= p.exclude) and not (p.only and not (c & p.only)):
+            return "any"
+    return row
+
+
+def _classify_place(loc: str, desc: str, p: Prefs, visa_flag: bool) -> str | None:
     loc = loc or ""
     desc = desc or ""
     info = parse_loc(loc)
@@ -618,7 +687,7 @@ def _http_request(
 
     429 backs off, retries twice; 502/503/504 on a GET retry once; other 4xx never retry.
     Status 0 = network error or refused URL. Max 3 in flight per host.
-    Only public http(s) hosts are contacted. The User-Agent is always ours. Never raises.
+    Only public http(s) hosts are contacted. The User-Agent is ours unless the caller sets one. Never raises.
     """
     try:
         if params:
@@ -630,7 +699,7 @@ def _http_request(
         return 0, str(url), b""
     hdrs = {"Accept": "application/json, text/xml, text/html;q=0.8, */*;q=0.5"}
     hdrs.update(headers or {})
-    hdrs["User-Agent"] = USER_AGENT
+    hdrs.setdefault("User-Agent", USER_AGENT)  # a feed may set its own (USAJOBS wants the account email)
     wait = 0
     retried_5xx = False
     attempt = 0  # counts 429 retries only; the one 5xx retry never eats one
@@ -1332,7 +1401,8 @@ class Collector:
             lines = ["Feed field says visa sponsorship is offered."]
         rec = {
             "title": title,
-            "company": raw.get("company") or raw.get("board") or "",
+            # a company board's token names the company; a feed's board is the feed itself ("eures"), never one
+            "company": raw.get("company") or (raw.get("board") if raw.get("board") != source else "") or "",
             "url": url,
             "location": re.sub(r"\s*\|\s*", " | ", (raw.get("loc") or "").strip(" |")),
             "posted": raw.get("posted", ""),
@@ -1542,6 +1612,7 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
+_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0}  # ats -> token part used as the name
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:
@@ -1558,8 +1629,10 @@ def parse_extra(value: str | None) -> list[dict[str, str]]:
             first, second = tok.split("/")  # taleo tenant/section, oraclecloud host/siteNumber
             out.append({"name": first, "ats": ats, "token": tok, _TWO_PART[ats][0]: first,
                         _TWO_PART[ats][1]: second, "source": "user"})
-        elif ats == "successfactors" and re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", tok):
-            out.append({"name": tok.split("/")[0], "ats": ats, "token": tok, "source": "user"})  # site host[/brand]
+        elif ats in _PATH_TOKEN and re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", tok):
+            parts = tok.split("/")  # successfactors host[/brand], ultipro host/tenant/id, adp cid/ccId
+            name = parts[min(_PATH_TOKEN[ats], len(parts) - 1)]
+            out.append({"name": name, "ats": ats, "token": tok, "source": "user"})
         elif ats in BOARD_SOURCES and ats not in _TWO_PART and ats != "workday" \
                 and re.fullmatch(r"[A-Za-z0-9_.-]+", tok):
             out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
@@ -1574,6 +1647,8 @@ def load_companies(path: Path) -> list[dict[str, str]]:
     key. Rows keep a ``token`` key in memory, which every fetcher reads; an older
     file that still says ``token`` loads too.
     """
+    if str(path).strip().lower() == "none":  # --companies none: no company list, like --history none
+        return []
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     for r in data:
@@ -1588,8 +1663,16 @@ UNIVERSE_MAX_AGE_DAYS = 7
 BIG_BOARD_NAME = re.compile(r"linkedin|indeed|glassdoor", re.I)
 
 
-def universe_rows(ats: str, data: Any) -> list[dict[str, str]]:
-    """Turn one downloaded universe list (list of tokens; workday 'tenant|wd|site') into board rows."""
+WD_HOST_TENANT = re.compile(r"wd\d+")  # a Workday host label ("wd5"), never a tenant name
+
+
+def universe_rows(ats: str, data: Any, dropped: list[int] | None = None) -> list[dict[str, str]]:
+    """Turn one downloaded universe list (list of tokens; workday 'tenant|wd|site') into board rows.
+
+    Workday rows whose tenant is itself a host label ("wd5|wd1|rydercareers") are junk in the open list:
+    the kit would build https://wd5.wd1.myworkdayjobs.com/... and get 422. They are dropped, and counted
+    into ``dropped[0]`` when a list is given.
+    """
     out: list[dict[str, str]] = []
     for t in data if isinstance(data, list) else []:
         if not isinstance(t, str) or BIG_BOARD_NAME.search(t):
@@ -1597,6 +1680,10 @@ def universe_rows(ats: str, data: Any) -> list[dict[str, str]]:
         if ats == "workday":
             parts = t.split("|")
             if len(parts) != 3 or not all(re.fullmatch(r"[A-Za-z0-9_.-]+", x) for x in parts):
+                continue
+            if WD_HOST_TENANT.fullmatch(parts[0]):
+                if dropped:
+                    dropped[0] += 1
                 continue
             out.append(
                 {
@@ -1627,6 +1714,7 @@ def load_universe(
     cache = cache_dir or (HERE / "universe_cache")
     t_now = time.time() if now is None else now
     rows: list[dict[str, str]] = []
+    dropped = [0]
     for ats in ats_list:
         if ats not in UNIVERSE_ATS:
             continue
@@ -1659,7 +1747,10 @@ def load_universe(
                     data = json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
                 except (OSError, ValueError):
                     data = None
-        rows += universe_rows(ats, data)
+        rows += universe_rows(ats, data, dropped)
+    if dropped[0]:
+        print("note: dropped %d junk Workday rows from the open list (tenant looks like wdN)" % dropped[0],
+              file=sys.stderr)
     return rows
 
 
@@ -1725,6 +1816,24 @@ def _feed_call(fetch: Callable[..., list[dict[str, Any]]], queries: list[str], d
     return fetch(queries, http, st, days=days, countries=countries)
 
 
+def order_tasks(
+    own: list[tuple[str, str, Callable[[], None], bool]],
+    feeds: list[tuple[str, str, Callable[[], None]]],
+    sweep: list[tuple[str, str, Callable[[], None], bool]],
+) -> list[tuple[str, str, Callable[[], None]]]:
+    """Run order, so a time budget never starves the cheap sources.
+
+    The user's own boards first, then freehire and every feed (a few requests each), then the board
+    sweep round-robin across ATS types (one greenhouse, one ashby, one lever, ... rather than all of
+    greenhouse's 4,000 boards first). Task ids are untouched, so --resume still matches.
+    """
+    by_ats: dict[str, list[tuple[str, str, Callable[[], None]]]] = {}
+    for ats, tid, work, _ in sweep:
+        by_ats.setdefault(ats, []).append((ats, tid, work))
+    mixed = [t for row in itertools.zip_longest(*by_ats.values()) for t in row if t is not None]
+    return [(a, t, w) for a, t, w, _ in own] + list(feeds) + mixed
+
+
 def run(args: argparse.Namespace) -> Collector:
     """Fetch every selected source and return the Collector with results and stats."""
     col = Collector(args)
@@ -1734,10 +1843,12 @@ def run(args: argparse.Namespace) -> Collector:
     sources = select_sources(args.sources)
     queries = split_csv(args.titles or DEFAULT_TITLES)[:12]
     countries = sorted(col.prefs.only or col.prefs.work)
+    # "*" lets the country-gated national services run everywhere when on-site jobs abroad count
+    # (--visa-onsite, the default): their ads are then kept only when they say they sponsor a visa.
+    feed_countries = countries + (["*"] if (col.prefs.visa_onsite or col.prefs.any_row) and not col.prefs.only else [])
     sink = col.sink
     if sink is not None:
         sink.seed(col)
-    tasks: list[tuple[str, str, Callable[[], None]]] = []  # (source label, task id, work)
 
     base = load_companies(Path(args.companies))
     extra_universe = load_universe([a for a in UNIVERSE_ATS if a in sources]) if args.universe else []
@@ -1766,31 +1877,34 @@ def run(args: argparse.Namespace) -> Collector:
                 counts[b["ats"]] += 1
                 picked.append(b)
         boards = picked
-    kit_ats = _import_kit("kit_ats") if any(b["ats"] not in _BOARD_FN for b in boards) else None
-    ats_fetchers = getattr(kit_ats, "ATS_FETCHERS", {}) if kit_ats else {}
+    ats_fetchers = _merged("ATS_FETCHERS", ATS_MODULES) if any(b["ats"] not in _BOARD_FN for b in boards) else {}
+    board_tasks: list[tuple[str, str, Callable[[], None], bool]] = []  # (ats, task id, work, is the user's own)
     for b in boards:
         bkey = "%s:%s" % (b["ats"], b["token"].lower())
         if b["ats"] in _BOARD_FN:
-            tasks.append((b["ats"], bkey, functools.partial(
-                _track_board, col, bkey, functools.partial(_BOARD_FN[b["ats"]], col, b))))
+            board_tasks.append((b["ats"], bkey, functools.partial(
+                _track_board, col, bkey, functools.partial(_BOARD_FN[b["ats"]], col, b)), b.get("source") == "user"))
         elif b["ats"] in ats_fetchers:
             call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
-            tasks.append((b["ats"], bkey, functools.partial(
-                _track_board, col, bkey, functools.partial(_module_task, col, b["ats"], call, bkey))))
+            board_tasks.append((b["ats"], bkey, functools.partial(
+                _track_board, col, bkey, functools.partial(_module_task, col, b["ats"], call, bkey)),
+                b.get("source") == "user"))
+    feed_tasks: list[tuple[str, str, Callable[[], None]]] = []
     if "freehire" in sources:
-        tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
+        feed_tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
     if wanted_feeds:
-        kit_feeds = _import_kit("kit_feeds")
-        feeds = getattr(kit_feeds, "FEEDS", {}) if kit_feeds else {}
+        feeds = _merged("FEEDS", FEED_MODULES)
         for name in wanted_feeds:
             if name in feeds:
-                tasks.append((name, "feed:" + name, functools.partial(
+                feed_tasks.append((name, "feed:" + name, functools.partial(
                     _module_task, col, name,
-                    functools.partial(_feed_call, feeds[name], queries, args.days, countries), "feed:" + name,
+                    functools.partial(_feed_call, feeds[name], queries, args.days, feed_countries), "feed:" + name,
                 )))
-            elif kit_feeds is not None:
-                print("note: feed %s not provided by kit_feeds; skipped" % name, file=sys.stderr)
+            else:
+                print("note: feed %s not provided by %s; skipped" % (name, ", ".join(FEED_MODULES)), file=sys.stderr)
+
+    tasks = order_tasks([t for t in board_tasks if t[3]], feed_tasks, [t for t in board_tasks if not t[3]])
 
     if sink is not None and sink.done:
         before = len(tasks)
@@ -2195,7 +2309,16 @@ WHY_VERDICTS = {
     "board_not_in_list": "the kit does not know this board",
     "universe_not_cached": "not in your list, and the open company list is not cached, so it cannot be checked offline",
     "board_covered": "the kit reads this board; the job was filtered out, closed, or posted after the last run",
+    "feed_covered": "the kit reads this site as a feed; the job was filtered out, outside your countries, "
+                    "or the feed needs a key you have not set",
 }
+# Job sites the kit reads as a feed (host -> feed name). Checked before the aggregator list.
+_FEED_HOSTS = (
+    ("reed", re.compile(r"(?:^|\.)reed\.co\.uk$", re.I)),
+    ("jobstreet", re.compile(r"(?:^|\.)(?:seek\.com\.au|seek\.co\.nz|jobstreet\.com|jobsdb\.com)$", re.I)),
+    ("adzuna", re.compile(r"(?:^|\.)adzuna\.[a-z.]+$", re.I)),
+    ("jooble", re.compile(r"(?:^|\.)jooble\.org$", re.I)),
+)
 _AGGREGATOR_HOSTS = re.compile(
     r"(?:^|\.)(?:linkedin\.com|lnkd\.in|indeed\.[a-z.]+|glassdoor\.[a-z.]+|ziprecruiter\.[a-z.]+|monster\.[a-z.]+|"
     r"reed\.co\.uk|totaljobs\.com|cv-library\.co\.uk|jooble\.org|adzuna\.[a-z.]+|jobrapido\.com|simplyhired\.com|"
@@ -2222,6 +2345,17 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("successfactors", re.compile(r"^(career[a-z0-9-]*\.successfactors\.(?:eu|com))$")),
     ("jobvite", re.compile(r"^jobs\.jobvite\.com$")),
     ("eightfold", re.compile(r"^([a-z0-9-]+)\.eightfold\.ai$")),
+    ("rippling", re.compile(r"^ats\.rippling\.com$")),
+    ("breezy", re.compile(r"^([a-z0-9-]+)\.breezy\.hr$")),
+    ("pinpoint", re.compile(r"^([a-z0-9-]+)\.pinpointhq\.com$")),
+    ("ultipro", re.compile(r"^(recruiting[0-9]*\.ultipro\.(?:com|ca))$")),
+    ("adp", re.compile(r"^workforcenow\.adp\.com$")),
+    ("cornerstone", re.compile(r"^([a-z0-9-]+)\.csod\.com$")),
+    ("gem", re.compile(r"^jobs\.gem\.com$")),
+    ("jazzhr", re.compile(r"^([a-z0-9-]+)\.applytojob\.com$")),
+    ("softgarden", re.compile(r"^([a-z0-9-]+)\.softgarden\.io$")),
+    ("join", re.compile(r"^join\.com$")),
+    ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
@@ -2253,7 +2387,7 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         if not m:
             continue
         tok = ""
-        if ats in ("greenhouse", "lever", "ashby", "smartrecruiters", "workable", "jobvite"):
+        if ats in ("greenhouse", "lever", "ashby", "smartrecruiters", "workable", "jobvite", "rippling", "gem"):
             first = seg[0] if seg else ""
             if first in ("v0", "v1") and len(seg) > 2:
                 first = seg[2]  # api.lever.co/v0/postings/{t}, boards-api.greenhouse.io/v1/boards/{t}
@@ -2273,9 +2407,22 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         elif ats == "oraclecloud":
             site = seg[seg.index("sites") + 1] if "sites" in seg[:-1] else ""
             tok = "%s/%s" % (m.group(1), site) if site else ""
+        elif ats == "ultipro":  # https://recruiting.ultipro.ca/<tenant>/JobBoard/<boardId>/...
+            at = seg.index("JobBoard") if "JobBoard" in seg[1:-1] else 0
+            tok = "%s/%s/%s" % (m.group(1), seg[at - 1], seg[at + 1]) if at else ""
+        elif ats == "adp":  # ...recruitment.html?cid=<cid>&ccId=<ccId>
+            cid, cc = (q.get("cid") or [""])[0], (q.get("ccId") or [""])[0]
+            tok = "%s/%s" % (cid, cc) if cid and cc else ""
+        elif ats == "cornerstone":  # https://<tenant>.csod.com/ux/ats/careersite/<siteId>/home
+            site = seg[seg.index("careersite") + 1] if "careersite" in seg[:-1] else ""
+            tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
+        elif ats == "join":  # https://join.com/companies/<slug>/...
+            tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
         else:
             tok = m.group(1)
-        return {"kind": "ats", "ats": ats, "token": tok.lower(), "host": host}
+        # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.
+        keep = ats in ("ultipro", "adp", "cornerstone")
+        return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
     return {"kind": "unsupported" if _UNSUPPORTED_HOSTS.search(host) else "other", "ats": "", "token": "", "host": host}
@@ -2312,6 +2459,15 @@ def why_missed(args: argparse.Namespace, url: str, today: _dt.date | None = None
     if info["kind"] == "invalid":
         out.update(verdict="invalid_url", meaning="not an http(s) link", change="give the full job link")
         return out
+    feed = next((name for name, rx in _FEED_HOSTS if host and rx.search(host)), "")
+    if feed:
+        out["board"] = "feed:" + feed
+        if feed not in select_sources(args.sources):
+            shown = args.sources or "default"
+            return done("board_in_list_source_skipped", "--sources %s,%s" % (shown, feed),
+                        "%s is the %s feed, which is not in --sources %s" % (host, feed, shown))
+        return done("feed_covered", "check --work-countries, --titles and --days, and that the feed's key is set",
+                    "%s is read as the %s feed" % (host, feed))
     if info["kind"] == "aggregator":
         return done("not_a_board_url", "bring this link yourself (bring_job), or turn on Gmail job alerts for the site",
                     "%s is a job-search site; the kit never reads it" % host)

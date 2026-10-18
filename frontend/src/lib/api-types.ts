@@ -220,6 +220,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/answers/{index}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Answer
+         * @description Verify or Edit one answer on a ready card (owner decision 2026-10-18): it is
+         *     saved as the user's own word in memory, so the assistant uses it next time.
+         *     Session only - an assistant can never vouch for its own answer. Returns the
+         *     card again; 404 / 409 (the fill changed) / 422 write nothing. Logs paths only.
+         */
+        post: operations["confirm_answer_api_applications__application_id__answers__index__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/artifacts": {
         parameters: {
             query?: never;
@@ -3800,6 +3823,13 @@ export interface components {
             /** Url */
             url?: string | null;
         };
+        /** ConfirmAnswerRequest */
+        ConfirmAnswerRequest: {
+            /** Answer */
+            answer?: string | null;
+            /** Form Filled Event Id */
+            form_filled_event_id: number;
+        };
         /** ConsentDecisionRequest */
         ConsentDecisionRequest: {
             /** Approve */
@@ -5752,6 +5782,8 @@ export interface components {
         ReadyAnswer: {
             /** Answer */
             answer: string;
+            /** Changed To */
+            changed_to?: string | null;
             /** Key */
             key?: string | null;
             /** Question */
@@ -5762,6 +5794,11 @@ export interface components {
             saved_by?: string | null;
             /** Source */
             source: string;
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
         };
         /** ReadyCard */
         ReadyCard: {
@@ -7774,6 +7811,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AlignmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_answer_api_applications__application_id__answers__index__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                index: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmAnswerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyCard"];
                 };
             };
             /** @description Validation Error */

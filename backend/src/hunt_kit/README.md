@@ -37,13 +37,13 @@ What the options mean:
 - `--only-countries`, `--exclude-countries` optional ISO2 filters. `--any-location` keeps every title match.
 - `--titles`, `--exclude-title-words`, `--max-years 5` (drop jobs asking 5+ years), `--days 30`.
 - `--sources` default skips only the giant BambooHR list. `all` runs everything. Or give a list: `greenhouse,lever,ashby,hn,jobicy`.
-- `--workday-max 300` Workday sites from the open list per run (default 300; 0 = all ~13k). The slice moves every day, so daily runs cover the whole list over time. Each Workday site is searched by your titles (up to 6), so only matching jobs are fetched.
+- `--workday-max 300` Workday sites from the open list per run (default 300; 0 = all ~13k). The slice moves every day, so daily runs cover the whole list over time. Each Workday site is searched by your titles (up to 6), so only matching jobs are fetched. Junk rows in the open list whose tenant is a host label (`wd5|wd1|site`, about 6,000 of 12,884) are dropped and counted on stderr.
 - `--freehire-pages 10` freehire pages of 100 per title and place (default 10, at most 100).
-- `--limit-boards 40` quick test run. `--companies PATH` your own list. `--companies-extra "ashby:acme,lever:foo"` your own boards, run first.
+- Run order: your `--companies-extra` boards, then freehire and every feed (a few requests each), then the board sweep round-robin across ATS types, so a time budget never starves the feeds. `--limit-boards 40` quick test run. `--companies PATH` your own list (`--companies none` = no company list; add `--no-universe` too to drop the open company lists, leaving only `--companies-extra` and the open feeds). `--companies-extra "ashby:acme,lever:foo"` your own boards, run first.
 - `--history seen_jobs.json` (default) remembers what was output. The next run shows only NEW jobs and tells you how many were skipped as seen. `--all` ignores history, `--history none` turns it off.
 - `--check-live` re-fetches each kept job once and drops it only when the page shows it is closed: HTTP 404 or 410, an error redirect, a closed notice (English, German, Dutch, Spanish, French or Russian), or a page with almost no text. A blocked or failed fetch, a bot wall, or a page that only loads with JavaScript counts as "unknown" and the job is kept. `--stats` shows `live_dead` and `live_unknown`.
 - `--retry-dead` also fetches boards that answered a real HTTP 404 on 3 runs in a row. By default the kit skips them (and rechecks after 30 days) and says how many it skipped. The counters sit in the `--history` file, under `boards`. A throttle, a block or a network error never counts as a miss, and any good answer clears the counter.
-- `--why-missed URL` explains why a job link was not in your results and proposes one change, then exits. It makes no request and writes nothing. It uses the same `--companies`, `--companies-extra`, `--sources`, `--universe` and `--history` as a real run, and reads the open company list only if it is already cached. Answers: `board_not_in_list`, `universe_not_cached`, `board_in_list_source_skipped`, `skipped_by_option`, `board_marked_dead`, `board_covered`, `ats_not_supported`, `not_a_board_url`.
+- `--why-missed URL` explains why a job link was not in your results and proposes one change, then exits. It makes no request and writes nothing. It uses the same `--companies`, `--companies-extra`, `--sources`, `--universe` and `--history` as a real run, and reads the open company list only if it is already cached. Answers: `board_not_in_list`, `universe_not_cached`, `board_in_list_source_skipped`, `skipped_by_option`, `board_marked_dead`, `board_covered`, `feed_covered`, `ats_not_supported`, `not_a_board_url`.
 - `--discover "Company A,Company B"` probes likely board names on Greenhouse, Lever, Ashby, Workable and Recruitee and prints the ones that answer with jobs. The assistant can add good ones to the user's `target_companies`.
 
 - `--out found.jsonl` the final file, written at the end. `--stream PATH` where jobs are saved as they are found (default `found.jsonl.stream`, or `hunt_stream.jsonl` when `--out` is stdout). `--resume` continues a stopped run. `--max-minutes 15` (default; 0 = no limit) and `--max-sources N` stop the run cleanly when spent.
@@ -71,20 +71,38 @@ Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, Personio,
 Teamtailor, BambooHR, Workday, iCIMS, Oracle Recruiting Cloud (`oraclecloud`),
 SuccessFactors, Taleo, Jobvite, Eightfold. iCIMS reads the date and description
 from the first 20 ads of each board only; the rest come back undated.
+`kit_ats_more.py` adds Rippling, Breezy, Pinpoint, Phenom (branded career host), UKG
+UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN and
+Jibe. Phenom, UltiPro, ADP and Cornerstone list ads only (no description).
 
 Open feeds (no key): freehire.me, Himalayas, Remotive, Arbeitnow (uses its
 remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
 The Muse, Hacker News "Who is hiring" (latest monthly thread), and the SimplifyJobs
 new-grad and intern lists on GitHub (`githublists`: title only, open the link for the ad).
 
-National job services (no key; each runs only when its country is one of yours):
+Niche boards (no key; `kit_niche.py`): 4 Day Week (`4dayweek`), Landing.jobs, Get on Board, getManfred,
+The Hub (Nordics and EU), Remotli (Swiss remote), a16z speedrun talent network, Jobspresso, NoDesk,
+CryptocurrencyJobs, Python.org jobs (`pythonjobs`), LaraJobs, Startup Jobs (`startupjobs`, RSS only),
+PowerToFly, JobStash (Web3) and HigherEdJobs (US universities). The Polish boards `nofluffjobs`,
+`justjoin` and `solidjobs` keep every job when PL is one of your countries and only the remote jobs
+otherwise. Each board is one request, or a few pages, and your words are matched locally.
+
+National job services (no key; each runs when its country is one of yours, and also everywhere when `--visa-onsite` (the default) or `--any-location` is on and `--only-countries` is not set. With `--visa-onsite`, ads outside your countries are kept only when they say they sponsor a visa; `--any-location` keeps them without that):
 Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech /
 Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
 (`jobbank`, title only).
+More (`kit_gov.py`; unofficial site APIs that can change, and a country is skipped if it blocks scripts):
+EU/EEA/CH EURES (`eures`, any of 31 countries, searched by job title (up to 5 titles); it asks only for ads from the last three days, whatever `--days` says), Belgium VDAB (`vdab`),
+Denmark Jobnet (`jobnet`), Finland Job Market Finland (`tyomarkkinatori`, title only),
+Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
+(`jobstreet`: AU NZ MY SG ID HK, short teaser).
 
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
 - Jooble: get a free key at https://jooble.org/api/about . Set `JOOBLE_KEY`. Jooble gives short snippets.
+- Reed: get a free key from https://www.reed.co.uk . Set `REED_API_KEY`. Runs only when GB is one of your countries. Reed gives short snippets.
+- USAJOBS: get a free key from https://www.usajobs.gov . Set `USAJOBS_API_KEY` and `USAJOBS_EMAIL` (the email you registered the key with). Runs only when US is one of your countries.
+- WhatJobs: get a publisher id per country from https://www.whatjobs.com . Set `WHATJOBS_PUBLISHER_IDS` as `gb:123,us:456` (country code, then your id for that country; about 50 countries). Runs only for the countries you gave an id.
 
 For snippet sources the assistant must open the link to read the full ad.
 When you show a job to the user, link back to the original listing (several feeds require it).
@@ -96,10 +114,16 @@ and job-board-aggregator, all MIT, see `NOTICE.md`). Many tokens are dead; that
 is fine, they answer 404 fast. Job360 never runs, ranks or uses this list.
 The user's own `preferences.target_companies` come first: pass them with
 `--companies-extra "ashby:acme,lever:foo"` (format `ats:token`) or edit the file.
-Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/section/`),
+Taleo sections that redirect to `joblist.ftl` and show no portal id are read from the first page the shell carries inline (about 10 jobs, logged as `N of M`). EURES retries a dropped connection once and logs the HTTP status of a refused request. Eightfold tenants that moved to PCSX need their company domain: add `"domain"` to the row, or the kit tries `<tenant>.com`. Two-part boards: `taleo:tenant/section` (from `tenant.taleo.net/careersection/section/`),
 `oraclecloud:host/siteNumber` (from `host/hcmUI/CandidateExperience/en/sites/CX_1/`), and
 `successfactors:jobs.example.com` (the career-site host). iCIMS is `icims:careers-acme`
 (from `careers-acme.icims.com`), Jobvite `jobvite:slug`, Eightfold `eightfold:tenant`.
+Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT/JobBoard/BOARDID/`),
+`adp:cid/ccId` (from `workforcenow.adp.com/...recruitment.html?cid=..&ccId=..`),
+`cornerstone:tenant/siteId` (from `tenant.csod.com/ux/ats/careersite/4/home`), `phenom:careers.example.com`
+(the branded career host). One slug each: `rippling:slug` (`ats.rippling.com/slug/jobs`), `breezy:tenant`,
+`pinpoint:tenant`, `jazzhr:tenant` (`tenant.applytojob.com`), `softgarden:tenant`, `jibe:slug`, `gem:id`
+(`jobs.gem.com/id`), `join:slug` (`join.com/companies/slug`). Cornerstone sites that need a session cookie return no ads.
 Maintainers grow the list with `python scripts/harvest_hunt_boards.py` (from `backend/`;
 see its docstring). Its Workday rows share the daily `--workday-max` slice.
 The assistant may copy good entries into the user's target_companies with
@@ -128,11 +152,14 @@ The kit is one source. Use all of these too, for every row's place x title.
 - Himalayas `https://mcp.himalayas.app/mcp`: remote jobs (about 125K). Credit Himalayas with a link.
 - FoundRole `https://www.foundrole.com/ojcp/mcp`: `search_jobs`, `get_job_detail`. Check `datePosted` (old ads appear) and follow the link to the employer's own posting.
 - Indeed's official connector, if your assistant has it (Claude): search, then read each job.
+- ZipRecruiter's official connector, if your assistant has it (Claude): search, then read each job.
+- Dice's official connector, if your assistant has it (Claude): search, then read each job.
 
 **Web search, one query per board type.** These find employers that are on no list:
 - `site:boards.greenhouse.io OR site:job-boards.greenhouse.io "<title>" <place>`
 - `site:jobs.lever.co "<title>" <place>`, `site:jobs.ashbyhq.com "<title>" <place>`
 - `site:myworkdayjobs.com "<title>" <place>`, `site:icims.com "<title>" <place>`, `site:apply.workable.com "<title>" <place>`
+- Big national boards the kit leaves to you, like Indeed and LinkedIn: India `site:naukri.com "<title>" <place>`, the Gulf `site:bayt.com "<title>" <place>`. Open each ad logged out.
 - Social posts: `("hiring" OR "open role" OR "we're hiring" OR "join our team") "<title>"` with `site:x.com` or `site:linkedin.com/posts`, read through web search only (no login).
 A new employer board found this way can be added with `--companies-extra "ats:token"`.
 
@@ -166,7 +193,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` the other company-board types, `kit_feeds.py` open and keyed feeds
+- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`)
 - `NOTICE.md` where the data came from, with licences

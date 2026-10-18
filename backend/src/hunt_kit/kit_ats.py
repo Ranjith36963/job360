@@ -17,6 +17,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import sys
 import xml.etree.ElementTree as ET
 
 try:  # shared safe-XML helper (same folder)
@@ -885,6 +886,8 @@ _TALEO_PORTAL_RES = (
     re.compile(r"[?&]portal=([0-9]+)", re.I),
     re.compile(r"""["']portal(?:Id)?["']?\s*[:=]\s*["']?([0-9]+)""", re.I),
     re.compile(r"""name=["']portal["'][^>]*value=["']([0-9]+)""", re.I),
+    # freehire internal/ingest/sources/taleo.go:72-74: the shell's JS config block says `portalNo: '101430233'`
+    re.compile(r"""portalNo["']?\s*[:=]\s*["']?([0-9]+)""", re.I),
 )
 _TALEO_LDJSON_RE = re.compile(
     r"""<script\b[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>([\s\S]*?)</script>""", re.I)
@@ -1016,6 +1019,73 @@ def _taleo_description(page: Any) -> str:
     return ""
 
 
+# NOT IN REFERENCE: own fallback, page shape from kearney.taleo.net 2026-10-18.
+# Some sections 302 jobsearch.ftl to joblist.ftl, whose shell carries no portal id but does carry the FIRST page
+# of the list (10 rows, whatever the total) in <input id="initialHistory" value="...">, a '!|!'-delimited token
+# stream. A row starts with id,title,id,title,id x5 then schedule, location, more-locations flag; the posting date
+# ("Oct 13, 2026") is followed by the requisition number that jobdetail.ftl?job= takes.
+_TALEO_HIST_RE = re.compile(r"""id=["']initialHistory["'][^>]*value=["']([^"']*)["']""", re.I)
+_TALEO_NB_RE = re.compile(r"""id=["']listRequisition\.nbElements["'][^>]*value=["'](\d+)["']""", re.I)
+_TALEO_DATE_TOKEN = re.compile(r"[A-Z][a-z]{2} \d{1,2}, \d{4}")
+
+
+def _taleo_inline(page: Any) -> tuple[list[tuple[str, str, str, str]], int]:
+    """(title, requisition number, location, posted) of the rows inline in a joblist.ftl shell, and the
+    shell's own total ('listRequisition.nbElements'; 0 when absent)."""
+    text = str(page or "")
+    m = _TALEO_HIST_RE.search(text)
+    n = _TALEO_NB_RE.search(text)
+    total = int(n.group(1)) if n else 0
+    if not m:
+        return [], total
+    tok = [unquote(t) for t in html.unescape(m.group(1)).split("!|!")]
+    out: list[tuple[str, str, str, str]] = []
+    i = 0
+    while i + 12 < len(tok):
+        t = tok[i]
+        if not (t.isdigit() and tok[i + 3] == tok[i + 1] and all(tok[i + k] == t for k in (2, 4, 5, 6, 7, 8))):
+            i += 1
+            continue
+        title, loc, more = _text(tok[i + 1]), tok[i + 10], tok[i + 11] == "true"
+        j = i + 12
+        extra = ""
+        while j < len(tok) and j < i + 30 and not _TALEO_DATE_TOKEN.fullmatch(tok[j]):
+            if more and tok[j].startswith(", "):
+                extra = tok[j]
+            j += 1
+        if j + 1 < len(tok) and _TALEO_DATE_TOKEN.fullmatch(tok[j]) and tok[j + 1].strip():
+            where = _text(loc + extra)
+            out.append((title, tok[j + 1].strip(), where, _taleo_posted(tok[j])))
+            i = j + 2
+        else:
+            i += 1
+    return out, total
+
+
+def _taleo_enrich(row: dict[str, Any], http: Http, jobs: list[Job]) -> None:
+    """Fill descriptions from the detail pages when row['fetch_details'] is set (first N postings)."""
+    if row.get("fetch_details") is not True:
+        return
+    try:
+        limit = int(row.get("detail_limit") or TALEO_DETAIL_LIMIT)
+    except (TypeError, ValueError, OverflowError):
+        limit = TALEO_DETAIL_LIMIT
+    limit = max(1, min(limit, TALEO_DETAIL_MAX))
+    failed = 0
+    for j in jobs[:limit]:
+        try:  # best-effort enrichment: a bad detail page must never drop the listing
+            st, det = _get(http, j["url"], as_json=False, headers={"Accept": "text/html"})
+            if st == 200:
+                j["description"] = _taleo_description(det)
+            else:
+                failed += 1
+        except Exception:  # noqa: BLE001
+            failed += 1
+    if failed:
+        print(f"note: taleo {row.get('tenant') or row.get('token')}: {failed} of {min(limit, len(jobs))} detail pages "
+              "not read; those jobs keep no description", file=sys.stderr)
+
+
 def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Taleo Enterprise Edition: GET jobsearch.ftl for the portal id + column headings, then replay
     the anonymous POST /careersection/rest/jobboard/searchjobs (pageNo 1..MAX_PAGES).
@@ -1034,6 +1104,18 @@ def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[
         shell_url = f"{base}/{section}/jobsearch.ftl?lang={lang}"
         st, page = _get(http, shell_url, as_json=False, headers={"Accept": "text/html"})
         portal = _taleo_portal(page) if st == 200 else ""
+        if not portal and st == 200:
+            inline, inline_total = _taleo_inline(page)  # no portal id: keep the first page the shell carries
+            if inline:
+                if inline_total > len(inline):
+                    print(f"note: taleo {tenant}: no portal id; read {len(inline)} of {inline_total} jobs from the page",
+                          file=sys.stderr)
+                found = [_job(row, "taleo", title=t, url=f"{base}/{section}/jobdetail.ftl?job={quote(rid, safe='')}&lang={lang}",
+                             location=loc, posted=posted, remote=_remote_from(loc), extra={"req_id": rid})
+                        for t, rid, loc, posted in inline]
+                _taleo_enrich(row, http, found)
+                _count(stats, ok=True, jobs=len(found))
+                return found
         if not portal:  # private, unavailable, or no public portal id
             _count(stats, ok=False)
             return []
@@ -1089,19 +1171,8 @@ def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[
             reported += len(reqs)
             if not reqs or (total_n is not None and reported >= total_n):
                 break
-        if ok and row.get("fetch_details") is True:
-            try:
-                limit = int(row.get("detail_limit") or TALEO_DETAIL_LIMIT)
-            except (TypeError, ValueError, OverflowError):
-                limit = TALEO_DETAIL_LIMIT
-            limit = max(1, min(limit, TALEO_DETAIL_MAX))
-            for j in jobs[:limit]:
-                try:  # best-effort enrichment: a bad detail page must never drop the listing
-                    st, det = _get(http, j["url"], as_json=False, headers={"Accept": "text/html"})
-                    if st == 200:
-                        j["description"] = _taleo_description(det)
-                except Exception:  # noqa: BLE001, S112
-                    continue
+        if ok:
+            _taleo_enrich(row, http, jobs)
         _count(stats, ok=ok, jobs=len(jobs))
         return jobs
     except Exception:  # noqa: BLE001
@@ -1227,6 +1298,8 @@ def fetch_jobvite(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> lis
 # --------------------------------------------------------------------------- Eightfold
 # Port of career-ops providers/eightfold.mjs (MIT). Row: {name, ats: "eightfold", tenant, domain?}.
 _EF_TENANT_RE = re.compile(r"^[a-z0-9-]+$", re.I)
+EIGHTFOLD_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/151.0.0.0 Safari/537.36")  # career-ops user-agent.mjs:22-23
 EIGHTFOLD_PAGE = 10  # the API caps a page at 10 rows whatever `num` says
 
 
@@ -1291,7 +1364,12 @@ def fetch_eightfold(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> l
             return []
         host = f"{tenant}.eightfold.ai"
         dq = f"domain={quote(domain, safe='')}&" if domain else ""
-        hdr = {"Accept": "application/json"}
+        # NOT IN REFERENCE (live, owner's PC 2026-10-18): PCSX answers 422 "domain: Missing data for required
+        # field" without one. career-ops takes it from careers_url; a row without one tries <tenant>.com.
+        pq = f"domain={quote(domain or tenant + '.com', safe='')}&"
+        # career-ops eightfold.mjs:392 sends a browser-like User-Agent on every call; its header (:44-48) says
+        # several tenants WAF-403 anything else. Ours would be read as a bot.
+        hdr = {"Accept": "application/json", "User-Agent": EIGHTFOLD_UA}
         api = "v2"
         jobs: list[Job] = []
         seen: set[str] = set()
@@ -1299,7 +1377,7 @@ def fetch_eightfold(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> l
             start = page * EIGHTFOLD_PAGE
             urls = {
                 "v2": f"https://{host}/api/apply/v2/jobs?{dq}start={start}&num={EIGHTFOLD_PAGE}",
-                "pcsx": f"https://{host}/api/pcsx/search?{dq}start={start}",
+                "pcsx": f"https://{host}/api/pcsx/search?{pq}start={start}",
             }
             status, data = _get(http, urls[api], headers=hdr)
             if status == 403 and api == "v2" and page == 0:
