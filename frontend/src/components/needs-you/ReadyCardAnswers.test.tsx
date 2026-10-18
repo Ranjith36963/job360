@@ -62,12 +62,17 @@ describe("Verify / Edit on each answer", () => {
     expect(screen.getByTestId("ready-answer-edit-64-0")).toBeInTheDocument();
   });
 
-  it("an edited answer shows the user's word and holds Send until the form is filled again", () => {
-    const c = card(64, { answers: [answer({ source: "guessed", key: null, answer: "no", changed_to: "Yes" })] });
+  it("an edited answer is verified, shows the user's word, and Send stays open", () => {
+    const c = card(64, {
+      answers: [answer({ source: "guessed", key: null, answer: "no", changed_to: "Yes", verified: true })],
+    });
     render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("ready-answer-changed-64-0")).toHaveTextContent("Yes");
-    expect(screen.getByTestId("ready-send-64")).toBeDisabled();
-    expect(screen.getByTestId("ready-changed-64")).toHaveTextContent("Ask your assistant to fill the form again");
+    expect(screen.getByTestId("ready-answer-verified-64-0")).toHaveTextContent("Verified");
+    expect(screen.getByTestId("ready-send-64")).toBeEnabled();
+    expect(screen.getByTestId("ready-changed-64")).toHaveTextContent(
+      "You changed 1 answer. Your assistant types it in before it sends.",
+    );
   });
 
   it("a stale card says look again and reloads", async () => {

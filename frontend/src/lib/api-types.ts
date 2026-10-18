@@ -7100,6 +7100,8 @@ export interface components {
             detail: string;
             /** Reason */
             reason: string;
+            /** Type First */
+            type_first?: components["schemas"]["TypeFirstAnswer"][];
         };
         /** TailorBundle */
         TailorBundle: {
@@ -7205,6 +7207,13 @@ export interface components {
             name: string;
             /** Prefix */
             prefix: string;
+        };
+        /** TypeFirstAnswer */
+        TypeFirstAnswer: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
         };
         /**
          * UpdateContactRequest

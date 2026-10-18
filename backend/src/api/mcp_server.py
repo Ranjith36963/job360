@@ -1654,7 +1654,10 @@ def build_server(version: str = "") -> MCPServer:
         `ask` unless the user said yes to this CV; so does the first application after
         auto-submit is turned on (`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
         email_not_verified, blocked or held_by_other_session: do not submit, tell
-        the user. Read-only; after a real submit, call `record_application`."""
+        the user. `type_first`: answers the user changed on the web after you filled
+        the form - type each into its field (replacing what is there) before you
+        submit; record_application's answers carry the user's words. Read-only;
+        after a real submit, call `record_application`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.submit_check(

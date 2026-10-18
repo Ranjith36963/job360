@@ -1179,6 +1179,11 @@ class AutofillRequest(BaseModel):
     mode: Literal["allow", "deny"]
 
 
+class TypeFirstAnswer(BaseModel):
+    question: str
+    answer: str
+
+
 class SubmitCheckResponse(BaseModel):
     """The answer to "may I press submit on this application?" - one gate
     (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
@@ -1189,6 +1194,9 @@ class SubmitCheckResponse(BaseModel):
     decision: Literal["submit", "ask", "stop"]
     reason: str
     detail: str
+    # Owner decision 2026-10-19: answers the user changed on the web after the form was
+    # filled. Type each one into its field (replacing what is there) BEFORE any submit.
+    type_first: list[TypeFirstAnswer] = Field(default_factory=list)
 
 
 class OutreachCheckResponse(BaseModel):
@@ -2600,13 +2608,8 @@ async def approve_send(
     if form_filled_event_id is not None:
         if await ready_service.newest_fill_id(db, user.id, application_id) != form_filled_event_id:
             raise HTTPException(status_code=409, detail="the filled form changed since you looked - look again")
-    # Owner decision 2026-10-18 - an answer the user edited is not in the form yet: no yes for the old one.
-    card = await ready_service.ready_cards(db, user.id, limit=1, application_id=application_id)
-    if card and any(f["code"] == "changed" for f in card[0]["flags"]):
-        raise HTTPException(
-            status_code=409,
-            detail="you changed an answer - ask your assistant to fill the form again, then Send",
-        )
+    # Owner decision 2026-10-19: an answer the user edited does not block the yes - submit-check hands
+    # the assistant those answers (`type_first`) to type into the form before it submits.
     payload = {"artifact_id": cv["id"], "sha256": kit_service.sha256_text(cv["text"]), "where": "web"}
     await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
     await _web_decision(db, user, application_id, "submit_approved", payload)
@@ -2728,6 +2731,11 @@ async def submit_check(
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
+    type_first = await ready_service.changed_answers(db, user.id, app_row)
+    detail = verdict.detail
+    if type_first:
+        detail = (f"{detail} First type the {len(type_first)} answer(s) the user changed (type_first) into "
+                  "their fields, replacing what is there.")
     get_audit_logger().info(
         "submit_check",
         extra={
@@ -2739,7 +2747,7 @@ async def submit_check(
     )
     return {
         "application_id": application_id, "decision": verdict.decision,
-        "reason": verdict.reason, "detail": verdict.detail,
+        "reason": verdict.reason, "detail": detail, "type_first": type_first,
     }
 
 
