@@ -20,7 +20,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    read the state. A script-set value can show on screen but be missing in the site's own state. A click on a button
    that already looks selected can switch it OFF: read first. **Done when** every field has been typed or clicked.
 5. **Read back EVERY value** (text, dropdowns, checkboxes, the CV name). Fix what differs. `record_event`
-   `form_filled`, then `form_swept` {fields_checked, fixed} (multi-page: also `page`, `pages_total` of the page you are on). **Done when** each value matches the kit answer.
+   `form_filled`, then `form_swept` {fields_checked, fixed} (multi-page: also `page`, `pages_total` of the page you are on; `form_filled` once, after the last page - a second one reopens every page). **Done when** each value matches the kit answer.
    Several pages: after every Next or conditional reveal, `check_form` the new page, then sweep; repeat until a pass
    adds no new required field. Send `page` and `pages_total` on `form_checked` and `form_swept` for every page.
 6. **Gate.** Get the yes BEFORE the click: best is the user's own click on Job360 (Needs-you Send / Send all, i.e.

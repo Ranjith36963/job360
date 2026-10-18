@@ -314,9 +314,10 @@ async def test_load_submit_counts_counts_other_applications_at_the_same_company(
 async def test_a_corrected_applied_date_or_a_late_simulation_mark_is_handled(
     authenticated_async_context, fixture_user_id
 ):
-    """Bug review 2026-10-18 (P1): an ``applied`` replaced by a correction never counts, so
-    moving the date out of the window frees the cap. Security review 2026-10-18: a
-    ``simulation`` mark recorded AFTER the ``applied`` cannot re-label a real application."""
+    """CodeRabbit 2026-10-18 (safer than bug review P1): a correction may move an ``applied``
+    date INTO the window but never out, so re-dating cannot give a cap slot back; the
+    application still counts once. Security review 2026-10-18: a ``simulation`` mark
+    recorded AFTER the ``applied`` cannot re-label a real application."""
     from src.api import dependencies as api_deps
 
     now = datetime.now(timezone.utc)
@@ -336,8 +337,18 @@ async def test_a_corrected_applied_date_or_a_late_simulation_mark_is_handled(
         assert fix.status_code == 201, fix.text
         assert (await _event(client, relabelled, "simulation")).status_code == 201
         counts = await rules.load_submit_counts(db, fixture_user_id, now, target, window_days=180)
-        # moved: its surviving applied is 300 days ago; relabelled: the late mark is ignored
-        assert counts.company_applied_in_window == 1
+        # moved: re-dated to 300 days ago, still counted once; relabelled: the late mark is ignored
+        assert counts.company_applied_in_window == 2
+        # A correction INTO the window counts too: an old applied re-dated to yesterday.
+        old = await _bring(client, _ad(4))
+        aged = await _event(client, old, "applied", occurred_at=(now - timedelta(days=400)).isoformat())
+        assert (await rules.load_submit_counts(db, fixture_user_id, now, target, window_days=180)).company_applied_in_window == 2
+        back = await _event(
+            client, old, "applied", occurred_at=(now - timedelta(days=1)).isoformat(),
+            corrects_event_id=aged.json()["event_id"],
+        )
+        assert back.status_code == 201, back.text
+        assert (await rules.load_submit_counts(db, fixture_user_id, now, target, window_days=180)).company_applied_in_window == 3
 
 
 @pytest.mark.asyncio

@@ -303,11 +303,18 @@ describe("AssistantTab", () => {
     await ready();
     const from = screen.getByTestId("apply-hours-from");
     const to = screen.getByTestId("apply-hours-to");
+    // The real order: pick "from", focus leaves it, then pick "to" (CodeRabbit 2026-10-18).
     fireEvent.change(from, { target: { value: "09:00" } });
     fireEvent.blur(from);
     expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+    expect((from as HTMLInputElement).value).toBe("09:00");
+    fireEvent.change(to, { target: { value: "09:00" } });
+    fireEvent.blur(to);
+    expect(updateProfileFields).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith("Pick two different times, or clear both. Not saved.");
     fireEvent.change(from, { target: { value: "09:00" } });
+    fireEvent.blur(from);
     fireEvent.change(to, { target: { value: "17:30" } });
     fireEvent.blur(to);
     await waitFor(() =>

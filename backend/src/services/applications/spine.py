@@ -2355,12 +2355,19 @@ async def list_applications(
     summary: Optional[dict[str, Any]] = None
     if queued:
         # Bulk-apply Q1/Q2: derived, no table; the order above stays first in first out.
+        import asyncio  # noqa: PLC0415
+
         from src.services.applications import queue_preflight  # noqa: PLC0415 - imports spine
         from src.services.profile.models import UserProfile  # noqa: PLC0415
-        from src.services.profile.storage import load_profile  # noqa: PLC0415
+        from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
-        cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
-        preflights = await queue_preflight.preflight_rows(db, user_id, rows, queued_at, holds, cfg)
+        # One profile read, off the event loop (CodeRabbit 2026-10-18), shared with the preflight.
+        loaded, overlay = await asyncio.to_thread(load_profile_with_overlay, user_id)
+        profile = loaded or UserProfile()
+        cfg = settings_rules.effective(profile.assistant_settings)
+        preflights = await queue_preflight.preflight_rows(
+            db, user_id, rows, queued_at, holds, cfg, profile, overlay
+        )
         summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg)
     out = []
     for r in rows:

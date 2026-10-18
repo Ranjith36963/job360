@@ -290,6 +290,8 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           onClick={() => {
             setStatusFilter("all");
+            // A server-filter switch shows "Loading…", never the old list under the new filter.
+            if (inFlight || queuedOnly) setApplications(null);
             setInFlight(false);
             setQueuedOnly(false);
           }}
@@ -306,6 +308,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           data-testid="queued-filter"
           onClick={() => {
+            setApplications(null);
             setQueuedOnly((v) => !v);
             setInFlight(false);
             setStatusFilter("all");
@@ -321,6 +324,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           data-testid="in-flight-filter"
           onClick={() => {
+            setApplications(null);
             setInFlight((v) => !v);
             setQueuedOnly(false);
           }}

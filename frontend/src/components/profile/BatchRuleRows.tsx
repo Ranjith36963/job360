@@ -154,7 +154,8 @@ export function BatchRuleRows({
     const was = hoursOf(view.apply_hours);
     if (from === was.from && to === was.to) return;
     if (from === "" && to === "") return void save(P_HOURS, null);
-    if (from === "" || to === "" || from === to) {
+    if (from === "" || to === "") return; // wait for the other half; the first blur must not wipe it
+    if (from === to) {
       toast.error("Pick two different times, or clear both. Not saved.");
       setHoursFrom(was.from);
       setHoursTo(was.to);

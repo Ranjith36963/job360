@@ -44,6 +44,16 @@ describe("StartedNotConfirmed", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("shows nothing when the feed was cut short (the confirming event may be missing)", async () => {
+    fetchWhatsNewPages.mockResolvedValue({ events: [ev(1, 1, "submit_attempted")], applications: apps, truncated: true });
+    const { container } = render(<StartedNotConfirmed />);
+    await waitFor(() => expect(fetchWhatsNewPages).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("shows nothing when the read fails", async () => {
     fetchWhatsNewPages.mockRejectedValue(new Error("down"));
     const { container } = render(<StartedNotConfirmed />);

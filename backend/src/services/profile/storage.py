@@ -246,6 +246,22 @@ def _prune_old_versions(conn: pgsync.Connection, user_id: str) -> None:
     )
 
 
+def profile_version_avoid_companies(user_id: str, version_id: int) -> Optional[list[Any]]:
+    """The ``preferences.avoid_companies`` a restore of ``version_id`` would write
+    (``[]`` when the snapshot has none), or ``None`` when the version is not this
+    user's. Lets the restore route apply the never-remove rule before it writes."""
+    with pgsync.connect(str(DB_PATH)) as conn:
+        row = conn.execute(
+            "SELECT preferences FROM user_profile_versions WHERE id = ? AND user_id = ? LIMIT 1",
+            (version_id, user_id),
+        ).fetchone()
+    if row is None:
+        return None
+    prefs = json.loads(row[0]) if row[0] else {}
+    got = prefs.get("avoid_companies") if isinstance(prefs, dict) else None
+    return list(got) if isinstance(got, list) else []
+
+
 def restore_profile_version(user_id: str, version_id: int) -> Optional[UserProfile]:
     """Batch 1.8b — atomic rollback to a specific snapshot.
 

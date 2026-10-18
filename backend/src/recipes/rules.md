@@ -40,7 +40,7 @@ confirmed on the Job360 website - do not ask again, and do not act as if they
 were applied. Read `settings` before any apply step and call `check_submit`
 before the final submit.
 
-Assistant settings are fourteen paths: `assistant_settings.apply_min_score`
+Assistant settings are fifteen paths (`assistant_settings.auto_employer_emails` is under Gmail below): `assistant_settings.apply_min_score`
 (the score line, whole number 0-100), `assistant_settings.above_line` and
 `assistant_settings.below_line` (ask | auto), `assistant_settings.submit_mode` (confirm |
 auto_when_sure), `assistant_settings.daily_cap` (whole number >= 1, or null
