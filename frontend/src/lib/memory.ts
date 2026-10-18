@@ -24,6 +24,11 @@ export const PNS = "Prefer not to say";
 export const WORK_AUTH_OPTIONS = ["citizen", "permanent_resident", "visa", "needs_sponsorship"] as const;
 export const ONSITE_OPTIONS = ["yes", "only_if_sponsored", "no"] as const;
 const ONSITE_LABEL: Record<string, string> = { yes: "Yes", only_if_sponsored: "Only if sponsored", no: "No" };
+/** Job priority per place (owner decision 2026-10-19). Absent = not chosen; never defaulted. */
+export const PRIORITY_OPTIONS = ["highest", "high", "medium", "low", "off"] as const;
+export const PRIORITY_LABEL: Record<string, string> = {
+  highest: "Highest", high: "High", medium: "Medium", low: "Low", off: "Off",
+};
 export const LEVEL_OPTIONS = ["native", "fluent", "professional", "basic"] as const;
 const WORK_AUTH_LABEL: Record<string, string> = {
   citizen: "Citizen",
@@ -62,6 +67,8 @@ export const FIELD_LABEL: Record<string, string> = {
   salary: "Salary",
   remote_ok: "Remote work is fine",
   onsite: "On-site work",
+  remote_priority: "Remote priority",
+  onsite_priority: "On-site priority",
 };
 
 export type PartInput = "text" | "date" | "number" | "textarea" | "yesno" | "select" | "countries" | "languages";
@@ -115,6 +122,8 @@ export function isPns(v: unknown): boolean {
 const SENSITIVE_CONTACT = new Set(["date_of_birth", "address"]);
 /** Visa, equality, salary, birth date and address ask first. */
 export function isSensitive(path: string, key: string): boolean {
+  // The two job-priority keys are search preferences, not a visa fact: no confirm step.
+  if (path === RTW && key.endsWith("_priority")) return false;
   if (path === RTW || path === EQUALITY || path === SALARY) return true;
   return path === CONTACT && SENSITIVE_CONTACT.has(key);
 }
@@ -169,6 +178,9 @@ export function rtwCountryRows(code: string): RowSpec[] {
     // What people really say: "remote anywhere, on-site only if sponsored" (also saved for ANY).
     single(RTW, p("remote_ok"), "remote_ok", "yesno", s),
     single(RTW, p("onsite"), "onsite", "select", s, { options: ONSITE_OPTIONS }),
+    // Where the assistant looks first. Off = never search there. Empty = not chosen.
+    single(RTW, p("remote_priority"), "remote_priority", "select", s, { options: PRIORITY_OPTIONS }),
+    single(RTW, p("onsite_priority"), "onsite_priority", "select", s, { options: PRIORITY_OPTIONS }),
   ];
 }
 
@@ -430,6 +442,7 @@ export function showRow(spec: RowSpec, value: unknown): string {
   if (isPns(value)) return PNS;
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (key === "onsite") return ONSITE_LABEL[String(value)] ?? String(value);
+  if (key === "remote_priority" || key === "onsite_priority") return PRIORITY_LABEL[String(value)] ?? String(value);
   if (key === "work_authorization") return WORK_AUTH_LABEL[String(value)] ?? String(value);
   if (key === "citizenship" && Array.isArray(value)) return value.map((c) => countryName(String(c))).join(", ");
   if (key === "languages" && Array.isArray(value)) {

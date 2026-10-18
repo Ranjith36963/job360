@@ -340,3 +340,56 @@ describe("ApplicationList — In flight tab (weak spot #3 wave 2)", () => {
     expect(screen.getByTestId("in-flight-filter")).toBeInTheDocument();
   });
 });
+
+describe("ApplicationList — Job priority (owner decision, 2026-10-19)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("the priority select refetches with priority; All sends nothing", async () => {
+    listApplications.mockResolvedValue({ applications: [summary()], total: 1 });
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    expect(listApplications).toHaveBeenLastCalledWith({ limit: 50 });
+
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "highest" } });
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, priority: "highest" }));
+
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "not_set" } });
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, priority: "not_set" }));
+
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "all" } });
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50 }));
+  });
+
+  it("priority and In flight combine, and an empty priority result keeps the select", async () => {
+    listApplications.mockImplementation((params: { priority?: string }) =>
+      Promise.resolve(params.priority ? { applications: [], total: 0 } : { applications: [summary()], total: 1 })
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("in-flight-filter"));
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "low" } });
+    await waitFor(() =>
+      expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, in_flight: true, priority: "low" })
+    );
+    expect(await screen.findByText("Nothing is in flight right now.")).toBeInTheDocument();
+    expect(screen.getByTestId("priority-filter")).toBeInTheDocument();
+  });
+
+  it("shows a tag for a set priority, not for off or unset", async () => {
+    listApplications.mockResolvedValue({
+      applications: [
+        summary({ id: 1, job_title: "Top Job", priority: "highest" }),
+        summary({ id: 2, job_title: "Off Job", priority: "off" }),
+        summary({ id: 3, job_title: "Plain Job", priority: null }),
+      ],
+      total: 3,
+    });
+    render(<ApplicationList />);
+    await screen.findByText("Top Job");
+    const tags = screen.getAllByTestId("row-priority");
+    expect(tags).toHaveLength(1);
+    expect(tags[0]).toHaveTextContent("Highest priority");
+  });
+});

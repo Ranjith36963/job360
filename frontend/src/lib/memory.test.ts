@@ -8,12 +8,12 @@ import {
 describe("country card count (ANY)", () => {
   const block = { countries: [{ country: "ANY", remote_ok: true, onsite: "only_if_sponsored" }] };
 
-  it("remote_ok and onsite are rows, so a saved ANY record counts 2 of 6", () => {
+  it("remote_ok and onsite are rows, so a saved ANY record counts 2 of the 6 form facts (+2 priority rows)", () => {
     const specs = rtwCountryRows("ANY");
     const ids = specs.map((s) => s.id.split(".").pop());
     expect(ids).toEqual(expect.arrayContaining(["remote_ok", "onsite"]));
     expect(countrySaved(specs.map((s) => readRow(s, block)))).toBe(2);
-    expect(specs.length).toBe(6);
+    expect(specs.length).toBe(8);
     expect(showRow(specs.find((s) => s.id.endsWith("onsite"))!, "only_if_sponsored")).toBe("Only if sponsored");
   });
 
@@ -170,5 +170,29 @@ describe("showing values", () => {
     expect(isSensitive(CONTACT, "phone")).toBe(false);
     expect(equalityRows().every((r) => r.sensitive)).toBe(true);
     expect(phone.sensitive).toBe(false);
+  });
+});
+
+describe("job priority rows", () => {
+  const block = { countries: [{ country: "GB", remote_ok: true, remote_priority: "high" }] };
+
+  it("each country has a Remote priority and an On-site priority select with the five levels", () => {
+    const specs = rtwCountryRows("GB");
+    for (const key of ["remote_priority", "onsite_priority"]) {
+      const spec = specs.find((s) => s.id.endsWith(key))!;
+      expect(spec.parts[0].input).toBe("select");
+      expect(spec.parts[0].options).toEqual(["highest", "high", "medium", "low", "off"]);
+      expect(spec.sensitive).toBe(false); // a search preference, not a visa fact
+    }
+    const remote = specs.find((s) => s.id.endsWith("remote_priority"))!;
+    expect(remote.label).toBe("Remote priority");
+    expect(specs.find((s) => s.id.endsWith("onsite_priority"))!.label).toBe("On-site priority");
+    expect(readRow(remote, block)).toBe("high");
+    expect(showRow(remote, "highest")).toBe("Highest");
+  });
+
+  it("clearing a priority removes only that key", () => {
+    const remote = rtwCountryRows("GB").find((s) => s.id.endsWith("remote_priority"))!;
+    expect(writeRow(remote, block, undefined)).toEqual({ countries: [{ country: "GB", remote_ok: true }] });
   });
 });

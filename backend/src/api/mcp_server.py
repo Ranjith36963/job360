@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 5
-TOOLS_REV_FOR_HASH = "622847d9dab0"
+TOOLS_REV = 6
+TOOLS_REV_FOR_HASH = "923ee2641764"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -568,7 +568,7 @@ def build_server(version: str = "") -> MCPServer:
         sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
         word only when `approved` is true.
 
-        HUNT: `search_brief.rows` = the ONLY places to search, each with its `counts_if` lines;
+        HUNT: `search_brief.rows` = the ONLY places to search (`plan` = their order);
         `search_brief.gaps` = ask each once, save to the gap's `path`
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true, topic: the gap's topic}), then search.
 
@@ -998,6 +998,7 @@ def build_server(version: str = "") -> MCPServer:
         due: bool = False,
         quiet_days: Optional[int] = None,
         in_flight: bool = False,
+        priority: Optional[str] = None,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1014,12 +1015,15 @@ def build_server(version: str = "") -> MCPServer:
         of each. Gmail check: `email_senders` = the ATS domains to add as
         `from:` (mail that never names the company), `inbox_checked_at` = read
         only mail after it (null = since the application was added). `in_flight=true` —
-        only applications another session holds now; rows carry `hold` and `stage`."""
+        only applications another session holds now; rows carry `hold` and `stage`.
+        `priority` (highest|high|medium|low|off|not_set) — only jobs in places with
+        that level of the user's own job priority; each row carries `priority`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
-                    due=due, quiet_days=quiet_days, in_flight=in_flight, db=db, user=_user(),
+                    due=due, quiet_days=quiet_days, in_flight=in_flight, priority=priority,
+                    db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)

@@ -3316,6 +3316,8 @@ export interface components {
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
+            /** Priority */
+            priority?: ("highest" | "high" | "medium" | "low" | "off") | null;
             proof: components["schemas"]["ProofOut"];
             /** Receipts */
             receipts: number;
@@ -7453,6 +7455,7 @@ export interface operations {
                 due?: boolean;
                 quiet_days?: number | null;
                 in_flight?: boolean;
+                priority?: string | null;
             };
             header?: {
                 authorization?: string | null;

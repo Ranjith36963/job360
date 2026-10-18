@@ -1690,6 +1690,24 @@
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
           },
+          "priority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "highest",
+                  "high",
+                  "medium",
+                  "low",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
           },
@@ -12579,6 +12597,23 @@
               "default": false,
               "title": "In Flight",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Priority"
             }
           },
           {

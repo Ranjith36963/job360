@@ -185,7 +185,9 @@ export function MemoryTab() {
   };
 
   const countrySummary = (code: string) => {
-    const specs = rtwCountryRows(code);
+    // The card counts the facts a form asks. The two job-priority rows are a
+    // search preference (empty = "not chosen"), so they never show as "not saved yet".
+    const specs = rtwCountryRows(code).filter((s) => !s.id.endsWith("_priority"));
     const filled = specs.map((s) => ({ s, ...state(s) })).filter((x) => !isEmpty(x.value));
     const first = filled[0];
     return {

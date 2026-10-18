@@ -17,6 +17,9 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
 2. **Plan.** Print one line per `search_brief.rows` row: the place, its `counts_if` lines, the titles, and the
    sources you will try there. **Where** comes ONLY from those rows: a place that is not on that list is out,
    even if it is where the user lives today. A job counts only if one of its row's `counts_if` lines is true.
+   **Order and effort:** follow `search_brief.plan` (the user's own job priority, most wanted first): search
+   in that order and give each place about its `effort_pct` of the hunt and of the jobs you bring; a place the
+   user switched `off` is not in the plan. Report the split you reached per place in step 6.
    **Titles:** search the user's titles AND their real-world variants (for AI work: AI / LLM / GenAI / Agent /
    Agentic / Applied AI / Forward Deployed / Founding / AI Solutions / AI Product Engineer, Member of Technical
    Staff). **Done when** every row has a line.

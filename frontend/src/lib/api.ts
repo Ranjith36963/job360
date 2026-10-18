@@ -755,6 +755,8 @@ export async function listApplications(
     quiet_days?: number;
     // Weak spot #3 wave 2 — only applications another assistant session holds now.
     in_flight?: boolean;
+    // Job priority (owner decision 2026-10-19): highest|high|medium|low|off|not_set.
+    priority?: string;
   } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
   const query = { limit: 20, ...params };
