@@ -1,3 +1,4 @@
+<!-- doc: FROZEN | written 2026-10-18: Job360 feature map for the competitor gap analysis (agent-written, checked against code) -->
 # Job360 own feature inventory (read-only, code read 2026-10-18, main 65fc5eb)
 Evidence is repo/path:line. MCP tools = 32 (grep -cF '@mcp.tool()' mcp_server.py). Recipes: apply, daily, debrief, feedback, forms, hunt, prep, reach, research, review, rules, setup (backend/src/recipes/*.md). Frontend pages: bring, applications, applications/[id], needs-you, profile, receipts, stats, settings(/connect,/account), trust, privacy, terms, oauth consent.
 Product rule frame: docs/product/VISION.md "We never build" column + decisions 1,5,8,9,11,17,28.

@@ -1,3 +1,4 @@
+<!-- doc: FROZEN | written 2026-10-18: Job360 feature map for the competitor gap analysis (agent-written, checked against code) -->
 # Job360 feature rows: verified against the code (round 2)
 
 Checked 2026-10-18 on the checkout at /home/user/job360. Every row was opened by grep and by reading the cited lines.
