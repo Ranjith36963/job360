@@ -647,7 +647,7 @@ STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # a view a later slice appends (before "all") joins it automatically.
 STATS_VIEWS = (
     "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
-    "digest", "friction", "assessments", "patterns", "skill_gaps", "all",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "all",
 )
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE

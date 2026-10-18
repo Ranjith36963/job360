@@ -1232,35 +1232,36 @@ def build_server(version: str = "") -> MCPServer:
         contact_id: Optional[int] = None,
         channel: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Append one event to an application's history (append-only).
+        """Append one event to an application's history.
 
         `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; the same
-        message_id returns already_existed=true, writes nothing.
+        message_id returns already_existed, writes nothing.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, notes
-        never; the furthest stage wins (only corrects_event_id moves back). A repeat `applied` (its
-        confirmation email + `source`) becomes the submission proof, not a 2nd one. Wrong
+        never; the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
+        `source` is submission proof, not a 2nd one. Wrong
         date: `applied` + occurred_at + corrects_event_id=<old id>.
-        `warnings` = fixes. `occurred_at` may be past. `scheduled_at` (ISO-8601 + timezone) only on
+        `occurred_at` may be past. `scheduled_at` (ISO-8601 + timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or
-        the user says so) or outreach_replied; no application_id if cold; a reply never moves the status.
+        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`,
+        or the user says so) or outreach_replied; no application_id if cold; a reply never moves status.
 
-        Kit events (only these keys, else 422):
+        Kit events (these keys only):
         form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|
         approved|written|guessed (key = kit key);
-        form_checked {questions_count, answered, missing, answers?} (no values);
-        cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so (where = chat);
+        form_checked {questions_count, answered, missing, answers?};
+        cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so (where=chat);
         submit_declined {where};
-        form_swept {fields_checked, fixed, notes, unreadable} (after a full re-read; last two optional);
+        form_swept {fields_checked, fixed, notes, unreadable} (last two optional);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
-        quick_apply_warning|other, step, page_host, detail}, then stop; unblocked {resolution:
+        quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
+        manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped}.
-        proof_text {text, page_host}; simulation {} = a test app, record it first, never counted.
+        proof_text {text, page_host}; simulation {} = test app, never counted.
         Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
@@ -1517,7 +1518,8 @@ def build_server(version: str = "") -> MCPServer:
         (skills tests), patterns (outcome counts by archetype, remote policy, team size and
         agency/direct, needs 5 sent; `signals` need 2 decided; ghosted is no answer, never a rejection;
         `rejection_reasons` are exact words, group them yourself), skill_gaps (the gaps you saved with
-        save_fit, counted and tiered; needs 5 scored fits), or all. Every rate has its n; small_sample
+        save_fit, counted and tiered; needs 5 scored fits), sites (per form host: forms filled, applied,
+        blocked by reason, with n), or all. Every rate has its n; small_sample
         is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:
             async with _request_db() as db:

@@ -1,0 +1,52 @@
+........................................................................ [ 36%]
+........................................................................ [ 73%]
+........................................FF.........                      [100%]
+=================================== FAILURES ===================================
+______________ test_description_payload_per_event_matches_exactly ______________
+
+    def test_description_payload_per_event_matches_exactly():
+        """Stronger than 'the word appears somewhere': the braces after each event hold EXACTLY the validator's keys."""
+        from src.api.mcp_server import build_server
+    
+        tools = {t.name: t for t in build_server()._tool_manager.list_tools()}
+        text = _flat(tools["record_event"].description or "")
+        for event, keys in kit_service.EVENT_PAYLOAD_KEYS.items():
+            found = [
+                {k.strip().split(":")[0] for k in m.split(",") if k.strip()}
+                for m in re.findall(rf"\b{event}(?: and \w+)? \{{([^}}]*)\}}", text)
+            ]
+>           assert any(f == set(keys) or f == {f"{k}" for k in keys} for f in found), (event, found)
+E           AssertionError: ('form_swept', [{'fields_checked', 'fixed', 'notes?', 'unreadable?'}])
+E           assert False
+E            +  where False = any(<generator object test_description_payload_per_event_matches_exactly.<locals>.<genexpr> at 0x7f9b9d3c7970>)
+
+tests/test_tools_states_recipes.py:61: AssertionError
+________________ test_description_lists_every_closed_value_set _________________
+
+    def test_description_lists_every_closed_value_set():
+        """Live 2026-10-13: 'browser_frozen' was refused and the description never listed the allowed blocked reasons.
+        Every value the validators accept must appear in the record_event description."""
+        from src.api.mcp_server import build_server
+        from src.services.applications import blocked as blocked_service
+    
+        tools = {t.name: t for t in build_server()._tool_manager.list_tools()}
+        text = _flat(tools["record_event"].description or "")
+        assert len(text) <= 2000
+        for reason in blocked_service.BLOCKED_REASONS:
+>           assert re.search(rf"(?<![\w]){reason}(?![\w])", text), f"blocked reason {reason!r} missing from the description"
+E           AssertionError: blocked reason 'posting_closed' missing from the description
+E           assert None
+E            +  where None = <function search at 0x7f9ba2c7c2c0>('(?<![\\w])posting_closed(?![\\w])', 'Append one event to an application\'s history. `source` ({kind, message_id, sender, subject, received_at}) = the emai...age_host}; simulation {} = a test app, record it first, never counted. Payloads, 403/409: get_recipe("rules"), Events.')
+E            +    where <function search at 0x7f9ba2c7c2c0> = re.search
+
+tests/test_tools_states_recipes.py:74: AssertionError
+=============================== warnings summary ===============================
+../../j360venv/lib/python3.13/site-packages/starlette/testclient.py:51
+  /var/tmp/j360venv/lib/python3.13/site-packages/starlette/testclient.py:51: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_tools_states_recipes.py::test_description_payload_per_event_matches_exactly
+FAILED tests/test_tools_states_recipes.py::test_description_lists_every_closed_value_set
+2 failed, 193 passed, 1 warning in 268.90s (0:04:28)

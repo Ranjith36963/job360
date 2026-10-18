@@ -450,11 +450,16 @@ STUCK (the blocked record): when you get stuck on a form, record_event
 `blocked` {reason, step, page_host, detail}, then stop that application and
 move on to the next. `reason` is one of captcha, bot_check, login_needed,
 site_error, upload_failed, unknown_question, safety_block,
-quick_apply_warning, other; `step` is plain text up to 120 characters;
+quick_apply_warning, posting_closed, account_creation, otp_needed,
+id_or_payment_asked, assessment_required, manual_only, site_limit_reached, other
+(`posting_closed` = the page says it is filled or closed; `account_creation` = a sign-up wall; `otp_needed` = a
+one-time code; `id_or_payment_asked` = selfie, ID, card or SSN: never entered, never retried; `assessment_required`
+= timed test or video; `manual_only` = the site cannot be filled; `site_limit_reached` = the site's own daily
+limit message: stop this site for the run); `step` is plain text up to 120 characters;
 `page_host` is the host only (jobs.example.com), never a full URL; `detail`
 is up to 300 plain characters. Any other key is 422; never put a password, a
 token or page text in it. Job360 fills in who you are and opens one Needs-you
-ask for the user. Never retry a CAPTCHA or bot check and never bypass one; a
+ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and never bypass one; a
 login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with

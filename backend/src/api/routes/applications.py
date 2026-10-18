@@ -1689,6 +1689,25 @@ class StatsSkillGapsOut(BaseModel):
     note: Optional[str] = None
 
 
+class StatsSiteOut(BaseModel):
+    host: str
+    n: int
+    forms_filled: int
+    applied: int
+    blocked: dict[str, int]
+    blocked_total: int
+
+
+class StatsSitesOut(BaseModel):
+    """``stats(view="sites")``: counts per form host. Facts only, never a ranking."""
+
+    hosts: int
+    sites: list[StatsSiteOut]
+    truncated: bool
+    applications_without_host: int
+    note: str
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1717,6 +1736,7 @@ class StatsResponse(BaseModel):
     # Slice 5 - one block per view; null unless the call asked for it.
     patterns: Optional[StatsPatternsOut] = None
     skill_gaps: Optional[StatsSkillGapsOut] = None
+    sites: Optional[StatsSitesOut] = None
     computed_at: str
 
 
