@@ -487,7 +487,8 @@ def fetch_himalayas(queries: list[str], http: HttpFn, stats: Stats, *, days: int
             jobs += got
             served = len(body.get("jobs") or []) if isinstance(body, dict) else 0
             cursor = str(body.get("nextCursor") or "") if isinstance(body, dict) else ""
-            if served < HIMALAYAS_PAGE or not (q or cursor):  # a short or failed page is the last one
+            # search pages can be short before the end: stop on an empty page; the feed stops when no cursor
+            if served == 0 or (not q and not cursor):
                 break
     return _keep(jobs, queries, days)
 

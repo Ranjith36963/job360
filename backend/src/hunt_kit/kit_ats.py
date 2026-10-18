@@ -1062,6 +1062,24 @@ def _taleo_inline(page: Any) -> tuple[list[tuple[str, str, str, str]], int]:
     return out, total
 
 
+def _taleo_enrich(row: dict[str, Any], http: Http, jobs: list[Job]) -> None:
+    """Fill descriptions from the detail pages when row['fetch_details'] is set (first N postings)."""
+    if row.get("fetch_details") is not True:
+        return
+    try:
+        limit = int(row.get("detail_limit") or TALEO_DETAIL_LIMIT)
+    except (TypeError, ValueError, OverflowError):
+        limit = TALEO_DETAIL_LIMIT
+    limit = max(1, min(limit, TALEO_DETAIL_MAX))
+    for j in jobs[:limit]:
+        try:  # best-effort enrichment: a bad detail page must never drop the listing
+            st, det = _get(http, j["url"], as_json=False, headers={"Accept": "text/html"})
+            if st == 200:
+                j["description"] = _taleo_description(det)
+        except Exception:  # noqa: BLE001, S112
+            continue
+
+
 def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Taleo Enterprise Edition: GET jobsearch.ftl for the portal id + column headings, then replay
     the anonymous POST /careersection/rest/jobboard/searchjobs (pageNo 1..MAX_PAGES).
@@ -1089,6 +1107,7 @@ def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[
                 found = [_job(row, "taleo", title=t, url=f"{base}/{section}/jobdetail.ftl?job={quote(rid, safe='')}&lang={lang}",
                              location=loc, posted=posted, remote=_remote_from(loc), extra={"req_id": rid})
                         for t, rid, loc, posted in inline]
+                _taleo_enrich(row, http, found)
                 _count(stats, ok=True, jobs=len(found))
                 return found
         if not portal:  # private, unavailable, or no public portal id
@@ -1146,19 +1165,8 @@ def fetch_taleo(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[
             reported += len(reqs)
             if not reqs or (total_n is not None and reported >= total_n):
                 break
-        if ok and row.get("fetch_details") is True:
-            try:
-                limit = int(row.get("detail_limit") or TALEO_DETAIL_LIMIT)
-            except (TypeError, ValueError, OverflowError):
-                limit = TALEO_DETAIL_LIMIT
-            limit = max(1, min(limit, TALEO_DETAIL_MAX))
-            for j in jobs[:limit]:
-                try:  # best-effort enrichment: a bad detail page must never drop the listing
-                    st, det = _get(http, j["url"], as_json=False, headers={"Accept": "text/html"})
-                    if st == 200:
-                        j["description"] = _taleo_description(det)
-                except Exception:  # noqa: BLE001, S112
-                    continue
+        if ok:
+            _taleo_enrich(row, http, jobs)
         _count(stats, ok=ok, jobs=len(jobs))
         return jobs
     except Exception:  # noqa: BLE001

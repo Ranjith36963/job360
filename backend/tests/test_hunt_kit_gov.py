@@ -268,4 +268,5 @@ def test_star_runs_every_market_for_visa_onsite():
     http = _http({"": (200, {"data": []})})
     kg.fetch_jobstreet(["dev"], http, {}, days=30, countries=["IN", "*"])
     hosts = {c["url"].split("/api/")[0] for c in http.calls}
-    assert hosts == {o for o, _, _ in kg.JOBSTREET_MARKETS.values()}
+    assert hosts == {"https://www.seek.com.au", "https://www.seek.co.nz", "https://my.jobstreet.com",
+                     "https://sg.jobstreet.com", "https://id.jobstreet.com", "https://hk.jobsdb.com"}

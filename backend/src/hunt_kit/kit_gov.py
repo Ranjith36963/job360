@@ -126,7 +126,9 @@ def fetch_eures(queries: list[str], http: HttpFn, stats: Stats, *, days: int, co
     iso = _wanted(countries, *EURES_COUNTRIES)
     if not iso:
         return []
-    fallback = ", ".join(EURES_COUNTRIES[c] for c in iso)
+    # an ad with no locationMap is placed by the request's countries, but never when "*" spread the request
+    # over every EURES country: that would make an unplaced ad look like it sits in the user's country
+    fallback = "" if "*" in countries else ", ".join(EURES_COUNTRIES[c] for c in iso)
     jobs: list[Job] = []
     for page in range(1, LOCAL_PAGES + 1):
         body = {"resultsPerPage": 50, "page": page, "sortSearch": "MOST_RECENT", "keywords": [],

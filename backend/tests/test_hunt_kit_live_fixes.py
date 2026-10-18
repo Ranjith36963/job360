@@ -101,6 +101,7 @@ def test_eures_logs_the_status_of_a_refusal(capsys: pytest.CaptureFixture[str]) 
     assert "eures answered HTTP 403" in capsys.readouterr().err
     h = seen[0]["headers"]
     assert seen[0]["method"] == "POST" and h["Content-Type"] == "application/json" and h["Accept"] == "application/json"
+    assert seen[0]["body"]["locationCodes"] == ["de"]
     # freehire eures.go:115-134: every key of the request schema is present, arrays empty not null
     assert set(seen[0]["body"]) == {
         "resultsPerPage", "page", "sortSearch", "keywords", "publicationPeriod", "occupationUris", "skillUris",
@@ -157,3 +158,58 @@ def test_eightfold_pcsx_probe_after_a_403_uses_career_ops_urls() -> None:
     assert urls == ["https://qualcomm.eightfold.ai/api/apply/v2/jobs?domain=qualcomm.com&start=0&num=10",
                     "https://qualcomm.eightfold.ai/api/pcsx/search?domain=qualcomm.com&start=0"]
     assert len(jobs) == 1 and jobs[0]["extra"]["api"] == "pcsx" and jobs[0]["posted"].startswith("2025-")
+
+
+# ---------------------------------------------------------------- CodeRabbit round on #879
+kit_feeds = _load("kit_feeds_live_fixes", "kit_feeds.py")
+
+
+def test_himalayas_search_keeps_paging_after_a_short_page() -> None:
+    pages = {1: 3, 2: 5, 3: 0}  # search pages can be short before the end; only an empty page ends it
+    calls: list[str] = []
+
+    def http(url: str, **kw: Any):
+        calls.append(url)
+        n = int(url.rsplit("page=", 1)[1])
+        jobs = [{"title": "Data Engineer", "companyName": "Acme", "applicationLink": f"https://h.app/{n}/{i}",
+                 "pubDate": 0} for i in range(pages.get(n, 0))]
+        return 200, {"jobs": jobs}
+
+    kit_feeds.fetch_himalayas(["Data Engineer"], http, {}, days=0, countries=[])
+    assert [c.rsplit("page=", 1)[1] for c in calls] == ["1", "2", "3"]
+
+
+def test_himalayas_feed_follows_the_cursor_until_it_is_gone() -> None:
+    bodies = [{"jobs": [{"title": "x", "applicationLink": "https://h.app/a"}], "nextCursor": "c2"},
+              {"jobs": [{"title": "y", "applicationLink": "https://h.app/b"}]}]
+    calls: list[str] = []
+
+    def http(url: str, **kw: Any):
+        calls.append(url)
+        return 200, bodies[len(calls) - 1]
+
+    kit_feeds.fetch_himalayas([], http, {}, days=0, countries=[])
+    assert calls == ["https://himalayas.app/jobs/api", "https://himalayas.app/jobs/api?cursor=c2"]
+
+
+def test_eures_never_places_an_unlocated_ad_in_every_country_for_star() -> None:
+    body = {"jvs": [{"id": "1", "title": "Python Developer"}], "numberRecords": 1}
+    http = lambda url, **kw: (200, body)  # noqa: E731
+    star = kit_gov.fetch_eures(["python"], http, {}, days=0, countries=["DE", "*"])
+    assert star and "Germany" not in star[0]["location"]
+    own = kit_gov.fetch_eures(["python"], http, {}, days=0, countries=["DE"])
+    assert own and own[0]["location"].endswith("Germany")  # the user's own single country still places it
+
+
+def test_taleo_inline_jobs_get_details_when_asked() -> None:
+    page = (FIXTURES / "taleo_joblist.html").read_text(encoding="utf-8")
+    detail = ('<script type="application/ld+json">{"@type":"JobPosting","description":"Build data products."}'
+              "</script>")
+
+    def http(url: str, **kw: Any):
+        return 200, detail if "jobdetail.ftl" in url else page
+
+    row = {"name": "kearney", "tenant": "kearney", "section": "01", "fetch_details": True, "detail_limit": 2}
+    jobs = kit_ats.fetch_taleo(row, http, {})
+    assert len(jobs) == 3
+    assert [bool(j["description"]) for j in jobs] == [True, True, False]
