@@ -95,6 +95,12 @@ FEED_SOURCES = (
     "jobtech",
     "mycareersfuture",
     "jobbank",
+    "eures",
+    "vdab",
+    "jobnet",
+    "tyomarkkinatori",
+    "trudvsem",
+    "jobstreet",
     "reed",
     "usajobs",
     "whatjobs",
@@ -203,7 +209,7 @@ def _import_kit(name: str) -> Any:
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
 ATS_MODULES = ("kit_ats",)
-FEED_MODULES = ("kit_feeds", "kit_keyed")
+FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed")
 
 
 def _merged(attr: str, modules: tuple[str, ...]) -> dict[str, Any]:

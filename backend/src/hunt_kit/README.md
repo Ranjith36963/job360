@@ -81,6 +81,11 @@ National job services (no key; each runs only when its country is one of yours):
 Germany Bundesagentur fuer Arbeit (`arbeitsagentur`, title only), Sweden JobTech /
 Platsbanken (`jobtech`), Singapore MyCareersFuture (`mycareersfuture`), Canada Job Bank
 (`jobbank`, title only).
+More (`kit_gov.py`; unofficial site APIs that can change, and a country is skipped if it blocks scripts):
+EU/EEA/CH EURES (`eures`, any of 31 countries, matched locally), Belgium VDAB (`vdab`),
+Denmark Jobnet (`jobnet`), Finland Job Market Finland (`tyomarkkinatori`, title only),
+Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
+(`jobstreet`: AU NZ MY SG ID HK, short teaser).
 
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
@@ -138,6 +143,7 @@ The kit is one source. Use all of these too, for every row's place x title.
 - `site:boards.greenhouse.io OR site:job-boards.greenhouse.io "<title>" <place>`
 - `site:jobs.lever.co "<title>" <place>`, `site:jobs.ashbyhq.com "<title>" <place>`
 - `site:myworkdayjobs.com "<title>" <place>`, `site:icims.com "<title>" <place>`, `site:apply.workable.com "<title>" <place>`
+- Big national boards the kit leaves to you, like Indeed and LinkedIn: India `site:naukri.com "<title>" <place>`, the Gulf `site:bayt.com "<title>" <place>`. Open each ad logged out.
 - Social posts: `("hiring" OR "open role" OR "we're hiring" OR "join our team") "<title>"` with `site:x.com` or `site:linkedin.com/posts`, read through web search only (no login).
 A new employer board found this way can be added with `--companies-extra "ats:token"`.
 
@@ -171,7 +177,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` the other company-board types, `kit_feeds.py` open and keyed feeds
+- `kit_ats.py` the other company-board types, `kit_feeds.py` open and keyed feeds, `kit_gov.py` more national job services
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`)
 - `NOTICE.md` where the data came from, with licences
