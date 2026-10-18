@@ -2988,7 +2988,8 @@ def _queue_refused(user: CurrentUser, application_id: int, event_type: str, stat
         extra={
             "event": "queue_event_refused", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
-            "event_type": event_type, "status": status, "reason": reason, "result": "refused",
+            "event_type": safe_log_value(event_type), "status": status, "reason": safe_log_value(reason),
+            "result": "refused",
         },
     )
     detail = {
@@ -3047,8 +3048,10 @@ async def _check_queue_event(
         "queue_event",
         extra={
             "event": "queue_event", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
-            "application_id": application_id, "event_type": event_type, "result": "ok",
-            "reason": payload.get("reason") if event_type == "unqueued" else None,
+            "application_id": application_id, "event_type": safe_log_value(event_type), "result": "ok",
+            "reason": (
+                safe_log_value(payload["reason"]) if event_type == "unqueued" and payload.get("reason") else None
+            ),
         },
     )
 
@@ -3072,7 +3075,7 @@ def _check_answer_corrected(user: CurrentUser, application_id: int, payload: dic
         "answer_corrected",
         extra={
             "event": "answer_corrected", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor_for(user)),
-            "application_id": application_id, "was_source": payload["was_source"], "result": "ok",
+            "application_id": application_id, "was_source": safe_log_value(str(payload["was_source"])), "result": "ok",
         },
     )
 
