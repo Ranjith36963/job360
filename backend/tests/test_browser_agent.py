@@ -1205,3 +1205,127 @@ def test_the_form_not_the_ad_and_trap_fields():
     assert is_honeypot("Leave this field blank") and is_honeypot("Please do not fill this in")
     assert not is_honeypot("Leave date") and not is_honeypot("Blank space for notes")
     assert not is_honeypot("Middle name (leave blank if none)")
+
+
+FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
+""" + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
+<iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
+</body></html>"""
+
+
+@pytest.fixture
+async def frames_site():
+    from aiohttp import web
+
+    async def frames(_):
+        return web.Response(text=FRAMES, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/frames", frames)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_hidden_frames_do_not_use_up_the_frame_cap(frames_site):
+    from src.services.browser_agent.agent import BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(frames_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/frames")
+        assert any(e["name"] == "Work email" for e in page["elements"])   # the 26th frame, the only shown one
+    finally:
+        await pool.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_page_is_an_error_not_an_empty_ok():
+    from src.services.browser_agent.agent import BrowserError, _read_frame
+
+    class Broken:
+        calls = 0
+
+        async def evaluate(self, *_a):
+            Broken.calls += 1
+            raise RuntimeError("Execution context was destroyed")
+
+    assert await _read_frame(Broken(), 10, main=False) is None
+    with pytest.raises(BrowserError) as exc:
+        await _read_frame(Broken(), 10, main=True)
+    assert exc.value.reason == "page_unreadable" and Broken.calls == 3   # one try for the child, two for the page
+
+
+CHOICES = """<!doctype html><html><head><title>Choices - Acme</title></head><body>
+<label for="c">Country</label>
+<select id="c"><option value="">Choose</option><option value="GB">United Kingdom</option>
+  <option value="US">United States</option></select>
+<ul role="listbox" style="display:none"><li role="option">Old hidden option</li></ul>
+<div class="rs"><label for="lang">Language</label><input id="lang" role="combobox" aria-expanded="false">
+  <div id="shown"></div></div>
+<form onsubmit="event.preventDefault(); document.title = 'SUBMITTED'">
+  <button type="submit">Submit application</button></form>
+<script>
+  const lang = document.getElementById('lang');
+  lang.onclick = () => {   // react-select style: the pick shows beside the input, the input stays empty
+    const lb = document.createElement('div'); lb.setAttribute('role', 'listbox');
+    for (const v of ['English', 'French']) {
+      const o = document.createElement('div'); o.setAttribute('role', 'option'); o.textContent = v;
+      o.onclick = () => { document.getElementById('shown').textContent = v; lb.remove(); };
+      lb.appendChild(o);
+    }
+    document.body.appendChild(lb); lang.setAttribute('aria-expanded', 'true');
+  };
+</script></body></html>"""
+
+
+@pytest.fixture
+async def choices_site():
+    from aiohttp import web
+
+    async def choices(_):
+        return web.Response(text=CHOICES, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/choices", choices)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_choose_matches_native_labels_skips_hidden_lists_and_never_clicks_a_submit(choices_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, _pick, run
+
+    assert _pick(["Yes", "yes", "No"], "Yes") == -1   # two with the same name: no guess
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(choices_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/choices")
+        page = await run(pool, "u1", "choose", ref=_ref(page, "Country"), text="Kingdom")   # label GB: by its name
+        assert next(e for e in page["elements"] if e["name"] == "Country")["value"] == "United Kingdom"
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "choose", ref=_ref(page, "Country"), text="United")
+        assert exc.value.reason == "option_not_found" and "United States" in exc.value.detail
+
+        page = await run(pool, "u1", "choose", ref=_ref(page, "Language"), text="French")   # past the hidden list
+        s = pool._sessions["u1"]  # noqa: SLF001
+        assert await s.page.locator("#shown").inner_text() == "French"
+
+        submit = _ref(page, "Submit application")
+        for action, extra in (("choose", {"text": "x"}), ("tick", {}), ("upload", {"doc_kind": "cv"})):
+            with pytest.raises(BrowserError) as exc:
+                await run(pool, "u1", action, ref=submit, **extra)
+            assert exc.value.reason == "submit_control"
+        assert await s.page.title() == "Choices - Acme"   # never submitted
+    finally:
+        await pool.shutdown()
