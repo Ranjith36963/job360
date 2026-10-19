@@ -258,7 +258,29 @@ def _live_page(s: Session) -> Any:
 
 
 MAX_FRAMES = 20
+# How many frames are looked at to find the MAX_FRAMES shown ones.
+MAX_FRAMES_CHECKED = 100
 FRAME_READ_TIMEOUT_S = 3.0
+
+
+async def _read_frame(frame: Any, max_elements: int, *, main: bool) -> Optional[dict[str, Any]]:
+    """One frame's snapshot. A child frame that fails is skipped; the page itself gets one more try
+    and then an error, never an empty "ok" (CodeRabbit on #914)."""
+    for attempt in range(2 if main else 1):
+        try:
+            return await asyncio.wait_for(
+                frame.evaluate(SNAPSHOT_JS, {"maxElements": max_elements, "maxText": MAX_TEXT}),
+                FRAME_READ_TIMEOUT_S,
+            )
+        except Exception:  # noqa: BLE001, S112 - a frame that navigated, hung or is cross-process mid-read
+            if attempt == 0 and main:
+                await asyncio.sleep(0.5)
+    if main:
+        raise BrowserError(
+            "error", "page_unreadable",
+            "The page could not be read (it may still be loading or moving to a new page). Call look again.",
+        )
+    return None
 
 
 def _wrap_untrusted(text: str) -> str:
@@ -291,17 +313,16 @@ async def look(s: Session) -> dict[str, Any]:
     frame_urls: list[str] = []
     has_password = False
     above = below = 0
-    for i, frame in enumerate(page.frames[:MAX_FRAMES]):
+    read = 0
+    for i, frame in enumerate(page.frames[:MAX_FRAMES_CHECKED]):
         frame_urls.append(frame.url)
-        if i and not await _frame_shown(frame):
+        # The cap counts frames READ: hidden ones (ads, trackers) before the form do not use it up.
+        if read >= MAX_FRAMES or (i and not await _frame_shown(frame)):
             continue
-        try:
-            snap = await asyncio.wait_for(
-                frame.evaluate(SNAPSHOT_JS, {"maxElements": MAX_ELEMENTS - len(elements), "maxText": MAX_TEXT}),
-                FRAME_READ_TIMEOUT_S,
-            )
-        except Exception:  # noqa: BLE001, S112 - a frame that navigated, hung or is cross-process mid-read
+        snap = await _read_frame(frame, MAX_ELEMENTS - len(elements), main=i == 0)
+        if snap is None:
             continue
+        read += 1
         elements.extend(snap.get("elements") or [])
         if snap.get("text"):
             texts.append(snap["text"])
@@ -309,7 +330,7 @@ async def look(s: Session) -> dict[str, Any]:
         above += int(snap.get("omitted_above") or 0)
         below += int(snap.get("omitted_below") or 0)
     # Every frame's URL counts for the CAPTCHA check, including the frames past the cap and hidden ones.
-    frame_urls.extend(f.url for f in page.frames[MAX_FRAMES:])
+    frame_urls.extend(f.url for f in page.frames[MAX_FRAMES_CHECKED:])
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
