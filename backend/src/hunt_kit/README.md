@@ -97,6 +97,8 @@ Denmark Jobnet (`jobnet`), Finland Job Market Finland (`tyomarkkinatori`, title 
 Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
 (`jobstreet`: AU NZ MY SG ID HK, short teaser).
 
+India and Gulf (`kit_regional.py`; unofficial site endpoints behind bot protection, so a site that refuses scripts is skipped): Naukri (`naukri`: IN, searched by job title, ~300-character snippet), Bayt (`bayt`: AE SA QA KW BH OM, searched by title; the newest 15 ads also get their full description) and GulfTalent (`gulftalent`: same six countries, found through the site's sitemap by matching your titles to the ad addresses; 25 ads read per run). At most 45 requests per site per run. Bayt and GulfTalent may refuse a plain script from some networks; Naukri works from a home connection but not from hosting networks.
+
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
 - Jooble: get a free key at https://jooble.org/api/about . Set `JOOBLE_KEY`. Jooble gives short snippets.
@@ -220,7 +222,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_niche.py` niche boards
+- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)

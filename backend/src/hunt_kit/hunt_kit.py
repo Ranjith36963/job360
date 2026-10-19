@@ -121,6 +121,9 @@ FEED_SOURCES = (
     "tyomarkkinatori",
     "trudvsem",
     "jobstreet",
+    "naukri",
+    "bayt",
+    "gulftalent",
     "reed",
     "usajobs",
     "whatjobs",
@@ -248,7 +251,7 @@ def _import_kit(name: str) -> Any:
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
 ATS_MODULES = ("kit_ats", "kit_ats_more")
-FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche")
+FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional")
 
 
 def _merged(attr: str, modules: tuple[str, ...]) -> dict[str, Any]:
@@ -2529,6 +2532,9 @@ WHY_VERDICTS = {
 _FEED_HOSTS = (
     ("reed", re.compile(r"(?:^|\.)reed\.co\.uk$", re.I)),
     ("jobstreet", re.compile(r"(?:^|\.)(?:seek\.com\.au|seek\.co\.nz|jobstreet\.com|jobsdb\.com)$", re.I)),
+    ("naukri", re.compile(r"(?:^|\.)naukri\.com$", re.I)),
+    ("bayt", re.compile(r"(?:^|\.)bayt\.com$", re.I)),
+    ("gulftalent", re.compile(r"(?:^|\.)gulftalent\.com$", re.I)),
     ("adzuna", re.compile(r"(?:^|\.)adzuna\.[a-z.]+$", re.I)),
     ("jooble", re.compile(r"(?:^|\.)jooble\.org$", re.I)),
 )

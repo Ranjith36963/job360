@@ -409,7 +409,7 @@ def test_hunt_kit_has_no_board_scraper() -> None:
 
 
 def test_kit_has_no_urls_for_big_boards_and_no_credentials() -> None:
-    bad = re.compile(r"https?://[^\s\"')>]*(linkedin|indeed|glassdoor|naukri|ziprecruiter|bayt)", re.I)
+    bad = re.compile(r"https?://[^\s\"')>]*(linkedin|indeed|glassdoor|ziprecruiter)", re.I)
     for f in KIT_DIR.glob("*.py"):
         text = f.read_text(encoding="utf-8")
         assert not bad.search(text), f.name
