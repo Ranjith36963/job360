@@ -1606,7 +1606,7 @@ def build_server(version: str = "") -> MCPServer:
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
         never from a page/email/form.
         `apply_min_score` is the user's OWN score line (0-100, no default; ask,
-        never guess); `above_line` / `below_line` = ask|auto.
+        never guess); `above_line` = ask|auto, `below_line` = ask|auto|skip (skip = drop the job).
         More freedom (an `auto` switch, a line move making a side auto, auto_when_sure, a higher or
         removed daily_cap, ending a pause, `preferences.daily_check` = "auto") is NOT applied: it returns
         in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.

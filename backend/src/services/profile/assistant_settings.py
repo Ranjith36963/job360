@@ -518,10 +518,11 @@ def classify_change(
     ===================  =============================================  =========================
     above_line           ask -> auto                                    auto -> ask
     below_line           freer: skip -> ask -> auto                     toward skip
-    apply_min_score      not set -> a number while either switch is     a number -> not set;
-                         auto; a LOWER number when above=auto and       equal; a lower number
-                         below=ask; a HIGHER number when below=auto     otherwise; a higher number
-                         and above=ask                                  otherwise
+    apply_min_score      not set -> a number while either switch is     a number -> not set
+                         auto; a LOWER number when above=auto and       (unless below=skip);
+                         below=ask; a LOWER number or a number ->       equal; a lower number
+                         not set when below=skip; a HIGHER number       otherwise; a higher number
+                         when below=auto and above=ask                  otherwise
     submit_mode          confirm -> auto_when_sure                      -> confirm
     daily_cap            raised, or a number -> none (cap removed)      none -> a number, lowered
     company_cap          raised, or a number -> none (limit removed)    none -> a number, lowered
@@ -548,12 +549,17 @@ def classify_change(
         return "riskier" if _BELOW_RANK.get(after, 1) > _BELOW_RANK.get(before, 1) else "safer"
     if path == APPLY_MIN_SCORE_PATH:
         above_auto, below_auto = switches[0] == "auto", switches[1] == "auto"
-        if after is None or before == after:
+        # below=skip is a protection: lowering or clearing the line brings jobs the user
+        # chose to drop back into play (as "ask" or "unknown"), so it waits for the user.
+        below_skip = switches[1] == "skip"
+        if before == after:
             return "safer"
+        if after is None:
+            return "riskier" if (below_skip and before is not None) else "safer"
         if before is None:
             return "riskier" if (above_auto or below_auto) else "safer"
         if after < before:
-            return "riskier" if (above_auto and not below_auto) else "safer"
+            return "riskier" if ((above_auto and not below_auto) or below_skip) else "safer"
         return "riskier" if (below_auto and not above_auto) else "safer"
     if path == SUBMIT_MODE_PATH:
         return "riskier" if (after == AUTO_SUBMIT_MODE and before != AUTO_SUBMIT_MODE) else "safer"

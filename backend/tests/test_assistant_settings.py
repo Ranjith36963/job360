@@ -548,6 +548,17 @@ def test_below_line_skip_is_the_safest_side(before, after, expected):
     assert rules.classify_change(BELOW, before, after) == expected
 
 
+@pytest.mark.parametrize(
+    ("before", "after", "above", "expected"),
+    [(80, 0, "ask", "riskier"), (80, None, "ask", "riskier"), (80, 60, "auto", "riskier"),
+     (80, 90, "ask", "safer"), (80, 80, "ask", "safer"), (None, 70, "ask", "safer")],
+)
+def test_lowering_or_clearing_the_line_under_skip_waits_for_the_user(before, after, above, expected):
+    """below=skip drops the jobs under the line: a lower or cleared line would bring them back
+    (as ask / unknown), so an assistant cannot do that on its own - it waits for the user."""
+    assert rules.classify_change(SCORE, before, after, switches=(above, "skip")) == expected
+
+
 def test_save_fit_line_block_tells_the_assistant_to_drop_a_skipped_job():
     block = rules.line_block(20, _eff(below_line="skip"))
     assert (block["side"], block["switch"]) == ("below", "skip")
