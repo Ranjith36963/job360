@@ -14,6 +14,7 @@ import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportBut
 import { ClearButton } from "@/components/profile/ClearButton";
 import { LessonsList } from "@/components/profile/LessonsList";
 import { AssistantTab } from "@/components/profile/AssistantTab";
+import { JobPriority } from "@/components/profile/JobPriority";
 import { MemoryTab } from "@/components/profile/MemoryTab";
 import { SetupTab } from "@/components/profile/SetupProgress";
 import { ProfileHeader, ProfileTabs, useProfileTab } from "@/components/profile/ProfileTabs";
@@ -415,16 +416,22 @@ function CvTab() {
           <div className="space-y-6">
             {/* Two-column layout */}
             <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-              {/* Left column: CV + Enrichment */}
-              <CVUpload
-                onUpload={handleCVUpload}
-                onLinkedinUpload={handleLinkedinUpload}
-                onGithubEnrich={handleGithubEnrich}
-                onClearSection={handleClear}
-                profile={profile?.summary ?? null}
-                cvDetail={profile?.cv_detail ?? null}
-                loading={loadingProfile}
-              />
+              {/* Left column: CV + Enrichment, then Job priority in the space under it */}
+              <div className="space-y-6">
+                <CVUpload
+                  onUpload={handleCVUpload}
+                  onLinkedinUpload={handleLinkedinUpload}
+                  onGithubEnrich={handleGithubEnrich}
+                  onClearSection={handleClear}
+                  profile={profile?.summary ?? null}
+                  cvDetail={profile?.cv_detail ?? null}
+                  loading={loadingProfile}
+                />
+                <JobPriority
+                  rightToWork={(profile?.user_info as Record<string, unknown> | undefined)?.right_to_work}
+                  onSaved={setProfile}
+                />
+              </div>
 
               {/* Right column: Preferences */}
               <PreferencesForm

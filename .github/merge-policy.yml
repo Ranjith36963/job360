@@ -52,9 +52,12 @@
 #
 # WHAT DID NOT CHANGE, AND MUST NOT
 #   `harness_owner` is still human-only, and it is now the ONLY human-only lane:
-#   the robot's own rulebook -- `.github/**`, `scripts/**`, `.claude/hooks/**`,
-#   `.claude/settings*.json`, `.claude/agents/**`, every `**/CLAUDE.md`, and the
-#   cage files named below -- is never merged by a machine. An agent editing its
+#   the robot's own rulebook -- `.claude/hooks/**`, `.claude/settings*.json`,
+#   `.claude/agents/**`, every `**/CLAUDE.md`, the cage files named below, and
+#   the six workflows that produce the required checks -- is never merged by a
+#   machine. (`.github/**` and `scripts/**` were blanket here until 2026-10-18;
+#   the owner moved the blankets to `harness`, so an ordinary workflow or script
+#   now auto-merges and only the NAMED files wait.) An agent editing its
 #   own guards is how a cage is escaped, and no amount of post-merge watching
 #   detects it, because the watcher is one of the things it could have edited.
 #
@@ -303,6 +306,23 @@ lanes:
       # `scripts/repairable.py` blocks the whole `.claude/` prefix outright, so
       # the auto-fixer still may not touch this directory unsupervised.)
       - ".claude/skills/**"
+      # ── OWNER DECISION 2026-10-18: "let PRs touching .claude/**, .github/**
+      # or scripts/** auto-merge... once CI passes and verify and it's green it
+      # can merge to live." ─────────────────────────────────────────────────
+      # These three were blanket `harness_owner`, so EVERY PR touching any file
+      # under them waited for a hand-merge -- #883 sat green on 30 checks for
+      # one `.claude/rules/mistakes.md` line. They now ride this lane under the
+      # full gate (ci, review, security, drill, bugs).
+      #
+      # WHAT DID NOT MOVE: the "cage may not edit the cage" files are still
+      # NAMED in `harness_owner`, and `harness_owner` is checked FIRST
+      # (merge_cage.LANES), so a named file still wins over these blankets:
+      # the merge policy, the cage scripts, the undo, the hooks, the settings,
+      # the reviewer definitions, every CLAUDE.md -- and, added with this
+      # change, the six workflows that PRODUCE the required checks.
+      - ".claude/**"
+      - ".github/**"
+      - "scripts/**"
     # `security` ADDED 2026-09-17, also from reviewer-bugs on #582: this lane
     # carries `.claude/skills/**` now, and a fast lane with no secret scan and no
     # dependency audit was a hole the moment it stopped being only docs. It costs
@@ -467,12 +487,23 @@ lanes:
       # so recording them here changes NO verdict — it stops the two files
       # disagreeing about the same question.
       #
-      # `.github/**` and `scripts/**` are UNCHANGED and deliberately blanket:
-      # the named entries below say "the cage may not edit the cage", which is a
-      # handful of files, and a hand-list is wrong the moment someone adds the
-      # next one. These two say "no machine widens its own authorisation".
-      - ".github/**"
-      - "scripts/**"
+      # `.github/**` and `scripts/**` WERE HERE, blanket. MOVED to `harness`
+      # 2026-10-18, owner's call ("let PRs touching .claude/**, .github/** or
+      # scripts/** auto-merge"). The named entries below still say "the cage
+      # may not edit the cage"; the cost the old note warned about is real -- a
+      # NEW cage file must be named here by hand, or it auto-merges.
+      #
+      # THE CHECK FACTORIES (added 2026-10-18 with that move). The ruleset
+      # requires checks by NAME, not by content. With `.github/**` machine-
+      # mergeable, a PR could hollow out the job behind a required name and
+      # then pass its own hollowed check. These six workflows produce all 13
+      # required contexts of `main-production-gate`, so they stay yours.
+      - ".github/workflows/ci.yml"             # Backend (Python 3.12), Frontend (Node 20)
+      - ".github/workflows/ci-offline.yml"     # offline-suite, frontend-e2e, loop2-e2e-spotlight
+      - ".github/workflows/security.yml"       # pip-audit, npm audit, gitleaks, bandit
+      - ".github/workflows/codeql.yml"         # Analyze (python), Analyze (javascript-typescript)
+      - ".github/workflows/review-bugs.yml"    # reviewer-bugs
+      - ".github/workflows/review-security.yml"  # reviewer-security
       # ── `.claude/**` WAS HERE. NARROWED 2026-09-17, owner's call. ──────────
       # The blanket line made the daily truth-check PR — which edits
       # `.claude/skills/**/*.md` and `.claude/agents/*.md` — a hand-merge every
