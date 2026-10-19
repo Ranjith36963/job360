@@ -62,6 +62,11 @@ function NoteRow({
   // Enter unmounts the input, which blurs it: without this the same edit
   // would be saved twice.
   const finished = useRef(false);
+  // Focus the field when editing starts (instead of autoFocus, which a11y lint rejects).
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
 
   const open = () => {
     setDraft(note);
@@ -83,7 +88,7 @@ function NoteRow({
     <li className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm">
       {editing ? (
         <Input
-          autoFocus
+          ref={inputRef}
           value={draft}
           maxLength={NOTE_MAX_CHARS}
           aria-label={`Edit note: ${note}`}
