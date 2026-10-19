@@ -569,15 +569,18 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          state=""; desc=""; sha=""
           if [ -s status.json ]; then
-            state=$(jq -r .state status.json)
-            desc=$(jq -r .description status.json)
-            sha=$(jq -r .sha status.json)
-          else
-            state=error
-            desc="the merge cage did not reach a verdict; see the run"
-            sha=$(gh api "repos/$GH_REPO/pulls/$PR" --jq .head.sha)
+            state=$(jq -r '.state // empty' status.json 2>/dev/null || true)
+            desc=$(jq -r '.description // empty' status.json 2>/dev/null || true)
+            sha=$(jq -r '.sha // empty' status.json 2>/dev/null || true)
           fi
+          # A missing, unreadable or unknown verdict is `error`, never silence.
+          case "$state" in success|pending|failure|error) ;; *)
+            state=error
+            desc="the merge cage did not reach a verdict; see the run" ;;
+          esac
+          [ -n "$sha" ] || sha=$(gh api "repos/$GH_REPO/pulls/$PR" --jq .head.sha)
           [ -n "$sha" ] || { echo "::error::no commit to post merge-cage on for PR #$PR"; exit 1; }
           gh api "repos/$GH_REPO/statuses/$sha" -f state="$state" -f context=merge-cage \
             -f description="${desc:0:140}" -f target_url="$RUN_URL" > /dev/null

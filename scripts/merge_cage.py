@@ -70,7 +70,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
@@ -742,6 +742,7 @@ NEW_ALERT_RE = re.compile(r"(\d+)\s+new\s+alert", re.I)
 # is now the only place the numbers live. A missing or malformed `size:` refuses
 # at import, like every other policy read in this file: no cap is not "no limit".
 def _load_size() -> tuple[int, int, frozenset[str]]:
+    """(max_files, max_lines, generated paths) from `size:` in the policy. Missing or bad -> SystemExit."""
     import yaml
 
     try:
@@ -1028,6 +1029,7 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
 
 def check_size(n_files: int, n_lines: int, deletions: list[str],
                exempt_lines: int = 0) -> Verdict:
+    """SIZE: within the policy's file and line caps, and no file deleted. Generated lines are reported, not counted."""
     reasons: list[str] = []
     if deletions:
         reasons.append(
@@ -1766,6 +1768,9 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
     verdicts: list[Verdict] = []
     meta: dict = {}
     try:
+        # The head is read BEFORE the files and checked again after every cage,
+        # so a push mid-judgement cannot put this verdict on a diff it never read.
+        pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
         files_raw = gh(["api", f"repos/{REPO}/pulls/{pr}/files?per_page={PER_PAGE}"])
         files_json = json.loads(files_raw)
         files = [f["filename"] for f in files_json]
@@ -1773,7 +1778,6 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
         # The cap counts what a reviewer READS -- recorded fixtures are reported
         # separately rather than folded in. See review_surface().
         changed_lines, exempt_lines = review_surface(files_json)
-        pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
         # A MISSING base ref is not `main`. Defaulting an unknown base to the one
         # value that unlocks the full check list would be the permissive guess,
         # and the permissive guess is what this file exists to refuse. An empty
@@ -1786,7 +1790,10 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
                 "merge_sha": pr_json.get("merge_commit_sha") or "",
                 # The commit this verdict is about. The arm posts the `merge-cage`
                 # status on THIS sha, never on whatever the head is by then.
-                "head_sha": ((pr_json.get("head") or {}).get("sha")) or ""}
+                "head_sha": ((pr_json.get("head") or {}).get("sha")) or "",
+                # A PR that changes `.github/` can carry a workflow able to post
+                # `merge-cage` itself, so the arm never HOLDS one it refused.
+                "touches_github": any(f.startswith(".github/") for f in files)}
     except Exception as exc:
         # A cage that cannot see the change must never approve it.
         return False, [Verdict("READ", "fail", [
@@ -1841,6 +1848,18 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
             f"the RATCHET cage could not run ({type(exc).__name__}: {exc}) — refusing. "
             f"FIX: run `python scripts/merge_cage.py --measure` and fix whatever it reports."]))
 
+    # THE HEAD MUST NOT MOVE WHILE IT IS JUDGED (CodeRabbit on #912).
+    try:
+        head_now = ((json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"])).get("head") or {})
+                    .get("sha")) or ""
+    except Exception as exc:
+        head_now = f"unreadable ({type(exc).__name__})"
+    if head_now != meta.get("head_sha"):
+        verdicts.append(Verdict("READ", "fail", [
+            f"the head moved while I judged it ({str(meta.get('head_sha'))[:7]} -> "
+            f"{head_now[:7]}), so this verdict may describe a diff I never read. FIX: nothing; "
+            f"the new head gets its own run."]))
+
     return (not any(v.blocks for v in verdicts)), verdicts, meta
 
 
@@ -1888,6 +1907,7 @@ def requires_context(rules: object, context: str) -> bool:
 
 
 def merge_cage_required(base_ref: str) -> bool:
+    """Does `base_ref`'s ruleset require the `merge-cage` status? Any doubt -> False (withdraw)."""
     if not base_ref:
         return False
     try:
@@ -1911,12 +1931,16 @@ def ask_reviewer_again(pr: int, now: float | None = None) -> str:
     if not token:
         return "not asked: CODERABBIT_TRIGGER_TOKEN is not set"
     try:
-        comments = json.loads(gh(["api", f"repos/{REPO}/issues/{pr}/comments?per_page={PER_PAGE}"]))
+        # Only the recent window: comments come oldest first, so an unfiltered
+        # first page of a long-blocked PR never shows the latest ask.
+        t = now if now is not None else time.time()
+        since = datetime.fromtimestamp(t - ASK_AGAIN_EVERY_S, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        comments = json.loads(gh(["api", f"repos/{REPO}/issues/{pr}/comments?per_page={PER_PAGE}&since={since}"]))
         asked = [c.get("created_at") or "" for c in comments
                  if (c.get("body") or "").strip().lower().startswith("@coderabbitai review")]
         if asked:
             last = datetime.fromisoformat(max(asked).replace("Z", "+00:00")).timestamp()
-            if (now if now is not None else time.time()) - last < ASK_AGAIN_EVERY_S:
+            if t - last < ASK_AGAIN_EVERY_S:
                 return "not asked: it was asked less than 30 minutes ago"
         env = {**os.environ, "GH_TOKEN": token}
         proc = subprocess.run(["gh", "api", f"repos/{REPO}/issues/{pr}/comments",
@@ -3642,6 +3666,42 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not any(WAKE_JOB in r for r in judge_check_runs(_wake, len(_wake))),
        f"{judge_check_runs(_wake, len(_wake))}", ["judge_check_runs"])
 
+    # ── HOLD vs WITHDRAW, end to end through main() (CodeRabbit on #912) ─────
+    # A held PR is still queued, so Slack must not hear "taken out" on every
+    # sweep; and a PR that changes `.github/` can post its own `merge-cage`, so
+    # a refusal must still take it out of the queue.
+    import contextlib as _ctx
+    import io as _io
+    import tempfile as _tf
+    _saved = {k: globals()[k] for k in ("decide", "withdraw_auto_merge", "request_auto_merge",
+                                        "merge_cage_required", "slack")}
+    _calls: list[str] = []
+
+    def _run_arm(touches_github: bool) -> list[str]:
+        _calls.clear()
+        _meta = {"files": 1, "lines": 2, "base": "main", "head_sha": "abc1234", "title": "t",
+                 "touches_github": touches_github}
+        globals()["decide"] = lambda *a, **k: (False, [_wait], dict(_meta))
+        globals()["withdraw_auto_merge"] = lambda pr: (_calls.append("withdraw"), (True, "off", QUEUE_QUEUED))[1]
+        globals()["request_auto_merge"] = lambda pr: (_calls.append("arm"), (True, "on", QUEUE_QUEUED))[1]
+        globals()["merge_cage_required"] = lambda base: True
+        globals()["slack"] = lambda chan, text: (_calls.append("slack"), True)[1]
+        with _tf.TemporaryDirectory() as td, _ctx.redirect_stdout(_io.StringIO()), \
+                _ctx.redirect_stderr(_io.StringIO()):
+            lane_f = Path(td) / "lane.json"
+            lane_f.write_text(json.dumps({"lane": "product", "auto_merge": True}), encoding="utf-8")
+            main(["5", "--queue", "--lane", str(lane_f), "--slack"])
+        return list(_calls)
+
+    try:
+        _held, _wf = _run_arm(False), _run_arm(True)
+    finally:
+        globals().update(_saved)
+    ok("a held PR stays armed and Slack is told nothing (no false 'taken out')",
+       _held == ["arm"], f"calls {_held}", ["status_for"])
+    ok("a refused PR that changes .github/ is withdrawn, never held",
+       "withdraw" in _wf and "arm" not in _wf, f"calls {_wf}", ["status_for"])
+
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
     ok("COVERAGE (every function on the decision path is drilled)",
@@ -4135,8 +4195,11 @@ def main(argv: list[str] | None = None) -> int:
         # so the arm keeps auto-merge ON for every PR its lane lets a machine
         # decide ("always on" — the owner, 2026-10-19), and it lands the moment
         # a later run says yes. Until the owner adds that rule, the old
-        # withdrawal still runs.
+        # withdrawal still runs. NEVER for a PR that changes `.github/`: a
+        # workflow in it can post `merge-cage = success` with its own token, so
+        # for that PR a refusal must still take it out (CodeRabbit on #912).
         held = bool(args.queue and not allowed and not switch_off
+                    and not meta.get("touches_github")
                     and merge_cage_required(str(meta.get("base") or "")))
         if held:
             print(f"HELD: PR #{args.pr} is held by `{STATUS_CONTEXT}`, a required check on "
@@ -4203,6 +4266,10 @@ def main(argv: list[str] | None = None) -> int:
                       "the queue (no --queue), so there was nothing to announce.")
             elif allowed and queued:
                 move = judge_transition(queue_state, "allow")
+            elif held:
+                # Held is not a transition: the PR is still queued, GitHub waits.
+                print(f"SLACK: PR #{args.pr} is held by `{STATUS_CONTEXT}`, still queued; "
+                      f"nothing to announce.")
             elif not allowed:
                 move = judge_transition(queue_state, "refuse")
             if move is not None:
@@ -4217,7 +4284,7 @@ def main(argv: list[str] | None = None) -> int:
                     print("REFUSING TO PROCEED: the owner could not be told.", file=sys.stderr)
                     return EXIT_CANNOT_TELL_OWNER
                 print(f"SLACK: told #{chan} that PR #{args.pr} was {kind}.")
-            elif args.queue:
+            elif args.queue and not held:
                 print(f"SLACK: nothing changed (previous queue state: {queue_state}), so "
                       f"nothing was said — red -> red is the noise that mutes a channel.")
 

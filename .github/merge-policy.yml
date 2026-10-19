@@ -709,12 +709,13 @@ size:
   max_lines: 400
   # Files a script writes and nobody reads line by line. Their lines are reported
   # in the verdict but not counted against max_lines. EXACT paths only: a glob is
-  # a bypass waiting for a file.
+  # a bypass waiting for a file. `frontend/package-lock.json` is NOT here: no
+  # check regenerates it, so a hand-edited `resolved`/`integrity` line would
+  # ride under the cap (CodeRabbit on #912). Its lines count.
   generated:
     - frontend/openapi.json
     - frontend/src/lib/api-types.ts
     - docs/GENERATED.md
-    - frontend/package-lock.json
 
 # ── Ratchets ───────────────────────────────────────────────────────────────
 # A ratchet is a number that may HOLD or IMPROVE and may never get worse.
