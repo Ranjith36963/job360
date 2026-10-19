@@ -1,9 +1,9 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-09-19 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-10-11 by the daily truth check -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
-> This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (reads, versions and renders the CV the agent wrote — no LLM of ours, decision 28) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -cF '@mcp.tool()' backend/src/api/mcp_server.py`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is the route modules under `backend/src/api/routes/` (counts: [`docs/GENERATED.md`](docs/GENERATED.md)). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
+> This file describes the one path the app has. The path itself is stated once, in root [`CLAUDE.md`](CLAUDE.md); an Application is born in `services/applications/spine.birth_application`, called from `api/routes/bring.py`. Route and endpoint counts: [`docs/GENERATED.md`](docs/GENERATED.md).
 >
 > **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day.** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
 >
@@ -39,7 +39,7 @@ job360/
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
 │   │   │   ├── tailoring/            # render + check a saved CV (no LLM since decision 28) — `ls` the folder for the module list
 │   │   │   └── profile/              # deterministic extraction + storage — `ls` the folder for the module list
-│   │   ├── repositories/             # (post-Phase-4 rename from storage/) — `ls` it; `repositories.pg` is the single Postgres door, `repositories.database.JobDatabase` the legacy baseline that goes through it
+│   │   ├── repositories/             # (post-Phase-4 rename from storage/) — `ls` it
 │   │   └── utils/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
@@ -47,8 +47,7 @@ job360/
 │   └── tests/                        # file count: `docs/GENERATED.md` (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4
 │   └── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
-├── docs/
-│   └── product/                      # VISION.md (the mission), product_design_rules.md
+├── docs/                             # every doc, indexed: docs/README.md
 ├── .env.example
 └── CLAUDE.md                         # Canonical AI agent instructions
 ```
@@ -81,6 +80,57 @@ row. `grep -rn "normalized_key()" backend/src` for its call sites.
 
 The fields are the dataclasses `services/profile/models.CVData` and
 `services/profile/models.UserPreferences`. Read them there.
+
+`user_profiles` holds three JSON columns, one store each (owner decision
+2026-10-08, migration 0050): `cv_data`, `preferences` and `user_info` — the
+user-info MEMORY (`models.UserInfo`: contact, right to work, logistics,
+languages, equality answers, approved answers). `save_profile` writes the
+first two and snapshots them into `user_profile_versions`; `user_info` has ONE
+writer, `storage.save_user_info`, and is not in a snapshot, so an upload, a
+re-extraction or a version restore cannot wipe it. The assistant's edits ride
+`profile_edits` on top of all three (`user_info.*` paths; shapes in
+`services/profile/user_info.py`). The salary per hiring country is a normal
+preference, `preferences.salary_by_country`.
+
+A fourth column, `user_profiles.assistant_settings` (owner decision 2026-10-08,
+migration 0051), holds the ASSISTANT SETTINGS (`models.AssistantSettings`). Same
+pattern as `user_info`: ONE writer, `storage.save_assistant_settings` (only "Clear all"
+resets it), not in a snapshot, values ride `profile_edits` on
+`assistant_settings.*` paths. An assistant's RISKIER change (more freedom;
+`services/profile/assistant_settings.classify_change`) is never written: it is a
+row in `assistant_setting_requests` ("Waiting for your OK") that only the
+signed-in user can confirm (`api/routes/assistant_settings.py`, session-only, no
+MCP twin). `assistant_settings.may_submit` is the one submit gate behind
+`GET /api/applications/{id}/submit-check` and the MCP `check_submit` tool; the
+per-job override is the `submit_mode_set` note event; the practice run is derived,
+never stored. The inbox mode, check frequency and notes keep their
+`preferences.*` paths and are only shown in the settings view.
+
+The APPLICATION KIT (S3, owner decision 2026-10-08, migration 0052) is what an
+assistant reads to fill ONE application form: `GET /api/applications/{id}/kit`
+and the MCP `get_application_kit` call the same route function
+(`services/applications/kit.build_kit`). It carries the CV and letter of that
+application only, every stored answer with its source (memory / profile /
+approved text), `missing` for the job's country, the duplicate / hold /
+account-site / autofill state and a preview of the gate. Each read writes a
+`kit_read` event and mints one `artifact_links` row per document
+(`services/applications/kit._mint_link`); the public `GET /api/files/{token}`
+compares, counts down and rate-limits it (`api/routes/files.py`), and
+`utils.logger.redact_path` keeps the token out of every log and Sentry event.
+Caps: the `KIT_*` and `FILE_*` constants in `core/settings.py`.
+`application_receipts` gained `possible_duplicate`, `kit_event_id`,
+`kit_sha256`, all set at INSERT. The human in the loop is the note events in
+`services/applications/kit.KIT_EVENT_TYPES`, validated in the `record_event`
+route (`kit.check_kit_event`), plus the website-only buttons — the
+`require_session_user` routes in `api/routes/applications.py`; `may_submit`
+reads them through `kit.gate_facts`.
+
+PROOF OF APPLICATION (S7, migration 0053): the tables and every column are
+`backend/migrations/0053_application_proof.up.sql`; what counts as proof and how
+`proof.level` is derived is `services/applications/proof.py`; the routes are
+`api/routes/proof.py`. Whether a table reaches a GDPR export or an account erasure
+is `repositories.database.JobDatabase._EXPORT_TABLES` / `_EXPORT_COLUMNS` /
+`_PER_USER_TABLES` — a prose copy of those lists was wrong here.
 
 ### Extraction pipelines
 
@@ -124,16 +174,6 @@ Profile extraction infers a candidate's seniority band from job titles
 
 ---
 
-## Notification System
-
-Job360 is **pull, not push** (VISION.md decision 11): the
-seeker reads `GET /whats-new` and the web home; there is no background delivery, no
-per-user notification channels, and no queue. The Apprise dispatcher, the per-user
-channel CRUD, the digest queue and `notification_rules` were all deleted 2026-09-05 along
-with the sourcing era — do not rebuild them.
-
----
-
 ## Database Schema
 
 > **The schema is code, not prose.** The legacy baseline `init_db()` hands to
@@ -159,9 +199,9 @@ The full table — every method, path and router file, generated from the router
 
 There is no single list, and no grep finds them all — `core.settings._env_list`
 and `validate_required_env` read under variable names. Most knobs are
-`os.getenv` calls in `core/settings.py`; the rest sit where they are used —
-`FRONTEND_ORIGIN` in `api.main`, `REQUIRE_EMAIL_VERIFICATION` in
-`api.auth_deps.require_verified_user`, `SMTP_*` in `services.auth.email_sender`.
+`os.getenv` calls in `core/settings.py`; the rest sit where they are used, and a
+name can be read in more than one place, so search for the name rather than
+trusting a location written here.
 
 - `.env` lives in the repo root (see `.env.example`).
 - Required in production: `core.settings._REQUIRED_PROD_VARS`, enforced at boot

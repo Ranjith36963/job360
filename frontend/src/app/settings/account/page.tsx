@@ -27,12 +27,24 @@ import {
   changePassword,
   changeEmail,
   deleteAccount,
+  downloadMyData,
   logout,
   me,
   resendVerificationEmail,
   setTimezone,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
+import {
+  CARD_CLASS,
+  TITLE_CLASS,
+  DESC_CLASS,
+  LABEL_CLASS,
+  PRIMARY_BTN_CLASS,
+  QUIET_BTN_CLASS,
+  DANGER_BTN_CLASS,
+  DANGER_CONFIRM_BTN_CLASS,
+} from "@/components/connect/ConnectSteps";
+import { CalendarFeedSection } from "@/components/settings/CalendarFeedSection";
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -65,7 +77,7 @@ type DeleteConfirmValues = { confirmText: string; currentPassword: string };
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <p className="text-xs text-red-400 mt-1" role="alert">
+    <p className="text-xs text-danger mt-1" role="alert">
       {message}
     </p>
   );
@@ -101,10 +113,10 @@ function ChangePasswordCard() {
   }
 
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Change password</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Change password</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Update your password. For your security, you&apos;ll be signed out on
           all devices and need to sign in again.
         </CardDescription>
@@ -112,7 +124,7 @@ function ChangePasswordCard() {
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="space-y-1">
-            <Label htmlFor="cp-current">Current password</Label>
+            <Label htmlFor="cp-current" className={LABEL_CLASS}>Current password</Label>
             <Input
               id="cp-current"
               type="password"
@@ -123,7 +135,7 @@ function ChangePasswordCard() {
             <FieldError message={errors.currentPassword?.message} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="cp-new">New password</Label>
+            <Label htmlFor="cp-new" className={LABEL_CLASS}>New password</Label>
             <Input
               id="cp-new"
               type="password"
@@ -134,7 +146,7 @@ function ChangePasswordCard() {
             <FieldError message={errors.newPassword?.message} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="cp-confirm">Confirm new password</Label>
+            <Label htmlFor="cp-confirm" className={LABEL_CLASS}>Confirm new password</Label>
             <Input
               id="cp-confirm"
               type="password"
@@ -144,9 +156,9 @@ function ChangePasswordCard() {
             />
             <FieldError message={errors.confirmPassword?.message} />
           </div>
-          {serverError && <p className="text-sm text-red-400" role="alert">{serverError}</p>}
-          {success && <p className="text-sm text-emerald-400" role="status">{success}</p>}
-          <Button type="submit" disabled={isSubmitting}>
+          {serverError && <p className="text-sm text-danger" role="alert">{serverError}</p>}
+          {success && <p className="text-sm text-success" role="status">{success}</p>}
+          <Button type="submit" className={PRIMARY_BTN_CLASS} disabled={isSubmitting}>
             {isSubmitting ? "Updating..." : "Update password"}
           </Button>
         </form>
@@ -183,10 +195,10 @@ function ChangeEmailCard() {
   }
 
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Change email</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Change email</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Enter your current password to verify your identity. You will be
           logged out after the change.
         </CardDescription>
@@ -194,7 +206,7 @@ function ChangeEmailCard() {
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="space-y-1">
-            <Label htmlFor="ce-current">Current password</Label>
+            <Label htmlFor="ce-current" className={LABEL_CLASS}>Current password</Label>
             <Input
               id="ce-current"
               type="password"
@@ -205,7 +217,7 @@ function ChangeEmailCard() {
             <FieldError message={errors.currentPassword?.message} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="ce-email">New email address</Label>
+            <Label htmlFor="ce-email" className={LABEL_CLASS}>New email address</Label>
             <Input
               id="ce-email"
               type="email"
@@ -215,8 +227,8 @@ function ChangeEmailCard() {
             />
             <FieldError message={errors.newEmail?.message} />
           </div>
-          {serverError && <p className="text-sm text-red-400" role="alert">{serverError}</p>}
-          <Button type="submit" disabled={isSubmitting}>
+          {serverError && <p className="text-sm text-danger" role="alert">{serverError}</p>}
+          <Button type="submit" className={PRIMARY_BTN_CLASS} disabled={isSubmitting}>
             {isSubmitting ? "Updating..." : "Update email"}
           </Button>
         </form>
@@ -259,16 +271,20 @@ function DeleteAccountCard() {
 
   return (
     <>
-      <Card className="border-red-900/40">
+      <Card className={`${CARD_CLASS} border-danger/40`}>
         <CardHeader>
-          <CardTitle className="text-red-400">Danger zone</CardTitle>
-          <CardDescription>
+          <CardTitle className={`${TITLE_CLASS} text-danger`}>Danger zone</CardTitle>
+          <CardDescription className={DESC_CLASS}>
             This action is permanent and cannot be undone. All your data will be
             deleted.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Button variant="destructive" onClick={openDialog}>
+          <Button
+            variant="destructive"
+            className={DANGER_BTN_CLASS}
+            onClick={openDialog}
+          >
             Delete my account
           </Button>
         </CardContent>
@@ -287,7 +303,7 @@ function DeleteAccountCard() {
           <form onSubmit={handleSubmit(onConfirmDelete)} noValidate>
             <div className="space-y-4 py-2">
               <div className="space-y-1">
-                <Label htmlFor="del-password">Current password</Label>
+                <Label htmlFor="del-password" className={LABEL_CLASS}>Current password</Label>
                 <Input
                   id="del-password"
                   type="password"
@@ -300,7 +316,7 @@ function DeleteAccountCard() {
                 <FieldError message={errors.currentPassword?.message} />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="del-confirm">Type DELETE to confirm</Label>
+                <Label htmlFor="del-confirm" className={LABEL_CLASS}>Type DELETE to confirm</Label>
                 <Input
                   id="del-confirm"
                   placeholder="DELETE"
@@ -314,12 +330,13 @@ function DeleteAccountCard() {
                 />
                 <FieldError message={errors.confirmText?.message} />
               </div>
-              {serverError && <p className="text-sm text-red-400 mt-1" role="alert">{serverError}</p>}
+              {serverError && <p className="text-sm text-danger mt-1" role="alert">{serverError}</p>}
             </div>
             <DialogFooter className="mt-4">
               <Button
                 type="button"
                 variant="outline"
+                className={QUIET_BTN_CLASS}
                 onClick={() => setDialogOpen(false)}
                 disabled={isSubmitting}
               >
@@ -328,6 +345,7 @@ function DeleteAccountCard() {
               <Button
                 type="submit"
                 variant="destructive"
+                className={DANGER_CONFIRM_BTN_CLASS}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? "Deleting..." : "Delete my account"}
@@ -411,10 +429,10 @@ function TimezoneCard() {
   const unchanged = saved !== null && selected.trim() === saved;
 
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Time zone</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Time zone</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Used to work out &quot;today&quot; for follow-up dates and what&apos;s
           due, e.g. &quot;Europe/London&quot; or &quot;America/New_York&quot;.
         </CardDescription>
@@ -422,7 +440,7 @@ function TimezoneCard() {
       <CardContent className="space-y-3">
         <div className="flex items-end gap-2">
           <div className="flex-1 space-y-1">
-            <Label htmlFor="timezone-input">Time zone</Label>
+            <Label htmlFor="timezone-input" className={LABEL_CLASS}>Time zone</Label>
             <Input
               id="timezone-input"
               data-testid="timezone-input"
@@ -436,6 +454,7 @@ function TimezoneCard() {
           </div>
           <Button
             type="button"
+            className={PRIMARY_BTN_CLASS}
             data-testid="timezone-save"
             disabled={saving || unchanged || !selected.trim()}
             onClick={() => void onSave()}
@@ -450,7 +469,7 @@ function TimezoneCard() {
         )}
         {serverError && <FieldError message={serverError} />}
         {success && (
-          <p className="text-xs text-emerald-400" role="status">
+          <p className="text-xs text-success" role="status">
             {success}
           </p>
         )}
@@ -487,21 +506,79 @@ function VerifyEmailCard() {
   }
 
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Verify your email</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Verify your email</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Viewing, editing, and downloading the CV or cover letter your assistant
           wrote need a verified email. Resend the verification link if you
           didn&apos;t get it.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Button onClick={onResend} disabled={sending}>
+        <Button
+          className={PRIMARY_BTN_CLASS}
+          onClick={onResend}
+          disabled={sending}
+        >
           {sending ? "Sending..." : "Resend verification email"}
         </Button>
         {success && (
-          <p className="mt-3 text-xs text-green-400" role="status">
+          <p className="mt-3 text-xs text-success" role="status">
+            {success}
+          </p>
+        )}
+        <FieldError message={serverError ?? undefined} />
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Your data — download everything (GDPR Article 20)
+// ---------------------------------------------------------------------------
+
+function YourDataCard() {
+  const [busy, setBusy] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  async function onDownload() {
+    setServerError(null);
+    setSuccess(null);
+    setBusy(true);
+    try {
+      await downloadMyData();
+      setSuccess("Downloaded job360-my-data.json.");
+    } catch (err) {
+      setServerError(apiErrorMessage(err, "Failed to download your data."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className={CARD_CLASS} id="your-data">
+      <CardHeader>
+        <CardTitle className={TITLE_CLASS}>Your data</CardTitle>
+        <CardDescription className={DESC_CLASS}>
+          Download everything Job360 holds on you as one JSON file: your
+          profile, applications, events, every CV and cover letter version, and
+          receipts. Secrets such as your password hash are left out.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button
+          type="button"
+          className={PRIMARY_BTN_CLASS}
+          data-testid="download-everything"
+          onClick={() => void onDownload()}
+          disabled={busy}
+        >
+          {busy ? "Preparing..." : "Download everything"}
+        </Button>
+        {success && (
+          <p className="mt-3 text-xs text-success" role="status">
             {success}
           </p>
         )}
@@ -515,15 +592,19 @@ export default function AccountSettingsPage() {
   return (
     <div className="max-w-3xl space-y-8 py-12">
       <div>
-        <h1 className="text-3xl font-semibold">Account settings</h1>
+        <h1 className="text-balance font-heading text-[clamp(1.9rem,3.6vw,2.75rem)] font-normal leading-[1.08] tracking-[-0.022em]">
+          Account settings
+        </h1>
         <p className="mt-2 text-muted-foreground">
           Manage your password, email address, and deleting your account.
         </p>
       </div>
       <VerifyEmailCard />
       <TimezoneCard />
+      <CalendarFeedSection />
       <ChangePasswordCard />
       <ChangeEmailCard />
+      <YourDataCard />
       <DeleteAccountCard />
     </div>
   );

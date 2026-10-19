@@ -98,7 +98,7 @@ function ResetForm() {
           {...register("password")}
         />
         {errors.password && (
-          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-danger">{errors.password.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -112,11 +112,11 @@ function ResetForm() {
           {...register("confirm")}
         />
         {errors.confirm && (
-          <p id="confirm-error" className="text-sm text-red-400">{errors.confirm.message}</p>
+          <p id="confirm-error" className="text-sm text-danger">{errors.confirm.message}</p>
         )}
       </div>
       {serverError && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {serverError}
         </p>
       )}
@@ -124,7 +124,7 @@ function ResetForm() {
         {isSubmitting ? "Updating…" : "Set new password"}
       </Button>
       <p className="text-center text-sm text-muted-foreground">
-        <Link href="/login" className="underline">
+        <Link href="/login" className="text-foreground underline">
           Back to sign in
         </Link>
       </p>
@@ -134,10 +134,12 @@ function ResetForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Set a new password</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">
+            <h1>Set a new password</h1>
+          </CardTitle>
           <CardDescription>
             Pick a fresh password. After you update it, every existing
             session on every device will be signed out.

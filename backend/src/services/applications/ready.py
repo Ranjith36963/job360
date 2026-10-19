@@ -1,0 +1,478 @@
+"""Ready to send - the applications whose form the assistant filled and the
+user has not yet answered (S5b), and the approval card for each (S5d).
+
+An application is READY when the user owns it, it is still ``considering``, it
+has no receipt, its newest ``form_filled`` event is F, and no ``submit_approved``
+or ``submit_declined`` event came after F (a decline then a NEW fill is ready
+again), and it is not blocked (S6: its newest ``blocked`` / ``unblocked`` event
+is not ``blocked``). One SQL, no per-row query. Always scoped by ``user_id`` (rule #12).
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
+
+from src.core import settings
+from src.services.applications import kit, spine
+from src.services.applications.kit import _json
+from src.services.profile import edits as profile_edits
+from src.services.profile import user_info
+from src.services.profile.edits import is_assistant_actor
+
+if TYPE_CHECKING:  # pragma: no cover - type-only
+    from src.repositories.database import JobDatabase
+
+_READY_SQL = (
+    "SELECT a.id AS application_id, a.job_id, a.job_title, a.job_company, a.job_location, a.job_country, "
+    "a.job_url, a.fit_score, a.fit_recorded_by, f.id AS form_filled_event_id, "
+    "f.recorded_at AS filled_at, f.recorded_by AS filled_by, f.payload "
+    "FROM applications a JOIN application_events f "
+    "ON f.application_id = a.id AND f.user_id = a.user_id AND f.event_type = 'form_filled' "
+    "AND f.id = (SELECT MAX(x.id) FROM application_events x WHERE x.application_id = a.id "
+    "AND x.user_id = a.user_id AND x.event_type = 'form_filled') "
+    "WHERE a.user_id = ? {only}AND a.status = 'considering' "
+    "AND NOT EXISTS (SELECT 1 FROM application_receipts r WHERE r.application_id = a.id AND r.user_id = a.user_id) "
+    "AND NOT EXISTS (SELECT 1 FROM application_events d WHERE d.application_id = a.id AND d.user_id = a.user_id "
+    "AND d.event_type IN ('submit_approved', 'submit_declined') AND d.id > f.id) "
+    # S6: an open block (newest blocked/unblocked is `blocked`) is never ready to send.
+    "AND NOT EXISTS (SELECT 1 FROM application_events b WHERE b.application_id = a.id AND b.user_id = a.user_id "
+    "AND b.event_type = 'blocked' AND b.id = (SELECT MAX(y.id) FROM application_events y "
+    "WHERE y.application_id = a.id AND y.user_id = a.user_id AND y.event_type IN ('blocked', 'unblocked'))) "
+    "ORDER BY f.id DESC LIMIT ?"
+)
+
+
+async def ready_rows(
+    db: JobDatabase, user_id: str, *, limit: int, application_id: Optional[int] = None
+) -> list[dict[str, Any]]:
+    """The caller's ready-to-send applications, newest fill first, at most
+    ``min(limit, READY_TO_SEND_MAX)``. Each row: ``application_id``,
+    ``form_filled_event_id``, ``filled_at``, ``filled_by``, ``payload`` (parsed),
+    plus the job facts for display. ``application_id`` narrows it to one row."""
+    cap = max(0, min(int(limit), settings.READY_TO_SEND_MAX))
+    if cap == 0:
+        return []
+    only = "" if application_id is None else "AND a.id = ? "
+    params: tuple[Any, ...] = (user_id, cap) if application_id is None else (user_id, application_id, cap)
+    cur = await db._db.execute(_READY_SQL.format(only=only), params)
+    out: list[dict[str, Any]] = []
+    for r in await cur.fetchall():
+        d = dict(r)
+        d["payload"] = _json(d.get("payload"))
+        out.append(d)
+    return out
+
+
+async def newest_fill_id(db: JobDatabase, user_id: str, application_id: int) -> Optional[int]:
+    """The id of the caller's newest ``form_filled`` event on one application
+    (None when there is none). "Send" checks it so a yes names the fill the user saw."""
+    cur = await db._db.execute(
+        "SELECT MAX(id) AS id FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_filled'",
+        (application_id, user_id),
+    )
+    row = await cur.fetchone()
+    return None if row is None or row["id"] is None else int(row["id"])
+
+
+# -- The card (S5d) -----------------------------------------------------------
+
+_BLOCK_PATH = {
+    "contact": "user_info.contact", "right_to_work": "user_info.right_to_work",
+    "logistics": "user_info.logistics", "languages": "user_info.languages",
+    "equality": "user_info.equality", "salary": "preferences.salary_by_country",
+}
+_MISSING_WORDS = {"work_authorization": "Right to work", "needs_sponsorship": "Sponsorship need"}
+_DASH = "—"
+
+
+def _flag(code: str, text: str, key: Optional[str] = None, country: Optional[str] = None) -> dict[str, Any]:
+    return {"code": code, "text": text, "key": key, "country": country}
+
+
+def _salary_saved(profile: Any, country: str) -> bool:
+    """Any salary record with a value for ``country`` counts (one amount or a min / max)."""
+    return any(
+        str(r.get("country") or "").upper() == country
+        and any(kit._present(r.get(k)) for k in ("amount", "min", "max"))
+        for r in kit._records(profile.preferences.salary_by_country)
+    )
+
+
+def _missing_flags(profile: Any, missing: list[dict[str, str]], country: Optional[str]) -> list[dict[str, Any]]:
+    """The job-country facts the form needs and memory lacks, as flags."""
+    out: list[dict[str, Any]] = []
+    for m in missing:
+        key = m["key"]
+        if key == "job_country":
+            out.append(_flag("missing", f"The job's country is not set {_DASH} answer it first", key))
+        elif country and key == f"salary.{country}" and not _salary_saved(profile, country):
+            out.append(_flag("missing", f"Salary for {country} not saved yet {_DASH} answer it first", key, country))
+        elif country and key.startswith(f"right_to_work.{country}."):
+            word = _MISSING_WORDS.get(key.rsplit(".", 1)[1], "Right to work")
+            out.append(_flag("missing", f"{word} for {country} not saved yet {_DASH} answer it first", key, country))
+    return out
+
+
+async def _brought(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, dict[str, Any]]:
+    marks = ",".join("?" for _ in ids)
+    cur = await db._db.execute(
+        "SELECT application_id, recorded_by, occurred_at FROM application_events "  # noqa: S608
+        f"WHERE user_id = ? AND event_type = 'brought' AND application_id IN ({marks}) ORDER BY id DESC",
+        (user_id, *ids),
+    )
+    return {int(d["application_id"]): d for d in (dict(r) for r in await cur.fetchall())}
+
+
+async def _doc(db: JobDatabase, user_id: str, application_id: int, kind: str) -> Optional[dict[str, Any]]:
+    row = await spine.latest_artifact(db, user_id, application_id, kind)
+    if row is None:
+        return None
+    return {
+        "artifact_id": row["id"], "version": row["version_no"], "saved_at": row["created_at"],
+        "made_by": row["made_by"],
+    }
+
+
+def _norm(text: Any) -> str:
+    """Compare answers the way a person reads them: case and spacing do not matter."""
+    return " ".join(str(text).split()).casefold()
+
+
+def _field_target(key: str) -> Optional[tuple[str, str]]:
+    """``(overlay path, field)`` for a memory key that is one plain text field the user
+    can change in place (equality, email, phone); None for everything else."""
+    head, _, field = key.partition(".")
+    if head == "equality" and field in user_info.EQUALITY_KEYS:
+        return "user_info.equality", field
+    if key in ("contact.email", "contact.phone"):
+        return "user_info.contact", field
+    return None
+
+
+def _company_key(company: str) -> Optional[str]:
+    return kit.normalized_company_key(company) if company.strip() else None
+
+
+def _approved_for(profile: Any, question: str, company_key: Optional[str]) -> Optional[str]:
+    """The user's approved answer to ``question`` (or one of its other wordings), for this
+    company or any company; the last one in the list wins. None when there is none."""
+    q = _norm(question)
+    hit: Optional[str] = None
+    for rec in kit._records(profile.user_info.answers):
+        if rec.get("approved") is not True or not kit._present(rec.get("answer")):
+            continue
+        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
+        if q not in {_norm(w) for w in wordings if isinstance(w, str)}:
+            continue
+        scoped = str(rec.get("company") or "").strip()
+        if scoped and kit.normalized_company_key(scoped) != company_key:
+            continue
+        hit = str(rec["answer"])
+    return hit
+
+
+def _memory_text(profile: Any, key: str) -> Optional[str]:
+    """The saved text behind a ``contact.*`` / ``equality.*`` / ``logistics.*`` key; None
+    when the value is not one plain text (a yes/no, a list, a salary)."""
+    head, _, field = key.partition(".")
+    block = {"contact": profile.user_info.contact, "equality": profile.user_info.equality,
+             "logistics": profile.user_info.logistics}.get(head)
+    value = block.get(field) if isinstance(block, dict) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _user_check(
+    a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]], company_key: Optional[str],
+    have: dict[str, dict[str, Any]],
+) -> tuple[bool, Optional[str]]:
+    """(verified, changed_to) for one typed answer, read from the user's OWN word:
+    their approved answer to this question, else a memory row they saved on the web
+    that still holds this key. ``changed_to`` = the user's word when it differs from
+    what the assistant typed."""
+    typed = _norm(a["answer"])
+    word = _approved_for(profile, a["question"], company_key)
+    if word is not None:
+        return (True, None) if _norm(word) == typed else (False, word)
+    key = str(a.get("key") or "")
+    path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
+    by = saved.get(path, (None, None))[0] if a["source"] == "memory" and path and key in have else None
+    if not by or is_assistant_actor(str(by)):
+        return False, None
+    text = _memory_text(profile, key)
+    if text is not None and _norm(text) != typed:
+        return False, text if _field_target(key) else None
+    return True, None
+
+
+def _answer_rows(
+    typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
+    profile: Any = None, company_key: Optional[str] = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(answers with saved_by / saved_at / verified / changed_to, the flags they raise)."""
+    answers: list[dict[str, Any]] = []
+    flags: list[dict[str, Any]] = []
+    for a in typed:
+        key, src = a.get("key"), a["source"]
+        by = at = None
+        if src in ("memory", "approved", "profile") and key in have:
+            at = have[key]["saved_at"]
+            if src == "memory":
+                by, at = saved.get(_BLOCK_PATH.get(str(key).split(".", 1)[0], ""), (None, at))
+        verified, changed_to = (
+            _user_check(a, profile, saved, company_key, have) if profile is not None else (False, None)
+        )
+        answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
+                        "changed_to": changed_to})
+        if changed_to is not None:
+            # Owner decision 2026-10-19: the user's own word IS verified, and Send stays open -
+            # check_submit hands the assistant this answer to type before it submits.
+            answers[-1]["verified"] = True
+            flags.append(_flag("changed", f"You changed an answer: {a['question']} {_DASH} your assistant types "
+                                          "your answer before it sends", key))
+            continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
+        if src == "guessed" and not verified:
+            flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
+        if not a["answer"]:
+            flags.append(_flag("blank", f"An answer is blank: {a['question']}", key))
+        if src in ("memory", "approved") and key and key not in have and not verified:
+            flags.append(_flag("not_in_memory", f"No longer in memory: {a['question']}", key))
+    return answers, flags
+
+
+async def has_unverified_guess(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds an answer the assistant marked
+    ``guessed`` that the user has not stood behind (owner rule 2026-10-19: "if you
+    guess you are not verified - you need to ask me"). The SAME reading as the
+    card (:func:`_answer_rows`), so the gate and the card never disagree. Only the
+    ``guessed`` flag counts: a guess the user EDITED is the user's word (``changed``),
+    and :func:`type_first_lock` holds the submit until the form holds it. Scoped by
+    ``user_id`` (rule #12)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    fills = await kit._events(db, user_id, int(app_row["id"]), ("form_filled",))
+    typed = fills[0]["payload"].get("answers") if fills else None
+    if not isinstance(typed, list) or not any(isinstance(a, dict) and a.get("source") == "guessed" for a in typed):
+        return False
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    country = (str(app_row.get("job_country") or "").strip().upper()) or None
+    blocks, _missing = kit.compute_answers(profile, overlay, country)
+    have = {i["key"]: i for block in blocks.values() for i in block}
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    guesses = [
+        a for a in typed
+        if isinstance(a, dict) and "question" in a and "answer" in a and a.get("source") == "guessed"
+    ]
+    _answers, flags = _answer_rows(guesses, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    return any(f["code"] == "guessed" for f in flags)
+
+
+def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
+    """The LOCK (owner decision 2026-10-19 - not just an instruction): answers the user changed
+    on the web hold every submit, even after their yes, until a ``form_swept`` newer than the fill
+    reports those exact words in the form (``changed_answers`` returns ``[]`` then). A ``stop`` the
+    gate already gave stays as it is (it is no less a stop); ``submit`` and ``ask`` become
+    ``stop`` / ``type_first_pending``. A sweep never cancels the yes; a new fill does."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
+
+    if not type_first or verdict.decision == "stop":
+        return verdict
+    return settings_rules.SubmitDecision(
+        "stop", "type_first_pending",
+        f"Type the {len(type_first)} answer(s) the user changed (type_first) into their fields, "
+        "then record_event form_swept with `answers` (what the form now holds). Then check again.",
+    )
+
+
+async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[dict[str, str]]:
+    """The answers the user changed on the newest filled form: ``[{question, answer}]``
+    with the USER's answer, which the assistant must type before it submits. Read
+    from the newest ``form_filled`` whether or not the user already said yes."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_filled' ORDER BY id DESC LIMIT 1",
+        (app_row["id"], user_id),
+    )
+    row = await cur.fetchone()
+    typed = _json(row["payload"]).get("answers") if row is not None else None
+    if not isinstance(typed, list) or not typed:
+        return []
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    country = (str(app_row.get("job_country") or "").strip().upper()) or None
+    blocks, _ = kit.compute_answers(profile, overlay, country)
+    have = {i["key"]: i for block in blocks.values() for i in block}
+    answers, _ = _answer_rows(typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    pending = [{"question": a["question"], "answer": str(a["changed_to"])}
+               for a in answers if a["changed_to"] is not None]
+    if not pending:
+        return []
+    # Owner decision 2026-10-19: an answer is only off this list once a `form_swept` NEWER than
+    # the fill reports the form now holds the user's words - the assistant's proof that it typed them.
+    # A multi-page form is swept page by page (`page`), so the NEWEST sweep of EACH page counts
+    # (a page-2 sweep must not hide the page-1 sweep that holds the answer); unpaged = one page.
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_swept' AND id > (SELECT MAX(id) FROM application_events "
+        "WHERE application_id = ? AND user_id = ? AND event_type = 'form_filled') ORDER BY id DESC",
+        (app_row["id"], user_id, app_row["id"], user_id),
+    )
+    newest_per_page: dict[Any, Any] = {}
+    for row in await cur.fetchall():
+        payload = _json(row["payload"])
+        newest_per_page.setdefault(payload.get("page"), payload.get("answers"))
+    in_form = {
+        (_norm(h.get("question", "")), _norm(h.get("answer", "")))
+        for held in newest_per_page.values() for h in held or [] if isinstance(h, dict)
+    }
+    return [p for p in pending if (_norm(p["question"]), _norm(p["answer"])) not in in_form]
+
+
+async def ready_cards(
+    db: JobDatabase, user_id: str, *, limit: int, application_id: Optional[int] = None
+) -> list[dict[str, Any]]:
+    """The full approval card for each ready application: job, CV / letter
+    versions, every answer the assistant typed with where it came from, and the
+    flags that keep a card out of "Send all". A flag never blocks the one-by-one
+    Send. ``answers`` come only from the stored ``form_filled`` event."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    rows = await ready_rows(db, user_id, limit=limit, application_id=application_id)
+    if not rows:
+        return []
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    brought = await _brought(db, user_id, [r["application_id"] for r in rows])
+    now = datetime.now(timezone.utc)
+    cards: list[dict[str, Any]] = []
+    for r in rows:
+        app_id = r["application_id"]
+        country = (str(r.get("job_country") or "").strip().upper()) or None
+        blocks, missing = kit.compute_answers(profile, overlay, country)
+        have = {i["key"]: i for block in blocks.values() for i in block}
+        typed = r["payload"].get("answers")
+        flags: list[dict[str, Any]] = []
+        if not isinstance(typed, list) or not typed:
+            flags.append(_flag("no_answers", "Your assistant did not list the answers it typed"))
+            typed = []
+        answers, answer_flags = _answer_rows(typed, have, saved, profile, _company_key(r["job_company"] or ""))
+        flags += answer_flags + _missing_flags(profile, missing, country)
+        cv = await _doc(db, user_id, app_id, "cv")
+        letter = await _doc(db, user_id, app_id, "cover_letter")
+        if cv is None:
+            flags.append(_flag("no_cv", "No CV is saved for this application"))
+        app_row = {"id": app_id, "job_id": r.get("job_id"), "job_url": r.get("job_url")}
+        dup = await kit.duplicate_facts(db, user_id, app_row, now)
+        if dup["same_job"] and not await kit._events(db, user_id, app_id, ("duplicate_cleared",)):
+            flags.append(_flag("duplicate", "You may have already applied to this job"))
+        b = brought.get(app_id)
+        score = r.get("fit_score")
+        cards.append({
+            "application_id": app_id, "form_filled_event_id": r["form_filled_event_id"],
+            "filled_at": r["filled_at"], "filled_by": r["filled_by"],
+            "job_title": r["job_title"] or "", "job_company": r["job_company"] or "",
+            "job_location": r["job_location"] or "", "job_country": country,
+            "brought_by": b["recorded_by"] if b else None, "brought_at": b["occurred_at"] if b else None,
+            "fit_score": score, "fit_by": r.get("fit_recorded_by") if score is not None else None,
+            "line_side": settings_rules.line_side(score, profile.assistant_settings.apply_min_score),
+            "cv": cv, "cover_letter": letter, "answers": answers, "flags": flags,
+        })
+    return cards
+
+
+# -- Verify / Edit one answer (owner decision 2026-10-18) ---------------------
+# The user stands behind an answer (Verify) or types the right one (Edit). Both
+# save it as the user's own word, so the assistant reads it next time:
+# * a memory answer: its memory row is saved again by the user (it reads
+#   confirmed); an equality / email / phone answer sets that field;
+# * every other answer, and a non-sensitive memory one: the exact question ->
+#   answer is saved as an approved answer (kit ``approved_text``).
+# Sensitive answers (equality, salary, visa) stay out of the approved list when
+# memory holds them. The filled form itself never changes: an edited answer
+# flags the card until the assistant fills the form again with the user's word.
+
+
+def _path_value(profile: Any, path: str) -> Any:
+    head, _, name = path.partition(".")
+    return getattr(profile.user_info if head == "user_info" else profile.preferences, name, None)
+
+
+def _with_approved(profile: Any, question: str, text: str, company_key: Optional[str]) -> list[dict[str, Any]]:
+    """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
+    to the same question (unscoped, or scoped to this company)."""
+    q = _norm(question)
+    keep = [
+        dict(r) for r in kit._records(profile.user_info.answers)
+        if not (_norm(r.get("question") or "") == q and (
+            not str(r.get("company") or "").strip()
+            or kit.normalized_company_key(str(r["company"])) == company_key))
+    ]
+    return [*keep, {"question": question, "answer": text, "approved": True}]
+
+
+def answer_edits(
+    profile: Any, answer: dict[str, Any], text: str, *, edited: bool, company_key: Optional[str]
+) -> list[tuple[str, Any]]:
+    """The memory writes that make ``text`` the user's own answer to ``answer``."""
+    key = str(answer.get("key") or "")
+    memory = answer["source"] == "memory" and bool(key)
+    sensitive = memory and kit._is_sensitive(key.split(".", 1)[0], key)
+    out: list[tuple[str, Any]] = []
+    target = _field_target(key) if memory else None
+    if target is not None:
+        path, field = target
+        out.append((path, {**(_path_value(profile, path) or {}), field: text}))
+    elif memory and not edited:
+        path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
+        value = _path_value(profile, path) if path else None
+        if kit._present(value):
+            out.append((path, value))  # the same value, now saved by the user
+    if not sensitive or not out:
+        out.append((user_info.USER_INFO_ANSWERS_PATH, _with_approved(profile, answer["question"], text, company_key)))
+    return out
+
+
+async def confirm_answer(
+    db: JobDatabase, user_id: str, actor: str, application_id: int, *,
+    form_filled_event_id: int, index: int, new_text: Optional[str],
+) -> list[str]:
+    """Verify (``new_text`` None) or Edit one answer on a ready card; returns the paths
+    written. Raises ``ProfileEditError`` 404 / 409 / 422 and writes nothing on a refusal."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile, load_profile_with_overlay, save_profile  # noqa: PLC0415
+
+    cards = await ready_cards(db, user_id, limit=1, application_id=application_id)
+    if not cards:
+        raise profile_edits.ProfileEditError(404, "This form is no longer waiting for you")
+    card = cards[0]
+    if card["form_filled_event_id"] != form_filled_event_id:
+        raise profile_edits.ProfileEditError(409, "The filled form changed since you looked - look again")
+    if not 0 <= index < len(card["answers"]):
+        raise profile_edits.ProfileEditError(422, "No such answer on this form")
+    answer = card["answers"][index]
+    text = (answer["answer"] if new_text is None else new_text).strip()
+    if not text:
+        raise profile_edits.ProfileEditError(
+            422, "This answer is blank - use Edit to type it" if new_text is None else "Type an answer first"
+        )
+    loaded, _ = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    writes = answer_edits(profile, answer, text, edited=new_text is not None,
+                          company_key=_company_key(card["job_company"]))
+    for path, value in writes:
+        profile_edits.validate_edit(path, value)  # all-or-nothing: a bad value writes nothing
+    if load_profile(user_id, with_overlay=False) is None:
+        save_profile(UserProfile(), user_id, source_action="agent_edit")
+    profile_edits.record_edits(
+        user_id, actor, writes, enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
+    )
+    return [path for path, _ in writes]

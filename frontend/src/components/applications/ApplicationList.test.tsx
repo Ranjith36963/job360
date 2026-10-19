@@ -260,3 +260,183 @@ describe("ApplicationList — status filter", () => {
     expect(screen.getByText("Job Two")).toBeInTheDocument();
   });
 });
+
+describe("ApplicationList — fit display (redesign slice 2)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("shows the assistant's verdict as the main text and the score as a small 70/100", async () => {
+    listApplications.mockResolvedValue({
+      applications: [summary({ fit_score: 70, fit_verdict: "Good fit for agent work" })],
+      total: 1,
+    });
+    render(<ApplicationList />);
+    const fit = await screen.findByTestId("row-fit");
+    expect(fit).toHaveTextContent("Good fit for agent work");
+    expect(fit).toHaveTextContent("70/100");
+    expect(fit.querySelector(".bg-primary")).toBeNull();
+  });
+
+  it("with no fit judged, row-fit is absent and the next-step line stays", async () => {
+    listApplications.mockResolvedValue({ applications: [summary()], total: 1 });
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    expect(screen.queryByTestId("row-fit")).toBeNull();
+    expect(screen.getByTestId("row-next-step")).toHaveTextContent("No fit judged yet");
+  });
+
+  it("labels the score against the user's own line; unknown shows nothing", async () => {
+    listApplications.mockResolvedValue({
+      applications: [
+        summary({ id: 1, fit_score: 80, line_side: "above" } as never),
+        summary({ id: 2, fit_score: 40, line_side: "below" } as never),
+        summary({ id: 3, fit_score: 55, line_side: "unknown" } as never),
+      ],
+      total: 3,
+    });
+    render(<ApplicationList />);
+    await screen.findAllByTestId("row-fit");
+    const labels = screen.getAllByTestId("row-line-side");
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toHaveTextContent("Above your line");
+    expect(labels[1]).toHaveTextContent("Below your line");
+  });
+});
+
+describe("ApplicationList — In flight tab (weak spot #3 wave 2)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("In flight fetches in_flight=true and renders the stage text", async () => {
+    listApplications.mockImplementation((params: { in_flight?: boolean }) =>
+      Promise.resolve(
+        params.in_flight
+          ? { applications: [summary({ id: 7, job_title: "Held Job", stage: "Reading the kit…" })], total: 1 }
+          : {
+              applications: [summary({ id: 7, job_title: "Held Job" }), summary({ id: 8, job_title: "Free Job" })],
+              total: 2,
+            }
+      )
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Free Job");
+    expect(listApplications).toHaveBeenLastCalledWith({ limit: 50 });
+    fireEvent.click(screen.getByTestId("in-flight-filter"));
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, in_flight: true }));
+    expect(await screen.findByTestId("row-stage")).toHaveTextContent("Reading the kit…");
+    expect(screen.queryByText("Free Job")).toBeNull();
+  });
+
+  it("an empty In flight tab keeps the tab row and says nothing is in flight", async () => {
+    listApplications.mockImplementation((params: { in_flight?: boolean }) =>
+      Promise.resolve(params.in_flight ? { applications: [], total: 0 } : { applications: [summary()], total: 1 })
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("in-flight-filter"));
+    expect(await screen.findByText("Nothing is in flight right now.")).toBeInTheDocument();
+    expect(screen.getByTestId("in-flight-filter")).toBeInTheDocument();
+  });
+});
+
+describe("ApplicationList — Job priority (owner decision, 2026-10-19)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("the priority select refetches with priority; All sends nothing", async () => {
+    listApplications.mockResolvedValue({ applications: [summary()], total: 1 });
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    expect(listApplications).toHaveBeenLastCalledWith({ limit: 50 });
+
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "highest" } });
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, priority: "highest" }));
+
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "not_set" } });
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, priority: "not_set" }));
+
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "all" } });
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50 }));
+  });
+
+  it("priority and In flight combine, and an empty priority result keeps the select", async () => {
+    listApplications.mockImplementation((params: { priority?: string }) =>
+      Promise.resolve(params.priority ? { applications: [], total: 0 } : { applications: [summary()], total: 1 })
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("in-flight-filter"));
+    fireEvent.change(screen.getByTestId("priority-filter"), { target: { value: "low" } });
+    await waitFor(() =>
+      expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, in_flight: true, priority: "low" })
+    );
+    expect(await screen.findByText("Nothing is in flight right now.")).toBeInTheDocument();
+    expect(screen.getByTestId("priority-filter")).toBeInTheDocument();
+  });
+
+  it("shows a tag for a set priority, not for off or unset", async () => {
+    listApplications.mockResolvedValue({
+      applications: [
+        summary({ id: 1, job_title: "Top Job", priority: "highest" }),
+        summary({ id: 2, job_title: "Off Job", priority: "off" }),
+        summary({ id: 3, job_title: "Plain Job", priority: null }),
+      ],
+      total: 3,
+    });
+    render(<ApplicationList />);
+    await screen.findByText("Top Job");
+    const tags = screen.getAllByTestId("row-priority");
+    expect(tags).toHaveLength(1);
+    expect(tags[0]).toHaveTextContent("Highest priority");
+  });
+});
+
+describe("ApplicationList — Queued filter (batch queue)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("asks for queued rows, shows the summary line, the place in line and the problems", async () => {
+    listApplications.mockImplementation(async (params: { queued?: boolean }) =>
+      params.queued
+        ? {
+            applications: [
+              summary({
+                id: 5, job_title: "Queued Job", queue_position: 1,
+                preflight: { kit_missing: ["a"], has_cv: false, duplicate_flag: "", avoided: true, company_left: null, blocked_count: 2, hold: null },
+              } as never),
+            ],
+            total: 1,
+            queue_summary: { queued: 8, ready_to_send: 5, asked: 1, blocked: 1, daily_left: 3 },
+          }
+        : { applications: [summary()], total: 1 },
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("queued-filter"));
+    // the old list never shows under the new filter while it loads
+    expect(screen.queryByText("Staff Engineer")).toBeNull();
+    await screen.findByText("Queued Job");
+    expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, queued: true });
+    expect(screen.getByTestId("queue-summary")).toHaveTextContent("8 queued · 5 ready · 2 need you · 3 left today");
+    expect(screen.getByTestId("row-queue-position")).toHaveTextContent("#1 in batch");
+    const problems = screen.getByTestId("row-preflight");
+    expect(problems).toHaveTextContent("Missing 1 answer");
+    expect(problems).toHaveTextContent("No CV yet");
+    expect(problems).toHaveTextContent("On your never-apply list");
+    expect(problems).toHaveTextContent("Blocked 2 times");
+  });
+
+  it("says so when the batch is empty", async () => {
+    listApplications.mockImplementation(async (params: { queued?: boolean }) =>
+      params.queued ? { applications: [], total: 0, queue_summary: { queued: 0 } } : { applications: [summary()], total: 1 },
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("queued-filter"));
+    await screen.findByText("Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt.");
+  });
+});

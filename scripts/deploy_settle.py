@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """deploy_settle.py - wait for THIS commit's deploy to be live, then let it settle.
 
-WHY THIS EXISTS (FC-008, 2026-10-03).
+WHY THIS EXISTS (FC-009, 2026-10-03).
 
 post-merge-watch.yml's old "wait" polled /api/readyz until it answered 200. That
 answers "is SOME backend up", not "is MY backend up": during a Railway deploy the OLD

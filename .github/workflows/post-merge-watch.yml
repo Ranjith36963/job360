@@ -36,7 +36,7 @@ name: Post-merge watch (the eyes after the merge)
 # that is the actual post-merge trigger this workflow exists for.
 #
 # ───────────────────────────────────────────────────────────────────────────
-# DEPLOY NOISE vs A REGRESSION (FC-008, docs/harness/FAILURE_CATALOG.md)
+# DEPLOY NOISE vs A REGRESSION (FC-009, docs/harness/FAILURE_CATALOG.md)
 #
 # On 2026-10-03 this workflow rolled production back THREE times (#722, #724,
 # #725; trip run 37131014974) on the same 3 Sentry issues: `ClientDisconnect` on
@@ -336,7 +336,7 @@ jobs:
         env:
           SENTRY_API_TOKEN: ${{ secrets.SENTRY_API_TOKEN || secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_WINDOW_HOURS: "1"
-          # FC-008 knobs - see the header. `inputs.*` is empty on a push, so the
+          # FC-009 knobs - see the header. `inputs.*` is empty on a push, so the
           # `||` default IS the live value.
           SENTRY_MIN_EVENTS: ${{ inputs.sentry_min_events || '5' }}
           SENTRY_MIN_USERS: "1"

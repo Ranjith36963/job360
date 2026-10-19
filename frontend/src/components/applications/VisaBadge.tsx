@@ -34,7 +34,7 @@ export function VisaBadge({
   let dataVisa: string;
 
   if (signal === "sponsors") {
-    pillClass = "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+    pillClass = "bg-success/15 text-success";
     label = "Sponsors visas";
     dataVisa = "sponsors";
   } else if (needsSponsorship === false) {
@@ -43,7 +43,7 @@ export function VisaBadge({
     dataVisa = "no_sponsorship_covered";
   } else {
     // needsSponsorship is true or null (unknown comparison) — still a red flag.
-    pillClass = "bg-red-500/15 text-red-700 dark:text-red-300";
+    pillClass = "bg-danger/15 text-danger";
     label = "No sponsorship";
     dataVisa = "no_sponsorship";
   }
@@ -53,14 +53,14 @@ export function VisaBadge({
       <span
         data-testid="visa-badge"
         data-visa={dataVisa}
-        className={`rounded-full px-3 py-1 text-sm font-medium ${pillClass}`}
+        className={`self-start rounded-full px-2.5 py-0.5 font-mono text-xs font-medium ${pillClass}`}
       >
         {label}
       </span>
       {detail && detail.trim() && (
         <p
           data-testid="visa-detail"
-          className="whitespace-pre-wrap text-xs text-muted-foreground/70"
+          className="whitespace-pre-wrap text-xs text-faint"
         >
           {detail}
         </p>

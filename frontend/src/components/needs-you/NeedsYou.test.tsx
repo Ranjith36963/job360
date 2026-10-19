@@ -5,13 +5,35 @@ import { NeedsYou } from "./NeedsYou";
 const listAsks = vi.fn();
 const answerAsk = vi.fn();
 const withdrawAsk = vi.fn();
+const confirmAsk = vi.fn();
+const getAssistantSettings = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   withdrawAsk: (...a: unknown[]) => withdrawAsk(...a),
+  confirmAsk: (...a: unknown[]) => confirmAsk(...a),
+  getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
+  confirmSettingRequest: vi.fn(),
+  declineSettingRequest: vi.fn(),
 }));
+// The morning check has its own tests (MorningCheck.test.tsx).
+// The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
+vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
+vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
+// Ready to send has its own tests (ReadyToSend.test.tsx).
+// Ready to send has its own tests; this stand-in only reports its total for the badge.
+const readyMock = vi.hoisted(() => ({ total: 0 }));
+vi.mock("./ReadyToSend", async () => {
+  const { useEffect } = await import("react");
+  return {
+    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
+      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
+      return null;
+    },
+  };
+});
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const base = {
@@ -25,6 +47,10 @@ const base = {
   answered_by: null,
   answered_at: null,
   answered_by_user: false,
+  user_words: "",
+  relayed_from_chat: false,
+  said_by: "assistant",
+  confirmed_at: null,
   withdrawn_at: null,
 };
 const evil = "<img src=x onerror=alert(1)>";
@@ -42,6 +68,7 @@ beforeEach(() => {
   listAsks.mockReset();
   answerAsk.mockReset().mockResolvedValue({});
   withdrawAsk.mockReset().mockResolvedValue({});
+  getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
 });
 
 describe("NeedsYou", () => {
@@ -75,6 +102,46 @@ describe("NeedsYou", () => {
     expect(withdrawAsk).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("ask-withdraw-confirm"));
     await waitFor(() => expect(withdrawAsk).toHaveBeenCalledWith(1));
+  });
+
+  it("a relayed answer gets a Confirm button that records the confirmation, then reads You confirmed", async () => {
+    const relayed = {
+      ...base, id: 4, question: "Q4", status: "answered", answer: "Two months",
+      answered_by: "agent:Claude", user_words: "two months", relayed_from_chat: true, said_by: "you",
+    };
+    const done = { ...relayed, confirmed_at: new Date().toISOString() };
+    confirmAsk.mockResolvedValue(done);
+    listAsks.mockImplementation(async (s: string) =>
+      s === "open"
+        ? { asks: [], open_count: 0 }
+        : { asks: [confirmAsk.mock.calls.length ? done : relayed, { ...base, id: 5, question: "Q5", status: "answered", answer: "A5", answered_by: "agent:Claude" }], open_count: 0 }
+    );
+    render(<NeedsYou />);
+    const btn = await screen.findByTestId("confirm-relayed");
+    expect(screen.getAllByTestId("confirm-relayed")).toHaveLength(1); // not on the assistant-only answer
+    fireEvent.click(btn);
+    await waitFor(() => expect(confirmAsk).toHaveBeenCalledWith(4));
+    expect(await screen.findByTestId("ask-confirmed")).toHaveTextContent("You confirmed");
+    expect(screen.queryByTestId("confirm-relayed")).toBeNull();
+  });
+
+  it("shows the user's own words when an assistant relayed them from chat", async () => {
+    setup(
+      [],
+      [
+        {
+          ...base, id: 4, question: "Q4", status: "answered", answer: "Two months",
+          answered_by: "agent:Claude", user_words: "its two months, give or take",
+          relayed_from_chat: true, said_by: "you",
+        },
+        { ...base, id: 5, question: "Q5", status: "answered", answer: "A5", answered_by: "agent:Claude" },
+      ]
+    );
+    render(<NeedsYou />);
+    const relayed = await screen.findByTestId("ask-relayed-from-chat");
+    expect(relayed).toHaveTextContent("You said (via Claude): its two months, give or take");
+    // only the relayed card shows it; the assistant-only answer is unchanged
+    expect(screen.getAllByTestId("ask-relayed-from-chat")).toHaveLength(1);
   });
 
   it("shows provenance for both answer sources", async () => {
@@ -113,6 +180,21 @@ describe("NeedsYou", () => {
     fireEvent.click(screen.getByTestId("ask-answer-confirm"));
     await waitFor(() => expect(seen).toEqual([1, 0]));
     window.removeEventListener("job360:asks-changed", on);
+  });
+
+  it("the badge count includes Ready to send, and never announces without it first", async () => {
+    readyMock.total = 2;
+    const seen: number[] = [];
+    const on = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("job360:asks-changed", on);
+    try {
+      setup([openAsk]);
+      render(<NeedsYou />);
+      await waitFor(() => expect(seen).toEqual([3]));
+    } finally {
+      readyMock.total = 0;
+      window.removeEventListener("job360:asks-changed", on);
+    }
   });
 
   it("a changed answer goes back to the read-only view after saving", async () => {

@@ -1,4 +1,4 @@
-"""post-merge-watch must not roll prod back on deploy noise (FC-008, 2026-10-03).
+"""post-merge-watch must not roll prod back on deploy noise (FC-009, 2026-10-03).
 
 Three rollbacks in one afternoon (#722, #724, #725; trip run 37131014974) were caused by
 3 Sentry issues - `ClientDisconnect` on /api/mcp and two `event loop blocked for 3.13s`,

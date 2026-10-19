@@ -138,11 +138,11 @@ function TagInput({
   const badgeClass =
     variant === "destructive"
       ? "bg-destructive/10 text-destructive border border-destructive/20"
-      : "skill-matched";
+      : "border border-border bg-card text-foreground";
 
   return (
     <div className="space-y-2" data-testid={testId}>
-      <Label className="text-sm font-medium">
+      <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         {icon}
         {label}
         {trailing}
@@ -155,7 +155,7 @@ function TagInput({
           {tags.map((tag, i) => (
             <span
               key={`${tag}-${i}`}
-              className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${badgeClass}`}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${badgeClass}`}
             >
               {tag}
               <button
@@ -197,7 +197,7 @@ function TagInput({
       {openSuggestions.length > 0 && (
         <div className="pt-1">
           {suggestionsLabel && (
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">
+            <p className="mb-1 font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               {suggestionsLabel}
             </p>
           )}
@@ -216,7 +216,7 @@ function TagInput({
                 // this control must stay clearly distinct from one.
                 aria-label={`Add ${s} to ${label}`}
                 onClick={() => appendTag(s)}
-                className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
               >
                 <Plus className="h-3 w-3" />
                 {s}
@@ -225,97 +225,6 @@ function TagInput({
           </div>
         </div>
       )}
-      {footer}
-    </div>
-  );
-}
-
-// ── Assistant notes ────────────────────────────────────────
-// "Things your assistant should know" — standing instructions, one short line
-// each. The agent reads them first on every get_profile. Saved through the
-// normal debounced preferences save (no button of its own).
-
-// Mirrors the backend's PROFILE_NOTE_MAX_CHARS default. The server is the
-// real guard (a longer note is a 422 naming the limit); this only stops the
-// input from accepting what the server would refuse.
-const NOTE_MAX_CHARS = 200;
-
-function AssistantNotes({
-  notes,
-  onChange,
-  trailing,
-  footer,
-}: {
-  notes: string[];
-  onChange: (notes: string[]) => void;
-  trailing?: React.ReactNode;
-  footer?: React.ReactNode;
-}) {
-  const [draft, setDraft] = useState("");
-  const add = () => {
-    const text = draft.trim();
-    if (!text) return;
-    if (!notes.some((n) => n.toLowerCase() === text.toLowerCase())) {
-      onChange([...notes, text]);
-    }
-    setDraft("");
-  };
-  return (
-    <div className="space-y-2" data-testid="assistant-notes">
-      <Label className="text-sm font-medium">
-        Things your assistant should know
-        {trailing}
-      </Label>
-      <p className="text-xs text-muted-foreground -mt-1">
-        One line each — e.g. &quot;Never apply to recruitment agencies&quot;. Your
-        assistant reads these first, every time.
-      </p>
-      {notes.length > 0 && (
-        <ul className="space-y-1.5">
-          {notes.map((note, i) => (
-            <li
-              key={`${note}-${i}`}
-              className="flex items-start justify-between gap-2 rounded-md border border-border/60 px-2.5 py-1.5 text-sm"
-            >
-              <span className="break-words">{note}</span>
-              <button
-                type="button"
-                aria-label={`Remove note: ${note}`}
-                onClick={() => onChange(notes.filter((_, j) => j !== i))}
-                className="shrink-0 rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="flex gap-2">
-        <Input
-          value={draft}
-          maxLength={NOTE_MAX_CHARS}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add();
-            }
-          }}
-          placeholder="Add a line for your assistant"
-          aria-label="New note for your assistant"
-          className="flex-1"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          onClick={add}
-          disabled={!draft.trim()}
-          aria-label="Add note"
-          className="shrink-0"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
-      </div>
       {footer}
     </div>
   );
@@ -341,7 +250,7 @@ const asArr = (val: unknown): string[] =>
 // itself would be posted to the server as though the user had typed it.
 const EXPERIENCE_UNSET = "unspecified";
 
-function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
+export function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
   return {
     target_job_titles: asArr(raw.target_job_titles),
     additional_skills: asArr(raw.additional_skills),
@@ -368,6 +277,11 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     experience_level:
       typeof raw.experience_level === "string" ? raw.experience_level : "",
     negative_keywords: asArr(raw.negative_keywords),
+    experience_years_min: raw.experience_years_min != null ? Number(raw.experience_years_min) : null,
+    experience_years_max: raw.experience_years_max != null ? Number(raw.experience_years_max) : null,
+    looking_for: asArr(raw.looking_for),
+    dealbreakers: asArr(raw.dealbreakers),
+    avoid_companies: asArr(raw.avoid_companies),
     about_me: typeof raw.about_me === "string" ? raw.about_me : "",
     needs_visa: raw.needs_visa === true,
     work_authorization_countries: asArr(raw.work_authorization_countries),
@@ -389,6 +303,11 @@ function serializePrefs(p: PreferencesRequest): string {
     p.work_arrangement,
     p.experience_level,
     p.negative_keywords,
+    p.experience_years_min,
+    p.experience_years_max,
+    p.looking_for,
+    p.dealbreakers,
+    p.avoid_companies,
     p.about_me,
     p.needs_visa,
     p.work_authorization_countries,
@@ -416,8 +335,12 @@ const ALL_PREFERENCE_FIELDS: { field: string; label: string }[] = [
   { field: "needs_visa", label: "Visa sponsorship" },
   { field: "work_authorization_countries", label: "Countries where I can already work" },
   { field: "negative_keywords", label: "Words to avoid in job titles" },
+  { field: "experience_years_min", label: "Years of experience (from)" },
+  { field: "experience_years_max", label: "Years of experience (to)" },
+  { field: "looking_for", label: "What you look for in a job" },
+  { field: "dealbreakers", label: "Dealbreakers" },
+  { field: "avoid_companies", label: "Companies to avoid" },
   { field: "about_me", label: "About Me" },
-  { field: "assistant_notes", label: "Things your assistant should know" },
 ];
 
 // ── Preferences Form ───────────────────────────────────────
@@ -448,6 +371,11 @@ export function PreferencesForm({
   const [workArrangement, setWorkArrangement] = useState("any");
   const [experienceLevel, setExperienceLevel] = useState(EXPERIENCE_UNSET);
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
+  const [yearsMin, setYearsMin] = useState("");
+  const [yearsMax, setYearsMax] = useState("");
+  const [lookingFor, setLookingFor] = useState<string[]>([]);
+  const [dealbreakers, setDealbreakers] = useState<string[]>([]);
+  const [avoidCompanies, setAvoidCompanies] = useState<string[]>([]);
   const [aboutMe, setAboutMe] = useState("");
   const [needsVisa, setNeedsVisa] = useState(false);
   const [workAuthorizationCountries, setWorkAuthorizationCountries] = useState<string[]>([]);
@@ -491,6 +419,11 @@ export function PreferencesForm({
     setNeedsVisa(p.needs_visa === true);
     setWorkAuthorizationCountries(p.work_authorization_countries ?? []);
     setNegativeKeywords(p.negative_keywords ?? []);
+    setYearsMin(p.experience_years_min != null ? String(p.experience_years_min) : "");
+    setYearsMax(p.experience_years_max != null ? String(p.experience_years_max) : "");
+    setLookingFor(p.looking_for ?? []);
+    setDealbreakers(p.dealbreakers ?? []);
+    setAvoidCompanies(p.avoid_companies ?? []);
     setAboutMe(p.about_me ?? "");
     setAssistantNotes(p.assistant_notes ?? []);
     baselineRef.current = serializePrefs(p);
@@ -515,6 +448,12 @@ export function PreferencesForm({
       experience_level:
         experienceLevel === EXPERIENCE_UNSET ? "" : experienceLevel,
       negative_keywords: negativeKeywords,
+      // Empty box = null = "don't care" (rule #29); never a 0 the user did not type.
+      experience_years_min: yearsMin.trim() === "" ? null : Number(yearsMin),
+      experience_years_max: yearsMax.trim() === "" ? null : Number(yearsMax),
+      looking_for: lookingFor,
+      dealbreakers: dealbreakers,
+      avoid_companies: avoidCompanies,
       about_me: aboutMe,
       needs_visa: needsVisa,
       work_authorization_countries: workAuthorizationCountries,
@@ -531,6 +470,11 @@ export function PreferencesForm({
       workArrangement,
       experienceLevel,
       negativeKeywords,
+      yearsMin,
+      yearsMax,
+      lookingFor,
+      dealbreakers,
+      avoidCompanies,
       aboutMe,
       needsVisa,
       workAuthorizationCountries,
@@ -570,15 +514,15 @@ export function PreferencesForm({
   return (
     <div
       id="preferences"
-      className="glass-card rounded-xl p-6 animate-fade-in-up stagger-3 scroll-mt-24"
+      className="rounded-xl border border-border bg-card p-6 animate-fade-in-up stagger-3 scroll-mt-24"
     >
       <div className="flex items-center gap-3 mb-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-          <Briefcase className="h-5 w-5 text-primary" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-muted">
+          <Briefcase className="h-5 w-5 text-muted-foreground" />
         </div>
         <div>
-          <h3 className="font-heading text-base font-semibold">Your preferences</h3>
-          <p className="text-xs text-muted-foreground">
+          <h3 className="font-heading text-base font-medium">Your preferences</h3>
+          <p className="font-mono text-[11px] text-faint">
             What you want — your assistant reads this when it judges a job
           </p>
         </div>
@@ -677,7 +621,7 @@ export function PreferencesForm({
 
         {/* ── Salary Range ───────────────────────── */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
+          <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             <DollarSign className="h-3.5 w-3.5" />
             Salary Range
             <EditedMark
@@ -717,7 +661,7 @@ export function PreferencesForm({
         {/* ── Work Arrangement & Experience Level ── */}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <Label className="text-sm font-medium">
+            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               Work Arrangement
               {markOf("work_arrangement")}
             </Label>
@@ -737,7 +681,7 @@ export function PreferencesForm({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium">
+            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               Experience Level
               {markOf("experience_level")}
             </Label>
@@ -816,9 +760,87 @@ export function PreferencesForm({
           trailing={markOf("negative_keywords")}
         />
 
+        <Separator />
+
+        {/* ── What you're looking for (owner decision 2026-10-10) ──
+            Stored on the profile; the user's assistant reads it when it
+            judges a job. Every field is optional: empty = "don't care"
+            (rule #29), never a default. */}
+        <section aria-labelledby="looking-for-heading" data-testid="looking-for" className="space-y-6">
+          <h4
+            id="looking-for-heading"
+            className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint"
+          >
+            What you&apos;re looking for
+          </h4>
+          <div className="space-y-2">
+            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+              Years of experience in the job
+              <EditedMark
+                edit={editOf("experience_years_min") ?? editOf("experience_years_max")}
+                onTakeBack={onTakeBack}
+                onKeep={onKeep}
+              />
+            </Label>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                type="number"
+                min={0}
+                max={60}
+                aria-label="Years of experience, from"
+                data-testid="years-min"
+                value={yearsMin}
+                onChange={(e) => setYearsMin(e.target.value)}
+                placeholder="From"
+              />
+              <Input
+                type="number"
+                min={0}
+                max={60}
+                aria-label="Years of experience, to"
+                data-testid="years-max"
+                value={yearsMax}
+                onChange={(e) => setYearsMax(e.target.value)}
+                placeholder="To"
+              />
+            </div>
+          </div>
+          <TagInput
+            label="What you look for in a job"
+            tags={lookingFor}
+            onChange={setLookingFor}
+            placeholder="e.g. small team, ships often"
+            description="Things that make a job a good one for you."
+            trailing={markOf("looking_for")}
+            testId="looking-for-list"
+          />
+          <TagInput
+            label="Dealbreakers"
+            tags={dealbreakers}
+            onChange={setDealbreakers}
+            placeholder="e.g. on-call, relocation"
+            description="Anything that rules a job out."
+            variant="destructive"
+            trailing={markOf("dealbreakers")}
+            testId="dealbreakers-list"
+          />
+          <TagInput
+            label="Companies to avoid"
+            tags={avoidCompanies}
+            onChange={setAvoidCompanies}
+            placeholder="e.g. a company name"
+            description="Your assistant reads this when it judges a job."
+            variant="destructive"
+            trailing={markOf("avoid_companies")}
+            testId="avoid-companies-list"
+          />
+        </section>
+
+        <Separator />
+
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
+          <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             About Me
             {markOf("about_me")}
           </Label>
@@ -833,17 +855,9 @@ export function PreferencesForm({
           />
         </div>
 
-        <Separator />
-
-        {/* ── Things your assistant should know ────
-            Standing instructions (preferences.assistant_notes). The agent
-            reads them first on every get_profile; empty = nothing to say
-            (rule #29). */}
-        <AssistantNotes
-          notes={assistantNotes}
-          onChange={setAssistantNotes}
-          trailing={markOf("assistant_notes")}
-        />
+        {/* "Things your AI assistant should know" lives on Home only (owner,
+            2026-10-19). The notes are still hydrated and sent back in every
+            save above, so a Profile save never wipes them. */}
 
         {/* Excluded Companies removed entirely (not just the UI control) —
             a grep of backend/src turned up ZERO consumers of the
@@ -875,7 +889,7 @@ export function PreferencesForm({
               </>
             ) : (
               <>
-                <Check className="h-3.5 w-3.5 text-score-high" />
+                <Check className="h-3.5 w-3.5 text-success" />
                 <span>Changes save automatically</span>
               </>
             )}

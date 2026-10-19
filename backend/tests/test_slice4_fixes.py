@@ -501,3 +501,41 @@ async def test_s6_stats_fetch_is_bounded_by_a_parameter(authenticated_async_cont
         monkeypatch.setattr(settings, "STATS_MAX_APPLICATIONS", 50)
         body = (await client.get("/api/applications/stats")).json()
         assert body["overall"]["brought"] == 3 and body["applications_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_check_every_and_paused_survive_web_save_and_preferences_clear(
+    authenticated_async_context, fixture_user_id
+):
+    """Owner decision 2026-10-03 — the inbox-check frequency and the "paused"
+    switch are overlay-only like daily_check: a web preferences save and a
+    "preferences" clear keep them; only "all" resets them."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        for path, value in (("preferences.daily_check", "paused"), ("preferences.check_every", "6h")):
+            assert (await _patch(client, {"path": path, "value": value})).status_code == 200
+        resp = await client.post(
+            "/api/profile/preferences",
+            data={
+                "preferences": json.dumps(
+                    {"preferred_locations": ["Leeds"], "check_every": "", "daily_check": ""}
+                )
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert prefs["daily_check"] == "paused"
+        assert prefs["check_every"] == "6h"
+
+        resp = await client.post("/api/profile/clear", data={"section": "preferences"})
+        assert resp.status_code == 200, resp.text
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert prefs["daily_check"] == "paused"
+        assert prefs["check_every"] == "6h"
+        assert prefs["preferred_locations"] == []
+
+        resp = await client.post("/api/profile/clear", data={"section": "all"})
+        assert resp.status_code == 200, resp.text
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert prefs["daily_check"] == ""
+        assert prefs["check_every"] == ""

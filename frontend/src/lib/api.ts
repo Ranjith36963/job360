@@ -412,6 +412,49 @@ export async function deleteAccount(currentPassword: string): Promise<void> {
   });
 }
 
+// ---- Calendar feed (migration 0056) ----
+
+export type CalendarFeedStatus = components["schemas"]["CalendarFeedStatus"];
+export type CalendarFeedCreated = components["schemas"]["CalendarFeedCreated"];
+
+export async function getCalendarFeed(): Promise<CalendarFeedStatus> {
+  return request<CalendarFeedStatus>("/api/calendar-feed");
+}
+
+/** Creates the feed or rotates it (the old URL dies). The plain URL is in this
+ * response ONLY - the server keeps a hash. */
+export async function createCalendarFeed(): Promise<CalendarFeedCreated> {
+  return request<CalendarFeedCreated>("/api/calendar-feed", { method: "POST" });
+}
+
+export async function revokeCalendarFeed(): Promise<void> {
+  await request<void>("/api/calendar-feed", { method: "DELETE" });
+}
+
+/** Download everything we hold on the signed-in user as one JSON file
+ * (GDPR Article 20). GET, fetched into a blob and saved by an anchor click,
+ * like the CV downloads. Rate limited server-side (429). */
+export async function downloadMyData(): Promise<void> {
+  const res = await fetch(`${API}/api/auth/users/me/export`, { credentials: "include" });
+  if (!res.ok) {
+    let detail = "Download failed";
+    try {
+      const body = await res.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      // no JSON body — keep the fallback detail
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "job360-my-data.json";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ---- Step-3: Profile version diff ----
 
 export async function getProfileVersionDiff(
@@ -502,6 +545,37 @@ export async function downloadTailored(
   const a = document.createElement("a");
   a.href = url;
   a.download = `${kind}_${jobId}.${fmt}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Download ONE stored CV / cover-letter version as Word or PDF. POST like
+ * `downloadTailored` (Origin-checked); same blob + anchor pattern. */
+export async function downloadApplicationArtifact(
+  applicationId: number,
+  artifactId: number,
+  fmt: TailorFormat,
+  filenameStem = "document"
+): Promise<void> {
+  const res = await fetch(
+    `${API}/api/applications/${applicationId}/artifacts/${artifactId}/download?fmt=${fmt}`,
+    { method: "POST", credentials: "include" }
+  );
+  if (!res.ok) {
+    let detail = "Download failed";
+    try {
+      const body = await res.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      // no JSON body — keep the fallback detail
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filenameStem}.${fmt}`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -679,6 +753,12 @@ export async function listApplications(
     // Owner decision, 2026-09-25 — "what's due" / "gone quiet".
     due?: boolean;
     quiet_days?: number;
+    // Weak spot #3 wave 2 — only applications another assistant session holds now.
+    in_flight?: boolean;
+    // Batch queue: only queued applications, in queue order, with preflight + queue_summary.
+    queued?: boolean;
+    // Job priority (owner decision 2026-10-19): highest|high|medium|low|off|not_set.
+    priority?: string;
   } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
   const query = { limit: 20, ...params };
@@ -706,8 +786,49 @@ export async function answerAsk(id: number, answer: string): Promise<Ask> {
   });
 }
 
+export async function confirmAsk(id: number): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/confirm`, { method: "POST" });
+}
+
 export async function withdrawAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/withdraw`, { method: "POST" });
+}
+
+// ---- Assistant settings (S2, owner decision 2026-10-08) ----
+// A RISKIER change an assistant asks for (more freedom for it) is never applied;
+// it waits as a request that only the signed-in user can confirm here. The full
+// settings page is S5; this slice is the "Waiting for your OK" cards only.
+export type AssistantSettingsView = _Schemas["AssistantSettingsView"];
+export type SettingRequest = _Schemas["SettingRequestOut"];
+
+export async function getAssistantSettings(): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>("/api/assistant-settings");
+}
+
+export async function confirmSettingRequest(id: number): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>(`/api/assistant-settings/requests/${id}/confirm`, {
+    method: "POST",
+  });
+}
+
+export async function declineSettingRequest(id: number): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>(`/api/assistant-settings/requests/${id}/decline`, {
+    method: "POST",
+  });
+}
+
+/** Every change to ONE assistant setting, newest first (both sides). */
+export async function getSettingHistory(path: string): Promise<ProfileEditHistoryRow[]> {
+  const res = await request<_Schemas["ProfileEditHistoryResponse"]>(`/api/assistant-settings/history${qs({ path })}`);
+  return res.rows;
+}
+
+/** "Take back" the newest change to one setting: a new web row with the value before it. */
+export async function takeBackSetting(path: string): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>("/api/assistant-settings/take-back", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
 }
 
 // ---- Lessons (slice 9, docs/plans/2026-09-11-lessons/spec.md) ----
@@ -720,6 +841,15 @@ export async function listLessons(
   params: { limit?: number; offset?: number } = {}
 ): Promise<_Schemas["LessonsResponse"]> {
   return request(`/api/applications/lessons${qs(params as Record<string, unknown>)}`);
+}
+
+/** Job facts the assistant (or you) read off the ad — ISO country, remote,
+ *  where it was found. Only the keys sent change; null clears one. */
+export type JobFacts = _Schemas["JobFactsOut"];
+export type JobFactsPatch = _Schemas["UpdateJobFactsRequest"];
+
+export async function updateApplicationJob(applicationId: number, body: JobFactsPatch): Promise<JobFacts> {
+  return request(`/api/applications/${applicationId}/job`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
 export async function getApplication(id: number, withArtifactText = false): Promise<ApplicationDetail> {
@@ -819,7 +949,129 @@ export async function recordApplicationReceipt(
   });
 }
 
+// ── S3 application kit: the four human-in-the-loop buttons ────────────────────
+// Every one is a signed-in WEB action (the server refuses a token / OAuth caller).
+
+/** Who / where (web | chat) / when for a decision on an application. */
+export type DecisionMark = _Schemas["KitSeenOut"];
+/** What the four buttons show: CV seen / approved, don't-send, autofill, duplicate. */
+export type ApplicationControls = _Schemas["ApplicationControlsOut"];
+
+export async function getApplicationControls(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/controls`);
+}
+
+/** "I've checked this CV" - marks the latest CV seen (where=web). */
+export async function markCvSeen(applicationId: number, artifactId?: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/cv-seen`, {
+    method: "POST",
+    body: JSON.stringify(artifactId == null ? {} : { artifact_id: artifactId }),
+  });
+}
+
+/** "Send this one" - the user says yes to sending with the latest CV. `seen`
+ * (S5d) names the CV and the fill on screen: if either is no longer the newest
+ * the server answers 409 and records nothing. */
+export async function approveSend(
+  applicationId: number,
+  seen?: { artifactId?: number | null; formFilledEventId?: number | null },
+): Promise<ApplicationControls> {
+  const q = qs({ artifact_id: seen?.artifactId ?? undefined, form_filled_event_id: seen?.formFilledEventId ?? undefined });
+  return request(`/api/applications/${applicationId}/send/approve${q}`, { method: "POST" });
+}
+
+/** Verify (`answer` omitted: the typed answer is right) or Edit (`answer`: the
+ * right one) one answer on a ready card. Saved as the user's own word in memory,
+ * so the assistant uses it next time. 409 when the fill changed. Returns the card. */
+export async function confirmAnswer(
+  applicationId: number,
+  index: number,
+  formFilledEventId: number,
+  answer?: string,
+): Promise<ReadyCardData> {
+  return request<ReadyCardData>(`/api/applications/${applicationId}/answers/${index}/confirm`, {
+    method: "POST",
+    body: JSON.stringify(answer === undefined
+      ? { form_filled_event_id: formFilledEventId }
+      : { form_filled_event_id: formFilledEventId, answer }),
+  });
+}
+
+/** "Don't send" - the gate stops until a later "Send this one". */
+export async function declineSend(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/send/decline`, { method: "POST" });
+}
+
+/** "Autofill" / "Don't autofill" - may the assistant type into this form. */
+export async function setAutofill(applicationId: number, mode: "allow" | "deny"): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/autofill`, {
+    method: "POST",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+/** "Not a duplicate, go ahead" - clears the duplicate warning for this application. */
+export async function clearDuplicate(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/duplicate/clear`, { method: "POST" });
+}
+
+// ---- Proof screenshots (S7b) ----
+export type ProofOut = _Schemas["ProofOut"];
+export type ProofScreenshotOut = _Schemas["ProofScreenshotOut"];
+export type ProofStateOut = _Schemas["ProofStateOut"];
+export async function getProof(applicationId: number): Promise<ProofStateOut> {
+  return request(`/api/applications/${applicationId}/proof`);
+}
+
+export async function uploadProofScreenshot(applicationId: number, file: File): Promise<ProofScreenshotOut> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`/api/applications/${applicationId}/proof/screenshots`, { method: "POST", body: form });
+}
+
+/** Image bytes via the session cookie (fetch-blob, like CV downloads); the caller revokes its blob URL. */
+export async function fetchProofScreenshot(applicationId: number, screenshotId: number): Promise<Blob> {
+  const res = await fetch(`${API}/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, "Image unavailable");
+  return res.blob();
+}
+
+export async function deleteProofScreenshot(applicationId: number, screenshotId: number): Promise<ProofScreenshotOut> {
+  return request(`/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { method: "DELETE" });
+}
+
+/** "It was not sent" - a started submit never went out; records `submit_resolved` {outcome: not_sent}. */
+export async function resolveSubmit(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/submit/resolve`, { method: "POST" });
+}
+
+/** "Mark resolved" - the user sorted out what stopped their assistant; records `unblocked` {resolution: user_did_it}. */
+/** Free an application another assistant session holds (appends `hold_released`). */
+export async function releaseHold(applicationId: number): Promise<{ released: boolean }> {
+  return request(`/api/applications/${applicationId}/hold/release`, { method: "POST" });
+}
+
+export async function resolveBlocked(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/blocked/resolve`, { method: "POST" });
+}
+
 export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
+export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
+export type StatsResponse = _Schemas["StatsResponse"];
+
+/** What changed since `since` (events oldest first, `limit` max 200). Page on
+ * with `next_since` + `next_after_id` while `truncated` is true. */
+export async function whatsNew(
+  params: { since?: string; after_id?: number; limit?: number } = {}
+): Promise<WhatsNewResponse> {
+  return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
+}
+
+/** The hunt in counts (brought / applied / replied / interview …). */
+export async function getStats(view?: string): Promise<StatsResponse> {
+  // A view only ADDS one block to the response (e.g. "sites"); the rest is unchanged.
+  return request(`/api/applications/stats${qs({ view })}`);
+}
 /** Add a person to an application (spec R1/R2). 201 for a new row, 200
  * (`already_existed: true`) for the same non-empty email seen again on this
  * application — the caller reads the status from the response body, not the
@@ -832,6 +1084,7 @@ export async function addContact(
     email?: string;
     linkedin_url?: string;
     notes?: string;
+    found_via?: string;
     occurred_at?: string;
   }
 ): Promise<AddContactResult> {
@@ -849,7 +1102,32 @@ export async function addContact(
  *  (the response's `edit_history` shows every value with who/when). */
 export async function updateContact(
   contactId: number,
-  body: { name?: string; role?: string; email?: string; linkedin_url?: string; notes?: string }
+  body: {
+    name?: string;
+    role?: string;
+    email?: string;
+    linkedin_url?: string;
+    notes?: string;
+    found_via?: string; // "" clears it; null would mean "not given"
+  }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+// ---- Morning check (S5b) ----
+export type MorningCheck = _Schemas["MorningCheckOut"];
+
+export async function getMorningCheck(since: string): Promise<MorningCheck> {
+  return request<MorningCheck>(`/api/morning-check${qs({ since })}`);
+}
+
+// ---- Ready to send (S5d) ----
+export type ReadyToSend = _Schemas["ReadyToSendOut"];
+export type ReadyCardData = _Schemas["ReadyCard"];
+export type ReadyAnswer = _Schemas["ReadyAnswer"];
+export type ReadyFlag = _Schemas["ReadyFlag"];
+
+/** The approval cards. `limit: 0` = counts only; `applicationId` narrows to one. */
+export async function getReadyToSend(params: { applicationId?: number; limit?: number } = {}): Promise<ReadyToSend> {
+  return request<ReadyToSend>(`/api/ready-to-send${qs({ application_id: params.applicationId, limit: params.limit })}`);
 }

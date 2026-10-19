@@ -15,13 +15,16 @@ from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.api.auth_deps import (
+    AUTH_FIRST,
     SESSION_COOKIE_NAME,
     CurrentUser,
     _secret,
+    require_session_user,
     require_user,
 )
 from src.api.dependencies import get_request_db
 from src.api.middleware import _is_production
+from src.core import settings
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS, USER_TIMEZONE_MAX_CHARS
 from src.repositories import pg
 from src.repositories.database import JobDatabase
@@ -337,13 +340,16 @@ class TimezoneResponse(BaseModel):
     timezone: str
 
 
-@router.put("/me/timezone", response_model=TimezoneResponse)
+@router.put("/me/timezone", response_model=TimezoneResponse, dependencies=AUTH_FIRST)
 async def set_timezone(
     body: TimezoneRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-    user: CurrentUser = Depends(require_user),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
+    """Web session only (security review 2026-10-18): the user's timezone sets their day, week and
+    ``apply_hours``, so an assistant's token must not move it.
+
+    Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
     (browser-prefilled on the account settings page, but only ever SAVED
     here, on an explicit press — rule #29). A name `ZoneInfo` cannot resolve
     is refused with 422 naming the bad value; a valid one is stored and used
@@ -360,7 +366,7 @@ async def set_timezone(
 # ── GDPR Article 20 — data portability (docs/fable/05 C7) ────────────────────
 
 
-@router.get("/users/me/export")
+@router.get("/users/me/export", dependencies=AUTH_FIRST)
 async def export_my_data(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
@@ -372,7 +378,26 @@ async def export_my_data(
     Secrets (password hash, encrypted channel creds) are redacted and the
     security-token tables are omitted entirely; see ``export_user_data``.
     """
+    # Per-user cap (feature 4): a full export reads every table, so bound repeats.
+    # 0 or less disables the cap, matching the other *_MAX_PER_HOUR settings.
+    if settings.USER_EXPORT_MAX_PER_HOUR > 0 and not auth_rate_limit.check_and_record(
+        f"user_export:{user.id}", max_in_window=settings.USER_EXPORT_MAX_PER_HOUR, window_seconds=3600
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail=f"too many exports this hour (USER_EXPORT_MAX_PER_HOUR = {settings.USER_EXPORT_MAX_PER_HOUR})",
+        )
     data = await db.export_user_data(user.id)
+    # Audit line: ids and counts only, never the exported content.
+    get_audit_logger().info(
+        "auth",
+        extra={
+            "event": "user_data_exported",
+            "user_id": user.id,
+            "tables": len([k for k in data if not k.startswith("_") and k != "user"]),
+            "incomplete": bool(data.get("_incomplete_tables")),
+        },
+    )
     # Flat file: ``exported_at`` beside the tables (``user``, ``api_tokens``, …),
     # no wrapper object — one level to read for a human opening the download.
     body = json.dumps(
@@ -394,7 +419,7 @@ class AccountDeleteRequest(BaseModel):
     current_password: str
 
 
-@router.delete("/users/me", status_code=204)
+@router.delete("/users/me", status_code=204, dependencies=AUTH_FIRST)
 async def delete_account(
     req: AccountDeleteRequest,
     response: Response,
@@ -432,7 +457,7 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=256)
 
 
-@router.patch("/users/me/password", status_code=204)
+@router.patch("/users/me/password", status_code=204, dependencies=AUTH_FIRST)
 async def change_password(
     req: PasswordChangeRequest,
     response: Response,
@@ -471,7 +496,7 @@ class EmailChangeRequest(BaseModel):
     new_email: EmailStr
 
 
-@router.patch("/users/me/email", status_code=204)
+@router.patch("/users/me/email", status_code=204, dependencies=AUTH_FIRST)
 async def change_email(
     req: EmailChangeRequest,
     response: Response,

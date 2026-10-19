@@ -42,6 +42,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("user_profile_versions", "user_id"),
     ("user_feed", "user_id"),
     ("user_actions", "user_id"),
+    ("calendar_feeds", "user_id"),  # 0058: the private .ics feed token hash, one per user
     ("applications", "user_id"),
     ("application_stage_history", "user_id"),
     ("user_channels", "user_id"),
@@ -68,10 +69,18 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("application_asks", "user_id"),
     ("application_contacts", "user_id"),
     ("profile_edits", "user_id"),
+    # S2 assistant settings (migration 0051): riskier changes waiting on the user.
+    ("assistant_setting_requests", "user_id"),
+    ("artifact_links", "user_id"),
+    # S7 proof of application (migration 0053).
+    ("application_proof_screenshots", "user_id"),
+    ("proof_upload_links", "user_id"),
     # Outreach tracking (migration 0046) — CI's test_observe.py caught these
     # missing (coordinator review, 2026-09-26): a per-user table nobody
     # registers here is one this layer silently cannot see.
     ("contact_outreach", "user_id"),
+    # Feature 7: what the assistant reports missing (migration 0056_missing_tool_reports).
+    ("missing_tool_reports", "user_id"),
     ("contact_edits", "user_id"),
 )
 

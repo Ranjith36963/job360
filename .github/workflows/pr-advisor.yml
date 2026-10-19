@@ -708,7 +708,8 @@ jobs:
   # ═════════════════════════════════════════════════════════════════════════
   # WIP LIMIT — refuse a 3rd open PR by PARKING it, never by losing it.
   #
-  # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)". Refuse does
+  # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)"; the owner raised
+  # `wip.limit` to 5 on 2026-10-17 (.github/merge-policy.yml). Refuse does
   # NOT mean discard. A PR opened while `wip.limit` other real PRs are
   # already open gets PARKED, a comment says why and how to undo it, and the
   # owner is told in Slack once. `scripts/wip_gate.py` carries the exemptions
@@ -759,7 +760,7 @@ jobs:
   # picked out of a hat.
   # ═════════════════════════════════════════════════════════════════════════
   wip:
-    name: WIP limit (park the 3rd open PR)
+    name: WIP limit (park PRs over the limit)
     if: >-
       github.event_name == 'pull_request' &&
       contains(fromJSON('["opened","ready_for_review"]'), github.event.action)
@@ -842,7 +843,7 @@ jobs:
         with:
           channel: needs-your-decision
           severity: warn
-          title: "WIP 2: PR #${{ github.event.pull_request.number }} parked (label wip:parked) — WIP limit reached"
+          title: "WIP limit: PR #${{ github.event.pull_request.number }} parked (label wip:parked) — WIP limit reached"
           body: |
             ${{ steps.decide.outputs.why }}
 

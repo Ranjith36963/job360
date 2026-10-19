@@ -42,6 +42,25 @@ from migrations import runner  # noqa: E402
 from src.models import Job  # noqa: E402
 
 
+@pytest.fixture
+def form_check_gate():
+    """Opt-in marker: a test that requests this keeps the ``form_check_missing`` gate ON."""
+
+
+@pytest.fixture(autouse=True)
+def _form_check_cutoff_off(request, monkeypatch):
+    """Weak spot #1b (c): applications created today fall under the ``form_checked`` rule
+    (``kit.FORM_CHECK_REQUIRED_FROM``). Tests about other submit rules never call check_form, so by
+    default push the cut-off far into the future; a test asks for the real gate with ``form_check_gate``."""
+    if "form_check_gate" in request.fixturenames:
+        return
+    from datetime import datetime, timezone
+
+    from src.services.applications import kit as _kit
+
+    monkeypatch.setattr(_kit, "FORM_CHECK_REQUIRED_FROM", datetime(2999, 1, 1, tzinfo=timezone.utc))
+
+
 @pytest.fixture(autouse=True)
 def _reset_auth_rate_limit():
     """Clear the auth rate-limiter's module-global buckets around every test.
@@ -164,6 +183,26 @@ def _close_leaked_app_db():
             asyncio.run(dependencies.close_db())
         except Exception:
             dependencies._db = None
+
+
+@pytest.fixture(autouse=True)
+async def _drain_session_touches():
+    """No test leaks a background ``last_seen`` touch (FC-008).
+
+    Any authenticated request on a stale session schedules a background
+    UPDATE. Undrained, it could land during a later statement-counting assert,
+    or be destroyed pending when the loop closes. After each test: await this
+    loop's touches (1 s cap), then forget all in-process touch state. For a
+    sync TestClient test the touches lived on the client's own loop; the drain
+    just skips them and the reset drops the references. Never raises.
+    """
+    yield
+    from src.services.auth import sessions as _sessions
+
+    try:
+        await _sessions.drain_session_touches(timeout=1)
+    finally:
+        _sessions.reset_session_touch_state()
 
 
 # Pinned test timestamp — avoid non-determinism from datetime.now() leaking
@@ -330,7 +369,7 @@ def _bootstrap_async_db(db_path: str) -> None:
     """Initialize the full JobDatabase schema + apply ALL migrations (0000..latest).
 
     Uses ``JobDatabase.init_db()`` rather than a hand-written executescript
-    so the schema stays in sync with production (incl. match_score,
+    so the schema stays in sync with production (incl.
     salary_min/max, description columns, etc.), then runs the whole
     migration set so migration-created tables (users, job_enrichment, user_feed,
     audit_log, …) exist too.

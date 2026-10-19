@@ -29,16 +29,16 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from src.api.auth_deps import CurrentUser, require_verified_user
+from src.api.auth_deps import VERIFIED_FIRST, CurrentUser, require_verified_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
 from src.services.applications import spine as applications_spine
 from src.services.applications.spine import SpineError
 from src.services.profile.storage import load_profile
 from src.services.tailoring import DOC_KINDS
+from src.services.tailoring.cv_render import render_document_pdf
 from src.services.tailoring.docx import render_docx
 from src.services.tailoring.patterns import derive_patterns
-from src.services.tailoring.pdf import render_pdf
 from src.services.tailoring.provenance import annotate_provenance
 from src.utils.logger import get_audit_logger, get_logger, safe_log_value
 
@@ -131,7 +131,7 @@ def _load_cv_text(user_id: str) -> str:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("/tailor/{job_id}", response_model=TailorBundle)
+@router.get("/tailor/{job_id}", response_model=TailorBundle, dependencies=VERIFIED_FIRST)
 async def get_tailored(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
@@ -149,7 +149,11 @@ async def get_tailored(
     return TailorBundle(job_id=job_id, application_id=application_id, documents=documents)
 
 
-@router.get("/tailor/{job_id}/{doc_kind}/provenance", response_model=list[ProvenanceSegment])
+@router.get(
+    "/tailor/{job_id}/{doc_kind}/provenance",
+    response_model=list[ProvenanceSegment],
+    dependencies=VERIFIED_FIRST,
+)
 async def provenance(
     job_id: int,
     doc_kind: str,
@@ -163,12 +167,14 @@ async def provenance(
     _check_kind(doc_kind)
     application_id = await _application_id(db, user.id, job_id)
     row = await _latest(db, user.id, application_id, doc_kind)
-    job = await db.get_job_by_id(job_id)
-    source = _load_cv_text(user.id) + "\n" + (job.get("description", "") if job else "")
+    # P0 2026-10-14 — the ad as THIS user brought it (their snapshot), never
+    # the shared catalog row another user may have pasted first.
+    app_row = await applications_spine.get_owned_application(db, user.id, application_id) or {}
+    source = _load_cv_text(user.id) + "\n" + str(app_row.get("job_description_snapshot") or "")
     return annotate_provenance(row.get("text") or "", source)
 
 
-@router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut)
+@router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut, dependencies=VERIFIED_FIRST)
 async def save_edit(
     job_id: int,
     doc_kind: str,
@@ -198,7 +204,7 @@ async def save_edit(
     )
 
 
-@router.post("/tailor/{job_id}/{doc_kind}/keep", response_model=TailoredDocOut)
+@router.post("/tailor/{job_id}/{doc_kind}/keep", response_model=TailoredDocOut, dependencies=VERIFIED_FIRST)
 async def keep(
     job_id: int,
     doc_kind: str,
@@ -224,7 +230,7 @@ async def keep(
     return _doc_out(doc_kind, row)
 
 
-@router.post("/tailor/{job_id}/{doc_kind}/download")
+@router.post("/tailor/{job_id}/{doc_kind}/download", dependencies=VERIFIED_FIRST)
 async def download(
     job_id: int,
     doc_kind: str,
@@ -262,7 +268,7 @@ async def download(
         content = await asyncio.to_thread(render_docx, text, title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
-        content = await asyncio.to_thread(render_pdf, text, title=title)
+        content = await render_document_pdf(user.id, doc_kind, text)
         media_type = "application/pdf"
 
     # Downloading counts as 'used' → learn from it (§5).

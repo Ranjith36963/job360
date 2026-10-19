@@ -20,6 +20,19 @@ changed, what worked".
 
 Job boards find jobs. Agents think and act. Job360 remembers.
 
+## How a job gets in (decided 2026-10-16, the owner)
+
+Jobs enter the apply process in two ways:
+
+1. **The assistant finds it.** It searches for you ("run 360 hunt").
+2. **You bring it.** Two ways:
+   - a. Paste the **link**.
+   - b. Copy-paste the **whole job description**.
+
+All three land in the same place: `bring_job` births one Application, and the
+same apply process runs from there. There is no fourth way — Job360 never
+finds jobs itself.
+
 ## Why this and not the old Job360
 
 Job360 spent a year sourcing and ranking jobs. Every board already does that
@@ -37,7 +50,7 @@ That persistent, agent-accessible record is the product.
 | One **Application** object per job, born the moment the job is brought | Fit judging, CV / cover-letter / answer writing (we store, the agent writes) |
 | **Every version** of every artifact, forever, stamped with who/when/which profile | Gmail OAuth, inbox polling, email classification (the agent's connector reads; we store the event) |
 | A **typed event log**, one door (`record_event`), every event says who wrote it | People databases (Apollo, LinkedIn lookups) — the agent finds, we store the contact |
-| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Form filling, browser automation, auto-submit at volume |
+| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Browser automation of our own; auto-submit only when the user turns it on (never Indeed/LinkedIn; practice run first; pause switch) |
 | `whats_new` — pull, not push | Push notifications, WhatsApp, mobile apps (later, on evidence) |
 | OAuth 2.1 so ChatGPT / Grok / any client can connect | Our own LLM, our own general agent |
 | Cheap counts (reply rate per CV version / role) + full `export_history` | Charts-heavy analytics; the agent analyses the export |
@@ -60,16 +73,19 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
       ├── Contacts[]        name, role, email, linkedin — found by the agent
       ├── Receipt           frozen on "I applied": artifact versions sent, fields filled, answers,
       │                     confirmation text/number, channel, sent_at — append-only
-      └── Events[]          the history; the current status is just the last status event
+      └── Events[]          the history; the status is replayed from it by
+                            services/applications/status.replay_status
 ```
 
-**Event types (fixed list, plus free-text detail):**
-`brought`, `fit_judged`, `artifact_saved`, `contact_added`, `outreach_sent`,
-`outreach_replied`, `applied`, `replied`, `interview_requested`, `interview_scheduled`,
-`interview_done`, `offer`, `rejected`, `withdrawn`, `ghosted`, `note`,
-`lesson` ("flag for next time"), `asked` / `answered` / `ask_withdrawn` (the
-"Needs you" queue — note-family, never move the status). Every event: `type`, `detail`, `occurred_at`,
-`recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
+**Event types are a fixed list plus free-text detail.** The list is
+`core.settings.APPLICATION_STATUS_EVENT_TYPES` (these move the status) and
+`APPLICATION_NOTE_EVENT_TYPES` (these never do). Who may write each one, and
+the payload it must carry, is the `record_event` route in
+`api/routes/applications.py`, which dispatches one validator per event family.
+Pinned by `tests/test_application_kit.py::test_autofill_events_assistants_may_only_deny`,
+`tests/test_application_kit.py::test_duplicate_clear_is_web_only` and
+`tests/test_assistant_settings.py::test_per_job_override_an_assistant_may_only_send_confirm`.
+Nothing is ever deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +
 `application_stage_history` + `tailored_documents` (unversioned, DELETE+INSERT)
@@ -77,20 +93,12 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 ## The agent surface (MCP + same REST)
 
-| Tool | Does |
-|---|---|
-| `get_profile` / `update_profile` | structured candidate context; agent may fix or add fields |
-| `bring_job` | link or text → Application (status `considering`) |
-| `get_application` / `list_applications` | full object with events and artifact versions |
-| `save_artifact` | new version of cv / cover_letter / answers / outreach |
-| `save_fit` | agent's verdict + gaps on this application |
-| `add_contact` | recruiter / hiring manager on this application |
-| `record_event` | typed event, free-text detail |
-| `record_application` | the receipt — what was actually sent |
-| `whats_new` | everything since a timestamp (replaces push for now) |
-| `export_history` | applications + events + versions + outcomes as clean JSON |
-| `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
+The tools are the `@mcp.tool()` functions in `api/mcp_server.py`; each carries its
+own docstring, which is what the agent actually reads. The exact set is pinned by
+`tests/test_mcp_server.py::test_tools_list_is_exactly_the_expected_tools`. Two that
+are decisions, not mechanics: we write no CV or letter ourselves (decision 28 — the
+agent writes, we version and render), and nothing sources, ranks or recommends a
+job (rule 4).
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
@@ -152,7 +160,7 @@ applications and events in the database, not a doc.
 | 18 | Success measure | **Owner uses it daily for his own hunt.** |
 
 Taken from the 2026-09-02 pivot without re-asking: recruiters later and
-consent-first; everything free; no auto-submit at volume; global from day one.
+consent-first; everything free; auto-submit only when the user switches it on (owner decision 2026-10-08, no cap by default); global from day one.
 
 ### Additions, 2026-09-07 (the Tsenta competitor read — decisions kept, the read itself deleted 2026-09-12)
 

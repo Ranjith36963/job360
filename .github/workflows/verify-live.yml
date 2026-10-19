@@ -54,6 +54,52 @@ permissions:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
+  # RUN EACH TEST ONCE (CI audit, 2026-10-19).
+  #
+  # Q1-Q4 below are four files of the backend suite, and the frontend eye is
+  # `npx playwright test`. ci-offline.yml already runs BOTH, on this same PR,
+  # on this same merge tree, as REQUIRED checks: `offline-suite` (the whole
+  # pytest suite, nothing deselected) and `frontend-e2e` (every spec). Running
+  # them here too cost ~3 runner-minutes per PR for the same answer.
+  #
+  # So each eye asks the SAME classifier ci-offline.yml asks (same script, same
+  # base, same checkout -> same answer) and defers ONLY where that job really
+  # runs the thing:
+  #   backend eye   defers when scope is `full`   (offline-suite runs pytest)
+  #   frontend eye  defers when scope is `full` or `frontend` (frontend-e2e
+  #                 runs Playwright); on `docs` it drives the browser itself
+  # Anything else -- an unknown word, a failed classifier, a dispatch (the
+  # drill entrance, where no ci-offline run exists) -- runs here, as before.
+  #
+  # A deferral is not a pass on its own: scripts/merge_cage.py's `verify` tag
+  # names `offline-suite` and `frontend-e2e` alongside the two eyes, so the
+  # tag still needs the run that actually happened to be green. The eyes keep
+  # their check names; the summary says which ran here and which deferred.
+  # ───────────────────────────────────────────────────────────────────────
+  scope:
+    name: Scope (which eyes ci-offline already covers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    outputs:
+      scope: ${{ steps.decide.outputs.scope }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0   # the diff needs the base commit
+      - name: The scope classifier can still fail
+        run: python scripts/ci_scope.py --drill
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --print-scope --summary)
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
+  # ───────────────────────────────────────────────────────────────────────
   # BACKEND EYES — boot the real app against a real Postgres and ask it
   # questions a filename cannot answer.
   # ───────────────────────────────────────────────────────────────────────
@@ -61,8 +107,9 @@ jobs:
     name: verify / backend
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [scope]
 
-    # Mirrors ci.yml's Backend job exactly. NOT re-invented: a verifier that
+    # Mirrors ci-offline.yml's offline-suite job (the one backend pytest run). NOT re-invented: a verifier that
     # stands somewhere different from CI answers a different question, and then
     # the two disagree and you trust neither.
     services:
@@ -95,14 +142,31 @@ jobs:
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
 
     steps:
+      # Deferred: offline-suite runs these four files inside the full suite on
+      # this same tree. Say so, loudly, instead of a silent green.
+      - name: "Q1-Q4 ran in offline-suite (ci-offline.yml) on this same tree"
+        if: ${{ !(github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full') }}
+        run: |
+          {
+            echo "### verify / backend — deferred to \`offline-suite\`"
+            echo ""
+            echo "Scope \`${{ needs.scope.outputs.scope }}\`: ci-offline.yml \`offline-suite\` runs the FULL pytest"
+            echo "suite on this PR's merge tree, which contains Q1-Q4 (route auth, IDOR + tenancy,"
+            echo "design rules, the e2e lifecycle). They are not run a second time here."
+            echo "The merge cage's \`verify\` tag requires \`offline-suite\` green by name."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
       - name: Install backend (with dev extras)
+        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
@@ -113,14 +177,17 @@ jobs:
       # point is that the answers were already sitting in the repo unread.
 
       - name: "Q1 — is every route still auth-classified on purpose?"
+        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
         working-directory: backend
         run: python -m pytest tests/test_route_auth_coverage.py -q -p no:randomly
 
       - name: "Q2 — can one user still reach another user's data?"
+        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
         working-directory: backend
         run: python -m pytest tests/test_api_idor.py tests/test_tenancy_isolation.py -q -p no:randomly
 
       - name: "Q3 — do the owner's product rules still hold?"
+        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
         working-directory: backend
         run: |
           if [ -f tests/test_design_rules.py ]; then
@@ -130,6 +197,7 @@ jobs:
           fi
 
       - name: "Q4 — does a whole user journey still work end to end?"
+        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
         working-directory: backend
         run: python -m pytest tests/test_e2e_lifecycle.py -q -p no:randomly
 
@@ -153,22 +221,44 @@ jobs:
     name: verify / frontend
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: [scope]
 
     steps:
+      # Deferred: ci-offline.yml `frontend-e2e` drives the same specs, same
+      # config, on this same tree, and keeps the report + traces (14 days).
+      - name: "Playwright ran in frontend-e2e (ci-offline.yml) on this same tree"
+        if: ${{ !(github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')) }}
+        run: |
+          {
+            echo "### verify / frontend — deferred to \`frontend-e2e\`"
+            echo ""
+            echo "Scope \`${{ needs.scope.outputs.scope }}\`: ci-offline.yml \`frontend-e2e\` runs \`npx playwright test\`"
+            echo "(every spec in frontend/tests/e2e, real Chromium, production build) on this PR's"
+            echo "merge tree. It is not run a second time here. Its evidence — report, traces and"
+            echo "screenshots — is the \`playwright-evidence-${{ github.event.pull_request.number }}\` artifact on that run,"
+            echo "and its coverage bound (quarantined specs) is in that run's summary."
+            echo "The merge cage's \`verify\` tag requires \`frontend-e2e\` green by name."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
         with:
           node-version: "22"
 
       - name: Install
+        if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
         working-directory: frontend
         run: npm ci
 
       - name: Install Chromium
+        if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
       - name: Drive the real browser
+        if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
         working-directory: frontend
         run: npx playwright test
 
@@ -178,7 +268,7 @@ jobs:
       # spec that RAN, and the day one gets quarantined again this step is
       # what says so out loud instead of a doc going quietly stale.
       - name: State the coverage bound
-        if: always()
+        if: always() && (github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend'))
         working-directory: frontend
         run: |
           fixmes=$(grep -rlc "test.fixme" tests/e2e/ 2>/dev/null | wc -l || echo "?")
@@ -193,7 +283,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the evidence
-        if: always()
+        if: always() && (github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend'))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: verify-frontend-evidence-${{ github.event.pull_request.number || github.run_id }}
@@ -215,21 +305,34 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-latest
-    needs: [backend-eyes, frontend-eyes]
+    needs: [scope, backend-eyes, frontend-eyes]
     if: always()
     steps:
       - name: Decide
+        env:
+          EVENT: ${{ github.event_name }}
+          SCOPE: ${{ needs.scope.outputs.scope }}
         run: |
           be='${{ needs.backend-eyes.result }}'
           fe='${{ needs.frontend-eyes.result }}'
-          echo "backend-eyes=$be  frontend-eyes=$fe"
+          echo "backend-eyes=$be  frontend-eyes=$fe  scope=$SCOPE"
+          be_where="ran here"; fe_where="ran here"
+          if [ "$EVENT" = "pull_request" ] && [ "$SCOPE" = "full" ]; then
+            be_where="deferred to offline-suite (ci-offline.yml)"
+          fi
+          if [ "$EVENT" = "pull_request" ] && { [ "$SCOPE" = "full" ] || [ "$SCOPE" = "frontend" ]; }; then
+            fe_where="deferred to frontend-e2e (ci-offline.yml)"
+          fi
           {
             echo "### verify"
             echo ""
-            echo "| eye | result |"
-            echo "|---|---|"
-            echo "| backend (routes, IDOR, product rules, journey) | \`$be\` |"
-            echo "| frontend (14 specs, real Chromium) | \`$fe\` |"
+            echo "| eye | result | where the tests ran |"
+            echo "|---|---|---|"
+            echo "| backend (routes, IDOR, product rules, journey) | \`$be\` | $be_where |"
+            echo "| frontend (14 specs, real Chromium) | \`$fe\` | $fe_where |"
+            echo ""
+            echo "A deferred eye is green only as a record; the merge cage's \`verify\` tag"
+            echo "also requires \`offline-suite\` and \`frontend-e2e\` green by name (TAG_CHECKS)."
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$be" != "success" ] || [ "$fe" != "success" ]; then

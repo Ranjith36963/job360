@@ -175,8 +175,8 @@ function SectionLabel({
 }) {
   return (
     <div className="flex items-center gap-2 mb-2">
-      <Icon className="h-3.5 w-3.5 text-primary" />
-      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <Icon className="h-3.5 w-3.5 text-faint" />
+      <span className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         {text}
       </span>
       {trailing}
@@ -357,17 +357,17 @@ export function CVViewer({
   return (
     <div className="space-y-6 animate-fade-in-up stagger-2">
       {/* ── Extracted sections ────────────────────────── */}
-      <div className="glass-card rounded-xl p-6">
-        <h3 className="font-heading text-base font-semibold mb-4 flex items-center gap-2">
-          <FileText className="h-4 w-4 text-primary" />
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h3 className="font-heading text-base font-medium mb-4 flex items-center gap-2">
+          <FileText className="h-4 w-4 text-brand" />
           What we extracted from your profile
         </h3>
 
         {/* Identity */}
         {(cv.name || cv.headline || cv.location) && (
-          <div className="mb-5 pb-4 border-b border-border/40">
+          <div className="mb-5 pb-4 border-b border-border">
             {cv.name && (
-              <h4 className="font-heading text-lg font-semibold text-foreground">
+              <h4 className="font-heading text-lg font-medium text-foreground">
                 {cv.name}
                 <EditedMark edit={editOf("name")} onTakeBack={onTakeBack} onKeep={onKeep} />
               </h4>
@@ -392,13 +392,13 @@ export function CVViewer({
         {cv.summary_text && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <User className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <User className="h-3.5 w-3.5 text-faint" />
+              <span className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
                 Professional Summary
               </span>
               <EditedMark edit={editOf("summary")} onTakeBack={onTakeBack} onKeep={onKeep} />
             </div>
-            <p className="text-sm text-foreground/90 leading-relaxed pl-5 border-l-2 border-primary/20">
+            <p className="font-heading text-sm text-foreground/90 leading-relaxed pl-5 border-l-2 border-border">
               {cv.summary_text}
             </p>
           </div>
@@ -413,8 +413,8 @@ export function CVViewer({
         {cv.job_titles.length > 0 && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <Briefcase className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Briefcase className="h-3.5 w-3.5 text-faint" />
+              <span className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
                 Experience Found
               </span>
               <EditedMark edit={editOf("job_titles")} onTakeBack={onTakeBack} onKeep={onKeep} />
@@ -423,7 +423,7 @@ export function CVViewer({
               {cv.job_titles.map((title) => (
                 <span
                   key={title}
-                  className="inline-flex items-center rounded-md bg-primary/10 border border-primary/20 px-2.5 py-1 text-xs font-medium text-primary"
+                  className="inline-flex items-center rounded-full border border-border px-2.5 py-1 text-xs font-medium text-foreground"
                 >
                   <Building className="mr-1.5 h-3 w-3" />
                   {title}
@@ -443,7 +443,7 @@ export function CVViewer({
               {positions.map((pos, i) => (
                 <div
                   key={i}
-                  className="rounded-lg border border-border/50 bg-muted/10 p-3"
+                  className="rounded-lg border border-border p-3"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                     <p className="text-sm font-medium text-foreground">
@@ -456,7 +456,7 @@ export function CVViewer({
                       )}
                     </p>
                     {pos.dates && (
-                      <span className="shrink-0 text-xs text-muted-foreground">
+                      <span className="shrink-0 font-mono text-[11px] tabular-nums text-faint">
                         {pos.dates}
                       </span>
                     )}
@@ -468,7 +468,7 @@ export function CVViewer({
                     </p>
                   )}
                   {pos.bullets.length > 0 && (
-                    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-foreground/80">
+                    <ul className="mt-2 list-disc space-y-1 pl-4 font-heading text-xs text-foreground/80">
                       {pos.bullets.map((bullet, bi) => (
                         <li key={bi} className="leading-relaxed">
                           {bullet}
@@ -486,8 +486,8 @@ export function CVViewer({
         {cv.education.length > 0 && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <GraduationCap className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <GraduationCap className="h-3.5 w-3.5 text-faint" />
+              <span className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
                 Education
               </span>
               <EditedMark edit={editOf("education")} onTakeBack={onTakeBack} onKeep={onKeep} />
@@ -506,8 +506,8 @@ export function CVViewer({
         {cv.certifications.length > 0 && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <Award className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Award className="h-3.5 w-3.5 text-faint" />
+              <span className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
                 Certifications
               </span>
               <EditedMark edit={editOf("certifications")} onTakeBack={onTakeBack} onKeep={onKeep} />
@@ -623,7 +623,7 @@ export function CVViewer({
               {(cv.links ?? []).map((link, i) => (
                 <li key={i} className="break-all leading-relaxed">
                   {link.startsWith("https://") ? (
-                    <a href={link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                    <a href={link} target="_blank" rel="noreferrer" className="text-brand hover:underline">
                       {link}
                     </a>
                   ) : (
@@ -645,7 +645,7 @@ export function CVViewer({
 
       {/* ── LinkedIn detail ────────────────────────────── */}
       {hasLinkedinDetail && (
-        <div className="glass-card rounded-xl p-6">
+        <div className="rounded-xl border border-border bg-card p-6">
           <button
             type="button"
             data-testid="linkedin-detail-toggle"
@@ -654,7 +654,7 @@ export function CVViewer({
             className="flex w-full items-center gap-2 text-left"
           >
             <Link2 className="h-4 w-4 text-[#0A66C2]" />
-            <h3 className="font-heading text-base font-semibold flex-1">
+            <h3 className="font-heading text-base font-medium flex-1">
               LinkedIn detail
             </h3>
             <span className="text-xs font-medium text-muted-foreground">
@@ -680,7 +680,7 @@ export function CVViewer({
                 {liPositions.map((pos, i) => (
                   <div
                     key={i}
-                    className="rounded-lg border border-border/50 bg-muted/10 p-3"
+                    className="rounded-lg border border-border p-3"
                   >
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                       <p className="text-sm font-medium text-foreground">
@@ -693,13 +693,13 @@ export function CVViewer({
                         )}
                       </p>
                       {(pos.start || pos.end) && (
-                        <span className="shrink-0 text-xs text-muted-foreground">
+                        <span className="shrink-0 font-mono text-[11px] tabular-nums text-faint">
                           {[pos.start, pos.end].filter(Boolean).join(" – ")}
                         </span>
                       )}
                     </div>
                     {pos.description && (
-                      <p className="mt-1 text-xs text-foreground/80 leading-relaxed">
+                      <p className="mt-1 font-heading text-xs text-foreground/80 leading-relaxed">
                         {pos.description}
                       </p>
                     )}
@@ -772,7 +772,7 @@ export function CVViewer({
                   return (
                     <li
                       key={i}
-                      className="rounded-lg border border-border/40 bg-muted/10 p-3"
+                      className="rounded-lg border border-border p-3"
                     >
                       <p className="text-xs leading-relaxed text-foreground/85">
                         {text}
@@ -905,7 +905,7 @@ export function CVViewer({
                   return (
                     <li
                       key={i}
-                      className="rounded-full bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-400"
+                      className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-foreground"
                     >
                       {name}
                       {score ? ` · ${score}` : ""}
@@ -947,7 +947,7 @@ export function CVViewer({
                   return (
                     <li
                       key={i}
-                      className="rounded-full bg-sky-500/10 text-sky-400 px-2.5 py-0.5 text-xs font-medium"
+                      className="rounded-full border border-border text-foreground px-2.5 py-0.5 text-xs font-medium"
                     >
                       {lang}
                       {prof ? ` · ${prof}` : ""}
@@ -1046,7 +1046,7 @@ export function CVViewer({
 
       {/* ── GitHub detail ──────────────────────────────── */}
       {hasGithubDetail && (
-        <div className="glass-card rounded-xl p-6">
+        <div className="rounded-xl border border-border bg-card p-6">
           <button
             type="button"
             data-testid="github-detail-toggle"
@@ -1054,8 +1054,8 @@ export function CVViewer({
             aria-expanded={githubDetailOpen}
             className="flex w-full items-center gap-2 text-left"
           >
-            <GitBranch className="h-4 w-4 text-[#8B5CF6]" />
-            <h3 className="font-heading text-base font-semibold flex-1">
+            <GitBranch className="h-4 w-4 text-foreground" />
+            <h3 className="font-heading text-base font-medium flex-1">
               GitHub detail
             </h3>
             <span className="text-xs font-medium text-muted-foreground">
@@ -1096,7 +1096,7 @@ export function CVViewer({
                   return (
                     <li
                       key={lang}
-                      className="rounded-full bg-violet-500/10 text-violet-400 px-2.5 py-0.5 text-xs font-medium"
+                      className="rounded-full bg-foreground/10 text-muted-foreground px-2.5 py-0.5 text-xs font-medium"
                     >
                       {lang} {pct > 0 ? `· ${pct}%` : ""}
                     </li>
@@ -1138,14 +1138,14 @@ export function CVViewer({
                 {ghRepos.map((repo, i) => (
                   <li
                     key={`${repo.name}-${i}`}
-                    className="rounded-lg border border-border/40 bg-muted/10 p-3"
+                    className="rounded-lg border border-border p-3"
                   >
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                       <span className="text-sm font-medium text-foreground">
                         {repo.name}
                       </span>
                       {repo.language && (
-                        <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400">
+                        <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                           {repo.language}
                         </span>
                       )}
@@ -1160,7 +1160,7 @@ export function CVViewer({
                         </span>
                       )}
                       {repo.archived && (
-                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">
+                        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
                           archived
                         </span>
                       )}
@@ -1215,7 +1215,7 @@ export function CVViewer({
                 {ghFrameworks.map((f) => (
                   <li
                     key={f}
-                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                    className="rounded-full bg-foreground/10 px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
                   >
                     {f}
                   </li>
@@ -1236,7 +1236,7 @@ export function CVViewer({
           {ghProfileReadme && (
             <div>
               <SectionLabel icon={FileText} text="Profile README" />
-              <pre className="ml-5 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border/40 bg-muted/10 p-3 font-sans text-xs leading-relaxed text-foreground/80">
+              <pre className="ml-5 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border p-3 font-sans text-xs leading-relaxed text-foreground/80">
                 {ghProfileReadme}
               </pre>
             </div>

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
-import posthog from "posthog-js";
 
 import {
   createToken,
@@ -29,6 +28,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format-date";
+import {
+  AddressStepCard,
+  AssistantStepsCard,
+  SayHelloCard,
+  CARD_CLASS,
+  TITLE_CLASS,
+  DESC_CLASS,
+  LABEL_CLASS,
+  MONO_FIELD_CLASS,
+  QUIET_BTN_CLASS,
+  PRIMARY_BTN_CLASS,
+  DANGER_BTN_CLASS,
+  DANGER_CONFIRM_BTN_CLASS,
+  copyText,
+  mcpUrl,
+} from "@/components/connect/ConnectSteps";
 
 // ---------------------------------------------------------------------------
 // Connect your assistant — the page that gets a user's own AI assistant
@@ -42,13 +57,6 @@ import { formatDateTime } from "@/lib/format-date";
 // ---------------------------------------------------------------------------
 
 const MAX_NAME = 100;
-
-function mcpUrl(): string {
-  // The frontend proxies /api/* to the backend, so the MCP endpoint lives on
-  // the same origin the user is looking at — no separate host to explain.
-  if (typeof window === "undefined") return "/api/mcp";
-  return `${window.location.origin}/api/mcp`;
-}
 
 function connectCommand(token: string): string {
   return `claude mcp add --transport http job360 ${mcpUrl()} --header "Authorization: Bearer ${token}"`;
@@ -69,15 +77,6 @@ function redirectHost(uri: string): string {
   }
 }
 
-async function copyText(text: string, what: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success(`${what} copied`);
-  } catch {
-    toast.error("Copy failed — select the text and copy it by hand.");
-  }
-}
-
 // ---------------------------------------------------------------------------
 // The one-time reveal
 // ---------------------------------------------------------------------------
@@ -91,29 +90,32 @@ function NewTokenReveal({
 }) {
   const cmd = connectCommand(created.token);
   return (
-    <Card className="border-emerald-700/40" data-testid="token-reveal">
+    <Card className={CARD_CLASS} data-testid="token-reveal">
       <CardHeader>
-        <CardTitle>Your new token: {created.name}</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Your new token: {created.name}</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Copy it now. This is the only time it is shown — we keep a hash,
           not the token.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1">
-          <Label htmlFor="new-token">Token</Label>
+          <Label htmlFor="new-token" className={LABEL_CLASS}>
+            Token
+          </Label>
           <div className="flex gap-2">
             <Input
               id="new-token"
               readOnly
               value={created.token}
-              className="font-mono text-xs"
+              className={MONO_FIELD_CLASS}
               data-testid="token-value"
               onFocus={(e) => e.currentTarget.select()}
             />
             <Button
               type="button"
               variant="outline"
+              className={`h-9 ${QUIET_BTN_CLASS}`}
               onClick={() => copyText(created.token, "Token")}
             >
               Copy
@@ -121,7 +123,9 @@ function NewTokenReveal({
           </div>
         </div>
         <div className="space-y-1">
-          <Label htmlFor="connect-cmd">Connect Claude Code</Label>
+          <Label htmlFor="connect-cmd" className={LABEL_CLASS}>
+            Connect Claude Code
+          </Label>
           <p className="text-xs text-muted-foreground">
             Run this once in a terminal. Then Claude can bring a job, read
             your profile and receipts, and record an application for you.
@@ -131,145 +135,31 @@ function NewTokenReveal({
             readOnly
             rows={3}
             value={cmd}
-            className="w-full rounded-md border border-border/40 bg-muted/30 p-2 font-mono text-xs"
+            className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
             data-testid="connect-command"
             onFocus={(e) => e.currentTarget.select()}
           />
           <Button
             type="button"
             variant="outline"
+            className={QUIET_BTN_CLASS}
             onClick={() => copyText(cmd, "Command")}
           >
             Copy command
           </Button>
         </div>
-        <Button type="button" onClick={onDismiss} data-testid="token-reveal-done">
+        <Button
+          type="button"
+          className={PRIMARY_BTN_CLASS}
+          onClick={onDismiss}
+          data-testid="token-reveal-done"
+        >
           I have saved it
         </Button>
       </CardContent>
     </Card>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Step 1 — the address every assistant connects to. Kept exactly as it was
-// computed before (mcpUrl(), the frontend's own origin) — never hardcoded.
-// ---------------------------------------------------------------------------
-
-function AddressStepCard() {
-  const url = mcpUrl();
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Step 1 — Copy this address</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-1">
-        <Label htmlFor="mcp-url">Address</Label>
-        <div className="flex gap-2">
-          <Input
-            id="mcp-url"
-            readOnly
-            value={url}
-            className="font-mono text-xs"
-            data-testid="mcp-url"
-            onFocus={(e) => e.currentTarget.select()}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              // Funnel event (owner decision, 2026-09-28): the moment a user
-              // actually starts connecting an assistant, not just visits the
-              // page. No-op unless PostHog has loaded (consent given).
-              posthog.capture("connect_address_copied");
-              copyText(url, "Address");
-            }}
-          >
-            Copy
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step 2 — one plain line per assistant (owner-approved copy, 2026-09-27).
-// Only Claude carries a "Tested: works" line — a hand-checked, dated result
-// (2026-09-19, docs/product/VISION.md), never a live reading. The other four
-// carry no testing claim at all: neither "works" nor "not tested" — we have
-// not run them end-to-end, and a guess here would be a claim we can't back.
-// ---------------------------------------------------------------------------
-
-type AssistantStep = {
-  name: string;
-  /** Plan + how-to, combined into one plain line. */
-  line: string;
-  /** Only true for an assistant actually run end-to-end, hand-checked and
-   *  dated — see the comment above. Never set from a guess. */
-  tested?: boolean;
-};
-
-const ASSISTANT_STEPS: AssistantStep[] = [
-  {
-    name: "Claude",
-    line: "Settings → Connectors → Add custom connector → paste → Connect. Every plan, including Free.",
-    tested: true,
-  },
-  {
-    name: "ChatGPT",
-    line: "Business, Enterprise or Edu (Plus and Pro may be read-only). An admin adds it as a custom app.",
-  },
-  {
-    name: "Perplexity",
-    line: "Pro or Max. Settings → Connectors → add → paste.",
-  },
-  {
-    name: "Grok",
-    line: "Paid accounts. Add a connection with the address.",
-  },
-  {
-    name: "Gemini",
-    line: "Business editions only. An admin adds it.",
-  },
-];
-
-function AssistantStepsCard() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Step 2 — Add it in your assistant</CardTitle>
-        <CardDescription>
-          Same address for every assistant, from Step 1 above.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ul className="grid gap-4 border-t border-border/40 lg:grid-cols-2 lg:gap-x-8">
-          {ASSISTANT_STEPS.map((a) => (
-            <li key={a.name} className="space-y-1 border-b border-border/40 py-3">
-              <p className="font-medium">{a.name}</p>
-              <p className="text-xs text-muted-foreground">{a.line}</p>
-              {a.tested && (
-                <p
-                  className="text-xs text-emerald-600 dark:text-emerald-400"
-                  data-testid={`assistant-status-${a.name.toLowerCase()}`}
-                >
-                  ✅ Tested: works
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step 3 — say hello. What to actually say, once connected — the two
-// workflows the MCP tools carry (docs/product/VISION.md decision 28): build
-// the profile, apply to a job. Plain prompts, no marketing.
-// ---------------------------------------------------------------------------
 
 const EXAMPLE_PROMPTS: { label: string; prompt: string }[] = [
   {
@@ -282,38 +172,21 @@ const EXAMPLE_PROMPTS: { label: string; prompt: string }[] = [
   },
 ];
 
-function SayHelloCard() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Step 3 — Say hello</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm">
-          &ldquo;Build my Job360 profile from my CV.&rdquo; Your assistant
-          will offer to set up a daily check of your email for job replies —
-          just say yes.
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
 function ExamplePromptsCard() {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>What to say to your assistant</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>What to say to your assistant</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Once connected, just ask in plain words — the assistant picks the
           right tools.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ul className="divide-y divide-border/40">
+        <ul className="divide-y divide-border">
           {EXAMPLE_PROMPTS.map((e) => (
             <li key={e.label} className="space-y-1 py-3">
-              <p className="text-xs font-medium text-muted-foreground">
+              <p className={LABEL_CLASS}>
                 {e.label}
               </p>
               <p className="font-mono text-sm">&quot;{e.prompt}&quot;</p>
@@ -333,7 +206,10 @@ function ExamplePromptsCard() {
 // ---------------------------------------------------------------------------
 
 const DAILY_CHECK_PROMPT =
-  "Once a day: check my Gmail for new replies about jobs I applied to. For each " +
+  "On each run: first call Job360 get_profile and read preferences.daily_check. " +
+  "If it is paused, declined or empty, stop and record nothing. If it is ask, only ask " +
+  "me in chat 'Can I check your Gmail now?' and read only after I say yes. " +
+  "Check my Gmail for new replies about jobs I applied to. For each " +
   "one, find the application with Job360 list_applications and record it with " +
   "record_event (replied, interview_requested with scheduled_at when a time is " +
   "given, offer, rejected), always passing source (message id, sender, subject, " +
@@ -348,8 +224,47 @@ const DAILY_CHECK_PROMPT =
   "in plain words what's due today and what's gone quiet.";
 
 /** Values `preferences.daily_check` can hold (backend `VALID_DAILY_CHECK_VALUES`
- *  plus the "" not-asked-yet default — owner decision 2026-09-25). */
-export type DailyCheckState = "" | "scheduled" | "declined";
+ *  plus the "" not-asked-yet default — owner decision 2026-09-25). 2026-10-03:
+ *  it is the INBOX MODE — "auto" / "ask" / "paused"; the legacy "scheduled"
+ *  means auto and "declined" means off. */
+export type DailyCheckState =
+  | ""
+  | "auto"
+  | "ask"
+  | "paused"
+  | "scheduled"
+  | "declined";
+
+/** What the user can pick in the mode control. */
+export type InboxMode = "auto" | "ask" | "paused";
+
+/** Which mode option a stored value displays as (none for ""). */
+function modeOf(state: DailyCheckState | null): InboxMode | null {
+  if (state === "auto" || state === "scheduled") return "auto";
+  if (state === "ask") return "ask";
+  if (state === "paused" || state === "declined") return "paused";
+  return null;
+}
+
+const MODE_OPTIONS: { value: InboxMode; label: string }[] = [
+  { value: "auto", label: "Auto" },
+  { value: "ask", label: "Ask me first" },
+  { value: "paused", label: "Off" },
+];
+
+/** Values `preferences.check_every` can hold (backend
+ *  `VALID_CHECK_EVERY_VALUES`; "" = not set = once a day — 2026-10-03). */
+export type CheckEveryState = "" | "1h" | "3h" | "6h" | "12h" | "24h";
+
+type EveryValue = "1h" | "3h" | "6h" | "12h" | "24h";
+
+const CHECK_EVERY_OPTIONS: { value: EveryValue; label: string }[] = [
+  { value: "1h", label: "Every hour" },
+  { value: "3h", label: "Every 3 hours" },
+  { value: "6h", label: "Every 6 hours" },
+  { value: "12h", label: "Every 12 hours" },
+  { value: "24h", label: "Once a day" },
+];
 
 /** Plain words for whatever a connected assistant already answered — never
  * shown as a guess, since an empty value is silence (rule #29), not "no".
@@ -363,7 +278,11 @@ export function dailyCheckStatusLine(
   state: DailyCheckState,
   connected: boolean | null
 ): string | null {
-  if (state === "scheduled") return "Set up with your assistant.";
+  if (state === "auto" || state === "scheduled") {
+    return "Your assistant reads Gmail for your open applications, records what happened, and sends the outreach messages it wrote.";
+  }
+  if (state === "ask") return "Your assistant asks you before each Gmail check and only drafts messages.";
+  if (state === "paused") return "Off — your assistant reads nothing.";
   if (state === "declined") {
     return "You said no — your assistant won't ask again.";
   }
@@ -384,6 +303,10 @@ export function DailyCheckCard({
   loadFailed = false,
   onResetOffer,
   resetting,
+  checkEvery = null,
+  onModeChange = () => {},
+  onCheckEveryChange = () => {},
+  modeSaving = false,
 }: {
   /** `null` until the profile read succeeds: no status line, no button. */
   dailyCheck: DailyCheckState | null;
@@ -394,22 +317,33 @@ export function DailyCheckCard({
   loadFailed?: boolean;
   onResetOffer: () => void;
   resetting: boolean;
+  /** `null` until the profile read succeeds: no frequency select. */
+  checkEvery?: CheckEveryState | null;
+  /** Inbox mode picker (auto / ask first / off). */
+  onModeChange?: (mode: InboxMode) => void;
+  onCheckEveryChange?: (value: EveryValue) => void;
+  modeSaving?: boolean;
 }) {
-  const canReset =
-    !loadFailed && (dailyCheck === "scheduled" || dailyCheck === "declined");
+  const canReset = !loadFailed && dailyCheck !== null && dailyCheck !== "";
+  // Owner decision 2026-10-03 — the controls only make sense once an
+  // assistant is connected; null (still loading) shows neither.
+  const showControls =
+    connected === true && !loadFailed && dailyCheck !== null;
+  const selectedMode = modeOf(dailyCheck);
   const statusLine = loadFailed
     ? DAILY_CHECK_LOAD_FAILED
     : dailyCheck === null
       ? null
       : dailyCheckStatusLine(dailyCheck, connected);
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Daily check (scheduled task)</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Inbox check (scheduled task)</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Paste this into a ChatGPT or Claude scheduled task with Gmail
           connected — it reads your inbox and records what it finds, on your
-          own agent, once a day. Job360 never reads your email itself.
+          own agent, as often as you choose below. Job360 never reads your
+          email itself.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -422,7 +356,7 @@ export function DailyCheckCard({
           readOnly
           rows={6}
           value={DAILY_CHECK_PROMPT}
-          className="w-full rounded-md border border-border/40 bg-muted/30 p-2 font-mono text-xs"
+          className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
           data-testid="daily-check-prompt"
           onFocus={(e) => e.currentTarget.select()}
         />
@@ -430,6 +364,7 @@ export function DailyCheckCard({
           <Button
             type="button"
             variant="outline"
+            className={QUIET_BTN_CLASS}
             onClick={() => copyText(DAILY_CHECK_PROMPT, "Prompt")}
           >
             Copy prompt
@@ -443,10 +378,60 @@ export function DailyCheckCard({
               onClick={onResetOffer}
               data-testid="daily-check-reset"
             >
-              {resetting ? "Resetting…" : "Let my assistant offer again"}
+              {resetting ? "Resetting…" : "Let my assistant ask again"}
             </Button>
           )}
         </div>
+        {showControls && (
+          <div
+            role="radiogroup"
+            aria-label="Inbox mode"
+            className="flex flex-wrap items-center gap-2"
+            data-testid="inbox-mode"
+          >
+            {MODE_OPTIONS.map((o) => (
+              <Button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={selectedMode === o.value}
+                size="sm"
+                variant={selectedMode === o.value ? "default" : "outline"}
+                className={
+                  selectedMode === o.value ? PRIMARY_BTN_CLASS : QUIET_BTN_CLASS
+                }
+                disabled={modeSaving}
+                onClick={() => onModeChange(o.value)}
+                data-testid={`inbox-mode-${o.value}`}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
+        )}
+        {showControls && checkEvery !== null && (
+          <div className="flex items-center gap-2">
+            <label htmlFor="inbox-check-every" className="text-sm text-muted-foreground">
+              How often
+            </label>
+            <select
+              id="inbox-check-every"
+              data-testid="inbox-check-every"
+              value={checkEvery === "" ? "24h" : checkEvery}
+              disabled={modeSaving}
+              onChange={(e) =>
+                onCheckEveryChange(e.target.value as EveryValue)
+              }
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+            >
+              {CHECK_EVERY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -474,7 +459,7 @@ function GrantRow({
       data-testid="grant-row"
     >
       <div className="min-w-0">
-        <p className="truncate font-medium">{grant.client_name}</p>
+        <p className="truncate font-normal">{grant.client_name}</p>
         <p className="text-xs text-muted-foreground">
           <span className="font-mono">{redirectHost(grant.redirect_uri)}</span>{" "}
           · connected {fmtDate(grant.created_at)} · last used{" "}
@@ -487,6 +472,7 @@ function GrantRow({
             type="button"
             variant="destructive"
             size="sm"
+            className={DANGER_CONFIRM_BTN_CLASS}
             onClick={() => onRevoke(grant)}
             data-testid={`grant-revoke-confirm-${grant.id}`}
           >
@@ -496,6 +482,7 @@ function GrantRow({
             type="button"
             variant="outline"
             size="sm"
+            className={QUIET_BTN_CLASS}
             onClick={() => setConfirming(false)}
           >
             Cancel
@@ -506,6 +493,7 @@ function GrantRow({
           type="button"
           variant="destructive"
           size="sm"
+          className={DANGER_BTN_CLASS}
           onClick={() => setConfirming(true)}
           aria-label={`Revoke access for ${grant.client_name}`}
           data-testid={`grant-revoke-${grant.id}`}
@@ -527,10 +515,10 @@ function ConnectedAppsCard({
   onRevoke: (g: OAuthGrant) => void;
 }) {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Connected apps</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Connected apps</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Apps you signed in through — ChatGPT, Claude.ai, or any app that
           asked to connect. Revoking cuts that app off right away.
         </CardDescription>
@@ -543,7 +531,7 @@ function ConnectedAppsCard({
             No connected apps yet.
           </p>
         ) : (
-          <ul className="divide-y divide-border/40" data-testid="grant-list">
+          <ul className="divide-y divide-border" data-testid="grant-list">
             {grants.map((g) => (
               <GrantRow key={g.id} grant={g} onRevoke={onRevoke} />
             ))}
@@ -591,10 +579,10 @@ function CreateTokenCard({
   }
 
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Create a token</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Create a token</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           One token per agent or machine. Name it after where it lives
           (&quot;laptop Claude Code&quot;) so revoking later is easy.
         </CardDescription>
@@ -602,7 +590,9 @@ function CreateTokenCard({
       <CardContent>
         <form onSubmit={onSubmit} noValidate className="flex items-end gap-2">
           <div className="flex-1 space-y-1">
-            <Label htmlFor="token-name">Name</Label>
+            <Label htmlFor="token-name" className={LABEL_CLASS}>
+              Name
+            </Label>
             <Input
               id="token-name"
               value={name}
@@ -613,12 +603,12 @@ function CreateTokenCard({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" className={PRIMARY_BTN_CLASS} disabled={submitting}>
             {submitting ? "Creating..." : "Create token"}
           </Button>
         </form>
         {error && (
-          <p className="mt-2 text-xs text-red-400" role="alert">
+          <p className="mt-2 text-xs text-danger" role="alert">
             {error}
           </p>
         )}
@@ -641,10 +631,10 @@ function TokenList({
   onRevoke: (t: TokenSummary) => void;
 }) {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Active tokens</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Active tokens</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Revoking a token cuts that agent off immediately. It cannot be
           undone — mint a new one instead.
         </CardDescription>
@@ -657,7 +647,7 @@ function TokenList({
             No tokens yet. Create one above to connect an agent.
           </p>
         ) : (
-          <ul className="divide-y divide-border/40" data-testid="token-list">
+          <ul className="divide-y divide-border" data-testid="token-list">
             {tokens.map((t) => (
               <li
                 key={t.id}
@@ -665,7 +655,7 @@ function TokenList({
                 data-testid="token-row"
               >
                 <div className="min-w-0">
-                  <p className="truncate font-medium">{t.name}</p>
+                  <p className="truncate font-normal">{t.name}</p>
                   <p className="text-xs text-muted-foreground">
                     <span className="font-mono">{t.prefix}…</span> · created{" "}
                     {fmtDate(t.created_at)} · last used {fmtDate(t.last_used_at)}
@@ -675,6 +665,7 @@ function TokenList({
                   type="button"
                   variant="destructive"
                   size="sm"
+                  className={DANGER_BTN_CLASS}
                   onClick={() => onRevoke(t)}
                   aria-label={`Revoke token ${t.name}`}
                 >
@@ -720,13 +711,13 @@ function DeveloperTokensSection({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl ring-1 ring-border/40">
+    <div className="rounded-lg border border-border bg-card">
       <button
         type="button"
         data-testid="developer-tokens-toggle"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 p-4 text-left text-sm font-medium text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center gap-2 p-4 text-left text-sm font-normal text-muted-foreground hover:text-foreground"
       >
         <ChevronDown
           className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
@@ -736,7 +727,7 @@ function DeveloperTokensSection({
       {open && (
         <div data-testid="developer-tokens-content" className="space-y-8 p-4 pt-0">
           <p
-            className="text-xs text-emerald-600 dark:text-emerald-400"
+            className="font-mono text-[11px] text-brand"
             data-testid="developer-tokens-tested"
           >
             ✅ Tested: works — Claude Code, 28 September 2026
@@ -769,6 +760,9 @@ export default function ConnectAgentPage() {
   const [dailyCheck, setDailyCheck] = useState<DailyCheckState | null>(null);
   const [dailyCheckLoadFailed, setDailyCheckLoadFailed] = useState(false);
   const [resettingDailyCheck, setResettingDailyCheck] = useState(false);
+  const [savingMode, setSavingMode] = useState(false);
+  // null until the profile read succeeds, like dailyCheck above.
+  const [checkEvery, setCheckEvery] = useState<CheckEveryState | null>(null);
 
   const [tokensFailed, setTokensFailed] = useState(false);
   const [grantsFailed, setGrantsFailed] = useState(false);
@@ -812,7 +806,22 @@ export default function ConnectAgentPage() {
     try {
       const profile = await getProfile();
       const value = profile.preferences?.daily_check;
-      setDailyCheck(value === "scheduled" || value === "declined" ? value : "");
+      setDailyCheck(
+        value === "auto" ||
+          value === "ask" ||
+          value === "paused" ||
+          value === "scheduled" ||
+          value === "declined"
+          ? value
+          : ""
+      );
+      const every = profile.preferences?.check_every;
+      setCheckEvery(
+        every === "1h" ||
+        every === "3h" || every === "6h" || every === "12h" || every === "24h"
+          ? every
+          : ""
+      );
       setDailyCheckLoadFailed(false);
     } catch {
       // No toast: this is a courtesy status, not the page's main content. The
@@ -835,11 +844,41 @@ export default function ConnectAgentPage() {
       // above only ever READS what get_profile last returned.
       await updateProfileFields([{ path: "preferences.daily_check", value: "" }]);
       setDailyCheck("");
-      toast.success("Your assistant will offer the daily check again.");
+      toast.success("Your assistant will ask you again.");
     } catch (err) {
       toast.error(apiErrorMessage(err, "Failed to reset the daily check offer."));
     } finally {
       setResettingDailyCheck(false);
+    }
+  }
+
+  async function onModeChange(mode: InboxMode) {
+    setSavingMode(true);
+    try {
+      await updateProfileFields([{ path: "preferences.daily_check", value: mode }]);
+      setDailyCheck(mode);
+      toast.success("Saved — your assistant uses this from its next run.");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Failed to change the inbox mode."));
+    } finally {
+      setSavingMode(false);
+    }
+  }
+
+  async function onCheckEveryChange(value: EveryValue) {
+    // One save at a time (the select and the mode buttons share
+    // `savingMode`), so a late failure can never roll back a newer value.
+    const previous = checkEvery;
+    setCheckEvery(value);
+    setSavingMode(true);
+    try {
+      await updateProfileFields([{ path: "preferences.check_every", value }]);
+      toast.success("Saved — your assistant uses this from its next run.");
+    } catch (err) {
+      setCheckEvery(previous);
+      toast.error(apiErrorMessage(err, "Failed to save how often."));
+    } finally {
+      setSavingMode(false);
     }
   }
 
@@ -872,7 +911,9 @@ export default function ConnectAgentPage() {
   return (
     <div className="space-y-8 py-12">
       <div className="max-w-3xl">
-        <h1 className="text-3xl font-semibold">Connect your assistant</h1>
+        <h1 className="text-balance font-heading text-[clamp(1.9rem,3.6vw,2.75rem)] font-normal leading-[1.08] tracking-[-0.022em]">
+          Connect your assistant
+        </h1>
         {/* Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning
             sentence in use; do not invent another. Same line as the landing
             headline (Landing.tsx), the <title>/meta description
@@ -903,6 +944,10 @@ export default function ConnectAgentPage() {
           loadFailed={dailyCheckLoadFailed}
           onResetOffer={onResetDailyCheckOffer}
           resetting={resettingDailyCheck}
+          checkEvery={checkEvery}
+          onModeChange={onModeChange}
+          onCheckEveryChange={onCheckEveryChange}
+          modeSaving={savingMode}
         />
         <ConnectedAppsCard
           grants={grants}

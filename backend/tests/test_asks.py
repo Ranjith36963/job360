@@ -437,3 +437,172 @@ def test_asks_table_is_in_the_per_user_registries():
     assert "application_asks" in JobDatabase._EXPORT_TABLES
     observe = Path(__file__).resolve().parent.parent / "scripts" / "observe.py"
     assert "application_asks" in observe.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_route_answer_with_user_words_is_relayed_from_chat(authenticated_async_context):
+    """A token (assistant) answer that carries the user's words reads as the user's."""
+    token = await _mint_token(authenticated_async_context)
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web)
+        ask_id = (await _ask(web, application_id=app_id)).json()["id"]
+        assert (await web.get("/api/asks")).json()["asks"][0]["said_by"] == "assistant"  # open: nobody said it
+    from src.api.main import app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        done = await agent.post(
+            f"/api/asks/{ask_id}/answer",
+            json={"answer": "Two months", "user_words": "  its two months, give or take  "},
+        )
+        assert done.status_code == 200, done.text
+        body = done.json()
+        assert body["answer"] == "Two months"
+        assert body["user_words"] == "its two months, give or take"
+        assert body["relayed_from_chat"] is True and body["said_by"] == "you"
+        assert body["answered_by"].startswith("token:") and body["answered_by_user"] is False
+
+        # without user_words the assistant answered alone
+        ask2 = (await _ask(agent, application_id=app_id, question="Second?")).json()["id"]
+        alone = (await agent.post(f"/api/asks/{ask2}/answer", json={"answer": "guess"})).json()
+        assert alone["user_words"] == "" and alone["relayed_from_chat"] is False
+        assert alone["said_by"] == "assistant" and alone["answered_by_user"] is False
+
+        too_long = await agent.post(f"/api/asks/{ask2}/answer", json={"answer": "x", "user_words": "w" * 2001})
+        assert too_long.status_code == 422
+
+    async with authenticated_async_context() as web:
+        detail = (await web.get(f"/api/applications/{app_id}")).json()
+        answered = [e for e in detail["events"] if e["event_type"] == "answered"]
+        assert answered[0]["payload"] == {
+            "ask_id": ask_id, "answer": "Two months", "user_words": "its two months, give or take",
+        }
+        assert "user_words" not in answered[1]["payload"]
+        listed = {a["id"]: a for a in detail["asks"]}
+        assert listed[ask_id]["relayed_from_chat"] is True and listed[ask_id]["said_by"] == "you"
+
+
+@pytest.mark.asyncio
+async def test_web_answer_says_you_and_is_not_relayed(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        ask_id = (await _ask(client)).json()["id"]
+        body = (await client.post(f"/api/asks/{ask_id}/answer", json={"answer": "Two months"})).json()
+        assert body["said_by"] == "you" and body["relayed_from_chat"] is False
+        assert body["answered_by_user"] is True and body["user_words"] == ""
+
+
+@pytest.mark.asyncio
+async def test_mcp_answer_ask_user_words_matches_the_route(authenticated_async_context):
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    token = await _mint_token(authenticated_async_context)
+    async with authenticated_async_context() as web:
+        ids = [(await _ask(web, question=f"Q{i}?")).json()["id"] for i in range(2)]
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            relayed = json.loads((await mcp.call_tool(
+                "answer_ask", {"ask_id": ids[0], "answer": "55k", "user_words": "about 55k I think"}
+            )).content[0].text)
+            assert relayed["user_words"] == "about 55k I think" and relayed["relayed_from_chat"] is True
+            assert relayed["said_by"] == "you" and relayed["answered_by_user"] is False
+            assert relayed["answered_by"].startswith("token:")
+            alone = json.loads((await mcp.call_tool("answer_ask", {"ask_id": ids[1], "answer": "60k"})).content[0].text)
+            assert alone["said_by"] == "assistant" and alone["relayed_from_chat"] is False
+            assert alone["user_words"] == ""
+    async with authenticated_async_context() as web:
+        stored = {a["id"]: a for a in (await web.get("/api/asks?status=answered")).json()["asks"]}
+        assert stored[ids[0]]["user_words"] == "about 55k I think" and stored[ids[0]]["said_by"] == "you"
+        assert stored[ids[1]]["said_by"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_user_confirms_a_relayed_answer_once_and_a_changed_answer_unconfirms(authenticated_async_context):
+    token = await _mint_token(authenticated_async_context)
+    async with authenticated_async_context() as web:
+        ask_id = (await _ask(web)).json()["id"]
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).status_code == 409  # nothing answered yet
+    from src.api.main import app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        answer = {"answer": "Two months", "user_words": "two months"}
+        assert (await agent.post(f"/api/asks/{ask_id}/answer", json=answer)).json()["confirmed_at"] is None
+        # an assistant can never confirm for the user
+        assert (await agent.post(f"/api/asks/{ask_id}/confirm")).status_code == 403
+    async with authenticated_async_context() as web:
+        first = (await web.post(f"/api/asks/{ask_id}/confirm")).json()
+        assert first["confirmed_at"] and first["relayed_from_chat"] is True
+        again = (await web.post(f"/api/asks/{ask_id}/confirm")).json()
+        assert again["confirmed_at"] == first["confirmed_at"]  # set once
+        assert (await web.get("/api/asks?status=answered")).json()["asks"][0]["confirmed_at"] == first["confirmed_at"]
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        changed = {"answer": "Three months", "user_words": "actually three"}
+        assert (await agent.post(f"/api/asks/{ask_id}/answer", json=changed)).json()["confirmed_at"] is None
+    async with authenticated_async_context() as web:
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).json()["confirmed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_confirm_needs_a_relayed_answer_and_is_per_user(authenticated_async_context):
+    async with authenticated_async_context() as web:
+        ask_id = (await _ask(web)).json()["id"]
+        await web.post(f"/api/asks/{ask_id}/answer", json={"answer": "Two months"})
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).status_code == 409  # the user's own web answer
+        assert (await web.post("/api/asks/999999/confirm")).status_code == 404
+    cookie = await _second_user_session_cookie("other-confirm@example.com")
+    async with _session_client(cookie) as other:
+        assert (await other.post(f"/api/asks/{ask_id}/confirm")).status_code == 404
+
+
+def test_no_mcp_tool_confirms_an_ask():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "src" / "api" / "mcp_server.py").read_text(encoding="utf-8")
+    assert "confirm_ask" not in src
+
+
+@pytest.mark.asyncio
+async def test_kit_answer_relayed_until_that_edit_is_kept_not_any_ask_confirm(authenticated_async_context):
+    """Weak spot #6 part B. Mirrors neonwatty job-apply/SKILL.md:118. Confirming an UNRELATED ask leaves
+    the relayed row relayed; approving THAT edit (profile-memory Keep) makes it confirmed."""
+    token = await _mint_token(authenticated_async_context)
+    from src.api.main import app
+
+    async with authenticated_async_context() as web:
+        app_id = await _bring(web)
+        ask_id = (await _ask(web, application_id=app_id)).json()["id"]
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        saved = await agent.patch("/api/profile", json={"edits": [
+            {"path": "user_info.contact", "value": {"phone": "+44 7700 900123"}, "source": "user_said"}]})
+        assert saved.status_code == 200, saved.text
+        assert (await agent.post(f"/api/asks/{ask_id}/answer",
+                                 json={"answer": "yes", "user_words": "yes that is right"})).status_code == 200
+        before = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+        phone = next(i for i in before["answers"]["contact"] if i["key"] == "contact.phone")
+        assert phone["state"] == "relayed" and phone.get("confirmed_at") is None
+        assert before["answers_summary"]["relayed"] >= 1
+    async with authenticated_async_context() as web:
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).status_code == 200
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        mid = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+        phone = next(i for i in mid["answers"]["contact"] if i["key"] == "contact.phone")
+        assert phone["state"] == "relayed" and mid["answers_summary"]["relayed"] >= 1
+    async with authenticated_async_context() as web:
+        kept = await web.post("/api/profile/edits/keep", json={"path": "user_info.contact"})
+        assert kept.status_code == 200, kept.text
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        after = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+        phone = next(i for i in after["answers"]["contact"] if i["key"] == "contact.phone")
+        assert phone["state"] == "confirmed" and phone["confirmed_at"]
+        assert after["answers_summary"]["relayed"] == 0

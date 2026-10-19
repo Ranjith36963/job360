@@ -104,6 +104,7 @@ def test_sentry_with_dsn_in_prod_calls_init(monkeypatch):
     assert len(calls) == 1, "sentry_sdk.init should be called exactly once in prod"
     assert calls[0]["dsn"] == fake_dsn
     assert calls[0]["environment"] == "production"
+    assert calls[0]["max_request_body_size"] == "never"
 
 
 # ---------------------------------------------------------------------------

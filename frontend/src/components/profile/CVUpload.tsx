@@ -71,14 +71,14 @@ function UploadReceipt({
   return (
     <div
       data-testid="upload-receipt"
-      className="flex items-center gap-2 rounded-lg border border-score-high/30 bg-score-high/5 px-3 py-2"
+      className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
     >
-      <CheckCircle className="h-4 w-4 shrink-0 text-score-high" />
+      <CheckCircle className="h-4 w-4 shrink-0 text-brand" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium text-foreground" title={name}>
           {name}
         </p>
-        {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="font-mono text-[11px] tabular-nums text-muted-foreground">{sub}</p>}
       </div>
     </div>
   );
@@ -99,10 +99,10 @@ interface HighlightTerm {
 }
 
 const CATEGORY_STYLES: Record<string, string> = {
-  skill: "bg-primary/25 text-primary border-b-2 border-primary/60 rounded-sm px-0.5",
-  title: "bg-blue-500/25 text-blue-300 border-b-2 border-blue-400/60 rounded-sm px-0.5",
-  education: "bg-amber-500/20 text-amber-300 border-b-2 border-amber-400/50 rounded-sm px-0.5",
-  certification: "bg-purple-500/20 text-purple-300 border-b-2 border-purple-400/50 rounded-sm px-0.5",
+  skill: "bg-primary/25 text-brand border-b-2 border-primary/60 rounded-sm px-0.5",
+  title: "bg-info/25 text-info border-b-2 border-info/60 rounded-sm px-0.5",
+  education: "bg-warning/20 text-warning border-b-2 border-warning/50 rounded-sm px-0.5",
+  certification: "bg-foreground/20 text-muted-foreground border-b-2 border-foreground/50 rounded-sm px-0.5",
 };
 
 function buildHighlightedCV(
@@ -320,13 +320,13 @@ export function CVUpload({
   return (
     <div className="space-y-6">
       {/* ── CV Upload Section ───────────────────────────── */}
-      <div className="glass-card rounded-xl p-6 animate-fade-in-up stagger-1">
+      <div className="rounded-xl border border-border bg-card p-6">
         <div className="flex items-center gap-3 mb-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-            <FileText className="h-5 w-5 text-primary" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border">
+            <FileText className="h-5 w-5 text-muted-foreground" />
           </div>
           <div>
-            <h3 className="font-heading text-base font-semibold">
+            <h3 className="font-heading text-lg font-normal">
               {hasCV ? "CV Uploaded" : "Upload CV"}
             </h3>
             <p className="text-xs text-muted-foreground">
@@ -336,7 +336,7 @@ export function CVUpload({
             </p>
           </div>
           {hasCV && (
-            <CheckCircle className="ml-auto h-5 w-5 text-score-high" />
+            <CheckCircle className="ml-auto h-4 w-4 text-brand" />
           )}
         </div>
 
@@ -371,7 +371,7 @@ export function CVUpload({
               className={`mt-3 rounded-md border p-3 text-xs ${
                 broken
                   ? "border-destructive/40 bg-destructive/5"
-                  : "border-amber-500/40 bg-amber-500/5"
+                  : "border-warning/40 bg-warning/5"
               }`}
             >
               <p className="font-semibold mb-1">
@@ -403,7 +403,7 @@ export function CVUpload({
 
         {/* V-04 upload validation error */}
         {uploadError && (
-          <p className="mb-3 text-sm text-red-400" role="alert">{uploadError}</p>
+          <p className="mb-3 text-sm text-danger" role="alert">{uploadError}</p>
         )}
 
         {/* Drop zone (when no CV or re-uploading) */}
@@ -423,10 +423,10 @@ export function CVUpload({
             tabIndex={uploading ? -1 : 0}
             aria-label="Upload a CV — click or drop a PDF or DOCX file here"
             aria-disabled={uploading}
-            className={`cursor-pointer border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+            className={`cursor-pointer border border-dashed rounded-xl p-8 text-center transition-colors ${
               dragging
-                ? "border-primary/60 bg-primary/5"
-                : "border-primary/20 hover:border-primary/40"
+                ? "border-foreground/40"
+                : "border-border hover:border-foreground/30"
             } ${uploading ? "pointer-events-none opacity-60" : ""}`}
           >
             <input
@@ -438,15 +438,15 @@ export function CVUpload({
             />
             {uploading || loading ? (
               <div className="flex flex-col items-center gap-3">
-                <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-foreground" />
                 <p className="text-sm text-muted-foreground">
                   Parsing your CV...
                 </p>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-                  <Upload className="h-7 w-7 text-primary" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border">
+                  <Upload className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">
@@ -471,35 +471,35 @@ export function CVUpload({
                 dropped and the other keeps its real count. */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1.5">
-                <Wrench className="h-3.5 w-3.5 text-primary" />
+                <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">Skills:</span>
-                <Badge variant="secondary" className="font-mono text-xs">
+                <Badge variant="outline" className="font-mono text-xs tabular-nums">
                   {profile.skills_count}
                 </Badge>
               </div>
               {profile.job_titles.length > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <Briefcase className="h-3.5 w-3.5 text-blue-400" />
+                  <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">Roles:</span>
-                  <Badge variant="secondary" className="font-mono text-xs">
+                  <Badge variant="outline" className="font-mono text-xs tabular-nums">
                     {profile.job_titles.length}
                   </Badge>
                 </div>
               )}
               {profile.education.length > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <GraduationCap className="h-3.5 w-3.5 text-amber-400" />
+                  <GraduationCap className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">Education:</span>
-                  <Badge variant="secondary" className="font-mono text-xs">
+                  <Badge variant="outline" className="font-mono text-xs tabular-nums">
                     {profile.education.length}
                   </Badge>
                 </div>
               )}
               {cvDetail && cvDetail.certifications.length > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <Award className="h-3.5 w-3.5 text-purple-400" />
+                  <Award className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">Certs:</span>
-                  <Badge variant="secondary" className="font-mono text-xs">
+                  <Badge variant="outline" className="font-mono text-xs tabular-nums">
                     {cvDetail.certifications.length}
                   </Badge>
                 </div>
@@ -529,7 +529,7 @@ export function CVUpload({
                 {cvDetail.skills.slice(0, 30).map((skill) => (
                   <span
                     key={skill}
-                    className="inline-flex items-center rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-xs font-medium text-primary"
+                    className="inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground"
                   >
                     {skill}
                   </span>
@@ -567,7 +567,7 @@ export function CVUpload({
                 </button>
                 {rawTextOpen && (
                   <div data-testid="raw-cv-text-content" className="mt-2 space-y-2">
-                    <div className="rounded-lg bg-muted/20 border border-border/40 p-4 max-h-[500px] overflow-y-auto">
+                    <div className="rounded-lg border border-border bg-card p-4 max-h-[500px] overflow-y-auto">
                       <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-foreground/85">
                         {buildHighlightedCV(cvDetail.raw_text, highlightTerms)}
                       </pre>
@@ -584,9 +584,9 @@ export function CVUpload({
                     {(() => {
                       const LEGEND = [
                         { category: "skill", label: "Skills", swatch: "bg-primary/30 border-primary/60" },
-                        { category: "title", label: "Roles", swatch: "bg-blue-500/30 border-blue-400/60" },
-                        { category: "education", label: "Education", swatch: "bg-amber-500/25 border-amber-400/50" },
-                        { category: "certification", label: "Certifications", swatch: "bg-purple-500/25 border-purple-400/50" },
+                        { category: "title", label: "Roles", swatch: "bg-info/30 border-info/60" },
+                        { category: "education", label: "Education", swatch: "bg-warning/25 border-warning/50" },
+                        { category: "certification", label: "Certifications", swatch: "bg-foreground/25 border-foreground/50" },
                       ] as const;
                       // Match buildHighlightedCV's own eligibility rule (it drops terms
                       // of 2 characters or fewer, above), otherwise a CV whose only
@@ -654,8 +654,8 @@ export function CVUpload({
       </div>
 
       {/* ── Enrichment Section ──────────────────────────── */}
-      <div className="glass-card rounded-xl p-6 animate-fade-in-up stagger-2">
-        <h3 className="font-heading text-base font-semibold mb-1">
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h3 className="font-heading text-lg font-normal mb-1">
           Add LinkedIn and GitHub
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
@@ -682,7 +682,7 @@ export function CVUpload({
               </p>
             </div>
             {profile?.has_linkedin && (
-              <CheckCircle className="h-4 w-4 text-score-high shrink-0" />
+              <CheckCircle className="h-4 w-4 text-brand shrink-0" />
             )}
           </div>
           <div>
@@ -701,7 +701,7 @@ export function CVUpload({
               className="gap-2 w-full"
             >
               {linkedinLoading ? (
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-foreground" />
               ) : (
                 <Upload className="h-3.5 w-3.5" />
               )}
@@ -732,8 +732,8 @@ export function CVUpload({
         {/* GitHub */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#8B5CF6]/10 ring-1 ring-[#8B5CF6]/20">
-              <GitBranch className="h-4 w-4 text-[#8B5CF6]" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border">
+              <GitBranch className="h-4 w-4 text-foreground" />
             </div>
             <div className="flex-1 min-w-0">
               <Label className="text-sm font-medium">GitHub Profile</Label>
@@ -742,7 +742,7 @@ export function CVUpload({
               </p>
             </div>
             {profile?.has_github && (
-              <CheckCircle className="h-4 w-4 text-score-high shrink-0" />
+              <CheckCircle className="h-4 w-4 text-brand shrink-0" />
             )}
           </div>
           <div className="flex gap-2">
@@ -766,7 +766,7 @@ export function CVUpload({
               className="gap-2 shrink-0"
             >
               {githubLoading ? (
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-foreground" />
               ) : (
                 <GitBranch className="h-3.5 w-3.5" />
               )}
@@ -810,8 +810,8 @@ export function CVUpload({
             itself (rule 4) — the old copy claimed LinkedIn/GitHub improved
             "semantic matching accuracy", which does not exist here. */}
         {profile && !profile.has_linkedin && !profile.has_github && (
-          <div className="mt-4 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/10 p-3">
-            <AlertCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-border p-3">
+            <AlertCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
             <p className="text-xs text-muted-foreground">
               Optional — your assistant can read these too.
             </p>

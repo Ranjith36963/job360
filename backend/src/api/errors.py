@@ -18,7 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.utils.logger import get_logger, get_request_id
+from src.utils.logger import get_logger, get_request_id, redact_path
 
 _err_log = get_logger("error")  # "job360.error" → main job360 handlers (data/logs/)
 
@@ -36,7 +36,7 @@ async def log_unhandled_exception(request: Request, exc: Exception) -> JSONRespo
         extra={
             "event": "unhandled_exception",
             "method": request.method,
-            "path": request.url.path,
+            "path": redact_path(request.url.path),
             "request_id": _rid(request),
             "error": repr(exc),
         },
@@ -54,7 +54,7 @@ async def log_http_exception(request: Request, exc: StarletteHTTPException) -> J
             extra={
                 "event": "http_error",
                 "method": request.method,
-                "path": request.url.path,
+                "path": redact_path(request.url.path),
                 "status_code": exc.status_code,
                 "detail": str(exc.detail),
                 "request_id": _rid(request),
@@ -75,7 +75,7 @@ async def log_validation_error(request: Request, exc: RequestValidationError) ->
         extra={
             "event": "validation_error",
             "method": request.method,
-            "path": request.url.path,
+            "path": redact_path(request.url.path),
             "status_code": 422,
             "errors": errors[:10],
             "request_id": _rid(request),

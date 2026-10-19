@@ -246,6 +246,18 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/repairable.py", "--drill"],
         no_negative="the cases are inline assertions over a pure predicate",
     ),
+    "scripts/fixer_gate.py": Guard(
+        status="drilled",
+        # The ONE door to `pr-repair.yml` (finding-watch.yml calls it; pr-shepherd
+        # goes through finding-watch). Refuses a dispatch while a pr-repair run
+        # for the same PR is not completed, or for a head sha + findings a run
+        # already judged. Born from 141 dispatches in 3.7 days (PR #891: 27 for 6
+        # heads). The drill replays #891's 27 recorded requests (-> 2) and #894's
+        # (-> 1); `--blind` switches both refusals off, so the replay and the
+        # skip cases must go RED.
+        drill=[sys.executable, "scripts/fixer_gate.py", "--drill"],
+        negative=[sys.executable, "scripts/fixer_gate.py", "--drill", "--blind"],
+    ),
     "scripts/stale_path_check.py": Guard(
         status="drilled",
         # Asks git which paths a change renamed and fails if any tracked file
@@ -459,6 +471,17 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/ssrf_drill.py", "--drill"],
         no_negative="ten inline mutations against an injected resolver",
     ),
+    # ── S4 playbooks: the MCP text budget ───────────────────────────────────
+    # Claude Code silently truncates server instructions and every tool
+    # description at 2,048 characters (anthropics/claude-code#81268). The
+    # drill plants a 2,001-character text and demands it is named, then a
+    # 2,000-character one that must pass. The negative blinds the limit check:
+    # the drill must then FAIL, which proves it can still go red.
+    "scripts/mcp_text_budget.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/mcp_text_budget.py", "--drill"],
+        negative=[sys.executable, "scripts/mcp_text_budget.py", "--drill", "--break-checker", "LIMIT"],
+    ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/already_built.py": Guard(
         status="owed",
@@ -519,7 +542,7 @@ REGISTRY: dict[str, Guard] = {
     ),
     "scripts/sentry_poll.py": Guard(
         status="drilled",
-        # WAS `owed` since 2026-08-16 ("needs a recorded issue payload"). FC-008
+        # WAS `owed` since 2026-08-16 ("needs a recorded issue payload"). FC-009
         # (2026-10-03): the trip rule is now the pure `decide()`, and the drill feeds
         # it the 3 REAL noise issues that rolled prod back three times (they must NOT
         # trip) plus controls that MUST (user-facing error, noise flood, unreadable
@@ -532,7 +555,7 @@ REGISTRY: dict[str, Guard] = {
     ),
     "scripts/deploy_settle.py": Guard(
         status="drilled",
-        # FC-008: waits for the deployment that carries THIS sha (not "any readyz
+        # FC-009: waits for the deployment that carries THIS sha (not "any readyz
         # 200", which the OLD container satisfies) and then lets the swap settle.
         # The drill covers the pure assess()/settle_remaining(); the Railway call
         # is rollback_gear.list_deployments, already drilled there.

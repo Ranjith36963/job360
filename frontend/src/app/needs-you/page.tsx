@@ -6,7 +6,7 @@ export default function NeedsYouPage() {
   return (
     <PageContainer className="flex flex-col gap-6 py-8">
       <div>
-        <h1 className="font-heading text-2xl font-bold">Needs you</h1>
+        <h1 className="font-heading text-3xl font-normal tracking-tight">Needs you</h1>
         <p className="text-muted-foreground">
           Questions your assistant could not answer without you. Answer once — every assistant
           sees it.

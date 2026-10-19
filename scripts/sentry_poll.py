@@ -29,7 +29,7 @@ The backlog is a human triage decision; only NEW ones are an event. Alarming on
 the standing backlog every night is how a detector becomes noise, and a noisy
 detector gets muted, which is worse than no detector.
 
-WHAT "NEW" MEANS FOR A ROLLBACK (added 2026-10-03, FC-008). "First seen in the
+WHAT "NEW" MEANS FOR A ROLLBACK (added 2026-10-03, FC-009). "First seen in the
 window" is not "caused by this deploy": every container swap makes the OLD container
 log `ClientDisconnect` on /api/mcp and `event loop blocked for 3.1s` on its way out,
 and each is a brand-new Sentry issue with 2 events and 0 users. post-merge-watch.yml
@@ -102,7 +102,7 @@ def _env_int(name: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Knobs:
-    """The trip rule's parameters. Defaults reproduce the pre-FC-008 behaviour."""
+    """The trip rule's parameters. Defaults reproduce the pre-FC-009 behaviour."""
 
     min_events: int = 1
     min_users: int = 1

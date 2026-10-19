@@ -1,33 +1,34 @@
 import type { Metadata } from "next";
-import { Sora, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Navbar } from "@/components/layout/Navbar";
-import { Footer } from "@/components/layout/Footer";
-import { FloatingIcons } from "@/components/layout/FloatingIcons";
+import { AppShell } from "@/components/layout/AppShell";
 import { AuthProvider } from "@/components/layout/AuthProvider";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { PostHogProviderWrapper } from "@/components/providers/PostHogProviderWrapper";
 import { ConsentBanner } from "@/components/consent/ConsentBanner";
 import { ClientErrorReporter } from "@/components/ClientErrorReporter";
-import { Toaster } from "sonner";
+import { ThemedToaster } from "@/components/layout/ThemedToaster";
 import "./globals.css";
 
-const sora = Sora({
-  variable: "--font-sora",
+// Geist = body (--font-sans), Geist Mono = numbers, dates and IDs only
+// (--font-mono), Newsreader = the serif for headings (--font-heading).
+const geist = Geist({
+  variable: "--font-geist",
   subsets: ["latin"],
   display: "swap",
 });
 
-const plusJakarta = Plus_Jakarta_Sans({
-  variable: "--font-plus-jakarta",
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
   subsets: ["latin"],
   display: "swap",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains",
+const newsreader = Newsreader({
+  variable: "--font-newsreader",
   subsets: ["latin"],
+  weight: ["400", "500"],
   display: "swap",
 });
 
@@ -67,7 +68,8 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark ${sora.variable} ${plusJakarta.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${geist.variable} ${geistMono.variable} ${newsreader.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <ClientErrorReporter />
@@ -76,15 +78,12 @@ export default function RootLayout({
           <QueryProvider>
             <AuthProvider>
               <TooltipProvider>
-                <FloatingIcons />
-                <Navbar />
-                <main className="flex-1">{children}</main>
-                <Footer />
+                <AppShell>{children}</AppShell>
                 {/* Analytics consent gate (fable/05 C3) — PostHog stays off
                     until the user accepts here. */}
                 <ConsentBanner />
               </TooltipProvider>
-              <Toaster position="bottom-right" richColors />
+              <ThemedToaster />
             </AuthProvider>
           </QueryProvider>
         </ThemeProvider>

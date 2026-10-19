@@ -274,6 +274,22 @@ async def require_session_user(
     return user
 
 
+def email_verification_satisfied(user: CurrentUser) -> bool:
+    """True when ``user`` has confirmed their email, or the gate is switched off.
+
+    The one reading of the verification rule: ``require_verified_user``, the
+    ``check_submit`` gate (``email_not_verified``) and personal-token minting all
+    ask this, so the ``REQUIRE_EMAIL_VERIFICATION=false`` escape hatch (e.g.
+    while Resend is in sandbox mode and verification emails only reach the
+    account owner) switches all of them off together. Defaults to ON.
+    """
+    import os
+
+    if os.getenv("REQUIRE_EMAIL_VERIFICATION", "true").strip().lower() in ("false", "0", "no", "off"):
+        return True
+    return bool(user.email_verified)
+
+
 async def require_verified_user(
     user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
 ) -> CurrentUser:
@@ -285,16 +301,22 @@ async def require_verified_user(
     verify, manage their account, and sign out. Returns HTTP 403 with detail
     ``email_not_verified`` (distinct from the 401 'authentication required').
     """
-    # Escape hatch for testing: REQUIRE_EMAIL_VERIFICATION=false disables this
-    # gate (e.g. while Resend is in sandbox mode and verification emails only
-    # reach the account owner). Defaults to ON — set back to true before launch.
-    import os
-
-    if os.getenv("REQUIRE_EMAIL_VERIFICATION", "true").strip().lower() in ("false", "0", "no", "off"):
-        return user
-    if not user.email_verified:
+    if not email_verification_satisfied(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="email_not_verified",
         )
     return user
+
+
+# Auth BEFORE the pooled DB handle (FC-008). FastAPI resolves a route's
+# ``dependencies=`` before the endpoint's own parameters, in order. A route that
+# takes ``db = Depends(get_request_db)`` ahead of ``user = Depends(require_user)``
+# would otherwise borrow a pool connection first and hold it while auth runs —
+# under a slow disk that pinned the 10-connection pool. Passing one of these as
+# ``dependencies=`` runs the gate first; the endpoint's own ``user`` parameter
+# then reuses the cached result (same callable, so it is resolved once), and an
+# unauthenticated request is refused before any connection is borrowed. The
+# endpoint signatures stay unchanged, so MCP's positional calls keep working.
+AUTH_FIRST = (Depends(require_user),)
+VERIFIED_FIRST = (Depends(require_verified_user),)

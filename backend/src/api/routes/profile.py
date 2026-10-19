@@ -11,7 +11,7 @@ import os
 import re
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Literal, Optional, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,11 +20,13 @@ from src.api.auth_deps import CurrentUser, require_session_user, require_user
 from src.api.dependencies import save_upload_to_temp
 from src.api.models import (
     AgentEditOut,
+    AssistantSettingsView,
     CVDetail,
     GitHubResponse,
     JsonResumeResponse,
     LessonOut,
     LinkedInResponse,
+    NormalizedOut,
     ProfileEditHistoryResponse,
     ProfileEditHistoryRow,
     ProfileEditOut,
@@ -32,14 +34,19 @@ from src.api.models import (
     ProfileSummary,
     ProfileVersionsListResponse,
     ProfileVersionSummary,
+    SettingRequestOut,
     TakeBackRequest,
 )
 from src.core import settings
 from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
+from src.services.applications import cv_checks
 from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
+from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import edits as profile_edits
+from src.services.profile import forgiving, refusals, setting_requests, user_info
 from src.services.profile.cv_parser import extract_text
+from src.services.profile.cv_style import extract_cv_style
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
     fetch_github_profile,
@@ -52,9 +59,12 @@ from src.services.profile.linkedin_parser import (
     _looks_like_linkedin,
 )
 from src.services.profile.models import (
+    OVERLAY_ONLY_PREFERENCE_FIELDS,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
+    AssistantSettings,
     CVData,
+    UserInfo,
     UserPreferences,
     UserProfile,
 )
@@ -64,8 +74,11 @@ from src.services.profile.storage import (
     list_profile_versions,
     load_profile,
     load_profile_with_overlay,
+    profile_version_avoid_companies,
     restore_profile_version,
+    save_assistant_settings,
     save_profile,
+    save_user_info,
 )
 from src.services.profile.two_pass import reset_cv_owned_fields, run_two_pass_extraction
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -83,6 +96,7 @@ def _build_profile_response(
     user_id: str,
     agent_edits: list[AgentEditOut],
     lessons: list[LessonOut] | None = None,
+    settings_view: dict[str, Any] | None = None,
 ) -> ProfileResponse:
     """Render ``profile`` as the API's ``ProfileResponse``.
 
@@ -124,6 +138,7 @@ def _build_profile_response(
         # saved before these fields existed still renders.
         cv_filename=getattr(profile.cv_data, "cv_filename", "") or "",
         cv_uploaded_at=getattr(profile.cv_data, "cv_uploaded_at", "") or "",
+        cv_file_warning=getattr(profile.cv_data, "cv_file_warning", "") or "",
         linkedin_filename=getattr(profile.cv_data, "linkedin_filename", "") or "",
         linkedin_uploaded_at=getattr(profile.cv_data, "linkedin_uploaded_at", "") or "",
         github_username=profile.preferences.github_username or "",
@@ -224,9 +239,9 @@ def _build_profile_response(
         "contact": [getattr(cv, "linkedin_contact", {}) or {}]
         if getattr(cv, "linkedin_contact", None)
         else [],
-        # The About section. It reaches the judge and the vector, and would
+        # The About section. It is read by the user's agent, and would
         # otherwise be the one thing on this profile that is extracted, stored
-        # and MATCHED ON while being invisible to the person it describes — the
+        # and READ while being invisible to the person it describes — the
         # third way a shelf goes dark, after a broken extractor and a dropping
         # merge. Shown as a single row so it renders like every other section.
         "summary": [{"text": (getattr(cv, "linkedin_summary", "") or "").strip()}]
@@ -295,6 +310,10 @@ def _build_profile_response(
         # Passed IN like `agent_edits` (slice-4 review N4): this builder is
         # pure, the caller does the read.
         lessons=lessons or [],
+        user_info=asdict(profile.user_info),
+        # Owner decision 2026-10-08 (S2) — passed IN like `lessons`: this
+        # builder is pure, the caller does the reads (waiting requests, practice).
+        assistant_settings=AssistantSettingsView(**settings_view) if settings_view is not None else None,
     )
 
 
@@ -315,7 +334,7 @@ _NOTES_PATH = "preferences.assistant_notes"
 # through the agent-edit overlay (update_profile / PATCH /api/profile). A web
 # preferences save ignores them in `_apply_preferences` and never records a
 # history row for them (owner decision 2026-09-25, daily-check offer).
-_OVERLAY_ONLY_PREFERENCES: frozenset[str] = frozenset({"daily_check"})
+_OVERLAY_ONLY_PREFERENCES: frozenset[str] = OVERLAY_ONLY_PREFERENCE_FIELDS
 
 
 def _notes_or_422(value: Any) -> list[str]:
@@ -327,12 +346,60 @@ def _notes_or_422(value: Any) -> list[str]:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
+def _salary_by_country_or_422(value: Any) -> list[dict[str, Any]]:
+    """The salary records through the SAME validator ``update_profile`` uses
+    (``None`` -> ``[]``), or a 422 naming the rule — never a silent cut."""
+    try:
+        return cast(
+            list[dict[str, Any]],
+            profile_edits.validate_edit(user_info.SALARY_BY_COUNTRY_PATH, value if value is not None else []),
+        )
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+def _pref_or_422(path: str, value: Any) -> Any:
+    """A preference through the SAME validator ``update_profile`` uses, or a 422
+    naming the path - never a silent cut. ``None`` keeps meaning "not set"."""
+    try:
+        return profile_edits.validate_edit(path, value)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+def _list_pref_or_422(path: str, value: Any) -> list[str]:
+    return cast(list[str], _pref_or_422(path, value if value is not None else []))
+
+
+def _years_or_422(pref_dict: dict[str, Any], existing: UserPreferences) -> tuple[Optional[int], Optional[int]]:
+    """Owner decision 2026-10-10 - years of experience the user is looking for.
+    Partial-save shape: an OMITTED key keeps the stored value, an explicit null
+    clears it. Both bounds validated like ``update_profile`` (0-60, min <= max)."""
+    low = pref_dict.get("experience_years_min", existing.experience_years_min)
+    high = pref_dict.get("experience_years_max", existing.experience_years_max)
+    low = _pref_or_422(profile_edits.YEARS_MIN_PATH, low)
+    high = _pref_or_422(profile_edits.YEARS_MAX_PATH, high)
+    try:
+        profile_edits.check_years_order(low, high)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    return low, high
+
+
 def _recent_lessons(user_id: str) -> list[LessonOut]:
     """The last ``PROFILE_LESSONS_MAX`` lessons — one bounded read."""
     from src.services.applications.lessons import list_lessons  # noqa: PLC0415
 
     rows, _total = list_lessons(user_id, limit=settings.PROFILE_LESSONS_MAX)
     return [LessonOut(**row) for row in rows]
+
+
+def settings_view(profile: UserProfile, user_id: str) -> dict[str, Any]:
+    """The assistant-settings read model for ``profile`` (already overlaid): the
+    waiting requests and the derived practice-run state are the two reads."""
+    return settings_rules.build_settings_view(
+        profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id)
+    )
 
 
 def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
@@ -354,9 +421,16 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     # only an ASSISTANT's row is an "assistant changed this" — a field whose
     # newest row is the human's own save carries no mark and is not listed.
     rows = [
-        AgentEditOut(**row) for row in overlay if profile_edits.is_assistant_actor(str(row["set_by"]))
+        AgentEditOut(
+            **row, confirmed=profile_edits.is_confirmed(str(row["set_by"]), str(row.get("source") or ""))
+        )
+        for row in overlay
+        if profile_edits.is_assistant_actor(str(row["set_by"]))
     ]
-    return profile, _build_profile_response(profile, user_id, rows, lessons=_recent_lessons(user_id))
+    return profile, _build_profile_response(
+        profile, user_id, rows, lessons=_recent_lessons(user_id),
+        settings_view=settings_view(profile, user_id)
+    )
 
 
 # ``_user_id_for(profile)`` used to live here. It did
@@ -393,6 +467,13 @@ class ProfileEditIn(BaseModel):
 
     path: str
     value: Any = None
+    # Feature 9: did the user SAY this, or did you work it out? Omitted = "agent_inferred"
+    # for an assistant (the safe default); the web always stores "user_said".
+    source: Optional[Literal["user_said", "agent_inferred"]] = None
+    # Weak spot #6 wave 2: the user said "yes, remember it" for THIS sensitive answer (equality,
+    # salary, visa). Without it an assistant's sensitive value is not saved. Never a time:
+    # the server stamps the marker itself. A web write is the user and needs no flag.
+    remember: Optional[bool] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -419,6 +500,307 @@ class UpdateProfileResponse(BaseModel):
 
     applied: list[ProfileEditOut]
     profile: ProfileResponse
+    # Owner decision 2026-10-08 (S2) — RISKIER setting changes an assistant asked
+    # for. NOT applied: the user confirms each one on the Job360 website
+    # ("Waiting for your OK"). Empty when nothing was held back.
+    waiting: list[SettingRequestOut] = []
+    # Owner decision 2026-10-14 - one plain sentence per path in `waiting`, so an
+    # assistant can never tell the user a parked value was saved.
+    not_saved: list[str] = []
+    # Owner decision 2026-10-10 - what was normalised on the way in (a country name read as its
+    # ISO code, "junior" read as "entry", ...). Path + closed rule code only, never a value.
+    normalized: list[NormalizedOut] = []
+
+
+class EditRefused(HTTPException):
+    """A refused ``update_profile``: 422 whose body says "Nothing was saved." plus the fix, and
+    carrying the closed ``reason`` code so the MCP audit row can log it."""
+
+    def __init__(self, status_code: int, detail: str, reason: str) -> None:
+        super().__init__(status_code=status_code, detail=detail)
+        self.reason = reason
+
+
+def _log_edit_rejected(
+    user_id: str, actor: str, pairs: list[tuple[str, Any]], failed_path: str, status: int,
+    reason: str = "validation_error",
+) -> None:
+    """Audit a refused ``update_profile`` call: who, which paths, which one
+    failed, the status and a CLOSED reason code. NEVER the detail — a message
+    can quote a rule about a value, and no submitted value belongs in a log line."""
+    get_audit_logger().warning(
+        "profile_edit_rejected",
+        extra={
+            "event": "profile_edit_rejected", "tool": "update_profile", "user_id": safe_log_value(user_id),
+            "actor": safe_log_value(actor), "http_status": status,
+            "paths": [safe_log_value(path, max_len=100) for path, _ in pairs],
+            "failed_path": safe_log_value(failed_path, max_len=100),
+            "status": status, "reason": safe_log_value(reason, max_len=40), "result": "rejected",
+        },
+    )
+
+
+_SETTING_LOG_VALUE_PATHS = frozenset(
+    {
+        settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH, settings_rules.SUBMIT_MODE_PATH,
+        settings_rules.APPLY_MIN_SCORE_PATH, settings_rules.DAILY_CAP_PATH,
+        settings_rules.COMPANY_CAP_PATH, settings_rules.COMPANY_CAP_DAYS_PATH,
+        settings_rules.WEEKLY_CAP_PATH, settings_rules.MIN_GAP_PATH, settings_rules.APPLY_HOURS_PATH,
+        settings_rules.AUTO_GRANT_COUNT_PATH, settings_rules.AUTO_GRANT_UNTIL_PATH,
+    }
+)
+
+
+def _remember_split(
+    actor: str, write_now: list[tuple[str, Any]], remembered: set[str]
+) -> tuple[set[str], set[str]]:
+    """``(consent_paths, no_consent)`` for the pairs about to be written: ``consent_paths`` get the
+    server-stamped remember marker (a web write, or an assistant edit sent with ``remember: true``);
+    ``no_consent`` are an assistant's sensitive values sent without it - not written."""
+    from src.services.applications.kit import edit_is_sensitive  # noqa: PLC0415 - kit pulls in the spine
+
+    consent: set[str] = set()
+    refused: set[str] = set()
+    for path, value in write_now:
+        if not edit_is_sensitive(path, value):
+            continue
+        if actor == profile_edits.WEB_ACTOR or path in remembered:
+            consent.add(path)
+        else:
+            refused.add(path)
+    return consent, refused
+
+
+def _remember_line(path: str) -> str:
+    """One plain sentence for ``not_saved``: the assistant must ask, then resend."""
+    return (
+        f"{path} was NOT saved: it holds a sensitive answer. Ask the user 'may I remember this for later "
+        "applications?'; if yes, send it again with remember: true (if no, use it on this form only)."
+    )
+
+
+AVOID_COMPANIES_PATH = "preferences.avoid_companies"
+
+
+def _refuse_avoid_list_removal(user_id: str, actor: str, pairs: list[tuple[str, Any]]) -> None:
+    """Security review 2026-10-18: ``preferences.avoid_companies`` drives the ``company_avoided``
+    STOP in ``check_submit``. An assistant (any non-web actor) may ADD companies to it, never
+    remove one or clear it: that would switch off a stop "a yes never clears". 403 naming the
+    path; the user removes entries on the website. Compared by the gate's normalized key."""
+    if actor == profile_edits.WEB_ACTOR or not any(p == AVOID_COMPANIES_PATH for p, _ in pairs):
+        return
+    from src.services.applications.kit import normalized_company_key  # noqa: PLC0415 - kit imports profile
+
+    current = load_profile(user_id) or UserProfile()
+    have = {normalized_company_key(str(c)) for c in current.preferences.avoid_companies} - {""}
+    for path, value in pairs:
+        if path != AVOID_COMPANIES_PATH:
+            continue
+        after = (
+            {normalized_company_key(str(c)) for c in (value or [])} - {""}
+            if isinstance(value, list) or value is None else None
+        )
+        if after is None or not have <= after:
+            _log_edit_rejected(user_id, actor, pairs, AVOID_COMPANIES_PATH, 403, "avoid_list_removal")
+            raise EditRefused(
+                403,
+                f"{AVOID_COMPANIES_PATH}: an assistant may add companies to the user's never-apply list but "
+                "never remove one; the user removes entries on the Job360 website.",
+                "avoid_list_removal",
+            )
+        have = after
+
+
+def _guard_avoid_list(user: CurrentUser, after: Optional[list[Any]]) -> None:
+    """The same never-remove rule for the other doors that write preferences (POST
+    /profile/preferences, POST /profile with preferences, POST /profile/clear): a non-web
+    caller whose write would drop any entry of the CURRENT effective list gets the same 403
+    (bug review 2026-10-18). ``after`` = the list the write leaves (``None`` = cleared)."""
+    actor = actor_for(user)
+    if actor == profile_edits.WEB_ACTOR:
+        return
+    _refuse_avoid_list_removal(user.id, actor, [(AVOID_COMPANIES_PATH, list(after or []))])
+
+
+def _sends_avoid_list(preferences_json: str) -> bool:
+    """True when the preferences form names ``avoid_companies`` (absent = left as it is)."""
+    try:
+        sent = json.loads(preferences_json)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(sent, dict) and "avoid_companies" in sent
+
+
+def _split_gated(
+    user_id: str, actor: str, pairs: list[tuple[str, Any]]
+) -> tuple[list[tuple[str, Any]], list[tuple[str, Any]], dict[str, str]]:
+    """Owner decision 2026-10-08 (S2) — split ``pairs`` into ``(write_now, hold,
+    risk)``.
+
+    Only the gated paths (the six ``assistant_settings.*`` paths and the inbox
+    mode ``preferences.daily_check``) are looked at. Each is classified
+    ``safer`` / ``riskier`` against the EFFECTIVE value the user has right now,
+    with the running value carried across the call so two pairs on one path
+    are judged in order. ``riskier`` pairs from a non-web actor go to ``hold``
+    (they become waiting requests); everything else is written now. The signed-in
+    user's own click (``WEB_ACTOR``) applies every pair at once — that click IS
+    the confirmation. ``risk`` maps path -> classification for the audit line.
+    """
+    if not any(path in settings_rules.GATED_PATHS for path, _ in pairs):
+        return list(pairs), [], {}
+    now = datetime.now(timezone.utc)
+    current = load_profile(user_id) or UserProfile()
+    base: UserProfile | None = None
+    running: dict[str, Any] = {}
+    write_now: list[tuple[str, Any]] = []
+    hold: list[tuple[str, Any]] = []
+    risk: dict[str, str] = {}
+    # The two line switches, as the user has them right now (RAW values; carried
+    # across the call as pairs on them are written). A moved score line is
+    # judged against these, never against a product-wide rule.
+    switch_raw: dict[str, Any] = {
+        settings_rules.ABOVE_LINE_PATH: current.assistant_settings.above_line,
+        settings_rules.BELOW_LINE_PATH: current.assistant_settings.below_line,
+    }
+    # A side also counts as "auto" for judging a moved line when this same batch
+    # asks for auto on it (held or written), or a request for auto on it is
+    # already waiting - otherwise [line -> 0, above_line -> auto] would slip the
+    # line change through as "safer" while the switch change waits.
+    pending_auto: set[str] = {
+        str(r["path"]) for r in setting_requests.list_waiting(user_id)
+        if r["path"] in switch_raw and str(r["value"]).strip().lower() == "auto"
+    }
+    pending_auto |= {
+        path for path, value in pairs
+        if path in switch_raw and isinstance(value, str) and value.strip().lower() == "auto"
+    }
+    for path, value in pairs:
+        if path not in settings_rules.GATED_PATHS:
+            write_now.append((path, value))
+            continue
+        head, _, field_name = path.partition(".")
+        if path not in running:
+            running[path] = getattr(profile_edits.profile_section(current, head), field_name)
+        if value is None:  # a clear falls back to the BASE value
+            if base is None:
+                base = load_profile(user_id, with_overlay=False) or UserProfile()
+            after_raw = getattr(profile_edits.profile_section(base, head), field_name)
+        else:
+            after_raw = profile_edits.validate_edit(path, value)
+        before = settings_rules.effective_path_value(path, running[path], now)
+        after = settings_rules.effective_path_value(path, after_raw, now)
+        # Judged twice: against the switches as they are now AND with the pending
+        # autos applied. Either one riskier = riskier (if the pending switch is
+        # never confirmed, the "now" view is the one that stands).
+        now_sw = tuple(
+            settings_rules.effective_path_value(p, switch_raw[p])
+            for p in (settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH)
+        )
+        pend_sw = tuple(
+            "auto" if p in pending_auto else sw
+            for p, sw in zip((settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH), now_sw)
+        )
+        # Owner decision 2026-10-14 — a FIRST-EVER score line (no line yet) is
+        # judged only against the switches IN EFFECT: a waiting `auto` request
+        # is not in effect, and parking the user's first line behind it left
+        # the setup interview stuck with nothing saved.
+        first_line = path == settings_rules.APPLY_MIN_SCORE_PATH and running[path] is None
+        verdicts = {
+            settings_rules.classify_change(path, before, after, switches=(sw[0], sw[1]))
+            for sw in ((now_sw,) if first_line else (now_sw, pend_sw))
+        }
+        verdict = "riskier" if "riskier" in verdicts else "safer"
+        risk[path] = verdict
+        if verdict == "riskier" and actor != profile_edits.WEB_ACTOR:
+            hold.append((path, profile_edits.validate_edit(path, value) if value is not None else None))
+        else:
+            write_now.append((path, value))
+            running[path] = after_raw
+            if path in switch_raw:
+                switch_raw[path] = after_raw
+    return write_now, hold, risk
+
+
+def _batch_state_rejection(
+    user_id: str,
+    write_now: list[tuple[str, Any]],
+    waiting_paths: frozenset[str] = frozenset(),
+    held_now: frozenset[str] = frozenset(),
+) -> tuple[str, str, str] | None:
+    """``(path, closed reason code, message)`` when the profile AS IT WILL BE after
+    ``write_now`` breaks a cross-field rule, else ``None``. Pure on the inputs it
+    reads (no write). Rules: ``experience_years_min`` <= ``experience_years_max``;
+    a setup round newly marked done needs its answers (``setup_round_missing``).
+    Applying the batch in memory first is what lets ONE call carry the answers AND
+    the ``done_at``. Only what is written NOW counts: a value that is only waiting
+    for the user's Confirm (``waiting_paths`` — a request from an earlier call) or
+    that THIS call would park (``held_now`` — no request exists yet, and none will:
+    the refusal writes nothing) is not saved, so a round that needs it is refused,
+    naming that path (owner decision 2026-10-14)."""
+    years_touched = any(path in profile_edits.YEARS_PATHS for path, _ in write_now)
+    progress_pairs = [
+        (path, value) for path, value in write_now
+        if path == settings_rules.SETUP_PROGRESS_PATH and value is not None
+    ]
+    if not years_touched and not progress_pairs:
+        return None
+    before = load_profile(user_id) or UserProfile()
+    after = copy.deepcopy(before)
+    base: UserProfile | None = None
+    for path, value in write_now:
+        head, _, field_name = path.partition(".")
+        if value is None:  # a clear falls back to the BASE value
+            if base is None:
+                base = load_profile(user_id, with_overlay=False) or UserProfile()
+            new_value = getattr(profile_edits.profile_section(base, head), field_name)
+        else:
+            new_value = profile_edits.validate_edit(path, value)
+        setattr(profile_edits.profile_section(after, head), field_name, copy.deepcopy(new_value))
+    if years_touched:
+        try:
+            profile_edits.check_years_order(
+                after.preferences.experience_years_min, after.preferences.experience_years_max
+            )
+        except profile_edits.ProfileEditError as exc:
+            return profile_edits.YEARS_MIN_PATH, "years_order", exc.detail
+    stored_raw = before.assistant_settings.setup_progress
+    written_raw = after.assistant_settings.setup_progress
+    stored = stored_raw if isinstance(stored_raw, dict) else {}
+    written = written_raw if isinstance(written_raw, dict) else {}
+    for round_name in settings_rules.SETUP_ROUNDS:
+        if round_name not in written or written[round_name] == stored.get(round_name):
+            continue  # not newly marked done by this call
+        missing = settings_rules.setup_round_missing(round_name, after)
+        if missing:
+            held = [m for m in missing if m in held_now]
+            parked = [m for m in missing if m in waiting_paths and m not in held_now]
+            other = [m for m in missing if m not in held and m not in parked]
+            detail = (
+                settings_rules.setup_round_waiting_refusal(
+                    round_name, parked, settings.SITE_BASE_URL, held_now=held, other=other
+                )
+                if parked or held else settings_rules.setup_round_refusal(round_name, missing)
+            )
+            return settings_rules.SETUP_PROGRESS_PATH, "setup_round_missing_answers", detail
+    return None
+
+
+def _log_settings_saved(user_id: str, actor: str, applied: list[dict[str, Any]], risk: dict[str, str]) -> None:
+    """One audit line per ``assistant_settings.*`` path written: who, which path,
+    safer/riskier, and the value ONLY for the closed modes and the whole numbers.
+    Never ``pause_reason`` (free text) nor the pause time."""
+    audit = get_audit_logger()
+    for row in applied:
+        if not str(row["path"]).startswith(f"{settings_rules.HEAD}."):
+            continue
+        extra: dict[str, Any] = {
+            "event": "assistant_setting_saved", "user_id": safe_log_value(user_id),
+            "actor": safe_log_value(actor), "path": safe_log_value(row["path"]),
+            "risk": risk.get(row["path"], "safer"), "cleared": row["value"] is None, "result": "ok",
+        }
+        if row["path"] in _SETTING_LOG_VALUE_PATHS and row["value"] is not None:
+            extra["value"] = safe_log_value(row["value"], max_len=40)
+        audit.info("assistant_setting_saved", extra=extra)
 
 
 @router.patch("/profile", response_model=UpdateProfileResponse)
@@ -446,17 +828,27 @@ async def update_profile(
     """
     # Cap check FIRST — no side effect (no profile row created) on a call
     # that is going to be rejected outright.
-    if len(body.edits) > settings.PROFILE_EDIT_MAX_PATHS_PER_CALL:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"at most {settings.PROFILE_EDIT_MAX_PATHS_PER_CALL} edits per call "
-                f"(PROFILE_EDIT_MAX_PATHS_PER_CALL); {len(body.edits)} given"
-            ),
-        )
-
     actor = actor_for(user)
     pairs = [(edit.path, edit.value) for edit in body.edits]
+    # Feature 9 - who said it. A web write is the user speaking: always user_said, and it may not
+    # claim "agent_inferred". An assistant that names no source gets the safe default (hard line 4).
+    if actor == profile_edits.WEB_ACTOR:
+        if any(edit.source == profile_edits.SOURCE_AGENT_INFERRED for edit in body.edits):
+            raise HTTPException(status_code=422, detail="source 'agent_inferred' is not allowed on a web write")
+        sources = {edit.path: profile_edits.SOURCE_USER_SAID for edit in body.edits}
+    else:
+        sources = {edit.path: edit.source or profile_edits.SOURCE_AGENT_INFERRED for edit in body.edits}
+    if len(body.edits) > settings.PROFILE_EDIT_MAX_PATHS_PER_CALL:
+        _log_edit_rejected(user.id, actor, pairs, "", 422, "too_long")
+        raise EditRefused(
+            422,
+            (
+                f"Nothing was saved. At most {settings.PROFILE_EDIT_MAX_PATHS_PER_CALL} edits per call "
+                f"(PROFILE_EDIT_MAX_PATHS_PER_CALL); {len(body.edits)} given. Split them into calls "
+                "under the limit and send every path."
+            ),
+            "too_long",
+        )
 
     # VALIDATE BEFORE BOOTSTRAPPING. The blank-profile creation below is a
     # WRITE — it inserts a `user_profiles` row and a `user_profile_versions`
@@ -465,9 +857,66 @@ async def update_profile(
     # /profile` then answered 200-with-nothing instead of 404, and the user's
     # own first CV upload started from a profile they never made. A 422 must
     # change nothing.
-    try:
+    # EVERY bad path is collected (not just the first) so one refusal can name them all and the
+    # assistant fixes the whole call at once. Normalisations that fire are recorded for the reply.
+    failures: list[tuple[str, profile_edits.ProfileEditError]] = []
+    with forgiving.recording() as normalized_rows:
         for path, value in pairs:
-            profile_edits.validate_edit(path, value)
+            try:
+                profile_edits.validate_edit(path, value)
+            except profile_edits.ProfileEditError as exc:
+                failures.append((path, exc))
+    if failures:
+        failed_path, first = failures[0]
+        reason = refusals.reason_for_http(first.detail, first.reason)
+        _log_edit_rejected(user.id, actor, pairs, failed_path, first.status_code, reason)
+        for bad_path, bad_exc in failures:
+            if bad_path in settings_rules.GATED_PATHS:
+                get_audit_logger().warning(
+                    "assistant_setting_request_rejected",
+                    extra={
+                        "event": "assistant_setting_request_rejected", "user_id": safe_log_value(user.id),
+                        "actor": safe_log_value(actor), "path": safe_log_value(bad_path, max_len=100),
+                        "status": bad_exc.status_code, "result": "rejected",
+                    },
+                )
+        raise EditRefused(
+            first.status_code,
+            refusals.self_correcting_message(
+                [p for p, _ in pairs], [(p, e.detail) for p, e in failures]
+            ),
+            reason,
+        ) from first
+
+    # S2 — a RISKIER setting change from an assistant is held, not written. The
+    # hourly budget for held requests is checked HERE, before any write of the
+    # call, so a 429 changes nothing.
+    write_now, hold, risk = _split_gated(user.id, actor, pairs)
+    _refuse_avoid_list_removal(user.id, actor, pairs)
+    # Weak spot #6 wave 2 - permission to fill is not permission to remember (answer-memory
+    # SKILL.md L151; job-apply-store.py L503-507: "sensitive answer value requires explicit
+    # remember consent"). An assistant's sensitive value without remember:true is NOT written.
+    consent_paths, no_consent = _remember_split(actor, write_now, {e.path for e in body.edits if e.remember})
+    if no_consent:
+        write_now = [(p, v) for p, v in write_now if p not in no_consent]
+    # Owner decision 2026-10-10 - checks that need the state AFTER this batch:
+    # years min <= max, and a setup round only counts as done once its answers
+    # are saved (in this call or before). A refusal writes nothing.
+    # A path THIS call holds has no request yet (create_requests runs after the
+    # checks), so it is named apart from paths already waiting for Confirm.
+    held_now = frozenset(path for path, _ in hold)
+    waiting_paths = frozenset(str(r["path"]) for r in setting_requests.list_waiting(user.id))
+    reject = _batch_state_rejection(user.id, write_now, waiting_paths, held_now)
+    if reject is not None:
+        reject_path, reject_reason, reject_detail = reject
+        _log_edit_rejected(user.id, actor, pairs, reject_path, 422, reject_reason)
+        raise EditRefused(
+            422,
+            refusals.self_correcting_message([p for p, _ in pairs], [(reject_path, reject_detail)]),
+            reject_reason,
+        )
+    try:
+        setting_requests.check_capacity(user.id, actor, len(hold))
     except profile_edits.ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -484,22 +933,53 @@ async def update_profile(
         # including every MCP update_profile call (/api/mcp is bearer-only),
         # are never WEB_ACTOR and stay limited.
         applied = profile_edits.record_edits(
-            user.id, actor, pairs, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
+            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR, source=sources,
+            consent_paths=consent_paths,
         )
     except profile_edits.ProfileEditError as exc:
+        _log_edit_rejected(
+            user.id, actor, pairs, "", exc.status_code, "rate_limited" if exc.status_code == 429 else "validation_error"
+        )
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     # S3 — audit line names PATHS and the ACTOR only, never a value. Goes to
     # the dedicated `job360.audit` logger (durable + DB-teed), the same
     # channel `services.applications.spine` uses for every other write.
-    get_audit_logger().info(
+    audit = get_audit_logger()
+    audit.info(
         "profile_edit",
-        extra={"event": "profile_edit", "paths": [path for path, _ in pairs], "actor": actor},
+        extra={
+            "event": "profile_edit", "paths": [path for path, _ in write_now],
+            "sources": sorted({sources.get(path, "") for path, _ in write_now}),
+            "actor": safe_log_value(actor), "user_id": safe_log_value(user.id), "result": "ok",
+        },
     )
+    # One line per memory path written: a COUNT and a flag, never a value and
+    # never a key name (owner decision 2026-10-08). `preferences.salary_by_country`
+    # is a normal preference, so it is audited by `profile_edit` above only.
+    for row in applied:
+        if row["path"] in user_info.USER_INFO_PATHS:
+            audit.info(
+                "memory_saved",
+                extra={
+                    "event": "memory_saved", "user_id": safe_log_value(user.id),
+                    "actor": safe_log_value(actor), "path": safe_log_value(row["path"]),
+                    "answered": user_info.answered_count(row["path"], row["value"]),
+                    "cleared": row["value"] is None, "result": "ok",
+                },
+            )
+
+    _log_settings_saved(user.id, actor, applied, risk)
+    created = setting_requests.create_requests(user.id, actor, hold) if hold else []
 
     rendered = load_profile_response(user.id)[1]
     return UpdateProfileResponse(
-        applied=[ProfileEditOut(**row) for row in applied], profile=rendered
+        applied=[ProfileEditOut(**row) for row in applied],
+        profile=rendered,
+        waiting=[SettingRequestOut(**setting_requests.waiting_out(r)) for r in created],
+        not_saved=[settings_rules.parked_line(str(r["path"]), settings.SITE_BASE_URL) for r in created]
+        + [_remember_line(p) for p in sorted(no_consent)],
+        normalized=[NormalizedOut(**row) for row in normalized_rows],
     )
 
 
@@ -574,6 +1054,7 @@ async def take_back_edit(
         # control chars, so both are run through the shared sanitizer here.
         extra={
             "event": "profile_edit_taken_back",
+            "user_id": safe_log_value(user.id),
             "paths": [safe_log_value(path)],
             "actor": safe_log_value(actor_for(user)),
         },
@@ -619,17 +1100,27 @@ async def keep_edit(
     if base is None:  # pragma: no cover — an overlay row implies a profile row (R8)
         raise HTTPException(status_code=404, detail="No profile found")
     head, _, field_name = path.partition(".")
-    target: Any = base.cv_data if head == "cv_data" else base.preferences
-    setattr(target, field_name, copy.deepcopy(value))
-    save_profile(base, user.id, source_action="keep_edit")
+    setattr(profile_edits.profile_section(base, head), field_name, copy.deepcopy(value))
+    if head == "user_info":
+        # Memory has its own column and its own single writer; no version snapshot.
+        save_user_info(user.id, base.user_info, "keep_edit")
+    elif head == "assistant_settings":
+        # S2 — the settings BASE stays at its defaults on purpose (it is written
+        # only by "Clear all"): a cleared value (null) must always mean "the safe
+        # default". Keep just makes the value the human's own via the web row below.
+        pass
+    else:
+        save_profile(base, user.id, source_action="keep_edit")
     profile_edits.record_edits(
-        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True
+        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True,
+        source=profile_edits.SOURCE_USER_SAID,
     )
     get_audit_logger().info(
         "profile_edit_kept",
         # CodeQL py/log-injection — same sanitizing as take_back above.
         extra={
             "event": "profile_edit_kept",
+            "user_id": safe_log_value(user.id),
             "paths": [safe_log_value(path)],
             "actor": safe_log_value(actor_for(user)),
         },
@@ -699,6 +1190,9 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # extraction below refills it only if the remaining history says so.
         _reinfer_level_from_what_remains(profile)
         profile.cv_data.raw_text = raw_text
+        # A file whose text layer is (cid:N) / U+FFFD debris reads as noise to hiring
+        # software too: warn the user to send a Job360-rendered copy instead.
+        profile.cv_data.cv_file_warning = "cv_file_garbled" if cv_checks.garbled(raw_text) else ""
         # Upload receipt — WHAT was uploaded and WHEN. Set here, right where the
         # new CV replaces the old one, so a re-upload always names the CURRENT
         # file (a stale name would be worse than none: it would confirm the
@@ -706,6 +1200,12 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # path-ish value, and the directory part is neither useful nor ours.
         profile.cv_data.cv_filename = os.path.basename(filename or "")[:255]
         profile.cv_data.cv_uploaded_at = datetime.now(timezone.utc).isoformat()
+        # Remember the PDF's own design so generated CVs follow it. Off the
+        # event loop (pdfplumber is sync); {} = keep the default style. A DOCX
+        # has no PDF fingerprint, and the reset above already cleared the old one.
+        if suffix == ".pdf":
+            extracted: Optional[dict[str, Any]] = await asyncio.to_thread(extract_cv_style, tmp_path)
+            profile.cv_data.cv_style = extracted or {}
     finally:
         try:
             os.unlink(tmp_path)
@@ -717,17 +1217,14 @@ def _normalize_work_arrangement(value: object) -> str:
     """Store "I don't mind" as SILENCE, not as the literal string "any".
 
     The preferences select seeds itself at ``"any"`` and posts that value, so
-    "any" reached the database as though the user had stated a constraint. Two
-    consumers then read it RAW, not through the ``preferred_workplace`` property
-    that maps it to None:
+    "any" reached the database as though the user had stated a constraint. The
+    old scoring/judging pipeline (now deleted) read it RAW, not through the
+    ``preferred_workplace`` property that maps it to None, and treated it as a
+    stated preference. Today the reader is the user's own agent, via
+    ``get_profile``, and it would see "any" as a real choice.
 
-      * the LLM judge builds its prompt with ``if v:`` — a non-empty string — so
-        every judged job was told ``work_arrangement=any``, spending real tokens
-        to state a preference the user explicitly declined to make;
-      * the semantic vector appended "any" as a candidate token.
-
-    The property protects the keyword scorer, but a property cannot protect a
-    reader that bypasses it. Normalising on SAVE fixes it once, at the only
+    A property cannot protect a reader that bypasses it. Normalising on SAVE
+    fixes it once, at the only
     point where the sentinel can enter — and it holds for the CLI and any older
     client too, which a frontend-side fix would not.
 
@@ -774,8 +1271,8 @@ def _normalize_experience_level(value: object) -> str:
     ``work_arrangement``. Before this function existed, ``_apply_preferences``
     stored whatever the client posted with no check at all, so a typo, a stale
     client sending a value the UI no longer offers, or a future free-text
-    field would reach the judge prompt and the semantic vector as though the
-    user had stated it.
+    field would be stored, and shown to the agent through ``get_profile``, as
+    though the user had stated it.
 
     NOT a fix for "a brand-new account saves 'mid' it never chose" — that
     defect is the FRONTEND seeding a real, still-selectable dropdown value
@@ -813,6 +1310,7 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     # that entry point produced a divergent profile from the day it was written.
     # preferred_workplace is now a derived @property on UserPreferences, so
     # there is exactly one stored answer and the two cannot disagree.
+    years = _years_or_422(pref_dict, existing)
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -859,18 +1357,6 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         work_authorization_countries=_countries_or_422(
             pref_dict.get("work_authorization_countries", existing.work_authorization_countries)
         ),
-        # Owner decision 2026-09-25 — the preferences form never sends this
-        # (it is written only by the connected assistant, through the
-        # agent-edit overlay). Not carrying it forward would reset the BASE
-        # object's copy on every routine web save — harmless on its own since
-        # the overlay wins on read, but the same "rebuilds from scratch"
-        # pattern already bit needs_visa/work_authorization_countries twice
-        # (PR #630), so it is carried forward here too rather than relying on
-        # the overlay alone. A posted `daily_check` key is ignored on purpose,
-        # and `_record_web_preference_changes` skips it too
-        # (`_OVERLAY_ONLY_PREFERENCES`), so a web save never writes a history
-        # row that would wipe the assistant's remembered answer.
-        daily_check=existing.daily_check,
         # Standing instructions for the assistant. Same partial-save shape: an
         # OMITTED key keeps the stored notes, an explicit [] clears them. Same
         # validator as update_profile (length cap, count cap, control chars
@@ -878,7 +1364,46 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         assistant_notes=_notes_or_422(
             pref_dict.get("assistant_notes", existing.assistant_notes)
         ),
+        # Owner decision 2026-10-08 — the salary per hiring country. Same
+        # partial-save shape as assistant_notes: OMITTED keeps the stored
+        # records, an explicit [] clears them. A NORMAL web-owned preference
+        # (history row on a web change), validated by the SAME validator as
+        # update_profile so the two doors can never store different shapes.
+        salary_by_country=_salary_by_country_or_422(
+            pref_dict.get("salary_by_country", existing.salary_by_country)
+        ),
+        # Owner decision 2026-10-10 - what the user is looking for. Same
+        # partial-save shape: OMITTED keeps the stored value, [] / null clears.
+        experience_years_min=years[0],
+        experience_years_max=years[1],
+        looking_for=_list_pref_or_422(
+            "preferences.looking_for", pref_dict.get("looking_for", existing.looking_for)
+        ),
+        dealbreakers=_list_pref_or_422(
+            "preferences.dealbreakers", pref_dict.get("dealbreakers", existing.dealbreakers)
+        ),
+        avoid_companies=_list_pref_or_422(
+            "preferences.avoid_companies", pref_dict.get("avoid_companies", existing.avoid_companies)
+        ),
+        target_companies=_list_pref_or_422(
+            "preferences.target_companies", pref_dict.get("target_companies", existing.target_companies)
+        ),
     )
+    # Overlay-only fields (daily_check, check_every): the
+    # preferences form never sends them — they are written only by the
+    # connected assistant through the agent-edit overlay (owner decisions
+    # 2026-09-25 / 2026-10-03). The user-info MEMORY is not here at all: it is
+    # its own store (`profile.user_info`) that this function never touches, and
+    # a posted "user_info" key is ignored. Not carrying them forward would
+    # reset the BASE object's copy on every routine web save — harmless on its
+    # own since the overlay wins on read, but the same "rebuilds from scratch"
+    # pattern already bit needs_visa/work_authorization_countries twice
+    # (PR #630). A posted key is ignored on purpose, and
+    # `_record_web_preference_changes` skips these too
+    # (`_OVERLAY_ONLY_PREFERENCES`), so a web save never writes a history row
+    # that would wipe the assistant's remembered answer.
+    for overlay_only in OVERLAY_ONLY_PREFERENCE_FIELDS:
+        setattr(profile.preferences, overlay_only, copy.deepcopy(getattr(existing, overlay_only)))
     # Scrub extraction pollution before it is stored. The frontend autosaves the
     # loaded preference chips straight back, so a profile whose additional_skills
     # / target_job_titles were polluted by an older extraction merge would keep
@@ -1115,6 +1640,8 @@ async def upsert_preferences(
     profile = load_profile(user.id, with_overlay=False) or UserProfile()
     base_prefs = copy.deepcopy(profile.preferences)
     _apply_preferences(preferences, profile)
+    if _sends_avoid_list(preferences):
+        _guard_avoid_list(user, profile.preferences.avoid_companies)
     kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     _record_web_preference_changes(preferences, before, profile, user, skip=kept)
@@ -1144,6 +1671,8 @@ async def upsert_profile(
     if preferences is not None and before is not None:
         base_prefs = copy.deepcopy(profile.preferences)
         _apply_preferences(preferences, profile)
+        if _sends_avoid_list(preferences):
+            _guard_avoid_list(user, profile.preferences.avoid_companies)
         kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     if preferences is not None and before is not None:
@@ -1405,7 +1934,7 @@ async def upload_github(
 # the SAME file was not skipped as "already read". That cache went with the LLM
 # passes in decision 28 — there is no paid call left to skip.)
 
-_CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "all")
+_CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "memory", "all")
 
 
 def _reinfer_level_from_what_remains(profile: UserProfile) -> None:
@@ -1428,6 +1957,7 @@ def _clear_cv(cv: CVData) -> None:
     cv.raw_text = ""
     cv.cv_filename = ""
     cv.cv_uploaded_at = ""
+    cv.cv_style = {}
     cv.extraction_score = {}
 
 
@@ -1436,12 +1966,12 @@ def _clear_prefixed(cv: CVData, prefix: str) -> None:
 
     WHY NOT A HAND-WRITTEN LIST. This was 18 named assignments, and it had
     already fallen two fields behind the dataclass: `linkedin_summary` and
-    `linkedin_headline` were added, wired into the LLM judge and the semantic
-    vector, and never added here. Measured on the shipped code — after
+    `linkedin_headline` were added, read by the old matching pipeline (since
+    deleted), and never added here. Measured on the shipped code — after
     "Clear LinkedIn", `linkedin_skills` and `linkedin_positions` were empty
     while `linkedin_summary` still held the previous person's About paragraph
-    and `linkedin_headline` their tagline, both of which `profile_to_matcher_text`
-    then sent to the judge for every job.
+    and `linkedin_headline` their tagline, and both stayed in the stored
+    profile for the next person's agent to read.
 
     Same failure as `reset_cv_owned_fields`, same root cause, third occurrence
     across the file. Ownership is a PREFIX fact, so read it off the dataclass
@@ -1477,6 +2007,43 @@ def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
     prefs.github_username = ""  # the handle belongs to this section
 
 
+def _log_profile_cleared(user_id: str, section: str) -> None:
+    """Audit a clear: who and which scope, never a value."""
+    logger.info(
+        # CodeQL py/log-injection — `section` is closed-enum validated by the
+        # caller (`_CLEAR_SCOPES`), but sanitized here too so the barrier is
+        # visible at the sink, not just at the validator.
+        "profile_cleared",
+        extra={
+            "event": "profile_cleared", "section": safe_log_value(section),
+            "user_id": safe_log_value(user_id),
+        },
+    )
+
+
+def _settings_riskier_to_reset(user: CurrentUser) -> frozenset[str]:
+    """The ``assistant_settings.*`` paths whose reset to the safe default would be
+    RISKIER for this caller (S2 injection guard): ``frozenset()`` for the user's
+    own web session (the click IS the confirmation), else every setting whose
+    current EFFECTIVE value is stricter than its default — a pause in force, a
+    daily cap. A "Clear all" from a token leaves those rows standing."""
+    if actor_for(user) == profile_edits.WEB_ACTOR:
+        return frozenset()
+    current = load_profile(user.id)
+    if current is None:
+        return frozenset()
+    now = datetime.now(timezone.utc)
+    default = AssistantSettings()
+    riskier: set[str] = set()
+    for path in settings_rules.SETTING_PATHS:
+        field_name = path.partition(".")[2]
+        before = settings_rules.effective_path_value(path, getattr(current.assistant_settings, field_name), now)
+        after = settings_rules.effective_path_value(path, getattr(default, field_name), now)
+        if settings_rules.classify_change(path, before, after) == "riskier":
+            riskier.add(path)
+    return frozenset(riskier)
+
+
 @router.post("/profile/clear", response_model=ProfileResponse)
 async def clear_profile_section(
     section: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
@@ -1484,7 +2051,15 @@ async def clear_profile_section(
 ) -> ProfileResponse:
     """Empty ONE input (or the whole profile), so the next upload starts clean.
 
-    ``section``: cv | linkedin | github | preferences | all.
+    ``section``: cv | linkedin | github | preferences | memory | all.
+
+    ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
+    (``user_info.*``: contact, right to work, logistics, languages, equality
+    answers, saved answers): the base column and the assistant's overlay rows.
+    It takes no version snapshot and leaves the CV, the preferences and
+    ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
+    ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
+    ``github`` leave it alone; only ``all`` resets it.
 
     Deliberately does NOT re-run extraction: there is nothing left to read, so
     rebuilding an emptied profile would be pure waste. The stored snapshot taken
@@ -1497,20 +2072,43 @@ async def clear_profile_section(
     fresh upload: the whole point is a clean experiment. So each cleared
     scope also appends a clearing row (``value = NULL``, append-only) for
     every overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``
-    -> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no
-    editable path, so they clear nothing in the overlay.
+    -> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.
+    ``linkedin`` and ``github`` own no editable path, so they clear nothing in
+    the overlay.
     """
     if section not in _CLEAR_SCOPES:
         raise HTTPException(
             status_code=400,
             detail=f"section must be one of: {', '.join(_CLEAR_SCOPES)}",
         )
+    if section in ("preferences", "all"):
+        _guard_avoid_list(user, None)
+    # S2 injection guard — this route takes a bearer token too, and "all" resets
+    # the assistant settings. A reset that would LOOSEN one (end a pause, remove a
+    # daily cap) is a riskier change: only the user's own web click may make it,
+    # so for any other caller those setting rows are left standing.
+    keep_settings = _settings_riskier_to_reset(user) if section == "all" else frozenset()
     # BASE profile (``with_overlay=False``) — this route mutates and saves, so
     # starting from the merged profile would write the agent's values into the
     # base while clearing it.
     profile = load_profile(user.id, with_overlay=False)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile to clear")
+
+    if section == "memory":
+        # The memory has its own column and ONE writer, and is not part of a
+        # version snapshot: no save_profile, no new version.
+        save_user_info(user.id, UserInfo(), "clear_memory")
+        _clear_overlay_paths(
+            user,
+            [
+                row["path"]
+                for row in profile_edits.current_overlay(user.id)
+                if str(row["path"]).startswith("user_info.")
+            ],
+        )
+        _log_profile_cleared(user.id, section)
+        return load_profile_response(user.id)[1]
 
     cv = profile.cv_data
     prefs = profile.preferences or UserPreferences()
@@ -1531,12 +2129,16 @@ async def clear_profile_section(
         # "Clear preferences" button owns; it is the connected assistant's
         # remembered answer to a one-time offer. Only a full "clear all"
         # (starting the whole profile over) may reset it.
-        keep_daily_check = "" if section == "all" else prefs.daily_check
+        # The user-info MEMORY (owner decision 2026-10-08) is not on the
+        # preferences object at all — it has its own column; see below.
+        old_prefs = prefs
         prefs = UserPreferences(
             github_username=keep_handle,
             experience_level_inferred=prefs.experience_level_inferred,
-            daily_check=keep_daily_check,
         )
+        if section != "all":
+            for overlay_only in OVERLAY_ONLY_PREFERENCE_FIELDS:
+                setattr(prefs, overlay_only, copy.deepcopy(getattr(old_prefs, overlay_only)))
     if section == "all":
         # about_me-derived skills live on the CV object but are owned by the
         # preferences the user typed, so a full clear takes them too.
@@ -1547,6 +2149,12 @@ async def clear_profile_section(
         # Both clear dated positions the stored level was read from.
         _reinfer_level_from_what_remains(profile)
     save_profile(profile, user.id, f"clear_{section}")
+    if section == "all":
+        save_user_info(user.id, UserInfo(), "clear_all")
+        # S2 — a full reset also returns the assistant settings to their safe
+        # defaults and cancels every request still waiting for the user's OK.
+        save_assistant_settings(user.id, AssistantSettings(), "clear_all")
+        setting_requests.cancel_waiting(user.id, actor_for(user))
 
     # The overlay half of the clear. Prefixes, not a hand-written path list —
     # PROFILE_EDITABLE_PATHS is env-extendable, so anything enumerated here
@@ -1557,7 +2165,7 @@ async def clear_profile_section(
     elif section == "preferences":
         cleared_prefixes = ("preferences.",)
     elif section == "all":
-        cleared_prefixes = ("cv_data.", "preferences.")
+        cleared_prefixes = ("cv_data.", "preferences.", "user_info.", f"{settings_rules.HEAD}.")
     if cleared_prefixes:
         _clear_overlay_paths(
             user,
@@ -1566,18 +2174,17 @@ async def clear_profile_section(
                 for row in profile_edits.current_overlay(user.id)
                 if str(row["path"]).startswith(cleared_prefixes)
                 # Same rule as the base-object rebuild above: a "preferences"
-                # clear must not touch the daily-check overlay row; only
-                # "all" may.
-                and not (section == "preferences" and row["path"] == "preferences.daily_check")
+                # clear must not touch the daily-check / check-every overlay
+                # rows; only "all" may.
+                and not (
+                    section == "preferences"
+                    and row["path"] in {f"preferences.{n}" for n in OVERLAY_ONLY_PREFERENCE_FIELDS}
+                )
+                and row["path"] not in keep_settings
             ],
         )
 
-    logger.info(
-        # CodeQL py/log-injection — `section` is closed-enum validated above
-        # (`_CLEAR_SCOPES`), but sanitized here too so the barrier is visible
-        # at the sink, not just at the validator.
-        "profile_cleared", extra={"event": "profile_cleared", "section": safe_log_value(section)}
-    )
+    _log_profile_cleared(user.id, section)
     return load_profile_response(user.id)[1]
 
 
@@ -1618,6 +2225,11 @@ async def restore_version(
     a 404 here — the existence-hiding pattern Batch 3.5.1 introduced for
     similar cross-tenant lookups.
     """
+    # CodeRabbit 2026-10-18: an older snapshot can lack a company the user added since, so a
+    # token-driven restore would switch off the ``company_avoided`` stop. Same 403 as the other doors.
+    snapshot_avoid = profile_version_avoid_companies(user.id, version_id)
+    if snapshot_avoid is not None:
+        _guard_avoid_list(user, snapshot_avoid)
     restored = restore_profile_version(user.id, version_id)
     if restored is None:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -1646,6 +2258,15 @@ def _resync_web_rows_to_base(user: CurrentUser) -> None:
     for row in profile_edits.current_overlay(user.id):
         path = str(row["path"])
         if path not in valid or profile_edits.is_assistant_actor(str(row["set_by"])):
+            continue
+        # Overlay-only fields are not in the base, so a restore knows nothing
+        # about them: skipping keeps what the web/assistant set (it used to
+        # wipe a web-set daily_check back to the base's empty value).
+        if path.partition(".")[2] in _OVERLAY_ONLY_PREFERENCES:
+            continue
+        # The user-info memory is its own store (not in a version snapshot), so
+        # a restore knows nothing about it either.
+        if path.startswith(("user_info.", f"{settings_rules.HEAD}.")):
             continue
         value = profile_edits.field_values(base, [path])[path]
         if value == row["value"]:

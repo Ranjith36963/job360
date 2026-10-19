@@ -21,6 +21,7 @@ dependencies = [
     "pdfplumber>=0.10.0",
     "python-docx>=1.1.0",
     "fpdf2>=2.7.0",  # tailored CV/cover-letter PDF render (services/tailoring/pdf.py) — runtime, not dev
+    "fonttools>=4.34.0",  # glyph coverage check for the bundled CV fonts (services/tailoring/cv_render.py); fpdf2 needs it too
     "rich>=13.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
@@ -90,7 +91,7 @@ dev = [
     # — different versions report different error sets, so "clean locally" said
     # nothing about CI. Bump deliberately: raise the pin, run
     # `python scripts/mypy_ratchet.py --update`, review the delta.
-    "mypy==2.3.1",
+    "mypy==2.4.0",
     # Linter — MUST be in dev extras so the CI "Lint (ruff)" blocking gate can run
     # it. Pinned to the 0.x line the backlog was drained against; ruff's rule set
     # changes between releases, so bump deliberately (an unpinned bump flags
@@ -146,6 +147,8 @@ include = ["src*"]
 [tool.setuptools.package-data]
 src = [
     "data/job_signals/*.txt",
+    "services/tailoring/fonts/*.ttf",
+    "services/tailoring/fonts/LICENSE",
 ]
 
 [tool.pytest.ini_options]
@@ -282,6 +285,8 @@ module = [
     "fpdf",
     "pdfplumber.*",
     "pdfplumber",
+    "fontTools.*",
+    "fontTools",
     "docx.*",
     "docx",
     "argon2.*",

@@ -87,11 +87,11 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
           {...register("email")}
         />
         {errors.email && (
-          <p id="magic-email-error" className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="magic-email-error" className="text-sm text-danger">{errors.email.message}</p>
         )}
       </div>
       {serverError && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {serverError}
         </p>
       )}
@@ -159,7 +159,7 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
           {...register("email")}
         />
         {errors.email && (
-          <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="email-error" className="text-sm text-danger">{errors.email.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -173,11 +173,11 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
           {...register("password")}
         />
         {errors.password && (
-          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-danger">{errors.password.message}</p>
         )}
       </div>
       {serverError && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {serverError}
         </p>
       )}
@@ -224,7 +224,7 @@ function LoginForm() {
       {serviceDown && (
         <p
           role="alert"
-          className="mb-4 rounded-md border border-yellow-600/40 bg-yellow-500/10 p-3 text-sm text-yellow-500"
+          className="mb-4 rounded-md border border-warning/30 bg-warning-soft p-3 text-sm text-warning"
         >
           We couldn&apos;t reach the server to verify your session — you may still be
           signed in. Please try again in a moment.
@@ -245,10 +245,12 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Sign in to Job360</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">
+            <h1>Sign in to Job360</h1>
+          </CardTitle>
           <CardDescription>
             Welcome back. Your applications are one step away.
           </CardDescription>
@@ -259,7 +261,7 @@ export default function LoginPage() {
           </Suspense>
           <p className="mt-6 text-center text-sm text-muted-foreground">
             No account yet?{" "}
-            <Link href="/register" className="underline">
+            <Link href="/register" className="text-foreground underline">
               Create one
             </Link>
           </p>

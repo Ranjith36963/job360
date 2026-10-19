@@ -133,28 +133,13 @@ pre-commit install
 
 ## 5. Unicode CV text crashes fpdf2
 
-**Symptom:** `UnicodeEncodeError: 'latin-1' codec can't encode character` when the test suite builds a sample PDF with fpdf2.
+**Symptom:** `UnicodeEncodeError: 'latin-1' codec can't encode character` while
+building a PDF with a core font.
 
-**Cause:** fpdf2's core 14 fonts (Helvetica/Times/Courier) only support Latin-1. Unicode needs `add_font(..., uni=True)` with a TTF path.
-
-**Fix — two options:**
-
-```python
-# Option A: use a Unicode TTF (heaviest, but handles any char)
-from fpdf import FPDF
-pdf = FPDF()
-pdf.add_font("DejaVu", "", "/path/to/DejaVuSans.ttf", uni=True)
-pdf.set_font("DejaVu", size=12)
-pdf.cell(0, 10, "café naïve — résumé")
-
-# Option B: strip to Latin-1, keep the core fonts (cheaper)
-def safe_latin1(s: str) -> str:
-    return s.encode("latin-1", errors="replace").decode("latin-1")
-
-pdf = FPDF()
-pdf.set_font("Helvetica", size=12)
-pdf.cell(0, 10, safe_latin1("café naïve — résumé"))
-```
+**Fix:** reuse the renderer's own transliterator,
+`services/tailoring/pdf._to_latin1` — pinned by
+`backend/tests/test_pdf_unicode.py`. To embed a Unicode TTF instead, copy the
+`add_font(family, style, path)` call in `services/tailoring/cv_render`.
 
 ---
 
@@ -242,28 +227,12 @@ no `down <stem>` and no `down --all`.
 
 **Symptom:** Network panel shows CORS error or `TypeError: Failed to fetch` when the dashboard calls the backend.
 
-**Cause:** One of:
-- FastAPI not running on the expected port.
-- `NEXT_PUBLIC_API_URL` in `frontend/.env.local` doesn't match the URL the backend is actually listening on.
-- `FRONTEND_ORIGIN` on the backend doesn't include the frontend's origin (CORS rejects the preflight).
-
-**Fix:** Verify both halves match.
-
-```bash
-# Terminal 1 — backend
-cd backend
-FRONTEND_ORIGIN=http://localhost:3000 python main.py
-
-# Terminal 2 — frontend (and check frontend/.env.local)
-cd frontend
-cat .env.local   # must contain NEXT_PUBLIC_API_URL=http://localhost:8000
-npm run dev
-```
-
-If running on a non-default host (e.g. LAN IP for mobile testing), pass a comma-separated list:
-
-```bash
-FRONTEND_ORIGIN=http://localhost:3000,http://192.168.1.10:3000 python main.py
-```
+**Cause:** usually `NEXT_PUBLIC_API_URL` being SET. The browser is meant to call
+`/api/*` on its own origin and let the Next rewrite forward it; setting that variable
+sends fetches straight at the backend, where CSP `connect-src 'self'` blocks them.
+`frontend/.env.local.example` carries that warning; the proxy target is
+`BACKEND_ORIGIN` in `frontend/next.config.ts`.
+Otherwise: the backend is not running, or `FRONTEND_ORIGIN` does not include the
+frontend's origin — that list is read in `api/main.py`.
 
 ---

@@ -8,7 +8,9 @@ fall back to what extraction says". ``storage.load_profile`` calls
 web route, the tailor, MCP ``get_profile`` — sees one profile.
 
 The editable set is closed (R9) and validated against the DECLARED dataclass
-fields of ``CVData``/``UserPreferences`` at import (S8): a path naming a
+fields of ``CVData``/``UserPreferences``/``UserInfo``/``AssistantSettings`` at import (S8; the
+``user_info.*`` head is the user-info MEMORY, its own ``user_profiles`` column,
+owner decision 2026-10-08; its record shapes live in ``user_info.py``): a path naming a
 field that does not exist refuses to boot rather than being silently
 accepted. Values are typed by the field's own annotation (R10), not by a
 hand-written table — the two exceptions are ``preferences.work_arrangement``
@@ -33,11 +35,15 @@ from src.core import settings
 from src.core.settings import DB_PATH
 from src.repositories import pgsync
 from src.services.auth import rate_limit
+from src.services.profile import forgiving
 from src.services.profile.models import (
+    VALID_CHECK_EVERY_VALUES,
     VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
+    AssistantSettings,
     CVData,
+    UserInfo,
     UserPreferences,
     UserProfile,
 )
@@ -52,10 +58,12 @@ class ProfileEditError(Exception):
     the caller.
     """
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(self, status_code: int, detail: str, reason: str = "") -> None:
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        # Closed refusal code for the audit trail (services/profile/refusals.py); "" = classify from the text.
+        self.reason = reason
 
 
 # The closed-set preference paths (R10). The first two share vocabulary with
@@ -66,16 +74,20 @@ _CLOSED_SET_PATHS: dict[str, frozenset[str]] = {
     "preferences.work_arrangement": VALID_WORK_ARRANGEMENTS,
     "preferences.experience_level": VALID_EXPERIENCE_LEVELS,
     "preferences.daily_check": VALID_DAILY_CHECK_VALUES,
+    "preferences.check_every": VALID_CHECK_EVERY_VALUES,
 }
 
 _editable_paths_cache: tuple[str, ...] | None = None
 
 
 def _declared_fields() -> dict[str, set[str]]:
-    """``{"cv_data": {...field names...}, "preferences": {...}}``."""
+    """``{"cv_data": {...}, "preferences": {...}, "user_info": {...}, "assistant_settings": {...}}``
+    — each value the set of declared field names."""
     return {
         "cv_data": {f.name for f in dataclass_fields(CVData)},
         "preferences": {f.name for f in dataclass_fields(UserPreferences)},
+        "user_info": {f.name for f in dataclass_fields(UserInfo)},
+        "assistant_settings": {f.name for f in dataclass_fields(AssistantSettings)},
     }
 
 
@@ -125,9 +137,27 @@ def _field_type(path: str) -> Any:
     with ``get_origin``/``get_args``.
     """
     head, _, field_name = path.partition(".")
-    cls: type[Any] = CVData if head == "cv_data" else UserPreferences
-    hints = typing.get_type_hints(cls)
+    classes: dict[str, type[Any]] = {
+        "cv_data": CVData, "preferences": UserPreferences, "user_info": UserInfo,
+        "assistant_settings": AssistantSettings,
+    }
+    hints = typing.get_type_hints(classes[head])
     return hints[field_name]
+
+
+def profile_section(profile: UserProfile, head: str) -> Any:
+    """The dataclass a dotted path's head names: ``cv_data`` | ``preferences``
+    | ``user_info`` (the memory) | ``assistant_settings`` (S2). Any other head is a ``KeyError`` — callers
+    only pass heads that passed :func:`editable_paths`."""
+    if head == "cv_data":
+        return profile.cv_data
+    if head == "preferences":
+        return profile.preferences
+    if head == "user_info":
+        return profile.user_info
+    if head == "assistant_settings":
+        return profile.assistant_settings
+    raise KeyError(head)
 
 
 def _validate_string(path: str, value: Any) -> str:
@@ -143,6 +173,15 @@ def _validate_string(path: str, value: Any) -> str:
     return text
 
 
+_CLOSED_ALIASES: dict[str, tuple[Any, str]] = {
+    "preferences.experience_level": (lambda text, _allowed: forgiving.level_alias(text), forgiving.RULE_LEVEL),
+    "preferences.work_arrangement": (
+        lambda text, _allowed: forgiving.arrangement_alias(text), forgiving.RULE_ARRANGEMENT
+    ),
+    "preferences.check_every": (forgiving.every_alias, forgiving.RULE_EVERY),
+}
+
+
 def _validate_closed_set(path: str, value: Any, allowed: frozenset[str]) -> str:
     if not isinstance(value, str):
         raise ProfileEditError(422, f"{path} must be a string, got {type(value).__name__}")
@@ -150,9 +189,14 @@ def _validate_closed_set(path: str, value: Any, allowed: frozenset[str]) -> str:
     # An empty string is the explicit "unset" (R10) — never checked against
     # the allowlist, always accepted.
     if text and text not in allowed:
+        alias = _CLOSED_ALIASES.get(path)
+        mapped = alias[0](text, allowed) if alias else None
+        if alias and mapped in allowed:
+            # Owner decision 2026-10-10: a spelling that means an allowed value is stored as it, and reported.
+            forgiving.note(alias[1], at=path)
+            return str(mapped)
         raise ProfileEditError(
-            422,
-            f"{path}: {value!r} is not one of the allowed values: {', '.join(sorted(allowed))}",
+            422, f"{path} is not one of the allowed values: {', '.join(sorted(allowed))}", "bad_value"
         )
     return text
 
@@ -482,6 +526,28 @@ def _validate_notes(path: str, value: Any) -> list[str]:
     return out
 
 
+WORK_AUTH_COUNTRIES_PATH = "preferences.work_authorization_countries"
+
+# Owner decision 2026-10-10 - years of experience the user is looking for.
+YEARS_MIN_PATH = "preferences.experience_years_min"
+YEARS_MAX_PATH = "preferences.experience_years_max"
+YEARS_PATHS: frozenset[str] = frozenset({YEARS_MIN_PATH, YEARS_MAX_PATH})
+YEARS_LIMIT = 60
+
+
+def _validate_years(path: str, value: Any) -> int:
+    """A whole number 0..60. ``bool`` is refused (it is an ``int`` subclass)."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= YEARS_LIMIT:
+        raise ProfileEditError(422, f"{path} must be a whole number from 0 to {YEARS_LIMIT}")
+    return value
+
+
+def check_years_order(low: Any, high: Any) -> None:
+    """422 when both years bounds are set and min is above max. ``None`` = don't care."""
+    if low is not None and high is not None and low > high:
+        raise ProfileEditError(422, f"{YEARS_MIN_PATH} must not be above {YEARS_MAX_PATH}")
+
+
 def validate_edit(path: str, value: Any) -> Any:
     """Normalise ``value`` for ``path``, or raise ``ProfileEditError(422, ...)``.
 
@@ -490,14 +556,49 @@ def validate_edit(path: str, value: Any) -> Any:
     (R9); a value of the wrong shape is a 422 naming the path (R10).
     """
     paths = editable_paths()
+    forgiving.set_path(path)
     if path not in paths:
+        from src.services.profile import assistant_settings as _retired  # noqa: PLC0415 — imports this module
+
+        if path == _retired.APPLY_MODE_PATH:
+            # Retired 2026-10-10: name the replacement so a cached assistant
+            # instruction fixes itself instead of guessing.
+            raise ProfileEditError(422, _retired.APPLY_MODE_RETIRED_MESSAGE, "retired_path")
         raise ProfileEditError(
-            422, f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}"
+            422, f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}", "unknown_key"
         )
     if value is None:
         return None
+    from src.services.profile import assistant_settings, user_info  # noqa: PLC0415 — both import this module
+
+    if path in YEARS_PATHS:
+        return _validate_years(path, value)
+    if path == assistant_settings.SETUP_PROGRESS_PATH:
+        return _bound_encoded_size(path, assistant_settings.validate_setup_progress(path, value))
+    if path in assistant_settings.SETTING_PATHS:
+        # Owner decision 2026-10-08 (S2): ints / closed sets / a future time /
+        # one plain line — each refusal names the path, never the value.
+        return assistant_settings.validate_setting(path, value)
+    if path in user_info.USER_INFO_PATHS:
+        answers = path == user_info.USER_INFO_ANSWERS_PATH
+        return _bound_encoded_size(
+            path,
+            user_info.validate_user_info(path, value),
+            limit=settings.USER_INFO_ANSWERS_MAX_CHARS if answers else settings.PROFILE_EDIT_MAX_RECORDS_CHARS,
+            setting="USER_INFO_ANSWERS_MAX_CHARS" if answers else "PROFILE_EDIT_MAX_RECORDS_CHARS",
+        )
+    if path == user_info.SALARY_BY_COUNTRY_PATH:
+        return _bound_encoded_size(
+            path,
+            user_info.validate_salary_by_country(path, value),
+            limit=settings.PROFILE_EDIT_MAX_RECORDS_CHARS,
+            setting="PROFILE_EDIT_MAX_RECORDS_CHARS",
+        )
     if path in _CLOSED_SET_PATHS:
         return _validate_closed_set(path, value, _CLOSED_SET_PATHS[path])
+    if path == WORK_AUTH_COUNTRIES_PATH:
+        # ISO alpha-2 codes; a country name or "UK" is converted (and reported), a lone string becomes a list.
+        return _bound_encoded_size(path, user_info.validate_country_list(path, value))
     if path in NOTE_PATHS:
         # Bounded by shape alone: PROFILE_NOTE_MAX_CHARS x PROFILE_EDIT_MAX_LIST_ITEMS.
         # The generic encoded cap (PROFILE_EDIT_MAX_CHARS) would quietly allow
@@ -585,7 +686,7 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
     connection (S1/N4).
     """
     sql = """
-        SELECT path, value, set_by, set_at
+        SELECT path, value, set_by, set_at, source, remember_consent_at
         FROM profile_edits
         WHERE user_id = ? AND id IN (
             SELECT MAX(id) FROM profile_edits WHERE user_id = ? GROUP BY path
@@ -603,10 +704,13 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
             return []
         raise
     out: list[dict[str, Any]] = []
-    for path, value, set_by, set_at in rows:
+    for path, value, set_by, set_at, source, consent_at in rows:
         if value is None:
             continue
-        out.append({"path": path, "value": json.loads(value), "set_by": set_by, "set_at": set_at})
+        out.append({
+            "path": path, "value": json.loads(value), "set_by": set_by, "set_at": set_at,
+            "source": source or "", "remember_consent_at": consent_at,
+        })
     return out
 
 
@@ -614,6 +718,20 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
 # Rows by this author are the human's own changes: they are history, never an
 # "assistant changed this" mark.
 WEB_ACTOR = "web"
+
+# Feature 9 - WHO SAID IT. ``user_said`` = the user told the assistant (or typed
+# it on the web); ``agent_inferred`` = the assistant worked it out. ``''`` is a
+# legacy row (before migration 0057): nobody confirmed it, so it reads as
+# unconfirmed. ``set_by`` records who WROTE a fact, not whether the user said it.
+SOURCE_USER_SAID = "user_said"
+SOURCE_AGENT_INFERRED = "agent_inferred"
+VALID_SOURCES = (SOURCE_USER_SAID, SOURCE_AGENT_INFERRED)
+
+
+def is_confirmed(set_by: str, source: str) -> bool:
+    """True when the user stands behind this value: a web write, or an
+    assistant write explicitly marked ``user_said``. A legacy ``''`` is not."""
+    return set_by == WEB_ACTOR or source == SOURCE_USER_SAID
 
 
 def is_assistant_actor(set_by: str) -> bool:
@@ -629,7 +747,7 @@ def path_history(user_id: str, path: str, limit: int) -> list[dict[str, Any]]:
     can only ever read its own history.
     """
     sql = (
-        "SELECT value, set_by, set_at FROM profile_edits "
+        "SELECT value, set_by, set_at, source FROM profile_edits "
         "WHERE user_id = ? AND path = ? ORDER BY id DESC LIMIT ?"
     )
     try:
@@ -640,8 +758,11 @@ def path_history(user_id: str, path: str, limit: int) -> list[dict[str, Any]]:
             return []
         raise
     return [
-        {"value": None if value is None else json.loads(value), "set_by": set_by, "set_at": set_at}
-        for value, set_by, set_at in rows
+        {
+            "value": None if value is None else json.loads(value), "set_by": set_by, "set_at": set_at,
+            "source": source or "",
+        }
+        for value, set_by, set_at, source in rows
     ]
 
 
@@ -677,8 +798,7 @@ def apply_overlay_rows(profile: UserProfile, rows: list[dict[str, Any]]) -> User
             # profile read over a historical row.
             continue
         head, _, field_name = path.partition(".")
-        target: Any = profile.cv_data if head == "cv_data" else profile.preferences
-        setattr(target, field_name, row["value"])
+        setattr(profile_section(profile, head), field_name, row["value"])
         touched_inference = touched_inference or path in INFERENCE_INPUT_PATHS
     if touched_inference:
         # The stored ``experience_level_inferred`` was computed at extraction
@@ -701,6 +821,8 @@ def record_edits(
     *,
     enforce_rate_limit: bool = True,
     store_as_given: bool = False,
+    source: str | dict[str, str] = "",
+    consent_paths: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     """Validate every edit, then insert them append-only in ONE transaction.
 
@@ -731,8 +853,16 @@ def record_edits(
     same value — a normalised copy (stripped, de-duplicated) would shadow the
     base with something the human did not type.
 
+    ``source`` (feature 9) is ``user_said`` / ``agent_inferred`` / ``""``, one
+    word for the whole batch or a ``{path: word}`` map; stored on each row.
+
+    ``consent_paths`` (weak spot #6, wave 2): paths whose row carries the user's OK to
+    REMEMBER a sensitive answer. ``remember_consent_at`` is stamped HERE from the server
+    clock - a caller can never supply the time (mirrors job-apply-store.py L541-544:
+    ``record["rememberedWithConsentAt"] = utc_now()``, set by the helper, not the input).
+
     Returns the applied rows in the same ``{"path", "value", "set_by",
-    "set_at"}`` shape as :func:`current_overlay`.
+    "set_at", "source"}`` shape as :func:`current_overlay`.
     """
     # Validate everything up front — nothing below this line can 422.
     normalised: list[tuple[str, Any]] = [(path, validate_edit(path, value)) for path, value in edits]
@@ -757,15 +887,23 @@ def record_edits(
         )
 
     now = datetime.now(timezone.utc).isoformat()
+    consent = frozenset(consent_paths)
     applied: list[dict[str, Any]] = []
     with pgsync.connect(str(DB_PATH)) as conn, conn._raw.transaction():
         for path, value in normalised:
             encoded = None if value is None else json.dumps(value)
+            row_source = source.get(path, "") if isinstance(source, dict) else source
+            if not row_source and actor == WEB_ACTOR:
+                row_source = SOURCE_USER_SAID  # a human at the browser is the user speaking
+            marker = now if (path in consent and value is not None) else None
             conn.execute(
-                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at) VALUES (?, ?, ?, ?, ?)",
-                (user_id, path, encoded, actor, now),
+                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at, source, remember_consent_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, path, encoded, actor, now, row_source, marker),
             )
-            applied.append({"path": path, "value": value, "set_by": actor, "set_at": now})
+            applied.append(
+                {"path": path, "value": value, "set_by": actor, "set_at": now, "source": row_source}
+            )
     return applied
 
 
@@ -778,6 +916,5 @@ def field_values(profile: UserProfile, paths: Iterable[str]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for path in paths:
         head, _, field_name = path.partition(".")
-        target: Any = profile.cv_data if head == "cv_data" else profile.preferences
-        out[path] = getattr(target, field_name)
+        out[path] = getattr(profile_section(profile, head), field_name)
     return out

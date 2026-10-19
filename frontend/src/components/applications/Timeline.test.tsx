@@ -25,6 +25,26 @@ function makeEvent(overrides: Partial<ApplicationEvent> = {}): ApplicationEvent 
 }
 
 describe("Timeline", () => {
+  it("shows who recorded each event in plain words", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({ id: 1, recorded_by: "web" }),
+          makeEvent({ id: 2, recorded_by: "agent:Claude" }),
+          makeEvent({ id: 3, recorded_by: "token:My laptop" }),
+          makeEvent({ id: 4, recorded_by: "system" }),
+        ]}
+      />,
+    );
+    const marks = screen.getAllByTestId("event-actor").map((m) => m.textContent);
+    expect(marks).toEqual([
+      "recorded by you",
+      "recorded by your assistant (via Claude)",
+      "recorded by your assistant (via My laptop)",
+      "recorded by Job360",
+    ]);
+  });
+
   it("renders the sender and subject for an event with a source, and no anchor", () => {
     render(
       <Timeline

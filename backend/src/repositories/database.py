@@ -90,7 +90,6 @@ class JobDatabase:
                 apply_url TEXT NOT NULL,
                 source TEXT NOT NULL,
                 date_found TEXT NOT NULL,
-                match_score INTEGER DEFAULT 0,
                 experience_level TEXT DEFAULT '',
                 normalized_company TEXT NOT NULL,
                 normalized_title TEXT NOT NULL,
@@ -109,7 +108,6 @@ class JobDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
             CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
-            CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
             CREATE INDEX IF NOT EXISTS idx_jobs_staleness_state ON jobs(staleness_state);
             CREATE INDEX IF NOT EXISTS idx_jobs_last_seen_at ON jobs(last_seen_at);
             -- `user_actions` is dropped by migration 0040 (mission sweep) — no
@@ -161,16 +159,10 @@ class JobDatabase:
             ("date_posted_raw", "TEXT"),
             ("consecutive_misses", "INTEGER DEFAULT 0"),
             ("staleness_state", "TEXT DEFAULT 'active'"),
-            # Step-1.5 S1.1 — per-dim score columns (migration 0011 mirror).
-            ("role", "INTEGER DEFAULT 0"),
-            ("skill", "INTEGER DEFAULT 0"),
-            ("seniority_score", "INTEGER DEFAULT 0"),
-            ("experience", "INTEGER DEFAULT 0"),
-            ("credentials", "INTEGER DEFAULT 0"),
-            ("location_score", "INTEGER DEFAULT 0"),
-            ("recency", "INTEGER DEFAULT 0"),
-            ("semantic", "INTEGER DEFAULT 0"),
-            ("penalty", "INTEGER DEFAULT 0"),
+            # (The Step-1.5 per-dim score columns — migration 0011 — and
+            # `match_score` are NOT mirrored any more: migration 0059 drops
+            # them. Re-adding them here would resurrect them on every boot,
+            # because this runs BEFORE the runner and 0059 runs only once.)
             # Migration 0020 — application deadline columns.
             ("deadline", "TEXT"),
             ("deadline_source", "TEXT"),
@@ -194,8 +186,7 @@ class JobDatabase:
             ("salary_currency", "TEXT"),
             ("salary_period", "TEXT"),
             ("salary_is_estimated", "BOOLEAN"),
-            ("salary_min_gbp_annual", "REAL"),
-            ("salary_max_gbp_annual", "REAL"),
+            # salary_min/max_gbp_annual: dropped by migration 0059 — see above.
             ("shelf_provenance", "JSONB NOT NULL DEFAULT '{}'"),
         ]
         applications_migrations = [
@@ -530,21 +521,11 @@ class JobDatabase:
                 pass
         return out
 
-    async def create_application(self, job_id: int, user_id: str) -> None:
-        """Upsert the legacy `applications` row for (user, job) as 'applied'.
-
-        INSERT OR IGNORE — calling it twice is safe. Returns nothing: both
-        callers (`POST /receipts`, the MCP `record_application` tool) read the
-        spine's Application object straight after, never this row.
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            """INSERT OR IGNORE INTO applications
-               (user_id, job_id, stage, created_at, updated_at)
-               VALUES (?, ?, 'applied', ?, ?)""",
-            (user_id, job_id, now, now),
-        )
-        await self._db.commit()
+    # `create_application` (an INSERT-OR-IGNORE of a blank application onto
+    # ANY job_id) was deleted 2026-10-14 (P0 bring isolation): it let
+    # `POST /receipts/{job_id}` and MCP `record_application` adopt a job
+    # another user pasted. An application is born only by `bring_job`
+    # (`spine.birth_application`), carrying the caller's own paste.
 
     async def get_job_id_by_key(self, normalized_key: tuple[str, str]) -> int | None:
         """Resolve a (normalized_company, normalized_title) key to the catalog id.
@@ -640,7 +621,7 @@ class JobDatabase:
     _RECEIPT_SUMMARY_COLS = (
         "id, user_id, job_id, sent_at, job_title, job_company, job_location, "
         "job_apply_url, job_source, cv_text IS NOT NULL, cover_letter_text IS NOT NULL, "
-        "profile_version, channel, note, created_at"
+        "profile_version, channel, note, created_at, application_id"
     )
 
     async def list_receipts(
@@ -667,7 +648,7 @@ class JobDatabase:
         keys = (
             "id", "user_id", "job_id", "sent_at", "job_title", "job_company",
             "job_location", "job_apply_url", "job_source", "has_cv", "has_cover_letter",
-            "profile_version", "channel", "note", "created_at",
+            "profile_version", "channel", "note", "created_at", "application_id",
         )
         out = []
         for r in await cursor.fetchall():
@@ -724,10 +705,11 @@ class JobDatabase:
     _PER_USER_TABLES = (
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
-        "application_receipts", "application_stage_history", "applications", "contact_edits",
-        "contact_outreach", "email_verifications",
+        "application_receipts", "application_stage_history", "applications",
+        "application_proof_screenshots", "artifact_links", "assistant_setting_requests", "calendar_feeds",
+        "contact_edits", "contact_outreach", "email_verifications", "missing_tool_reports",
         "oauth_grants",
-        "password_resets", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
+        "password_resets", "proof_upload_links", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
         "user_profile_versions", "user_profiles",
     )
 
@@ -744,9 +726,9 @@ class JobDatabase:
     _EXPORT_TABLES = (
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
-        "application_receipts", "applications", "application_stage_history", "audit_log",
-        "contact_edits", "contact_outreach",
-        "oauth_grants", "profile_edits", "tailored_documents",
+        "application_proof_screenshots", "application_receipts", "applications", "application_stage_history",
+        "assistant_setting_requests", "audit_log", "contact_edits", "contact_outreach",
+        "missing_tool_reports", "oauth_grants", "profile_edits", "tailored_documents",
         "tailored_usage",
         "user_profile_versions", "user_profiles",
     )
@@ -758,6 +740,14 @@ class JobDatabase:
         "password_hash", "config_encrypted", "credentials_encrypted", "token",
         "token_hash", "secret", "access_token", "refresh_token", "webhook_url",
     })
+
+    # Tables whose export must not be `SELECT *`: proof screenshots keep their
+    # metadata (and the delete note) but never the image bytes (S7).
+    _EXPORT_COLUMNS = {
+        "application_proof_screenshots": (
+            "id, user_id, application_id, mime, sha256, size, created_by, created_at, deleted_at, delete_note"
+        ),
+    }
 
     @classmethod
     def _scrub_export_row(cls, row: dict[str, Any]) -> dict[str, Any]:
@@ -786,7 +776,8 @@ class JobDatabase:
         for tbl in self._EXPORT_TABLES:
             try:
                 cur = await self._db.execute(
-                    f"SELECT * FROM {tbl} WHERE user_id = ?", (user_id,)  # noqa: S608 — name from a module constant
+                    f"SELECT {self._EXPORT_COLUMNS.get(tbl, '*')} FROM {tbl} WHERE user_id = ?",  # noqa: S608 — constants
+                    (user_id,),
                 )
                 out[tbl] = [self._scrub_export_row(dict(r)) for r in await cur.fetchall()]
             except Exception as exc:  # noqa: BLE001 — tolerate a table absent in a partial test schema

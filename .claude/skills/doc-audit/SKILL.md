@@ -59,9 +59,8 @@ Flag any doc you cannot classify — that is itself a finding.
 
 ## Step 2: Sync the LIVING docs (delegate to /sync)
 
-Run the `/sync` skill's steps against every LIVING doc: extract real facts
-from code (source registry, migrations head, test count, schema, commands,
-deps), fix every stale claim, and update each doc's
+Run the `/sync` skill's steps against every LIVING doc (its Step 1 lists which
+facts to extract from code), fix every stale claim, and update each doc's
 `<!-- last-verified: YYYY-MM-DD by /sync -->` stamp.
 
 ## Step 3: Plan lifecycle pass

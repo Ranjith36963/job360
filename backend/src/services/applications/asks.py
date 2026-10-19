@@ -33,6 +33,9 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 
 STATUS_FILTERS = ("open", "answered", "all")
 
+# The user's exact chat words relayed with an answer (answer_ask `user_words`).
+ASKS_USER_WORDS_MAX_CHARS = 2000
+
 # Same banned set spine.validate_source uses (Cc/Zl/Zp + bidi overrides),
 # except a plain newline and tab are kept: a question or answer is prose and
 # may span lines.
@@ -57,6 +60,9 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         status = "withdrawn"
     else:
         status = "answered" if answered_at else "open"
+    user_words = row.get("user_words") or ""
+    confirmed_at = row.get("confirmed_at")
+    relayed = bool(answered_at) and row.get("answered_by") != "web" and bool(user_words)
     return {
         "id": row["id"],
         "application_id": row.get("application_id"),
@@ -72,6 +78,17 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         # True when the USER typed it on Job360 ("web"); False when the
         # assistant recorded the user's chat answer (token:/agent: actor).
         "answered_by_user": row.get("answered_by") == "web",
+        # The user's exact chat words, when the assistant relayed them.
+        "user_words": user_words,
+        # True when an assistant (not the web) recorded an answer AND passed the
+        # user's own words. answered_by_user keeps its strict meaning.
+        "relayed_from_chat": relayed,
+        # Whose decision it reads as: "you" for a web answer or a relayed chat
+        # answer; "assistant" when the assistant answered with no user words.
+        "said_by": "you" if (row.get("answered_by") == "web" or relayed) else "assistant",
+        # When the user confirmed the relayed answer on the web; None until then,
+        # and None again if the answer was changed after the confirmation.
+        "confirmed_at": confirmed_at if relayed and confirmed_at and confirmed_at >= answered_at else None,
         "withdrawn_at": withdrawn_at,
         "status": status,
     }
@@ -79,7 +96,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
 
 _SELECT = (
     "SELECT k.id, k.application_id, a.job_title, a.job_company, k.question, k.context, k.asked_by, "
-    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at "
+    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at, k.user_words, k.confirmed_at "
     "FROM application_asks k LEFT JOIN applications a ON a.id = k.application_id AND a.user_id = k.user_id "
 )
 
@@ -98,6 +115,29 @@ async def count_open_asks(db: JobDatabase, user_id: str) -> int:
     )
     row = await cur.fetchone()
     return int(row[0]) if row else 0
+
+
+def _log_no_proof_ask(user_id: str, application_id: Optional[int], result: str) -> None:
+    get_audit_logger().info("no_proof_ask", extra={
+        "event": "no_proof_ask", "user_id": safe_log_value(user_id),
+        "application_id": safe_log_value(str(application_id)), "result": safe_log_value(result),
+    })
+
+
+async def _first_proof_ask(
+    db: JobDatabase, user_id: str, application_id: Optional[int], proof_ctx: str
+) -> Optional[dict[str, Any]]:
+    """The "no proof yet" ask already recorded for this application (any state), logged as a duplicate."""
+    cur = await db._db.execute(
+        "SELECT id FROM application_asks WHERE user_id = ? AND application_id = ? AND context = ? "
+        "ORDER BY id LIMIT 1",
+        (user_id, application_id, proof_ctx),
+    )
+    first = await cur.fetchone()
+    if not first:
+        return None
+    _log_no_proof_ask(user_id, application_id, "duplicate")
+    return await _get_ask(db, user_id, int(first[0]))
 
 
 async def create_ask(
@@ -120,12 +160,22 @@ async def create_ask(
         raise SpineError(422, f"context exceeds ASKS_CONTEXT_MAX_CHARS ({settings.ASKS_CONTEXT_MAX_CHARS} chars)")
     if application_id is not None and await get_owned_application(db, user_id, application_id) is None:
         raise SpineError(404, "application not found")
+    # S7 - the "no proof yet" ask is asked ONCE per application, whatever its state:
+    # a repeat (the assistant re-reading whats_new) returns the first one, writes nothing.
+    proof_ctx = f"proof_missing:{application_id}" if application_id is not None else ""
+    is_proof = bool(proof_ctx) and clean_ctx == proof_ctx
+    if is_proof and (first := await _first_proof_ask(db, user_id, application_id, proof_ctx)):
+        return first
     if await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
         raise SpineError(
             429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first"
         )
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
+        if is_proof:  # two parallel callers: the loser waits here, then finds the winner's ask
+            await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:{clean_ctx}",))
+            if first := await _first_proof_ask(db, user_id, application_id, proof_ctx):
+                return first
         cur = await db._db.execute(
             "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -145,13 +195,15 @@ async def create_ask(
             "has_application": application_id is not None,
         },
     )
+    if is_proof:
+        _log_no_proof_ask(user_id, application_id, "created")
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None
     return ask
 
 
 async def answer_ask(
-    db: JobDatabase, user_id: str, ask_id: int, answer: str, answered_by: str
+    db: JobDatabase, user_id: str, ask_id: int, answer: str, answered_by: str, user_words: str = ""
 ) -> dict[str, Any]:
     """Record the user's answer. May be called again to CHANGE it: the row
     holds the latest answer and each answer appends an ``answered`` event
@@ -167,12 +219,15 @@ async def answer_ask(
         raise SpineError(422, "answer must not be empty")
     if len(clean_a) > settings.ASKS_ANSWER_MAX_CHARS:
         raise SpineError(422, f"answer exceeds ASKS_ANSWER_MAX_CHARS ({settings.ASKS_ANSWER_MAX_CHARS} chars)")
+    clean_w = clean_text(user_words)
+    if len(clean_w) > ASKS_USER_WORDS_MAX_CHARS:
+        raise SpineError(422, f"user_words exceeds {ASKS_USER_WORDS_MAX_CHARS} chars")
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
         cur = await db._db.execute(
-            "UPDATE application_asks SET answer = ?, answered_by = ?, answered_at = ? "
+            "UPDATE application_asks SET answer = ?, answered_by = ?, answered_at = ?, user_words = ? "
             "WHERE id = ? AND user_id = ? AND withdrawn_at IS NULL",
-            (clean_a, answered_by, now, ask_id, user_id),
+            (clean_a, answered_by, now, clean_w, ask_id, user_id),
         )
         if not cur.rowcount:
             raise SpineError(404, "ask not found")
@@ -180,7 +235,7 @@ async def answer_ask(
             await append_event(
                 db, user_id=user_id, application_id=int(existing["application_id"]), event_type="answered",
                 detail=clean_a[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
-                payload={"ask_id": ask_id, "answer": clean_a},
+                payload={"ask_id": ask_id, "answer": clean_a, **({"user_words": clean_w} if clean_w else {})},
                 occurred_at=now, recorded_by=answered_by,
             )
     # ``ask_id`` is the ``/asks/{ask_id}/…`` path parameter, so CodeQL's
@@ -198,6 +253,35 @@ async def answer_ask(
     # string rather than a number; nothing reads that field (grepped).
     get_audit_logger().info(
         "ask_answered", extra={"event": "ask_answered", "user_id": user_id, "ask_id": safe_log_value(ask_id)}
+    )
+    ask = await _get_ask(db, user_id, ask_id)
+    assert ask is not None
+    return ask
+
+
+async def confirm_ask(db: JobDatabase, user_id: str, ask_id: int) -> dict[str, Any]:
+    """The user confirms an answer their assistant relayed from chat. Sets
+    ``confirmed_at`` once per answer (a repeat is a no-op); nothing is
+    rewritten and no event is added. 404 if not the caller's, 409 if the ask
+    was withdrawn or has no relayed answer to confirm."""
+    existing = await _get_ask(db, user_id, ask_id)
+    if existing is None:
+        raise SpineError(404, "ask not found")
+    if existing["withdrawn_at"]:
+        raise SpineError(409, "ask was withdrawn")
+    if not existing["relayed_from_chat"]:
+        raise SpineError(409, "only an answer your assistant relayed from chat can be confirmed")
+    if existing["confirmed_at"]:
+        return existing
+    now = datetime.now(timezone.utc).isoformat()
+    await db._db.execute(
+        "UPDATE application_asks SET confirmed_at = ? "
+        "WHERE id = ? AND user_id = ? AND withdrawn_at IS NULL AND answered_at IS NOT NULL "
+        "AND (confirmed_at IS NULL OR confirmed_at < answered_at)",
+        (now, ask_id, user_id),
+    )
+    get_audit_logger().info(
+        "ask_confirmed", extra={"event": "ask_confirmed", "user_id": user_id, "ask_id": safe_log_value(ask_id)}
     )
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None

@@ -1,5 +1,9 @@
 # 360-research — know the company before you apply
-<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
+<!-- doc: REFERENCE — a run 360 recipe the connected assistant reads; served by routes/recipes.py -->
+
+Print this checklist and tick each step:
+[ ] 1 Read  [ ] 2 Open  [ ] 3 Research  [ ] 4 Save  [ ] 5 People  [ ] 6 Finish
+
 
 Use this for one application, after the user decided to apply and before
 outreach. Every fact you save must say where it came from.
@@ -10,12 +14,15 @@ outreach. Every fact you save must say where it came from.
 3. **Research with your own tools**: what the company does, the team this role
    sits in, recent news, and whether the company has sponsored visas before
    (the ad, their careers page, public sponsor lists). Never guess: "not found"
-   is an answer.
+   is an answer. Also `stats(view="company", company=<company>)` and add one fact line
+   "Job360 history: <label> (<n> applications) - source: Job360 stats". If a silence might be an unlogged reply, ask
+   the user. It is never a reason to skip the company or a follow-up.
 4. **Save it** as one `record_event` `note` on the application: 3-6 short
-   lines, each ending with its source URL. Visa facts go in `save_fit`'s visa
+   lines, each externally researched fact ending with its source URL (the
+   Job360 history line cites the stats result instead, never a URL). Visa facts go in `save_fit`'s visa
    fields only when a source states them.
 5. **Who to talk to:** if you find the hiring manager or recruiter, `list_people`
    first, then `add_contact` (notes = where you found them). Not finding one is
    fine — it is not a gate.
 6. **Finish** with two lines: what matters for the CV and letter, and the
-   next command (`360-apply`).
+   next command ("run 360 apply <link>").

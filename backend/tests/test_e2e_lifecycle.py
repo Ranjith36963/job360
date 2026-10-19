@@ -185,7 +185,7 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
         # the agent's OWN fit verdict — Job360 stores it, never computes it
         assert client.put(
             f"/api/applications/{application_id}/fit",
-            json={"score": 72, "verdict": "worth applying"},
+            json={"score": 72, "verdict": "worth applying", "score_source": "full_ad"},
         ).status_code == 200
 
         # a receipt

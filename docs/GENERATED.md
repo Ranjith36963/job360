@@ -15,11 +15,11 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0048** | `backend/migrations/` |
-| Migration files | **49** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 13 route modules (86 endpoints) | `backend/src/api/routes/` |
-| Test files | across 144 `test_*.py` files | `backend/tests/` |
-| GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
+| Migration head | **0064** | `backend/migrations/` |
+| Migration files | **65** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 21 route modules (128 endpoints) | `backend/src/api/routes/` |
+| Test files | across 236 `test_*.py` files | `backend/tests/` |
+| GitHub Actions | 30 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
 
@@ -35,6 +35,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | --- | --- | --- |
 | `GET` | `/api/applications` | `applications.py` |
 | `GET` | `/api/applications/export` | `applications.py` |
+| `POST` | `/api/applications/inbox-checked` | `applications.py` |
 | `GET` | `/api/applications/job/{job_id}` | `applications.py` |
 | `GET` | `/api/applications/lessons` | `applications.py` |
 | `GET` | `/api/applications/stats` | `applications.py` |
@@ -43,20 +44,42 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/applications/{application_id}/artifacts` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}/diff` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/artifacts/{artifact_id}/download` | `applications.py` |
+| `GET` | `/api/applications/{application_id}/auto-email-check` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/autofill` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/blocked/resolve` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/contacts` | `applications.py` |
+| `GET` | `/api/applications/{application_id}/controls` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/cv-seen` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/duplicate/clear` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/events` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/hold/release` | `applications.py` |
+| `PATCH` | `/api/applications/{application_id}/job` | `applications.py` |
+| `GET` | `/api/applications/{application_id}/kit` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/kit/form-check` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/send/approve` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/send/decline` | `applications.py` |
+| `GET` | `/api/applications/{application_id}/submit-check` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/submit/resolve` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/visa` | `applications.py` |
 | `POST` | `/api/contacts` | `applications.py` |
 | `PATCH` | `/api/contacts/{contact_id}` | `applications.py` |
 | `POST` | `/api/contacts/{contact_id}/outreach` | `applications.py` |
+| `GET` | `/api/contacts/{contact_id}/outreach-check` | `applications.py` |
 | `GET` | `/api/people` | `applications.py` |
 | `GET` | `/api/whats-new` | `applications.py` |
 | `GET` | `/api/asks` | `asks.py` |
 | `POST` | `/api/asks` | `asks.py` |
 | `POST` | `/api/asks/{ask_id}/answer` | `asks.py` |
+| `POST` | `/api/asks/{ask_id}/confirm` | `asks.py` |
 | `POST` | `/api/asks/{ask_id}/withdraw` | `asks.py` |
+| `GET` | `/api/assistant-settings` | `assistant_settings.py` |
+| `GET` | `/api/assistant-settings/history` | `assistant_settings.py` |
+| `POST` | `/api/assistant-settings/requests/{request_id}/confirm` | `assistant_settings.py` |
+| `POST` | `/api/assistant-settings/requests/{request_id}/decline` | `assistant_settings.py` |
+| `POST` | `/api/assistant-settings/take-back` | `assistant_settings.py` |
 | `POST` | `/api/auth/login` | `auth.py` |
 | `POST` | `/api/auth/logout` | `auth.py` |
 | `POST` | `/api/auth/magic-link/consume` | `auth.py` |
@@ -75,11 +98,22 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/auth/verify-email/request` | `auth.py` |
 | `POST` | `/api/jobs/bring` | `bring.py` |
 | `POST` | `/api/jobs/fetch-url` | `bring.py` |
+| `GET` | `/api/applications/{application_id}/calendar.ics` | `calendar.py` |
+| `DELETE` | `/api/calendar-feed` | `calendar.py` |
+| `GET` | `/api/calendar-feed` | `calendar.py` |
+| `POST` | `/api/calendar-feed` | `calendar.py` |
+| `GET` | `/api/calendar/{token}.ics` | `calendar.py` |
 | `POST` | `/api/client-log` | `client_log.py` |
+| `GET` | `/api/doctor` | `doctor.py` |
+| `POST` | `/api/missing-tools` | `doctor.py` |
+| `GET` | `/api/files/{token}` | `files.py` |
 | `GET` | `/api/health` | `health.py` |
 | `GET` | `/api/livez` | `health.py` |
 | `GET` | `/api/readyz` | `health.py` |
 | `GET` | `/api/status` | `health.py` |
+| `GET` | `/api/hunt-kit` | `hunt_kit.py` |
+| `GET` | `/api/hunt-kit/{name}` | `hunt_kit.py` |
+| `GET` | `/api/morning-check` | `morning_check.py` |
 | `GET` | `/api/oauth/authorize` | `oauth.py` |
 | `GET` | `/api/oauth/authorize/{rid}` | `oauth.py` |
 | `POST` | `/api/oauth/authorize/{rid}/decision` | `oauth.py` |
@@ -103,6 +137,14 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/profile/versions` | `profile.py` |
 | `GET` | `/api/profile/versions/{version_id1}/diff/{version_id2}` | `profile.py` |
 | `POST` | `/api/profile/versions/{version_id}/restore` | `profile.py` |
+| `GET` | `/api/applications/{application_id}/proof` | `proof.py` |
+| `POST` | `/api/applications/{application_id}/proof/link` | `proof.py` |
+| `POST` | `/api/applications/{application_id}/proof/screenshots` | `proof.py` |
+| `DELETE` | `/api/applications/{application_id}/proof/screenshots/{screenshot_id}` | `proof.py` |
+| `GET` | `/api/applications/{application_id}/proof/screenshots/{screenshot_id}` | `proof.py` |
+| `POST` | `/api/proof/{token}` | `proof.py` |
+| `POST` | `/api/applications/{application_id}/answers/{index}/confirm` | `ready_to_send.py` |
+| `GET` | `/api/ready-to-send` | `ready_to_send.py` |
 | `GET` | `/api/receipts` | `receipts.py` |
 | `POST` | `/api/receipts/{job_id}` | `receipts.py` |
 | `GET` | `/api/receipts/{receipt_id}` | `receipts.py` |
@@ -120,5 +162,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**86 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**128 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
