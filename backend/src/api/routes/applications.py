@@ -746,6 +746,9 @@ class ApplicationSummaryOut(BaseModel):
     # Owner decision 2026-10-10 - which side of the USER's own score line the fit
     # score is on; "unknown" when there is no line or no fit yet.
     line_side: Literal["above", "below", "unknown"] = "unknown"
+    # Owner decision 2026-10-19 - the user's own job priority of this job's place;
+    # None when not chosen or the place is unknown (rule #29).
+    priority: Optional[Literal["highest", "high", "medium", "low", "off"]] = None
     # 2026-09-24 — the list card's "Next:" line; same state machine and same
     # fields `get_application`'s `next_step` reads, batched for the page.
     next_step: NextStepOut
@@ -1824,13 +1827,15 @@ async def list_applications(
     in_flight: bool = Query(False),
     # Batch queue (2026-10-18) - only the open queue, first in first out (rows carry `queue_position`).
     queued: bool = Query(False),
+    # Owner decision 2026-10-19 - the user's own job priority of the job's place.
+    priority: Optional[str] = Query(None, max_length=20),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
-            due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued,
+            due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, priority=priority,
         )
     except SpineError as exc:
         _raise(exc)

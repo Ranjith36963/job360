@@ -3345,6 +3345,8 @@ export interface components {
             preflight?: {
                 [key: string]: unknown;
             } | null;
+            /** Priority */
+            priority?: ("highest" | "high" | "medium" | "low" | "off") | null;
             proof: components["schemas"]["ProofOut"];
             /** Queue Position */
             queue_position?: number | null;
@@ -7556,6 +7558,7 @@ export interface operations {
                 quiet_days?: number | null;
                 in_flight?: boolean;
                 queued?: boolean;
+                priority?: string | null;
             };
             header?: {
                 authorization?: string | null;

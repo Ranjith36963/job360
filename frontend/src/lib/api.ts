@@ -757,6 +757,8 @@ export async function listApplications(
     in_flight?: boolean;
     // Batch queue: only queued applications, in queue order, with preflight + queue_summary.
     queued?: boolean;
+    // Job priority (owner decision 2026-10-19): highest|high|medium|low|off|not_set.
+    priority?: string;
   } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
   const query = { limit: 20, ...params };

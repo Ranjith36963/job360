@@ -1702,6 +1702,24 @@
             ],
             "title": "Preflight"
           },
+          "priority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "highest",
+                  "high",
+                  "medium",
+                  "low",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
           },
@@ -12828,6 +12846,23 @@
               "default": false,
               "title": "Queued",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Priority"
             }
           },
           {

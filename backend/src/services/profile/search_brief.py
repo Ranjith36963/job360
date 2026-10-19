@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from src.services.profile import job_priority
 from src.services.profile.answer_match import resolve_answer
 from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES, USER_INFO_ANSWERS_PATH
 
@@ -113,6 +114,7 @@ def build_search_brief(
 
     rows: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
+    plan: list[dict[str, Any]] = []
     remote_countries = {r["country"] for r in records if r.get("remote_ok") is True}
     if residence:
         for country in list(work_from):
@@ -140,24 +142,42 @@ def build_search_brief(
             continue  # not a place they said they would work: never searched
         needs = _needs_sponsorship(rec)
         counts_if: list[str] = []
+        priorities: dict[str, Optional[str]] = {}
         if remote is True:
-            counts_if.append(_remote_line(country, work_from))
+            line = _remote_line(country, work_from)
+            lvl = job_priority.level_of(rec, job_priority.REMOTE)
+            if lvl != job_priority.OFF:  # the user switched this place off: never searched
+                counts_if.append(line)
+                priorities[job_priority.REMOTE] = lvl
+                plan.append({"country": country, "kind": job_priority.REMOTE, "counts_if": line, "priority": lvl})
         if onsite in ("yes", "only_if_sponsored"):
             if needs is None and onsite == "yes":
                 gaps.append({
                     "path": RIGHT_TO_WORK_PATH, "country": country,
                     "ask": f"Do you need visa sponsorship to work in {_name(country)}?",
                 })
-            counts_if.append(_onsite_line(country, onsite, needs is not False))
+            line = _onsite_line(country, onsite, needs is not False)
+            lvl = job_priority.level_of(rec, job_priority.ONSITE)
+            if lvl != job_priority.OFF:
+                counts_if.append(line)
+                priorities[job_priority.ONSITE] = lvl
+                plan.append({"country": country, "kind": job_priority.ONSITE, "counts_if": line, "priority": lvl})
         if onsite not in ONSITE_VALUES:
             gaps.append({
                 "path": RIGHT_TO_WORK_PATH, "country": country,
                 "ask": f"On-site in {_name(country)}: yes, only if they sponsor your visa, or no?",
             })
+        if not counts_if:
+            continue  # every place of this record is switched off
         rows.append({
             "country": country, "remote_ok": remote is True, "onsite": onsite or "",
-            "needs_sponsorship": needs, "counts_if": counts_if,
+            "needs_sponsorship": needs, "counts_if": counts_if, "priority": priorities,
         })
     if not rows:
         gaps.append({"path": RIGHT_TO_WORK_PATH, "country": None, "ask": WHERE_TO_SEARCH_ASK})
-    return {"rows": rows, "work_from": work_from, "residence_country": residence or None, "gaps": gaps}
+    return {
+        "rows": rows, "work_from": work_from, "residence_country": residence or None, "gaps": gaps,
+        # Owner decision 2026-10-19 - the user's own job priority: search in this order and
+        # spend about effort_pct of the hunt on each place. priority null = not chosen.
+        "plan": job_priority.effort_split(plan),
+    }
