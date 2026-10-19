@@ -92,10 +92,19 @@ ELEMENT_FACTS_JS = r"""
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
     in_form: !!el.closest('form'), role: el.getAttribute('role') || '',
-    // Any typed answer or chosen file anywhere on the page: the form is being filled.
-    page_has_answers: Array.from(el.ownerDocument.querySelectorAll('input, textarea')).some((f) => {
+    // Any typed answer, chosen file or changed choice anywhere on the page: the
+    // form is being filled. A box, radio or dropdown counts only once it differs
+    // from how the page loaded, so a pre-ticked box on a job ad is not an answer.
+    page_has_answers: Array.from(el.ownerDocument.querySelectorAll('input, textarea, select')).some((f) => {
+      if (f.tagName === 'SELECT') {
+        const opts = Array.from(f.options);
+        if (f.multiple) return opts.some((o) => o.selected !== o.defaultSelected);
+        const first = opts.findIndex((o) => o.defaultSelected);
+        return f.selectedIndex !== (first === -1 ? 0 : first) && !!(f.value || '').trim();
+      }
       const t = (f.type || '').toLowerCase();
-      if (['hidden', 'submit', 'button', 'image', 'checkbox', 'radio', 'password', 'search'].includes(t)) return false;
+      if (['hidden', 'submit', 'button', 'image', 'password', 'search'].includes(t)) return false;
+      if (t === 'checkbox' || t === 'radio') return f.checked !== f.defaultChecked;
       if (t === 'file') return !!(f.files && f.files.length);
       return !!(f.value || '').trim();
     }),

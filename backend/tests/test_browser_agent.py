@@ -91,3 +91,45 @@ async def test_the_request_screen_lets_only_the_public_internet_through():
     before = len(calls)
     assert (await screen.screen("https://jobs.example/other")).ok
     assert len(calls) == before
+
+
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_chosen_answer_alone_puts_send_application_behind_the_gate():
+    # A React form with no <form> whose only answers are choices: "Send
+    # application" must still count as the final submit. A box ticked by the
+    # page itself is not an answer, so the ad's "Apply" still only opens.
+    async_api = pytest.importorskip("playwright.async_api")
+    from src.services.browser_agent.page_js import ELEMENT_FACTS_JS
+
+    page_html = """<!doctype html><html><body>
+    <label><input type="checkbox" id="news" checked> Keep me posted</label>
+    <select id="auth"><option value="">Choose</option><option value="yes">Yes</option></select>
+    <label><input type="radio" name="r" id="r1" value="a"> A</label>
+    <div role="button" id="send">Send application</div>
+    </body></html>"""
+
+    async def kind(page):
+        facts = await page.locator("#send").evaluate(ELEMENT_FACTS_JS)
+        return control_kind(facts["tag"], facts["type"], facts["name"], facts["autocomplete"],
+                            facts["in_form"], facts["role"], facts["page_has_answers"])
+
+    async with async_api.async_playwright() as p:
+        try:
+            browser = await p.chromium.launch()
+        except Exception as e:  # noqa: BLE001 — no Chromium on this machine
+            pytest.skip(f"Chromium not available: {e}")
+        page = await browser.new_page()
+        for choose in (None, "select", "radio", "untick"):
+            await page.set_content(page_html)
+            if choose is None:
+                assert await kind(page) == "field"
+                continue
+            if choose == "select":
+                await page.select_option("#auth", "yes")
+            elif choose == "radio":
+                await page.check("#r1")
+            else:
+                await page.uncheck("#news")
+            assert await kind(page) == "submit", choose
+        await browser.close()

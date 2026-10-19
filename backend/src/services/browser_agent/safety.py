@@ -53,7 +53,7 @@ def control_kind(
     ``autocomplete`` its autocomplete attribute, ``in_form`` whether it sits
     inside a ``<form>``, ``role`` its ARIA role (a ``<div role=button>`` is a
     button too) and ``page_has_answers`` whether any field on the page already
-    holds a typed answer or a chosen file. "Apply" / "Send" / "Finish" on a
+    holds a typed answer, a chosen file or a changed choice. "Apply" / "Send" / "Finish" on a
     button counts as the final submit inside a form OR on a page with answers
     (React forms often have no ``<form>``); on a page with nothing typed it is
     the ad's "Apply for this job" that opens the form. When unsure, a button counts as the final submit: the
