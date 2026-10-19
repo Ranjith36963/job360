@@ -163,3 +163,54 @@ TICK_VIA_LABEL_JS = r"""
   return el.checked;
 }
 """
+
+# React and other framework inputs ignore a plain `value =`: set it through the native setter and
+# fire the events a person's typing fires (browser-use default_action_watchdog.py:1392-1405;
+# freehire extension/lib/form.ts:798-809). Used only when Playwright's fill() read back wrong.
+NATIVE_SET_JS = r"""
+(el, v) => {
+  const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+  setter.call(el, v);
+  for (const t of ['input', 'change', 'blur']) el.dispatchEvent(new Event(t, { bubbles: true }));
+  return el.value;
+}
+"""
+
+# A field that holds its text in `value` (the native setter's kind), not a contenteditable box.
+IS_TEXT_FIELD_JS = r"""
+(el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+"""
+
+# The ids of the list a dropdown names as its own (ARIA): its options are looked for there first.
+OWN_LIST_IDS_JS = r"""
+(el) => [el.getAttribute('aria-controls'), el.getAttribute('aria-owns')].join(' ').split(/\s+/).filter(Boolean)
+"""
+
+# The value a field shows now (inputs, textareas, contenteditable boxes, custom dropdown buttons).
+SHOWN_VALUE_JS = r"""
+(el) => ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '')
+"""
+
+# A suggestion box (react-select, Workday prompt, Lever location): typed key by key so the site's
+# key listeners fire (Skyvern handler.py:8713-8730).
+IS_TYPEAHEAD_JS = r"""
+(el) => {
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  return role === 'combobox' || !!el.getAttribute('aria-autocomplete') || el.hasAttribute('list')
+    || /select__input|autocomplete|typeahead/i.test(el.className || '');
+}
+"""
+
+# The picked option shown near the field (react-select draws it in a sibling, not the input's value).
+# Only the field's own small box (up to 3 levels up) counts, so a whole question block cannot.
+CHOSEN_NEARBY_JS = r"""
+(el, want) => {
+  let n = el.parentElement;
+  for (let i = 0; i < 3 && n; i++, n = n.parentElement) {
+    if ((n.innerText || '').length > 400) break;
+    if ((n.innerText || '').toLowerCase().includes(want)) return true;
+  }
+  return false;
+}
+"""

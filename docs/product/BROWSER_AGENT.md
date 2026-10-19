@@ -177,6 +177,22 @@ form; the test fails when the wait is removed.
 - **Untrusted text:** the page text sits inside a marker with a random code per read. A site that plants a fake end
   marker gets it removed, so its text cannot pose as instructions.
 
+**Step 3, typing and dropdowns that hold (2026-10-19):**
+- **`type`** reads the value back. A suggestion box (combobox, autocomplete) is typed key by key so the site's
+  suggestions appear (Skyvern). A plain field that a React form did not take gets the value set the way React
+  expects, once (browser-use, freehire). Never a retry loop.
+- **`choose`** works on custom dropdowns, not only `<select>`: it opens the list, finds the option wherever the
+  site draws it (react-select, Workday's portal lists), clicks it and checks the field now shows it. It picks an
+  exact match, or the only option that starts with or contains the text. Two candidates means no guess: it lists
+  the options it saw. It looks in the field's own frame first, and in the list the field names as its own
+  (`aria-controls`); two open lists with no owner named are refused (`two_lists_open`), never guessed between.
+  A contenteditable box keeps what was typed: the React value setter is used only on inputs and text boxes.
+- **`upload`** also works from an "Attach" button by catching the file picker. `upload_confirmed` says whether the
+  file name shows on the page, because Greenhouse can take the file and still show an error (ApplYourself).
+- **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
+  `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); line breaks go
+  only into a multi-line box, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
+
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.

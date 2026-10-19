@@ -29,7 +29,18 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from src.services.browser_agent.egress import EgressProxy, OpenFn
-from src.services.browser_agent.page_js import ELEMENT_FACTS_JS, FOCUS_IN_LIST_JS, SNAPSHOT_JS, TICK_VIA_LABEL_JS
+from src.services.browser_agent.page_js import (
+    CHOSEN_NEARBY_JS,
+    ELEMENT_FACTS_JS,
+    FOCUS_IN_LIST_JS,
+    IS_TEXT_FIELD_JS,
+    IS_TYPEAHEAD_JS,
+    NATIVE_SET_JS,
+    OWN_LIST_IDS_JS,
+    SHOWN_VALUE_JS,
+    SNAPSHOT_JS,
+    TICK_VIA_LABEL_JS,
+)
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
 from src.services.fetch.guard import ResolveFn
 
@@ -244,6 +255,146 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
     await page.keyboard.press(key)
     await _settle(page)
     return await look(s)
+
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+async def _type_into(loc: Any, text: str) -> str:
+    """Type and read back. Suggestion boxes key by key; plain fields fill(), then the native setter
+    if the site's framework did not take it (one bounded heal, never a loop)."""
+    # Never key a control character: as keys "\n" is Enter (it can submit the form, skipping
+    # check_submit) and "\t" is Tab (the rest would land in another field). fill() inserts them as text.
+    if await loc.evaluate(IS_TYPEAHEAD_JS) and not _CONTROL_CHARS.search(text):
+        await loc.fill("")
+        await loc.press_sequentially(text, delay=25)
+    else:
+        await loc.fill(text)
+    shown = str(await loc.evaluate(SHOWN_VALUE_JS))
+    # The native setter is an input's or a textarea's: a contenteditable box keeps what fill() left.
+    if shown != text and await loc.evaluate(IS_TEXT_FIELD_JS) and not await loc.evaluate(IS_TYPEAHEAD_JS):
+        shown = str(await loc.evaluate(NATIVE_SET_JS, text))
+    return shown
+
+
+# Where custom dropdowns draw their options: ARIA options anywhere (often a portal at the end of the
+# page), react-select's classes, and Workday's prompt options (freehire combobox.ts:44-119;
+# OfferOS dom-fill.ts:913-960; ApplYourself fill.py:12-17).
+OPTION_SELECTOR = '[role=option], .select__option, [data-automation-id="promptOption"]'
+
+
+def _pick(options: list[str], want: str) -> int:
+    """Index of the option to click: an exact match (any case), else the ONLY option starting with it,
+    else the ONLY option containing it; -1 when none or ambiguous (never a guess)."""
+    w = " ".join(want.split()).casefold()
+    if not w:
+        return -1  # nothing asked for: never "the only option there is"
+    norm = [" ".join(o.split()).casefold() for o in options]
+    exact = [i for i, o in enumerate(norm) if o == w]
+    if exact:
+        return exact[0] if len(exact) == 1 else -1  # two options with the same name: no guess
+    for hits in ([i for i, o in enumerate(norm) if o.startswith(w)], [i for i, o in enumerate(norm) if w in o]):
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            return -1
+    return -1
+
+
+# Options the user can see: a closed list drawn earlier (hidden) never answers for the open one.
+VISIBLE_OPTIONS = ", ".join(f"{part.strip()}:visible" for part in OPTION_SELECTOR.split(","))
+# The ids of the list a dropdown says is its own (aria-controls / aria-owns), when they are plain ids.
+_LIST_ID = re.compile(r"^[\w:.-]{1,200}$")
+
+
+def _option_not_found(text: str, seen: list[str]) -> BrowserError:
+    # Option labels are page text: clipped, and inside the untrusted marker like the rest of the page.
+    listed = _wrap_untrusted("; ".join(o[:60] for o in seen[:30])) if seen else "none were shown"
+    return BrowserError(
+        "refused", "option_not_found",
+        f"No single option matches '{text[:80]}'. Type part of it first, then choose again. Options seen: {listed}",
+    )
+
+
+async def _choose(s: Session, loc: Any, text: str) -> None:
+    """Pick an option: a native <select> by the same matching rules; a custom dropdown by opening it,
+    finding the option wherever it is drawn, clicking it and checking the field now shows it."""
+    if await loc.evaluate("(el) => el.tagName === 'SELECT'"):
+        labels = [" ".join(str(t).split()) for t in await loc.evaluate("(el) => Array.from(el.options, o => o.text)")]
+        i = _pick(labels, text)
+        if i >= 0:
+            await loc.select_option(index=i)
+            return
+        try:
+            await loc.select_option(value=text, timeout=1000)
+        except Exception:  # noqa: BLE001 - no option has that value either
+            raise _option_not_found(text, labels) from None
+        return
+    page = _live_page(s)
+    if not await loc.evaluate("(el) => el.getAttribute('aria-expanded') === 'true'"):
+        await loc.click()
+    own_lists = [i for i in await loc.evaluate(OWN_LIST_IDS_JS) if _LIST_ID.match(i)]
+    seen: list[str] = []
+    for frame in await _option_frames(page, loc):
+        options, scoped = frame.locator(VISIBLE_OPTIONS), False
+        for list_id in own_lists:  # the list the field names as its own, when it is in this frame
+            own = frame.locator(f'[id="{list_id}"]')
+            if await own.count():
+                options, scoped = own.locator(VISIBLE_OPTIONS), True
+                break
+        try:
+            await options.first.wait_for(state="visible", timeout=2000 if frame == page.main_frame else 300)
+        except Exception:  # noqa: BLE001, S112 - no options drawn in this frame
+            continue
+        if not scoped and await frame.locator("[role=listbox]:visible").count() > 1:
+            await page.keyboard.press("Escape")
+            raise BrowserError(
+                "refused", "two_lists_open",
+                "Two dropdown lists are open and this field does not say which is its own. Close the other "
+                "one (key Escape), then choose again.",
+            )
+        texts = [" ".join(t.split()) for t in await options.all_inner_texts()][:200]
+        seen.extend(texts)
+        i = _pick(texts, text)
+        if i < 0:
+            continue  # an unrelated open list here; the one we want may be in another frame
+        before = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
+        await options.nth(i).click()
+        await _settle(page)
+        shown = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
+        # The picked option's own text shows, or the asked-for text shows AND the field changed (what was
+        # typed into a suggestion box beforehand is no proof). react-select keeps its input empty and shows
+        # the pick next to it: then read the field's surroundings.
+        confirmed = (
+            texts[i].casefold() in shown or (text.strip().casefold() in shown and shown != before)
+            if shown.strip() else bool(await loc.evaluate(CHOSEN_NEARBY_JS, texts[i].casefold()))
+        )
+        if confirmed:
+            return
+        raise BrowserError(
+            "error", "choose_unconfirmed",
+            f"Clicked option {i + 1} but the field does not show it. The field shows: "
+            + (_wrap_untrusted(shown[:60]) if shown.strip() else "nothing"),
+        )
+    await page.keyboard.press("Escape")
+    raise _option_not_found(text, seen)
+
+
+async def _option_frames(page: Any, loc: Any) -> list[Any]:
+    """Where to look for the options: the field's own frame first (look lists fields in shown frames
+    past the MAX_FRAMES-th), then the page, then other shown frames; at most MAX_FRAMES of them."""
+    own = None
+    try:
+        own = await (await loc.element_handle(timeout=1000)).owner_frame()
+    except Exception:  # noqa: BLE001 - detached: search the page as before
+        own = None
+    order = [f for f in (own, page.main_frame) if f is not None]
+    for f in page.frames[:MAX_FRAMES_CHECKED]:
+        if len(order) >= MAX_FRAMES:
+            break
+        if f not in order and await _frame_shown(f):
+            order.append(f)
+    return list(dict.fromkeys(order))[:MAX_FRAMES]
 
 
 def _live_page(s: Session) -> Any:
@@ -511,17 +662,27 @@ async def _act(
             )
         if len(text) > MAX_TYPE_CHARS:
             raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
-        await loc.fill(text)
-        typed = await loc.input_value()
+        if _CONTROL_CHARS.search(text.replace("\n", "")) or (
+            "\n" in text and not await loc.evaluate("(el) => el.tagName === 'TEXTAREA'")
+        ):
+            raise BrowserError(
+                "refused", "control_characters",
+                "Type plain text only: line breaks only into a multi-line box, never tabs or other control keys.",
+            )
+        typed = await _type_into(loc, text)
         out = await look(s)
         out["typed_matches"] = typed == text
         return out
 
+    if kind == "submit" and action in ("choose", "tick", "upload"):
+        # These click too; a final submit is only ever clicked through the gate (CodeRabbit on #915).
+        raise BrowserError(
+            "refused", "submit_control",
+            "That is the form's final submit. Use click with application_id, so check_submit runs first.",
+        )
+
     if action == "choose":
-        try:
-            await loc.select_option(label=text)
-        except Exception:  # noqa: BLE001 - fall back to the option's value
-            await loc.select_option(value=text)
+        await _choose(s, loc, text)
         return await look(s)
 
     if action == "tick":
@@ -543,13 +704,33 @@ async def _act(
             "refused", "upload_needs_application", "Uploads need application_id: Job360 sends the CV saved for it."
         )
     name, data = await files(doc_kind)
+    is_file_input = (await loc.evaluate("(el) => el.tagName === 'INPUT' && el.type === 'file'"))
     with tempfile.TemporaryDirectory(prefix="j360-upload-") as tmp:
         path = os.path.join(tmp, name)
         with open(path, "wb") as fh:
             fh.write(data)
-        await loc.set_input_files(path)
+        if is_file_input:
+            await loc.set_input_files(path)
+        else:
+            # An "Attach" button with no reachable file box: catch the file picker it opens
+            # (Playwright filechooser; the Greenhouse fix in ApplYourself src/apply/fill.py:450-509).
+            try:
+                async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
+                    await loc.click()
+                chooser = await chooser_info.value
+            except Exception:  # noqa: BLE001 - the button opened no file picker
+                raise BrowserError(
+                    "refused", "not_an_upload",
+                    "That control did not open a file picker. Use the file box or the Attach button.",
+                ) from None
+            await chooser.set_files(path)
     await _settle(page)
-    return await look(s)
+    out = await look(s)
+    # A site can take the file and still show an error (Greenhouse): believe the file name on the page.
+    out["upload_confirmed"] = name in out["text"] or any(
+        name in str(e.get("value") or "") for e in out["elements"] if e.get("type") == "file"
+    )
+    return out
 
 
 # ── The live view: the USER signs in themselves (slice 2) ─────────────────────

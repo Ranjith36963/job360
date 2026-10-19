@@ -836,6 +836,111 @@ async def test_hidden_checkbox_shadow_input_untrusted_marker_and_hidden_frame(lo
         await pool.shutdown()
 
 
+# ── Step 3: typing, custom dropdowns and Attach-button uploads ─────────────────
+
+
+def test_choose_picks_exact_then_unique_and_never_guesses():
+    from src.services.browser_agent.agent import _pick
+
+    opts = ["London", "Londonderry", "Yes", "No", "Prefer not to say"]
+    assert _pick(opts, "london") == 0          # exact wins over the longer one
+    assert _pick(opts, "Lond") == -1           # two start with it: ambiguous, no guess
+    assert _pick(opts, "prefer") == 4          # the only one starting with it
+    assert _pick(opts, "not to") == 4          # the only one containing it
+    assert _pick(opts, "Maybe") == -1
+
+
+WIDGETS = """<!doctype html><html><head><title>Widgets - Acme</title></head><body>
+<label for="city">City</label>
+<input id="city" role="combobox" aria-autocomplete="list" aria-expanded="false">
+<label id="auth-l">Authorised to work?</label>
+<button id="auth" aria-haspopup="listbox" aria-labelledby="auth-l" type="button">Select One</button>
+<label for="cv">Resume</label><input id="cv" type="file" style="display:none">
+<button type="button" id="attach" onclick="document.getElementById('cv').click()">Attach</button>
+<span id="chosen"></span>
+<script>
+  let keys = 0;
+  const city = document.getElementById('city');
+  city.addEventListener('keydown', () => keys++);
+  city.addEventListener('keyup', () => {
+    // Suggestions appear only for real key presses (a pasted value draws nothing).
+    document.querySelectorAll('.menu').forEach(m => m.remove());
+    if (!city.value) return;
+    const menu = document.createElement('div'); menu.className = 'menu'; menu.setAttribute('role', 'listbox');
+    for (const c of ['London, United Kingdom', 'Londonderry, United Kingdom', 'Lonsdale, Australia']) {
+      if (!c.toLowerCase().startsWith(city.value.toLowerCase())) continue;
+      const o = document.createElement('div'); o.setAttribute('role', 'option'); o.textContent = c;
+      o.onclick = () => { city.value = c; menu.remove(); city.setAttribute('aria-expanded', 'false'); };
+      menu.appendChild(o);
+    }
+    document.body.appendChild(menu); city.setAttribute('aria-expanded', 'true');
+  });
+  const auth = document.getElementById('auth');
+  auth.onclick = () => {   // a Workday-style portal: the list is drawn at the end of the page
+    const lb = document.createElement('ul'); lb.setAttribute('role', 'listbox');
+    for (const v of ['Yes', 'No']) {
+      const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = v;
+      li.onclick = () => { auth.textContent = v; lb.remove(); };
+      lb.appendChild(li);
+    }
+    document.body.appendChild(lb); auth.setAttribute('aria-expanded', 'true');
+  };
+  document.getElementById('cv').addEventListener('change', (e) => {
+    document.getElementById('chosen').textContent = e.target.files[0].name;
+  });
+</script></body></html>"""
+
+
+@pytest.fixture
+async def widget_site():
+    from aiohttp import web
+
+    async def widgets(_):
+        return web.Response(text=WIDGETS, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/widgets", widgets)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_typeahead_custom_dropdown_and_attach_button_upload(widget_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(widget_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/widgets")
+        city = _ref(page, "City")
+        page = await run(pool, "u1", "type", ref=city, text="Lon")   # key by key: suggestions appear
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "choose", ref=city, text="Lond")     # London and Londonderry: no guess
+        assert exc.value.reason == "option_not_found" and "Londonderry" in exc.value.detail
+        await run(pool, "u1", "type", ref=city, text="Lon")
+        page = await run(pool, "u1", "choose", ref=city, text="London, United Kingdom")
+        assert next(e for e in page["elements"] if e["name"] == "City")["value"] == "London, United Kingdom"
+
+        page = await run(pool, "u1", "choose", ref=_ref(page, "Authorised to work?"), text="yes")
+        assert any(e["name"] == "Authorised to work?" for e in page["elements"])
+        s = pool._sessions["u1"]  # noqa: SLF001
+        assert await s.page.locator("#auth").inner_text() == "Yes"
+
+        async def pdf(kind):
+            return "Ada_CV.pdf", b"%PDF-1.4 test"
+
+        page = await run(pool, "u1", "upload", ref=_ref(page, "Attach"), doc_kind="cv", files=pdf)
+        assert page["upload_confirmed"] is True
+        assert await s.page.locator("#chosen").inner_text() == "Ada_CV.pdf"
+    finally:
+        await pool.shutdown()
+
+
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
@@ -888,3 +993,73 @@ async def test_an_unreadable_page_is_an_error_not_an_empty_ok():
     with pytest.raises(BrowserError) as exc:
         await _read_frame(Broken(), 10, main=True)
     assert exc.value.reason == "page_unreadable" and Broken.calls == 3   # one try for the child, two for the page
+
+
+CHOICES = """<!doctype html><html><head><title>Choices - Acme</title></head><body>
+<label for="c">Country</label>
+<select id="c"><option value="">Choose</option><option value="GB">United Kingdom</option>
+  <option value="US">United States</option></select>
+<ul role="listbox" style="display:none"><li role="option">Old hidden option</li></ul>
+<div class="rs"><label for="lang">Language</label><input id="lang" role="combobox" aria-expanded="false">
+  <div id="shown"></div></div>
+<form onsubmit="event.preventDefault(); document.title = 'SUBMITTED'">
+  <button type="submit">Submit application</button></form>
+<script>
+  const lang = document.getElementById('lang');
+  lang.onclick = () => {   // react-select style: the pick shows beside the input, the input stays empty
+    const lb = document.createElement('div'); lb.setAttribute('role', 'listbox');
+    for (const v of ['English', 'French']) {
+      const o = document.createElement('div'); o.setAttribute('role', 'option'); o.textContent = v;
+      o.onclick = () => { document.getElementById('shown').textContent = v; lb.remove(); };
+      lb.appendChild(o);
+    }
+    document.body.appendChild(lb); lang.setAttribute('aria-expanded', 'true');
+  };
+</script></body></html>"""
+
+
+@pytest.fixture
+async def choices_site():
+    from aiohttp import web
+
+    async def choices(_):
+        return web.Response(text=CHOICES, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/choices", choices)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_choose_matches_native_labels_skips_hidden_lists_and_never_clicks_a_submit(choices_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, _pick, run
+
+    assert _pick(["Yes", "yes", "No"], "Yes") == -1   # two with the same name: no guess
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(choices_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/choices")
+        page = await run(pool, "u1", "choose", ref=_ref(page, "Country"), text="Kingdom")   # label GB: by its name
+        assert next(e for e in page["elements"] if e["name"] == "Country")["value"] == "United Kingdom"
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "choose", ref=_ref(page, "Country"), text="United")
+        assert exc.value.reason == "option_not_found" and "United States" in exc.value.detail
+
+        page = await run(pool, "u1", "choose", ref=_ref(page, "Language"), text="French")   # past the hidden list
+        s = pool._sessions["u1"]  # noqa: SLF001
+        assert await s.page.locator("#shown").inner_text() == "French"
+
+        submit = _ref(page, "Submit application")
+        for action, extra in (("choose", {"text": "x"}), ("tick", {}), ("upload", {"doc_kind": "cv"})):
+            with pytest.raises(BrowserError) as exc:
+                await run(pool, "u1", action, ref=submit, **extra)
+            assert exc.value.reason == "submit_control"
+        assert await s.page.title() == "Choices - Acme"   # never submitted
+    finally:
+        await pool.shutdown()
