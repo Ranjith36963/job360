@@ -33,7 +33,7 @@ SITES: tuple[Site, ...] = (
     Site("greenhouse", ("greenhouse.io",), (
         "Upload the CV with the Attach button and check upload_confirmed; a file box set directly can fail silently.",
         "Dropdowns are react-select: choose by the exact option text, then read the value back.",
-        "An invisible reCAPTCHA is normal here; only a visible challenge is a CAPTCHA.",
+        "Its invisible reCAPTCHA is normal and no stop; an image challenge or a tick box is (needs_you).",
     )),
     Site("lever", ("lever.co",), (
         "Location: type, then choose a suggestion from the list; typed text alone is rejected on submit.",
