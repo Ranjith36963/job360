@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from src.services.browser_agent.egress import EgressProxy, OpenFn
-from src.services.browser_agent.page_js import ELEMENT_FACTS_JS, FOCUS_IN_LIST_JS, SNAPSHOT_JS
+from src.services.browser_agent.page_js import ELEMENT_FACTS_JS, FOCUS_IN_LIST_JS, SNAPSHOT_JS, TICK_VIA_LABEL_JS
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
 from src.services.fetch.guard import ResolveFn
 
@@ -257,25 +257,88 @@ def _live_page(s: Session) -> Any:
     return s.page
 
 
+MAX_FRAMES = 20
+# How many frames are looked at to find the MAX_FRAMES shown ones.
+MAX_FRAMES_CHECKED = 100
+# Controls kept for embedded frames when the page has any shown one.
+FRAME_ELEMENT_FLOOR = 50
+FRAME_READ_TIMEOUT_S = 3.0
+
+
+async def _read_frame(frame: Any, max_elements: int, *, main: bool) -> Optional[dict[str, Any]]:
+    """One frame's snapshot. A child frame that fails is skipped; the page itself gets one more try
+    and then an error, never an empty "ok" (CodeRabbit on #914)."""
+    for attempt in range(2 if main else 1):
+        try:
+            return await asyncio.wait_for(
+                frame.evaluate(SNAPSHOT_JS, {"maxElements": max_elements, "maxText": MAX_TEXT}),
+                FRAME_READ_TIMEOUT_S,
+            )
+        except Exception:  # noqa: BLE001, S112 - a frame that navigated, hung or is cross-process mid-read
+            if attempt == 0 and main:
+                await asyncio.sleep(0.5)
+    if main:
+        raise BrowserError(
+            "error", "page_unreadable",
+            "The page could not be read (it may still be loading or moving to a new page). Call look again.",
+        )
+    return None
+
+
+def _wrap_untrusted(text: str) -> str:
+    """Page text inside a per-read random marker (nanobrowser text.ts:16, :69-91; Skyvern
+    utils/strings.py:86-89). A page cannot forge the end marker: it does not know the nonce, and
+    anything shaped like one is defused first."""
+    import secrets  # noqa: PLC0415
+
+    nonce = secrets.token_hex(4)
+    clean = re.sub(r"<<\s*(?:/?\s*)?(?:end\s+)?page[-_ ]?text[^>]*>>", "[marker removed]", text, flags=re.IGNORECASE)
+    return f"<<page-text {nonce}>>\n{clean}\n<<end page-text {nonce}>>"
+
+
+async def _frame_shown(frame: Any) -> bool:
+    """A child frame the user cannot see (0x0, hidden) holds no form worth reading."""
+    try:
+        handle = await frame.frame_element()
+        box = await handle.bounding_box()
+    except Exception:  # noqa: BLE001 - detached or cross-process mid-read
+        return False
+    return bool(box) and box["width"] > 1 and box["height"] > 1
+
+
 async def look(s: Session) -> dict[str, Any]:
-    """Read the page: every visible control (with a ref to act on) and the page text."""
+    """Read the page: the visible controls nearest the screen (with a ref to act on), how many more
+    there are above and below, and the page text inside an untrusted-content marker."""
     page = _live_page(s)
     elements: list[dict[str, Any]] = []
     texts: list[str] = []
     frame_urls: list[str] = []
     has_password = False
-    for frame in page.frames:
+    above = below = 0
+    read = 0
+    frames = page.frames[:MAX_FRAMES_CHECKED]
+    # A page that embeds a shown frame (a Greenhouse or iCIMS form on a careers page) keeps part of
+    # the budget for it: 150 links on the page itself must not crowd the form out.
+    shown = [True] + [await _frame_shown(f) for f in frames[1:]]
+    embeds = any(shown[1:])
+    for i, frame in enumerate(frames):
         frame_urls.append(frame.url)
-        try:
-            snap = await frame.evaluate(
-                SNAPSHOT_JS, {"maxElements": MAX_ELEMENTS - len(elements), "maxText": MAX_TEXT}
-            )
-        except Exception:  # noqa: BLE001, S112 - a frame that navigated or is cross-process mid-read
+        # The cap counts frames READ: hidden ones (ads, trackers) before the form do not use it up.
+        if read >= MAX_FRAMES or not shown[i]:
             continue
+        budget = MAX_ELEMENTS - (FRAME_ELEMENT_FLOOR if embeds else 0) if i == 0 else MAX_ELEMENTS - len(elements)
+        snap = await _read_frame(frame, budget, main=i == 0)
+        if snap is None:
+            continue
+        read += 1
         elements.extend(snap.get("elements") or [])
         if snap.get("text"):
             texts.append(snap["text"])
         has_password = has_password or bool(snap.get("has_password_box"))
+        above += int(snap.get("omitted_above") or 0)
+        below += int(snap.get("omitted_below") or 0)
+    # Every frame's URL counts for the CAPTCHA check, including the frames past the cap and hidden ones.
+    frame_urls.extend(f.url for f in page.frames[MAX_FRAMES_CHECKED:])
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
@@ -283,8 +346,13 @@ async def look(s: Session) -> dict[str, Any]:
         "title": await page.title(),
         "note": UNTRUSTED,
         "elements": elements,
-        "text": text,
+        "text": _wrap_untrusted(text),
     }
+    if above or below:
+        out["more_elements"] = {
+            "above": above, "below": below,
+            "hint": "Only the controls nearest the screen are listed. scroll up or down, then look, to see the rest.",
+        }
     blocker = blocker_for(frame_urls, text, has_password)
     if blocker is not None:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
@@ -457,7 +525,14 @@ async def _act(
         return await look(s)
 
     if action == "tick":
-        await loc.set_checked(on)
+        try:
+            await loc.set_checked(on)
+        except Exception:  # noqa: BLE001 - a hidden input behind a styled label: click the label instead
+            state = await loc.evaluate(TICK_VIA_LABEL_JS, on)
+            if state != on:
+                raise BrowserError(
+                    "error", "tick_failed", "That box did not change. Call look and click its label instead."
+                ) from None
         return await look(s)
 
     # action == "upload"
