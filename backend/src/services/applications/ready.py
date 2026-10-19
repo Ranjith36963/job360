@@ -263,7 +263,22 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     blocks, _ = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     answers, _ = _answer_rows(typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
-    return [{"question": a["question"], "answer": str(a["changed_to"])} for a in answers if a["changed_to"] is not None]
+    pending = [{"question": a["question"], "answer": str(a["changed_to"])}
+               for a in answers if a["changed_to"] is not None]
+    if not pending:
+        return []
+    # Owner decision 2026-10-19: an answer is only off this list once a `form_swept` NEWER than
+    # the fill reports the form now holds the user's words - the assistant's proof that it typed them.
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_swept' AND id > (SELECT MAX(id) FROM application_events "
+        "WHERE application_id = ? AND user_id = ? AND event_type = 'form_filled') ORDER BY id DESC LIMIT 1",
+        (app_row["id"], user_id, app_row["id"], user_id),
+    )
+    sweep = await cur.fetchone()
+    held = _json(sweep["payload"]).get("answers") if sweep is not None else None
+    in_form = {(_norm(h.get("question", "")), _norm(h.get("answer", ""))) for h in held or [] if isinstance(h, dict)}
+    return [p for p in pending if (_norm(p["question"]), _norm(p["answer"])) not in in_form]
 
 
 async def ready_cards(

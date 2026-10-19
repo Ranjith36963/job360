@@ -2791,10 +2791,16 @@ async def submit_check(
         raise AssertionError("unreachable")  # pragma: no cover
     verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
     type_first = await ready_service.changed_answers(db, user.id, app_row)
+    if type_first and verdict.decision != "stop":
+        # Owner decision 2026-10-19 (the LOCK, not just an instruction): answers the user changed on
+        # the web hold every submit - even after their yes - until a `form_swept` newer than the fill
+        # reports those exact words in the form. A sweep never cancels the yes; a new fill does.
+        verdict = settings_rules.SubmitDecision(
+            "stop", "type_first_pending",
+            f"Type the {len(type_first)} answer(s) the user changed (type_first) into their fields, "
+            "then record_event form_swept with `answers` (what the form now holds). Then check again.",
+        )
     detail = verdict.detail
-    if type_first:
-        detail = (f"{detail} First type the {len(type_first)} answer(s) the user changed (type_first) into "
-                  "their fields, replacing what is there.")
     get_audit_logger().info(
         "submit_check",
         extra={

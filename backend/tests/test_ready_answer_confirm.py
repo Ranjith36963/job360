@@ -40,6 +40,14 @@ async def _fill(client: AsyncClient, app_id: int, answers: list[dict[str, Any]])
     assert resp.status_code == 201, resp.text
 
 
+async def _sweep(client: AsyncClient, app_id: int, answer: str) -> None:
+    """The assistant re-reads the one field and reports what the form now holds."""
+    payload = {"fields_checked": 1, "fixed": 1,
+               "answers": [{"question": GUESS["question"], "answer": answer, "source": "approved"}]}
+    resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_swept", "payload": payload})
+    assert resp.status_code == 201, resp.text
+
+
 async def _card(client: AsyncClient, app_id: int) -> dict[str, Any]:
     resp = await client.get("/api/ready-to-send", params={"application_id": app_id})
     assert resp.status_code == 200, resp.text
@@ -106,7 +114,17 @@ async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_
         check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
         assert check.status_code == 200, check.text
         assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}]
-        assert "type_first" in check.json()["detail"]
+        # The LOCK: even after the yes, no submit until a sweep proves the form holds the user's words.
+        assert (check.json()["decision"], check.json()["reason"]) == ("stop", "type_first_pending")
+        assert "form_swept" in check.json()["detail"]
+        # Negative control: a sweep that still reads the OLD answer does not open the lock.
+        await _sweep(client, app_id, GUESS["answer"])
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["reason"] == "type_first_pending"
+        # The assistant types the user's word and sweeps: the lock opens (the yes still stands).
+        await _sweep(client, app_id, word)
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["type_first"] == [] and check.json()["reason"] != "type_first_pending", check.json()
         # Once the assistant fills with the user's word, nothing is left to type.
         await _fill(client, app_id, [{**GUESS, "answer": word, "source": "approved"}])
         card = await _card(client, app_id)

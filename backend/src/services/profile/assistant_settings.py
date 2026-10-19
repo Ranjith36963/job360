@@ -739,6 +739,7 @@ REASONS: tuple[str, ...] = (
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
+    "type_first_pending",
 )
 
 
