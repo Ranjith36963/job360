@@ -55,6 +55,14 @@ delete a lesson; if one stops being true, say so on its line and why.
   this skill before watching the PR, so I also waited an hour on a rate-limited CodeRabbit,
   breaking the rule below. **Rule:** pull enough of a failing log to reach pytest's
   `short test summary info` (tail_lines ≥ 600) before any slower route.
+- 2026-10-19, same PR #916: the failure itself was mine. A review asked for `skip` to be
+  explained in the `update_profile` tool description; my one-line addition took it from
+  1,998 to 2,034 characters. `tests/test_mcp_text_budget.py` caps every MCP text at 2,000
+  (Claude Code truncates at 2,048), but `scripts/agent-gate.sh` passed twice: its fast tier
+  ran only the 226 / 13 tests it judged affected, not the budget test. Only the 20-minute
+  `offline-suite` caught it. **Rule:** after editing any `@mcp.tool()` docstring or
+  `INSTRUCTIONS` in `api/mcp_server.py`, run `python scripts/mcp_text_budget.py` before
+  pushing.
 - CodeRabbit's free tier rate-limits after a few reviews an hour. **Rule:** never
   wait on it; the repo's own reviewer-bugs / reviewer-security / CI are the gate.
 - 2026-10-18: a finished Needs-you feature sat unpushed while the session
