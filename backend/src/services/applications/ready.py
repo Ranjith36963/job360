@@ -240,6 +240,23 @@ def _answer_rows(
     return answers, flags
 
 
+def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
+    """The LOCK (owner decision 2026-10-19 - not just an instruction): answers the user changed
+    on the web hold every submit, even after their yes, until a ``form_swept`` newer than the fill
+    reports those exact words in the form (``changed_answers`` returns ``[]`` then). A ``stop`` the
+    gate already gave stays as it is (it is no less a stop); ``submit`` and ``ask`` become
+    ``stop`` / ``type_first_pending``. A sweep never cancels the yes; a new fill does."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
+
+    if not type_first or verdict.decision == "stop":
+        return verdict
+    return settings_rules.SubmitDecision(
+        "stop", "type_first_pending",
+        f"Type the {len(type_first)} answer(s) the user changed (type_first) into their fields, "
+        "then record_event form_swept with `answers` (what the form now holds). Then check again.",
+    )
+
+
 async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[dict[str, str]]:
     """The answers the user changed on the newest filled form: ``[{question, answer}]``
     with the USER's answer, which the assistant must type before it submits. Read

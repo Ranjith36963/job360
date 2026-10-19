@@ -115,12 +115,13 @@ async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_
         assert check.status_code == 200, check.text
         assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}]
         # The LOCK: even after the yes, no submit until a sweep proves the form holds the user's words.
-        assert (check.json()["decision"], check.json()["reason"]) == ("stop", "type_first_pending")
-        assert "form_swept" in check.json()["detail"]
+        # Not swept yet: an earlier stop (form_not_swept) answers first - either way, no submit.
+        assert check.json()["decision"] == "stop", check.json()
         # Negative control: a sweep that still reads the OLD answer does not open the lock.
         await _sweep(client, app_id, GUESS["answer"])
         check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
-        assert check.json()["reason"] == "type_first_pending"
+        assert check.json()["decision"] == "stop", check.json()
+        assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}], check.json()
         # The assistant types the user's word and sweeps: the lock opens (the yes still stands).
         await _sweep(client, app_id, word)
         check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
@@ -131,6 +132,23 @@ async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_
         assert card["answers"][0]["verified"] is True and _codes(card) == []
         check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
         assert check.json()["type_first"] == []
+
+
+def test_the_lock_turns_submit_and_ask_into_stop_and_keeps_an_earlier_stop():
+    from src.services.applications.ready import type_first_lock
+    from src.services.profile.assistant_settings import REASONS, SubmitDecision
+
+    pending = [{"question": "Located in India?", "answer": "Yes"}]
+    yes = SubmitDecision("submit", "user_approved", "The user said yes.")
+    ask = SubmitDecision("ask", "practice_run", "Ask first.")
+    stop = SubmitDecision("stop", "form_not_swept", "Sweep first.")
+    for verdict in (yes, ask):
+        locked = type_first_lock(verdict, pending)
+        assert (locked.decision, locked.reason) == ("stop", "type_first_pending")
+        assert "form_swept" in locked.detail and "1 answer" in locked.detail
+    assert type_first_lock(stop, pending) is stop, "an earlier stop is no less a stop"
+    assert type_first_lock(yes, []) is yes, "nothing left to type: the yes goes through"
+    assert "type_first_pending" in REASONS
 
 
 @pytest.mark.asyncio
