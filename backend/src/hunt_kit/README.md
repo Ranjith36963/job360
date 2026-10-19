@@ -102,7 +102,9 @@ More (`kit_gov.py`; unofficial site APIs that can change, and a country is skipp
 EU/EEA/CH EURES (`eures`, any of 31 countries, searched by job title (up to 5 titles); it asks only for ads from the last three days, whatever `--days` says), Belgium VDAB (`vdab`),
 Denmark Jobnet (`jobnet`), Finland Job Market Finland (`tyomarkkinatori`, title only),
 Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
-(`jobstreet`: AU NZ MY SG ID HK, short teaser).
+(`jobstreet`: AU NZ MY SG ID HK, short teaser), Norway NAV arbeidsplassen (`nav`, snippet: a one-sentence
+summary, so open the link for the full ad; newest first, up to 5 titles, 2 pages of 25 each; see NOTICE.md
+for NAV's terms).
 
 India and Gulf (`kit_regional.py`; unofficial site endpoints behind bot protection, so a site that refuses scripts is skipped): Naukri (`naukri`: IN, searched by job title, ~300-character snippet), Bayt (`bayt`: AE SA QA KW BH OM, searched by title; the newest 15 ads also get their full description) and GulfTalent (`gulftalent`: same six countries, found through the site's sitemap by matching your titles to the ad addresses; 25 ads read per run). At most 45 requests per site per run. Bayt and GulfTalent may refuse a plain script from some networks; Naukri works from a home connection but not from hosting networks.
 

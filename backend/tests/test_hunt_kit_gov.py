@@ -28,6 +28,11 @@ JOB_KEYS = {"title", "company", "url", "location", "posted", "description", "sou
             "board", "remote", "visa_flag", "extra"}
 
 
+@pytest.fixture(autouse=True)
+def _no_nav_pause(monkeypatch):
+    monkeypatch.setattr(kg, "NAV_PAUSE_S", 0)
+
+
 def _http(routes):
     """Fake http: the first route whose needle is in the url answers; a callable gets (url, data)."""
     calls: list = []
@@ -143,7 +148,7 @@ def test_parse_jobstreet():
 
 # ------------------------------------------------------------------------------ country gates
 GATES = [("eures", ["GB", "US"]), ("vdab", ["NL"]), ("jobnet", ["SE"]), ("tyomarkkinatori", ["DK"]),
-         ("trudvsem", ["UA"]), ("jobstreet", ["GB", "PH", "TH"])]
+         ("trudvsem", ["UA"]), ("jobstreet", ["GB", "PH", "TH"]), ("nav", ["SE", "DK"])]
 
 
 @pytest.mark.parametrize(("name", "countries"), GATES)
@@ -255,6 +260,78 @@ def test_jobstreet_uses_each_markets_host_and_site_key():
     paged = _http({"hk.jobsdb.com": (200, full)})
     kg.fetch_jobstreet(["dev"], paged, {}, days=BIG, countries=["HK"])
     assert len(paged.calls) == kg.NATIONAL_PAGES and "siteKey=HK-Main" in paged.calls[0]["url"]
+
+
+# NAV arbeidsplassen: a trimmed REAL response (Data Scientist, sort=published, read live 2026-10-19).
+NAV = json.loads((Path(__file__).resolve().parent / "fixtures" / "hunt_kit" / "nav_search.json")
+                 .read_text(encoding="utf-8"))
+
+
+def test_parse_nav():
+    jobs = kg.parse_nav(NAV)
+    _check(jobs, "nav")
+    assert len(jobs) == 3
+    j = jobs[0]
+    assert j["url"] == "https://arbeidsplassen.nav.no/stillinger/stilling/d2560ea2-eef6-45e7-babe-f94f9f236b6b"
+    assert j["company"] == "SLB Kristiansand" and j["posted"] == "2026-10-16"
+    assert j["title"].endswith("Data Scientist - Industrial Data & Analytics")  # NAV's "\&" escape is undone
+    assert j["location"] == "Kristiansand S, Norway" and j["remote"] is None
+    assert j["description"].startswith("Data Scientist wanted") and "title_only" not in j["extra"]
+    assert j["extra"]["truncated"] is True  # a one-sentence summary, not the ad: the assistant opens the link
+    assert j["extra"]["work_language"] == ["Engelsk"] and j["extra"]["expires"] == "2026-10-29"
+    assert jobs[1]["extra"]["work_language"] == ["Norsk"] and jobs[1]["location"] == "Oslo, Norway"
+    # no summary -> title_only; no businessName -> employer name; several places are de-duplicated; junk rows dropped
+    bare = {"hits": {"hits": [
+        {"_source": {"uuid": "11111111-1111-1111-1111-111111111111", "title": "Dev", "employer": {"name": "ACME AS"},
+                     "published": "bad",
+                     "locationList": [{"city": "BERGEN", "country": "NORGE"}, {"city": "BERGEN"}, {"city": "OSLO"}]}},
+        {"_source": {"uuid": "", "title": "no id"}},
+        {"_source": {"uuid": "22222222-2222-2222-2222-222222222222", "title": " "}},
+        {"_source": {"uuid": "..", "title": "path trick"}},  # not a UUID: never becomes a link (review 2026-10-19)
+        "junk", {}]}}
+    only = kg.parse_nav(bare)
+    assert len(only) == 1 and only[0]["company"] == "ACME AS" and only[0]["posted"] == ""
+    assert only[0]["location"] == "Bergen, Oslo, Norway" and only[0]["extra"]["title_only"] is True
+    assert kg.parse_nav(None) == kg.parse_nav({}) == kg.parse_nav({"hits": {"hits": "x"}}) == []
+
+
+def test_nav_searches_each_title_newest_first_and_stops_at_the_total():
+    http = _http({"stillinger/api/search": (200, NAV)})
+    jobs = kg.fetch_nav(["data scientist", "ml engineer"], http, {}, days=BIG, countries=["NO"])
+    assert len(http.calls) == 2 * kg.NATIONAL_PAGES and len(jobs) == 3  # 3 of 29 read per call; same ids de-duplicated
+    first = http.calls[0]["url"]
+    assert first.startswith("https://arbeidsplassen.nav.no/stillinger/api/search?")
+    assert "q=data+scientist" in first and "size=50" in first and "from=0" in first and "sort=published" in first
+    assert "workLanguage" not in first  # never filtered by language by default
+
+
+def test_nav_pages_by_rows_received_and_stops_on_empty_or_total():
+    def row(i):
+        return {"_source": {"uuid": f"00000000-0000-0000-0000-{i:012d}", "title": "Data Engineer", "businessName": "Co"}}
+
+    def page(total, n):
+        return 200, {"hits": {"total": {"value": total}, "hits": [row(i) for i in range(n)]}}
+
+    full = _http({"stillinger/api/search": lambda _u, _d: page(60, 25)})
+    kg.fetch_nav(["data"], full, {}, days=BIG, countries=["NO"])
+    assert len(full.calls) == kg.NATIONAL_PAGES and "from=25" in full.calls[1]["url"]  # advances by rows received
+    empty = _http({"stillinger/api/search": page(0, 0)})
+    assert kg.fetch_nav(["data"], empty, {}, days=BIG, countries=["NO"]) == [] and len(empty.calls) == 1
+    done = _http({"stillinger/api/search": page(3, 3)})
+    assert len(kg.fetch_nav(["data"], done, {}, days=BIG, countries=["NO"])) == 3 and len(done.calls) == 1
+
+
+def test_nav_non_200_counts_as_failed_and_star_runs_it():
+    stats: dict = {}
+    down = _http({"": (503, None)})
+    assert kg.fetch_nav(["data"], down, stats, days=BIG, countries=["NO"]) == []
+    assert (stats["tried"], stats["ok"], stats["jobs"]) == (1, 0, 0) and len(down.calls) == 1
+    # a refusal (429) on the first title stops the whole service: three titles, still one request
+    limited = _http({"": (429, None)})
+    assert kg.fetch_nav(["a", "b", "c"], limited, {}, days=BIG, countries=["NO"]) == [] and len(limited.calls) == 1
+    star = _http({"": (200, {"hits": {"total": {"value": 0}, "hits": []}})})
+    kg.fetch_nav(["data"], star, {}, days=30, countries=["IN", "*"])  # --visa-onsite: runs everywhere
+    assert len(star.calls) == 1
 
 
 def test_a_failing_service_never_raises():
