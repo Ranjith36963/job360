@@ -971,7 +971,9 @@ def build_server(version: str = "") -> MCPServer:
         every artifact version (text omitted unless with_artifact_text=true),
         the whole event timeline, receipts, and `next_step` — what to do next,
         read off the stored state. Branch on `next_step.code`: judge_fit → call
-        save_fit; write_cv → save_artifact(kind="cv"); apply → the human applies,
+        save_fit; write_cv → save_artifact(kind="cv"); submit_now → the user
+        clicked Send on the web: open the form, check_submit, type its
+        type_first answers, submit, record_application; apply → the human applies,
         then record_application; record_receipt → record_application; schedule →
         record_event(interview_scheduled, scheduled_at=…); record_outcome → the
         interview date has passed, record how it went via record_event (
