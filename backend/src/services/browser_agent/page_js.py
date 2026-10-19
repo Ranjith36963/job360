@@ -189,3 +189,16 @@ IS_TYPEAHEAD_JS = r"""
     || /select__input|autocomplete|typeahead/i.test(el.className || '');
 }
 """
+
+# The picked option shown near the field (react-select draws it in a sibling, not the input's value).
+# Only the field's own small box (up to 3 levels up) counts, so a whole question block cannot.
+CHOSEN_NEARBY_JS = r"""
+(el, want) => {
+  let n = el.parentElement;
+  for (let i = 0; i < 3 && n; i++, n = n.parentElement) {
+    if ((n.innerText || '').length > 400) break;
+    if ((n.innerText || '').toLowerCase().includes(want)) return true;
+  }
+  return false;
+}
+"""
