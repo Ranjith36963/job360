@@ -7,10 +7,12 @@ import { ApiError } from "@/lib/api-error";
 
 const getReadyToSend = vi.fn();
 const approveSend = vi.fn();
+const fireAssistant = vi.fn();
 vi.mock("@/lib/api", () => ({
   getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: vi.fn(),
+  fireAssistant: (...a: unknown[]) => fireAssistant(...a),
 }));
 vi.mock("@/lib/assistant-state", () => ({ PAUSE_CHANGED_EVENT: "job360:pause-changed", READY_CHANGED_EVENT: "job360:ready-changed" }));
 const toastSuccess = vi.fn();
@@ -28,6 +30,7 @@ const list = (paused = false, items = [card(1), card(2), card(3), card(4, { job_
 beforeEach(() => {
   getReadyToSend.mockReset().mockResolvedValue(list());
   approveSend.mockReset().mockResolvedValue({});
+  fireAssistant.mockReset().mockResolvedValue({ fired: false, reason: "not_set" });
   toastSuccess.mockReset();
   toastError.mockReset();
 });
@@ -61,6 +64,27 @@ describe("Send all unflagged", () => {
     await waitFor(() => expect(approveSend).toHaveBeenCalledTimes(3));
     expect(approveSend.mock.calls.map((c) => c[0])).toEqual([1, 2, 3]);
     expect(toastSuccess).toHaveBeenCalledWith("Sent 3.");
+    // One start for the whole batch, after every yes is saved; nothing set up = nothing said.
+    await waitFor(() => expect(fireAssistant).toHaveBeenCalledTimes(1));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("starts the assistant once and says so; a refusal is shown but the yeses stay saved", async () => {
+    fireAssistant.mockResolvedValueOnce({ fired: true, count: 3, application_ids: [1, 2, 3], session_url: null });
+    render(<ReadyToSend />);
+    fireEvent.click(await screen.findByTestId("send-all-open"));
+    fireEvent.click(screen.getByTestId("send-all-yes"));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Your assistant started on 3 jobs."));
+    expect(fireAssistant).toHaveBeenCalledTimes(1);
+  });
+
+  it("nothing saved means nothing started", async () => {
+    approveSend.mockRejectedValue(new Error("down"));
+    render(<ReadyToSend />);
+    fireEvent.click(await screen.findByTestId("send-all-open"));
+    fireEvent.click(screen.getByTestId("send-all-yes"));
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(fireAssistant).not.toHaveBeenCalled();
   });
 
   it("re-reads before sending and skips a row whose fill or CV changed, naming it", async () => {

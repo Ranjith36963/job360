@@ -5,6 +5,7 @@ import { CheckCheck, Pencil } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { approveSend, confirmAnswer, declineSend } from "@/lib/api";
+import { startAssistantAfterSend } from "@/lib/assistant-start";
 import { ApiError } from "@/lib/api-error";
 import type { ReadyAnswer, ReadyCardData } from "@/lib/api";
 import { canCheck, clock, docText, flagText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
@@ -61,6 +62,7 @@ export function ReadyCard({
         : declineSend(card.application_id));
       toast.success(send ? "Saved your yes." : "Saved: don't send.");
       onChanged();
+      if (send) void startAssistantAfterSend();
     } catch (err) {
       if (send && card.cv && err instanceof ApiError && err.status === 409) {
         // The CV or the filled form changed since this card loaded: show the new one.

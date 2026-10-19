@@ -168,6 +168,25 @@ each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no cli
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
 It needs the open internet, so run it on Railway once the switch is on, with a list of real apply links.
 
+**Send starts my assistant (built 2026-10-19).** Before this, Send / Send all on Needs you only saved the yes,
+and the work waited for "run 360". Now, if you saved a start link on **Settings → Connect your assistant**, the
+website calls `POST /api/assistant-trigger/fire` once after Send (or after all of Send all), and Job360 starts your
+assistant with the list of every job whose newest decision is your yes. **One start per click, never one per job**,
+and a 60-second cool-down stops a double click starting two.
+- **Claude routine (recommended, PC off):** make a routine on claude.ai/code/routines with the Job360 connector and
+  the instructions the card gives you; add an **API trigger**, copy its URL and token into the card. Job360 calls
+  `POST https://api.anthropic.com/v1/claude_code/routines/<trig_id>/fire` (`anthropic-version: 2023-06-01`,
+  body `{"text": ...}`; Anthropic's docs mark this API as experimental, 30 starts per routine per hour). The routine
+  applies with Job360's `browser` tool and your saved sign-ins, running `check_submit` (your yes shows as
+  `user_approved`) before every final click.
+- **Any other assistant:** any https webhook gets the same `{"text": ...}` and bearer token.
+- **No cloud:** the card also gives a `/loop 5m ...` command to leave running in Claude Code on your own computer;
+  it applies with your own Chrome and sign-ins (computer on).
+- **Safety:** set, changed and fired only from the website (an assistant's token gets 403, and no MCP tool reaches
+  it); the token is encrypted (table `assistant_triggers`, migration 0066) and never shown again; https only,
+  screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
+  yes stays saved.
+
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 
 ## 10. Open questions for later

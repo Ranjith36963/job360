@@ -1168,3 +1168,41 @@ export async function forgetBrowserSignIn(host: string): Promise<{ forgotten: st
 export async function browserLive(step: BrowserLiveAction): Promise<BrowserLiveShot> {
   return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify(step) });
 }
+
+// ---- Send starts my assistant (browser agent, "Send trigger"; website only, never a token) ----
+export type AssistantTrigger =
+  | { set: false }
+  | {
+      set: true;
+      host: string;
+      kind: "claude_routine" | "webhook";
+      has_token: boolean;
+      updated_at: string;
+      last_fired_at: string | null;
+      last_result: string;
+    };
+export type AssistantFire = {
+  fired: boolean;
+  reason?: string;
+  detail?: string;
+  count?: number;
+  application_ids?: number[];
+  session_url?: string | null;
+};
+
+export async function getAssistantTrigger(): Promise<AssistantTrigger> {
+  return request<AssistantTrigger>("/api/assistant-trigger");
+}
+
+export async function saveAssistantTrigger(url: string, token: string): Promise<AssistantTrigger> {
+  return request<AssistantTrigger>("/api/assistant-trigger", { method: "PUT", body: JSON.stringify({ url, token }) });
+}
+
+export async function deleteAssistantTrigger(): Promise<{ deleted: boolean }> {
+  return request("/api/assistant-trigger", { method: "DELETE" });
+}
+
+/** After Send / Send all: start the user's assistant once for every job they said yes to. */
+export async function fireAssistant(): Promise<AssistantFire> {
+  return request<AssistantFire>("/api/assistant-trigger/fire", { method: "POST" });
+}
