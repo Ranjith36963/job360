@@ -246,6 +246,18 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/repairable.py", "--drill"],
         no_negative="the cases are inline assertions over a pure predicate",
     ),
+    "scripts/fixer_gate.py": Guard(
+        status="drilled",
+        # The ONE door to `pr-repair.yml` (finding-watch.yml calls it; pr-shepherd
+        # goes through finding-watch). Refuses a dispatch while a pr-repair run
+        # for the same PR is not completed, or for a head sha + findings a run
+        # already judged. Born from 141 dispatches in 3.7 days (PR #891: 27 for 6
+        # heads). The drill replays #891's 27 recorded requests (-> 2) and #894's
+        # (-> 1); `--blind` switches both refusals off, so the replay and the
+        # skip cases must go RED.
+        drill=[sys.executable, "scripts/fixer_gate.py", "--drill"],
+        negative=[sys.executable, "scripts/fixer_gate.py", "--drill", "--blind"],
+    ),
     "scripts/stale_path_check.py": Guard(
         status="drilled",
         # Asks git which paths a change renamed and fails if any tracked file
