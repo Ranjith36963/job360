@@ -225,14 +225,14 @@ form; the test fails when the wait is removed.
   a new address, a new tab, a frame that navigated, any change to the page, or a change in the control itself (a
   tick box) counts. When unsure, it counts as changed. Nothing changed: `next` says not to click it again
   (nanobrowser's changed / none receipts).
-- **Never blind:** a control whose clicks changed nothing twice in a row is refused (`no_effect`) until something
-  else changes the page.
+- **Never blind:** a control whose clicks changed nothing twice in a row is refused (`no_effect`) until another
+  action (an answer typed, a box ticked, a scroll or a new page) gives it its tries back.
 - **Never twice:** after a final submit on a page, a second submit on the same page is refused
-  (`already_submitted`), unless the site said it did not take the first (`site_refused`). The gate still runs
-  check_submit on the retry.
+  (`already_submitted`), unless the site said it did not take the first (`site_refused`). Even then `check_submit`
+  holds a second submit until the user marks the first one "not sent" on Job360, so `next` says to ask them.
 - **`repeat_warning`:** the same action with the same ref and text 3 times in a row (browser-use's loop nudge).
 - **Proof:** when a gated submit lands on the site's confirmation (`confirmation_seen`), a screenshot of that page
-  is stored as the application's proof (`proof_screenshot`, `via: browser`, the S7 store, at most 3 per
+  (the tab that shows it, a new one included) is stored as the application's proof (`proof_screenshot`, `via: browser`, the S7 store, at most 3 per
   application). `proof_saved` says whether it was kept; a failed save never undoes the application.
 
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens

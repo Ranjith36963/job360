@@ -653,6 +653,10 @@ async def run(
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
+        if action not in ("click", "look"):
+            # The form changed (an answer typed, a box ticked, a new page): a control that did nothing
+            # before may work now, so it gets its tries back.
+            s.dead_clicks.clear()
         s.recent = ([*s.recent, (action, ref, text)])[-REPEAT_LIMIT:]
         if len(s.recent) == REPEAT_LIMIT and len(set(s.recent)) == 1 and action not in ("look", "scroll"):
             result["repeat_warning"] = (
@@ -743,10 +747,10 @@ async def _act(
         except Exception:  # noqa: BLE001 - unreadable: compared as changed
             before = None
         frames = await _watch(page)
-        await loc.click()
         if submitted:
-            # Set before the page is read: a page that cannot be read now still counts as submitted on.
+            # Set before the click: a click that fails after it reached the page still counts as one.
             s.submitted_on, s.submit_refused = url, False
+        await loc.click()
         await _settle(page)
         changed = await _changed(page, frames, url, tabs)
         if not changed:
@@ -770,11 +774,13 @@ async def _act(
             if out.get("site_refused"):
                 out["next"] = (
                     "The site says it did NOT take the application (site_refused). Read the page text for "
-                    "which fields, fix them, then check_submit again before another submit."
+                    "which fields, and fix them. check_submit holds a second submit until the user marks this "
+                    "one 'not sent' on Job360 (Needs you): ask them to, then submit again."
                 )
             elif out.get("confirmation_seen"):
                 out["next"] = "The site shows a confirmation: call record_application."
-                out["proof_saved"] = gate is not None and await _save_proof(page, gate)
+                # The tab look just read: a confirmation can open in a new tab.
+                out["proof_saved"] = gate is not None and await _save_proof(_live_page(s), gate)
             else:
                 out["next"] = (
                     "No confirmation on the page yet. Read it. Do NOT click submit again; if nothing "
