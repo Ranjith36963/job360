@@ -74,6 +74,7 @@ from src.services.profile.storage import (
     list_profile_versions,
     load_profile,
     load_profile_with_overlay,
+    profile_version_avoid_companies,
     restore_profile_version,
     save_assistant_settings,
     save_profile,
@@ -2224,6 +2225,11 @@ async def restore_version(
     a 404 here — the existence-hiding pattern Batch 3.5.1 introduced for
     similar cross-tenant lookups.
     """
+    # CodeRabbit 2026-10-18: an older snapshot can lack a company the user added since, so a
+    # token-driven restore would switch off the ``company_avoided`` stop. Same 403 as the other doors.
+    snapshot_avoid = profile_version_avoid_companies(user.id, version_id)
+    if snapshot_avoid is not None:
+        _guard_avoid_list(user, snapshot_avoid)
     restored = restore_profile_version(user.id, version_id)
     if restored is None:
         raise HTTPException(status_code=404, detail="Version not found")

@@ -12,12 +12,11 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    `list_applications` so you never bring a job twice. `search_brief.gaps` not empty: ask each `ask` once, then
    save it to the `path` that gap names with `update_profile`. For `user_info.answers` save `{question: <the ask
    text exactly>, answer: "Yes"|"No", approved: true, topic: <the gap's `topic`>}` only after the user answers. The user's answer = `"source": "user_said"`. Read again. **Done when**
-   you hold titles, the brief with no gaps, and the list. STOP if `search_brief.rows` is empty: ask the user
-   before you search.
+   you hold titles, the brief with no gaps, and the list. STOP if `search_brief.rows` is empty: ask the user before you search.
 2. **Plan.** Print one line per `search_brief.rows` row: the place, its `counts_if` lines, the titles, and the
    sources you will try there. **Where** comes ONLY from those rows: a place that is not on that list is out,
    even if it is where the user lives today. A job counts only if one of its row's `counts_if` lines is true.
-   **Titles:** search the user's titles AND their real-world variants (for AI work: AI / LLM / GenAI / Agent /
+   **Order and effort:** follow `search_brief.plan` (the user's own job priority, most wanted first): search in that order and give each place about its `effort_pct` of the hunt and of the jobs you bring (`off` places are not in the plan); report the split you reached in step 6. **Titles:** search the user's titles AND their real-world variants (for AI work: AI / LLM / GenAI / Agent /
    Agentic / Applied AI / Forward Deployed / Founding / AI Solutions / AI Product Engineer, Member of Technical
    Staff). **Done when** every row has a line.
 3. **Search** row by row, widest sources first, all with NO login:
@@ -52,7 +51,7 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    and ask the user. Never guess - "not mentioned" is an answer. A minimum of years far above the profile is a
    stretch: say so. Duplicate hard stop: a job already in `list_applications`, or with the application kit's
    `duplicate.flag`, is not brought again. Check the posting is still open.
-5. **Bring only the fits.** For each one: `bring_job` (title, company, location, full description, apply URL,
+5. **Bring only the fits.** For each one: `bring_job` (`origin` "ai_hunt", `queue` true: the batch; title, company, location, ad, URL,
    and `posted_at` / `employer_published_at` as YYYY-MM-DD when the ad shows them) and ALWAYS the job facts you
    know: `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on` (`indeed`, `linkedin`,
    `company_careers`, `job_board`, `referral`, `visa_sponsor_list`, `pasted_by_user` or `other`). Leave out only
@@ -67,4 +66,4 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    and "Below your line (N)" (`settings.apply_min_score.effective`; null = ask for it first): company, title,
    place, your score, visa answer, and the link to the Job360 application page. Inside `run 360 daily`, apply
    per each job's `save_fit` `line.switch` with `get_recipe("apply")` (the kit first); `ask` means ask. Alone,
-   ask which ones to apply to.
+   the fits are in the batch: work it with `get_recipe("batch")`.

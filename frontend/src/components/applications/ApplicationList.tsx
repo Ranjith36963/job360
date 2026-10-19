@@ -8,7 +8,8 @@ import { STATUS_LABEL } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
-import { preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import { PRIORITY_LABEL, PRIORITY_OPTIONS } from "@/lib/memory";
+import { originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
 import type { QueueSummary } from "@/lib/batch-queue";
 
 
@@ -99,12 +100,26 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                   />
                   {STATUS_LABEL[app.status] ?? app.status}
                 </span>
+                {/* Job priority (owner decision 2026-10-19): only when the user set one, and "off" says nothing. */}
+                {app.priority && app.priority !== "off" && (
+                  <span
+                    data-testid="row-priority"
+                    className="mt-1.5 inline-block rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                  >
+                    {PRIORITY_LABEL[app.priority] ?? app.priority} priority
+                  </span>
+                )}
                 {/* Weak spot #3 wave 2: the headline stage while another assistant session
                     holds this application (mirrors Tsenta's two-line "Tailoring résumé /
                     Reading job description…" status cell; the derivation is Job360's own). */}
                 {app.stage && (
                   <p data-testid="row-stage" className="mt-1 text-xs text-warning">
                     {app.stage}
+                  </p>
+                )}
+                {originLabel(app.origin) && (
+                  <p data-testid="row-origin" className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+                    {originLabel(app.origin)}
                   </p>
                 )}
                 {/* Batch queue: the place in line and anything that would stop it. */}
@@ -217,27 +232,38 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   // Weak spot #3 wave 2: "In flight" asks the server (`in_flight=true`), because the
   // hold lives in the event log, not in anything the page already fetched.
   const [inFlight, setInFlight] = useState(false);
+  // Job priority filter — asks the server (`priority=`): "all" sends nothing.
+  const [priority, setPriority] = useState<string>("all");
   // Batch queue: server-side too (`queued=true` gives queue order, preflight and the summary).
   const [queuedOnly, setQueuedOnly] = useState(false);
   const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
+  // A server-filter switch shows "Loading…" in place of the rows (never the old list under the new
+  // filter), while the filter bar itself stays on screen.
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    listApplications(queuedOnly ? { limit, queued: true } : inFlight ? { limit, in_flight: true } : { limit })
+    listApplications({
+      limit,
+      ...(queuedOnly ? { queued: true } : inFlight ? { in_flight: true } : {}),
+      ...(priority !== "all" ? { priority } : {}),
+    })
       .then((res) => {
         if (cancelled) return;
         setApplications(res.applications);
+        setSwitching(false);
         setQueueSummary(queuedOnly ? ((res.queue_summary as QueueSummary | null | undefined) ?? null) : null);
         setError(null);
       })
       .catch(() => {
         if (cancelled) return;
+        setSwitching(false);
         setError("Could not load your applications.");
       });
     return () => {
       cancelled = true;
     };
-  }, [limit, inFlight, queuedOnly]);
+  }, [limit, inFlight, queuedOnly, priority]);
 
   // Browser-side only — one chip per status actually present in this list,
   // plus "All". Counts move with the data; there is no server-side facet
@@ -271,7 +297,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return <p className="text-sm text-muted-foreground">Loading your applications…</p>;
   }
 
-  if (applications.length === 0 && !inFlight && !queuedOnly) {
+  if (applications.length === 0 && !inFlight && !queuedOnly && priority === "all") {
     return (
       <p className="text-sm text-muted-foreground">
         Nothing yet. Bring a job from your assistant, or the{" "}
@@ -290,6 +316,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           onClick={() => {
             setStatusFilter("all");
+            if (inFlight || queuedOnly) setSwitching(true);
             setInFlight(false);
             setQueuedOnly(false);
           }}
@@ -306,6 +333,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           data-testid="queued-filter"
           onClick={() => {
+            setSwitching(true);
             setQueuedOnly((v) => !v);
             setInFlight(false);
             setStatusFilter("all");
@@ -321,6 +349,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           data-testid="in-flight-filter"
           onClick={() => {
+            setSwitching(true);
             setInFlight((v) => !v);
             setQueuedOnly(false);
           }}
@@ -363,6 +392,24 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             Due ({dueCount})
           </button>
         )}
+        <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          Priority:
+          <select
+            data-testid="priority-filter"
+            value={priority}
+            onChange={(e) => {
+              setSwitching(true);
+              setPriority(e.target.value);
+            }}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="all">All</option>
+            {PRIORITY_OPTIONS.map((o) => (
+              <option key={o} value={o}>{PRIORITY_LABEL[o]}</option>
+            ))}
+            <option value="not_set">Not set</option>
+          </select>
+        </label>
       </div>
 
       {queuedOnly && queueSummaryLine(queueSummary) && (
@@ -371,13 +418,17 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
         </p>
       )}
 
-      {visibleApplications && visibleApplications.length === 0 ? (
+      {switching ? (
+        <p className="text-sm text-muted-foreground">Loading your applications…</p>
+      ) : visibleApplications && visibleApplications.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {queuedOnly
-            ? "Nothing is in your batch."
+            ? "Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt."
             : inFlight
               ? "Nothing is in flight right now."
-              : "No applications with this status."}
+              : priority !== "all"
+                ? "No applications with this priority."
+                : "No applications with this status."}
         </p>
       ) : (
         <ApplicationRows applications={visibleApplications ?? []} />

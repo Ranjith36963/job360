@@ -248,7 +248,7 @@ async def test_attempt_without_an_outcome_stops_the_gate_and_a_yes_does_not_clea
         yes = await _event(
             client, app_id, "submit_approved", payload={"artifact_id": None, "sha256": "", "where": "web"}
         )
-        assert yes.status_code in (201, 409), yes.text
+        assert yes.status_code == 201, yes.text
         assert (await _check(client, app_id))["reason"] == "submit_unconfirmed"
 
 
@@ -605,3 +605,30 @@ async def test_the_other_preference_doors_also_refuse_an_assistant_removing_from
     async with authenticated_async_context() as client:
         prof = (await client.get("/api/profile")).json()
         assert "Northwind" in str(prof)
+
+
+@pytest.mark.asyncio
+async def test_a_version_restore_by_an_assistant_cannot_drop_a_never_apply_company(
+    authenticated_async_context, fixture_user_id
+):
+    """CodeRabbit 2026-10-18: POST /profile/versions/{id}/restore is a fourth door. An older
+    snapshot without the company would switch the ``company_avoided`` stop off for a token."""
+    import json as _json
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+        ok = await client.post("/api/profile/preferences", data={"preferences": _json.dumps({"avoid_companies": ["Northwind"]})})
+        assert ok.status_code == 200, ok.text
+        versions = (await client.get("/api/profile/versions")).json()["versions"]
+        oldest = min(v["id"] for v in versions)
+    async with _bearer(token) as bot:
+        refused = await bot.post(f"/api/profile/versions/{oldest}/restore")
+        assert refused.status_code == 403, refused.text
+        assert "never-apply list" in refused.text
+        assert (await bot.post("/api/profile/versions/999999/restore")).status_code == 404
+    async with authenticated_async_context() as client:
+        assert (await client.get("/api/profile")).json()["preferences"]["avoid_companies"] == ["Northwind"]
+        web = await client.post(f"/api/profile/versions/{oldest}/restore")
+        assert web.status_code == 200, web.text
+        assert web.json()["preferences"]["avoid_companies"] == []

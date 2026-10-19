@@ -1122,10 +1122,12 @@ async def append_event(
 
 
 async def birth_application(
-    db: JobDatabase, *, user_id: str, job_id: int, job_row: Mapping[str, Any], recorded_by: str
+    db: JobDatabase, *, user_id: str, job_id: int, job_row: Mapping[str, Any], recorded_by: str,
+    origin: Optional[str] = None,
 ) -> dict[str, Any]:
     """Upsert-by-read: bringing the same job twice returns the SAME
-    application_id and appends NO second `brought` event."""
+    application_id and appends NO second `brought` event. ``origin`` (ai_hunt / user_link /
+    user_paste, already validated by the route) lands in that event's payload."""
     existing = await get_application_by_job(db, user_id, job_id)
     if existing is not None:
         return {"application_id": existing["id"], "status": existing["status"], "existing": True}
@@ -1146,7 +1148,7 @@ async def birth_application(
     application_id = int(cur.lastrowid or 0)
     await append_event(
         db, user_id=user_id, application_id=application_id, event_type="brought",
-        occurred_at=now, recorded_by=recorded_by,
+        occurred_at=now, recorded_by=recorded_by, payload={"origin": origin} if origin else None,
     )
     get_audit_logger().info(
         "application_born",
@@ -1762,6 +1764,58 @@ async def submit_override(db: JobDatabase, user_id: str, application_id: int) ->
     return mode if mode in ("confirm", "auto_when_sure") else None
 
 
+async def origin_by_app(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, str]:
+    """Where each application's job came from (owner ask 2026-10-18), for the tag on every job:
+    the ``origin`` its ``brought`` event carries (ai_hunt / user_link / user_paste); without one,
+    ``user`` when the web brought it, ``ai`` when an assistant did. ONE query for the page."""
+    if not app_ids:
+        return {}
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        f"SELECT application_id, payload, recorded_by FROM application_events "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND event_type = 'brought' AND application_id IN ({marks}) ORDER BY id",
+        [user_id, *app_ids],
+    )
+    from src.services.profile import edits as profile_edits  # noqa: PLC0415
+
+    out: dict[int, str] = {}
+    for r in await cur.fetchall():
+        d = dict(r)
+        if int(d["application_id"]) in out:
+            continue
+        raw = d.get("payload")
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except ValueError:
+            payload = {}
+        origin = payload.get("origin") if isinstance(payload, dict) else None
+        if origin not in ("ai_hunt", "user_link", "user_paste"):
+            origin = "user" if d.get("recorded_by") == profile_edits.WEB_ACTOR else "ai"
+        out[int(d["application_id"])] = origin
+    return out
+
+
+async def queue_if_open(
+    db: JobDatabase, user_id: str, application_id: int, *, recorded_by: str
+) -> tuple[bool, Optional[str]]:
+    """``bring_job queue=true`` (owner ask 2026-10-18): append a ``queued`` event when the application
+    is open (``considering``, no receipt) and not on the queue yet. ``(in_batch_now, note)``."""
+    if application_id in await queued_at_by_app(db, user_id, [application_id]):
+        return True, "already queued"
+    row = await get_owned_application(db, user_id, application_id)
+    cur = await db._db.execute(
+        "SELECT COUNT(*) FROM application_receipts WHERE application_id = ? AND user_id = ?",
+        (application_id, user_id),
+    )
+    if row is None or row["status"] != "considering" or int((await cur.fetchone())[0]) > 0:
+        return False, "not open"
+    await append_event(
+        db, user_id=user_id, application_id=application_id, event_type="queued",
+        occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=recorded_by,
+    )
+    return True, None
+
+
 async def queued_at_by_app(
     db: JobDatabase, user_id: str, app_ids: Optional[list[int]] = None
 ) -> dict[int, str]:
@@ -2167,6 +2221,7 @@ async def list_applications(
     quiet_days: Optional[int] = None,
     in_flight: bool = False,
     queued: bool = False,
+    priority: Optional[str] = None,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
     status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
@@ -2188,7 +2243,18 @@ async def list_applications(
     ``last_event_at`` is older than N days (setting a follow-up counts as
     activity, since it writes an event and updates the slot), same closed-
     status exclusion. Both may be combined with ``status``/``updated_since``.
+
+    ``priority`` (owner decision 2026-10-19) - only applications whose PLACE (the job's
+    country + remote/on-site, matched to the user's ``right_to_work`` records) has that
+    level of the user's own job priority, or ``not_set``. Each row carries ``priority``.
     """
+    from src.services.profile import job_priority  # noqa: PLC0415 - profile ↔ spine cycle
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
+
+    if priority is not None and priority not in job_priority.FILTER_VALUES:
+        raise SpineError(422, f"priority must be one of: {', '.join(job_priority.FILTER_VALUES)}")
+    _profile = load_profile(user_id)
+    rtw = getattr(_profile.user_info, "right_to_work", None) if _profile is not None else None
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
     # Bug fix (coordinator review, 2026-09-25) — Query(ge=1, le=...) on the
@@ -2243,6 +2309,10 @@ async def list_applications(
             params.extend(held)
         else:
             where.append("1 = 0")
+    if priority is not None:
+        p_sql, p_params = job_priority.filter_sql(rtw, priority)
+        where.append(p_sql)
+        params.extend(p_params)
     # The batch queue: the user's WHOLE open queue (still ``considering``), first in first out.
     # Two queries for the page (events, then the status of the queued ids), never N+1.
     queue_order: list[int] = []
@@ -2350,17 +2420,25 @@ async def list_applications(
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user_id, app_ids)
+    origins = await origin_by_app(db, user_id, app_ids)
     holds = await kit_service.holds_for_apps(db, user_id, app_ids, datetime.now(timezone.utc))
     preflights: dict[int, dict[str, Any]] = {}
     summary: Optional[dict[str, Any]] = None
     if queued:
         # Bulk-apply Q1/Q2: derived, no table; the order above stays first in first out.
+        import asyncio  # noqa: PLC0415
+
         from src.services.applications import queue_preflight  # noqa: PLC0415 - imports spine
         from src.services.profile.models import UserProfile  # noqa: PLC0415
-        from src.services.profile.storage import load_profile  # noqa: PLC0415
+        from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
-        cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
-        preflights = await queue_preflight.preflight_rows(db, user_id, rows, queued_at, holds, cfg)
+        # One profile read, off the event loop (CodeRabbit 2026-10-18), shared with the preflight.
+        loaded, overlay = await asyncio.to_thread(load_profile_with_overlay, user_id)
+        profile = loaded or UserProfile()
+        cfg = settings_rules.effective(profile.assistant_settings)
+        preflights = await queue_preflight.preflight_rows(
+            db, user_id, rows, queued_at, holds, cfg, profile, overlay
+        )
         summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg)
     out = []
     for r in rows:
@@ -2381,6 +2459,7 @@ async def list_applications(
                 "visa_signal": signal, "visa_country": country,
                 "needs_sponsorship": visa_service.needs_sponsorship(signal, country, countries),
                 **_job_facts_for(r),
+                "priority": job_priority.place_priority(rtw, r.get("job_country"), r.get("job_remote")),
                 "events": await _count(db, "application_events", "application_id", app_id),
                 "artifacts": artifact_counts,
                 "receipts": receipts_count,
@@ -2398,6 +2477,7 @@ async def list_applications(
                 "queued_at": queued_at.get(app_id),
                 "queue_position": queue_position.get(app_id),
                 "preflight": preflights.get(app_id),
+                "origin": origins.get(app_id, ""),
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
                 "inbox_checked_at": r.get("inbox_checked_at"),

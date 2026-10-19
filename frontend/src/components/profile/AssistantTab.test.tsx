@@ -288,56 +288,113 @@ describe("AssistantTab", () => {
     await screen.findByTestId("assistant-tab");
   });
 
-  it("pace limits save as numbers, blank clears (never a default)", async () => {
+  it("pace limits save as numbers; No limit and 0 both mean no limit (never a default)", async () => {
     getAssistantSettings.mockResolvedValue(view({ company_cap: field(2, 2), weekly_cap: field(null, null) }));
     await ready();
+    expect(screen.getByTestId("company-cap-none")).toHaveAttribute("aria-checked", "false");
     expect((screen.getByTestId("company-cap") as HTMLInputElement).value).toBe("2");
     expect((screen.getByTestId("company-cap-days") as HTMLInputElement).value).toBe("");
     const days = screen.getByTestId("company-cap-days");
-    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.change(days, { target: { value: "0" } });
     fireEvent.blur(days);
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.company_cap_days", value: 30 }]));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.company_cap_days", value: 0 }]));
     const cap = screen.getByTestId("company-cap");
-    fireEvent.change(cap, { target: { value: "" } });
+    fireEvent.change(cap, { target: { value: "0" } });
     fireEvent.blur(cap);
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.company_cap", value: null }]));
+    // weekly: no limit is ticked and the box is hidden until the tick is taken off
+    expect(screen.getByTestId("weekly-cap-none")).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByTestId("weekly-cap")).toBeNull();
+    fireEvent.click(screen.getByTestId("weekly-cap-none"));
     const weekly = screen.getByTestId("weekly-cap");
     fireEvent.change(weekly, { target: { value: "20" } });
     fireEvent.blur(weekly);
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.weekly_cap", value: 20 }]));
-    const gap = screen.getByTestId("min-gap");
-    fireEvent.change(gap, { target: { value: "15" } });
-    fireEvent.blur(gap);
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.min_gap_minutes", value: 15 }]));
+    // minutes and seconds
+    fireEvent.change(screen.getByTestId("min-gap"), { target: { value: "1" } });
+    const sec = screen.getByTestId("min-gap-seconds");
+    fireEvent.change(sec, { target: { value: "30" } });
+    fireEvent.blur(sec);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.min_gap_minutes", value: 1.5 }]));
+  });
+
+  it("ticking No limit clears a saved limit", async () => {
+    getAssistantSettings.mockResolvedValue(view({ weekly_cap: field(30, 30) }));
+    await ready();
+    fireEvent.click(screen.getByTestId("weekly-cap-none"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.weekly_cap", value: null }]));
   });
 
   it("a bad pace number says so and is not sent", async () => {
     await ready();
-    const weekly = screen.getByTestId("weekly-cap");
-    fireEvent.change(weekly, { target: { value: "0" } });
-    fireEvent.blur(weekly);
+    const sec = screen.getByTestId("min-gap-seconds");
+    fireEvent.change(sec, { target: { value: "75" } });
+    fireEvent.blur(sec);
     expect(updateProfileFields).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalled();
   });
 
-  it("apply hours save only as a pair, and clear to nothing", async () => {
+  it("the modes: one of three, each turns the other two off", async () => {
     await ready();
+    expect(screen.getByTestId("mode-ask")).toHaveAttribute("aria-checked", "true");
+    // Straight away asks once, then sends on its own with no hours and no grant
+    fireEvent.click(screen.getByTestId("mode-straight"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("mode-straight-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([
+        { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
+        { path: "assistant_settings.apply_hours", value: null },
+        { path: "assistant_settings.auto_grant_count", value: null },
+        { path: "assistant_settings.auto_grant_until", value: null },
+      ]),
+    );
+  });
+
+  it("Hours to apply saves the window and sending on its own together, only once both times are set", async () => {
+    await ready();
+    fireEvent.click(screen.getByTestId("mode-hours"));
     const from = screen.getByTestId("apply-hours-from");
     const to = screen.getByTestId("apply-hours-to");
+    // The real order: pick "from", focus leaves it, then pick "to" (CodeRabbit 2026-10-18).
     fireEvent.change(from, { target: { value: "09:00" } });
     fireEvent.blur(from);
     expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+    expect((from as HTMLInputElement).value).toBe("09:00");
+    fireEvent.change(to, { target: { value: "09:00" } });
+    fireEvent.blur(to);
+    expect(updateProfileFields).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith("Pick two different times, or clear both. Not saved.");
     fireEvent.change(from, { target: { value: "09:00" } });
+    fireEvent.blur(from);
     fireEvent.change(to, { target: { value: "17:30" } });
     fireEvent.blur(to);
     await waitFor(() =>
-      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_hours", value: { from: "09:00", to: "17:30" } }]),
+      expect(updateProfileFields).toHaveBeenCalledWith([
+        { path: "assistant_settings.apply_hours", value: { from: "09:00", to: "17:30" } },
+        { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
+        { path: "assistant_settings.auto_grant_count", value: null },
+        { path: "assistant_settings.auto_grant_until", value: null },
+      ]),
+    );
+  });
+
+  it("Ask me each time turns sending on its own off", async () => {
+    getAssistantSettings.mockResolvedValue(view({ submit_mode: field("auto_when_sure", "auto_when_sure") }));
+    await ready();
+    expect(screen.getByTestId("mode-straight")).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByTestId("mode-ask"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith(
+        expect.arrayContaining([{ path: "assistant_settings.submit_mode", value: "confirm" }]),
+      ),
     );
   });
 
   it("auto for my next N applications: asks to confirm, then saves count and time together", async () => {
     await ready();
+    fireEvent.click(screen.getByTestId("mode-while"));
     fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "5" } });
     fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: "2099-01-02T18:00" } });
     fireEvent.click(screen.getByTestId("auto-grant-save"));
@@ -348,6 +405,10 @@ describe("AssistantTab", () => {
     expect(sent[0]).toEqual({ path: "assistant_settings.auto_grant_count", value: 5 });
     expect(sent[1].path).toBe("assistant_settings.auto_grant_until");
     expect(new Date(String(sent[1].value)).getFullYear()).toBe(2099);
+    expect(sent.slice(2)).toEqual([
+      { path: "assistant_settings.submit_mode", value: "confirm" },
+      { path: "assistant_settings.apply_hours", value: null },
+    ]);
   });
 
   it("a running grant is shown in words and can be stopped", async () => {

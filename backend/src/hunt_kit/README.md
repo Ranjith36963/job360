@@ -32,7 +32,7 @@ What the options mean:
 
 - `--work-countries IN,PT` countries where you need no visa. On-site or hybrid jobs there count. Remote jobs count when they are open worldwide, or open to a region or country that includes one of yours (for example "Remote - EMEA" for a German user, "Remote - LATAM" for a Brazilian, "Remote - US" for a US user). Remote jobs locked to a country you cannot work in are dropped.
 - `--remote` / `--no-remote` (default on) the remote rule above.
-- `--visa-onsite` / `--no-visa-onsite` (default on) on-site jobs anywhere else, only if the ad says it sponsors visas.
+- `--visa-onsite` / `--no-visa-onsite` (default on) on-site jobs anywhere else, only if the ad says it sponsors visas, or (row `visa_maybe_register`) the ad says nothing but the employer is on that country's official visa-sponsor register (see "Visa sponsor registers").
 - `--maybe-relocation` also keep ads that only say "relocation".
 - `--only-countries`, `--exclude-countries` optional ISO2 filters. `--any-location` keeps every title match.
 - `--titles`, `--exclude-title-words`, `--max-years 5` (drop jobs asking 5+ years), `--days 30`.
@@ -58,8 +58,9 @@ Every run, including one that failed or was interrupted, appends one JSON line t
 
 Each output line is one job: title, company, url, location, posted, source,
 board, row (which rule matched: `work_country`, `remote_world`, `remote_region`,
-`visa_onsite`, `maybe_relocation`), years_min, visa_lines (up to 2 exact
-sentences) and the full description. Newest first.
+`visa_onsite`, `visa_maybe_register`, `maybe_relocation`), years_min, visa_lines (up to 2 exact
+sentences) and the full description. Rows `visa_maybe_register` also carry `sponsor_register`
+(`NL-IND`, `GB-HO`). Newest first.
 
 It is polite: at most 8 workers and 3 requests at a time per site, waits and
 retries twice on 429, 30 second timeout.
@@ -110,7 +111,7 @@ When you show a job to the user, link back to the original listing (several feed
 ## The company list is only a starter
 
 `companies.json` is an open, third-party starter list (from jobsync, career-ops
-and job-board-aggregator, all MIT, see `NOTICE.md`). Many tokens are dead; that
+and job-board-aggregator, all MIT, plus employers from official visa-sponsor registers, see `NOTICE.md`). Many tokens are dead; that
 is fine, they answer 404 fast. Job360 never runs, ranks or uses this list.
 The user's own `preferences.target_companies` come first: pass them with
 `--companies-extra "ashby:acme,lever:foo"` (format `ats:token`) or edit the file.
@@ -128,6 +129,33 @@ Maintainers grow the list with `python scripts/harvest_hunt_boards.py` (from `ba
 see its docstring). Its Workday rows share the daily `--workday-max` slice.
 The assistant may copy good entries into the user's target_companies with
 `update_profile`.
+
+## Visa sponsor registers
+
+Some rows in `companies.json` come from official public registers of employers allowed to sponsor work
+visas: the Netherlands IND register of recognised sponsors (`NL-IND`) and the UK Home Office register of
+licensed sponsors, Skilled Worker route (`GB-HO`). Those rows have `country`, `sponsor_register` and
+`match` fields. When an ad from such a board is on-site or hybrid in that country (or names no country),
+says nothing about visas, and `--visa-onsite` is on, the kit keeps it as `visa_maybe_register`.
+
+"Maybe" means only this: the employer holds a sponsor licence. The ad itself says nothing about
+sponsoring this job. The user decides; the assistant should say so plainly and never claim the job
+sponsors. Ads that refuse sponsorship, ask for an existing right to work there, or are remote are not
+kept by this rule. An ad that does say it sponsors stays `visa_onsite`. Only rows with `match: "name"`
+(the board's own company name equals the register name) get the maybe; `match: "slug"` rows can be a
+different company with the same short name, so they are searched like any board but never tagged.
+
+The rows are built by `python build_companies.py` (maintainers; stdlib only; see its docstring). It
+downloads the registers, narrows the UK one with Companies House SIC codes 62, 63 and 72 (software, IT
+and information services, R&D; `--uk-all` skips that), then probes only the joined and hyphenated name
+on Greenhouse, Lever, Ashby, Workable, Recruitee, Personio, Teamtailor, SmartRecruiters and JOIN. A board
+counts only with at least one job and either its own company name equals the register name
+(`"match": "name"`), or, when the ATS gives no name, the board is the full name and 6+ characters long
+(`"match": "slug"`). A slug match is then kept only if the board has at least one job located in the
+register's country (`--no-verify-slug-country` skips this check). Boards whose only jobs are sample or
+demo postings are dropped, whatever the match. Boards that show the very same sample jobs as two or more other boards (ATS demo
+accounts) are skipped. Results are cached, so a stopped build continues where it left off. A company on
+both registers has comma lists (`"country": "GB,NL"`).
 
 ## Places
 
@@ -195,7 +223,8 @@ Never bring jobs in bulk without reading them.
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
 - `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
-- `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`)
+- `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
+- `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
 - `NOTICE.md` where the data came from, with licences
 
 ## Safety

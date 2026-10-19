@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 6
-TOOLS_REV_FOR_HASH = "3071a11b0b36"
+TOOLS_REV = 8
+TOOLS_REV_FOR_HASH = "f512402744a0"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -568,7 +568,7 @@ def build_server(version: str = "") -> MCPServer:
         sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
         word only when `approved` is true.
 
-        HUNT: `search_brief.rows` = the ONLY places to search, each with its `counts_if` lines;
+        HUNT: `search_brief.rows` = the ONLY places to search (`plan` = their order);
         `search_brief.gaps` = ask each once, save to the gap's `path`
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true, topic: the gap's topic}), then search.
 
@@ -728,6 +728,8 @@ def build_server(version: str = "") -> MCPServer:
         found_on: Optional[str] = None,
         posted_at: Optional[str] = None,
         employer_published_at: Optional[str] = None,
+        origin: Optional[str] = None,
+        queue: bool = False,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
@@ -740,8 +742,7 @@ def build_server(version: str = "") -> MCPServer:
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
         `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`
         (e.g. "GB", "DE", "IN"). If the ad says nothing, leave it out — Job360 never
-        guesses. The web compares it with preferences.work_authorization_countries
-        (set with update_profile).
+        guesses.
 
         Job facts (pass them on EVERY bring when you know them; they feed the
         user's stats): `country` = the job's ISO alpha-2 code ("FR", "US"),
@@ -760,13 +761,15 @@ def build_server(version: str = "") -> MCPServer:
         is mentioned). Read them: if the text is title_only or partial, fetch the
         full ad first; if the host is unknown, tell the user. They never block a bring.
         `repost` (not null) = among jobs YOU brought, this title at this company was first
-        brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide."""
+        brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
+        `origin`: "ai_hunt" (you found it), "user_link" or "user_paste"; `queue`=true puts it in the batch."""
         try:
             body = bring_route.BringJobRequest(
                 title=title, company=company, description=description, location=location, apply_url=apply_url,
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
                 country=country, remote=remote, found_on=found_on,
                 posted_at=posted_at, employer_published_at=employer_published_at,
+                origin=origin, queue=queue,  # type: ignore[arg-type]  # the model validates the closed set
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -784,6 +787,7 @@ def build_server(version: str = "") -> MCPServer:
                 "country": resp.country, "remote": resp.remote, "found_on": resp.found_on,
                 "ad_posted_at": resp.ad_posted_at, "employer_published_at": resp.employer_published_at,
                 "checks": resp.checks, "repost": resp.repost,
+                "queued": resp.queued, "queue_note": resp.queue_note,
                 "assistant_hint": ASSISTANT_HINT,
             }
         )
@@ -971,7 +975,10 @@ def build_server(version: str = "") -> MCPServer:
         every artifact version (text omitted unless with_artifact_text=true),
         the whole event timeline, receipts, and `next_step` — what to do next,
         read off the stored state. Branch on `next_step.code`: judge_fit → call
-        save_fit; write_cv → save_artifact(kind="cv"); apply → the human applies,
+        save_fit; write_cv → save_artifact(kind="cv"); submit_now → the user
+        clicked Send on the web: open the form, check_submit, type its
+        type_first answers, record form_swept with `answers`, check_submit
+        again, submit, record_application; apply → the human applies,
         then record_application; record_receipt → record_application; schedule →
         record_event(interview_scheduled, scheduled_at=…); record_outcome → the
         interview date has passed, record how it went via record_event (
@@ -999,6 +1006,7 @@ def build_server(version: str = "") -> MCPServer:
         quiet_days: Optional[int] = None,
         in_flight: bool = False,
         queued: bool = False,
+        priority: Optional[str] = None,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1018,12 +1026,14 @@ def build_server(version: str = "") -> MCPServer:
         only applications another session holds now; rows carry `hold` and `stage`.
         `queued=true` - the batch queue in order (`queue_position`); work it top-down.
         Rows carry `preflight`; the reply a
-        `queue_summary`."""
+        `queue_summary`. `priority` (highest|high|medium|low|off|not_set) - only jobs
+        in places with that level of the user's own job priority; rows carry `priority`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
-                    due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, db=db, user=_user(),
+                    due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued,
+                    priority=priority, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)
@@ -1254,9 +1264,9 @@ def build_server(version: str = "") -> MCPServer:
         answers?: [{question, answer, source, key?}]}, source = memory|profile|
         approved|written|guessed (key = kit key);
         form_checked {questions_count, answered, missing, answers?, page, pages_total};
-        cv_seen and submit_approved {artifact_id, sha256, where} only after the user said so (where=chat);
+        cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
-        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total};
+        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
@@ -1634,31 +1644,32 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def check_submit(application_id: int, form_url: str = "", session: str = "") -> dict[str, Any]:
-        """May you press the FINAL submit on this application's form? Call this
-        right before the submit with `form_url` (the page the form is on) and your `session` label
-        (the one you gave get_application_kit). ONE decision from the user's settings:
+        """Call right before the FINAL submit, with `form_url` (the page the form is on) and
+        your `session` label (as given to get_application_kit). ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
-        the user yes for this one application; `stop` - do not submit. `reason`
-        is a short code and `detail` one plain sentence you can show the user. Reasons:
+        the user yes for this one; `stop` - do not submit. `reason` = a code, `detail` = a
+        sentence for the user. Reasons:
         paused, already_applied, user_declined,
         daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
-        company_avoided (the user's own never-apply list), form_pages_incomplete (`stop`),
+        company_avoided (user's never-apply list), form_pages_incomplete (`stop`),
         form_not_recorded (`stop`: record `form_filled`),
         form_not_swept (`stop`: re-read every field, record `form_swept`),
         form_count_mismatch, unreadable_fields (`stop`: sweep again), form_check_missing (`stop`: call
         check_form), submit_unconfirmed (`stop`: `submit_attempted` has no outcome: never submit again),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), duplicate_role (`ask`: same company and title applied before),
+        in auto mode, else `ask`), duplicate_role (`ask`: same company+title before),
         new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
         profile), held_by_other_session (another session holds this kit),
-        unknown_site (`form_url` is not one plain http(s) address),
-        form_host_mismatch (`form_url` is not the site of your latest
-        `form_filled`), email_not_verified (email not confirmed), ask_always_site, job_override_confirm,
+        unknown_site (not one plain http(s) address),
+        form_host_mismatch (not the site of your latest
+        `form_filled`), email_not_verified, ask_always_site, job_override_confirm,
         submit_mode_confirm, cv_not_seen (auto mode, user has not seen the latest CV), practice_run,
         user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
         `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
         email_not_verified, blocked or held_by_other_session: tell the user.
-        Also `daily_left`, `company_left` (null = no limit).
+        Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
+        changed on the web - type each in, then form_swept with `answers`; until then
+        `stop` (type_first_pending), even after a yes.
         Read-only; after a real submit, call `record_application`."""
         try:
             async with _request_db() as db:

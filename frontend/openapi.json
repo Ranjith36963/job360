@@ -1690,6 +1690,11 @@
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
           },
+          "origin": {
+            "default": "",
+            "title": "Origin",
+            "type": "string"
+          },
           "preflight": {
             "anyOf": [
               {
@@ -1701,6 +1706,24 @@
               }
             ],
             "title": "Preflight"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "highest",
+                  "high",
+                  "medium",
+                  "low",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
           },
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
@@ -2445,6 +2468,22 @@
             "title": "Location",
             "type": "string"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ai_hunt",
+                  "user_link",
+                  "user_paste"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
           "posted_at": {
             "anyOf": [
               {
@@ -2456,6 +2495,11 @@
               }
             ],
             "title": "Posted At"
+          },
+          "queue": {
+            "default": false,
+            "title": "Queue",
+            "type": "boolean"
           },
           "remote": {
             "anyOf": [
@@ -2583,6 +2627,28 @@
           },
           "job": {
             "$ref": "#/components/schemas/JobResponse"
+          },
+          "queue_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Note"
+          },
+          "queued": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued"
           },
           "remote": {
             "anyOf": [
@@ -11850,6 +11916,13 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "type_first": {
+            "items": {
+              "$ref": "#/components/schemas/TypeFirstAnswer"
+            },
+            "title": "Type First",
+            "type": "array"
           }
         },
         "required": [
@@ -12156,6 +12229,24 @@
           "last_used_at"
         ],
         "title": "TokenSummary",
+        "type": "object"
+      },
+      "TypeFirstAnswer": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "TypeFirstAnswer",
         "type": "object"
       },
       "UpdateContactRequest": {
@@ -12804,6 +12895,23 @@
               "default": false,
               "title": "Queued",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Priority"
             }
           },
           {

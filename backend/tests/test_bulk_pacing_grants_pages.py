@@ -220,7 +220,8 @@ def test_the_gap_wait_is_moved_to_the_next_opening_when_it_would_fall_outside_th
 
 def test_pace_settings_validate_and_classify():
     assert validate_edit(GAP, 0) == 0 and validate_edit(GAP, 240) == 240
-    for bad in (-1, 241, "5", True, 1.5):
+    assert validate_edit(GAP, 1.5) == 1.5, "whole seconds are allowed (owner ask 2026-10-18)"
+    for bad in (-1, 241, "5", True, 1.001):
         with pytest.raises(ProfileEditError):
             validate_edit(GAP, bad)
     assert validate_edit(HOURS, {"from": "09:00", "to": "17:30"}) == {"from": "09:00", "to": "17:30"}
@@ -447,7 +448,7 @@ async def test_grant_info_counts_from_the_grant_and_a_shorter_end_never_restarts
         first = await _bring(client, _ad(1))
         second = await _bring(client, _ad(2, company="Southwind"))
         third = await _bring(client, _ad(3, company="Eastwind"))
-        await _applied(client, first)  # before any grant: never counts
+        await _applied(client, first)  # no grant history yet: it counts (the safe side)
         assert rules.grant_info(fixture_user_id)[1] == 1, "no grant yet: every applied counts (the safe side)"
         end = datetime.now(timezone.utc) + timedelta(hours=4)
         assert (await _patch(client, _e(GRANT_N, 2), _e(GRANT_UNTIL, end.isoformat()))).status_code == 200
@@ -529,12 +530,29 @@ async def test_a_two_page_form_stops_until_every_page_is_swept(authenticated_asy
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def test_a_simulation_mark_after_a_real_submit_never_frees_a_grant_slot():
+@pytest.mark.asyncio
+async def test_a_simulation_mark_after_a_real_submit_never_frees_a_grant_slot(
+    authenticated_async_context, fixture_user_id
+):
     from src.repositories import pgsync
 
-    src = __import__("inspect").getsource(rules._applied_after)
-    assert "s.id < e.id" in src
-    assert pgsync  # imported for parity with the other DB tests
+    def applied_count() -> int:
+        with pgsync.connect(str(settings.DB_PATH)) as conn:
+            return rules._applied_after(conn, fixture_user_id, None)
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        real = await _bring(client, _ad(1))
+        practice = await _bring(client, _ad(2, company="Southwind"))
+        await _applied(client, real)
+        assert applied_count() == 1
+        # a mark recorded AFTER the real submit cannot re-label it
+        assert (await _event(client, real, "simulation")).status_code == 201
+        assert applied_count() == 1
+        # a mark recorded BEFORE the submit is a practice run: not counted
+        assert (await _event(client, practice, "simulation")).status_code == 201
+        await _applied(client, practice)
+        assert applied_count() == 1
 
 
 def test_mixed_paged_and_unpaged_sweeps_keep_the_unreadable_and_count_stops():
@@ -582,16 +600,48 @@ async def test_sweep_shortfalls_sees_an_unpaged_unreadable_after_paged_pages(aut
         assert unreadable is True
 
 
-def test_the_grant_and_pace_counters_ignore_relabelling():
+@pytest.mark.asyncio
+async def test_the_grant_and_pace_counters_ignore_relabelling(authenticated_async_context, fixture_user_id):
     """Security review 2026-10-18: a simulation mark or a correcting note must never give a grant
     slot back or move the pace anchor; both read every applied the server recorded."""
-    import inspect
+    from src.api import dependencies as api_deps
 
-    grant_src = inspect.getsource(rules.grant_info)
-    pace_src = inspect.getsource(rules.last_applied_at)
-    assert "simulation" not in pace_src.split('"""')[-1].lower()
-    assert "corrects_event_id" not in pace_src.split('"""')[-1]
-    assert "event_type = 'applied' AND recorded_at > ?" in grant_src
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        end = datetime.now(timezone.utc) + timedelta(hours=4)
+        assert (await _patch(client, _e(GRANT_N, 3), _e(GRANT_UNTIL, end.isoformat()))).status_code == 200
+        app_id = await _bring(client, _ad(1))
+        sent = await _event(client, app_id, "applied")
+        assert sent.status_code == 201, sent.text
+        db = await api_deps.get_db()
+        used, anchor = rules.grant_info(fixture_user_id)[1], await rules.last_applied_at(db, fixture_user_id)
+        assert used == 1 and anchor is not None
+        assert (await _event(client, app_id, "simulation")).status_code == 201
+        await _event(client, app_id, "note", detail="not real", corrects_event_id=sent.json()["event_id"])
+        assert rules.grant_info(fixture_user_id)[1] == used
+        assert await rules.last_applied_at(db, fixture_user_id) == anchor
+
+
+def test_a_second_form_filled_reopens_every_page_swept_before_it():
+    """CodeRabbit 2026-10-18: pages 1-2 swept, the form filled AGAIN, only page 2 re-swept: page 1
+    still describes the old answers. The first form_filled (once, after the last page) reopens nothing."""
+    from src.services.applications import kit
+
+    def ev(i, t, **p):
+        return {"id": i, "event_type": t, "payload": p}
+
+    walk = [
+        ev(1, "form_checked", questions_count=1, page=1, pages_total=2),
+        ev(2, "form_swept", fields_checked=1, fixed=0, page=1, pages_total=2),
+        ev(3, "form_checked", questions_count=1, page=2, pages_total=2),
+        ev(4, "form_swept", fields_checked=1, fixed=0, page=2, pages_total=2),
+    ]
+    newest_first = list(reversed(walk))
+    assert kit._paged_shortfalls(newest_first, 2) == (False, False, False)  # first fill at id 5
+    resweep = [ev(7, "form_swept", fields_checked=1, fixed=0, page=2, pages_total=2), *newest_first]
+    assert kit._paged_shortfalls(resweep, 2, refill_id=6)[2] is True  # refill at id 6: page 1 is stale
+    both = [ev(8, "form_swept", fields_checked=1, fixed=0, page=1, pages_total=2), *resweep]
+    assert kit._paged_shortfalls(both, 2, refill_id=6) == (False, False, False)
 
 
 def test_a_smaller_pages_total_cannot_shrink_the_form():

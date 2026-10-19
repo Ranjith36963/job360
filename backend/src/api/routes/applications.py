@@ -746,6 +746,9 @@ class ApplicationSummaryOut(BaseModel):
     # Owner decision 2026-10-10 - which side of the USER's own score line the fit
     # score is on; "unknown" when there is no line or no fit yet.
     line_side: Literal["above", "below", "unknown"] = "unknown"
+    # Owner decision 2026-10-19 - the user's own job priority of this job's place;
+    # None when not chosen or the place is unknown (rule #29).
+    priority: Optional[Literal["highest", "high", "medium", "low", "off"]] = None
     # 2026-09-24 — the list card's "Next:" line; same state machine and same
     # fields `get_application`'s `next_step` reads, batched for the page.
     next_step: NextStepOut
@@ -770,6 +773,9 @@ class ApplicationSummaryOut(BaseModel):
     # user's whole open queue; both null when it is not on the queue.
     queued_at: Optional[str] = None
     queue_position: Optional[int] = None
+    # Where the job came from (owner ask 2026-10-18): ai_hunt / user_link / user_paste, else
+    # user (brought on the web) / ai (an assistant brought it).
+    origin: str = ""
     # Bulk-apply Q1: derived problems of a queued row (queued=true only; null otherwise).
     preflight: Optional[dict[str, Any]] = None
 
@@ -1187,6 +1193,11 @@ class AutofillRequest(BaseModel):
     mode: Literal["allow", "deny"]
 
 
+class TypeFirstAnswer(BaseModel):
+    question: str
+    answer: str
+
+
 class SubmitCheckResponse(BaseModel):
     """The answer to "may I press submit on this application?" - one gate
     (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
@@ -1197,6 +1208,9 @@ class SubmitCheckResponse(BaseModel):
     decision: Literal["submit", "ask", "stop"]
     reason: str
     detail: str
+    # Owner decision 2026-10-19: answers the user changed on the web after the form was
+    # filled. Type each one into its field (replacing what is there) BEFORE any submit.
+    type_first: list[TypeFirstAnswer] = Field(default_factory=list)
     # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
     daily_left: Optional[int] = None
     company_left: Optional[int] = None
@@ -1816,13 +1830,15 @@ async def list_applications(
     in_flight: bool = Query(False),
     # Batch queue (2026-10-18) - only the open queue, first in first out (rows carry `queue_position`).
     queued: bool = Query(False),
+    # Owner decision 2026-10-19 - the user's own job priority of the job's place.
+    priority: Optional[str] = Query(None, max_length=20),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
-            due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued,
+            due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, priority=priority,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2633,13 +2649,8 @@ async def approve_send(
     if form_filled_event_id is not None:
         if await ready_service.newest_fill_id(db, user.id, application_id) != form_filled_event_id:
             raise HTTPException(status_code=409, detail="the filled form changed since you looked - look again")
-    # Owner decision 2026-10-18 - an answer the user edited is not in the form yet: no yes for the old one.
-    card = await ready_service.ready_cards(db, user.id, limit=1, application_id=application_id)
-    if card and any(f["code"] == "changed" for f in card[0]["flags"]):
-        raise HTTPException(
-            status_code=409,
-            detail="you changed an answer - ask your assistant to fill the form again, then Send",
-        )
+    # Owner decision 2026-10-19: an answer the user edited does not block the yes - submit-check hands
+    # the assistant those answers (`type_first`) to type into the form before it submits.
     payload = {"artifact_id": cv["id"], "sha256": kit_service.sha256_text(cv["text"]), "where": "web"}
     await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
     await _web_decision(db, user, application_id, "submit_approved", payload)
@@ -2779,6 +2790,9 @@ async def submit_check(
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
+    type_first = await ready_service.changed_answers(db, user.id, app_row)
+    verdict = ready_service.type_first_lock(verdict, type_first)
+    detail = verdict.detail
     get_audit_logger().info(
         "submit_check",
         extra={
@@ -2790,7 +2804,7 @@ async def submit_check(
     )
     return {
         "application_id": application_id, "decision": verdict.decision,
-        "reason": verdict.reason, "detail": verdict.detail,
+        "reason": verdict.reason, "detail": detail, "type_first": type_first,
         # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
         "daily_left": settings_rules.daily_left(cfg, counts),
         "company_left": settings_rules.company_left(cfg, counts.company_applied_in_window),

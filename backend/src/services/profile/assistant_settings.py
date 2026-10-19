@@ -54,7 +54,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -152,6 +152,30 @@ def _int_in_range(path: str, value: Any, low: int, high: int) -> int:
     if value < low or value > high:
         raise _bad(path, f"must be a whole number from {low} to {high}")
     return value
+
+
+def _gap_minutes(path: str, value: Any) -> Union[int, float]:
+    """``min_gap_minutes``: 0-240 minutes in WHOLE SECONDS (owner ask 2026-10-18: "I should also get
+    seconds"), so 1.5 = 1 min 30 s. Kept as a whole number when it is one; bool is never a number."""
+    msg = f"must be a number of minutes from 0 to {MIN_GAP_MAX}, in whole seconds (1.5 = 1 min 30 s)"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _bad(path, msg)
+    if not 0 <= value <= MIN_GAP_MAX:
+        raise _bad(path, msg)
+    secs = value * 60
+    if abs(secs - round(secs)) > 0.01:
+        raise _bad(path, msg)
+    whole = round(secs)
+    return whole // 60 if whole % 60 == 0 else round(whole / 60, 4)
+
+
+def gap_words(minutes: Union[int, float]) -> str:
+    """``95`` -> "95 minutes", ``1.5`` -> "1 min 30 s", ``0.25`` -> "15 seconds"."""
+    secs = round(float(minutes) * 60)
+    m, sec = divmod(secs, 60)
+    if sec == 0:
+        return f"{m} minute{'s' if m != 1 else ''}"
+    return f"{m} min {sec} s" if m else f"{sec} seconds"
 
 
 def parse_iso_with_offset(text: str) -> datetime:
@@ -299,11 +323,11 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
     if path == COMPANY_CAP_PATH:
         return _int_in_range(path, value, 1, settings.ASSISTANT_COMPANY_CAP_MAX)
     if path == COMPANY_CAP_DAYS_PATH:
-        return _int_in_range(path, value, 1, COMPANY_CAP_DAYS_MAX)
+        return _int_in_range(path, value, 0, COMPANY_CAP_DAYS_MAX)  # 0 = all time (owner ask 2026-10-18)
     if path == WEEKLY_CAP_PATH:
         return _int_in_range(path, value, 1, settings.ASSISTANT_WEEKLY_CAP_MAX)
     if path == MIN_GAP_PATH:
-        return _int_in_range(path, value, 0, MIN_GAP_MAX)
+        return _gap_minutes(path, value)
     if path == APPLY_HOURS_PATH:
         return _validate_apply_hours(path, value)
     if path == AUTO_GRANT_COUNT_PATH:
@@ -341,7 +365,7 @@ class EffectiveSettings:
     company_cap_days: int = settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS
     # Bulk-apply C1 / C2 / R1 (None / "" = not set).
     weekly_cap: Optional[int] = None
-    min_gap_minutes: Optional[int] = None
+    min_gap_minutes: Optional[float] = None
     apply_hours: Optional[tuple[str, str]] = None
     auto_grant_count: Optional[int] = None
     auto_grant_until: str = ""
@@ -372,7 +396,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
             settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS if s.company_cap_days is None else int(s.company_cap_days)
         ),
         weekly_cap=None if s.weekly_cap is None else int(s.weekly_cap),
-        min_gap_minutes=None if not s.min_gap_minutes else int(s.min_gap_minutes),
+        min_gap_minutes=None if not s.min_gap_minutes else s.min_gap_minutes,
         apply_hours=_hours_tuple(s.apply_hours),
         auto_grant_count=None if s.auto_grant_count is None else int(s.auto_grant_count),
         auto_grant_until=s.auto_grant_until or "",
@@ -546,7 +570,11 @@ def classify_change(
     if path == AUTO_GRANT_UNTIL_PATH:
         return "riskier" if _grant_until_rank(after or "") > _grant_until_rank(before or "") else "safer"
     if path == COMPANY_CAP_DAYS_PATH:
-        return "riskier" if after < before else "safer"
+        # 0 = all time: the longest window there is.
+        def days_rank(d: Any) -> float:
+            return float("inf") if d == 0 else float(d)
+
+        return "riskier" if days_rank(after) < days_rank(before) else "safer"
     if path == PAUSED_UNTIL_PATH:
         return "riskier" if _pause_rank(after) < _pause_rank(before) else "safer"
     if path == PAUSE_REASON_PATH:
@@ -728,7 +756,7 @@ REASONS: tuple[str, ...] = (
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
-    "below_score_line", "answer_guessed",
+    "type_first_pending", "below_score_line", "answer_guessed",
 )
 
 
@@ -930,7 +958,8 @@ def may_submit(
     if cfg.company_cap is not None and counts.company_applied_in_window >= cfg.company_cap:
         return SubmitDecision(
             "stop", "company_cap_reached",
-            f"You set a limit of {cfg.company_cap} applications per company in {cfg.company_cap_days} days, "
+            f"You set a limit of {cfg.company_cap} applications per company "
+            f"{'in all time' if cfg.company_cap_days == 0 else f'in {cfg.company_cap_days} days'}, "
             "and it is reached for this company. Do not submit; the user can raise the limit.",
         )
     if cfg.weekly_cap is not None and counts.submitted_this_week >= cfg.weekly_cap:
@@ -1110,8 +1139,9 @@ def _pace_stop(cfg: EffectiveSettings, counts: SubmitCounts, now: datetime) -> O
                 nxt = _next_opening(nxt, hours)
             return SubmitDecision(
                 "stop", "pace_wait",
-                f"You set a gap of {cfg.min_gap_minutes} minutes between applications. Do not submit before "
-                f"{nxt.isoformat(timespec='minutes')} (your time); work another application or wait.",
+                f"You set a gap of {gap_words(cfg.min_gap_minutes)} between applications. Do not submit before "
+                f"{nxt.isoformat(timespec='minutes' if float(cfg.min_gap_minutes).is_integer() else 'seconds')} "
+                "(your time); work another application or wait.",
             )
     return None
 
@@ -1518,7 +1548,9 @@ async def company_applied_count(
     re-label it (security review 2026-10-18). An ``applied`` replaced by a correction never
     counts (the ``_has_surviving_applied`` rule). The window is on ``occurred_at``, the date
     the user applied: a stop no yes clears must not fire on history recorded late (review
-    2026-10-18 chose this over ``recorded_at``). Scoped by ``user_id`` (rule #12)."""
+    2026-10-18 chose this over ``recorded_at``). A correction can move a date INTO the window but
+    never out: an application counts while any ``applied`` it replaced was dated inside it
+    (CodeRabbit 2026-10-18). Scoped by ``user_id`` (rule #12)."""
     cur = await db._db.execute(
         "SELECT j.normalized_company FROM applications a JOIN jobs j ON j.id = a.job_id "
         "WHERE a.id = ? AND a.user_id = ?",
@@ -1528,18 +1560,23 @@ async def company_applied_count(
     company = str(dict(row).get("normalized_company") or "").strip() if row else ""
     if not company or company.lower() == "unknown":
         return 0
-    cutoff = (now - timedelta(days=window_days)).isoformat()
+    # 0 = all time: every earlier application at this company counts.
+    cutoff = "1970-01-01T00:00:00+00:00" if window_days == 0 else (now - timedelta(days=window_days)).isoformat()
     cur = await db._db.execute(
         "SELECT COUNT(DISTINCT e.application_id) FROM application_events e "
         "JOIN applications a ON a.id = e.application_id JOIN jobs j ON j.id = a.job_id "
         "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'applied' "
-        "AND e.occurred_at >= ? "
+        "AND (e.occurred_at >= ? OR EXISTS (SELECT 1 FROM application_events o "
+        "WHERE o.application_id = e.application_id AND o.user_id = e.user_id AND o.event_type = 'applied' "
+        "AND o.id < e.id AND o.occurred_at >= ? "
+        "AND EXISTS (SELECT 1 FROM application_events c2 WHERE c2.corrects_event_id = o.id "
+        "AND c2.user_id = o.user_id AND c2.event_type = 'applied'))) "
         "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
         "AND e.application_id <> ? AND j.normalized_company = ? "
         "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
         "AND s.user_id = e.user_id AND s.event_type = ? AND s.id < e.id AND s.id NOT IN "
         "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))",
-        (user_id, user_id, cutoff, application_id, company, settings.SIMULATION_EVENT_TYPE, user_id),
+        (user_id, user_id, cutoff, cutoff, application_id, company, settings.SIMULATION_EVENT_TYPE, user_id),
     )
     got = await cur.fetchone()
     return int(got[0]) if got else 0

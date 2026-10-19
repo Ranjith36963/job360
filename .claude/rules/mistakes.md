@@ -25,8 +25,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   and `test_outreach_people` (MCP tool count).
 - Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
   GitHub merges it when the 13 required checks are green. Never leave finished work unpushed.
-  Keep `.claude/**`, `.github/**`, `scripts/**` out of product PRs: `auto-merge.yml` disarms
-  any PR with an owner-lane file.
+  Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
+  every `**/CLAUDE.md` is human-only, so a CLAUDE.md fix (even a `last-verified` stamp) goes in its own PR.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
 - Read CI failures from the job summary, not the log tail (Postgres noise).
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).

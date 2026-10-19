@@ -60,9 +60,13 @@ _RTW_COUNTRY: dict[str, str] = {
     # Owner decision 2026-10-10 - what people really say: "remote anywhere, on-site only if
     # sponsored". `country` may also be "ANY" = every other country.
     "remote_ok": "bool", "onsite": "onsite", "note": "line",
+    # Owner decision 2026-10-19 - the user's own order of search effort per place
+    # (job_priority.PRIORITY_LEVELS). Empty = not chosen (rule #29), never a default.
+    "remote_priority": "priority", "onsite_priority": "priority",
 }
 ANY_COUNTRY = "ANY"
 ONSITE_VALUES = ("yes", "only_if_sponsored", "no")
+PRIORITY_LEVELS = ("highest", "high", "medium", "low", "off")
 LICENCE_TYPES = ("full", "provisional", "none")
 _RIGHT_TO_WORK: dict[str, str] = {
     "countries": "rtw_countries", "citizenship": "iso2_list", "sanctions_country_citizen": "bool_or_pns",
@@ -199,8 +203,8 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
             forgiving.note(forgiving.RULE_BOOL_YESNO, at=at)
             return yes_no
         return _line(at, raw) or None
-    if kind in ("onsite", "licence_type"):
-        allowed = ONSITE_VALUES if kind == "onsite" else LICENCE_TYPES
+    if kind in ("onsite", "licence_type", "priority"):
+        allowed = {"onsite": ONSITE_VALUES, "licence_type": LICENCE_TYPES, "priority": PRIORITY_LEVELS}[kind]
         text = "_".join(_line(at, raw).lower().replace("-", " ").split())
         if not text:
             return None

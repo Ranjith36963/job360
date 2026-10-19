@@ -26,7 +26,7 @@ is a practice run: fill it, stop before submit, let the user check it.
 above, and below, the line; `submit_mode` (confirm | auto_when_sure),
 `daily_cap` (null = no cap), `company_cap` / `company_cap_days` (most applications
 to ONE company in that many days; null = no limit), `weekly_cap` (Monday-Sunday in the user's timezone; null = none),
-`min_gap_minutes` (0-240 between submits; null = none), `apply_hours` ({from, to} "HH:MM" in the user's timezone; null = any time),
+`min_gap_minutes` (0-240 minutes between submits, whole seconds allowed; null = none), `apply_hours` ({from, to} "HH:MM" in the user's timezone; null = any time),
 `auto_grant_count` / `auto_grant_until` ("auto for my next N until <time>"), `paused_until` ("" | "until_resumed" | a time)
 and `pause_reason` has a `value` (what was chosen, empty = not chosen) and an
 `effective` (the safe default filled in: no line, ask, ask, confirm, no cap,
@@ -40,13 +40,13 @@ confirmed on the Job360 website - do not ask again, and do not act as if they
 were applied. Read `settings` before any apply step and call `check_submit`
 before the final submit.
 
-Assistant settings are fourteen paths: `assistant_settings.apply_min_score`
+Assistant settings are fifteen paths (`assistant_settings.auto_employer_emails` is under Automatic employer emails below): `assistant_settings.apply_min_score`
 (the score line, whole number 0-100), `assistant_settings.above_line` and
 `assistant_settings.below_line` (ask | auto | skip), `assistant_settings.submit_mode` (confirm |
 auto_when_sure), `assistant_settings.daily_cap` (whole number >= 1, or null
 for no cap), `assistant_settings.company_cap` (whole number >= 1, or null: most
 applications to one company) with `assistant_settings.company_cap_days` (1-365,
-default 180), `assistant_settings.weekly_cap` (whole number >= 1, or null), `assistant_settings.min_gap_minutes` (0-240 or
+0 = all time, default 180), `assistant_settings.weekly_cap` (whole number >= 1, or null), `assistant_settings.min_gap_minutes` (0-240 minutes in whole seconds, 1.5 = 1 min 30 s, or
 null) and `assistant_settings.apply_hours` ({"from":"09:00","to":"17:00"} in the user's own timezone, or null; from later
 than to = overnight) - the user's own FIXED pace, never randomized, `check_submit` enforces it; `assistant_settings.auto_grant_count`
 (1-100) with `assistant_settings.auto_grant_until` (ISO time with an offset, at most 7 days ahead): while now is before
@@ -456,7 +456,7 @@ they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat"} -
 ONLY when the user typed yes to submitting THIS application; `submit_declined`
 {where:"chat"} - the user said don't send; `autofill_set` {mode:"deny"} - you
 may only send deny; `form_filled` {form_url, fields_count, fields_skipped?, answers?} - after you filled
-the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?, page?, pages_total?, unreadable?: [field names you could not read back]} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill, while `unreadable` is not empty, or if fields_checked < the latest `form_checked` questions_count - per page on a multi-page form); `form_checked` {questions_count, answered, missing, page?, pages_total?, answers?: [{question, source, key?, needs_confirmation?}]} - after check_form and the user's reply, counts and wording only, never values; on a multi-page form send `page` (1..N) and `pages_total` on BOTH `form_checked` and `form_swept` for every page (each page's sweep must be newer than its check, else `form_pages_incomplete`); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
+the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?, page?, pages_total?, unreadable?: [field names you could not read back], answers?: [{question, answer, source}] - what the form holds after you typed check_submit's `type_first` (required to clear `type_first_pending`)} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill, while `unreadable` is not empty, or if fields_checked < the latest `form_checked` questions_count - per page on a multi-page form); `form_checked` {questions_count, answered, missing, page?, pages_total?, answers?: [{question, source, key?, needs_confirmation?}]} - after check_form and the user's reply, counts and wording only, never values; on a multi-page form send `page` (1..N) and `pages_total` on BOTH `form_checked` and `form_swept` for every page (each page's sweep must be newer than its check, else `form_pages_incomplete`); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
 wall (never a password anywhere). A payload that is wrong is refused ONCE (422) with every
 problem listed and one complete valid example for that event; fix them all and
@@ -620,7 +620,8 @@ legal_last_name, preferred_name, linkedin_url}.
 required), work_authorization (citizen | permanent_resident | visa |
 needs_sponsorship), needs_sponsorship (bool), visa_type, visa_expires (YYYY-MM
 or YYYY-MM-DD), remote_ok (bool), onsite (yes | only_if_sponsored | no), note
-(one line, the user's own words)}] - country "ANY" = every other country
+(one line, the user's own words), remote_priority / onsite_priority (highest | high | medium | low | off:
+the user's own job priority for that place; set only what they chose)}] - country "ANY" = every other country
 (e.g. remote anywhere, on-site only if sponsored), citizenship: [ISO2], sanctions_country_citizen (bool, or "Prefer not to say")}.
 `user_info.logistics` = {notice_period, earliest_start, countries: [ONE record
 per country {country (ISO2, required), willing_to_relocate (bool),

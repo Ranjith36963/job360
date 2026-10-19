@@ -3341,10 +3341,17 @@ export interface components {
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
+            /**
+             * Origin
+             * @default
+             */
+            origin: string;
             /** Preflight */
             preflight?: {
                 [key: string]: unknown;
             } | null;
+            /** Priority */
+            priority?: ("highest" | "high" | "medium" | "low" | "off") | null;
             proof: components["schemas"]["ProofOut"];
             /** Queue Position */
             queue_position?: number | null;
@@ -3642,8 +3649,15 @@ export interface components {
              * @default
              */
             location: string;
+            /** Origin */
+            origin?: ("ai_hunt" | "user_link" | "user_paste") | null;
             /** Posted At */
             posted_at?: string | null;
+            /**
+             * Queue
+             * @default false
+             */
+            queue: boolean;
             /** Remote */
             remote?: boolean | null;
             /** Title */
@@ -3674,6 +3688,10 @@ export interface components {
             /** Found On */
             found_on?: string | null;
             job: components["schemas"]["JobResponse"];
+            /** Queue Note */
+            queue_note?: string | null;
+            /** Queued */
+            queued?: boolean | null;
             /** Remote */
             remote?: boolean | null;
             /** Repost */
@@ -7177,6 +7195,8 @@ export interface components {
             detail: string;
             /** Reason */
             reason: string;
+            /** Type First */
+            type_first?: components["schemas"]["TypeFirstAnswer"][];
         };
         /** TailorBundle */
         TailorBundle: {
@@ -7289,6 +7309,13 @@ export interface components {
             name: string;
             /** Prefix */
             prefix: string;
+        };
+        /** TypeFirstAnswer */
+        TypeFirstAnswer: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
         };
         /**
          * UpdateContactRequest
@@ -7538,6 +7565,7 @@ export interface operations {
                 quiet_days?: number | null;
                 in_flight?: boolean;
                 queued?: boolean;
+                priority?: string | null;
             };
             header?: {
                 authorization?: string | null;
