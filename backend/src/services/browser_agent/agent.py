@@ -115,6 +115,7 @@ class BrowserPool:
             try:
                 from playwright.async_api import async_playwright  # noqa: PLC0415 - optional, heavy (rule #16)
             except ImportError:
+                logger.error("browser_agent: playwright is not installed (build the image with the [browser] extra)")
                 raise BrowserError(
                     "off", "not_installed", "Job360's browser is not installed on this server."
                 ) from None
@@ -129,6 +130,8 @@ class BrowserPool:
                     # Every connection, loopback included, leaves through the screening proxy.
                     f"--proxy-server=http://127.0.0.1:{self.egress.port}",
                     "--proxy-bypass-list=<-loopback>",
+                    # WebRTC's UDP ignores --proxy-server: allow only WebRTC that goes through the proxy.
+                    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                     *self._launch_args,
                 ],
             )
@@ -268,6 +271,12 @@ async def _locate(s: Session, ref: str) -> Any:
     raise BrowserError("refused", "ref_not_found", "That ref is not on the page any more. Call look and use a new one.")
 
 
+def upload_name(name: str, doc_kind: str) -> str:
+    """The file's own name with every folder part removed, so the upload stays in its temp folder."""
+    base = os.path.basename((name or "").replace("\\", "/")).strip()
+    return base if base not in ("", ".", "..") else f"{doc_kind}.pdf"
+
+
 async def _kind(loc: Any) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
     return control_kind(
@@ -315,6 +324,7 @@ async def run(
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
             if getattr(exc, "status_code", None) is not None:
                 raise  # an HTTP refusal from the gate (e.g. not the caller's application) stays one
+            logger.warning("browser_agent %s failed", action, exc_info=True)
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
@@ -335,6 +345,7 @@ async def _act(
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
+            logger.info("browser_agent open failed", exc_info=True)
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
         return await look(s)
@@ -412,7 +423,7 @@ async def _act(
         )
     name, data = await files(doc_kind)
     with tempfile.TemporaryDirectory(prefix="j360-upload-") as tmp:
-        path = os.path.join(tmp, name)
+        path = os.path.join(tmp, upload_name(name, doc_kind))
         with open(path, "wb") as fh:
             fh.write(data)
         await loc.set_input_files(path)

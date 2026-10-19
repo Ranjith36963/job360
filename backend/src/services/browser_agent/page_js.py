@@ -7,11 +7,36 @@ Playwright import at module level (rule #16).
 """
 from __future__ import annotations
 
+# The one way both scripts name an element, so the submit gate classifies the
+# same name the assistant saw in ``look`` (CodeRabbit on #908).
+_LABEL_OF_JS = r"""
+  const labelOf = (el) => {
+    const doc = el.ownerDocument;
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return aria;
+    const by = el.getAttribute('aria-labelledby');
+    if (by) {
+      const t = by.split(/\s+/).map(id => doc.getElementById(id)).filter(Boolean).map(n => n.innerText).join(' ');
+      if (t.trim()) return t;
+    }
+    if (el.id) {
+      const l = doc.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+      if (l && l.innerText.trim()) return l.innerText;
+    }
+    const wrap = el.closest('label');
+    if (wrap && wrap.innerText.trim()) return wrap.innerText;
+    if (el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) return el.value;
+    // A button's own text comes before its tooltip: the gate must see "Submit application".
+    return el.innerText || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('name') || '';
+  };
+"""
+
 # Returns {elements: [...], text: str, has_password_box: bool}.
 # Each element: {ref, tag, type, role, name, value, checked, required,
 # disabled, autocomplete, in_form, options}.
 SNAPSHOT_JS = r"""
 (args) => {
+""" + _LABEL_OF_JS + r"""
   const maxElements = args.maxElements, maxText = args.maxText, maxName = 120;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
     + '[role=combobox], [role=option], [role=tab], [role=link], [contenteditable=true]';
@@ -23,23 +48,6 @@ SNAPSHOT_JS = r"""
     return s.visibility !== 'hidden' && s.display !== 'none';
   };
   const clip = (t, n) => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
-  const labelOf = (el) => {
-    const aria = el.getAttribute('aria-label');
-    if (aria) return aria;
-    const by = el.getAttribute('aria-labelledby');
-    if (by) {
-      const t = by.split(/\s+/).map(id => document.getElementById(id)).filter(Boolean).map(n => n.innerText).join(' ');
-      if (t.trim()) return t;
-    }
-    if (el.id) {
-      const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-      if (l && l.innerText.trim()) return l.innerText;
-    }
-    const wrap = el.closest('label');
-    if (wrap && wrap.innerText.trim()) return wrap.innerText;
-    if (el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) return el.value;
-    return el.getAttribute('placeholder') || el.getAttribute('title') || el.innerText || el.getAttribute('name') || '';
-  };
   let n = 0, hasPassword = false;
   const out = [];
   for (const el of document.querySelectorAll(sel)) {
@@ -80,14 +88,8 @@ SNAPSHOT_JS = r"""
 # safety check runs on what is on the page NOW, not on an old snapshot.
 ELEMENT_FACTS_JS = r"""
 (el) => {
-  const aria = el.getAttribute('aria-label');
-  let name = aria || '';
-  if (!name && el.id) {
-    const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-    if (l) name = l.innerText;
-  }
-  if (!name && el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) name = el.value;
-  if (!name) name = el.innerText || el.getAttribute('placeholder') || el.getAttribute('name') || '';
+""" + _LABEL_OF_JS + r"""
+  const name = labelOf(el) || '';
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
@@ -95,7 +97,12 @@ ELEMENT_FACTS_JS = r"""
     // Any typed answer, chosen file or changed choice anywhere on the page: the
     // form is being filled. A box, radio or dropdown counts only once it differs
     // from how the page loaded, so a pre-ticked box on a job ad is not an answer.
-    page_has_answers: Array.from(el.ownerDocument.querySelectorAll('input, textarea, select')).some((f) => {
+    // A rich-text box (contenteditable) counts once it holds text.
+    page_has_answers: Array.from(el.ownerDocument.querySelectorAll(
+      'input, textarea, select, [contenteditable=""], [contenteditable=true]')).some((f) => {
+      if (f.isContentEditable && !['INPUT', 'TEXTAREA', 'SELECT'].includes(f.tagName)) {
+        return !!(f.innerText || '').trim();
+      }
       if (f.tagName === 'SELECT') {
         const opts = Array.from(f.options);
         if (f.multiple) return opts.some((o) => o.selected !== o.defaultSelected);
