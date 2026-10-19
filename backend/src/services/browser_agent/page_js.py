@@ -258,7 +258,15 @@ WATCH_START_JS = r"""
       window.__j360seen++;
     }
   });
-  mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  // Open shadow roots too (SmartRecruiters draws its form in them): an observer on the document does
+  // not see inside one. A root added during the click comes with an insertion that is already counted.
+  const opts = { subtree: true, childList: true, attributes: true, characterData: true };
+  const walk = (root, depth) => {
+    mo.observe(root, opts);
+    if (depth > 6) return;
+    for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
+  };
+  walk(document, 0);
   window.__j360watch = mo;
   return true;
 }
