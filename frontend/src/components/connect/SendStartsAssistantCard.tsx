@@ -54,7 +54,7 @@ const RESULT_WORDS: Record<string, string> = {
 
 function resultText(result: string): string {
   if (!result) return "not used yet";
-  return RESULT_WORDS[result] ?? result.replace(/^failed: /, "failed, answered ").replace(/^refused: /, "refused: ");
+  return RESULT_WORDS[result] ?? result.replace(/^failed: /, "failed, answered ");
 }
 
 /**
