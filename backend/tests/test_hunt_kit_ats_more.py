@@ -56,7 +56,7 @@ def _run(name: str, row: dict, http):
 
 def test_registry_and_hunt_kit_wiring():
     assert set(F) == {"rippling", "breezy", "pinpoint", "phenom", "ultipro", "adp", "cornerstone", "gem", "jazzhr",
-                      "softgarden", "join", "jibe"}
+                      "softgarden", "join", "jibe", "paylocity"}
     assert hk.ATS_MODULES == ("kit_ats", "kit_ats_more")
     assert set(F) <= set(hk.BOARD_SOURCES)
     assert (KIT_DIR / "kit_ats_more.py").read_text().count("Borrowed from") >= len(F)

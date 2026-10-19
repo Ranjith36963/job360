@@ -277,8 +277,8 @@ def test_why_missed_verdicts(why_setup, tmp_path: Path) -> None:
     assert ask("https://jobs.lever.co/inuniverse/abc-123", universe=False)["verdict"] == "board_not_in_list"
     r = ask("https://jobs.ashbyhq.com/someone/1")  # ashby universe file is not cached
     assert r["verdict"] == "universe_not_cached" and "companies-extra" in r["change"]
-    r = ask("https://acme.bamboohr.com/careers/5")  # bamboohr is skipped by --sources default
-    assert r["verdict"] == "board_in_list_source_skipped" and "--sources all" in r["change"]
+    r = ask("https://acme.bamboohr.com/careers/5", sources="lever")  # bamboohr runs by default now; not in this list
+    assert r["verdict"] == "board_in_list_source_skipped" and r["change"] == "--sources lever,bamboohr"
     r = ask("https://boards.greenhouse.io/known/jobs/1", sources="lever")
     assert r["verdict"] == "board_in_list_source_skipped" and r["change"] == "--sources lever,greenhouse"
     assert ask("https://boards.greenhouse.io/known/jobs/1", skip_companies="known")["verdict"] == "skipped_by_option"

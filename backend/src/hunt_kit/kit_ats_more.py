@@ -12,6 +12,7 @@ Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
   adp        cid/ccId from workforcenow.adp.com/.../recruitment.html?cid=<cid>&ccId=<ccId>
   cornerstone  <tenant>/<siteId> from <tenant>.csod.com/ux/ats/careersite/<siteId>/home (row may add corp)
   gem        board id from jobs.gem.com/<id>
+  paylocity  company GUID from recruiting.paylocity.com/Recruiting/Jobs/All/<guid>
 
 Endpoints and field names are adapted from the MIT-licensed career-ops providers and freehire adapters (see NOTICE.md).
 """
@@ -40,6 +41,7 @@ try:  # shared helpers live in the sibling kit_ats.py
         _join,
         _remote_from,
         _text,
+        _title_ok,
     )
 except ImportError:  # loaded by file path: find the sibling file
     import importlib.util as _ilu
@@ -52,7 +54,7 @@ except ImportError:  # loaded by file path: find the sibling file
     _spec.loader.exec_module(_mod)
     MAX_PAGES, Http, Job = _mod.MAX_PAGES, _mod.Http, _mod.Job
     _count, _get, _iso_date, _job, _jobvite_date = _mod._count, _mod._get, _mod._iso_date, _mod._job, _mod._jobvite_date
-    _join, _remote_from, _text = _mod._join, _mod._remote_from, _mod._text
+    _join, _remote_from, _text, _title_ok = _mod._join, _mod._remote_from, _mod._text, _mod._title_ok
 
 _JSON = {"Accept": "application/json"}
 _POST = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -652,6 +654,122 @@ def _jibe(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- Paylocity
+# Borrowed from freehire internal/ingest/sources/paylocity.go (MIT): board = company GUID (:13-14); listing GET
+# https://recruiting.paylocity.com/Recruiting/Jobs/All/<guid> (:45), whose window.pageData embeds the whole Jobs array,
+# sliced out by bracket matching (:53, bracketSlice in nextflight.go:117-152); brief fields JobId, JobTitle, LocationName,
+# PublishedDate, IsRemote, JobLocation.Country (:133-146); posting URL /Recruiting/Jobs/Details/<JobId> (:78); a brief with
+# no id is skipped (:75); a failed detail fetch keeps the job with no description (:69-73, :81); description is the <div>
+# after <div class="job-listing-header">Description</div> (:107-130), else the legacy schema.org ld+json "description"
+# (:84-89); remote = IsRemote or "remote" in the location (:101). Fixtures follow paylocity_test.go:11-32, :122, :140-145.
+# The listing is one request, so a bad listing fails the board (:46-60). The detail cap is the kit's own.
+PAYLOCITY_DETAIL_CAP = 25  # detail-page requests per board (the rest keep the listing fields, no description)
+_PAYLOCITY_JOBS_KEY = re.compile(r'"Jobs"\s*:')
+_PAYLOCITY_HEADER = re.compile(
+    r"""<div\b[^>]*class=["'][^"']*\bjob-listing-header\b[^"']*["'][^>]*>\s*Description\s*</div>\s*(<div\b[^>]*>)""", re.I)
+_PAYLOCITY_LD = re.compile(r"""<script\b[^>]*type=["']application/ld\+json["'][^>]*>([\s\S]*?)</script>""", re.I)
+_PAYLOCITY_DIV = re.compile(r"<(/?)div\b[^>]*>", re.I)
+_PAYLOCITY_DROP = re.compile(r"<(script|style)\b[^>]*>[\s\S]*?</\1\s*>", re.I)
+
+
+def _bracket_slice(s: str, key: re.Pattern[str], open_: str, close: str) -> str:
+    """The balanced ``open_...close`` text after the first ``key`` match, skipping brackets inside JSON strings ('' if none)."""
+    m = key.search(s)
+    if not m:
+        return ""
+    start = s.find(open_, m.end())
+    if start < 0:
+        return ""
+    depth, in_str, i = 0, False, start
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            if c == "\\":
+                i += 1  # skip the escaped character
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == open_:
+            depth += 1
+        elif c == close:
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+        i += 1
+    return ""
+
+
+def _paylocity_description(page: str) -> str:
+    """Description block of a detail page (the div after the 'Description' header), else the ld+json description."""
+    m = _PAYLOCITY_HEADER.search(page)
+    if m:
+        depth, end = 1, len(page)
+        for t in _PAYLOCITY_DIV.finditer(page, m.end()):
+            depth += -1 if t.group(1) else 1
+            if depth == 0:
+                end = t.start()
+                break
+        body = str(_text(_PAYLOCITY_DROP.sub("", page[m.end():end])))
+        if body:
+            return body
+    for raw in _PAYLOCITY_LD.findall(page):
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        for node in data if isinstance(data, list) else [data]:
+            if isinstance(node, dict) and node.get("description"):
+                return str(_text(_PAYLOCITY_DROP.sub("", html.unescape(str(node["description"])))))
+    return ""
+
+
+def fetch_paylocity(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
+    """Paylocity career site (token = company GUID): window.pageData Jobs list + per-job detail page (capped)."""
+    try:
+        guid = str(row.get("token") or "").strip()
+        if not _label(guid):
+            _count(stats, ok=False)
+            return []
+        base = "https://recruiting.paylocity.com/Recruiting/Jobs"
+        st, page = _get(http, f"{base}/All/{quote(guid, safe='')}", as_json=False, headers={"Accept": "text/html"})
+        briefs: Any = None
+        if st == 200 and isinstance(page, str):
+            try:
+                briefs = json.loads(_bracket_slice(page, _PAYLOCITY_JOBS_KEY, "[", "]") or "null")
+            except ValueError:
+                briefs = None
+        if not isinstance(briefs, list):  # not 200, no Jobs array, or unreadable: skip the board
+            _count(stats, ok=False)
+            return []
+        jobs: list[Job] = []
+        details = 0  # detail requests so far: only cards whose title the user searches use the cap
+        for b in briefs:
+            jid = b.get("JobId") if isinstance(b, dict) else None
+            if not isinstance(jid, int) or isinstance(jid, bool) or jid <= 0:
+                continue
+            url, place = f"{base}/Details/{jid}", str(b.get("LocationName") or "").strip()
+            desc = ""
+            title = str(b.get("JobTitle") or "")
+            if details < PAYLOCITY_DETAIL_CAP and _title_ok(row, title):
+                details += 1
+                dst, det = _get(http, url, as_json=False, headers={"Accept": "text/html"})
+                if dst == 200 and isinstance(det, str):  # a failing detail only costs the description
+                    desc = _paylocity_description(det)
+            loc = b.get("JobLocation")
+            country = str(loc.get("Country") or "") if isinstance(loc, dict) else ""
+            jobs.append(_job(row, "paylocity", title=title, url=url, location=place,
+                             posted=_iso_date(b.get("PublishedDate")), description=desc,
+                             remote=True if b.get("IsRemote") is True else _remote_from(place),
+                             extra={"country": country}))
+        jobs = [j for j in jobs if j["title"]]
+        _count(stats, ok=True, jobs=len(jobs))
+        return jobs
+    except Exception:  # noqa: BLE001 - fetchers must never raise
+        _count(stats, ok=False)
+        return []
+
+
 ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
     "rippling": _wrap(_rippling),
     "breezy": _wrap(_breezy),
@@ -665,4 +783,5 @@ ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Jo
     "softgarden": _wrap(_softgarden),
     "join": _wrap(_join_board),
     "jibe": _wrap(_jibe),
+    "paylocity": fetch_paylocity,
 }

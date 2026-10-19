@@ -308,8 +308,8 @@ def test_arbeitnow_style_visa_flag_becomes_a_visa_line() -> None:
 
 def test_select_sources_and_aliases() -> None:
     # 2026-10-17 (owner: search wider): Workday runs by default as a rotating slice;
-    # only the giant BambooHR list stays opt-in.
-    assert "workday" in hk.select_sources("default") and "bamboohr" not in hk.select_sources("default")
+    # BambooHR joined the default once the open lists rotate (--open-days).
+    assert "workday" in hk.select_sources("default") and "bamboohr" in hk.select_sources("default")
     assert "bamboohr" in hk.select_sources("all")
     assert hk.select_sources("weworkremotely,hn") == ["wwr", "hn"]
 

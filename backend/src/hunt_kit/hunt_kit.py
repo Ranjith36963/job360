@@ -54,7 +54,13 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, NamedTuple, cast
 
 USER_AGENT = "job360-hunt-kit/1.0 (+https://job360.uk)"
-MAX_WORKERS = 8
+MAX_WORKERS = 16
+# Boards whose whole directory sits on ONE host: at most this many in flight per ATS. career-ops
+# scan-ats-full.mjs lines 104-113 (SINGLE_HOST_CONCURRENCY = 6 at line 113): 20 connections to one API were
+# throttled, and a throttled sweep loses live boards without failing loudly. Per-tenant hosts (workday,
+# icims, bamboohr, paylocity, ...) are limited only by MAX_WORKERS.
+SINGLE_HOST_CONCURRENCY = 6
+SINGLE_HOST_ATS = ("greenhouse", "lever", "ashby", "smartrecruiters", "workable")
 MAX_PER_HOST = 3
 TIMEOUT_S = 30
 RETRIES_429 = 2
@@ -72,6 +78,7 @@ BOARD_SOURCES = (
     "bamboohr",
     "workday",
     "icims",
+    "paylocity",
     "oraclecloud",
     "successfactors",
     "taleo",
@@ -139,10 +146,10 @@ FEED_SOURCES = (
 )
 SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn", "simplify": "githublists"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
-# "default" skips the giant unvetted BambooHR list (~11k boards). Workday runs by default, but only a
-# daily rotating slice of its open list (--workday-max), each board searched by the user's titles.
-DEFAULT_SKIP = ("bamboohr",)
-WORKDAY_MAX = 300  # universe Workday boards per run; the slice moves every day
+# "default" runs every source. The big open lists (workday, icims, bamboohr, paylocity) run as a daily
+# rotating slice (--open-days), each Workday board searched by the user's titles.
+DEFAULT_SKIP: tuple[str, ...] = ()
+WORKDAY_MAX: int | None = None  # explicit --workday-max override of the Workday slice; None = the --open-days slice
 WORKDAY_SEARCH_TITLES = 6  # Workday boards are searched by at most this many titles
 
 DEFAULT_TITLES = (
@@ -918,7 +925,7 @@ FINGERPRINT_ARGS = (
     "titles", "exclude_title_words", "work_countries", "remote", "visa_onsite", "maybe_relocation",
     "only_countries", "exclude_countries", "any_location", "max_years", "days", "sources", "companies",
     "universe", "companies_extra", "skip_companies", "limit_boards", "freehire_pages", "workday_max",
-    "retry_dead",
+    "open_days", "retry_dead",
 )
 
 
@@ -1278,6 +1285,8 @@ class RunLog:
             "skipped_company": total("skipped_company"),
             "skipped_bad_url": total("skipped_bad_url"),
             "skipped_dead": total("live_dead"),
+            "boards_listed": dict(col.boards_listed) if col is not None else {},
+            "boards_this_run": dict(col.boards_this_run) if col is not None else {},
             "failed": len(failed),
             "failed_sources": failed[:MAX_FAILED_LISTED],
         }
@@ -1336,9 +1345,15 @@ class Collector:
         self.seen_key: dict[str, str] = {}
         self.failed: list[dict[str, str]] = []  # sources that raised: {source, error}
         self.skipped_seen = 0  # jobs dropped at output because history already has them
+        self.boards_listed: dict[str, int] = {}  # per ATS, after dedup and dead-board skip, before rotation
+        self.boards_this_run: dict[str, int] = {}  # per ATS, after rotation and --limit-boards
         self.dead_skipped = 0  # boards not fetched because they answered 404 on DEAD_BOARD_MISSES runs in a row
         self.board_outcomes: dict[str, str] = {}  # "ats:token" -> "ok" | "404" for boards that gave a clear answer
         self.matcher = make_title_matcher(args.titles, args.exclude_title_words)
+        self.cursor: dict[str, int] = {}  # {ats: next offset into its open list}; moved on at the end of run()
+        self.rotation: dict[str, dict[str, Any]] = {}  # per rotated slow ATS: pool size, start, slice keys
+        self.visited: set[str] = set()  # "ats:token" of boards whose task ran to its end this session
+        self.resumed_done: set[str] = set()  # task ids already done in the run being resumed
         self.prefs = make_prefs(
             args.work_countries,
             args.remote,
@@ -1680,10 +1695,20 @@ def load_companies(path: Path) -> list[dict[str, str]]:
     return [r for r in data if r.get("ats") in BOARD_SOURCES and r.get("token")]
 
 
-UNIVERSE_BASE = "https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/ab0f66fc09c9239bb4a36f5d0edb2dcaf9dcacf2/data/%s_companies.json"
-UNIVERSE_ATS = ("greenhouse", "lever", "ashby", "bamboohr", "workday")
+# Pinned commit of the open list (MIT). Every ATS file is <ats>_companies.json except Paylocity's.
+UNIVERSE_BASE = ("https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/"
+                 "ba8cfa9dbc92aab1c2c253aab29367e0e01ac986/data/%s")
+UNIVERSE_ATS = ("greenhouse", "lever", "ashby", "bamboohr", "workday", "icims", "paylocity")
+UNIVERSE_FILES = {"paylocity": "paylocity_companies_clean.json"}
 UNIVERSE_MAX_AGE_DAYS = 7
 BIG_BOARD_NAME = re.compile(r"linkedin|indeed|glassdoor", re.I)
+ICIMS_TOKEN = re.compile(r"[a-z0-9][a-z0-9-]*")
+PAYLOCITY_GUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def universe_file(ats: str) -> str:
+    """File name of one ATS list, both in the pinned repo and in universe_cache/."""
+    return UNIVERSE_FILES.get(ats, "%s_companies.json" % ats)
 
 
 WD_HOST_TENANT = re.compile(r"wd\d+")  # a Workday host label ("wd5"), never a tenant name
@@ -1694,10 +1719,24 @@ def universe_rows(ats: str, data: Any, dropped: list[int] | None = None) -> list
 
     Workday rows whose tenant is itself a host label ("wd5|wd1|rydercareers") are junk in the open list:
     the kit would build https://wd5.wd1.myworkdayjobs.com/... and get 422. They are dropped, and counted
-    into ``dropped[0]`` when a list is given.
+    into ``dropped[0]`` when a list is given. iCIMS tokens must look like a host label (a token such as
+    "-careers-harrowcouncil" is dropped). Paylocity rows are objects ``{guid, name, jobs}``: the token is
+    the guid (a UUID) and the name is the company name.
     """
     out: list[dict[str, str]] = []
     for t in data if isinstance(data, list) else []:
+        if ats == "paylocity":
+            if not isinstance(t, dict):
+                continue
+            guid = t.get("guid")
+            if not isinstance(guid, str) or not PAYLOCITY_GUID.fullmatch(guid):
+                continue
+            nm = t.get("name")
+            name = nm.strip() if isinstance(nm, str) and nm.strip() else guid
+            if BIG_BOARD_NAME.search(name):
+                continue
+            out.append({"name": name, "ats": ats, "token": guid, "source": "universe"})
+            continue
         if not isinstance(t, str) or BIG_BOARD_NAME.search(t):
             continue
         if ats == "workday":
@@ -1719,6 +1758,9 @@ def universe_rows(ats: str, data: Any, dropped: list[int] | None = None) -> list
                     "source": "universe",
                 }
             )
+        elif ats == "icims":
+            if ICIMS_TOKEN.fullmatch(t):
+                out.append({"name": t, "ats": ats, "token": t, "source": "universe"})
         elif re.fullmatch(r"[A-Za-z0-9_.-]+", t):
             out.append({"name": t, "ats": ats, "token": t, "source": "universe"})
     return out
@@ -1741,7 +1783,7 @@ def load_universe(
     for ats in ats_list:
         if ats not in UNIVERSE_ATS:
             continue
-        f = cache / ("%s_companies.json" % ats)
+        f = cache / universe_file(ats)
         data: Any = None
         try:
             if f.exists() and t_now - f.stat().st_mtime < UNIVERSE_MAX_AGE_DAYS * 86400:
@@ -1750,7 +1792,7 @@ def load_universe(
             data = None
         if data is None:
             try:
-                st, got = http(UNIVERSE_BASE % ats)
+                st, got = http(UNIVERSE_BASE % universe_file(ats))
             except Exception:  # noqa: BLE001 - the universe is optional; never abort the run
                 st, got = 0, None
             if st == 200 and isinstance(got, list):
@@ -1777,27 +1819,131 @@ def load_universe(
     return rows
 
 
-_OPEN_LISTS = ("universe", "harvest")  # unvetted lists: their Workday rows share the daily slice
+_OPEN_LISTS = ("universe", "harvest")  # unvetted lists: their rows of the slow ATS share the daily slice
+SLOW_ATS = ("workday", "icims", "bamboohr", "paylocity")  # per-tenant hosts, too many boards for one run
+OPEN_CYCLE_DAYS = 7  # the whole open list of each slow ATS is covered once in this many days
+
+
+def _board_key(b: dict[str, Any]) -> str:
+    """'ats:token' (token lower-cased): the key of a board in task ids, dead-board counters and the cursor."""
+    return "%s:%s" % (b["ats"], b["token"].lower())
+
+
+def rotate_open(
+    boards: list[dict[str, Any]],
+    limits: dict[str, int] | None = None,
+    today: _dt.date | None = None,
+    open_days: int = OPEN_CYCLE_DAYS,
+    offsets: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    """Keep every vetted board; keep only one rotating slice of each slow ATS's open-list rows.
+
+    ``limits`` maps an ATS to an explicit slice size (0 = all of that ATS). An ATS without a limit takes
+    ``ceil(pool / open_days)`` rows, so ``open_days`` runs cover the whole pool; ``open_days`` of 0 turns
+    rotation off. With ``offsets`` ({ats: next row}) a slice starts at the stored offset (modulo the pool
+    size) and wraps round the pool; the caller moves the offset on by the boards that really finished.
+    Without ``offsets`` the start comes from the calendar day. Pure: no file is read or written.
+    Vetted rows (``companies.json``, ``--companies-extra``) and every other ATS are always kept.
+    """
+    limits = limits or {}
+    day = (today or _dt.date.today()).toordinal()
+    drop: set[int] = set()
+    for ats in SLOW_ATS:
+        pool = [b for b in boards if b["ats"] == ats and b.get("source") in _OPEN_LISTS]
+        if ats in limits:
+            n = limits[ats] or 0
+        elif open_days and open_days > 0:
+            n = -(-len(pool) // open_days)
+        else:
+            n = 0
+        if n <= 0 or len(pool) <= n:
+            continue
+        start = (day * n) % len(pool) if offsets is None else max(0, int(offsets.get(ats, 0))) % len(pool)
+        keep = {id(b) for b in (pool + pool)[start:start + n]}
+        drop |= {id(b) for b in pool} - keep
+    return [b for b in boards if id(b) not in drop]
+
+
+def plan_rotation(
+    before: list[dict[str, Any]], after: list[dict[str, Any]], offsets: dict[str, int]
+) -> dict[str, dict[str, Any]]:
+    """For each slow ATS that rotated: {pool: size, start: clamped offset, keys: board keys in the slice}."""
+    plan: dict[str, dict[str, Any]] = {}
+    for ats in SLOW_ATS:
+        pool = [b for b in before if b["ats"] == ats and b.get("source") in _OPEN_LISTS]
+        kept = [b for b in after if b["ats"] == ats and b.get("source") in _OPEN_LISTS]
+        if pool and len(kept) < len(pool):
+            plan[ats] = {"pool": len(pool), "start": max(0, int(offsets.get(ats, 0))) % len(pool),
+                         "keys": {_board_key(b) for b in kept}}
+    return plan
+
+
+def advance_offsets(
+    offsets: dict[str, int], plan: dict[str, dict[str, Any]], finished: set[str]
+) -> dict[str, int]:
+    """Offsets after a run: each rotated ATS moves on by the boards of its slice that were finished."""
+    out = {a: int(v) for a, v in offsets.items()}
+    for ats, p in plan.items():
+        out[ats] = (p["start"] + len(p["keys"] & finished)) % p["pool"]
+    return out
+
+
+CURSOR_SUFFIX = ".rotation.json"
+
+
+def _cursor_path(history: str | None) -> str | None:
+    """The rotation cursor sits next to the history file; 'none' (or no history) means no file."""
+    if not history or history.lower() == "none":
+        return None
+    return history + CURSOR_SUFFIX
+
+
+def load_rotation_cursor(history: str | None) -> dict[str, int]:
+    """{ats: next_offset} saved by the last run ({} for no history, a missing file or a damaged one)."""
+    path = _cursor_path(history)
+    if path is None:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): v for k, v in raw.items() if isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+
+
+def save_rotation_cursor(history: str | None, offsets: dict[str, int]) -> None:
+    """Write the cursor next to the history file (atomic swap; 'none' writes nothing)."""
+    path = _cursor_path(history)
+    if path is not None:
+        _atomic_write_text(path, json.dumps(offsets, sort_keys=True))
 
 
 def rotate_workday(
     boards: list[dict[str, Any]], limit: int | None, today: _dt.date | None = None
 ) -> list[dict[str, Any]]:
-    """Keep every vetted board; keep only a daily rotating slice of the open Workday lists.
+    """Only the open-list Workday rows rotate, by an explicit slice size (0 or None = all of them)."""
+    return rotate_open(boards, {**{a: 0 for a in SLOW_ATS}, "workday": limit or 0}, today)
 
-    The open list has ~13k Workday sites, too many for one run. Each day takes the next ``limit``
-    of them (wrapping round), so a daily run covers the whole list over time. 0 or None = all.
-    """
-    pool = [b for b in boards if b["ats"] == "workday" and b.get("source") in _OPEN_LISTS]
-    if not limit or limit <= 0 or len(pool) <= limit:
-        return boards
-    start = ((today or _dt.date.today()).toordinal() * limit) % len(pool)
-    keep = {id(b) for b in (pool + pool)[start:start + limit]}
-    return [b for b in boards if not (b["ats"] == "workday" and b.get("source") in _OPEN_LISTS) or id(b) in keep]
+
+def count_by_ats(boards: Iterable[dict[str, Any]]) -> dict[str, int]:
+    """Plain {ats: number of boards} for the coverage numbers."""
+    c = collections.Counter(b["ats"] for b in boards)
+    return {a: int(c[a]) for a in sorted(c)}
+
+
+def with_slot(sem: threading.BoundedSemaphore | None, fn: Callable[..., None], *a: Any) -> None:
+    """Run ``fn(*a)`` while holding one slot of ``sem`` (no semaphore = no limit)."""
+    if sem is None:
+        fn(*a)
+        return
+    with sem:
+        fn(*a)
 
 
 def select_sources(value: str) -> list[str]:
-    """'all' = everything; 'default' = all except the giant BambooHR list; else a comma list."""
+    """'all' and 'default' = every source (BambooHR included, it rotates); else a comma list."""
     v = (value or "default").strip().lower()
     if v == "all":
         return list(ALL_SOURCES)
@@ -1892,9 +2038,18 @@ def run(args: argparse.Namespace) -> Collector:
         live = [r for r in boards if not is_dead_board(dead.get("%s:%s" % (r["ats"], r["token"].lower())))]
         col.dead_skipped = len(boards) - len(live)
         boards = live
-    boards = rotate_workday(boards, getattr(args, "workday_max", WORKDAY_MAX))
+    col.boards_listed = count_by_ats(boards)
+    wd_max = getattr(args, "workday_max", WORKDAY_MAX)
+    col.cursor = load_rotation_cursor(getattr(args, "history", None))
+    listed = boards
+    boards = rotate_open(listed, {"workday": wd_max} if wd_max is not None else {},
+                         open_days=getattr(args, "open_days", OPEN_CYCLE_DAYS), offsets=col.cursor)
+    col.rotation = plan_rotation(listed, boards, col.cursor)
     wd_titles = "\n".join(queries[:WORKDAY_SEARCH_TITLES])  # board rows hold strings; kit_ats splits it
-    boards = [dict(b, search_texts=wd_titles) if b["ats"] == "workday" else b for b in boards]
+    # title_ok is the Collector's own title test (--titles and --exclude-title-words): readers that fetch a
+    # detail page per job call it so only a title that would be kept spends a request. Rows are never dumped.
+    gate: dict[str, Any] = {"title_ok": col.matcher}
+    boards = [{**b, "search_texts": wd_titles, **gate} if b["ats"] == "workday" else {**b, **gate} for b in boards]
     if args.limit_boards:
         counts: collections.Counter[str] = collections.Counter()
         picked = []
@@ -1903,10 +2058,11 @@ def run(args: argparse.Namespace) -> Collector:
                 counts[b["ats"]] += 1
                 picked.append(b)
         boards = picked
+    col.boards_this_run = count_by_ats(boards)
     ats_fetchers = _merged("ATS_FETCHERS", ATS_MODULES) if any(b["ats"] not in _BOARD_FN for b in boards) else {}
     board_tasks: list[tuple[str, str, Callable[[], None], bool]] = []  # (ats, task id, work, is the user's own)
     for b in boards:
-        bkey = "%s:%s" % (b["ats"], b["token"].lower())
+        bkey = _board_key(b)
         if b["ats"] in _BOARD_FN:
             work: Callable[[], None] = functools.partial(_BOARD_FN[b["ats"]], col, b)
         elif b["ats"] in ats_fetchers:
@@ -1938,6 +2094,7 @@ def run(args: argparse.Namespace) -> Collector:
     if sink is not None and sink.done:
         before = len(tasks)
         tasks = [t for t in tasks if t[1] not in sink.done]
+        col.resumed_done = set(sink.done)
         print("resuming: %d of %d sources already done, %d jobs already on disk"
               % (before - len(tasks), before, sink.count), file=sys.stderr, flush=True)
 
@@ -1964,10 +2121,11 @@ def run(args: argparse.Namespace) -> Collector:
             print("[%s] %d job%s, %.1fs (total %.0fs)" % (tid, col.tl.n, "" if col.tl.n == 1 else "s",
                   _now() - t0, sink.elapsed()), file=sys.stderr, flush=True)
 
+    sems = {a: threading.BoundedSemaphore(SINGLE_HOST_CONCURRENCY) for a in SINGLE_HOST_ATS}
     progress = Progress(col, [src for src, _, _ in tasks])
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, args.workers)))
     try:
-        futs = {ex.submit(guarded, src, tid, work): src for src, tid, work in tasks}
+        futs = {ex.submit(with_slot, sems.get(src), guarded, src, tid, work): src for src, tid, work in tasks}
         for f in concurrent.futures.as_completed(futs):
             try:
                 f.result()
@@ -1980,6 +2138,8 @@ def run(args: argparse.Namespace) -> Collector:
         raise
     finally:
         ex.shutdown(wait=True, cancel_futures=True)
+    # Finished = ran to its end this session (an exception counts) or already done in the run being resumed.
+    col.cursor = advance_offsets(col.cursor, col.rotation, col.visited | col.resumed_done)
     return col
 
 
@@ -2340,8 +2500,9 @@ def _track_board(col: Collector, key: str, work: Callable[[], None]) -> None:
     finally:
         _STATUS_TL.log = None
         result = board_outcome(log)
-        if result:
-            with col.lock:
+        with col.lock:
+            col.visited.add(key)  # finished, even if the board failed: it was visited
+            if result:
                 col.board_outcomes[key] = result
 
 
@@ -2489,7 +2650,7 @@ def cached_universe(ats_list: Iterable[str], cache_dir: Path | None = None) -> t
         if ats not in UNIVERSE_ATS:
             continue
         try:
-            data = json.loads((cache / ("%s_companies.json" % ats)).read_text(encoding="utf-8"))
+            data = json.loads((cache / universe_file(ats)).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             missing.append(ats)
             continue
@@ -2535,8 +2696,6 @@ def why_missed(args: argparse.Namespace, url: str, today: _dt.date | None = None
     if ats not in sources:
         shown = (args.sources or "default")
         change = "--sources %s,%s" % (shown, ats)
-        if shown == "default":
-            change = "--sources all (adds the large BambooHR list)"
         return done("board_in_list_source_skipped", change, "%s is not in --sources %s" % (ats, shown))
     skip = [s.lower() for s in split_csv(args.skip_companies or "")]  # the run lowercases them too (Collector)
 
@@ -2568,8 +2727,8 @@ def why_missed(args: argparse.Namespace, url: str, today: _dt.date | None = None
                     "%s (%s) matches --skip-companies" % (key, company_name))
     if where:
         note = ["%s is in %s" % (key, where)]
-        if ats == "workday" and where != "companies.json" and where != "--companies-extra":
-            note.append("open-list Workday boards run in a daily slice (--workday-max), so it may not run today")
+        if ats in SLOW_ATS and where != "companies.json" and where != "--companies-extra":
+            note.append("open-list %s boards run in a daily slice (--open-days), so it may not run today" % ats)
         return done("board_covered", "none: check the job's title, place and age against your options", *note)
     add = 'add --companies-extra "%s"' % key
     if missing:
@@ -2647,6 +2806,9 @@ def format_stats(col: Collector, skipped_seen: int = 0) -> str:
         if st["live_checked"]:
             note += "  live_checked=%d dead=%d unknown=%d" % (st["live_checked"], st["live_dead"], st["live_unknown"])
         lines.append("%-22s" % s + "".join("%17d" % st[c] for c in cols) + note)
+    if col.boards_listed:
+        lines.append("boards_listed: " + ", ".join("%s=%d" % kv for kv in sorted(col.boards_listed.items())))
+        lines.append("boards_this_run: " + ", ".join("%s=%d" % kv for kv in sorted(col.boards_this_run.items())))
     lines.append("total kept: %d   skipped as already seen: %d   boards skipped as dead: %d"
                  % (len(col.results), skipped_seen, col.dead_skipped))
     return "\n".join(lines)
@@ -2680,7 +2842,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--workday-max",
         type=int,
         default=WORKDAY_MAX,
-        help="open-list Workday boards per run, a slice that moves daily (default 300; 0 = all)",
+        help="open-list Workday boards per run, overriding the --open-days slice (default: pool / open-days; 0 = all)",
+    )
+    p.add_argument(
+        "--open-days",
+        type=int,
+        default=OPEN_CYCLE_DAYS,
+        help="scan the whole open list of workday, icims, bamboohr and paylocity once in N days, "
+             "a slice that moves daily (default 7; 0 = no rotation, scan everything)",
     )
     p.add_argument(
         "--freehire-pages",
@@ -2691,7 +2860,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--sources",
         default="default",
-        help="'default', 'all' (adds bamboohr), or a comma list of: " + ",".join(ALL_SOURCES),
+        help="'default' or 'all' (every source, bamboohr included), or a comma list of: " + ",".join(ALL_SOURCES),
     )
     p.add_argument("--companies", default=str(Path(__file__).resolve().parent / "companies.json"))
     p.add_argument(
@@ -2703,7 +2872,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--companies-extra", default="", help="your own boards first, e.g. ashby:acme,taleo:acme/2")
     p.add_argument("--skip-companies", default="", help="comma list; names or tokens containing these are skipped")
     p.add_argument("--limit-boards", type=int, default=0, help="max boards per ATS (quick runs)")
-    p.add_argument("--workers", type=int, default=MAX_WORKERS, help="parallel workers (max 8)")
+    p.add_argument("--workers", type=int, default=MAX_WORKERS,
+                   help="parallel workers (max 16; greenhouse, lever, ashby, smartrecruiters and workable get 6 each)")
     p.add_argument("--discover", default="", help='probe board tokens for "Company A,Company B" and print hits')
     p.add_argument("--check-live", action="store_true",
                    help="re-fetch each kept job once; drop only jobs shown closed (404/410, closed wording)")
@@ -2792,6 +2962,10 @@ def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> 
         try:
             col = run(args)
             partial = bool(sink.stop_reason)
+            try:  # even a stopped run moves the cursor past the boards it finished
+                save_rotation_cursor(args.history, col.cursor)
+            except OSError as e:
+                print("warning: could not write rotation cursor: %s" % e, file=sys.stderr)
             stored = list(sink.iter_records()) if sink.count else col.results
             results = sort_newest(stored)
             del stored
