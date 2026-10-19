@@ -206,6 +206,25 @@ async def test_migration_lock_is_per_schema(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_up_does_not_wait_on_another_schemas_lock(tmp_path, tmp_migrations_dir):
+    """The behaviour, not just the key: while another session holds production's
+    key AND another schema's key, up() on this schema still finishes. With one
+    shared key it would wait on the held production key and time out."""
+    a, b = str(tmp_path / "a.db"), str(tmp_path / "b.db")
+    async with pg.connect(b) as holder:
+        key_b = await runner._migration_lock_key(holder)
+        await holder.execute("SELECT pg_advisory_lock(?)", (runner.MIGRATION_LOCK_KEY,))
+        await holder.execute("SELECT pg_advisory_lock(?)", (key_b,))
+        try:
+            applied = await asyncio.wait_for(runner.up(a, migrations_dir=tmp_migrations_dir), timeout=20)
+        finally:
+            await holder.execute("SELECT pg_advisory_unlock_all()")
+    assert applied == ["0001_create_alpha", "0002_create_beta"]
+    await pg.drop_schema(a)
+    await pg.drop_schema(b)
+
+
+@pytest.mark.asyncio
 async def test_0017_adds_llm_verdict_columns(tmp_db_path):
     """Migration 0017 adds the four per-user LLM-matcher columns to user_feed."""
     # Pre-Batch-2 baseline tables must exist before the runner fires (same

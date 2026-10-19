@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import warnings
 
 # --- Windows selector event loop (psycopg async requires it) ---------------
 if sys.platform == "win32":
@@ -404,16 +405,21 @@ def _template_sql():
     ``None`` means "migrate from scratch": ``J360_TEST_SCHEMA_TEMPLATE=0``, no
     ``pg_dump`` on PATH, or the dump failed (e.g. a client older than the
     server). The fallback is the old, slower path, never a weaker schema.
+
+    On CI a missing or failing template is an ERROR, raised in every test that
+    asks for it: each xdist worker builds its own template, so one worker could
+    otherwise fall back unseen while the guard test passes in another.
     """
+    if "error" in _TEMPLATE_STATE:
+        raise RuntimeError(_TEMPLATE_STATE["error"])
     if "sql" in _TEMPLATE_STATE:
         return _TEMPLATE_STATE["sql"]
-    _TEMPLATE_STATE["sql"] = None
     if os.environ.get("J360_TEST_SCHEMA_TEMPLATE", "1") == "0":
+        _TEMPLATE_STATE["sql"] = None
         return None
     pg_dump = shutil.which("pg_dump")
     if pg_dump is None:
-        print("conftest: pg_dump not on PATH; every test migrates from scratch (slow)", file=sys.stderr)
-        return None
+        return _template_unavailable("pg_dump not on PATH")
     template_path = os.path.join(tempfile.mkdtemp(prefix="j360-schema-template-"), "template.db")
     schema = _pg.schema_for_path(template_path)
     _migrate_from_scratch(template_path)
@@ -424,8 +430,7 @@ def _template_sql():
         ).stdout
     except (OSError, subprocess.SubprocessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
-        print(f"conftest: pg_dump failed ({str(detail)[:300]}); migrating from scratch", file=sys.stderr)
-        return None
+        return _template_unavailable(f"pg_dump failed ({str(detail)[:300]})")
     finally:
         asyncio.run(_pg.drop_schema(template_path))
     # pg_dump >= 16.10 wraps the script in psql meta-commands (``\restrict`` /
@@ -445,12 +450,22 @@ def _template_sql():
     try:
         _restore_template(probe_path, sql)
     except Exception as exc:  # noqa: BLE001 -- any failure means "do not use the fast path"
-        print(f"conftest: the template dump does not load ({str(exc)[:300]}); migrating from scratch", file=sys.stderr)
-        return None
+        return _template_unavailable(f"the template dump does not load ({str(exc)[:300]})")
     finally:
         asyncio.run(_pg.drop_schema(probe_path))
     _TEMPLATE_STATE["sql"] = sql
     return sql
+
+
+def _template_unavailable(reason: str) -> None:
+    """No template: raise on CI (and keep raising), warn and fall back elsewhere."""
+    msg = f"conftest: no schema template: {reason}; every test migrates from scratch (slow)"
+    if os.environ.get("CI") == "true":
+        _TEMPLATE_STATE["error"] = msg
+        raise RuntimeError(msg)
+    warnings.warn(msg, stacklevel=3)
+    _TEMPLATE_STATE["sql"] = None
+    return None
 
 
 def _restore_template(db_path: str, sql: str) -> None:

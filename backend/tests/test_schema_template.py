@@ -15,6 +15,7 @@ import asyncio
 import os
 
 import psycopg
+import pytest
 
 from src.repositories import pg
 from tests import conftest
@@ -127,6 +128,8 @@ def _snapshot(schema: str) -> dict[str, list[tuple]]:
 
 
 def test_template_copy_matches_a_fresh_migration(tmp_path):
+    if conftest._template_sql() is None:  # on CI this raises instead (conftest._template_unavailable)
+        pytest.skip("no schema template here (no pg_dump, or J360_TEST_SCHEMA_TEMPLATE=0): nothing to compare")
     fresh_path, copy_path = str(tmp_path / "fresh.db"), str(tmp_path / "copy.db")
     try:
         conftest._migrate_from_scratch(fresh_path)
