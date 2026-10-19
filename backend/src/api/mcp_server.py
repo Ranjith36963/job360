@@ -1713,8 +1713,9 @@ def build_server(version: str = "") -> MCPServer:
         Final submit: a click on the form's submit button needs `application_id` and your `session`; Job360
         runs check_submit itself and clicks only on `submit` (it records `submit_attempted` first). `ask` =
         refused: ask_user; the user's Send on Needs you turns it into `submit`. `stop` = refused with the reason.
-        After the click read the page: a confirmation =
-        record_application; none = do not click again. Follow get_recipe("forms") for the rest.
+        After the click follow `next`: confirmation_seen = record_application (proof_saved true = screenshot kept);
+        site_refused = fix the fields; neither = never click again. `site` = that site's tips;
+        page_changed false = do not repeat. Follow get_recipe("forms") and get_recipe("ats") for the rest.
         Close when done: one browser per user, closed after 10 idle minutes."""
         try:
             body = browser_route.BrowserActionRequest.model_validate(

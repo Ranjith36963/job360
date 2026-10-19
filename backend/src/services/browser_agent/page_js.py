@@ -255,6 +255,46 @@ IS_WORKDAY_FIELD_JS = r"""
 (el) => !!el.closest('[data-automation-id^="formField-"]')
 """
 
+# Did that click do anything? A MutationObserver counts the page's own changes from just before the
+# click to after it settles (nanobrowser src/browser-control/core/interaction/evidence.ts:1-3, :278,
+# :309-323: a baseline before dispatch, then changed | none). Our own ref tags are not counted.
+WATCH_START_JS = r"""
+() => {
+  if (window.__j360watch) window.__j360watch.disconnect();
+  window.__j360seen = 0;
+  const mo = new MutationObserver((ms) => {
+    for (const m of ms) {
+      if (m.type === 'attributes' && m.attributeName === 'data-j360-ref') continue;
+      window.__j360seen++;
+    }
+  });
+  // Open shadow roots too (SmartRecruiters draws its form in them): an observer on the document does
+  // not see inside one. A root added during the click comes with an insertion that is already counted.
+  const opts = { subtree: true, childList: true, attributes: true, characterData: true };
+  const walk = (root, depth) => {
+    mo.observe(root, opts);
+    if (depth > 6) return;
+    for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
+  };
+  walk(document, 0);
+  window.__j360watch = mo;
+  return true;
+}
+"""
+WATCH_READ_JS = r"""
+() => {
+  const n = window.__j360seen;
+  if (window.__j360watch) window.__j360watch.disconnect();
+  window.__j360watch = null;
+  return typeof n === 'number' ? n : -1;
+}
+"""
+# A control's own state, for clicks that change a property but not the page (a checkbox's checked).
+CONTROL_STATE_JS = r"""
+(el) => JSON.stringify([el.checked, el.value, el.getAttribute('aria-expanded'), el.getAttribute('aria-checked'),
+  el.getAttribute('aria-pressed'), el.isConnected])
+"""
+
 # The picked option shown near the field (react-select draws it in a sibling, not the input's value).
 # Only the field's own small box (up to 3 levels up) counts, so a whole question block cannot.
 CHOSEN_NEARBY_JS = r"""
