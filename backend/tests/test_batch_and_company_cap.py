@@ -133,7 +133,7 @@ def test_the_two_new_paths_are_gated_setting_paths():
     [
         (CAP, 1, True), (CAP, 50, True), (CAP, 0, False), (CAP, 51, False), (CAP, -1, False),
         (CAP, True, False), (CAP, "3", False), (CAP, 2.5, False),
-        (DAYS, 1, True), (DAYS, 365, True), (DAYS, 0, False), (DAYS, 366, False), (DAYS, True, False),
+        (DAYS, 1, True), (DAYS, 365, True), (DAYS, 0, True), (DAYS, -1, False), (DAYS, 366, False), (DAYS, True, False),
         (DAYS, "30", False),
     ],
 )

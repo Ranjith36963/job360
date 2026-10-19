@@ -773,6 +773,9 @@ class ApplicationSummaryOut(BaseModel):
     # user's whole open queue; both null when it is not on the queue.
     queued_at: Optional[str] = None
     queue_position: Optional[int] = None
+    # Where the job came from (owner ask 2026-10-18): ai_hunt / user_link / user_paste, else
+    # user (brought on the web) / ai (an assistant brought it).
+    origin: str = ""
     # Bulk-apply Q1: derived problems of a queued row (queued=true only; null otherwise).
     preflight: Optional[dict[str, Any]] = None
 

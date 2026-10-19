@@ -49,3 +49,15 @@ export function preflightProblems(pf: Record<string, unknown> | null | undefined
   if (pf.hold) out.push("Another assistant session is working on it");
   return out;
 }
+
+/** Where a job came from (owner ask 2026-10-18): the tag on every job. "" = nothing to show. */
+export const ORIGIN_LABEL: Record<string, string> = {
+  ai_hunt: "AI hunt",
+  user_link: "Your link",
+  user_paste: "Pasted ad",
+  user: "You brought it",
+  ai: "Your AI brought it",
+};
+export function originLabel(origin: unknown): string {
+  return typeof origin === "string" ? (ORIGIN_LABEL[origin] ?? "") : "";
+}
