@@ -187,6 +187,9 @@ form; the test fails when the wait is removed.
   the options it saw.
 - **`upload`** also works from an "Attach" button by catching the file picker. `upload_confirmed` says whether the
   file name shows on the page, because Greenhouse can take the file and still show an error (ApplYourself).
+- **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
+  `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); line breaks go
+  only into a multi-line box, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
 
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form

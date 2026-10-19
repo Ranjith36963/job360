@@ -255,10 +255,15 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
     return await look(s)
 
 
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
 async def _type_into(loc: Any, text: str) -> str:
     """Type and read back. Suggestion boxes key by key; plain fields fill(), then the native setter
     if the site's framework did not take it (one bounded heal, never a loop)."""
-    if await loc.evaluate(IS_TYPEAHEAD_JS):
+    # Never key a control character: as keys "\n" is Enter (it can submit the form, skipping
+    # check_submit) and "\t" is Tab (the rest would land in another field). fill() inserts them as text.
+    if await loc.evaluate(IS_TYPEAHEAD_JS) and not _CONTROL_CHARS.search(text):
         await loc.fill("")
         await loc.press_sequentially(text, delay=25)
     else:
@@ -279,6 +284,8 @@ def _pick(options: list[str], want: str) -> int:
     """Index of the option to click: an exact match (any case), else the ONLY option starting with it,
     else the ONLY option containing it; -1 when none or ambiguous (never a guess)."""
     w = " ".join(want.split()).casefold()
+    if not w:
+        return -1  # nothing asked for: never "the only option there is"
     norm = [" ".join(o.split()).casefold() for o in options]
     exact = [i for i, o in enumerate(norm) if o == w]
     if exact:
@@ -296,10 +303,11 @@ VISIBLE_OPTIONS = ", ".join(f"{part.strip()}:visible" for part in OPTION_SELECTO
 
 
 def _option_not_found(text: str, seen: list[str]) -> BrowserError:
-    listed = "; ".join(seen[:30]) if seen else "none were shown"
+    # Option labels are page text: clipped, and inside the untrusted marker like the rest of the page.
+    listed = _wrap_untrusted("; ".join(o[:60] for o in seen[:30])) if seen else "none were shown"
     return BrowserError(
         "refused", "option_not_found",
-        f"No single option matches '{text[:80]}'. Options seen: {listed}. Type part of it first, then choose again.",
+        f"No single option matches '{text[:80]}'. Type part of it first, then choose again. Options seen: {listed}",
     )
 
 
@@ -332,18 +340,23 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
         i = _pick(texts, text)
         if i < 0:
             continue  # an unrelated open list here; the one we want may be in another frame
+        before = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
         await options.nth(i).click()
         await _settle(page)
         shown = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
-        # react-select keeps its input empty and shows the pick next to it: read the field's surroundings.
+        # The picked option's own text shows, or the asked-for text shows AND the field changed (what was
+        # typed into a suggestion box beforehand is no proof). react-select keeps its input empty and shows
+        # the pick next to it: then read the field's surroundings.
         confirmed = (
-            text.strip().casefold() in shown or texts[i].casefold() in shown
+            texts[i].casefold() in shown or (text.strip().casefold() in shown and shown != before)
             if shown.strip() else bool(await loc.evaluate(CHOSEN_NEARBY_JS, texts[i].casefold()))
         )
         if confirmed:
             return
         raise BrowserError(
-            "error", "choose_unconfirmed", f"Clicked '{texts[i]}' but the field shows '{shown[:80] or 'nothing'}'."
+            "error", "choose_unconfirmed",
+            f"Clicked option {i + 1} but the field does not show it. The field shows: "
+            + (_wrap_untrusted(shown[:60]) if shown.strip() else "nothing"),
         )
     await page.keyboard.press("Escape")
     raise _option_not_found(text, seen)
@@ -614,6 +627,13 @@ async def _act(
             )
         if len(text) > MAX_TYPE_CHARS:
             raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
+        if _CONTROL_CHARS.search(text.replace("\n", "")) or (
+            "\n" in text and not await loc.evaluate("(el) => el.tagName === 'TEXTAREA'")
+        ):
+            raise BrowserError(
+                "refused", "control_characters",
+                "Type plain text only: line breaks only into a multi-line box, never tabs or other control keys.",
+            )
         typed = await _type_into(loc, text)
         out = await look(s)
         out["typed_matches"] = typed == text
