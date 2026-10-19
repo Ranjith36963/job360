@@ -90,10 +90,24 @@ def control_kind(
 # Frame addresses of the CAPTCHA and bot-check vendors we know. A page that
 # loads one of these is asking a human to prove they are human.
 _CAPTCHA_FRAME = re.compile(
-    r"recaptcha|hcaptcha\.com|challenges\.cloudflare\.com|turnstile|arkoselabs|funcaptcha|"
+    r"hcaptcha\.com|challenges\.cloudflare\.com|turnstile|arkoselabs|funcaptcha|"
     r"captcha-delivery\.com|geo\.captcha|perimeterx|px-captcha|kasada|datadome",
     re.IGNORECASE,
 )
+# reCAPTCHA is told apart from a reCAPTCHA CHALLENGE (freehire internal/api/atsapply/browser.go:167-234):
+# every Greenhouse posting loads an invisible, score-based reCAPTCHA that asks nothing. The image
+# challenge frame (bframe) means a human is being asked; a mounted widget (anchor) is a checkbox to
+# tick, unless it is the invisible kind. Ours tells the invisible kind by the anchor's own
+# `size=invisible` (Google's URL; NOT IN REFERENCE, confirm on the first real Greenhouse run).
+_RECAPTCHA_CHALLENGE = re.compile(r"recaptcha/(?:api2|enterprise)/bframe", re.IGNORECASE)
+_RECAPTCHA_WIDGET = re.compile(r"recaptcha/(?:api2|enterprise)/anchor", re.IGNORECASE)
+_INVISIBLE = re.compile(r"[?&]size=invisible\b", re.IGNORECASE)
+
+
+def _captcha_frame(url: str) -> bool:
+    if _CAPTCHA_FRAME.search(url) or _RECAPTCHA_CHALLENGE.search(url):
+        return True
+    return bool(_RECAPTCHA_WIDGET.search(url)) and not _INVISIBLE.search(url)
 _CAPTCHA_TEXT = re.compile(
     r"verify (that )?you are (a )?human|are you a robot|i'?m not a robot|press (&|and) hold|"
     r"checking your browser|unusual traffic|complete the security check|prove you'?re not a robot",
@@ -113,7 +127,7 @@ def blocker_for(frame_urls: list[str], page_text: str, has_password_box: bool) -
     A CAPTCHA wins over a sign-in wall: both need the user, the CAPTCHA is the
     one they cannot skip.
     """
-    if any(_CAPTCHA_FRAME.search(u or "") for u in frame_urls) or _CAPTCHA_TEXT.search(page_text or ""):
+    if any(_captcha_frame(u or "") for u in frame_urls) or _CAPTCHA_TEXT.search(page_text or ""):
         return Blocker(
             "captcha",
             "This page asks for a human check (CAPTCHA). Job360's browser never solves one: the user finishes "

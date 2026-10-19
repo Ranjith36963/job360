@@ -156,7 +156,11 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 
 **`key` action (2026-10-19):** ArrowDown, ArrowUp, Tab, Escape and Enter, for the suggestion lists real forms use
 (Greenhouse location and school, Workday dropdowns): type, ArrowDown, Enter. Enter is refused outside a suggestion
-list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`.
+list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. The list
+must be OPEN (`aria-expanded` true, or an option highlighted): a closed suggestion box in a form submits on Enter too.
+
+**CAPTCHA vs. invisible reCAPTCHA:** every Greenhouse posting loads an invisible reCAPTCHA that asks nothing, so it
+is not a stop. A reCAPTCHA image challenge or a tick-box widget is (freehire `atsapply/browser.go:167-234`).
 
 **Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
 the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.
@@ -171,8 +175,10 @@ It needs the open internet, so run it on Railway once the switch is on, with a l
 **Send starts my assistant (built 2026-10-19).** Before this, Send / Send all on Needs you only saved the yes,
 and the work waited for "run 360". Now, if you saved a start link on **Settings → Connect your assistant**, the
 website calls `POST /api/assistant-trigger/fire` once after Send (or after all of Send all), and Job360 starts your
-assistant with the list of every job whose newest decision is your yes. **One start per click, never one per job**,
-and a 60-second cool-down stops a double click starting two.
+assistant with the list of every job whose newest decision is your yes. **One start per click, never one per job**.
+A 60-second cool-down, claimed in the database before the call, means two presses at once start one session. A yes
+given inside that minute is not in the session that just started: the page says so, and **Start now** on the card
+sends every job still waiting on your yes.
 - **Claude routine (recommended, PC off):** make a routine on claude.ai/code/routines with the Job360 connector and
   the instructions the card gives you; add an **API trigger**, copy its URL and token into the card. Job360 calls
   `POST https://api.anthropic.com/v1/claude_code/routines/<trig_id>/fire` (`anthropic-version: 2023-06-01`,
