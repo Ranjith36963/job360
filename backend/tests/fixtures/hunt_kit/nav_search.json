@@ -1,0 +1,105 @@
+{
+ "took": 66,
+ "timed_out": false,
+ "hits": {
+  "total": {
+   "value": 29,
+   "relation": "eq"
+  },
+  "hits": [
+   {
+    "_id": "d2560ea2-eef6-45e7-babe-f94f9f236b6b",
+    "_source": {
+     "title": "We are strengthening our Rig Equipment team and will hire Data Scientist - Industrial Data \\& Analytics",
+     "businessName": "SLB Kristiansand",
+     "employer": {
+      "name": "SLB KRISTIANSAND AS"
+     },
+     "uuid": "d2560ea2-eef6-45e7-babe-f94f9f236b6b",
+     "published": "2026-10-16T09:02:58.905681163+02:00",
+     "expires": "2026-10-29T00:00:00+01:00",
+     "status": "ACTIVE",
+     "source": "FINN",
+     "locationList": [
+      {
+       "country": "NORGE",
+       "city": "KRISTIANSAND S",
+       "county": "AGDER",
+       "municipal": "KRISTIANSAND"
+      }
+     ],
+     "generatedSearchMetadata": {
+      "shortSummary": "Data Scientist wanted for industrial data and analytics, focusing on building and maintaining data pipelines, modeling, and collaborating with technical teams. Relevant degree required."
+     },
+     "properties": {
+      "workLanguage": [
+       "Engelsk"
+      ]
+     }
+    }
+   },
+   {
+    "_id": "ab1645f4-b72d-4387-b413-9d9d0dbe2e39",
+    "_source": {
+     "title": "Senior ML-plattform Utvikler",
+     "businessName": "TET Digital As",
+     "employer": {
+      "name": "TET DIGITAL AS AVD OSLO"
+     },
+     "uuid": "ab1645f4-b72d-4387-b413-9d9d0dbe2e39",
+     "published": "2026-10-14T15:09:43.4984798+02:00",
+     "expires": "2026-10-30T00:00:00+01:00",
+     "status": "ACTIVE",
+     "source": "FINN",
+     "locationList": [
+      {
+       "country": "NORGE",
+       "city": "OSLO",
+       "county": "OSLO",
+       "municipal": "OSLO"
+      }
+     ],
+     "generatedSearchMetadata": {
+      "shortSummary": "Utvikle og drifte ML-plattform med fokus på sikkerhet, skalerbarhet og automatisering. Rollen krever erfaring fra ML, DevOps, skyteknologi og GitOps."
+     },
+     "properties": {
+      "workLanguage": [
+       "Norsk"
+      ]
+     }
+    }
+   },
+   {
+    "_id": "bfc3546c-248b-4eff-8c49-1613c7a906fc",
+    "_source": {
+     "title": "Data & Analytics Engineer til Amedia - Norges største utgiver av redaktørstyrte medier! (Søk uten CV og søknadsbrev)",
+     "businessName": "Ansettr AS",
+     "employer": {
+      "name": "AMEDIA AS AVD OSLO"
+     },
+     "uuid": "bfc3546c-248b-4eff-8c49-1613c7a906fc",
+     "published": "2026-10-13T12:13:23+02:00",
+     "expires": "2026-11-03T00:00:00+01:00",
+     "status": "ACTIVE",
+     "source": "Stillingsregistrering",
+     "locationList": [
+      {
+       "country": "NORGE",
+       "city": "OSLO",
+       "county": "OSLO",
+       "municipal": "OSLO"
+      }
+     ],
+     "generatedSearchMetadata": {
+      "shortSummary": "Stillingen innebærer utvikling og forvaltning av datainfrastruktur, dataflyt og analyseverktøy. Krever erfaring med SQL, datamodellering og skydata. God samarbeidsevne er viktig."
+     },
+     "properties": {
+      "workLanguage": [
+       "Norsk"
+      ]
+     }
+    }
+   }
+  ]
+ }
+}

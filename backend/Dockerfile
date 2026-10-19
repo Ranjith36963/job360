@@ -20,6 +20,22 @@ COPY . .
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir .
 
+# The Job360 browser agent (docs/product/BROWSER_AGENT.md) — only when the
+# owner turns it on. Railway hands service variables to the build as ARGs, so
+# setting BROWSER_AGENT_ENABLED=1 on the backend service is the one switch:
+# the build installs Playwright + Chromium (with its OS libraries) and the
+# runtime flag turns the `browser` MCP tool on. Unset = the same image as before.
+ARG BROWSER_AGENT_ENABLED=0
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Same values as the runtime flag (core/settings.py): 1 / true / yes, any case, spaces trimmed.
+RUN case "$(printf '%s' "$BROWSER_AGENT_ENABLED" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in \
+      1|true|yes) \
+        pip install --no-cache-dir ".[browser]" \
+        && python -m playwright install --with-deps chromium \
+        && chmod -R a+rX /ms-playwright \
+        && rm -rf /var/lib/apt/lists/* ;; \
+    esac
+
 # Drop privileges — never run the app as root in production.
 RUN addgroup --system job360 \
  && adduser --system --ingroup job360 --no-create-home job360 \
