@@ -114,6 +114,7 @@ FEED_SOURCES = (
     "tyomarkkinatori",
     "trudvsem",
     "jobstreet",
+    "nav",
     "reed",
     "usajobs",
     "whatjobs",
