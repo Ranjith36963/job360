@@ -207,6 +207,21 @@ form; the test fails when the wait is removed.
   line says which one: record the application, fix the fields, or neither (never click submit again). All from
   ApplYourself `src/apply/fill.py`; the recipe `get_recipe("ats")` has the same rows as BORROWED until a real run.
 
+**Step 5, Workday, SmartRecruiters, iCIMS, Teamtailor and agency sites (2026-10-19):**
+- **Workday pages:** `form_step` (for example `{current: 2, total: 7}`) from Workday's progress bar. Workday ignores
+  values set by a script, so short answers in a Workday field are typed as real keys and the field is then left,
+  which is when Workday saves and checks it. Long answers (over 200 characters) are filled.
+- **`invalid: true`** on any field the site marks wrong or missing. Workday marks them only after Save and
+  Continue; the tips say: fix them, Save again, and after 2 stuck Saves stop and record blocked.
+- **iCIMS** forms inside a frame on the company page are named iCIMS; `login.icims.com` is not. **Teamtailor** is
+  named, with tips on its hidden "Required" labels and on asking before the optional consent box.
+  **SmartRecruiters** needed nothing new: its shadow-DOM fields were already read in step 2.
+- **Agencies and unknown sites:** no reference covers agency forms, so only general rules apply.
+  - `application_form` says whether the page looks like the form itself (a file box, or 3 or more labelled
+    fields) or still the ad.
+  - A field labelled "leave this blank" (a trap for bots) reads `leave_blank: true`, and `type`, `choose`, `tick`
+    and `upload` refuse it. The label must say "this" or "the" field: "Middle name (leave blank)" is just optional.
+
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
