@@ -240,6 +240,9 @@ form; the test fails when the wait is removed.
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
+Each row also names the playbook the assistant would get (`site`: greenhouse, lever, ashby, workday...), Workday's
+page (`form_step`, like 2/7) and how many controls sit past the first read (`more_below`). "Is it the form?" is
+look's own `application_form` (a file box or 3+ labelled fields), so a lone search box is `no_form`.
 It needs the open internet, so run it on Railway once the switch is on, with a list of real apply links.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).

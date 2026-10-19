@@ -659,7 +659,19 @@ def test_the_probe_summary_reads_a_page_the_way_the_assistant_would():
         {"tag": "button", "type": "submit", "name": "Submit application", "in_form": True},
         {"tag": "a", "type": "", "name": "Privacy"},
     ]}
-    assert summarise(form) == {"outcome": "ok", "title": "Apply", "fields": 2, "file_inputs": 1, "submit_buttons": 1}
+    assert summarise(form) == {
+        "outcome": "ok", "title": "Apply", "fields": 2, "file_inputs": 1, "submit_buttons": 1, "site": "-",
+    }
+    # look's own verdict wins: one search box is not an application form.
+    search = {"status": "ok", "title": "Jobs", "application_form": False,
+              "elements": [{"tag": "input", "type": "text", "name": "Search jobs"}]}
+    assert summarise(search)["outcome"] == "no_form"
+    workday = {"status": "ok", "title": "Apply", "application_form": True, "site": {"name": "workday", "tips": []},
+               "form_step": {"current": 2, "total": 7}, "more_elements": {"above": 0, "below": 40}, "elements": []}
+    assert summarise(workday) == {
+        "outcome": "ok", "title": "Apply", "fields": 0, "file_inputs": 0, "submit_buttons": 0, "site": "workday",
+        "form_step": "2/7", "more_below": 40,
+    }
     ad = {"status": "ok", "title": "Engineer", "elements": [{"tag": "a", "type": "", "name": "Apply for this job"}]}
     assert summarise(ad)["outcome"] == "no_form"
     wall = {"status": "needs_you", "reason": "captcha", "elements": []}
@@ -667,6 +679,8 @@ def test_the_probe_summary_reads_a_page_the_way_the_assistant_would():
     text = table([{"host": "jobs.acme.com", **summarise(form)}, {"host": "x.com", "outcome": "error", "detail": "403"}])
     lines = text.splitlines()
     assert lines[1].split()[:2] == ["jobs.acme.com", "ok"]
+    assert "workday" in table([{"host": "acme.wd3.myworkdayjobs.com", **summarise(workday)}]).splitlines()[1]
+    assert "+40 below" in table([{"host": "acme.wd3.myworkdayjobs.com", **summarise(workday)}])
     assert lines[-1] == "total: error 1, ok 1"
 
 
