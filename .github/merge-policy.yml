@@ -115,7 +115,10 @@ version: 1
 # waits. Silence is never consent.
 #
 #   ci        every required check on the PR is green         (GitHub check runs)
-#   review    CodeRabbit left no unresolved blocking thread   (GitHub review API)
+#   review    no unresolved review thread, and reviewer-bugs  (GitHub review API)
+#             + reviewer-security really ran green on the head commit. CodeRabbit
+#             is optional since 2026-10-19 (the owner): its threads still count and
+#             a review it has started must finish, but the cage never waits for it.
 #   security  gitleaks + pip-audit + npm audit + CodeQL green (security.yml)
 #             + reviewer-security (review-security.yml, no P0/P1), 2026-10-02
 #   verify    THE APP WAS ACTUALLY RUN AND WATCHED            (verify-live.yml)
