@@ -259,10 +259,24 @@ def fetch_workable(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> li
         return []
 
 
+# --------------------------------------------------------------------------- host-label boards
+_HOST_LABEL_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+
+
+def _host_label(row: dict[str, Any]) -> str:
+    """The board token when it is one plain DNS label ('' otherwise): a token goes into the
+    host name ({token}.recruitee.com), so a dot, slash or '@' must never reach the URL."""
+    token = str(row.get("token") or "").strip()
+    return token if _HOST_LABEL_RE.fullmatch(token) else ""
+
+
 # --------------------------------------------------------------------------- Recruitee
 def fetch_recruitee(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Recruitee public offers API."""
-    token = str(row.get("token") or "")
+    token = _host_label(row)
+    if not token:
+        _count(stats, ok=False)
+        return []
     try:
         status, data = _get(http, f"https://{token}.recruitee.com/api/offers/")
         if status != 200 or not isinstance(data, dict):
@@ -307,7 +321,10 @@ def _child(el: ET.Element, name: str) -> str:
 
 def fetch_personio(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Personio XML feed (https://{token}.jobs.personio.de/xml)."""
-    token = str(row.get("token") or "")
+    token = _host_label(row)
+    if not token:
+        _count(stats, ok=False)
+        return []
     try:
         status, data = _get(http, f"https://{token}.jobs.personio.de/xml", as_json=False)
         if status != 200 or not isinstance(data, str) or "<workzag-jobs" not in data:
@@ -344,7 +361,10 @@ _TT_NS = {"tt": "https://teamtailor.com/locations"}
 
 def fetch_teamtailor(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Teamtailor RSS feed (https://{token}.teamtailor.com/jobs.rss)."""
-    token = str(row.get("token") or "")
+    token = _host_label(row)
+    if not token:
+        _count(stats, ok=False)
+        return []
     try:
         status, data = _get(http, f"https://{token}.teamtailor.com/jobs.rss", as_json=False)
         if status != 200 or not isinstance(data, str) or "<rss" not in data:

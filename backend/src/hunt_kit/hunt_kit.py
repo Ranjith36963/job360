@@ -543,15 +543,18 @@ def classify_location(
     desc: str = "",
     prefs: Prefs | None = None,
     visa_flag: bool = False,
+    register: frozenset[str] = frozenset(),
 ) -> str | None:
     """Say which rule a job matches, or None.
 
     Rows: work_country (on-site/hybrid in a country you can work in), remote_world,
     remote_region (remote open to, or limited to, a place that includes a work country),
-    visa_onsite (on-site elsewhere and the ad says it sponsors), maybe_relocation, any.
+    visa_onsite (on-site elsewhere and the ad says it sponsors), visa_maybe_register (on-site
+    elsewhere, the ad says nothing, but the employer is on that country's official sponsor
+    register; ``register`` is the board row's register countries), maybe_relocation, any.
     """
     p = prefs or Prefs()
-    row = _classify_place(loc, desc, p, visa_flag)
+    row = _classify_place(loc, desc, p, visa_flag, register)
     if row is None and p.any_row:
         # --any-location keeps every title match: the "remote but not open to you" and "locked to
         # another country" dead ends must not drop an ad. Only the user's own --only/--exclude
@@ -562,7 +565,15 @@ def classify_location(
     return row
 
 
-def _classify_place(loc: str, desc: str, p: Prefs, visa_flag: bool) -> str | None:
+def _visa_refused(desc: str) -> bool:
+    """True if a sentence says the job does NOT sponsor (or asks if you need sponsorship)."""
+    return any(visa_negated(s) and re.search(r"sponsor|visa|permit|immigration", s, re.I)
+               for s in sentences(desc[:8000])[:150])
+
+
+def _classify_place(
+    loc: str, desc: str, p: Prefs, visa_flag: bool, register: frozenset[str] = frozenset()
+) -> str | None:
     loc = loc or ""
     desc = desc or ""
     info = parse_loc(loc)
@@ -596,6 +607,15 @@ def _classify_place(loc: str, desc: str, p: Prefs, visa_flag: bool) -> str | Non
     pos, rel = visa_signals(desc)
     if (pos or visa_flag) and p.visa_onsite:
         return "visa_onsite"
+    # The ad says nothing, but the employer holds a sponsor licence in the job's country (official
+    # register, see build_companies.py). Only "maybe": the user decides. Never for remote jobs (they
+    # returned above), never when the ad refuses sponsorship or locks applicants to that country.
+    # With no --work-countries the lock check above never runs; a "must have the right to work in
+    # <country>" line still rules out a maybe, so test it against a country nobody has ("ZZ").
+    reg_locked = locked or (register and not p.work and eligibility_locked(desc, frozenset({"ZZ"})))
+    if (register and p.visa_onsite and not reg_locked and (c & register or not c)
+            and not _visa_refused(desc)):
+        return "visa_maybe_register"
     if (rel or pos or visa_flag) and p.maybe_relocation:
         return "maybe_relocation"
     return "any" if p.any_row else None
@@ -1386,7 +1406,8 @@ class Collector:
             raw["desc"] = extra.get("desc") or raw.get("desc", "")
             raw["posted"] = extra.get("posted") or raw.get("posted", "")
         desc = raw.get("desc") or ""
-        row = classify_location(raw.get("loc", ""), desc, self.prefs, bool(raw.get("visa_flag")))
+        reg_ids, reg_cc = getattr(self.tl, "register", None) or ("", frozenset())  # set by the board task
+        row = classify_location(raw.get("loc", ""), desc, self.prefs, bool(raw.get("visa_flag")), reg_cc)
         if not row:
             return
         self.bump(source, "location_matches")
@@ -1413,6 +1434,8 @@ class Collector:
             "visa_lines": lines,
             "description": desc,
         }
+        if row == "visa_maybe_register":
+            rec["sponsor_register"] = reg_ids
         key = job_key(rec)
         with self.lock:
             if url in self.seen_url:
@@ -1853,13 +1876,16 @@ def run(args: argparse.Namespace) -> Collector:
     base = load_companies(Path(args.companies))
     extra_universe = load_universe([a for a in UNIVERSE_ATS if a in sources]) if args.universe else []
     boards = parse_extra(args.companies_extra) + base + extra_universe
-    seen_b: set[tuple[str, str]] = set()
+    seen_b: dict[tuple[str, str], dict[str, Any]] = {}
     uniq = []
     for r in boards:
         k = (r["ats"], r["token"].lower())
         if k not in seen_b:
-            seen_b.add(k)
+            seen_b[k] = r
             uniq.append(r)
+        elif r.get("sponsor_register") and not seen_b[k].get("sponsor_register"):
+            # the user's own --companies-extra row wins, but keeps the list row's sponsor register
+            seen_b[k].update(country=r.get("country", ""), sponsor_register=r["sponsor_register"])
     boards = [r for r in uniq if r["ats"] in sources and not col.skipped(r["name"], r["token"])]
     if not getattr(args, "retry_dead", False):  # boards that answered 404 on DEAD_BOARD_MISSES runs in a row
         dead = load_dead_boards(getattr(args, "history", None))
@@ -1882,13 +1908,16 @@ def run(args: argparse.Namespace) -> Collector:
     for b in boards:
         bkey = "%s:%s" % (b["ats"], b["token"].lower())
         if b["ats"] in _BOARD_FN:
-            board_tasks.append((b["ats"], bkey, functools.partial(
-                _track_board, col, bkey, functools.partial(_BOARD_FN[b["ats"]], col, b)), b.get("source") == "user"))
+            work: Callable[[], None] = functools.partial(_BOARD_FN[b["ats"]], col, b)
         elif b["ats"] in ats_fetchers:
             call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
-            board_tasks.append((b["ats"], bkey, functools.partial(
-                _track_board, col, bkey, functools.partial(_module_task, col, b["ats"], call, bkey)),
-                b.get("source") == "user"))
+            work = functools.partial(_module_task, col, b["ats"], call, bkey)
+        else:
+            continue
+        if b.get("sponsor_register"):
+            work = functools.partial(_with_register, col, b, work)
+        board_tasks.append(
+            (b["ats"], bkey, functools.partial(_track_board, col, bkey, work), b.get("source") == "user"))
     feed_tasks: list[tuple[str, str, Callable[[], None]]] = []
     if "freehire" in sources:
         feed_tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
@@ -2277,6 +2306,29 @@ def update_dead_boards(
         elif result == "404":
             out[key] = {"misses": min(DEAD_BOARD_MISSES, out.get(key, {}).get("misses", 0) + 1), "last": day}
     return out
+
+
+def board_register(b: dict[str, Any]) -> tuple[str, frozenset[str]]:
+    """A board row's official sponsor registers and their countries ("GB-HO,NL-IND", {"GB", "NL"}).
+
+    Only a board matched by the employer's own company NAME carries the register into the hunt:
+    a slug-only match can be a different company with the same short name (review 2026-10-19:
+    "Academia Limited" -> Academia.edu's board), so it is searched like any board, never tagged.
+    """
+    if str(b.get("match") or "") == "slug":
+        return "", frozenset()
+    ids = ",".join(split_csv(str(b.get("sponsor_register") or "")))
+    cc = frozenset(x.upper() for x in split_csv(str(b.get("country") or "")) if len(x) == 2) if ids else frozenset()
+    return ids, cc
+
+
+def _with_register(col: Collector, b: dict[str, Any], work: Callable[[], None]) -> None:
+    """Run one board task with its row's sponsor register visible to Collector.offer (same worker thread)."""
+    col.tl.register = board_register(b)
+    try:
+        work()
+    finally:
+        col.tl.register = None
 
 
 def _track_board(col: Collector, key: str, work: Callable[[], None]) -> None:
