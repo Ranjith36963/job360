@@ -89,6 +89,8 @@ class Gate:
     mark_attempt: Callable[[], Awaitable[None]]
     # Stores a screenshot of the site's confirmation as the application's proof (S7), when given.
     save_proof: Optional[Callable[[bytes], Awaitable[None]]] = None
+    # Which application this gate is for: a second job on the same form page is its own submit.
+    application_id: Optional[int] = None
 
 
 # doc_kind -> (file name, PDF bytes) for an upload, injected by the MCP tool.
@@ -106,8 +108,8 @@ class Session:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Clicks on a ref that changed nothing, in a row (reset by any click that changes the page).
     dead_clicks: dict[str, int] = field(default_factory=dict)
-    # The page a final submit was clicked on, and whether the site then refused it.
-    submitted_on: str = ""
+    # The (application, page) a final submit was clicked on, and whether the site then refused it.
+    submitted_on: tuple[Optional[int], str] = (None, "")
     submit_refused: bool = False
     # The last few (action, ref, text), for the repeat warning.
     recent: list[tuple[str, str, str]] = field(default_factory=list)
@@ -537,6 +539,11 @@ async def look(s: Session) -> dict[str, Any]:
 
 
 async def _locate(s: Session, ref: str) -> Any:
+    return (await _find(s, ref))[1]
+
+
+async def _find(s: Session, ref: str) -> tuple[Any, Any]:
+    """The frame a ref is in, and its locator."""
     if not _REF.match(ref or ""):
         raise BrowserError("refused", "bad_ref", "Use a ref from the latest look, like e12_ab3f.")
     page = _live_page(s)
@@ -544,7 +551,7 @@ async def _locate(s: Session, ref: str) -> Any:
         loc = frame.locator(f'[data-j360-ref="{ref}"]')
         try:
             if await loc.count():
-                return loc.first
+                return frame, loc.first
         except Exception:  # noqa: BLE001, S112 - detached frame
             continue
     raise BrowserError("refused", "ref_not_found", "That ref is not on the page any more. Call look and use a new one.")
@@ -581,8 +588,11 @@ REPEAT_LIMIT = 3
 DEAD_CLICK_LIMIT = 2
 
 
-async def _watch(page: Any) -> list[Any]:
+async def _watch(page: Any, clicked_in: Any = None) -> list[Any]:
     frames = list(page.frames[:MAX_FRAMES])
+    # The clicked control's own frame always, even past the cap (look reads shown frames beyond it).
+    if clicked_in is not None and clicked_in not in frames:
+        frames.append(clicked_in)
     for f in frames:
         try:
             await asyncio.wait_for(f.evaluate(WATCH_START_JS), FRAME_READ_TIMEOUT_S)
@@ -701,7 +711,7 @@ async def _act(
         await _settle(page)
         return await look(s)
 
-    loc = await _locate(s, ref)
+    frame, loc = await _find(s, ref)
     kind = await _kind(loc)
     page = _live_page(s)
 
@@ -720,7 +730,8 @@ async def _act(
                 f"Clicking that changed nothing {DEAD_CLICK_LIMIT} times. Do not click it again blind: look, "
                 "scroll, try another control, or ask_user.",
             )
-        if kind == "submit" and s.submitted_on == page.url and not s.submit_refused:
+        app_id = gate.application_id if gate is not None else None
+        if kind == "submit" and s.submitted_on == (app_id, page.url) and not s.submit_refused:
             raise BrowserError(
                 "refused", "already_submitted",
                 "A final submit was already clicked on this page. Never submit twice: read the page; if "
@@ -746,10 +757,10 @@ async def _act(
             before = await loc.evaluate(CONTROL_STATE_JS)
         except Exception:  # noqa: BLE001 - unreadable: compared as changed
             before = None
-        frames = await _watch(page)
+        frames = await _watch(page, frame)
         if submitted:
             # Set before the click: a click that fails after it reached the page still counts as one.
-            s.submitted_on, s.submit_refused = url, False
+            s.submitted_on, s.submit_refused = (app_id, url), False
         await loc.click()
         await _settle(page)
         changed = await _changed(page, frames, url, tabs)

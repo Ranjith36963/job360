@@ -110,7 +110,9 @@ def _gate_and_files(
                 db, user.id, application_id, image, actor_for(user), "browser", datetime.now(timezone.utc)
             )
 
-    return browser_agent.Gate(check=_check, mark_attempt=_mark, save_proof=_proof), _files
+    return browser_agent.Gate(
+        check=_check, mark_attempt=_mark, save_proof=_proof, application_id=application_id
+    ), _files
 
 
 def _loader(user: CurrentUser) -> browser_agent.StateFn:
