@@ -529,3 +529,61 @@ async def test_the_user_signs_in_once_and_the_next_browser_is_already_signed_in(
         assert "Signed in as Ada" in page["text"]
     finally:
         await pool.shutdown()
+
+
+# ── Slice 3: a stop on a CAPTCHA / sign-in wall lands on Needs you by itself ──
+
+
+@pytest.mark.asyncio
+async def test_a_stop_records_blocked_once_and_opens_a_needs_you_ask(authenticated_async_context, monkeypatch):
+    import contextlib
+    import json
+
+    from src.api.dependencies import get_request_db
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    stop = {"status": "needs_you", "reason": "captcha", "detail": "x", "url": "https://jobs.acme.com/apply/7"}
+
+    async def fake_run(pool, user_id, action, **kw):
+        return dict(stop)
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    monkeypatch.setattr(agent, "get_pool", lambda: None)
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/7",
+        })
+        assert brought.status_code in (200, 201), brought.text
+        app_id = brought.json()["application_id"]
+
+        first = (await client.post("/api/browser", json={"action": "look", "application_id": app_id})).json()
+        again = (await client.post("/api/browser", json={"action": "look", "application_id": app_id})).json()
+        assert first["blocked_recorded"] is True and again["blocked_recorded"] is False
+        # Without an application there is nothing to put on Needs you.
+        assert "blocked_recorded" not in (await client.post("/api/browser", json={"action": "look"})).json()
+
+        user_id = authenticated_async_context.fixture_user_id
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            cur = await db._db.execute(
+                "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
+                "AND event_type = 'blocked'", (user_id, app_id),
+            )
+            rows = [json.loads(r["payload"]) for r in await cur.fetchall()]
+            cur = await db._db.execute(
+                "SELECT question FROM application_asks WHERE user_id = ? AND application_id = ? "
+                "AND answered_at IS NULL", (user_id, app_id),
+            )
+            asks = [r["question"] for r in await cur.fetchall()]
+        assert len(rows) == 1
+        assert rows[0]["reason"] == "captcha" and rows[0]["page_host"] == "jobs.acme.com"
+        assert rows[0]["step"] == "Job360 browser" and "own assistant's browser" in rows[0]["detail"]
+        assert len(asks) == 1 and "CAPTCHA" in asks[0]
+
+        # A different stop (a sign-in wall after the CAPTCHA was cleared elsewhere) is recorded on its own.
+        stop.update(reason="login_required")
+        third = (await client.post("/api/browser", json={"action": "look", "application_id": app_id})).json()
+        assert third["blocked_recorded"] is True

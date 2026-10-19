@@ -1,8 +1,8 @@
 # The Job360 browser agent
-<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) | slices 1-2 built, OFF until the owner turns it on -->
+<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) | slices 1-3 built, OFF until the owner turns it on -->
 
 What the owner and Claude discussed and agreed on 2026-10-19, in plain words.
-**Slices 1 and 2 are built and OFF** until the owner sets `BROWSER_AGENT_ENABLED=1` on Railway (section 9). Slices 3-4 are not built.
+**Slices 1-3 are built and OFF** until the owner sets `BROWSER_AGENT_ENABLED=1` on Railway (section 9). Slice 4 (testing real sites) is not done.
 
 ## 1. Where we started: bulk apply (already live)
 
@@ -100,7 +100,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 | B. Keep the user's logins | **Yes**, as the sign-in cookie only, encrypted, never a password ("storing logins is fine") |
 | Rule 5 "browser automation of our own: never" | **Replaced** by VISION decision 29 |
 | Pay a vendor | **No** |
-| When to build | **Go** (owner, 2026-10-19): slices 1-2 built, off by default. |
+| When to build | **Go** (owner, 2026-10-19): slices 1-3 built, off by default. |
 
 ## 9. Build plan (when the owner says go)
 
@@ -108,7 +108,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 |---|---|
 | 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
 | 2 ✅ | **Sign in once:** a live view on the Job360 site; the cookie is kept, encrypted, per site. |
-| 3 | **Hand-off:** a job the cloud browser couldn't finish shows on Needs you with "finish it with your assistant's browser". |
+| 3 ✅ | **Hand-off:** a job the cloud browser couldn't finish shows on Needs you with "finish it with your assistant's browser". |
 | 4 | **Measure:** test real career sites (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and record which work from the cloud. |
 
 **Slice 1 (built 2026-10-19, off by default):**
@@ -144,6 +144,14 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Changing `SESSION_SECRET`** signs everyone out of every saved site (they sign in again). Nothing breaks.
 - **Checked end to end** in a real browser against a local test site: the page signs in, keeps the site, lists it,
   the password is in neither the logs nor the database, and an assistant's new browser opens already signed in.
+
+**Slice 3 (built 2026-10-19, off by default): hand-off to Needs you.**
+- When the cloud browser stops on a CAPTCHA or a sign-in wall and the call names an `application_id`, Job360 records
+  `blocked` itself (reason `captcha` or `login_needed`, step "Job360 browser", the site's host). That opens the usual
+  Needs you ask, and `check_submit` holds the job until it is resolved.
+- Recorded once per open block of the same reason, so repeated looks don't pile up events.
+- The note tells the user how to finish: with their own assistant's browser when their computer is on (Claude in
+  Chrome, Gemini in Chrome, ChatGPT agent), or by signing in once on Settings → Job sites.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 

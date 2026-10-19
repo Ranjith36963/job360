@@ -13,6 +13,9 @@ with the caller's assistant; the safety stays here and in
   ``submit_attempted`` first, both scoped to the caller;
 * uploads are only the caller's own saved CV / cover letter for that
   application, rendered by Job360;
+* slice 3: when the browser stops on a CAPTCHA or a sign-in wall for a named
+  application, Job360 records ``blocked`` itself (once per open block), so the
+  job waits on Needs you for the user's own assistant's browser;
 * slice 2: the user signs in to a job site THEMSELVES in a live view
   (``POST /api/browser/live``, a browser session only — never a token, so no
   assistant can drive it or type into it). "Keep me signed in" saves what the
@@ -144,8 +147,41 @@ async def browser_action(
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
         return exc.as_dict()
+    if result.get("status") == "needs_you" and body.application_id is not None:
+        result["blocked_recorded"] = await _hand_off(user, body.application_id, result)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
     return result
+
+
+# Slice 3: the browser's stop reasons, in the blocked record's closed set (services/applications/blocked.py).
+_BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed"}
+HAND_OFF_DETAIL = (
+    "Job360's cloud browser stopped here. Finish it with your own assistant's browser when your computer is on "
+    "(Claude in Chrome, Gemini in Chrome, ChatGPT agent), or sign in once on Settings, Job sites."
+)
+
+
+async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:
+    """Record ``blocked`` for the application the browser stopped on, so the job waits on Needs you
+    whatever the assistant does next. Once per open block of the same reason (no event per look).
+    True when a new ``blocked`` was recorded."""
+    from src.api.routes import applications as applications_route  # noqa: PLC0415 - avoid an import cycle
+    from src.services.applications import blocked as blocked_service  # noqa: PLC0415
+    from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+    reason = _BLOCKED_REASON.get(str(result.get("reason")), "other")
+    async with _db() as db:
+        current = await blocked_service.open_block(db, user.id, application_id)
+        if current is not None and current["reason"] == reason:
+            return False
+        payload: dict[str, Any] = {"reason": reason, "step": "Job360 browser", "detail": HAND_OFF_DETAIL}
+        host = site_host(str(result.get("url", "")))
+        if host and "." in host:
+            payload["page_host"] = host
+        await applications_route.record_event(
+            application_id, applications_route.RecordEventRequest(event_type="blocked", payload=payload), db, user
+        )
+    return True
 
 
 # ── Slice 2: the user's own sign-in, on the website only ──────────────────────
