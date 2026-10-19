@@ -113,13 +113,18 @@ jobs:
             # ---- red CI: OWNER PRs get FIXED, not just diagnosed ----
             # (Owner's standing instruction 2026-07-30: conflicts and red CI
             # are repaired autonomously; only the merge stays human.)
+            # ONE DOOR TO THE FIXER (2026-10-19): this used to dispatch
+            # pr-repair.yml itself, skipping the busy check, the attempt
+            # ceiling and the fixable/unfixable split that finding-watch.yml
+            # applies. It now asks finding-watch to look at the PR, so
+            # `scripts/fixer_gate.py` is the only thing that starts a fixer.
             if [ "$red" -gt 0 ]; then
               author=$(echo "$pr" | jq -r .author.login)
               marker="<!-- pr-shepherd-red -->"
               if ! gh pr view "$num" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
-                if [ "$author" = "Ranjith36963" ] && gh workflow run pr-repair.yml -f pr="$num"; then
-                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing - the PR-repair loop has been dispatched to FIX this branch. It will push additive commits and CI will re-run; merging stays with you.' "$marker" "$red")
-                  echo "- #$num RED ($red failing) -> pr-repair dispatched — $title" >> "$GITHUB_STEP_SUMMARY"
+                if [ "$author" = "Ranjith36963" ] && gh workflow run finding-watch.yml -f pr="$num"; then
+                  body=$(printf '%s\n**PR shepherd:** %s check(s) are failing - finding watch has been asked to look; it starts the PR-repair loop if the failure is one the fixer can act on and no repair for this PR is already running. Merging stays with you.' "$marker" "$red")
+                  echo "- #$num RED ($red failing) -> finding-watch dispatched (it decides whether pr-repair runs) — $title" >> "$GITHUB_STEP_SUMMARY"
                 elif gh workflow run triage.yml -f issue="$num"; then
                   body=$(printf '%s\n**PR shepherd:** %s check(s) are failing, so the triage loop has been dispatched to diagnose this PR.' "$marker" "$red")
                   echo "- #$num RED ($red failing) -> triage dispatched — $title" >> "$GITHUB_STEP_SUMMARY"

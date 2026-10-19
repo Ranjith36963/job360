@@ -45,6 +45,16 @@ delete a lesson; if one stops being true, say so on its line and why.
   summary (failing tests are written there since the failed-tests-in-summary
   PR). When a head shows few check runs, read the PR's `mergeable_state` first:
   a CONFLICTING PR runs no CI.
+- 2026-10-19: `offline-suite` went red on PR #916 and I read only the last 80 lines of the
+  job log (`get_job_logs` tail_lines=80). All 80 were Postgres teardown noise ("lastval is
+  not yet defined"), which the container prints AFTER pytest; the check run's own output was
+  empty. Instead of pulling more of the log I re-ran all ~3,900 backend tests in the cloud
+  container (39 min, the first try lost to the local Postgres being stopped). The owner pasted
+  the answer: pytest's short test summary sat ~400 lines above the end
+  (`update_profile is 2034 characters`, the MCP text budget). Why it repeated: I never read
+  this skill before watching the PR, so I also waited an hour on a rate-limited CodeRabbit,
+  breaking the rule below. **Rule:** pull enough of a failing log to reach pytest's
+  `short test summary info` (tail_lines ≥ 600) before any slower route.
 - CodeRabbit's free tier rate-limits after a few reviews an hour. **Rule:** never
   wait on it; the repo's own reviewer-bugs / reviewer-security / CI are the gate.
 - 2026-10-18: a finished Needs-you feature sat unpushed while the session
