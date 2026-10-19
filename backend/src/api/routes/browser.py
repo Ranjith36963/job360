@@ -13,6 +13,8 @@ with the caller's assistant; the safety stays here and in
   ``submit_attempted`` first, both scoped to the caller;
 * uploads are only the caller's own saved CV / cover letter for that
   application, rendered by Job360;
+* step 6: when a gated submit lands on the site's confirmation, a screenshot
+  of it is stored as that application's proof (``proof_screenshot``);
 * slice 3: when the browser stops on a CAPTCHA or a sign-in wall for a named
   application, Job360 records ``blocked`` itself (once per open block), so the
   job waits on Needs you for the user's own assistant's browser;
@@ -96,7 +98,21 @@ def _gate_and_files(
         pdf = await render_document_pdf(user.id, kind, row.get("text") or "")
         return ("CV.pdf" if kind == "cv" else "Cover_letter.pdf"), pdf
 
-    return browser_agent.Gate(check=_check, mark_attempt=_mark), _files
+    async def _proof(image: bytes) -> None:
+        # The site's confirmation page, kept as this application's proof screenshot (S7).
+        from datetime import datetime, timezone  # noqa: PLC0415
+
+        from src.services.applications import proof  # noqa: PLC0415
+        from src.services.applications.authorship import actor_for  # noqa: PLC0415
+
+        async with _db() as db:
+            await proof.store_screenshot(
+                db, user.id, application_id, image, actor_for(user), "browser", datetime.now(timezone.utc)
+            )
+
+    return browser_agent.Gate(
+        check=_check, mark_attempt=_mark, save_proof=_proof, application_id=application_id
+    ), _files
 
 
 def _loader(user: CurrentUser) -> browser_agent.StateFn:

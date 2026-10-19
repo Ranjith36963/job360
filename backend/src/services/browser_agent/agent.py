@@ -31,19 +31,24 @@ from typing import Any, Awaitable, Callable, Optional
 from src.services.browser_agent.egress import EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
+    CONTROL_STATE_JS,
     ELEMENT_FACTS_JS,
     FOCUS_IN_LIST_JS,
+    FORM_STEP_JS,
     IS_TEXT_FIELD_JS,
     IS_TYPEAHEAD_JS,
+    IS_WORKDAY_FIELD_JS,
     LEVER_CHECK_JS,
     NATIVE_SET_JS,
     OWN_LIST_IDS_JS,
     SHOWN_VALUE_JS,
     SNAPSHOT_JS,
     TICK_VIA_LABEL_JS,
+    WATCH_READ_JS,
+    WATCH_START_JS,
 )
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
-from src.services.browser_agent.sites import outcome_for, site_for
+from src.services.browser_agent.sites import is_honeypot, looks_like_application, outcome_for, site_for
 from src.services.fetch.guard import ResolveFn
 
 logger = logging.getLogger("job360.services.browser_agent")
@@ -84,6 +89,10 @@ class Gate:
 
     check: Callable[[str], Awaitable[dict[str, Any]]]
     mark_attempt: Callable[[], Awaitable[None]]
+    # Stores a screenshot of the site's confirmation as the application's proof (S7), when given.
+    save_proof: Optional[Callable[[bytes], Awaitable[None]]] = None
+    # Which application this gate is for: a second job on the same form page is its own submit.
+    application_id: Optional[int] = None
 
 
 # doc_kind -> (file name, PDF bytes) for an upload, injected by the MCP tool.
@@ -99,6 +108,13 @@ class Session:
     page: Any
     last_used: float = field(default_factory=time.monotonic)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Clicks on a ref that changed nothing, in a row (reset by any click that changes the page).
+    dead_clicks: dict[str, int] = field(default_factory=dict)
+    # The (application, page) a final submit was clicked on, and whether the site then refused it.
+    submitted_on: tuple[Optional[int], str] = (None, "")
+    submit_refused: bool = False
+    # The last few (action, ref, text), for the repeat warning.
+    recent: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 class BrowserPool:
@@ -259,23 +275,31 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
     return await look(s)
 
 
+# Workday answers longer than this are filled, not keyed: keying 3,000 characters takes over a minute.
+KEYED_MAX_CHARS = 200
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 async def _type_into(loc: Any, text: str) -> str:
-    """Type and read back. Suggestion boxes key by key; plain fields fill(), then the native setter
-    if the site's framework did not take it (one bounded heal, never a loop)."""
+    """Type and read back. Suggestion boxes key by key; Workday's short fields key by key, then blur
+    so Workday commits them; other fields fill(), then the native setter if the site's framework did
+    not take it (one bounded heal, never a loop)."""
+    typeahead = bool(await loc.evaluate(IS_TYPEAHEAD_JS))
+    workday = not typeahead and bool(await loc.evaluate(IS_WORKDAY_FIELD_JS))
     # Never key a control character: as keys "\n" is Enter (it can submit the form, skipping
     # check_submit) and "\t" is Tab (the rest would land in another field). fill() inserts them as text.
-    if await loc.evaluate(IS_TYPEAHEAD_JS) and not _CONTROL_CHARS.search(text):
+    keyed = typeahead or (workday and len(text) <= KEYED_MAX_CHARS)
+    if keyed and not _CONTROL_CHARS.search(text):
         await loc.fill("")
         await loc.press_sequentially(text, delay=25)
     else:
         await loc.fill(text)
     shown = str(await loc.evaluate(SHOWN_VALUE_JS))
     # The native setter is an input's or a textarea's: a contenteditable box keeps what fill() left.
-    if shown != text and await loc.evaluate(IS_TEXT_FIELD_JS) and not await loc.evaluate(IS_TYPEAHEAD_JS):
+    if shown != text and not typeahead and await loc.evaluate(IS_TEXT_FIELD_JS):
         shown = str(await loc.evaluate(NATIVE_SET_JS, text))
+    if workday:
+        await loc.blur()
     return shown
 
 
@@ -517,6 +541,16 @@ async def look(s: Session) -> dict[str, Any]:
         "elements": elements,
         "text": _wrap_untrusted(text),
     }
+    try:
+        step = await asyncio.wait_for(page.evaluate(FORM_STEP_JS), FRAME_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 - a page mid-navigation: no step this read
+        step = None
+    if step:
+        out["form_step"] = step
+    for e in elements:
+        if is_honeypot(str(e.get("name") or "")):
+            e["leave_blank"] = True
+    out["application_form"] = looks_like_application(elements)
     site = site_for(page.url, frame_urls[1:])
     if site is not None:
         out["site"] = {"name": site.name, "tips": list(site.tips)}
@@ -540,6 +574,11 @@ async def look(s: Session) -> dict[str, Any]:
 
 
 async def _locate(s: Session, ref: str) -> Any:
+    return (await _find(s, ref))[1]
+
+
+async def _find(s: Session, ref: str) -> tuple[Any, Any]:
+    """The frame a ref is in, and its locator."""
     if not _REF.match(ref or ""):
         raise BrowserError("refused", "bad_ref", "Use a ref from the latest look, like e12_ab3f.")
     page = _live_page(s)
@@ -547,7 +586,7 @@ async def _locate(s: Session, ref: str) -> Any:
         loc = frame.locator(f'[data-j360-ref="{ref}"]')
         try:
             if await loc.count():
-                return loc.first
+                return frame, loc.first
         except Exception:  # noqa: BLE001, S112 - detached frame
             continue
     raise BrowserError("refused", "ref_not_found", "That ref is not on the page any more. Call look and use a new one.")
@@ -575,6 +614,52 @@ async def _settle(page: Any) -> None:
         await page.wait_for_load_state("networkidle", timeout=SETTLE_IDLE_MS)
     except Exception:  # noqa: BLE001, S110 - a page that keeps polling never goes idle: read it as it is
         pass
+
+
+# The same action this many times in a row gets a warning (browser-use browser_use/agent/views.py:157-178,
+# :211-215 nudges at 5, 8, 12 repeats; a smaller window here because each of our steps is one tool call).
+REPEAT_LIMIT = 3
+# A ref whose clicks changed nothing this many times is not clicked again blind.
+DEAD_CLICK_LIMIT = 2
+
+
+async def _watch(page: Any, clicked_in: Any = None) -> list[Any]:
+    frames = list(page.frames[:MAX_FRAMES])
+    # The clicked control's own frame always, even past the cap (look reads shown frames beyond it).
+    if clicked_in is not None and clicked_in not in frames:
+        frames.append(clicked_in)
+    for f in frames:
+        try:
+            await asyncio.wait_for(f.evaluate(WATCH_START_JS), FRAME_READ_TIMEOUT_S)
+        except Exception:  # noqa: BLE001, S112 - a frame mid-navigation: read as changed below
+            continue
+    return frames
+
+
+async def _changed(page: Any, frames: list[Any], url: str, tabs: int) -> bool:
+    """Whether the page moved after an action: a new address or tab, a frame that navigated, or any
+    change to the page itself. When unsure, it changed (the safe side: no false "nothing happened")."""
+    if page.url != url or len(page.context.pages) != tabs:
+        return True
+    for f in frames:
+        try:
+            seen = await asyncio.wait_for(f.evaluate(WATCH_READ_JS), FRAME_READ_TIMEOUT_S)
+        except Exception:  # noqa: BLE001 - navigated or detached: that is a change
+            return True
+        if seen != 0:
+            return True
+    return False
+
+
+async def _save_proof(page: Any, gate: Gate) -> bool:
+    if gate.save_proof is None:
+        return False
+    try:
+        await gate.save_proof(await page.screenshot(type="jpeg", quality=70))
+    except Exception:  # noqa: BLE001 - proof is extra: the application still went
+        logger.warning("browser proof screenshot not saved", exc_info=True)
+        return False
+    return True
 
 
 async def run(
@@ -613,6 +698,16 @@ async def run(
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
+        if action not in ("click", "look"):
+            # The form changed (an answer typed, a box ticked, a new page): a control that did nothing
+            # before may work now, so it gets its tries back.
+            s.dead_clicks.clear()
+        s.recent = ([*s.recent, (action, ref, text)])[-REPEAT_LIMIT:]
+        if len(s.recent) == REPEAT_LIMIT and len(set(s.recent)) == 1 and action not in ("look", "scroll"):
+            result["repeat_warning"] = (
+                f"The same {action} {REPEAT_LIMIT} times in a row. Stop repeating it: look again, try another "
+                "control, or ask_user."
+            )
         return result
 
 
@@ -651,12 +746,32 @@ async def _act(
         await _settle(page)
         return await look(s)
 
-    loc = await _locate(s, ref)
+    frame, loc = await _find(s, ref)
     kind = await _kind(loc)
     page = _live_page(s)
 
+    # A trap field for bots says to leave it blank: never fill, pick, tick or upload into it.
+    fills = action in ("choose", "upload") or (action == "type" and text) or (action == "tick" and on)
+    if fills and is_honeypot(str((await loc.evaluate(ELEMENT_FACTS_JS)).get("name") or "")):
+        raise BrowserError(
+            "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
+        )
+
     if action == "click":
         submitted = False
+        if s.dead_clicks.get(ref, 0) >= DEAD_CLICK_LIMIT:
+            raise BrowserError(
+                "refused", "no_effect",
+                f"Clicking that changed nothing {DEAD_CLICK_LIMIT} times. Do not click it again blind: look, "
+                "scroll, try another control, or ask_user.",
+            )
+        app_id = gate.application_id if gate is not None else None
+        if kind == "submit" and s.submitted_on == (app_id, page.url) and not s.submit_refused:
+            raise BrowserError(
+                "refused", "already_submitted",
+                "A final submit was already clicked on this page. Never submit twice: read the page; if "
+                "nothing confirms it went, record blocked and tell the user.",
+            )
         if kind == "submit":
             if gate is None:
                 raise BrowserError(
@@ -672,18 +787,46 @@ async def _act(
                 }
             await gate.mark_attempt()
             submitted = True
+        url, tabs = page.url, len(page.context.pages)
+        try:
+            before = await loc.evaluate(CONTROL_STATE_JS)
+        except Exception:  # noqa: BLE001 - unreadable: compared as changed
+            before = None
+        frames = await _watch(page, frame)
+        if submitted:
+            # Set before the click: a click that fails after it reached the page still counts as one.
+            s.submitted_on, s.submit_refused = (app_id, url), False
         await loc.click()
         await _settle(page)
+        changed = await _changed(page, frames, url, tabs)
+        if not changed:
+            try:
+                changed = before is None or await loc.evaluate(CONTROL_STATE_JS, timeout=1000) != before
+            except Exception:  # noqa: BLE001 - the control is gone: the page changed
+                changed = True
+        if changed:
+            s.dead_clicks.clear()
+        else:
+            s.dead_clicks[ref] = s.dead_clicks.get(ref, 0) + 1
         out = await look(s)
+        out["page_changed"] = changed
+        if not changed and not submitted:
+            out["next"] = (
+                "That click changed nothing on the page. Do not click it again: look, scroll or try another control."
+            )
         if submitted:
+            s.submit_refused = bool(out.get("site_refused"))
             out["submit_clicked"] = True
             if out.get("site_refused"):
                 out["next"] = (
                     "The site says it did NOT take the application (site_refused). Read the page text for "
-                    "which fields, fix them, then check_submit again before another submit."
+                    "which fields, and fix them. check_submit holds a second submit until the user marks this "
+                    "one 'not sent' on Job360 (Needs you): ask them to, then submit again."
                 )
             elif out.get("confirmation_seen"):
                 out["next"] = "The site shows a confirmation: call record_application."
+                # The tab look just read: a confirmation can open in a new tab.
+                out["proof_saved"] = gate is not None and await _save_proof(_live_page(s), gate)
             else:
                 out["next"] = (
                     "No confirmation on the page yet. Read it. Do NOT click submit again; if nothing "
