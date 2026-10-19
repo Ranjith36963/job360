@@ -167,7 +167,7 @@ SHAPES: dict[str, dict[str, Any]] = {
     },
     _settings.APPLY_MIN_SCORE_PATH: {"example": 70, "note": "the user's OWN score line, 0-100"},
     _settings.ABOVE_LINE_PATH: {"example": "ask", "allowed_values": _sorted(_settings.VALID_LINE_SWITCHES)},
-    _settings.BELOW_LINE_PATH: {"example": "ask", "allowed_values": _sorted(_settings.VALID_LINE_SWITCHES)},
+    _settings.BELOW_LINE_PATH: {"example": "ask", "allowed_values": _sorted(_settings.VALID_BELOW_SWITCHES)},
 }
 
 

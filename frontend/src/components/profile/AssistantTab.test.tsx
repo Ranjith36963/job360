@@ -65,19 +65,24 @@ describe("AssistantTab", () => {
     await ready();
     const tab = screen.getByTestId("assistant-tab");
     for (const t of [
-      "Your score line", "Score line", "Jobs at or above your line", "Jobs below your line",
-      "Ask me", "Apply on its own",
-      "Submit mode", "The last click on the form", "Confirm before sending", "Send on its own when sure",
-      "It stops at Submit and shows you Ready to send.",
+      "Your score line", "Score line", "Batch auto apply: off", "Batch auto apply: on",
+      "Your assistant asks you before each application.",
+      "Your assistant applies on its own to every job at or above your score line.",
+      "Your assistant always stops and asks you when it is not sure: a CAPTCHA, a login page, a guessed answer, or anything not verified.",
       "Limits & inbox", "Daily limit", "Most applications per day. Leave blank for no limit.",
       "Gmail check", "Auto", "Ask first", "Off", "Hard stops", "Always on. Cannot be switched off.",
       "History", "Every change, newest first",
     ]) {
       expect(tab).toHaveTextContent(t);
     }
-    expect(screen.getByTestId("above-line-ask")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("below-line-ask")).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByTestId("submit-mode-confirm")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("batch-off")).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByTestId("above-line-ask")).toBeNull();
+    expect(screen.queryByTestId("submit-mode-confirm")).toBeNull();
+    // an older "ask" below the line is shown honestly, with what a click will do
+    expect(screen.getByTestId("below-line-rule")).toHaveTextContent(
+      "Below the line: asks you. Choosing either option above drops them from now on.",
+    );
+    expect(tab).not.toHaveTextContent("Submit mode");
     expect(screen.getByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true");
     expect((screen.getByTestId("check-every") as HTMLSelectElement).value).toBe("6h");
     // No default line: unset shows the plain "not set" words, and the input is empty.
@@ -88,12 +93,13 @@ describe("AssistantTab", () => {
 
   it("each control sends its own PATCH body as the web user, then re-reads", async () => {
     await ready();
-    fireEvent.click(screen.getByTestId("above-line-auto"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.above_line", value: "auto" }]));
-    fireEvent.click(screen.getByTestId("below-line-auto"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.below_line", value: "auto" }]));
-    fireEvent.click(screen.getByTestId("submit-mode-auto_when_sure"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.submit_mode", value: "auto_when_sure" }]));
+    // Batch auto apply ON: both halves in one PATCH, and below-the-line jobs are dropped.
+    fireEvent.click(screen.getByTestId("batch-on"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "assistant_settings.above_line", value: "auto" },
+      { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
+      { path: "assistant_settings.below_line", value: "skip" },
+    ]));
     fireEvent.click(screen.getByTestId("inbox-ask"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "preferences.daily_check", value: "ask" }]));
     fireEvent.change(screen.getByTestId("check-every"), { target: { value: "12h" } });
@@ -103,7 +109,8 @@ describe("AssistantTab", () => {
     fireEvent.blur(cap);
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.daily_cap", value: 10 }]));
     expect(toastSuccess).toHaveBeenCalledWith("Saved.");
-    expect(getAssistantSettings.mock.calls.length).toBeGreaterThan(5);
+    // one first read + one re-read per save (batch, Gmail, every, daily limit)
+    expect(getAssistantSettings.mock.calls.length).toBeGreaterThanOrEqual(5);
   });
 
   it("automatic employer emails: turning on asks to confirm first, turning off applies at once", async () => {
@@ -214,10 +221,24 @@ describe("AssistantTab", () => {
   it("a refused save shows the error and never 'Saved.'", async () => {
     updateProfileFields.mockRejectedValueOnce(new Error("422"));
     await ready();
-    fireEvent.click(screen.getByTestId("above-line-auto"));
+    fireEvent.click(screen.getByTestId("batch-on"));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Could not save. Try again."));
     expect(toastSuccess).not.toHaveBeenCalled();
-    expect(screen.getByTestId("above-line-ask")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("batch-off")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("batch reads on only when both halves are on; OFF writes ask + confirm; a dropped line says so", async () => {
+    getAssistantSettings.mockResolvedValue(view({
+      above_line: field("auto"), submit_mode: field("auto_when_sure"), below_line: field("skip"),
+    }));
+    await ready();
+    expect(screen.getByTestId("batch-on")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("below-line-rule")).toHaveTextContent("Jobs below your score line are dropped — never applied to.");
+    fireEvent.click(screen.getByTestId("batch-off"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "assistant_settings.above_line", value: "ask" },
+      { path: "assistant_settings.submit_mode", value: "confirm" },
+    ]));
   });
 
   it("hard stops are read-only text with no control", async () => {
@@ -255,7 +276,7 @@ describe("AssistantTab", () => {
   it("right rail: Right now, today's count, and the note", async () => {
     await ready();
     const rail = screen.getByTestId("assistant-rail");
-    for (const t of ["Right now", "Score line", "At or above", "Ask me", "Confirm before sending", "Today4 of 10", "Take back adds a new row; nothing is erased."]) {
+    for (const t of ["Right now", "Score line", "Batch auto applyOff", "Below the lineAsk me", "Today4 of 10", "Take back adds a new row; nothing is erased."]) {
       expect(rail).toHaveTextContent(t);
     }
   });

@@ -237,6 +237,35 @@ def _answer_rows(
     return answers, flags
 
 
+async def has_unverified_guess(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds an answer the assistant marked
+    ``guessed`` that the user has not stood behind (owner rule 2026-10-19: "if you
+    guess you are not verified - you need to ask me"). The SAME reading as the
+    card (:func:`_answer_rows`), so the gate and the card never disagree: a guess
+    flagged ``guessed`` (not verified) OR ``changed`` (the user EDITED it to a
+    different answer that is not typed yet) both count - a rejected guess must
+    never be the one that slips through. Scoped by ``user_id`` (rule #12)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    fills = await kit._events(db, user_id, int(app_row["id"]), ("form_filled",))
+    typed = fills[0]["payload"].get("answers") if fills else None
+    if not isinstance(typed, list) or not any(isinstance(a, dict) and a.get("source") == "guessed" for a in typed):
+        return False
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    country = (str(app_row.get("job_country") or "").strip().upper()) or None
+    blocks, _missing = kit.compute_answers(profile, overlay, country)
+    have = {i["key"]: i for block in blocks.values() for i in block}
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    guesses = [
+        a for a in typed
+        if isinstance(a, dict) and "question" in a and "answer" in a and a.get("source") == "guessed"
+    ]
+    _answers, flags = _answer_rows(guesses, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    return any(f["code"] in ("guessed", "changed") for f in flags)
+
+
 async def ready_cards(
     db: JobDatabase, user_id: str, *, limit: int, application_id: Optional[int] = None
 ) -> list[dict[str, Any]]:

@@ -6331,7 +6331,7 @@ export interface components {
              */
             side: "above" | "below" | "unknown";
             /** Switch */
-            switch?: ("ask" | "auto") | null;
+            switch?: ("ask" | "auto" | "skip") | null;
         };
         /** SaveFitRequest */
         SaveFitRequest: {

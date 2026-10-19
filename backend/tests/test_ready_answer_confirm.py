@@ -85,6 +85,61 @@ async def test_verify_a_guess_saves_it_as_the_users_answer_and_the_next_fill_rea
 
 
 @pytest.mark.asyncio
+async def test_the_submit_gate_reads_an_unverified_guess_the_same_way_the_card_does(
+    authenticated_async_context, fixture_user_id
+):
+    """Owner rule 2026-10-19: a guess is not verified, so check_submit must ask. The
+    gate fact (``kit.gate_facts`` -> ``ready.has_unverified_guess``) and the card's
+    ``guessed`` flag read the same rows, so a Verify clears both together."""
+    from src.api import dependencies as api_deps
+    from src.services.applications import kit, spine
+
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        db = await api_deps.get_db()
+
+        async def gate_says_guessed() -> bool:
+            row = await spine.get_owned_application(db, fixture_user_id, app_id)
+            facts = await kit.gate_facts(db, fixture_user_id, row, email_verified=True)
+            return facts.guessed_unverified
+
+        await _fill(client, app_id, [NAME])
+        assert await gate_says_guessed() is False, "no guess, nothing to ask"
+        await _fill(client, app_id, [NAME, GUESS])
+        card = await _card(client, app_id)
+        assert "guessed" in _codes(card) and await gate_says_guessed() is True
+        assert (await _confirm(client, app_id, 1, card["form_filled_event_id"])).status_code == 200
+        await _fill(client, app_id, [NAME, GUESS])  # the next fill types the now-verified answer
+        assert await gate_says_guessed() is False, "the user's Verify clears the gate too"
+
+
+@pytest.mark.asyncio
+async def test_an_edited_guess_still_holds_the_submit_gate_until_the_users_word_is_typed(
+    authenticated_async_context, fixture_user_id
+):
+    """The guess the user REJECTED must never be the one that slips through: Edit turns the
+    card's flag from ``guessed`` to ``changed``, and the gate must keep asking."""
+    from src.api import dependencies as api_deps
+    from src.services.applications import kit, spine
+
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        db = await api_deps.get_db()
+
+        async def gate_says_guessed() -> bool:
+            row = await spine.get_owned_application(db, fixture_user_id, app_id)
+            return (await kit.gate_facts(db, fixture_user_id, row, email_verified=True)).guessed_unverified
+
+        await _fill(client, app_id, [GUESS])
+        card = await _card(client, app_id)
+        assert (await _confirm(client, app_id, 0, card["form_filled_event_id"], answer="No")).status_code == 200
+        assert "changed" in _codes(await _card(client, app_id))
+        assert await gate_says_guessed() is True, "the form still holds the rejected guess"
+        await _fill(client, app_id, [{**GUESS, "answer": "No"}])  # the assistant types the user's word
+        assert await gate_says_guessed() is False
+
+
+@pytest.mark.asyncio
 async def test_edit_a_guess_holds_send_until_the_assistant_types_the_users_word(
     authenticated_async_context, fixture_user_id
 ):

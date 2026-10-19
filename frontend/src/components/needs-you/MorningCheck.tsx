@@ -5,23 +5,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getMorningCheck, updateProfileFields } from "@/lib/api";
 import type { MorningCheck as MorningCheckData } from "@/lib/api";
-import { LINE_SWITCHES, P_ABOVE, P_BELOW, P_SCORE, P_SUBMIT, SUBMIT_MODES } from "@/lib/assistant-tab";
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { formatFeedTime, hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
 import {
+  ALWAYS_ASKS,
   BUCKETS,
   BUCKET_LABEL,
   CHECK_LOOKBACK_DAYS,
   LAST_CHECK_KEY,
-  SUBMIT_MODE_LABEL,
-  lineSwitchText,
+  batchEdits,
+  batchOn,
+  batchText,
+  belowText,
   pausedByText,
   quotaText,
   scoreLineText,
   sinceText,
 } from "@/lib/morning-check";
-import { asLineSwitch } from "@/lib/morning-check";
-import type { Bucket, LineSwitch } from "@/lib/morning-check";
+import type { Bucket } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 
 // Company, title and every label here are written by the user's assistants -
@@ -30,22 +31,13 @@ import { cn } from "@/lib/utils";
 const sectionLabel = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 const linkBtn = "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
 const numBox = "min-h-11 w-24 rounded-lg border border-border bg-card px-3 py-1.5 text-center font-mono text-sm md:min-h-9";
+const BATCH_OPTIONS = [
+  { value: "off", label: "Off — ask me first" },
+  { value: "on", label: "On — apply on its own" },
+];
 
 /** What the inline editor holds before Save. `score` is the raw text box. */
-type Draft = { score: string; above: LineSwitch; below: LineSwitch; submit: string };
-
-/** The PATCH edits for the fields that differ from what the server holds. */
-export function diffEdits(
-  state: { apply_min_score?: number | null; above_line?: string | null; below_line?: string | null; submit_mode?: string },
-  d: { scoreValue: number | null; above: LineSwitch; below: LineSwitch; submit: string },
-): { path: string; value: unknown }[] {
-  const out: { path: string; value: unknown }[] = [];
-  if (d.scoreValue !== (state.apply_min_score ?? null)) out.push({ path: P_SCORE, value: d.scoreValue });
-  if (d.above !== asLineSwitch(state.above_line)) out.push({ path: P_ABOVE, value: d.above });
-  if (d.below !== asLineSwitch(state.below_line)) out.push({ path: P_BELOW, value: d.below });
-  if (d.submit !== (state.submit_mode ?? "confirm")) out.push({ path: P_SUBMIT, value: d.submit });
-  return out;
-}
+type Draft = { score: string; batch: boolean };
 
 /** One row of the editor: a title and a two-way radio. */
 function Switch({
@@ -99,11 +91,11 @@ export function MorningCheck() {
   const [data, setData] = useState<MorningCheckData | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<Bucket | null>(null);
-  // The inline editor (owner ask 2026-10-18): change the line, both switches and
-  // the submit mode right here, then Save. Nothing is written until Save.
+  // The inline editor (owner asks 2026-10-18 / 10-19): change the score line and the
+  // one Batch auto apply switch right here, then Save. Nothing is written until Save.
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<Draft>({ score: "", above: "ask", below: "ask", submit: "confirm" });
+  const [draft, setDraft] = useState<Draft>({ score: "", batch: false });
   // What the editor opened on. Save diffs against THIS, not the live strip: a
   // re-read mid-edit (pause, a Send below) must not turn an assistant's newer
   // change into an edit the user never made.
@@ -177,13 +169,10 @@ export function MorningCheck() {
   const lineSet = state.apply_min_score != null;
   const sep = <span aria-hidden="true" className="text-faint">·</span>;
 
+  const batch = batchOn(state.above_line, state.submit_mode);
+
   const startEdit = () => {
-    setDraft({
-      score: state.apply_min_score == null ? "" : String(state.apply_min_score),
-      above: asLineSwitch(state.above_line),
-      below: asLineSwitch(state.below_line),
-      submit: state.submit_mode === "auto_when_sure" ? "auto_when_sure" : "confirm",
-    });
+    setDraft({ score: state.apply_min_score == null ? "" : String(state.apply_min_score), batch });
     setBase(state);
     setEditing(true);
   };
@@ -196,7 +185,7 @@ export function MorningCheck() {
       toast.error("Score line must be a whole number from 0 to 100. Not saved.");
       return;
     }
-    const edits = diffEdits(base ?? state, { ...draft, scoreValue: score });
+    const edits = batchEdits(base ?? state, { scoreValue: score, batch: draft.batch });
     if (edits.length === 0) {
       setEditing(false);
       return;
@@ -234,17 +223,23 @@ export function MorningCheck() {
         <span data-testid="mc-score-line" className="text-[13.5px] text-muted-foreground">
           {scoreLineText(state.apply_min_score)}
         </span>
-        {lineSet ? (
-          <span data-testid="mc-line-switches" className="text-[13.5px] text-muted-foreground">
-            {lineSwitchText(asLineSwitch(state.above_line), asLineSwitch(state.below_line))}
-          </span>
-        ) : (
-          <Link href="/profile?tab=assistant" data-testid="mc-score-line-link" className={linkBtn}>
-            Set it in Profile → Assistant
-          </Link>
+        {!lineSet && (
+          <button type="button" data-testid="mc-score-line-set" onClick={startEdit} className={linkBtn}>
+            Set it
+          </button>
         )}
         {sep}
-        <span className="text-[13.5px] text-muted-foreground">{SUBMIT_MODE_LABEL[state.submit_mode] ?? state.submit_mode}</span>
+        <span data-testid="mc-batch" className="text-[13.5px] text-muted-foreground">
+          {batchText(batch)}
+        </span>
+        {lineSet && (
+          <>
+            {sep}
+            <span data-testid="mc-below" className="text-[13.5px] text-muted-foreground">
+              {belowText(state.below_line)}
+            </span>
+          </>
+        )}
         <span className="ml-auto inline-flex items-center gap-3">
           <span data-testid="mc-quota" className="font-mono text-[12.5px] font-medium">{quotaText(state.applied_today, state.daily_cap)}</span>
           {!editing && (
@@ -254,6 +249,9 @@ export function MorningCheck() {
           )}
         </span>
       </div>
+      <p data-testid="mc-always-asks" className="rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
+        {ALWAYS_ASKS}
+      </p>
       {editing && (
         <form
           data-testid="mc-editor"
@@ -284,29 +282,17 @@ export function MorningCheck() {
             <span className="text-[12.5px] text-muted-foreground">0 to 100. Blank = not set; your assistant asks you.</span>
           </label>
           <Switch
-            title="Jobs at or above your line"
-            testPrefix="mc-above"
-            options={LINE_SWITCHES}
-            current={draft.above}
+            title="Batch auto apply"
+            testPrefix="mc-batch"
+            options={BATCH_OPTIONS}
+            current={draft.batch ? "on" : "off"}
             disabled={saving}
-            onPick={(v) => setDraft({ ...draft, above: v as LineSwitch })}
+            onPick={(v) => setDraft({ ...draft, batch: v === "on" })}
           />
-          <Switch
-            title="Jobs below your line"
-            testPrefix="mc-below"
-            options={LINE_SWITCHES}
-            current={draft.below}
-            disabled={saving}
-            onPick={(v) => setDraft({ ...draft, below: v as LineSwitch })}
-          />
-          <Switch
-            title="Submit mode"
-            testPrefix="mc-submit"
-            options={SUBMIT_MODES.map((m) => ({ value: m.value, label: SUBMIT_MODE_LABEL[m.value] ?? m.value }))}
-            current={draft.submit}
-            disabled={saving}
-            onPick={(v) => setDraft({ ...draft, submit: v })}
-          />
+          <p className="text-[12.5px] text-muted-foreground">
+            On: your assistant applies on its own to every job at or above your score line. Off: it asks you before
+            each one. Jobs below your score line are dropped — never applied to.
+          </p>
           <div className="flex items-center gap-3">
             <button
               type="submit"

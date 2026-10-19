@@ -22,8 +22,8 @@ is a practice run: fill it, stop before submit, let the user check it.
 
 `settings` is how much you may do on your own. Each of `apply_min_score`
 (the user's score line, 0-100; null = not set - ask them, never assume one),
-`above_line` and `below_line` (ask | auto - what to do with jobs at or above,
-and below, the line), `submit_mode` (confirm | auto_when_sure),
+`above_line` (ask | auto) and `below_line` (ask | auto | skip = never apply, drop it) - jobs at or
+above, and below, the line; `submit_mode` (confirm | auto_when_sure),
 `daily_cap` (null = no cap), `company_cap` / `company_cap_days` (most applications
 to ONE company in that many days; null = no limit), `weekly_cap` (Monday-Sunday in the user's timezone; null = none),
 `min_gap_minutes` (0-240 between submits; null = none), `apply_hours` ({from, to} "HH:MM" in the user's timezone; null = any time),
@@ -42,7 +42,7 @@ before the final submit.
 
 Assistant settings are fourteen paths: `assistant_settings.apply_min_score`
 (the score line, whole number 0-100), `assistant_settings.above_line` and
-`assistant_settings.below_line` (ask | auto), `assistant_settings.submit_mode` (confirm |
+`assistant_settings.below_line` (ask | auto | skip), `assistant_settings.submit_mode` (confirm |
 auto_when_sure), `assistant_settings.daily_cap` (whole number >= 1, or null
 for no cap), `assistant_settings.company_cap` (whole number >= 1, or null: most
 applications to one company) with `assistant_settings.company_cap_days` (1-365,
@@ -98,12 +98,13 @@ latest `form_filled`), form_check_missing (`stop`: a newer application has no `f
 email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you
-recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Indeed and LinkedIn
+recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it), below_score_line (`stop`: below the
+line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
 email_not_verified, blocked, held_by_other_session, company_avoided, submit_unconfirmed, weekly_cap_reached, pace_wait,
-outside_hours or form_pages_incomplete: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
+outside_hours, form_pages_incomplete, below_score_line or answer_guessed: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason
