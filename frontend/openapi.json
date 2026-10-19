@@ -1690,6 +1690,11 @@
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
           },
+          "origin": {
+            "default": "",
+            "title": "Origin",
+            "type": "string"
+          },
           "preflight": {
             "anyOf": [
               {
@@ -2463,6 +2468,22 @@
             "title": "Location",
             "type": "string"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ai_hunt",
+                  "user_link",
+                  "user_paste"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
           "posted_at": {
             "anyOf": [
               {
@@ -2474,6 +2495,11 @@
               }
             ],
             "title": "Posted At"
+          },
+          "queue": {
+            "default": false,
+            "title": "Queue",
+            "type": "boolean"
           },
           "remote": {
             "anyOf": [
@@ -2601,6 +2627,28 @@
           },
           "job": {
             "$ref": "#/components/schemas/JobResponse"
+          },
+          "queue_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Note"
+          },
+          "queued": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued"
           },
           "remote": {
             "anyOf": [

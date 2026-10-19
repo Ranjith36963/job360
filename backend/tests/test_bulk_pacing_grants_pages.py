@@ -220,7 +220,8 @@ def test_the_gap_wait_is_moved_to_the_next_opening_when_it_would_fall_outside_th
 
 def test_pace_settings_validate_and_classify():
     assert validate_edit(GAP, 0) == 0 and validate_edit(GAP, 240) == 240
-    for bad in (-1, 241, "5", True, 1.5):
+    assert validate_edit(GAP, 1.5) == 1.5, "whole seconds are allowed (owner ask 2026-10-18)"
+    for bad in (-1, 241, "5", True, 1.001):
         with pytest.raises(ProfileEditError):
             validate_edit(GAP, bad)
     assert validate_edit(HOURS, {"from": "09:00", "to": "17:30"}) == {"from": "09:00", "to": "17:30"}

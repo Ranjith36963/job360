@@ -437,6 +437,6 @@ describe("ApplicationList — Queued filter (batch queue)", () => {
     render(<ApplicationList />);
     await screen.findByText("Staff Engineer");
     fireEvent.click(screen.getByTestId("queued-filter"));
-    await screen.findByText("Nothing is in your batch.");
+    await screen.findByText("Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt.");
   });
 });

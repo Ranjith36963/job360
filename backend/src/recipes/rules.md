@@ -26,7 +26,7 @@ is a practice run: fill it, stop before submit, let the user check it.
 and below, the line), `submit_mode` (confirm | auto_when_sure),
 `daily_cap` (null = no cap), `company_cap` / `company_cap_days` (most applications
 to ONE company in that many days; null = no limit), `weekly_cap` (Monday-Sunday in the user's timezone; null = none),
-`min_gap_minutes` (0-240 between submits; null = none), `apply_hours` ({from, to} "HH:MM" in the user's timezone; null = any time),
+`min_gap_minutes` (0-240 minutes between submits, whole seconds allowed; null = none), `apply_hours` ({from, to} "HH:MM" in the user's timezone; null = any time),
 `auto_grant_count` / `auto_grant_until` ("auto for my next N until <time>"), `paused_until` ("" | "until_resumed" | a time)
 and `pause_reason` has a `value` (what was chosen, empty = not chosen) and an
 `effective` (the safe default filled in: no line, ask, ask, confirm, no cap,
@@ -46,7 +46,7 @@ Assistant settings are fifteen paths (`assistant_settings.auto_employer_emails` 
 auto_when_sure), `assistant_settings.daily_cap` (whole number >= 1, or null
 for no cap), `assistant_settings.company_cap` (whole number >= 1, or null: most
 applications to one company) with `assistant_settings.company_cap_days` (1-365,
-default 180), `assistant_settings.weekly_cap` (whole number >= 1, or null), `assistant_settings.min_gap_minutes` (0-240 or
+0 = all time, default 180), `assistant_settings.weekly_cap` (whole number >= 1, or null), `assistant_settings.min_gap_minutes` (0-240 minutes in whole seconds, 1.5 = 1 min 30 s, or
 null) and `assistant_settings.apply_hours` ({"from":"09:00","to":"17:00"} in the user's own timezone, or null; from later
 than to = overnight) - the user's own FIXED pace, never randomized, `check_submit` enforces it; `assistant_settings.auto_grant_count`
 (1-100) with `assistant_settings.auto_grant_until` (ISO time with an offset, at most 7 days ahead): while now is before

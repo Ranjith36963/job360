@@ -211,6 +211,12 @@ class BringJobRequest(BaseModel):
     # ad; checked by job_facts.normalize_ad_date (ISO, not in the future).
     posted_at: Optional[str] = Field(None, max_length=10)
     employer_published_at: Optional[str] = Field(None, max_length=10)
+    # Owner ask 2026-10-18: where this job came from, shown as a tag on every job - ``ai_hunt`` (your
+    # assistant found it), ``user_link`` (the user gave the link), ``user_paste`` (the user pasted the
+    # ad). Stored on the ``brought`` event of a NEW application; omitted = not said (rule #29).
+    origin: Optional[Literal["ai_hunt", "user_link", "user_paste"]] = None
+    # Owner ask 2026-10-18: put it straight into the batch (a ``queued`` event) when it is open.
+    queue: bool = Field(False, strict=True)
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -258,6 +264,10 @@ class BringJobResponse(BaseModel):
     # title at the same company was brought by THIS user earlier under another
     # link (1..90 days ago). Facts only; the user decides.
     repost: Optional[dict[str, Any]] = None
+    # ``queue: true`` only: is it in the batch now, and why not when it is not
+    # ("not open" = already applied or closed; "already queued" is still true).
+    queued: Optional[bool] = None
+    queue_note: Optional[str] = None
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -440,6 +450,7 @@ async def bring_job(
     }
     birth = await applications_spine.birth_application(
         db, user_id=user.id, job_id=job_id, job_row=own_paste, recorded_by=actor_for(user),
+        origin=body.origin,
     )
     if not birth["existing"] and not inserted:
         # The catalog key already existed (another user's paste, a re-titled
@@ -531,7 +542,15 @@ async def bring_job(
     except Exception:  # noqa: BLE001 — analytics must never break a bring
         logger.debug("analytics_first_bring_failed", extra={"user_id": user.id})
 
+    queued: Optional[bool] = None
+    queue_note: Optional[str] = None
+    if body.queue:
+        queued, queue_note = await applications_spine.queue_if_open(
+            db, user.id, birth["application_id"], recorded_by=actor_for(user)
+        )
     return BringJobResponse(
+        queued=queued,
+        queue_note=queue_note,
         # THIS caller's snapshot, never the shared row (P0 2026-10-14).
         job=application_job_response(app_now, dict(row)),
         # Per user: "you already had this job". Whether another user brought

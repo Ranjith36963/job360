@@ -9,7 +9,7 @@ import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { PRIORITY_LABEL, PRIORITY_OPTIONS } from "@/lib/memory";
-import { preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import { originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
 import type { QueueSummary } from "@/lib/batch-queue";
 
 
@@ -115,6 +115,11 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                 {app.stage && (
                   <p data-testid="row-stage" className="mt-1 text-xs text-warning">
                     {app.stage}
+                  </p>
+                )}
+                {originLabel(app.origin) && (
+                  <p data-testid="row-origin" className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+                    {originLabel(app.origin)}
                   </p>
                 )}
                 {/* Batch queue: the place in line and anything that would stop it. */}
@@ -418,7 +423,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       ) : visibleApplications && visibleApplications.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {queuedOnly
-            ? "Nothing is in your batch."
+            ? "Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt."
             : inFlight
               ? "Nothing is in flight right now."
               : priority !== "all"

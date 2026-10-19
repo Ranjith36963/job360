@@ -714,9 +714,10 @@ class AssistantSettings:
     company_cap_days: Optional[int] = None
     # Bulk-apply C2: most applications per Monday-Sunday week in the user's own timezone. None = no cap.
     weekly_cap: Optional[int] = None
-    # Bulk-apply C1: the user's OWN fixed pace. ``min_gap_minutes`` 0-240 (None = none); ``apply_hours``
-    # = {"from": "HH:MM", "to": "HH:MM"} in the user's timezone (None = any time). Never randomized.
-    min_gap_minutes: Optional[int] = None
+    # Bulk-apply C1: the user's OWN fixed pace. ``min_gap_minutes`` 0-240 in whole seconds (1.5 = 1 min
+    # 30 s; None = none); ``apply_hours`` = {"from": "HH:MM", "to": "HH:MM"} in the user's timezone (None =
+    # any time). Never randomized.
+    min_gap_minutes: Optional[float] = None
     apply_hours: Optional[dict[str, str]] = None
     # Bulk-apply R1: "auto for my next N until <time>". While now < until and fewer than N applied events
     # since the grant began, the submit mode resolves to auto; after that it is the user's own submit_mode.
