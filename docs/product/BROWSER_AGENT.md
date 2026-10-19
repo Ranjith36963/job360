@@ -193,6 +193,20 @@ form; the test fails when the wait is removed.
   `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); line breaks go
   only into a multi-line box, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
 
+**Step 4, site playbooks for Greenhouse, Lever and Ashby (2026-10-19, `sites.py`):**
+- **`site`:** every read names the job site from the page's own address, or its frames (Greenhouse and iCIMS forms
+  often sit in a frame on a company page). It matches the end of the host name, never a piece of the URL, so
+  `evilgreenhouse.io.example.com` is not Greenhouse. Known: Greenhouse, Lever, Ashby, Workday, SmartRecruiters,
+  iCIMS. Each comes with 1 to 4 short tips for the assistant.
+- **`site_warnings` (Lever):** a location typed but not picked from Lever's list (the site refuses those), and a
+  cookie banner over the form. `choose` now also picks from Lever's location list.
+- **Ashby Yes/No buttons:** the chosen one reads `pressed: true`.
+- **Did it go?** `confirmation_seen` only on a positive confirmation ("Thank you for applying", Ashby's "Your
+  application was successfully submitted.", Lever's `/thanks` page). `site_refused` when the site says it did not take
+  it ("Your form needs corrections", "Missing entry for required field: X"); a refusal wins. After a submit the `next`
+  line says which one: record the application, fix the fields, or neither (never click submit again). All from
+  ApplYourself `src/apply/fill.py`; the recipe `get_recipe("ats")` has the same rows as BORROWED until a real run.
+
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
