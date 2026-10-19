@@ -26,7 +26,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
   GitHub merges it when the 13 required checks are green. Never leave finished work unpushed.
   Keep `.claude/**`, `.github/**`, `scripts/**` out of product PRs: `auto-merge.yml` disarms
-  any PR with an owner-lane file. Every `**/CLAUDE.md` is still human-only (merge-policy.yml:56):
+  any PR with an owner-lane file. Every `**/CLAUDE.md` is still human-only (the `harness_owner` lane in merge-policy.yml):
   a CLAUDE.md fix (even a `last-verified` stamp) goes in its own PR, never in a product PR.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
 - Read CI failures from the job summary, not the log tail (Postgres noise).
