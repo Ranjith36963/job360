@@ -21,13 +21,15 @@ import {
 // Agentic UX audit (2026-09-08) — the whole product depends on the user
 // connecting their own assistant, but /settings/connect was reachable only
 // via the gear icon. It is a first-class destination now, not a settings tab.
+// "Needs you" leads the list (owner, 2026-10-19): the questions only the user
+// can answer are the first thing to look at, above Home.
 export const NAV_LINKS: readonly { href: string; label: string; icon: LucideIcon }[] = [
+  { href: "/needs-you", label: "Needs you", icon: MessageCircleQuestion },
   { href: "/", label: "Home", icon: House },
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Jobs in", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
   { href: "/stats", label: "Stats", icon: BarChart3 },
-  { href: "/needs-you", label: "Needs you", icon: MessageCircleQuestion },
   { href: "/receipts", label: "Receipts", icon: Receipt },
   { href: "/settings/connect", label: "Connect your assistant", icon: Plug },
 ];
