@@ -1,5 +1,5 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
+<!-- doc: LIVING | last-verified: 2026-10-19 by the CI-audit session (claims re-checked against code) -->
 
 > **This is a thin pointer, not the source of truth.** The mission is
 > [`../docs/product/VISION.md`](../docs/product/VISION.md) (agent thinks, Job360
