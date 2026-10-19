@@ -1495,6 +1495,8 @@ NAMING = """<!doctype html><html><body>
 <span id="lbl">Submit application</span>
 <button id="by" aria-labelledby="lbl">&rarr;</button>
 <button id="tip" title="Send">Submit application</button>
+<button id="ph" placeholder="Next">Submit application</button>
+<div id="rb" role="button" placeholder="Next">Submit application</div>
 <button id="pic"><img src="data:," alt="Submit application"></button>
 <input id="img" type="image" src="data:," alt="Submit">
 <button id="outside" type="submit" form="f">Apply</button>
@@ -1523,10 +1525,13 @@ async def test_the_gate_names_every_control_the_way_the_look_shows_it():
                 assert facts["name"] == el["name"], (el, facts)
             names = {e["name"] for e in snap["elements"]}
             assert {"Submit application", "Submit"} <= names
-            tip = await page.locator("#tip").evaluate(ELEMENT_FACTS_JS)
-            assert tip["name"] == "Submit application"   # its text, not its tooltip
+            for sel in ("#tip", "#ph", "#rb"):   # its text, never a tooltip or a placeholder="Next"
+                f = await page.locator(sel).evaluate(ELEMENT_FACTS_JS)
+                assert f["name"] == "Submit application", (sel, f)
+                assert control_kind(f["tag"], f["type"], f["name"], f["autocomplete"], f["in_form"],
+                                    f["role"], f["page_has_answers"]) == "submit", (sel, f)
             assert (await page.locator("#outside").evaluate(ELEMENT_FACTS_JS))["in_form"] is True
-            assert len([e for e in snap["elements"] if e["tag"] == "div"]) == 2   # both rich-text boxes
+            assert len([e for e in snap["elements"] if e["tag"] == "div" and not e["role"]]) == 2   # both rich-text boxes
             # Only a rich-text answer typed: the form is still being filled.
             assert (await page.locator("#outside").evaluate(ELEMENT_FACTS_JS))["page_has_answers"] is True
             await page.locator("#rich").evaluate("(el) => { el.innerText = ''; }")

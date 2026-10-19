@@ -44,7 +44,11 @@ _LABEL_OF_JS = r"""
       const alts = Array.from(el.querySelectorAll('img[alt]')).map(i => i.alt).join(' ');
       if (alts.trim()) return alts;
     }
-    // Visible text before the tooltip: the gate must see "Submit application", not a title="Send".
+    // A button or link is named by what it shows, before any placeholder or tooltip: the gate must
+    // see "Submit application", not a placeholder="Next" or title="Send" (#933 review).
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if ((el.tagName === 'BUTTON' || el.tagName === 'A' || role === 'button' || role === 'link')
+        && (el.innerText || '').trim()) return el.innerText;
     return el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
   };
   // A button can belong to a form it sits outside of (form="id"): el.form knows, closest() does not.
