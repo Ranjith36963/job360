@@ -349,6 +349,16 @@ async def test_a_corrected_applied_date_or_a_late_simulation_mark_is_handled(
         )
         assert back.status_code == 201, back.text
         assert (await rules.load_submit_counts(db, fixture_user_id, now, target, window_days=180)).company_applied_in_window == 3
+        # A NOTE that retracts an applied is not a re-dating: an older applied of that application
+        # stays out of the window (CodeRabbit 2026-10-19).
+        retracted = await _bring(client, _ad(5))
+        recent = await _event(client, retracted, "applied", occurred_at=(now - timedelta(days=2)).isoformat())
+        assert recent.status_code == 201, recent.text
+        undo = await _event(client, retracted, "note", detail="not sent", corrects_event_id=recent.json()["event_id"])
+        assert undo.status_code == 201, undo.text
+        old_one = await _event(client, retracted, "applied", occurred_at=(now - timedelta(days=500)).isoformat())
+        assert old_one.status_code == 201, old_one.text
+        assert (await rules.load_submit_counts(db, fixture_user_id, now, target, window_days=180)).company_applied_in_window == 3
 
 
 @pytest.mark.asyncio

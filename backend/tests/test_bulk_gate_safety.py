@@ -625,9 +625,10 @@ async def test_a_version_restore_by_an_assistant_cannot_drop_a_never_apply_compa
     async with _bearer(token) as bot:
         refused = await bot.post(f"/api/profile/versions/{oldest}/restore")
         assert refused.status_code == 403, refused.text
+        assert "never-apply list" in refused.text
         assert (await bot.post("/api/profile/versions/999999/restore")).status_code == 404
     async with authenticated_async_context() as client:
-        assert "Northwind" in str((await client.get("/api/profile")).json())
+        assert (await client.get("/api/profile")).json()["preferences"]["avoid_companies"] == ["Northwind"]
         web = await client.post(f"/api/profile/versions/{oldest}/restore")
         assert web.status_code == 200, web.text
-        assert "Northwind" not in str(web.json()["preferences"]["avoid_companies"])
+        assert web.json()["preferences"]["avoid_companies"] == []
