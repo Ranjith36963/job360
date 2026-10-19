@@ -975,7 +975,9 @@ def build_server(version: str = "") -> MCPServer:
         every artifact version (text omitted unless with_artifact_text=true),
         the whole event timeline, receipts, and `next_step` — what to do next,
         read off the stored state. Branch on `next_step.code`: judge_fit → call
-        save_fit; write_cv → save_artifact(kind="cv"); apply → the human applies,
+        save_fit; write_cv → save_artifact(kind="cv"); submit_now → the user
+        clicked Send on the web: open the form, check_submit, type its
+        type_first answers, submit, record_application; apply → the human applies,
         then record_application; record_receipt → record_application; schedule →
         record_event(interview_scheduled, scheduled_at=…); record_outcome → the
         interview date has passed, record how it went via record_event (
@@ -1641,12 +1643,11 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def check_submit(application_id: int, form_url: str = "", session: str = "") -> dict[str, Any]:
-        """May you press the FINAL submit on this application's form? Call this
-        right before the submit with `form_url` (the page the form is on) and your `session` label
-        (the one you gave get_application_kit). ONE decision from the user's settings:
+        """Call right before the FINAL submit, with `form_url` (the page the form is on) and
+        your `session` label (as given to get_application_kit). ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
-        the user yes for this one application; `stop` - do not submit. `reason`
-        is a short code and `detail` one plain sentence you can show the user. Reasons:
+        the user yes for this one; `stop` - do not submit. `reason` = a code, `detail` = a
+        sentence for the user. Reasons:
         paused, already_applied, user_declined,
         daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
         company_avoided (the user's own never-apply list), form_pages_incomplete (`stop`),
@@ -1665,7 +1666,8 @@ def build_server(version: str = "") -> MCPServer:
         user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
         `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
         email_not_verified, blocked or held_by_other_session: tell the user.
-        Also `daily_left`, `company_left` (null = no limit).
+        Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
+        changed on the web - type each into its field (replace it) before submitting.
         Read-only; after a real submit, call `record_application`."""
         try:
             async with _request_db() as db:
