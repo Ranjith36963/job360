@@ -1408,6 +1408,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/browser": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Browser Action
+         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,
+         *     close). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant
+         *     reads them like any page; a 404 from the gate (not the caller's application) stays a 404.
+         */
+        post: operations["browser_action_api_browser_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/browser/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Browser Live
+         * @description One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
+         *     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
+         *     logged or returned; the audit line names the action only.
+         */
+        post: operations["browser_live_api_browser_live_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/browser/sign-ins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sign Ins
+         * @description The job sites the user's cloud browser is kept signed in to (never a cookie value).
+         */
+        get: operations["list_sign_ins_api_browser_sign_ins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/browser/sign-ins/{host}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Forget Sign In
+         * @description Forget one saved sign-in. The user's live browser (if any) is closed so it forgets too.
+         */
+        delete: operations["forget_sign_in_api_browser_sign_ins__host__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/calendar-feed": {
         parameters: {
             query?: never;
@@ -3701,6 +3785,43 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** BrowserActionRequest */
+        BrowserActionRequest: {
+            /** Action */
+            action: string;
+            /** Application Id */
+            application_id?: number | null;
+            /**
+             * Doc Kind
+             * @default
+             */
+            doc_kind: string;
+            /**
+             * On
+             * @default true
+             */
+            on: boolean;
+            /**
+             * Ref
+             * @default
+             */
+            ref: string;
+            /**
+             * Session
+             * @default
+             */
+            session: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+        };
         /**
          * CVDetail
          * @description Full extracted CV data for transparent display.
@@ -5109,6 +5230,41 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+        };
+        /** LiveActionRequest */
+        LiveActionRequest: {
+            /** Action */
+            action: string;
+            /**
+             * Dy
+             * @default 0
+             */
+            dy: number;
+            /**
+             * Key
+             * @default
+             */
+            key: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * X
+             * @default 0
+             */
+            x: number;
+            /**
+             * Y
+             * @default 0
+             */
+            y: number;
         };
         /** LivezResponse */
         LivezResponse: {
@@ -9855,6 +10011,156 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browser_action_api_browser_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrowserActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browser_live_api_browser_live_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sign_ins_api_browser_sign_ins_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_sign_in_api_browser_sign_ins__host__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                host: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {

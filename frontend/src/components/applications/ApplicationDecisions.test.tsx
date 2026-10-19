@@ -295,6 +295,38 @@ describe("Your assistant got stuck (blocked record)", () => {
     );
     expect(screen.getByTestId("blocked-detail").textContent).toBe("Needs a puzzle solved");
   });
+
+  it("links to Job sites when Job360's own browser met a sign-in page, and only then", () => {
+    const { rerender } = render(
+      <ApplicationDecisions
+        applicationId={7}
+        controls={controls({
+          blocked: { ...BLOCKED, reason: "login_needed", reason_label: "a sign-in page", step: "Job360 browser" },
+        })}
+        onChanged={() => undefined}
+      />
+    );
+    const link = screen.getByTestId("blocked-sign-in-link");
+    expect(link).toHaveAttribute("href", "/settings/job-sites");
+    expect(link.textContent).toBe("Sign in once to jobs.example.com on Job sites");
+    // A CAPTCHA, or a sign-in page met by the assistant's own browser: no such link.
+    rerender(
+      <ApplicationDecisions
+        applicationId={7}
+        controls={controls({ blocked: { ...BLOCKED, step: "Job360 browser" } })}
+        onChanged={() => undefined}
+      />
+    );
+    expect(screen.queryByTestId("blocked-sign-in-link")).toBeNull();
+    rerender(
+      <ApplicationDecisions
+        applicationId={7}
+        controls={controls({ blocked: { ...BLOCKED, reason: "login_needed", reason_label: "a sign-in page" } })}
+        onChanged={() => undefined}
+      />
+    );
+    expect(screen.queryByTestId("blocked-sign-in-link")).toBeNull();
+  });
 });
 
 describe("nothing-sent line", () => {
