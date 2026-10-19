@@ -49,8 +49,7 @@ delete a lesson; if one stops being true, say so on its line and why.
   confirm the Railway deploy on the merge sha. Same day, PR #883: 30 s after
   arming, `auto-merge.yml` DISARMED it (timeline `auto_merge_disabled`) because
   one `.claude/` file matched no lane in `.github/merge-policy.yml` (owner
-  lane). **Rule:** keep product PRs free of `.claude/**`, `.github/**`,
-  `scripts/**` files; ship those separately (owner merges them).
+  lane). **Rule:** read a PR's lane off `lane.classify` (`python scripts/lane.py`), never a prefix list.
 
 ## Handing work to another Claude session
 
