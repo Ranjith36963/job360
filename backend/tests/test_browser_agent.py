@@ -665,7 +665,9 @@ def test_the_probe_summary_reads_a_page_the_way_the_assistant_would():
     wall = {"status": "needs_you", "reason": "captcha", "elements": []}
     assert summarise(wall)["outcome"] == "captcha"
     text = table([{"host": "jobs.acme.com", **summarise(form)}, {"host": "x.com", "outcome": "error", "detail": "403"}])
-    assert "jobs.acme.com" in text and "total: error 1, ok 1" in text
+    lines = text.splitlines()
+    assert lines[1].split()[:2] == ["jobs.acme.com", "ok"]
+    assert lines[-1] == "total: error 1, ok 1"
 
 
 @needs_chromium
