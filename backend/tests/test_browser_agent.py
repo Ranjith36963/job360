@@ -1486,3 +1486,125 @@ async def test_choose_matches_native_labels_skips_hidden_lists_and_never_clicks_
         assert await s.page.title() == "Choices - Acme"   # never submitted
     finally:
         await pool.shutdown()
+
+
+# ── #908 follow-up: the gate sees what the look shows; engine guards ──────────
+
+NAMING = """<!doctype html><html><body>
+<form id="f"><input name="first" placeholder="First name"></form>
+<span id="lbl">Submit application</span>
+<button id="by" aria-labelledby="lbl">&rarr;</button>
+<button id="tip" title="Send">Submit application</button>
+<button id="pic"><img src="data:," alt="Submit application"></button>
+<input id="img" type="image" src="data:," alt="Submit">
+<button id="outside" type="submit" form="f">Apply</button>
+<div id="rich" contenteditable="">Why us?</div>
+<div id="plain" contenteditable="plaintext-only"></div>
+</body></html>"""
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_the_gate_names_every_control_the_way_the_look_shows_it():
+    # The look (SNAPSHOT_JS) and the gate (ELEMENT_FACTS_JS) used to name controls two ways, so a
+    # button the look showed as "Submit application" could reach the gate as an ordinary field.
+    async_api = pytest.importorskip("playwright.async_api")
+    from src.services.browser_agent.page_js import ELEMENT_FACTS_JS, SNAPSHOT_JS
+
+    async with async_api.async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            page = await browser.new_page()
+            await page.set_content(NAMING)
+            snap = await page.evaluate(SNAPSHOT_JS, {"maxElements": 100, "maxText": 2000})
+            for el in snap["elements"]:
+                facts = await page.locator(f'[data-j360-ref="{el["ref"]}"]').evaluate(ELEMENT_FACTS_JS)
+                assert facts["name"] == el["name"], (el, facts)
+            names = {e["name"] for e in snap["elements"]}
+            assert {"Submit application", "Submit"} <= names
+            tip = await page.locator("#tip").evaluate(ELEMENT_FACTS_JS)
+            assert tip["name"] == "Submit application"   # its text, not its tooltip
+            assert (await page.locator("#outside").evaluate(ELEMENT_FACTS_JS))["in_form"] is True
+            assert len([e for e in snap["elements"] if e["tag"] == "div"]) == 2   # both rich-text boxes
+            # Only a rich-text answer typed: the form is still being filled.
+            assert (await page.locator("#outside").evaluate(ELEMENT_FACTS_JS))["page_has_answers"] is True
+            await page.locator("#rich").evaluate("(el) => { el.innerText = ''; }")
+            assert (await page.locator("#outside").evaluate(ELEMENT_FACTS_JS))["page_has_answers"] is False
+        finally:
+            await browser.close()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_open_works_again_after_every_tab_was_closed(pool):
+    from src.services.browser_agent.agent import run
+
+    await run(pool, "u1", "open", url="http://jobs.example/form")
+    s = pool._sessions["u1"]  # noqa: SLF001
+    for tab in list(s.context.pages):
+        await tab.close()
+    page = await run(pool, "u1", "open", url="http://jobs.example/form")
+    assert page["elements"], page
+
+
+@pytest.mark.asyncio
+async def test_a_dead_chromium_frees_every_session_it_held():
+    import types
+
+    from src.services.browser_agent.agent import BrowserPool, Session
+
+    class _Ctx:
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    async def resolve(host, port=0, family=socket.AF_UNSPEC):
+        return []
+
+    pool = BrowserPool(max_sessions=2, idle_s=600, resolve=resolve)
+    pool._browser = types.SimpleNamespace(is_connected=lambda: False)  # noqa: SLF001
+    ctxs = [_Ctx(), _Ctx()]
+    pool._sessions = {  # noqa: SLF001
+        "a": Session(context=ctxs[0], page=None), "b": Session(context=ctxs[1], page=None),
+    }
+    assert await pool.get("a", create=False) is None
+    assert pool._sessions == {} and all(c.closed for c in ctxs)  # noqa: SLF001
+
+
+def test_chromium_launches_with_webrtc_kept_behind_the_proxy(monkeypatch):
+    # WebRTC's UDP does not use --proxy-server: without this flag a page could reach any address
+    # around the request screen.
+    import asyncio
+    import sys
+    import types
+
+    from src.services.browser_agent.agent import BrowserPool
+
+    launched: dict = {}
+
+    class _Chromium:
+        async def launch(self, **kw):
+            launched.update(kw)
+            return types.SimpleNamespace(is_connected=lambda: True)
+
+    class _Starter:
+        async def start(self):
+            return types.SimpleNamespace(chromium=_Chromium())
+
+    fake = types.ModuleType("playwright.async_api")
+    fake.async_playwright = lambda: _Starter()
+    monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.async_api", fake)
+
+    async def resolve(host, port=0, family=socket.AF_UNSPEC):
+        return []
+
+    pool = BrowserPool(max_sessions=1, idle_s=60, resolve=resolve)
+    pool.egress.port = 1  # no proxy is started: only the flags are read
+    asyncio.run(pool._ensure_browser())  # noqa: SLF001
+    args = launched["args"]
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in args
+    assert "--proxy-server=http://127.0.0.1:1" in args
