@@ -35,6 +35,7 @@ from src.services.browser_agent.page_js import (
     FOCUS_IN_LIST_JS,
     IS_TEXT_FIELD_JS,
     IS_TYPEAHEAD_JS,
+    LEVER_CHECK_JS,
     NATIVE_SET_JS,
     OWN_LIST_IDS_JS,
     SHOWN_VALUE_JS,
@@ -42,6 +43,7 @@ from src.services.browser_agent.page_js import (
     TICK_VIA_LABEL_JS,
 )
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
+from src.services.browser_agent.sites import outcome_for, site_for
 from src.services.fetch.guard import ResolveFn
 
 logger = logging.getLogger("job360.services.browser_agent")
@@ -279,8 +281,8 @@ async def _type_into(loc: Any, text: str) -> str:
 
 # Where custom dropdowns draw their options: ARIA options anywhere (often a portal at the end of the
 # page), react-select's classes, and Workday's prompt options (freehire combobox.ts:44-119;
-# OfferOS dom-fill.ts:913-960; ApplYourself fill.py:12-17).
-OPTION_SELECTOR = '[role=option], .select__option, [data-automation-id="promptOption"]'
+# OfferOS dom-fill.ts:913-960; ApplYourself fill.py:12-17) and Lever's location list (fill.py:50-56).
+OPTION_SELECTOR = '[role=option], .select__option, [data-automation-id="promptOption"], .dropdown-results > *'
 
 
 def _pick(options: list[str], want: str) -> int:
@@ -457,6 +459,22 @@ async def _frame_shown(frame: Any) -> bool:
     return bool(box) and box["width"] > 1 and box["height"] > 1
 
 
+async def _site_warnings(page: Any, site: str) -> list[str]:
+    """Traps a site sets that the element list cannot show."""
+    if site != "lever":
+        return []
+    try:
+        facts = await asyncio.wait_for(page.evaluate(LEVER_CHECK_JS), FRAME_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 - a page mid-navigation: no warning this read
+        return []
+    out = []
+    if facts.get("location_unpicked"):
+        out.append("Location is typed but not picked from the list: choose it, or Lever refuses the application.")
+    if facts.get("cookie_banner"):
+        out.append("A cookie banner is over the form: click its Allow or Accept button first.")
+    return out
+
+
 async def look(s: Session) -> dict[str, Any]:
     """Read the page: the visible controls nearest the screen (with a ref to act on), how many more
     there are above and below, and the page text inside an untrusted-content marker."""
@@ -499,6 +517,17 @@ async def look(s: Session) -> dict[str, Any]:
         "elements": elements,
         "text": _wrap_untrusted(text),
     }
+    site = site_for(page.url, frame_urls[1:])
+    if site is not None:
+        out["site"] = {"name": site.name, "tips": list(site.tips)}
+        warnings = await _site_warnings(page, site.name)
+        if warnings:
+            out["site_warnings"] = warnings
+    outcome = outcome_for(site, page.url, text)
+    if outcome.confirmed:
+        out["confirmation_seen"] = True
+    if outcome.refused:
+        out["site_refused"] = list(outcome.refused)
     if above or below:
         out["more_elements"] = {
             "above": above, "below": below,
@@ -648,10 +677,18 @@ async def _act(
         out = await look(s)
         if submitted:
             out["submit_clicked"] = True
-            out["next"] = (
-                "Read the page. A confirmation means it went: call record_application. "
-                "No confirmation: do NOT click submit again; record blocked and tell the user."
-            )
+            if out.get("site_refused"):
+                out["next"] = (
+                    "The site says it did NOT take the application (site_refused). Read the page text for "
+                    "which fields, fix them, then check_submit again before another submit."
+                )
+            elif out.get("confirmation_seen"):
+                out["next"] = "The site shows a confirmation: call record_application."
+            else:
+                out["next"] = (
+                    "No confirmation on the page yet. Read it. Do NOT click submit again; if nothing "
+                    "confirms it, record blocked and tell the user."
+                )
         return out
 
     if action == "type":

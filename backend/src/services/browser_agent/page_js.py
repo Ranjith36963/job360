@@ -103,6 +103,10 @@ SNAPSHOT_JS = r"""
       else if (type === 'file') item.value = Array.from(el.files || []).map(f => f.name).join(', ');
       else item.value = clip(el.value, 300);
     } else if (el.getAttribute('aria-checked') !== null) item.checked = el.getAttribute('aria-checked') === 'true';
+    else if (el.getAttribute('aria-pressed') !== null) item.pressed = el.getAttribute('aria-pressed') === 'true';
+    // Ashby's Yes/No buttons: the chosen one carries a hashed "_active_" class (ApplYourself
+    // src/apply/fill.py:1059-1064); buttons only, an open listbox marks its highlighted div too.
+    else if (tag === 'button' && /(^|\s)_active_/.test(el.className || '')) item.pressed = true;
     return item;
   });
   const text = clip(document.body ? document.body.innerText : '', maxText);
@@ -193,12 +197,29 @@ SHOWN_VALUE_JS = r"""
 """
 
 # A suggestion box (react-select, Workday prompt, Lever location): typed key by key so the site's
-# key listeners fire (Skyvern handler.py:8713-8730).
+# key listeners fire (Skyvern handler.py:8713-8730). Lever's box is class="location-input" with no
+# role (ApplYourself tests/apply/fixtures/form_lever_minimal.html:26).
 IS_TYPEAHEAD_JS = r"""
 (el) => {
   const role = (el.getAttribute('role') || '').toLowerCase();
   return role === 'combobox' || !!el.getAttribute('aria-autocomplete') || el.hasAttribute('list')
-    || /select__input|autocomplete|typeahead/i.test(el.className || '');
+    || /select__input|autocomplete|typeahead|location-input/i.test(el.className || '');
+}
+"""
+
+# Lever's two traps (ApplYourself src/apply/fill.py:56-65): the location box is a search box, and
+# only a clicked suggestion fills the hidden #selected-location the board checks; and a cookie banner
+# (.cc-window) can sit over the first fields.
+LEVER_CHECK_JS = r"""
+() => {
+  const hidden = document.querySelector('#selected-location');
+  const shown = document.querySelector('#location-input, input[name="location"]');
+  const banner = document.querySelector('.cc-window');
+  const r = banner ? banner.getBoundingClientRect() : null;
+  return {
+    location_unpicked: !!(hidden && shown && shown.value.trim() && !hidden.value.trim()),
+    cookie_banner: !!(r && r.width > 1 && r.height > 1 && getComputedStyle(banner).visibility !== 'hidden'),
+  };
 }
 """
 

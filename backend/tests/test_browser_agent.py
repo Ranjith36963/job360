@@ -941,6 +941,155 @@ async def test_typeahead_custom_dropdown_and_attach_button_upload(widget_site):
         await pool.shutdown()
 
 
+# ── Step 4: site playbooks (sites.py) ─────────────────────────────────────────
+
+
+def test_the_site_is_named_from_the_host_never_a_url_substring():
+    from src.services.browser_agent.sites import site_for
+
+    assert site_for("https://job-boards.greenhouse.io/acme/jobs/1").name == "greenhouse"
+    assert site_for("https://jobs.eu.lever.co/acme/abc/apply").name == "lever"
+    assert site_for("https://jobs.ashbyhq.com/acme/abc/application").name == "ashby"
+    assert site_for("https://acme.wd3.myworkdayjobs.com/en-US/External").name == "workday"
+    assert site_for("https://jobs.smartrecruiters.com/Acme/1").name == "smartrecruiters"
+    # A company page with the form in an iframe is named by the frame.
+    assert site_for("https://acme.example/careers", ["https://careers-acme.icims.com/jobs/1"]).name == "icims"
+    assert site_for("https://evilgreenhouse.io.example.com/jobs/1") is None
+    assert site_for("https://acme.example/?next=https://jobs.lever.co/x") is None
+    assert site_for("https://login.icims.com/jobs/1") is None
+    assert site_for("not a url") is None
+
+
+def test_only_a_positive_confirmation_counts_and_a_refusal_wins():
+    from src.services.browser_agent.sites import outcome_for, site_for
+
+    ashby, lever = site_for("https://jobs.ashbyhq.com/a"), site_for("https://jobs.lever.co/a")
+    assert outcome_for(ashby, "https://jobs.ashbyhq.com/a", "Your application was successfully submitted.").confirmed
+    assert outcome_for(None, "https://x.example", "Thank you for applying to Acme!").confirmed
+    assert not outcome_for(None, "https://x.example", "Apply now. Submit your application below.").confirmed
+    refused = outcome_for(
+        ashby, "https://jobs.ashbyhq.com/a",
+        "Thank you for applying\nYour form needs corrections\nMissing entry for required field: LinkedIn",
+    )
+    assert not refused.confirmed
+    assert refused.refused == ("Your form needs corrections", "Missing entry for required field")
+    # Lever answers its form POST with a redirect to /thanks; the path alone is the proof there.
+    assert outcome_for(lever, "https://jobs.lever.co/acme/1/thanks", "").confirmed
+    assert not outcome_for(None, "https://x.example/thanks", "").confirmed
+
+
+LEVER = """<!doctype html><html><head><title>Acme - Engineer</title></head><body>
+<div class="cc-window" style="position:fixed;top:0;height:60px;width:100%">We use cookies
+  <a class="cc-allow" role="button" onclick="this.parentNode.remove()">Allow cookies</a></div>
+<form id="application-form" method="post" action="/acme/123/apply">
+  <label for="location-input">Current location</label>
+  <input class="location-input" id="location-input" type="text" name="location">
+  <input id="selected-location" type="hidden" name="selectedLocation">
+  <div class="dropdown-results"></div>
+  <button id="btn-submit" type="submit">Submit application</button>
+</form>
+<script>
+  const loc = document.getElementById('location-input'), box = document.querySelector('.dropdown-results');
+  loc.addEventListener('keyup', () => {   // Lever's own list: not react-select, not role=option
+    box.innerHTML = '';
+    document.getElementById('selected-location').value = '';
+    for (const c of ['London, England, United Kingdom', 'Lonavala, India']) {
+      if (!loc.value || !c.toLowerCase().startsWith(loc.value.toLowerCase())) continue;
+      const d = document.createElement('div'); d.textContent = c;
+      d.onclick = () => {
+        loc.value = c; box.innerHTML = '';
+        document.getElementById('selected-location').value = JSON.stringify({name: c});
+      };
+      box.appendChild(d);
+    }
+  });
+</script></body></html>"""
+ASHBY = """<!doctype html><html><head><title>Acme - Ashby</title></head><body>
+<div data-field-path="_systemfield_name"><label for="n">Name</label><input id="n"></div>
+<div data-field-path="q1"><label>Will you need sponsorship?</label>
+  <button type="button" class="_option_x1 _active_1svni_57">Yes</button>
+  <button type="button" class="_option_x1">No</button></div>
+<button type="button" id="go" onclick="document.getElementById('err').textContent =
+  'Your form needs corrections\\nMissing entry for required field: LinkedIn'">Submit Application</button>
+<p id="err"></p></body></html>"""
+
+
+@pytest.fixture
+async def ats_site():
+    from aiohttp import web
+
+    async def lever(_):
+        return web.Response(text=LEVER, content_type="text/html")
+
+    async def lever_post(_):
+        raise web.HTTPFound("/acme/123/thanks")
+
+    async def thanks(_):
+        return web.Response(text="<html><body><h3>Application submitted!</h3></body></html>", content_type="text/html")
+
+    async def ashby(_):
+        return web.Response(text=ASHBY, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/acme/123/apply", lever)
+    app.router.add_post("/acme/123/apply", lever_post)
+    app.router.add_get("/acme/123/thanks", thanks)
+    app.router.add_get("/acme/456/application", ashby)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site):
+    from src.services.browser_agent.agent import BrowserPool, Gate, run
+
+    table = {"jobs.lever.co": "93.184.216.34", "jobs.ashbyhq.com": "93.184.216.34"}
+    resolve, _ = _resolver(table)
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(ats_site))
+
+    async def mark():
+        return None
+
+    async def go(form_url):
+        return {"decision": "submit", "reason": "auto_when_sure", "detail": ""}
+
+    gate = Gate(check=go, mark_attempt=mark)
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.lever.co/acme/123/apply")
+        assert page["site"]["name"] == "lever" and any("suggestion" in t for t in page["site"]["tips"])
+        assert any("cookie banner" in w for w in page["site_warnings"])
+        page = await run(pool, "u1", "click", ref=_ref(page, "Allow cookies"))
+        loc = _ref(page, "Current location")
+        page = await run(pool, "u1", "type", ref=loc, text="Lon")
+        assert page["site_warnings"] == [
+            "Location is typed but not picked from the list: choose it, or Lever refuses the application."
+        ]
+        page = await run(pool, "u1", "choose", ref=loc, text="London")
+        assert "site_warnings" not in page
+        out = await run(pool, "u1", "click", ref=_ref(page, "Submit application"), gate=gate)
+        assert out["url"].endswith("/acme/123/thanks") and out["confirmation_seen"] is True
+        assert out["next"] == "The site shows a confirmation: call record_application."
+
+        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme/456/application")
+        assert page["site"]["name"] == "ashby" and "confirmation_seen" not in page
+        yes = next(e for e in page["elements"] if e["name"] == "Yes")
+        no = next(e for e in page["elements"] if e["name"] == "No")
+        assert yes["pressed"] is True and "pressed" not in no
+        page = await run(pool, "u1", "type", ref=_ref(page, "Name"), text="Ada")
+        out = await run(pool, "u1", "click", ref=_ref(page, "Submit Application"), gate=gate)
+        assert out["site_refused"] == ["Your form needs corrections", "Missing entry for required field"]
+        assert "LinkedIn" in out["text"]  # which field: in the page text, inside the untrusted marker
+        assert "did NOT take" in out["next"] and "confirmation_seen" not in out
+    finally:
+        await pool.shutdown()
+
+
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
