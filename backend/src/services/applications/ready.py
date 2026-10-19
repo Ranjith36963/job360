@@ -286,15 +286,22 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
         return []
     # Owner decision 2026-10-19: an answer is only off this list once a `form_swept` NEWER than
     # the fill reports the form now holds the user's words - the assistant's proof that it typed them.
+    # A multi-page form is swept page by page (`page`), so the NEWEST sweep of EACH page counts
+    # (a page-2 sweep must not hide the page-1 sweep that holds the answer); unpaged = one page.
     cur = await db._db.execute(
         "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
         "AND event_type = 'form_swept' AND id > (SELECT MAX(id) FROM application_events "
-        "WHERE application_id = ? AND user_id = ? AND event_type = 'form_filled') ORDER BY id DESC LIMIT 1",
+        "WHERE application_id = ? AND user_id = ? AND event_type = 'form_filled') ORDER BY id DESC",
         (app_row["id"], user_id, app_row["id"], user_id),
     )
-    sweep = await cur.fetchone()
-    held = _json(sweep["payload"]).get("answers") if sweep is not None else None
-    in_form = {(_norm(h.get("question", "")), _norm(h.get("answer", ""))) for h in held or [] if isinstance(h, dict)}
+    newest_per_page: dict[Any, Any] = {}
+    for row in await cur.fetchall():
+        payload = _json(row["payload"])
+        newest_per_page.setdefault(payload.get("page"), payload.get("answers"))
+    in_form = {
+        (_norm(h.get("question", "")), _norm(h.get("answer", "")))
+        for held in newest_per_page.values() for h in held or [] if isinstance(h, dict)
+    }
     return [p for p in pending if (_norm(p["question"]), _norm(p["answer"])) not in in_form]
 
 

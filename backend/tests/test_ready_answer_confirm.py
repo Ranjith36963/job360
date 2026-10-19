@@ -126,6 +126,13 @@ async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_
         await _sweep(client, app_id, word)
         check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
         assert check.json()["type_first"] == [] and check.json()["reason"] != "type_first_pending", check.json()
+        # A newer sweep of ANOTHER page (it does not hold this answer) must not re-lock it (CodeRabbit #897).
+        other = {"fields_checked": 1, "fixed": 0, "page": 2, "pages_total": 2,
+                 "answers": [{"question": "Notice period", "answer": "1 month", "source": "memory"}]}
+        resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_swept", "payload": other})
+        assert resp.status_code == 201, resp.text
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["type_first"] == [], check.json()
         # Once the assistant fills with the user's word, nothing is left to type.
         await _fill(client, app_id, [{**GUESS, "answer": word, "source": "approved"}])
         card = await _card(client, app_id)

@@ -53,7 +53,7 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    context=<row.context verbatim>, application_id=<row.application_id>)`.
    Job360 de-duplicates by that context, so never rephrase it.
 7. **The user's Send from the web FIRST:** each step-1 row whose `next_step.code` is `submit_now` (the user clicked Send on
-   Needs you): open its form, `check_submit`, type every `type_first` answer, `form_swept` with `answers`, `check_submit` = submit, submit.
+   Needs you): open its form, `check_submit`, type every `type_first` answer, `form_swept` with `answers`, `check_submit` = submit, submit, `record_application`.
    **Then hunt, kits, apply per modes:** `get_recipe("hunt")`, then
    `get_recipe("apply")` per each job's `save_fit` `line.switch`; submit only when
    `check_submit` says submit. Indeed or LinkedIn only, pause, duplicate or a
