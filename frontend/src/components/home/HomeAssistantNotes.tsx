@@ -22,10 +22,14 @@ import { EditedMark } from "@/components/profile/EditedMark";
 export function HomeAssistantNotes() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
-  // One save in flight at a time, in the order the edits were made: two
+  const [settling, setSettling] = useState(false);
+  // One request in flight at a time, in the order the owner acted: two
   // parallel requests could land out of order and leave the server holding an
   // older list than the screen. A queued save that a newer edit has already
-  // replaced is skipped — the newer one carries the whole list.
+  // replaced is skipped — the newer one carries the whole list. Keep and Take
+  // back join the same queue, so a note save still waiting can never land after
+  // them and undo them; and the notes are locked until they answer, so no edit
+  // can start from the list they are about to change.
   const seq = useRef(0);
   const chain = useRef<Promise<void>>(Promise.resolve());
   const latest = useRef<ProfileResponse | null>(null);
@@ -74,15 +78,22 @@ export function HomeAssistantNotes() {
   }, []);
 
   const settle = (run: (path: string) => Promise<ProfileResponse>, done: string, failed: string) =>
-    async (path: string) => {
-      try {
-        const next = await run(path);
-        latest.current = next;
-        setProfile(next);
-        toast.success(done);
-      } catch {
-        toast.error(failed);
-      }
+    (path: string) => {
+      setSettling(true);
+      const step = chain.current.then(async () => {
+        try {
+          const next = await run(path);
+          latest.current = next;
+          setProfile(next);
+          toast.success(done);
+        } catch {
+          toast.error(failed);
+        } finally {
+          setSettling(false);
+        }
+      });
+      chain.current = step;
+      return step;
     };
 
   if (!profile) return null;
@@ -95,6 +106,7 @@ export function HomeAssistantNotes() {
       <AssistantNotes
         notes={notes}
         onChange={save}
+        disabled={settling}
         showHistory
         trailing={
           <EditedMark
