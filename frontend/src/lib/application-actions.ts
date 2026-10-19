@@ -93,3 +93,37 @@ export function changesSinceApprovedCv(
   const base = approved ? approved.version_no : Math.min(...cvs.map((a) => a.version_no));
   return cvs.filter((a) => a.version_no > base).length;
 }
+
+interface StampedEvent extends EventLike {
+  corrects_event_id?: number | null;
+  superseded?: boolean;
+}
+
+/**
+ * "Started, never confirmed": the newest of submit_attempted / applied /
+ * submit_resolved is a submit_attempted. Same rule as the backend's
+ * `submit_unconfirmed` (kit.py): a retraction of a submit_attempted never
+ * clears it, and an `applied` that was retracted resolves nothing.
+ */
+export function submitUnconfirmed(events: readonly StampedEvent[]): boolean {
+  const retracted = new Set<number>();
+  for (const e of events) if (typeof e.corrects_event_id === "number") retracted.add(e.corrects_event_id);
+  let newest: StampedEvent | null = null;
+  for (const e of events) {
+    if (e.event_type !== "submit_attempted" && e.event_type !== "applied" && e.event_type !== "submit_resolved") continue;
+    if (e.event_type === "applied" && retracted.has(e.id)) continue;
+    if (!newest || e.id > newest.id) newest = e;
+  }
+  return newest?.event_type === "submit_attempted";
+}
+
+/** On the batch queue now: the newest surviving `queued` / `unqueued` event is `queued`. */
+export function isQueued(events: readonly StampedEvent[]): boolean {
+  let newest: StampedEvent | null = null;
+  for (const e of events) {
+    if (e.event_type !== "queued" && e.event_type !== "unqueued") continue;
+    if (e.superseded) continue;
+    if (!newest || e.id > newest.id) newest = e;
+  }
+  return newest?.event_type === "queued";
+}

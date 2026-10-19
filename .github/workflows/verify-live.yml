@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    # Mirrors ci.yml's Backend job exactly. NOT re-invented: a verifier that
+    # Mirrors ci-offline.yml's offline-suite job (the one backend pytest run). NOT re-invented: a verifier that
     # stands somewhere different from CI answers a different question, and then
     # the two disagree and you trust neither.
     services:

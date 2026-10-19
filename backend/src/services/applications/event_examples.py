@@ -34,6 +34,8 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
     "submit_declined": {"where": "chat"},
     "autofill_set": {"mode": "deny"},
     "hold_released": {"reason": "done"},
+    "submit_attempted": {},
+    "submit_resolved": {"outcome": "not_sent"},
     "site_account": {"host": "jobs.example.com"},
     "account_needed": {"host": "jobs.example.com"},
     "blocked": {

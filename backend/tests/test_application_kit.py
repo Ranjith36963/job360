@@ -1537,7 +1537,7 @@ def test_gate_form_not_swept_follows_form_not_recorded_and_keeps_the_rest_intact
 
 def test_form_swept_payload_keys_are_closed_and_pinned():
     assert kit_service.EVENT_PAYLOAD_KEYS["form_swept"] == frozenset(
-        {"fields_checked", "fixed", "notes", "unreadable"}
+        {"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total"}
     )
     assert "form_swept" in kit_service.KIT_EVENT_TYPES
 

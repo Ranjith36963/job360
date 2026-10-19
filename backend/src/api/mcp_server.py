@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 5
-TOOLS_REV_FOR_HASH = "622847d9dab0"
+TOOLS_REV = 6
+TOOLS_REV_FOR_HASH = "3071a11b0b36"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -93,9 +93,9 @@ INSTRUCTIONS = "\n".join(
         "anything. You find jobs with your own tools, judge fit, write the CV and letter; Job360 stores your "
         "verdict, every version, every event and the receipt.",
         "RUN 360: when the user types \"run 360\" (or \"/run 360\"), call get_recipe(\"setup\") and follow it "
-        "(it resumes at the first unfinished round). \"run 360 daily\" = get_recipe(\"daily\"); \"run 360 hunt\" = "
-        "get_recipe(\"hunt\"); \"run 360 apply <link>\" = get_recipe(\"apply\") for that link. "
-        "get_recipe() lists the rest.",
+        "(resumes at the first unfinished round). "
+        "\"run 360 <daily|hunt|batch>\" = get_recipe(\"<daily|hunt|batch>\"); \"run 360 batch N\" = N submits; "
+        "\"run 360 apply <link>\" = get_recipe(\"apply\"). get_recipe() lists the rest.",
         "RULES: before your first apply, outreach, inbox or profile write in a conversation, read "
         "get_recipe(\"rules\") — settings, the apply kit, Gmail modes, outreach, events and profile field "
         "shapes. A recipe is numbered steps: print its checklist, tick each step, stop where it says STOP.",
@@ -1000,6 +1000,7 @@ def build_server(version: str = "") -> MCPServer:
         due: bool = False,
         quiet_days: Optional[int] = None,
         in_flight: bool = False,
+        queued: bool = False,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1016,12 +1017,15 @@ def build_server(version: str = "") -> MCPServer:
         of each. Gmail check: `email_senders` = the ATS domains to add as
         `from:` (mail that never names the company), `inbox_checked_at` = read
         only mail after it (null = since the application was added). `in_flight=true` —
-        only applications another session holds now; rows carry `hold` and `stage`."""
+        only applications another session holds now; rows carry `hold` and `stage`.
+        `queued=true` - the batch queue in order (`queue_position`); work it top-down.
+        Rows carry `preflight`; the reply a
+        `queue_summary`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
-                    due=due, quiet_days=quiet_days, in_flight=in_flight, db=db, user=_user(),
+                    due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)
@@ -1232,35 +1236,37 @@ def build_server(version: str = "") -> MCPServer:
         contact_id: Optional[int] = None,
         channel: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Append one event to an application's history (append-only).
+        """Append one event to an application's history.
 
-        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; the same
-        message_id returns already_existed=true, writes nothing.
+        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; a repeat
+        message_id writes nothing.
 
-        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, notes
-        never; the furthest stage wins (only corrects_event_id moves back). A repeat `applied` (its
-        confirmation email + `source`) becomes the submission proof, not a 2nd one. Wrong
+        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
+        the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
+        `source` is submission proof, not a 2nd one. Wrong
         date: `applied` + occurred_at + corrects_event_id=<old id>.
-        `warnings` = fixes. `occurred_at` may be past. `scheduled_at` (ISO-8601 + timezone) only on
+        `scheduled_at` (ISO-8601 + timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or
-        the user says so) or outreach_replied; no application_id if cold; a reply never moves the status.
+        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`,
+        or the user says so) or outreach_replied; no application_id if cold.
 
-        Kit events (only these keys, else 422):
+        Kit events (these keys only):
         form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|
         approved|written|guessed (key = kit key);
-        form_checked {questions_count, answered, missing, answers?} (no values);
-        cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so (where = chat);
-        submit_declined {where};
-        form_swept {fields_checked, fixed, notes, unreadable} (after a full re-read; last two optional);
+        form_checked {questions_count, answered, missing, answers?, page, pages_total};
+        cv_seen and submit_approved {artifact_id, sha256, where} only after the user said so (where=chat);
+        submit_declined {where}; submit_attempted {} pre-click;
+        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
-        quick_apply_warning|other, step, page_host, detail}, then stop; unblocked {resolution:
+        quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
+        manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped}.
-        proof_text {text, page_host}; simulation {} = a test app, record it first, never counted.
+        proof_text {text, page_host}; simulation {} = test app, never counted.
+        unqueued {reason?}; answer_corrected {key|question, was_source}.
         Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
@@ -1517,7 +1523,8 @@ def build_server(version: str = "") -> MCPServer:
         (skills tests), patterns (outcome counts by archetype, remote policy, team size and
         agency/direct, needs 5 sent; `signals` need 2 decided; ghosted is no answer, never a rejection;
         `rejection_reasons` are exact words, group them yourself), skill_gaps (the gaps you saved with
-        save_fit, counted and tiered; needs 5 scored fits), or all. Every rate has its n; small_sample
+        save_fit, counted and tiered; needs 5 scored fits), sites (per form host: forms filled, applied,
+        blocked by reason, with n), or all. Every rate has its n; small_sample
         is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:
             async with _request_db() as db:
@@ -1630,36 +1637,32 @@ def build_server(version: str = "") -> MCPServer:
     @mcp.tool()
     async def check_submit(application_id: int, form_url: str = "", session: str = "") -> dict[str, Any]:
         """May you press the FINAL submit on this application's form? Call this
-        right before the submit, with the address of the page the form is on
-        (`form_url`) and your `session` label (the one you gave get_application_kit).
-        Job360 answers with ONE decision from the user's settings:
+        right before the submit with `form_url` (the page the form is on) and your `session` label
+        (the one you gave get_application_kit). ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
         the user yes for this one application; `stop` - do not submit. `reason`
         is a short code and `detail` one plain sentence you can show the user. Reasons:
-        paused, already_applied, user_declined (the user said don't send),
-        daily_cap_reached, form_not_recorded (`stop`: no `form_filled` yet - fill, record it),
-        form_not_swept (`stop`: no `form_swept` after the latest `form_filled` - re-read every field, fix, record it),
-        form_count_mismatch, unreadable_fields (`stop`: re-read, sweep again),
-        form_check_missing (`stop`: call check_form),
+        paused, already_applied, user_declined,
+        daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
+        company_avoided (the user's own never-apply list), form_pages_incomplete (`stop`),
+        form_not_recorded (`stop`: record `form_filled`),
+        form_not_swept (`stop`: re-read every field, record `form_swept`),
+        form_count_mismatch, unreadable_fields (`stop`: sweep again), form_check_missing (`stop`: call
+        check_form), submit_unconfirmed (`stop`: `submit_attempted` has no outcome: never submit again),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), cv_unsupported_claims (CV claims not in the
-        profile), held_by_other_session (another assistant
-        session read this kit recently and did not record `hold_released`),
-        unknown_site (`form_url` is not one plain http(s) address: no user@, %
-        or backslash before the path, ASCII host),
+        in auto mode, else `ask`), duplicate_role (`ask`: same company and title applied before),
+        new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
+        profile), held_by_other_session (another session holds this kit),
+        unknown_site (`form_url` is not one plain http(s) address),
         form_host_mismatch (`form_url` is not the site of your latest
-        `form_filled`), email_not_verified (the user has not confirmed their
-        email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
-        user has not seen the latest CV), practice_run, user_approved (the user
-        said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
-        `blocked`, no `unblocked` yet: `ask`). Indeed and LinkedIn answer
-        `ask` unless the user said yes to this CV; so does the first application after
-        auto-submit is turned on (`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
-        email_not_verified, blocked or held_by_other_session: do not submit, tell
-        the user. `type_first`: answers the user changed on the web after you filled
-        the form - type each into its field (replacing what is there) before you
-        submit; record_application's answers carry the user's words. Read-only;
-        after a real submit, call `record_application`."""
+        `form_filled`), email_not_verified (email not confirmed), ask_always_site, job_override_confirm,
+        submit_mode_confirm, cv_not_seen (auto mode, user has not seen the latest CV), practice_run,
+        user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
+        `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
+        email_not_verified, blocked or held_by_other_session: tell the user.
+        Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
+        changed on the web after you filled the form - type each into its field (replacing
+        what is there) before you submit. Read-only; after a real submit, call `record_application`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.submit_check(
@@ -1864,8 +1867,8 @@ def build_server(version: str = "") -> MCPServer:
     async def get_recipe(name: str = "") -> dict[str, Any]:
         """The run 360 playbooks — numbered steps for YOU to follow. No name = the list; a name = its full text. "run
         360" = setup (resumes where the user stopped); "run 360 daily" = daily; "run 360 hunt" = hunt; "run 360
-        apply <link>" = apply. "rules" holds the full rules every recipe relies on. Every result carries
-        `tools_version` + `tools_rev`: a change from the last you saw = reconnect Job360."""
+        apply <link>" = apply; "run 360 batch" = batch. "rules" holds the full rules every recipe relies on.
+        Every result carries `tools_version` + `tools_rev`: a change from the last you saw = reconnect Job360."""
         try:
             if not name:
                 rows = await recipes_route.list_recipes(_user())

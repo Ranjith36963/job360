@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ACTIONS_BY_STATUS, allowedActions, changesSinceApprovedCv, nothingSent, readyCardAllowed } from "./application-actions";
+import { ACTIONS_BY_STATUS, allowedActions, changesSinceApprovedCv, isQueued, nothingSent, readyCardAllowed, submitUnconfirmed } from "./application-actions";
 
 const BOTH = ["send_approve", "send_decline", "ready_card", "mark_applied"];
 
@@ -68,5 +68,26 @@ describe("changesSinceApprovedCv", () => {
     expect(changesSinceApprovedCv([], [cv(10, 1), cv(11, 2), cv(12, 3)])).toBe(2);
     expect(changesSinceApprovedCv([approved(1, 99)], [cv(10, 1), cv(11, 2)])).toBe(1);
     expect(changesSinceApprovedCv([], [])).toBe(0);
+  });
+});
+
+describe("submitUnconfirmed / isQueued", () => {
+  const ev = (id: number, event_type: string, extra: Record<string, unknown> = {}) => ({ id, event_type, payload: {}, ...extra });
+
+  it("is true when the newest of attempted / applied / resolved is submit_attempted", () => {
+    expect(submitUnconfirmed([ev(1, "submit_attempted")])).toBe(true);
+    expect(submitUnconfirmed([ev(1, "submit_attempted"), ev(2, "applied")])).toBe(false);
+    expect(submitUnconfirmed([ev(1, "submit_attempted"), ev(2, "submit_resolved")])).toBe(false);
+    expect(submitUnconfirmed([ev(1, "applied"), ev(2, "submit_attempted")])).toBe(true);
+    expect(submitUnconfirmed([ev(1, "note")])).toBe(false);
+  });
+  it("a retracted applied resolves nothing", () => {
+    expect(submitUnconfirmed([ev(1, "submit_attempted"), ev(2, "applied"), ev(3, "note", { corrects_event_id: 2 })])).toBe(true);
+  });
+  it("is on the queue when the newest surviving queue event is queued", () => {
+    expect(isQueued([ev(1, "queued")])).toBe(true);
+    expect(isQueued([ev(1, "queued"), ev(2, "unqueued")])).toBe(false);
+    expect(isQueued([ev(1, "queued"), ev(2, "unqueued", { superseded: true })])).toBe(true);
+    expect(isQueued([])).toBe(false);
   });
 });

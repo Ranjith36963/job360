@@ -1762,6 +1762,41 @@ async def submit_override(db: JobDatabase, user_id: str, application_id: int) ->
     return mode if mode in ("confirm", "auto_when_sure") else None
 
 
+async def queued_at_by_app(
+    db: JobDatabase, user_id: str, app_ids: Optional[list[int]] = None
+) -> dict[int, str]:
+    """The batch queue (owner decision 2026-10-18): ``{application_id: queued_at}`` for the
+    user's applications whose newest surviving ``queued`` / ``unqueued`` event (by id) is a
+    ``queued``. An event a ``corrects_event_id`` event names is skipped (the same "a
+    correcting event supersedes the one it names" rule the list uses), so retracting a
+    ``queued`` falls back to the one before it. ``queued_at`` is that event's
+    ``recorded_at``. ``app_ids`` limits the read (``[]`` reads nothing). Event history only:
+    whether the application is still ``considering`` is the caller's check. Scoped by
+    ``user_id`` (rule #12). One query, never N+1."""
+    if app_ids is not None and not app_ids:
+        return {}
+    where = "e.user_id = ? AND e.event_type IN ('queued', 'unqueued')"
+    params: list[Any] = [user_id]
+    if app_ids is not None:
+        where += f" AND e.application_id IN ({','.join('?' for _ in app_ids)})"  # noqa: S608 - placeholders, not values
+        params.extend(app_ids)
+    cur = await db._db.execute(
+        f"SELECT e.id, e.application_id, e.event_type, e.recorded_at FROM application_events e "  # noqa: S608
+        f"WHERE {where} "
+        f"AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        f"ORDER BY e.id ASC",
+        params,
+    )
+    queued: dict[int, str] = {}
+    for r in await cur.fetchall():
+        row = dict(r)
+        if row["event_type"] == "queued":
+            queued[int(row["application_id"])] = str(row["recorded_at"])
+        else:
+            queued.pop(int(row["application_id"]), None)
+    return queued
+
+
 # ── R11 — get_application / list_applications ────────────────────────────────
 
 
@@ -2131,11 +2166,17 @@ async def list_applications(
     due: bool = False,
     quiet_days: Optional[int] = None,
     in_flight: bool = False,
+    queued: bool = False,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
     status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
     (another assistant session's live kit hold, weak spot #3); ``in_flight`` keeps only the
-    applications with one. Newest
+    applications with one. Each row also carries ``queued_at`` / ``queue_position`` (the batch
+    queue, 2026-10-18: ``queued_at`` is when it was queued, ``queue_position`` its 1-based place in
+    the user's WHOLE open queue; both null when it is not queued). ``queued`` keeps only the open
+    queue (``considering`` and currently queued) in first-in-first-out order (``queued_at``, then
+    application id) instead of newest-first; an application that left ``considering`` is never in
+    the queue, whatever its events say. Newest
     ``last_event_at`` first; optionally filtered by ``status`` and/or
     ``updated_since``.
 
@@ -2202,6 +2243,26 @@ async def list_applications(
             params.extend(held)
         else:
             where.append("1 = 0")
+    # The batch queue: the user's WHOLE open queue (still ``considering``), first in first out.
+    # Two queries for the page (events, then the status of the queued ids), never N+1.
+    queue_order: list[int] = []
+    queued_at: dict[int, str] = {}
+    all_queued = await queued_at_by_app(db, user_id)
+    if all_queued:
+        qcur = await db._db.execute(
+            f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' "  # noqa: S608 - placeholders, not values
+            f"AND id IN ({','.join('?' for _ in all_queued)})",
+            [user_id, *all_queued],
+        )
+        queued_at = {int(q[0]): all_queued[int(q[0])] for q in await qcur.fetchall()}
+        queue_order = sorted(queued_at, key=lambda i: (queued_at[i], i))
+    queue_position = {app_id: pos for pos, app_id in enumerate(queue_order, start=1)}
+    if queued:
+        if queue_order:
+            where.append(f"id IN ({','.join('?' for _ in queue_order)})")
+            params.extend(queue_order)
+        else:
+            where.append("1 = 0")
     where_sql = " AND ".join(where)
 
     cur = await db._db.execute(
@@ -2210,14 +2271,23 @@ async def list_applications(
     total = int((await cur.fetchone())[0])
 
     order_sql = "follow_up_on ASC, id ASC" if due else "last_event_at DESC NULLS LAST, id DESC"
+    if queued:
+        # FIFO order lives in Python (queued_at is an event fact, not a column): the queue is
+        # small, so read every queued row, order it, then page it.
+        order_sql, page_sql, page_params = "id ASC", "", []
+    else:
+        page_sql, page_params = " LIMIT ? OFFSET ?", [limit, offset]
     cur = await db._db.execute(
         f"SELECT id, job_id, job_title, job_company, job_url, job_location, status, last_event_at, "  # noqa: S608
         f"visa_signal, visa_country, fit_recorded_at, fit_score, fit_verdict, follow_up_on, "
         f"job_country, job_remote, job_found_on, ad_posted_at, employer_published_at, inbox_checked_at "
-        f"FROM applications WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
-        [*params, limit, offset],
+        f"FROM applications WHERE {where_sql} ORDER BY {order_sql}{page_sql}",
+        [*params, *page_params],
     )
     rows = [dict(r) for r in await cur.fetchall()]
+    if queued:
+        rows.sort(key=lambda r: queue_position[r["id"]])
+        rows = rows[offset:offset + limit]
 
     # Slice 7 — fact 2 once per request, so every card can carry its badge.
     from src.services.applications import visa as visa_service  # noqa: PLC0415
@@ -2281,6 +2351,17 @@ async def list_applications(
 
     proofs = await proof_for(db, user_id, app_ids)
     holds = await kit_service.holds_for_apps(db, user_id, app_ids, datetime.now(timezone.utc))
+    preflights: dict[int, dict[str, Any]] = {}
+    summary: Optional[dict[str, Any]] = None
+    if queued:
+        # Bulk-apply Q1/Q2: derived, no table; the order above stays first in first out.
+        from src.services.applications import queue_preflight  # noqa: PLC0415 - imports spine
+        from src.services.profile.models import UserProfile  # noqa: PLC0415
+        from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+        cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+        preflights = await queue_preflight.preflight_rows(db, user_id, rows, queued_at, holds, cfg)
+        summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg)
     out = []
     for r in rows:
         app_id = r["id"]
@@ -2313,6 +2394,10 @@ async def list_applications(
                 "proof": proofs[app_id],
                 "hold": holds[app_id][0] if app_id in holds else None,
                 "stage": holds[app_id][1] if app_id in holds else "",
+                # The batch queue (2026-10-18): null when the application is not on the open queue.
+                "queued_at": queued_at.get(app_id),
+                "queue_position": queue_position.get(app_id),
+                "preflight": preflights.get(app_id),
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
                 "inbox_checked_at": r.get("inbox_checked_at"),
@@ -2332,7 +2417,7 @@ async def list_applications(
                 ),
             }
         )
-    return {"applications": out, "total": total}
+    return {"applications": out, "total": total, "queue_summary": summary}
 
 
 # ── R9 — whats_new ────────────────────────────────────────────────────────────

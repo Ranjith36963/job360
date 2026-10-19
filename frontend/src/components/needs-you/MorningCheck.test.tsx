@@ -4,7 +4,14 @@ import { MorningCheck } from "./MorningCheck";
 import { LAST_CHECK_KEY } from "@/lib/morning-check";
 
 const getMorningCheck = vi.fn();
-vi.mock("@/lib/api", () => ({ getMorningCheck: (...a: unknown[]) => getMorningCheck(...a) }));
+const updateProfileFields = vi.fn();
+vi.mock("@/lib/api", () => ({
+  getMorningCheck: (...a: unknown[]) => getMorningCheck(...a),
+  updateProfileFields: (...a: unknown[]) => updateProfileFields(...a),
+}));
+const toastSuccess = vi.fn();
+const toastError = vi.fn();
+vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) } }));
 
 const NOW = "2026-10-10T09:00:00+00:00";
 const bucket = (items: ReturnType<typeof item>[] = []) => ({ count: items.length, items });
@@ -32,6 +39,9 @@ const payload = (state: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   getMorningCheck.mockReset().mockResolvedValue(payload());
+  updateProfileFields.mockReset().mockResolvedValue({});
+  toastSuccess.mockReset();
+  toastError.mockReset();
   window.localStorage.clear();
 });
 afterEach(() => window.localStorage.clear());
@@ -63,7 +73,7 @@ describe("MorningCheck", () => {
     const strip = await screen.findByTestId("mc-strip");
     expect(strip).toHaveTextContent("Paused");
     expect(strip).toHaveTextContent("Send on its own when sure");
-    expect(strip.textContent).toMatch(/4 today$/);
+    expect(screen.getByTestId("mc-quota").textContent).toBe("4 today");
     expect(screen.getByTestId("mc-paused-by").textContent).toMatch(/^Paused by you, /);
   });
 
@@ -119,6 +129,93 @@ describe("MorningCheck", () => {
       expect(container.innerHTML).not.toMatch(/#[0-9a-f]{3,8}\b|bg-white|text-black/i);
       unmount();
     }
+  });
+});
+
+describe("MorningCheck inline editor", () => {
+  it("Change opens the editor with the saved values; Cancel closes it without a write", async () => {
+    render(<MorningCheck />);
+    await screen.findByTestId("mc-strip");
+    expect(screen.queryByTestId("mc-editor")).toBeNull();
+    fireEvent.click(screen.getByTestId("mc-edit"));
+    expect(screen.getByTestId("mc-score-input")).toHaveValue(75);
+    expect(screen.getByTestId("mc-above-ask")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("mc-below-auto")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("mc-submit-confirm")).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByTestId("mc-cancel"));
+    expect(screen.queryByTestId("mc-editor")).toBeNull();
+    expect(updateProfileFields).not.toHaveBeenCalled();
+  });
+
+  it("Save writes only the changed fields, then re-reads the strip", async () => {
+    render(<MorningCheck />);
+    await screen.findByTestId("mc-strip");
+    fireEvent.click(screen.getByTestId("mc-edit"));
+    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "80" } });
+    fireEvent.click(screen.getByTestId("mc-below-ask"));
+    fireEvent.click(screen.getByTestId("mc-submit-auto_when_sure"));
+    getMorningCheck.mockResolvedValue(payload({ apply_min_score: 80, below_line: "ask", submit_mode: "auto_when_sure" }));
+    fireEvent.click(screen.getByTestId("mc-save"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "assistant_settings.apply_min_score", value: 80 },
+      { path: "assistant_settings.below_line", value: "ask" },
+      { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
+    ]);
+    await waitFor(() => expect(screen.queryByTestId("mc-editor")).toBeNull());
+    expect(toastSuccess).toHaveBeenCalledWith("Saved.");
+    await waitFor(() => expect(screen.getByTestId("mc-strip")).toHaveTextContent("Score line 80"));
+    expect(screen.getByTestId("mc-strip")).toHaveTextContent("Above: ask me · Below: ask me");
+    expect(screen.getByTestId("mc-strip")).toHaveTextContent("Send on its own when sure");
+  });
+
+  it("a re-read mid-edit never turns an assistant's newer change into a user edit", async () => {
+    render(<MorningCheck />);
+    await screen.findByTestId("mc-strip");
+    fireEvent.click(screen.getByTestId("mc-edit"));
+    // The assistant flips above_line to auto; a Send below re-reads the strip.
+    getMorningCheck.mockResolvedValue(payload({ above_line: "auto" }));
+    window.dispatchEvent(new CustomEvent("job360:ready-changed"));
+    await waitFor(() => expect(getMorningCheck).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "60" } });
+    fireEvent.click(screen.getByTestId("mc-save"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_min_score", value: 60 }]));
+  });
+
+  it("a blank score line saves null (back to not set)", async () => {
+    render(<MorningCheck />);
+    await screen.findByTestId("mc-strip");
+    fireEvent.click(screen.getByTestId("mc-edit"));
+    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("mc-save"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_min_score", value: null }]));
+  });
+
+  it("a bad score line is refused before any write", async () => {
+    render(<MorningCheck />);
+    await screen.findByTestId("mc-strip");
+    fireEvent.click(screen.getByTestId("mc-edit"));
+    fireEvent.change(screen.getByTestId("mc-score-input"), { target: { value: "101" } });
+    fireEvent.click(screen.getByTestId("mc-save"));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Score line must be a whole number from 0 to 100. Not saved."));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(screen.getByTestId("mc-editor")).toBeInTheDocument();
+  });
+
+  it("Save with nothing changed just closes; a failed save says so and stays open", async () => {
+    render(<MorningCheck />);
+    await screen.findByTestId("mc-strip");
+    fireEvent.click(screen.getByTestId("mc-edit"));
+    fireEvent.click(screen.getByTestId("mc-save"));
+    await waitFor(() => expect(screen.queryByTestId("mc-editor")).toBeNull());
+    expect(updateProfileFields).not.toHaveBeenCalled();
+
+    updateProfileFields.mockRejectedValueOnce(new Error("down"));
+    fireEvent.click(screen.getByTestId("mc-edit"));
+    fireEvent.click(screen.getByTestId("mc-above-auto"));
+    fireEvent.click(screen.getByTestId("mc-save"));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Could not save. Try again."));
+    expect(screen.getByTestId("mc-editor")).toBeInTheDocument();
   });
 });
 

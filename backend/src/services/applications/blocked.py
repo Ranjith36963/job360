@@ -43,10 +43,18 @@ BLOCKED_REASONS: dict[str, str] = {
     "unknown_question": "a question it cannot answer",
     "safety_block": "a safety block",
     "quick_apply_warning": "a quick-apply warning",
+    # Bulk-apply wave 1 (N1): one word per way a site says no.
+    "posting_closed": "a closed posting",
+    "account_creation": "a sign-up wall",
+    "otp_needed": "a one-time code",
+    "id_or_payment_asked": "a request for ID or payment details",
+    "assessment_required": "a timed test or video step",
+    "manual_only": "a form that cannot be filled for you",
+    "site_limit_reached": "the site's own daily application limit",
     "other": "a problem",
 }
 UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped"})
-NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block"})
+NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked"})
 BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
 STEP_MAX_CHARS = 120
 DETAIL_MAX_CHARS = 300
@@ -118,6 +126,18 @@ _USER_TODO: dict[str, str] = {
     "login_needed": "Sign in on {host} yourself (never share the password), then mark this resolved.",
     "upload_failed": "Attach the CV file on {host} yourself, then mark this resolved.",
     "unknown_question": "Answer the question on {host} (the assistant could not), then mark this resolved.",
+    "posting_closed": "The posting on {host} is closed. Check it, then mark this resolved to drop it.",
+    "account_creation": "Create the account on {host} yourself (never share the password), then mark this resolved.",
+    "otp_needed": "Enter the one-time code on {host} yourself, then mark this resolved.",
+    "id_or_payment_asked": (
+        "{host} asks for ID or payment details. Your assistant never enters these. Decide whether to go on "
+        "yourself, then mark this resolved."
+    ),
+    "assessment_required": "{host} wants a timed test or video. Do it yourself if you want to, then mark it resolved.",
+    "manual_only": "The form on {host} cannot be filled for you. Fill it yourself, then mark this resolved.",
+    "site_limit_reached": (
+        "{host} says you applied too much today. Wait until tomorrow, then mark this resolved."
+    ),
 }
 
 
@@ -201,7 +221,7 @@ async def before_append(
         if stored["resolution"] == "retried" and events[0]["payload"].get("reason") in NEVER_RETRIED:
             _log(user, application_id, event_type, stored, "refused")
             raise SpineError(
-                422, "a CAPTCHA, bot check or safety block is never retried by the assistant; "
+                422, "a CAPTCHA, bot check, safety block or ID/payment request is never retried by the assistant; "
                 "the user resolves it (user_did_it) or it is skipped"
             )
         return stored

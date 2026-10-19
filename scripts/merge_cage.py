@@ -346,12 +346,48 @@ LANES: tuple[str, ...] = ("harness_owner", "product_owner", "product", "harness"
 # keeps this one honest.
 #
 # What is left here is exactly `harness_owner`: the robot's own rulebook.
+_CAGE_ESCAPE = ("part of the harness that judges this very PR — an agent editing its "
+                f"own guards is how a cage is escaped. {_OWNER_MERGES}")
+_CHECK_FACTORY = ("a workflow that PRODUCES a required check — the ruleset trusts the check's "
+                  "NAME, so a machine hollowing out the job behind it is how a cage is escaped. "
+                  + _OWNER_MERGES)
+
 DENY_REASONS: dict[str, str] = {
     # ── the harness must not quietly edit its own cage ───────────────────────
-    ".github/**": "part of the harness that judges this very PR — an agent editing its "
-                  f"own guards is how a cage is escaped. {_OWNER_MERGES}",
-    "scripts/**": "part of the harness that judges this very PR — an agent editing its "
-                  f"own guards is how a cage is escaped. {_OWNER_MERGES}",
+    # `.github/**` and `scripts/**` were blanket keys here until 2026-10-18,
+    # when the owner moved both blankets to the `harness` lane ("let PRs
+    # touching .claude/**, .github/** or scripts/** auto-merge"). What stays
+    # denied is the NAMED cage in `harness_owner`, each with its own sentence.
+    **{p: _CAGE_ESCAPE for p in (
+        ".github/merge-policy.yml",
+        "scripts/merge_cage.py",
+        "scripts/lane.py",
+        "scripts/data_only.py",
+        "scripts/drill_registry.py",
+        "scripts/rollback_gear.py",
+        "scripts/revert_gear.py",
+        "scripts/cage_blockers.py",
+        "scripts/gate_wiring_check.py",
+        "scripts/agent-gate.sh",
+        "backend/scripts/mypy_ratchet.py",
+        ".github/workflows/auto-merge.yml",
+        ".github/workflows/verify-live.yml",
+        ".github/workflows/revert-main.yml",
+        ".github/workflows/post-merge-watch.yml",
+        ".github/workflows/triage.yml",
+        ".github/workflows/pr-repair.yml",
+        ".github/workflows/finding-watch.yml",
+        ".github/workflows/security-watch.yml",
+    )},
+    # The six workflows behind the 13 required contexts of `main-production-gate`.
+    **{p: _CHECK_FACTORY for p in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/ci-offline.yml",
+        ".github/workflows/security.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/review-bugs.yml",
+        ".github/workflows/review-security.yml",
+    )},
     # ── `.claude/`: the half that RUNS, not the half that is READ ────────────
     # `.claude/**` used to sit here whole. The daily truth-check routine edits
     # `.claude/skills/**/*.md` and `.claude/agents/*.md` every day, and the
@@ -2288,8 +2324,10 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     #        recursive deny this commit introduced, and a new deny with no nested
     #        witness is how the 2026-08-20 rewrite nearly lost every slash-free
     #        rule it was fixing.
-    nested = [("scripts/deep/nested/tool.py", "cage is escaped"),
-              (".github/workflows/sub/x.yml", "cage is escaped"),
+    #        2026-10-18: `scripts/**` and `.github/**` moved to the `harness`
+    #        lane (owner), so they witness nothing any more. `.claude/agents/**`
+    #        is the other recursive deny still standing.
+    nested = [(".claude/agents/deep/nested/judge.md", "cage is escaped"),
               (".claude/hooks/lib/deep/helper.sh", "cage is escaped"),
               ("backend/deep/nested/CLAUDE.md", "circular")]
     missed = [f for f, needle in nested
@@ -3440,10 +3478,14 @@ def _swallowed_lane_probe() -> list[str]:
     `scripts/**` sat in the `harness` lane as auto-mergeable while the cage
     denied every path under it. Nothing went red for the cage's whole life, so
     the guard that now catches it needs a witness of its own.
+
+    2026-10-18: the owner moved `scripts/**` to `harness` for real, so it no
+    longer contradicts anything. Same shape against a whole-directory deny
+    that still exists: `.claude/agents/**` declared fast while it is denied.
     """
     saved = list(ALLOW)
     try:
-        ALLOW.append("scripts/**")   # the real historic contradiction, verbatim
+        ALLOW.append(".claude/agents/**")
         return check_lists()
     finally:
         ALLOW[:] = saved

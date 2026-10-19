@@ -8,6 +8,8 @@ import { STATUS_LABEL } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
+import { preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import type { QueueSummary } from "@/lib/batch-queue";
 
 
 // The status vocabulary is closed in the backend (src/core/settings.py
@@ -104,6 +106,19 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                   <p data-testid="row-stage" className="mt-1 text-xs text-warning">
                     {app.stage}
                   </p>
+                )}
+                {/* Batch queue: the place in line and anything that would stop it. */}
+                {typeof app.queue_position === "number" && (
+                  <p data-testid="row-queue-position" className="mt-1 font-mono text-xs font-medium text-brand">
+                    #{app.queue_position} in batch
+                  </p>
+                )}
+                {preflightProblems(app.preflight).length > 0 && (
+                  <ul data-testid="row-preflight" className="mt-1 flex flex-col gap-0.5 text-xs text-warning">
+                    {preflightProblems(app.preflight).map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
                 )}
               </div>
 
@@ -202,13 +217,17 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   // Weak spot #3 wave 2: "In flight" asks the server (`in_flight=true`), because the
   // hold lives in the event log, not in anything the page already fetched.
   const [inFlight, setInFlight] = useState(false);
+  // Batch queue: server-side too (`queued=true` gives queue order, preflight and the summary).
+  const [queuedOnly, setQueuedOnly] = useState(false);
+  const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    listApplications(inFlight ? { limit, in_flight: true } : { limit })
+    listApplications(queuedOnly ? { limit, queued: true } : inFlight ? { limit, in_flight: true } : { limit })
       .then((res) => {
         if (cancelled) return;
         setApplications(res.applications);
+        setQueueSummary(queuedOnly ? ((res.queue_summary as QueueSummary | null | undefined) ?? null) : null);
         setError(null);
       })
       .catch(() => {
@@ -218,7 +237,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return () => {
       cancelled = true;
     };
-  }, [limit, inFlight]);
+  }, [limit, inFlight, queuedOnly]);
 
   // Browser-side only — one chip per status actually present in this list,
   // plus "All". Counts move with the data; there is no server-side facet
@@ -252,7 +271,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return <p className="text-sm text-muted-foreground">Loading your applications…</p>;
   }
 
-  if (applications.length === 0 && !inFlight) {
+  if (applications.length === 0 && !inFlight && !queuedOnly) {
     return (
       <p className="text-sm text-muted-foreground">
         Nothing yet. Bring a job from your assistant, or the{" "}
@@ -272,20 +291,39 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           onClick={() => {
             setStatusFilter("all");
             setInFlight(false);
+            setQueuedOnly(false);
           }}
-          aria-pressed={statusFilter === "all" && !inFlight}
+          aria-pressed={statusFilter === "all" && !inFlight && !queuedOnly}
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-            statusFilter === "all" && !inFlight
+            statusFilter === "all" && !inFlight && !queuedOnly
               ? "bg-primary text-primary-foreground"
               : "bg-primary/10 text-brand hover:bg-primary/20"
           }`}
         >
-          All{inFlight ? "" : ` (${applications.length})`}
+          All{inFlight || queuedOnly ? "" : ` (${applications.length})`}
+        </button>
+        <button
+          type="button"
+          data-testid="queued-filter"
+          onClick={() => {
+            setQueuedOnly((v) => !v);
+            setInFlight(false);
+            setStatusFilter("all");
+          }}
+          aria-pressed={queuedOnly}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            queuedOnly ? "bg-primary text-primary-foreground" : "bg-primary/10 text-brand hover:bg-primary/20"
+          }`}
+        >
+          Queued
         </button>
         <button
           type="button"
           data-testid="in-flight-filter"
-          onClick={() => setInFlight((v) => !v)}
+          onClick={() => {
+            setInFlight((v) => !v);
+            setQueuedOnly(false);
+          }}
           aria-pressed={inFlight}
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
             inFlight
@@ -327,9 +365,19 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
         )}
       </div>
 
+      {queuedOnly && queueSummaryLine(queueSummary) && (
+        <p data-testid="queue-summary" className="font-mono text-xs text-muted-foreground">
+          {queueSummaryLine(queueSummary)}
+        </p>
+      )}
+
       {visibleApplications && visibleApplications.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {inFlight ? "Nothing is in flight right now." : "No applications with this status."}
+          {queuedOnly
+            ? "Nothing is in your batch."
+            : inFlight
+              ? "Nothing is in flight right now."
+              : "No applications with this status."}
         </p>
       ) : (
         <ApplicationRows applications={visibleApplications ?? []} />

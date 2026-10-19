@@ -321,6 +321,19 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # services/applications/interview_payloads.py. All note-family; `assessment`
     # must never enter FEEDBACK_FUNNEL_RANK.
     "interview_session", "process_friction", "assessment",
+    # Owner decision 2026-10-18: the batch queue. `queued` puts a considering application on
+    # the user's queue, `unqueued` takes it off. Note-family, never moves the status; no
+    # payload, detail optional. Checked in the record_event ROUTE (applications._check_queue_event);
+    # read by spine.queued_at_by_app.
+    "queued", "unqueued",
+    # Owner decision 2026-10-18 (bulk-apply D1): `submit_attempted` (no payload) is written by the
+    # assistant right before the final click; `submit_resolved` {outcome: "not_sent"} is WEB ONLY
+    # (the user says the submit never went out). Checked in services/applications/kit.py.
+    "submit_attempted", "submit_resolved",
+    # Owner decision 2026-10-18 (bulk-apply F4): the user changed an answer the assistant wrote or
+    # guessed; payload {key | question, was_source}. A note: saving it to memory is a separate,
+    # user-approved update_profile. Checked in the record_event ROUTE (_check_answer_corrected).
+    "answer_corrected",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -642,7 +655,7 @@ STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # a view a later slice appends (before "all") joins it automatically.
 STATS_VIEWS = (
     "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
-    "digest", "friction", "assessments", "patterns", "skill_gaps", "all",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "all",
 )
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
@@ -749,6 +762,11 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.apply_min_score",
     "assistant_settings.above_line", "assistant_settings.below_line",
     "assistant_settings.submit_mode", "assistant_settings.daily_cap",
+    # Owner decision 2026-10-18 - the per-company limit and its window in days.
+    "assistant_settings.company_cap", "assistant_settings.company_cap_days",
+    # Bulk-apply C1 / C2 / R1 - the weekly cap, the pace (gap + apply hours) and the counted auto grant.
+    "assistant_settings.weekly_cap", "assistant_settings.min_gap_minutes", "assistant_settings.apply_hours",
+    "assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until",
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
     # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
     "assistant_settings.auto_employer_emails",
@@ -780,6 +798,17 @@ PROFILE_NOTE_MAX_CHARS = int(os.getenv("PROFILE_NOTE_MAX_CHARS", "200"))
 # user may cap themselves to per day; no cap is the default (owner: "no cap by
 # default"), this is only the ceiling a typed cap may take.
 ASSISTANT_DAILY_CAP_MAX = int(os.getenv("ASSISTANT_DAILY_CAP_MAX", "500"))
+# Owner decision 2026-10-18: the per-company limit (applications to ONE company
+# inside a window). Like the daily cap there is no limit by default; these are only
+# the ceiling a typed limit may take and the window used when the user set a limit
+# without choosing days.
+ASSISTANT_COMPANY_CAP_MAX = int(os.getenv("ASSISTANT_COMPANY_CAP_MAX", "50"))
+ASSISTANT_COMPANY_CAP_DEFAULT_DAYS = int(os.getenv("ASSISTANT_COMPANY_CAP_DEFAULT_DAYS", "180"))
+# Bulk-apply C2 / R1: the ceiling a typed weekly cap may take, the most a counted auto grant may allow,
+# and how far ahead its end may be (a grant that never ends would be the old standing auto mode).
+ASSISTANT_WEEKLY_CAP_MAX = int(os.getenv("ASSISTANT_WEEKLY_CAP_MAX", "2000"))
+ASSISTANT_AUTO_GRANT_MAX = int(os.getenv("ASSISTANT_AUTO_GRANT_MAX", "100"))
+ASSISTANT_AUTO_GRANT_MAX_DAYS = int(os.getenv("ASSISTANT_AUTO_GRANT_MAX_DAYS", "7"))
 # A waiting (riskier) change request the user never answered stops counting
 # after this many days; the assistant has to ask again.
 ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TTL_DAYS", "7"))
@@ -815,6 +844,9 @@ CALENDAR_FEED_LOOKBACK_DAYS = int(os.getenv("CALENDAR_FEED_LOOKBACK_DAYS", "30")
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
+# Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
+# asks `duplicate_role` (a repost on another board has a new URL). Exact equality only.
+DUPLICATE_ROLE_WINDOW_DAYS = int(os.getenv("DUPLICATE_ROLE_WINDOW_DAYS", "180"))
 # Hosts that need an account before you can apply (seed list; the user's own
 # `account_needed` events add more). Registrable-domain match, subdomains included.
 ACCOUNT_REQUIRED_HOST_SUFFIXES = _env_list(

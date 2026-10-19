@@ -36,7 +36,14 @@ PAUSE = "assistant_settings.paused_until"
 REASON = "assistant_settings.pause_reason"
 INBOX = "preferences.daily_check"
 # Slice 2 added `auto_employer_emails` (a gated bool setting; tests/test_auto_emails.py).
-SIX = (APPLY, BELOW, SCORE, SUBMIT, CAP, PAUSE, REASON, "assistant_settings.auto_employer_emails")
+# 2026-10-18 added `company_cap` + `company_cap_days` (tests/test_batch_and_company_cap.py).
+SIX = (
+    APPLY, BELOW, SCORE, SUBMIT, CAP, PAUSE, REASON, "assistant_settings.auto_employer_emails",
+    "assistant_settings.company_cap", "assistant_settings.company_cap_days",
+    # 2026-10-18 bulk-apply C1 / C2 / R1 (tests/test_bulk_pacing_grants_pages.py).
+    "assistant_settings.weekly_cap", "assistant_settings.min_gap_minutes", "assistant_settings.apply_hours",
+    "assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until",
+)
 PROGRESS = "assistant_settings.setup_progress"
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
@@ -1041,6 +1048,7 @@ async def test_per_job_override_an_assistant_may_only_send_confirm(authenticated
         token = await _mint_token(client)
         assert (await _patch(client, _e(SUBMIT, "auto_when_sure"))).status_code == 200
         other = await _bring(client, _AD_2)
+        await _fill(client, other)  # the site is known from an earlier application (new_site_first_time)
         await _apply(client, other)  # ends the practice run
     async with _bearer_client(token) as agent:
         url = f"/api/applications/{app_id}/events"
@@ -1076,6 +1084,7 @@ async def test_an_override_auto_with_a_global_confirm_gets_its_own_practice_run(
         url = f"/api/applications/{a1}/events"
         assert (await client.post(url, json={"event_type": "submit_mode_set", "payload": AUTO})).status_code == 201
         assert (await _check(client, a1)).json()["reason"] == "practice_run"
+        await _fill(client, a2)  # the site is known from an earlier application (new_site_first_time)
         await _apply(client, a2)
         assert (await _check(client, a1)).json()["decision"] == "submit"
 
