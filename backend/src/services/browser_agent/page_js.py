@@ -161,3 +161,31 @@ TICK_VIA_LABEL_JS = r"""
   return el.checked;
 }
 """
+
+# React and other framework inputs ignore a plain `value =`: set it through the native setter and
+# fire the events a person's typing fires (browser-use default_action_watchdog.py:1392-1405;
+# freehire extension/lib/form.ts:798-809). Used only when Playwright's fill() read back wrong.
+NATIVE_SET_JS = r"""
+(el, v) => {
+  const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+  setter.call(el, v);
+  for (const t of ['input', 'change', 'blur']) el.dispatchEvent(new Event(t, { bubbles: true }));
+  return el.value;
+}
+"""
+
+# The value a field shows now (inputs, textareas, contenteditable boxes, custom dropdown buttons).
+SHOWN_VALUE_JS = r"""
+(el) => ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '')
+"""
+
+# A suggestion box (react-select, Workday prompt, Lever location): typed key by key so the site's
+# key listeners fire (Skyvern handler.py:8713-8730).
+IS_TYPEAHEAD_JS = r"""
+(el) => {
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  return role === 'combobox' || !!el.getAttribute('aria-autocomplete') || el.hasAttribute('list')
+    || /select__input|autocomplete|typeahead/i.test(el.className || '');
+}
+"""
