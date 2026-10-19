@@ -98,6 +98,13 @@ dev = [
     # previously-clean code and reds CI on unrelated PRs).
     "ruff>=0.15,<0.17",
 ]
+# The Job360 browser agent (docs/product/BROWSER_AGENT.md). Optional and
+# heavy (Chromium is installed by `playwright install`, not pip): the Docker
+# build installs it only when BROWSER_AGENT_ENABLED=1. Lazy-imported in
+# services/browser_agent/agent.py; without it the `browser` tool answers "off".
+browser = [
+    "playwright>=1.48,<2",
+]
 # The optional ESCO skill-canonicalisation stack. It used to cover the job
 # side too (embeddings + ChromaDB vector search); slice 5 (#483) deleted that,
 # so `chromadb` is gone from this extra — the only importer left is
@@ -295,6 +302,8 @@ module = [
     "aioresponses",
     "torch.*",
     "torch",
+    "playwright.*",
+    "playwright",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"
