@@ -587,3 +587,99 @@ async def test_a_stop_records_blocked_once_and_opens_a_needs_you_ask(authenticat
         stop.update(reason="login_required")
         third = (await client.post("/api/browser", json={"action": "look", "application_id": app_id})).json()
         assert third["blocked_recorded"] is True
+
+
+COMBO = """<!doctype html><html><head><title>Location - Acme</title></head><body>
+<label for="loc">Location</label>
+<input id="loc" role="combobox" aria-autocomplete="list" aria-expanded="false"
+  oninput="document.getElementById('lb').hidden=false; this.setAttribute('aria-expanded','true')"
+  onkeydown="if (event.key==='Enter') { this.value='London, United Kingdom'; document.getElementById('lb').hidden=true; }">
+<ul id="lb" role="listbox" hidden><li role="option">London, United Kingdom</li></ul>
+<form onsubmit="event.preventDefault(); document.title='SUBMITTED';">
+  <label for="nm">Full name</label><input id="nm"><button type="submit">Submit application</button>
+</form></body></html>"""
+
+
+@pytest.fixture
+async def combo_site():
+    from aiohttp import web
+
+    app = web.Application()
+    app.router.add_get("/combo", lambda _r: web.Response(text=COMBO, content_type="text/html"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_enter_picks_a_suggestion_but_never_submits_a_form(combo_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(combo_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/combo")
+        page = await run(pool, "u1", "type", ref=_ref(page, "Location"), text="Lon")
+        page = await run(pool, "u1", "key", text="ArrowDown")
+        page = await run(pool, "u1", "key", text="Enter")
+        assert next(e for e in page["elements"] if e["name"] == "Location")["value"] == "London, United Kingdom"
+
+        page = await run(pool, "u1", "type", ref=_ref(page, "Full name"), text="Ada")
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "key", text="Enter")
+        assert exc.value.reason == "enter_may_submit"
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "key", ref=_ref(page, "Full name"), text="Enter")
+        assert exc.value.reason == "enter_may_submit"
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "key", text="Control+a")
+        assert exc.value.reason == "bad_key"
+        assert (await run(pool, "u1", "look"))["title"] == "Location - Acme"  # never submitted
+    finally:
+        await pool.shutdown()
+
+
+# ── Slice 4 prep: the read-only probe ─────────────────────────────────────────
+
+
+def test_the_probe_summary_reads_a_page_the_way_the_assistant_would():
+    from src.services.browser_agent.probe import summarise, table
+
+    form = {"status": "ok", "title": "Apply", "elements": [
+        {"tag": "input", "type": "text", "name": "Name", "in_form": True},
+        {"tag": "textarea", "type": "", "name": "Why", "in_form": True},
+        {"tag": "input", "type": "file", "name": "CV", "in_form": True},
+        {"tag": "button", "type": "submit", "name": "Submit application", "in_form": True},
+        {"tag": "a", "type": "", "name": "Privacy"},
+    ]}
+    assert summarise(form) == {"outcome": "ok", "title": "Apply", "fields": 2, "file_inputs": 1, "submit_buttons": 1}
+    ad = {"status": "ok", "title": "Engineer", "elements": [{"tag": "a", "type": "", "name": "Apply for this job"}]}
+    assert summarise(ad)["outcome"] == "no_form"
+    wall = {"status": "needs_you", "reason": "captcha", "elements": []}
+    assert summarise(wall)["outcome"] == "captcha"
+    text = table([{"host": "jobs.acme.com", **summarise(form)}, {"host": "x.com", "outcome": "error", "detail": "403"}])
+    assert "jobs.acme.com" in text and "total: error 1, ok 1" in text
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_the_probe_opens_pages_read_only_with_a_fresh_browser_each(site):
+    from src.services.browser_agent.agent import BrowserPool
+    from src.services.browser_agent.probe import probe
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(site))
+    try:
+        rows = await probe(
+            ["http://jobs.example/form", "http://jobs.example/captcha", f"http://127.0.0.1:{site}/form"],
+            resolve=_site_resolver(), pool=pool,
+        )
+        assert [r["outcome"] for r in rows] == ["login_required", "captcha", "blocked"]
+        assert rows[0]["fields"] >= 1 and rows[0]["file_inputs"] == 1 and rows[0]["submit_buttons"] == 1
+        assert pool._sessions == {}  # noqa: SLF001 - nothing left open
+    finally:
+        await pool.shutdown()

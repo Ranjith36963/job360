@@ -102,3 +102,17 @@ ELEMENT_FACTS_JS = r"""
   };
 }
 """
+
+# Is the focused element a suggestion list (a combobox, an autocomplete box, an option)? Only
+# there may the assistant press Enter: anywhere else Enter can submit the form.
+FOCUS_IN_LIST_JS = r"""
+() => {
+  const el = document.activeElement;
+  if (!el || el === document.body) return false;
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  if (['combobox', 'option', 'listbox', 'searchbox'].includes(role)) return true;
+  if (el.getAttribute('aria-autocomplete') || el.getAttribute('aria-activedescendant')) return true;
+  if (el.getAttribute('aria-expanded') === 'true') return true;
+  return !!el.closest('[role=listbox], [role=combobox]');
+}
+"""

@@ -106,10 +106,10 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 
 | Slice | What |
 |---|---|
-| 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
+| 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, key, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
 | 2 ✅ | **Sign in once:** a live view on the Job360 site; the cookie is kept, encrypted, per site. |
 | 3 ✅ | **Hand-off:** a job the cloud browser couldn't finish shows on Needs you with "finish it with your assistant's browser". |
-| 4 | **Measure:** test real career sites (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and record which work from the cloud. |
+| 4 🟡 | **Measure:** test real career sites (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and record which work from the cloud. |
 
 **Slice 1 (built 2026-10-19, off by default):**
 - **Code:**
@@ -152,6 +152,15 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - Recorded once per open block of the same reason, so repeated looks don't pile up events.
 - The note tells the user how to finish: with their own assistant's browser when their computer is on (Claude in
   Chrome, Gemini in Chrome, ChatGPT agent), or by signing in once on Settings → Job sites.
+
+**`key` action (2026-10-19):** ArrowDown, ArrowUp, Tab, Escape and Enter, for the suggestion lists real forms use
+(Greenhouse location and school, Workday dropdowns): type, ArrowDown, Enter. Enter is refused outside a suggestion
+list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`.
+
+**Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
+each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
+fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
+It needs the open internet, so run it on Railway once the switch is on, with a list of real apply links.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 

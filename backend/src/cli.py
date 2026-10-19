@@ -143,5 +143,21 @@ def setup_profile(
     click.echo("Your agent can read it over MCP, or the web app at /profile.")
 
 
+@cli.command("browser-probe")
+@click.argument("urls", nargs=-1, required=True)
+@click.option("--json", "as_json", is_flag=True, help="Print JSON rows instead of a table.")
+def browser_probe(urls: tuple[str, ...], as_json: bool) -> None:
+    """Slice 4 of the browser agent: open each career page READ-ONLY and report what the
+    cloud browser would meet (form found, CAPTCHA, sign-in wall, blocked). Never types or
+    clicks. Needs the open internet and `pip install .[browser]` + Chromium."""
+    import json  # noqa: PLC0415
+
+    from src.services.browser_agent.probe import probe, table  # noqa: PLC0415
+    from src.services.fetch.fetcher import DEFAULT_RESOLVE  # noqa: PLC0415
+
+    rows = asyncio.run(probe(list(urls), resolve=DEFAULT_RESOLVE))
+    click.echo(json.dumps(rows, indent=2) if as_json else table(rows))
+
+
 if __name__ == "__main__":
     cli()
