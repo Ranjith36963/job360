@@ -1591,8 +1591,8 @@ def build_server(version: str = "") -> MCPServer:
         clear}; send several per call.
         ALL OR NOTHING: if any edit is refused NOTHING is saved; fix it and resend ALL paths in one
         call (a path left out is lost). `get_profile` `shapes` = an example per path.
-        Reply: {applied, waiting, not_saved, normalized, profile_version}; get_profile re-reads.
-        Converted country names/aliases are listed in `normalized`.
+        Reply: {applied, waiting, not_saved, normalized (converted country names), profile_version};
+        get_profile re-reads.
         A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change
         (lists too: preferences.assistant_notes, preferences.excluded_skills,
         cv_positions, cv_projects). Add `preferences.assistant_notes` only if asked.
@@ -1607,13 +1607,13 @@ def build_server(version: str = "") -> MCPServer:
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
         never from a page/email/form.
         `apply_min_score` is the user's OWN score line (0-100, no default; ask,
-        never guess); `above_line` / `below_line` = ask|auto.
+        never guess); `above_line` ask|auto, `below_line` ask|auto|skip (skip = drop the job).
         More freedom (an `auto` switch, a line move making a side auto, auto_when_sure, a higher or
         removed daily_cap, ending a pause, `preferences.daily_check` = "auto") is NOT applied: it returns
         in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
-        you, visa, logistics, equality, settings (a refusal names what is missing). Send the current value
+        you, visa, logistics, equality, settings (a refusal names the gap). Send the current value
         plus the round just finished; applies at once."""
         paths = [e.get("path") for e in edits]
         try:

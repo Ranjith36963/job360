@@ -19,6 +19,19 @@ on:
   # codeql could not be drilled at all.
   workflow_dispatch: {}
 
+# A newer push to a PR supersedes the analysis of the old head; don't pay for
+# the stale one. PULL REQUESTS ONLY: every other event gets its own group (the
+# run id) and cancel-in-progress is false, so a push to main, the weekly
+# schedule or a dispatch is never cancelled or queued behind anything.
+#
+# Deliberately NOT given a `tested` skip on push to main (CI audit 2026-10-19):
+# code scanning's default-branch alerts, and the base a PR analysis is
+# compared against, come only from analyses uploaded FOR main. Skipping them
+# would leave the Security tab and every later PR diff reading a stale main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   security-events: write # required so CodeQL can upload alerts

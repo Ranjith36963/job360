@@ -598,7 +598,15 @@ async def gate_facts(
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
+        guessed_unverified=await _guessed_unverified(db, user_id, app_row),
     )
+
+
+async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest form holds a guessed answer the user has not verified (``ready`` owns the reading)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return await ready.has_unverified_guess(db, user_id, app_row)
 
 
 def company_avoided(user_id: str, app_row: dict[str, Any], entries: Optional[list[Any]] = None) -> bool:
@@ -703,6 +711,8 @@ async def submit_verdict(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
             form_check_missing=False, form_pages_incomplete=False,
             form_host=settings_rules.screen_form_url(form_url),
+            # The answers of an OLD fill say nothing about the form about to be filled.
+            guessed_unverified=False,
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
