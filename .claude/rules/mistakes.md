@@ -28,7 +28,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
   every `**/CLAUDE.md` is human-only, so a CLAUDE.md fix (even a `last-verified` stamp) goes in its own PR.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
-- One PR per slice, at most 400 read lines (`size.max_lines` in `.github/merge-policy.yml`;
+- One PR per slice, at most 1000 read lines (aim for 400 or fewer) (`size.max_lines` in `.github/merge-policy.yml`;
   generated files don't count). Never keep pushing new slices onto an open PR: open the next.
 - Auto-merge is always on (owner, 2026-10-19), but the cage HOLDS a refused PR armed only once
   `merge-cage` is a required check on `main-production-gate` (and never one touching `.github/`);
