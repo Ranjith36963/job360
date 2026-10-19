@@ -1702,6 +1702,24 @@
             ],
             "title": "Preflight"
           },
+          "priority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "highest",
+                  "high",
+                  "medium",
+                  "low",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
           },
@@ -2317,7 +2335,7 @@
       "Body_upload_cv_api_profile_cv_post": {
         "properties": {
           "cv": {
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "Cv",
             "type": "string"
           }
@@ -2344,7 +2362,7 @@
       "Body_upload_linkedin_api_profile_linkedin_post": {
         "properties": {
           "file": {
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "File",
             "type": "string"
           }
@@ -2371,7 +2389,7 @@
       "Body_upsert_profile_api_profile_post": {
         "properties": {
           "cv": {
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "Cv",
             "type": "string"
           },
@@ -12803,6 +12821,23 @@
               "default": false,
               "title": "Queued",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Priority"
             }
           },
           {

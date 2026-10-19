@@ -2167,6 +2167,7 @@ async def list_applications(
     quiet_days: Optional[int] = None,
     in_flight: bool = False,
     queued: bool = False,
+    priority: Optional[str] = None,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
     status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
@@ -2188,7 +2189,18 @@ async def list_applications(
     ``last_event_at`` is older than N days (setting a follow-up counts as
     activity, since it writes an event and updates the slot), same closed-
     status exclusion. Both may be combined with ``status``/``updated_since``.
+
+    ``priority`` (owner decision 2026-10-19) - only applications whose PLACE (the job's
+    country + remote/on-site, matched to the user's ``right_to_work`` records) has that
+    level of the user's own job priority, or ``not_set``. Each row carries ``priority``.
     """
+    from src.services.profile import job_priority  # noqa: PLC0415 - profile ↔ spine cycle
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
+
+    if priority is not None and priority not in job_priority.FILTER_VALUES:
+        raise SpineError(422, f"priority must be one of: {', '.join(job_priority.FILTER_VALUES)}")
+    _profile = load_profile(user_id)
+    rtw = getattr(_profile.user_info, "right_to_work", None) if _profile is not None else None
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
     # Bug fix (coordinator review, 2026-09-25) — Query(ge=1, le=...) on the
@@ -2243,6 +2255,10 @@ async def list_applications(
             params.extend(held)
         else:
             where.append("1 = 0")
+    if priority is not None:
+        p_sql, p_params = job_priority.filter_sql(rtw, priority)
+        where.append(p_sql)
+        params.extend(p_params)
     # The batch queue: the user's WHOLE open queue (still ``considering``), first in first out.
     # Two queries for the page (events, then the status of the queued ids), never N+1.
     queue_order: list[int] = []
@@ -2381,6 +2397,7 @@ async def list_applications(
                 "visa_signal": signal, "visa_country": country,
                 "needs_sponsorship": visa_service.needs_sponsorship(signal, country, countries),
                 **_job_facts_for(r),
+                "priority": job_priority.place_priority(rtw, r.get("job_country"), r.get("job_remote")),
                 "events": await _count(db, "application_events", "application_id", app_id),
                 "artifacts": artifact_counts,
                 "receipts": receipts_count,
