@@ -10,7 +10,7 @@ import { AssistantNotes } from "@/components/profile/AssistantNotes";
 import { EditedMark } from "@/components/profile/EditedMark";
 
 // ---------------------------------------------------------------------------
-// "Things your assistant should know" on Home — the standing lines the agent
+// "Things your AI assistant should know" on Home — the standing lines the agent
 // reads first on every get_profile, shown where the owner lands so they can
 // be read and changed without opening Profile. Same data, same save path and
 // same Keep / Take back mark as the Profile page; nothing new is stored.
