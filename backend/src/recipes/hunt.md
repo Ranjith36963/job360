@@ -51,7 +51,7 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    and ask the user. Never guess - "not mentioned" is an answer. A minimum of years far above the profile is a
    stretch: say so. Duplicate hard stop: a job already in `list_applications`, or with the application kit's
    `duplicate.flag`, is not brought again. Check the posting is still open.
-5. **Bring only the fits.** For each one: `bring_job` (title, company, location, full description, apply URL,
+5. **Bring only the fits.** For each one: `bring_job` (`origin` "ai_hunt", `queue` true: the batch; title, company, location, ad, URL,
    and `posted_at` / `employer_published_at` as YYYY-MM-DD when the ad shows them) and ALWAYS the job facts you
    know: `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on` (`indeed`, `linkedin`,
    `company_careers`, `job_board`, `referral`, `visa_sponsor_list`, `pasted_by_user` or `other`). Leave out only
@@ -66,4 +66,4 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    and "Below your line (N)" (`settings.apply_min_score.effective`; null = ask for it first): company, title,
    place, your score, visa answer, and the link to the Job360 application page. Inside `run 360 daily`, apply
    per each job's `save_fit` `line.switch` with `get_recipe("apply")` (the kit first); `ask` means ask. Alone,
-   ask which ones to apply to.
+   the fits are in the batch: work it with `get_recipe("batch")`.

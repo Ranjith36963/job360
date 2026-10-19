@@ -417,6 +417,8 @@ describe("ApplicationList — Queued filter (batch queue)", () => {
     render(<ApplicationList />);
     await screen.findByText("Staff Engineer");
     fireEvent.click(screen.getByTestId("queued-filter"));
+    // the old list never shows under the new filter while it loads
+    expect(screen.queryByText("Staff Engineer")).toBeNull();
     await screen.findByText("Queued Job");
     expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, queued: true });
     expect(screen.getByTestId("queue-summary")).toHaveTextContent("8 queued · 5 ready · 2 need you · 3 left today");
@@ -435,6 +437,6 @@ describe("ApplicationList — Queued filter (batch queue)", () => {
     render(<ApplicationList />);
     await screen.findByText("Staff Engineer");
     fireEvent.click(screen.getByTestId("queued-filter"));
-    await screen.findByText("Nothing is in your batch.");
+    await screen.findByText("Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt.");
   });
 });

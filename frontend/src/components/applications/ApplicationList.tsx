@@ -9,7 +9,7 @@ import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { PRIORITY_LABEL, PRIORITY_OPTIONS } from "@/lib/memory";
-import { preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import { originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
 import type { QueueSummary } from "@/lib/batch-queue";
 
 
@@ -115,6 +115,11 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                 {app.stage && (
                   <p data-testid="row-stage" className="mt-1 text-xs text-warning">
                     {app.stage}
+                  </p>
+                )}
+                {originLabel(app.origin) && (
+                  <p data-testid="row-origin" className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+                    {originLabel(app.origin)}
                   </p>
                 )}
                 {/* Batch queue: the place in line and anything that would stop it. */}
@@ -232,6 +237,9 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   // Batch queue: server-side too (`queued=true` gives queue order, preflight and the summary).
   const [queuedOnly, setQueuedOnly] = useState(false);
   const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
+  // A server-filter switch shows "Loading…" in place of the rows (never the old list under the new
+  // filter), while the filter bar itself stays on screen.
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,11 +251,13 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       .then((res) => {
         if (cancelled) return;
         setApplications(res.applications);
+        setSwitching(false);
         setQueueSummary(queuedOnly ? ((res.queue_summary as QueueSummary | null | undefined) ?? null) : null);
         setError(null);
       })
       .catch(() => {
         if (cancelled) return;
+        setSwitching(false);
         setError("Could not load your applications.");
       });
     return () => {
@@ -306,6 +316,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           onClick={() => {
             setStatusFilter("all");
+            if (inFlight || queuedOnly) setSwitching(true);
             setInFlight(false);
             setQueuedOnly(false);
           }}
@@ -322,6 +333,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           data-testid="queued-filter"
           onClick={() => {
+            setSwitching(true);
             setQueuedOnly((v) => !v);
             setInFlight(false);
             setStatusFilter("all");
@@ -337,6 +349,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           type="button"
           data-testid="in-flight-filter"
           onClick={() => {
+            setSwitching(true);
             setInFlight((v) => !v);
             setQueuedOnly(false);
           }}
@@ -384,7 +397,10 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           <select
             data-testid="priority-filter"
             value={priority}
-            onChange={(e) => setPriority(e.target.value)}
+            onChange={(e) => {
+              setSwitching(true);
+              setPriority(e.target.value);
+            }}
             className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="all">All</option>
@@ -402,10 +418,12 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
         </p>
       )}
 
-      {visibleApplications && visibleApplications.length === 0 ? (
+      {switching ? (
+        <p className="text-sm text-muted-foreground">Loading your applications…</p>
+      ) : visibleApplications && visibleApplications.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {queuedOnly
-            ? "Nothing is in your batch."
+            ? "Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt."
             : inFlight
               ? "Nothing is in flight right now."
               : priority !== "all"

@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 7
-TOOLS_REV_FOR_HASH = "ba5bf0c56c89"
+TOOLS_REV = 8
+TOOLS_REV_FOR_HASH = "f512402744a0"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -728,6 +728,8 @@ def build_server(version: str = "") -> MCPServer:
         found_on: Optional[str] = None,
         posted_at: Optional[str] = None,
         employer_published_at: Optional[str] = None,
+        origin: Optional[str] = None,
+        queue: bool = False,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
@@ -740,8 +742,7 @@ def build_server(version: str = "") -> MCPServer:
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
         `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`
         (e.g. "GB", "DE", "IN"). If the ad says nothing, leave it out — Job360 never
-        guesses. The web compares it with preferences.work_authorization_countries
-        (set with update_profile).
+        guesses.
 
         Job facts (pass them on EVERY bring when you know them; they feed the
         user's stats): `country` = the job's ISO alpha-2 code ("FR", "US"),
@@ -760,13 +761,15 @@ def build_server(version: str = "") -> MCPServer:
         is mentioned). Read them: if the text is title_only or partial, fetch the
         full ad first; if the host is unknown, tell the user. They never block a bring.
         `repost` (not null) = among jobs YOU brought, this title at this company was first
-        brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide."""
+        brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
+        `origin`: "ai_hunt" (you found it), "user_link" or "user_paste"; `queue`=true puts it in the batch."""
         try:
             body = bring_route.BringJobRequest(
                 title=title, company=company, description=description, location=location, apply_url=apply_url,
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
                 country=country, remote=remote, found_on=found_on,
                 posted_at=posted_at, employer_published_at=employer_published_at,
+                origin=origin, queue=queue,  # type: ignore[arg-type]  # the model validates the closed set
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -784,6 +787,7 @@ def build_server(version: str = "") -> MCPServer:
                 "country": resp.country, "remote": resp.remote, "found_on": resp.found_on,
                 "ad_posted_at": resp.ad_posted_at, "employer_published_at": resp.employer_published_at,
                 "checks": resp.checks, "repost": resp.repost,
+                "queued": resp.queued, "queue_note": resp.queue_note,
                 "assistant_hint": ASSISTANT_HINT,
             }
         )

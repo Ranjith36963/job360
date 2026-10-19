@@ -7,7 +7,7 @@ import { BATCH_RULES_SAVED } from "./BatchRulesCard";
 import { toast } from "sonner";
 import { listApplications, recordApplicationEvent } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
-import { preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import { originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
 import type { QueueSummary } from "@/lib/batch-queue";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
@@ -15,6 +15,7 @@ const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] tex
 type QueueRow = {
   id: number;
   queue_position?: number | null;
+  origin?: string;
   job_title: string;
   job_company?: string | null;
   preflight?: Record<string, unknown> | null;
@@ -87,7 +88,7 @@ export function BatchQueueCard() {
         </p>
       ) : rows.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="batch-queue-empty">
-          No jobs in your batch. Add one from any application page with Add to batch.
+          Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt: the jobs it finds come here.
         </p>
       ) : (
         <>
@@ -116,6 +117,14 @@ export function BatchQueueCard() {
                       )}
                       {name}
                     </Link>
+                    {originLabel(r.origin) && (
+                      <span
+                        data-testid={`batch-row-origin-${r.id}`}
+                        className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10.5px] text-brand"
+                      >
+                        {originLabel(r.origin)}
+                      </span>
+                    )}
                     {problems.length > 0 && (
                       <ul data-testid={`batch-row-problems-${r.id}`} className="mt-1 flex flex-col gap-0.5 text-xs text-warning">
                         {problems.map((p) => (
