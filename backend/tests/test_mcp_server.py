@@ -68,6 +68,8 @@ EXPECTED_TOOLS = {
     "report_missing_tool",
     # The form check (weak spot #1) - which live-form questions have a saved answer - 29 -> 30.
     "check_form",
+    # The Job360 browser agent (VISION decision 29, 2026-10-19) - 32 -> 33.
+    "browser",
 }
 
 JOB = {

@@ -1131,3 +1131,40 @@ export type ReadyFlag = _Schemas["ReadyFlag"];
 export async function getReadyToSend(params: { applicationId?: number; limit?: number } = {}): Promise<ReadyToSend> {
   return request<ReadyToSend>(`/api/ready-to-send${qs({ application_id: params.applicationId, limit: params.limit })}`);
 }
+
+// ---- The Job360 browser agent, slice 2: sign in once (docs/product/BROWSER_AGENT.md) ----
+export type BrowserSignIn = { site_host: string; cookie_count: number; updated_at: string };
+export type BrowserSignIns = { enabled: boolean; sites: BrowserSignIn[] };
+/** One picture of the cloud browser (status ok), or a refusal: status + reason + detail. */
+export type BrowserLiveShot = {
+  status: string;
+  reason?: string;
+  detail?: string;
+  url?: string;
+  title?: string;
+  width?: number;
+  height?: number;
+  image?: string;
+  kept?: Record<string, number>;
+  closed?: boolean;
+};
+export type BrowserLiveAction =
+  | { action: "start"; url: string }
+  | { action: "shot" | "keep" | "cancel" }
+  | { action: "click"; x: number; y: number }
+  | { action: "type"; text: string }
+  | { action: "key"; key: string }
+  | { action: "scroll"; dy: number };
+
+export async function getBrowserSignIns(): Promise<BrowserSignIns> {
+  return request<BrowserSignIns>("/api/browser/sign-ins");
+}
+
+export async function forgetBrowserSignIn(host: string): Promise<{ forgotten: string }> {
+  return request(`/api/browser/sign-ins/${encodeURIComponent(host)}`, { method: "DELETE" });
+}
+
+/** One step of the user's own sign-in. What is typed goes to the page and is never kept. */
+export async function browserLive(step: BrowserLiveAction): Promise<BrowserLiveShot> {
+  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify(step) });
+}
