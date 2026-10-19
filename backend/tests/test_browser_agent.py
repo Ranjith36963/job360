@@ -604,8 +604,11 @@ COMBO = """<!doctype html><html><head><title>Location - Acme</title></head><body
 async def combo_site():
     from aiohttp import web
 
+    async def combo(_):
+        return web.Response(text=COMBO, content_type="text/html")
+
     app = web.Application()
-    app.router.add_get("/combo", lambda _r: web.Response(text=COMBO, content_type="text/html"))
+    app.router.add_get("/combo", combo)
     runner = web.AppRunner(app)
     await runner.setup()
     tcp = web.TCPSite(runner, "127.0.0.1", 0)
@@ -681,5 +684,63 @@ async def test_the_probe_opens_pages_read_only_with_a_fresh_browser_each(site):
         assert [r["outcome"] for r in rows] == ["login_required", "captcha", "blocked"]
         assert rows[0]["fields"] >= 1 and rows[0]["file_inputs"] == 1 and rows[0]["submit_buttons"] == 1
         assert pool._sessions == {}  # noqa: SLF001 - nothing left open
+    finally:
+        await pool.shutdown()
+
+
+SPA = """<!doctype html><html><head><title>Careers - Acme</title></head><body><div id="app">Loading…</div>
+<script>
+  fetch('/questions').then(r => r.json()).then(qs => {
+    document.getElementById('app').innerHTML = '<form>' + qs.map(q => `<label for="${q}">${q}</label><input id="${q}">`)
+      .join('') + '</form><div style="height:3000px"></div><div id="more"></div>';
+    addEventListener('scroll', () => {
+      if (scrollY > 200 && !document.getElementById('late'))
+        document.getElementById('more').innerHTML = '<label for="late">Notice period</label><input id="late">';
+    });
+  });
+</script></body></html>"""
+
+
+@pytest.fixture
+async def spa_site():
+    import asyncio
+
+    from aiohttp import web
+
+    async def questions(_):
+        await asyncio.sleep(0.4)  # the form's own data arrives after the HTML
+        return web.json_response(["First name", "Email"])
+
+    async def careers(_):
+        return web.Response(text=SPA, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/careers", careers)
+    app.router.add_get("/questions", questions)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_single_page_form_is_read_after_it_draws_and_scroll_loads_the_rest(spa_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(spa_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/careers")
+        names = [e["name"] for e in page["elements"]]
+        assert "First name" in names and "Email" in names, names
+        assert "Notice period" not in names
+        page = await run(pool, "u1", "scroll", text="down")
+        assert "Notice period" in [e["name"] for e in page["elements"]]
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "scroll", text="sideways")
+        assert exc.value.reason == "bad_scroll"
     finally:
         await pool.shutdown()

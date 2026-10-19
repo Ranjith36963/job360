@@ -35,7 +35,7 @@ from src.services.fetch.guard import ResolveFn
 
 logger = logging.getLogger("job360.services.browser_agent")
 
-ACTIONS = ("open", "look", "click", "type", "choose", "tick", "upload", "key", "back", "close")
+ACTIONS = ("open", "look", "click", "type", "choose", "tick", "upload", "key", "scroll", "back", "close")
 # Keys the assistant may press (action "key", the key in `text`). Enter only inside a suggestion list:
 # in an ordinary field Enter can submit the form, which would skip check_submit.
 AGENT_KEYS = frozenset({"ArrowDown", "ArrowUp", "Tab", "Escape", "Enter"})
@@ -313,10 +313,19 @@ async def _kind(loc: Any) -> str:
     )
 
 
+SETTLE_IDLE_MS = 3000
+
+
 async def _settle(page: Any) -> None:
+    """Let the page finish: the HTML, then up to ``SETTLE_IDLE_MS`` for the network to go quiet,
+    because single-page sites (React forms) draw their fields only after their own requests."""
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=ACTION_TIMEOUT_MS)
     except Exception:  # noqa: BLE001 - a click that does not navigate is normal
+        return
+    try:
+        await page.wait_for_load_state("networkidle", timeout=SETTLE_IDLE_MS)
+    except Exception:  # noqa: BLE001, S110 - a page that keeps polling never goes idle: read it as it is
         pass
 
 
@@ -375,6 +384,7 @@ async def _act(
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
+        await _settle(page)
         return await look(s)
     if action == "look":
         return await look(s)
@@ -385,6 +395,13 @@ async def _act(
         return await look(s)
     if action == "key":
         return await _press(s, ref, text)
+    if action == "scroll":
+        if text not in ("down", "up"):
+            raise BrowserError("refused", "bad_scroll", 'scroll needs text "down" or "up".')
+        page = _live_page(s)
+        await page.mouse.wheel(0, 800 if text == "down" else -800)
+        await _settle(page)
+        return await look(s)
 
     loc = await _locate(s, ref)
     kind = await _kind(loc)

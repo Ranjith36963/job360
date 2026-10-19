@@ -106,7 +106,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 
 | Slice | What |
 |---|---|
-| 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, key, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
+| 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, key, scroll, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
 | 2 ✅ | **Sign in once:** a live view on the Job360 site; the cookie is kept, encrypted, per site. |
 | 3 ✅ | **Hand-off:** a job the cloud browser couldn't finish shows on Needs you with "finish it with your assistant's browser". |
 | 4 🟡 | **Measure:** test real career sites (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and record which work from the cloud. |
@@ -156,6 +156,11 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 **`key` action (2026-10-19):** ArrowDown, ArrowUp, Tab, Escape and Enter, for the suggestion lists real forms use
 (Greenhouse location and school, Workday dropdowns): type, ArrowDown, Enter. Enter is refused outside a suggestion
 list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`.
+
+**Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
+the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.
+`scroll` (text `down` or `up`) loads questions that only appear further down. Both tested on a local single-page
+form; the test fails when the wait is removed.
 
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
