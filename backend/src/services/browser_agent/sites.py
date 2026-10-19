@@ -34,7 +34,7 @@ SITES: tuple[Site, ...] = (
     Site("greenhouse", ("greenhouse.io",), (
         "Upload the CV with the Attach button and check upload_confirmed; a file box set directly can fail silently.",
         "Dropdowns are react-select: choose by the exact option text, then read the value back.",
-        "An invisible reCAPTCHA is normal here; only a visible challenge is a CAPTCHA.",
+        "Its invisible reCAPTCHA is normal and no stop; an image challenge or a tick box is (needs_you).",
     )),
     Site("lever", ("lever.co",), (
         "Location: type, then choose a suggestion from the list; typed text alone is rejected on submit.",
@@ -140,8 +140,12 @@ _FIELD_TAGS = ("input", "select", "textarea")
 _NOT_FIELD_TYPES = ("submit", "button", "image", "reset", "hidden")
 # A trap field for bots: its label says to leave it empty (ats-autofill skills/fill-app/dom-toolkit.js:790).
 # "Leave blank if none" is an ordinary optional field, not a trap.
+# Narrower than the reference on purpose: it must say "this" / "the" field, because "Middle name
+# (leave blank)" is an ordinary optional field and refusing it would block a real answer.
 _HONEYPOT = re.compile(
-    r"leave (?:this|the)?\s*(?:field|box)?\s*blank(?!\s*(?:if|unless|when|for)\b)|do ?n['o]?t fill", re.IGNORECASE
+    r"leave (?:this|the)\s+(?:field\s+|box\s+)?(?:blank|empty)(?!\s*(?:if|unless|when|for)\b)"
+    r"|do ?n['o]?t fill (?:this|in)",
+    re.IGNORECASE,
 )
 
 
