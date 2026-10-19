@@ -30,6 +30,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from src.services.browser_agent.egress import EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
+    CHOSEN_NEARBY_JS,
     CONTROL_STATE_JS,
     ELEMENT_FACTS_JS,
     FOCUS_IN_LIST_JS,
@@ -306,7 +307,7 @@ def _pick(options: list[str], want: str) -> int:
     norm = [" ".join(o.split()).casefold() for o in options]
     exact = [i for i, o in enumerate(norm) if o == w]
     if exact:
-        return exact[0]
+        return exact[0] if len(exact) == 1 else -1  # two options with the same name: no guess
     for hits in ([i for i, o in enumerate(norm) if o.startswith(w)], [i for i, o in enumerate(norm) if w in o]):
         if len(hits) == 1:
             return hits[0]
@@ -315,44 +316,62 @@ def _pick(options: list[str], want: str) -> int:
     return -1
 
 
+# Options the user can see: a closed list drawn earlier (hidden) never answers for the open one.
+VISIBLE_OPTIONS = ", ".join(f"{part.strip()}:visible" for part in OPTION_SELECTOR.split(","))
+
+
+def _option_not_found(text: str, seen: list[str]) -> BrowserError:
+    listed = "; ".join(seen[:30]) if seen else "none were shown"
+    return BrowserError(
+        "refused", "option_not_found",
+        f"No single option matches '{text[:80]}'. Options seen: {listed}. Type part of it first, then choose again.",
+    )
+
+
 async def _choose(s: Session, loc: Any, text: str) -> None:
-    """Pick an option: a native <select> directly; a custom dropdown by opening it, finding the option
-    wherever it is drawn, clicking it and checking the field now shows it."""
+    """Pick an option: a native <select> by the same matching rules; a custom dropdown by opening it,
+    finding the option wherever it is drawn, clicking it and checking the field now shows it."""
     if await loc.evaluate("(el) => el.tagName === 'SELECT'"):
+        labels = [" ".join(str(t).split()) for t in await loc.evaluate("(el) => Array.from(el.options, o => o.text)")]
+        i = _pick(labels, text)
+        if i >= 0:
+            await loc.select_option(index=i)
+            return
         try:
-            await loc.select_option(label=text)
-        except Exception:  # noqa: BLE001 - fall back to the option's value
-            await loc.select_option(value=text)
+            await loc.select_option(value=text, timeout=1000)
+        except Exception:  # noqa: BLE001 - no option has that value either
+            raise _option_not_found(text, labels) from None
         return
     page = _live_page(s)
     if not await loc.evaluate("(el) => el.getAttribute('aria-expanded') === 'true'"):
         await loc.click()
     seen: list[str] = []
     for frame in page.frames[:MAX_FRAMES]:
-        options = frame.locator(OPTION_SELECTOR)
+        options = frame.locator(VISIBLE_OPTIONS)
         try:
-            await options.first.wait_for(state="visible", timeout=2000)
+            await options.first.wait_for(state="visible", timeout=2000 if frame == page.main_frame else 300)
         except Exception:  # noqa: BLE001, S112 - no options drawn in this frame
             continue
         texts = [" ".join(t.split()) for t in await options.all_inner_texts()][:200]
-        seen = texts
+        seen.extend(texts)
         i = _pick(texts, text)
-        if i >= 0:
-            await options.nth(i).click()
-            await _settle(page)
-            shown = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
-            if text.strip().casefold() in shown or texts[i].casefold() in shown or not shown:
-                return
-            raise BrowserError(
-                "error", "choose_unconfirmed", f"Clicked '{texts[i]}' but the field shows '{shown[:80]}'."
-            )
-        break
+        if i < 0:
+            continue  # an unrelated open list here; the one we want may be in another frame
+        await options.nth(i).click()
+        await _settle(page)
+        shown = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
+        # react-select keeps its input empty and shows the pick next to it: read the field's surroundings.
+        confirmed = (
+            text.strip().casefold() in shown or texts[i].casefold() in shown
+            if shown.strip() else bool(await loc.evaluate(CHOSEN_NEARBY_JS, texts[i].casefold()))
+        )
+        if confirmed:
+            return
+        raise BrowserError(
+            "error", "choose_unconfirmed", f"Clicked '{texts[i]}' but the field shows '{shown[:80] or 'nothing'}'."
+        )
     await page.keyboard.press("Escape")
-    listed = "; ".join(seen[:30]) if seen else "none were shown"
-    raise BrowserError(
-        "refused", "option_not_found",
-        f"No single option matches '{text[:80]}'. Options seen: {listed}. Type part of it first, then choose again.",
-    )
+    raise _option_not_found(text, seen)
 
 
 def _live_page(s: Session) -> Any:
@@ -367,7 +386,29 @@ def _live_page(s: Session) -> Any:
 
 
 MAX_FRAMES = 20
+# How many frames are looked at to find the MAX_FRAMES shown ones.
+MAX_FRAMES_CHECKED = 100
 FRAME_READ_TIMEOUT_S = 3.0
+
+
+async def _read_frame(frame: Any, max_elements: int, *, main: bool) -> Optional[dict[str, Any]]:
+    """One frame's snapshot. A child frame that fails is skipped; the page itself gets one more try
+    and then an error, never an empty "ok" (CodeRabbit on #914)."""
+    for attempt in range(2 if main else 1):
+        try:
+            return await asyncio.wait_for(
+                frame.evaluate(SNAPSHOT_JS, {"maxElements": max_elements, "maxText": MAX_TEXT}),
+                FRAME_READ_TIMEOUT_S,
+            )
+        except Exception:  # noqa: BLE001, S112 - a frame that navigated, hung or is cross-process mid-read
+            if attempt == 0 and main:
+                await asyncio.sleep(0.5)
+    if main:
+        raise BrowserError(
+            "error", "page_unreadable",
+            "The page could not be read (it may still be loading or moving to a new page). Call look again.",
+        )
+    return None
 
 
 def _wrap_untrusted(text: str) -> str:
@@ -416,17 +457,16 @@ async def look(s: Session) -> dict[str, Any]:
     frame_urls: list[str] = []
     has_password = False
     above = below = 0
-    for i, frame in enumerate(page.frames[:MAX_FRAMES]):
+    read = 0
+    for i, frame in enumerate(page.frames[:MAX_FRAMES_CHECKED]):
         frame_urls.append(frame.url)
-        if i and not await _frame_shown(frame):
+        # The cap counts frames READ: hidden ones (ads, trackers) before the form do not use it up.
+        if read >= MAX_FRAMES or (i and not await _frame_shown(frame)):
             continue
-        try:
-            snap = await asyncio.wait_for(
-                frame.evaluate(SNAPSHOT_JS, {"maxElements": MAX_ELEMENTS - len(elements), "maxText": MAX_TEXT}),
-                FRAME_READ_TIMEOUT_S,
-            )
-        except Exception:  # noqa: BLE001, S112 - a frame that navigated, hung or is cross-process mid-read
+        snap = await _read_frame(frame, MAX_ELEMENTS - len(elements), main=i == 0)
+        if snap is None:
             continue
+        read += 1
         elements.extend(snap.get("elements") or [])
         if snap.get("text"):
             texts.append(snap["text"])
@@ -434,7 +474,7 @@ async def look(s: Session) -> dict[str, Any]:
         above += int(snap.get("omitted_above") or 0)
         below += int(snap.get("omitted_below") or 0)
     # Every frame's URL counts for the CAPTCHA check, including the frames past the cap and hidden ones.
-    frame_urls.extend(f.url for f in page.frames[MAX_FRAMES:])
+    frame_urls.extend(f.url for f in page.frames[MAX_FRAMES_CHECKED:])
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
@@ -677,6 +717,9 @@ async def _act(
             before = None
         frames = await _watch(page)
         await loc.click()
+        if submitted:
+            # Set before the page is read: a page that cannot be read now still counts as submitted on.
+            s.submitted_on, s.submit_refused = url, False
         await _settle(page)
         changed = await _changed(page, frames, url, tabs)
         if not changed:
@@ -695,7 +738,7 @@ async def _act(
                 "That click changed nothing on the page. Do not click it again: look, scroll or try another control."
             )
         if submitted:
-            s.submitted_on, s.submit_refused = url, bool(out.get("site_refused"))
+            s.submit_refused = bool(out.get("site_refused"))
             out["submit_clicked"] = True
             if out.get("site_refused"):
                 out["next"] = (
@@ -728,6 +771,13 @@ async def _act(
         out = await look(s)
         out["typed_matches"] = typed == text
         return out
+
+    if kind == "submit" and action in ("choose", "tick", "upload"):
+        # These click too; a final submit is only ever clicked through the gate (CodeRabbit on #915).
+        raise BrowserError(
+            "refused", "submit_control",
+            "That is the form's final submit. Use click with application_id, so check_submit runs first.",
+        )
 
     if action == "choose":
         await _choose(s, loc, text)
