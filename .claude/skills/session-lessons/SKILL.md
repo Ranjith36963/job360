@@ -45,6 +45,24 @@ delete a lesson; if one stops being true, say so on its line and why.
   summary (failing tests are written there since the failed-tests-in-summary
   PR). When a head shows few check runs, read the PR's `mergeable_state` first:
   a CONFLICTING PR runs no CI.
+- 2026-10-19: `offline-suite` went red on PR #916 and I read only the last 80 lines of the
+  job log (`get_job_logs` tail_lines=80). All 80 were Postgres teardown noise ("lastval is
+  not yet defined"), which the container prints AFTER pytest; the check run's own output was
+  empty. Instead of pulling more of the log I re-ran all ~3,900 backend tests in the cloud
+  container (39 min, the first try lost to the local Postgres being stopped). The owner pasted
+  the answer: pytest's short test summary sat ~400 lines above the end
+  (`update_profile is 2034 characters`, the MCP text budget). Why it repeated: I never read
+  this skill before watching the PR, so I also waited an hour on a rate-limited CodeRabbit,
+  breaking the rule below. **Rule:** pull enough of a failing log to reach pytest's
+  `short test summary info` (tail_lines ≥ 600) before any slower route.
+- 2026-10-19, same PR #916: the failure itself was mine. A review asked for `skip` to be
+  explained in the `update_profile` tool description; my one-line addition took it from
+  1,998 to 2,034 characters. `tests/test_mcp_text_budget.py` caps every MCP text at 2,000
+  (Claude Code truncates at 2,048), but `scripts/agent-gate.sh` passed twice: its fast tier
+  ran only the 226 / 13 tests it judged affected, not the budget test. Only the 20-minute
+  `offline-suite` caught it. **Rule:** after editing any `@mcp.tool()` docstring or
+  `INSTRUCTIONS` in `api/mcp_server.py`, run `python scripts/mcp_text_budget.py` before
+  pushing.
 - CodeRabbit's free tier rate-limits after a few reviews an hour. **Rule:** never
   wait on it; the repo's own reviewer-bugs / reviewer-security / CI are the gate.
 - 2026-10-18: a finished Needs-you feature sat unpushed while the session
