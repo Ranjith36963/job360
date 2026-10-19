@@ -34,10 +34,12 @@ from src.services.browser_agent.page_js import (
     ELEMENT_FACTS_JS,
     FOCUS_IN_LIST_JS,
     FORM_STEP_JS,
+    IS_TEXT_FIELD_JS,
     IS_TYPEAHEAD_JS,
     IS_WORKDAY_FIELD_JS,
     LEVER_CHECK_JS,
     NATIVE_SET_JS,
+    OWN_LIST_IDS_JS,
     SHOWN_VALUE_JS,
     SNAPSHOT_JS,
     TICK_VIA_LABEL_JS,
@@ -279,7 +281,8 @@ async def _type_into(loc: Any, text: str) -> str:
     else:
         await loc.fill(text)
     shown = str(await loc.evaluate(SHOWN_VALUE_JS))
-    if shown != text and not typeahead:
+    # The native setter is an input's or a textarea's: a contenteditable box keeps what fill() left.
+    if shown != text and not typeahead and await loc.evaluate(IS_TEXT_FIELD_JS):
         shown = str(await loc.evaluate(NATIVE_SET_JS, text))
     if workday:
         await loc.blur()
@@ -312,6 +315,8 @@ def _pick(options: list[str], want: str) -> int:
 
 # Options the user can see: a closed list drawn earlier (hidden) never answers for the open one.
 VISIBLE_OPTIONS = ", ".join(f"{part.strip()}:visible" for part in OPTION_SELECTOR.split(","))
+# The ids of the list a dropdown says is its own (aria-controls / aria-owns), when they are plain ids.
+_LIST_ID = re.compile(r"^[\w:.-]{1,200}$")
 
 
 def _option_not_found(text: str, seen: list[str]) -> BrowserError:
@@ -340,13 +345,26 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
     page = _live_page(s)
     if not await loc.evaluate("(el) => el.getAttribute('aria-expanded') === 'true'"):
         await loc.click()
+    own_lists = [i for i in await loc.evaluate(OWN_LIST_IDS_JS) if _LIST_ID.match(i)]
     seen: list[str] = []
-    for frame in page.frames[:MAX_FRAMES]:
-        options = frame.locator(VISIBLE_OPTIONS)
+    for frame in await _option_frames(page, loc):
+        options, scoped = frame.locator(VISIBLE_OPTIONS), False
+        for list_id in own_lists:  # the list the field names as its own, when it is in this frame
+            own = frame.locator(f'[id="{list_id}"]')
+            if await own.count():
+                options, scoped = own.locator(VISIBLE_OPTIONS), True
+                break
         try:
             await options.first.wait_for(state="visible", timeout=2000 if frame == page.main_frame else 300)
         except Exception:  # noqa: BLE001, S112 - no options drawn in this frame
             continue
+        if not scoped and await frame.locator("[role=listbox]:visible").count() > 1:
+            await page.keyboard.press("Escape")
+            raise BrowserError(
+                "refused", "two_lists_open",
+                "Two dropdown lists are open and this field does not say which is its own. Close the other "
+                "one (key Escape), then choose again.",
+            )
         texts = [" ".join(t.split()) for t in await options.all_inner_texts()][:200]
         seen.extend(texts)
         i = _pick(texts, text)
@@ -372,6 +390,23 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
         )
     await page.keyboard.press("Escape")
     raise _option_not_found(text, seen)
+
+
+async def _option_frames(page: Any, loc: Any) -> list[Any]:
+    """Where to look for the options: the field's own frame first (look lists fields in shown frames
+    past the MAX_FRAMES-th), then the page, then other shown frames; at most MAX_FRAMES of them."""
+    own = None
+    try:
+        own = await (await loc.element_handle(timeout=1000)).owner_frame()
+    except Exception:  # noqa: BLE001 - detached: search the page as before
+        own = None
+    order = [f for f in (own, page.main_frame) if f is not None]
+    for f in page.frames[:MAX_FRAMES_CHECKED]:
+        if len(order) >= MAX_FRAMES:
+            break
+        if f not in order and await _frame_shown(f):
+            order.append(f)
+    return list(dict.fromkeys(order))[:MAX_FRAMES]
 
 
 def _live_page(s: Session) -> Any:

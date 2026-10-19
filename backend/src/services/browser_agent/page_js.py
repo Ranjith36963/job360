@@ -184,6 +184,16 @@ NATIVE_SET_JS = r"""
 }
 """
 
+# A field that holds its text in `value` (the native setter's kind), not a contenteditable box.
+IS_TEXT_FIELD_JS = r"""
+(el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+"""
+
+# The ids of the list a dropdown names as its own (ARIA): its options are looked for there first.
+OWN_LIST_IDS_JS = r"""
+(el) => [el.getAttribute('aria-controls'), el.getAttribute('aria-owns')].join(' ').split(/\s+/).filter(Boolean)
+"""
+
 # The value a field shows now (inputs, textareas, contenteditable boxes, custom dropdown buttons).
 SHOWN_VALUE_JS = r"""
 (el) => ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '')
