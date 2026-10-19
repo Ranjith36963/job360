@@ -111,7 +111,7 @@ describe("AssistantNotes — history", () => {
     const { rerender } = render(<AssistantNotes notes={["Keep", "Oops"]} onChange={vi.fn()} showHistory />);
     fireEvent.click(screen.getByRole("button", { name: "Remove note: Oops" }));
     rerender(<AssistantNotes notes={["Keep"]} onChange={vi.fn()} showHistory />);
-    fireEvent.click(screen.getByRole("button", { name: "History of things your assistant should know" }));
+    fireEvent.click(screen.getByRole("button", { name: "History of things your AI assistant should know" }));
     expect(await screen.findByText("Couldn't load the history")).toBeInTheDocument();
     expect(screen.getByTestId("notes-history")).toHaveTextContent("Oops");
 
