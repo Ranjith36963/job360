@@ -142,10 +142,18 @@ class EgressProxy:
         if not verdict.ok or not verdict.approved:
             await self._refuse(writer, host, verdict.reason or "denied")
             return
-        address = sorted(verdict.approved)[0]  # PINNED: the address screened is the address used
-        try:
-            up_reader, up_writer = await asyncio.wait_for(self._open(address, port), CONNECT_TIMEOUT_S)
-        except (OSError, asyncio.TimeoutError):
+        # PINNED: only the addresses screened above are ever used. IPv4 first, then
+        # each in turn: Railway has no outbound IPv6 unless switched on, and a
+        # string sort put a dual-stack site's IPv6 address first, so every such
+        # site was refused (CodeRabbit on #902). Refuse only when all fail.
+        up_reader = up_writer = None
+        for address in sorted(verdict.approved, key=lambda a: (":" in a, a)):
+            try:
+                up_reader, up_writer = await asyncio.wait_for(self._open(address, port), CONNECT_TIMEOUT_S)
+                break
+            except (OSError, asyncio.TimeoutError):
+                continue
+        if up_reader is None or up_writer is None:
             await self._refuse(writer, host, "the site did not answer")
             return
         if method.upper() == "CONNECT":
