@@ -12,6 +12,12 @@ each row says where it came from. Full licence texts follow below.
 - **job-board-aggregator** (Feashliaa/job-board-aggregator), `job-board-aggregator` rows (Greenhouse, Lever, Ashby, BambooHR and Workday boards)
 - `harvest` rows: board addresses found in public job lists on GitHub (SimplifyJobs New-Grad-Positions and Summer2027-Internships, vanshb03 Summer2027-Internships, crypto-jobs-fyi crawler) by `backend/scripts/harvest_hunt_boards.py`. Only the company name and board address were kept. The script is a Python re-write of freehire's `scripts/harvest_boards.py` and `scripts/ats_boards.py` (MIT, licence below).
 
+- `nl-ind` and `gb-ho` rows, and the `country`, `sponsor_register` and `match` fields on any row: employers from official visa-sponsor registers, matched to their public job boards by `build_companies.py`. Only the employer name was used (to find the board); no register data is shipped beyond the register id and country.
+  - Netherlands: IND (Immigratie- en Naturalisatiedienst) "Public register Work", recognised sponsors for regular labour and highly skilled migrants, https://ind.nl/en/public-register-recognised-sponsors/public-register-work (public register published by the Dutch government; read in October 2026).
+  - United Kingdom: Home Office "Register of licensed sponsors: workers", https://www.gov.uk/government/publications/register-of-licensed-sponsors-workers, Skilled Worker route rows. Contains public sector information licensed under the Open Government Licence v3.0 (https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
+  - United Kingdom: Companies House "Free Company Data Product" (BasicCompanyDataAsOneFile), https://download.companieshouse.gov.uk/en_output.html, used only to keep UK sponsors whose SIC codes start with 62, 63 or 72. Contains public sector information licensed under the Open Government Licence v3.0.
+  - Board endpoints are the ones the kit already reads (see Methods); the slug-probe idea is the kit's own `--discover`, limited to the two strongest names.
+
 ## Methods
 
 The endpoint patterns for the extra company-board types (Workday, Workable, Recruitee, Personio,
