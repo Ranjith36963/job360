@@ -260,6 +260,8 @@ def _live_page(s: Session) -> Any:
 MAX_FRAMES = 20
 # How many frames are looked at to find the MAX_FRAMES shown ones.
 MAX_FRAMES_CHECKED = 100
+# Controls kept for embedded frames when the page has any shown one.
+FRAME_ELEMENT_FLOOR = 50
 FRAME_READ_TIMEOUT_S = 3.0
 
 
@@ -314,12 +316,18 @@ async def look(s: Session) -> dict[str, Any]:
     has_password = False
     above = below = 0
     read = 0
-    for i, frame in enumerate(page.frames[:MAX_FRAMES_CHECKED]):
+    frames = page.frames[:MAX_FRAMES_CHECKED]
+    # A page that embeds a shown frame (a Greenhouse or iCIMS form on a careers page) keeps part of
+    # the budget for it: 150 links on the page itself must not crowd the form out.
+    shown = [True] + [await _frame_shown(f) for f in frames[1:]]
+    embeds = any(shown[1:])
+    for i, frame in enumerate(frames):
         frame_urls.append(frame.url)
         # The cap counts frames READ: hidden ones (ads, trackers) before the form do not use it up.
-        if read >= MAX_FRAMES or (i and not await _frame_shown(frame)):
+        if read >= MAX_FRAMES or not shown[i]:
             continue
-        snap = await _read_frame(frame, MAX_ELEMENTS - len(elements), main=i == 0)
+        budget = MAX_ELEMENTS - (FRAME_ELEMENT_FLOOR if embeds else 0) if i == 0 else MAX_ELEMENTS - len(elements)
+        snap = await _read_frame(frame, budget, main=i == 0)
         if snap is None:
             continue
         read += 1
