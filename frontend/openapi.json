@@ -2687,6 +2687,67 @@
         "title": "BringJobResponse",
         "type": "object"
       },
+      "BrowserActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "maxLength": 16,
+            "title": "Action",
+            "type": "string"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "doc_kind": {
+            "default": "",
+            "maxLength": 16,
+            "title": "Doc Kind",
+            "type": "string"
+          },
+          "on": {
+            "default": true,
+            "title": "On",
+            "type": "boolean"
+          },
+          "ref": {
+            "default": "",
+            "maxLength": 32,
+            "title": "Ref",
+            "type": "string"
+          },
+          "session": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Session",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "maxLength": 5000,
+            "title": "Text",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "BrowserActionRequest",
+        "type": "object"
+      },
       "CVDetail": {
         "description": "Full extracted CV data for transparent display.",
         "properties": {
@@ -17750,6 +17811,84 @@
         "summary": "Verify Email Request",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/browser": {
+      "post": {
+        "description": "One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,\nclose). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant\nreads them like any page; a 404 from the gate (not the caller's application) stays a 404.",
+        "operationId": "browser_action_api_browser_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Browser Action Api Browser Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Browser Action",
+        "tags": [
+          "browser"
         ]
       }
     },

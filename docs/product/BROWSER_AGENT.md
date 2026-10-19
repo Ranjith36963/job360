@@ -1,8 +1,8 @@
 # The Job360 browser agent
-<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) | NOT BUILT YET -->
+<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) | slice 1 built, OFF until the owner turns it on -->
 
 What the owner and Claude discussed and agreed on 2026-10-19, in plain words.
-**Nothing here is built yet.** The owner says when to build.
+**Slice 1 is built and OFF** until the owner sets `BROWSER_AGENT_ENABLED=1` on Railway (section 9). Slices 2-4 are not built.
 
 ## 1. Where we started: bulk apply (already live)
 
@@ -92,18 +92,18 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 | B. Keep the user's logins | **Yes**, as the sign-in cookie only, encrypted, never a password ("storing logins is fine") |
 | Rule 5 "browser automation of our own: never" | **Replaced** by VISION decision 29 |
 | Pay a vendor | **No** |
-| When to build | **The owner will say.** Docs only for now. |
+| When to build | **Go** (owner, 2026-10-19): slice 1 built, off by default. |
 
 ## 9. Build plan (when the owner says go)
 
 | Slice | What |
 |---|---|
-| 1 | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
+| 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
 | 2 | **Sign in once:** a live view on the Job360 site; the cookie is kept, encrypted, per site. |
 | 3 | **Hand-off:** a job the cloud browser couldn't finish shows on Needs you with "finish it with your assistant's browser". |
 | 4 | **Measure:** test real career sites (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and record which work from the cloud. |
 
-**Slice 1 design (started on 2026-10-19, then paused at the owner's request; no code was committed):**
+**Slice 1 (built 2026-10-19, off by default):**
 - **Code:**
   - `backend/src/services/browser_agent/`:
     - `safety.py`: pure rules, testable offline (password box, final-submit button, CAPTCHA / sign-in wall, the URL screen reusing `services/fetch/guard.py`)
@@ -119,6 +119,10 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
   - Each live browser uses about 300 MB of memory.
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
+- **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
+- **Known gap:** Chromium resolves addresses itself, so a site that changes its DNS between our check and Chromium's own lookup could reach a private address. Each request is still re-checked; slice 2 can close this with a filtering proxy.
+
+**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 
 ## 10. Open questions for later
 

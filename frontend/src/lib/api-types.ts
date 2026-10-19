@@ -1408,6 +1408,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/browser": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Browser Action
+         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,
+         *     close). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant
+         *     reads them like any page; a 404 from the gate (not the caller's application) stays a 404.
+         */
+        post: operations["browser_action_api_browser_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/calendar-feed": {
         parameters: {
             query?: never;
@@ -3700,6 +3722,43 @@ export interface components {
             } | null;
             /** Status */
             status: string;
+        };
+        /** BrowserActionRequest */
+        BrowserActionRequest: {
+            /** Action */
+            action: string;
+            /** Application Id */
+            application_id?: number | null;
+            /**
+             * Doc Kind
+             * @default
+             */
+            doc_kind: string;
+            /**
+             * On
+             * @default true
+             */
+            on: boolean;
+            /**
+             * Ref
+             * @default
+             */
+            ref: string;
+            /**
+             * Session
+             * @default
+             */
+            session: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
         };
         /**
          * CVDetail
@@ -9855,6 +9914,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browser_action_api_browser_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrowserActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {
