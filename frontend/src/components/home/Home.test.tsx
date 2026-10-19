@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   uploadProfile: vi.fn(),
   keepProfileEdit: vi.fn(),
   takeBackProfileEdit: vi.fn(),
+  getProfileEditHistory: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" }));
