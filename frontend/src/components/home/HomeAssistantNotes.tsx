@@ -5,11 +5,12 @@ import { toast } from "sonner";
 import { getProfile, keepProfileEdit, takeBackProfileEdit, uploadProfile } from "@/lib/api";
 import type { ProfileResponse } from "@/lib/types";
 import { findAgentEdit } from "@/lib/agent-edits";
-import { AssistantNotes, prefsFromRaw } from "@/components/profile/PreferencesForm";
+import { prefsFromRaw } from "@/components/profile/PreferencesForm";
+import { AssistantNotes } from "@/components/profile/AssistantNotes";
 import { EditedMark } from "@/components/profile/EditedMark";
 
 // ---------------------------------------------------------------------------
-// "Things your assistant should know" on Home — the standing lines the agent
+// "Things your AI assistant should know" on Home — the standing lines the agent
 // reads first on every get_profile, shown where the owner lands so they can
 // be read and changed without opening Profile. Same data, same save path and
 // same Keep / Take back mark as the Profile page; nothing new is stored.
@@ -21,50 +22,78 @@ import { EditedMark } from "@/components/profile/EditedMark";
 export function HomeAssistantNotes() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
-  // Latest-wins: a slow save must not overwrite the result of a newer edit.
+  const [settling, setSettling] = useState(false);
+  // One request in flight at a time, in the order the owner acted: two
+  // parallel requests could land out of order and leave the server holding an
+  // older list than the screen. A queued save that a newer edit has already
+  // replaced is skipped — the newer one carries the whole list. Keep and Take
+  // back join the same queue, so a note save still waiting can never land after
+  // them and undo them; and the notes are locked until they answer, so no edit
+  // can start from the list they are about to change.
   const seq = useRef(0);
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const latest = useRef<ProfileResponse | null>(null);
 
   useEffect(() => {
     let live = true;
     getProfile()
-      .then((p) => live && setProfile(p))
+      .then((p) => {
+        if (!live) return;
+        latest.current = p;
+        setProfile(p);
+      })
       .catch(() => {});
     return () => {
       live = false;
     };
   }, []);
 
-  const save = useCallback(
-    async (notes: string[]) => {
-      if (!profile) return;
-      const mine = ++seq.current;
+  const save = useCallback((notes: string[]) => {
+    const base = latest.current;
+    if (!base) return;
+    const mine = ++seq.current;
+    // Show the edit at once; the server's answer replaces it below.
+    const shown = { ...base, preferences: { ...base.preferences, assistant_notes: notes } };
+    latest.current = shown;
+    setProfile(shown);
+    chain.current = chain.current.then(async () => {
+      if (mine !== seq.current) return;
       // The save replaces the whole preferences block, so send every other
       // field back exactly as stored — only the notes change.
-      const prefs = { ...prefsFromRaw(profile.preferences ?? {}), assistant_notes: notes };
-      // Show the edit at once; the server's answer replaces it below.
-      setProfile({ ...profile, preferences: { ...profile.preferences, assistant_notes: notes } });
+      const prefs = { ...prefsFromRaw(shown.preferences ?? {}), assistant_notes: notes };
       try {
         const next = await uploadProfile(null, prefs);
         if (mine === seq.current) {
+          latest.current = next;
           setProfile(next);
           setSaveFailed(false);
         }
       } catch {
-        if (mine === seq.current) setSaveFailed(true);
-        toast.error("Couldn't save the note");
+        if (mine === seq.current) {
+          setSaveFailed(true);
+          toast.error("Couldn't save the note");
+        }
       }
-    },
-    [profile]
-  );
+    });
+  }, []);
 
   const settle = (run: (path: string) => Promise<ProfileResponse>, done: string, failed: string) =>
-    async (path: string) => {
-      try {
-        setProfile(await run(path));
-        toast.success(done);
-      } catch {
-        toast.error(failed);
-      }
+    (path: string) => {
+      setSettling(true);
+      const step = chain.current.then(async () => {
+        try {
+          const next = await run(path);
+          latest.current = next;
+          setProfile(next);
+          toast.success(done);
+        } catch {
+          toast.error(failed);
+        } finally {
+          setSettling(false);
+        }
+      });
+      chain.current = step;
+      return step;
     };
 
   if (!profile) return null;
@@ -77,6 +106,8 @@ export function HomeAssistantNotes() {
       <AssistantNotes
         notes={notes}
         onChange={save}
+        disabled={settling}
+        showHistory
         trailing={
           <EditedMark
             edit={edit}
