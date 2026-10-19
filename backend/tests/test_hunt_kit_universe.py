@@ -347,3 +347,18 @@ def test_run_gives_every_board_row_the_collectors_title_test(monkeypatch: pytest
                 fetch=lambda r, h, s: rows.append(r) or [])
     ok = rows[0]["title_ok"]
     assert ok("Senior AI Engineer") and not ok("Chef") and not ok("AI Engineer Intern")
+
+
+def test_history_none_rotates_by_the_calendar_not_slice_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Review P1 on #918: with --history none there is no cursor, so offsets={} pinned every run to slice 0.
+    got: list[Any] = []
+    real = hk.rotate_open
+
+    def spy(*a: Any, **k: Any) -> Any:
+        got.append(k.get("offsets"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(hk, "rotate_open", spy)
+    _cursor_run(monkeypatch, tmp_path, [], hist="none")
+    _cursor_run(monkeypatch, tmp_path, [])
+    assert got == [None, {}]  # no history: calendar slice; a history file: the stored cursor

@@ -2045,8 +2045,10 @@ def run(args: argparse.Namespace) -> Collector:
     wd_max = getattr(args, "workday_max", WORKDAY_MAX)
     col.cursor = load_rotation_cursor(getattr(args, "history", None))
     listed = boards
+    # No cursor file (--history none): fall back to the calendar slice, else every run would rescan slice 0.
+    offsets = col.cursor if _cursor_path(getattr(args, "history", None)) else None
     boards = rotate_open(listed, {"workday": wd_max} if wd_max is not None else {},
-                         open_days=getattr(args, "open_days", OPEN_CYCLE_DAYS), offsets=col.cursor)
+                         open_days=getattr(args, "open_days", OPEN_CYCLE_DAYS), offsets=offsets)
     col.rotation = plan_rotation(listed, boards, col.cursor)
     wd_titles = "\n".join(queries[:WORKDAY_SEARCH_TITLES])  # board rows hold strings; kit_ats splits it
     # title_ok is the Collector's own title test (--titles and --exclude-title-words): readers that fetch a
