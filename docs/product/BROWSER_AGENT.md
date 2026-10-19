@@ -150,6 +150,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   `blocked` itself (reason `captcha` or `login_needed`, step "Job360 browser", the site's host). That opens the usual
   Needs you ask, and `check_submit` holds the job until it is resolved.
 - Recorded once per open block of the same reason, so repeated looks don't pile up events.
+- On the application's page, a sign-in stop shows a **"Sign in once to <site> on Job sites"** button, so the next run starts signed in.
 - The note tells the user how to finish: with their own assistant's browser when their computer is on (Claude in
   Chrome, Gemini in Chrome, ChatGPT agent), or by signing in once on Settings → Job sites.
 

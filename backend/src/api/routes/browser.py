@@ -174,6 +174,7 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
         current = await blocked_service.open_block(db, user.id, application_id)
         if current is not None and current["reason"] == reason:
             return False
+        # "Job360 browser" is read by the web (ApplicationDecisions.tsx) to offer "Sign in once on Job sites".
         payload: dict[str, Any] = {"reason": reason, "step": "Job360 browser", "detail": HAND_OFF_DETAIL}
         host = site_host(str(result.get("url", "")))
         if host and "." in host:
