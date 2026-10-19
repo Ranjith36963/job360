@@ -26,6 +26,12 @@ _LABEL_OF_JS = r"""
     const wrap = el.closest('label');
     if (wrap && wrap.innerText.trim()) return wrap.innerText;
     if (el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) return el.value;
+    if (el.tagName === 'INPUT' && el.type === 'image' && (el.alt || '').trim()) return el.alt;
+    if (!(el.innerText || '').trim()) {
+      // An image-only button is named by its picture's alt text.
+      const alts = Array.from(el.querySelectorAll('img[alt]')).map(i => i.alt).join(' ');
+      if (alts.trim()) return alts;
+    }
     // A button's own text comes before its tooltip: the gate must see "Submit application".
     return el.innerText || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('name') || '';
   };
@@ -39,7 +45,8 @@ SNAPSHOT_JS = r"""
 """ + _LABEL_OF_JS + r"""
   const maxElements = args.maxElements, maxText = args.maxText, maxName = 120;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
-    + '[role=combobox], [role=option], [role=tab], [role=link], [contenteditable=true]';
+    + '[role=combobox], [role=option], [role=tab], [role=link], [contenteditable=""], [contenteditable=true], '
+    + '[contenteditable=plaintext-only]';
   const visible = (el) => {
     if (el.type === 'file') return true;  // file inputs are often hidden behind a styled button
     const r = el.getBoundingClientRect();
@@ -66,7 +73,8 @@ SNAPSHOT_JS = r"""
       ref, tag, type, role: el.getAttribute('role') || '', name: clip(labelOf(el), maxName),
       required: !!(el.required || el.getAttribute('aria-required') === 'true'),
       disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
-      autocomplete: el.getAttribute('autocomplete') || '', in_form: !!el.closest('form'),
+      // el.form also covers a control tied to its form by form="id" from outside it.
+      autocomplete: el.getAttribute('autocomplete') || '', in_form: !!(el.form || el.closest('form')),
     };
     if (isPassword) item.value = '';
     else if (tag === 'select') {
@@ -93,13 +101,14 @@ ELEMENT_FACTS_JS = r"""
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
-    in_form: !!el.closest('form'), role: el.getAttribute('role') || '',
+    in_form: !!(el.form || el.closest('form')), role: el.getAttribute('role') || '',
     // Any typed answer, chosen file or changed choice anywhere on the page: the
     // form is being filled. A box, radio or dropdown counts only once it differs
     // from how the page loaded, so a pre-ticked box on a job ad is not an answer.
     // A rich-text box (contenteditable) counts once it holds text.
     page_has_answers: Array.from(el.ownerDocument.querySelectorAll(
-      'input, textarea, select, [contenteditable=""], [contenteditable=true]')).some((f) => {
+      'input, textarea, select, [contenteditable=""], [contenteditable=true], [contenteditable=plaintext-only]'
+    )).some((f) => {
       if (f.isContentEditable && !['INPUT', 'TEXTAREA', 'SELECT'].includes(f.tagName)) {
         return !!(f.innerText || '').trim();
       }
@@ -117,4 +126,9 @@ ELEMENT_FACTS_JS = r"""
     }),
   };
 }
+"""
+
+# What a box holds after `type`: a rich-text (contenteditable) box has no value.
+TYPED_VALUE_JS = r"""
+(el) => (el.isContentEditable && !['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) ? el.innerText : el.value
 """

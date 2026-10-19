@@ -151,6 +151,9 @@ async def test_the_gate_and_look_name_a_button_the_same_way():
     <button id="by" aria-labelledby="l"><svg width="10" height="10"></svg></button>
     <label>Submit my application <span role="button" id="wrapped" tabindex="0">→</span></label>
     <button id="tip" title="Opens a new tab">Submit application</button>
+    <button id="pic"><img alt="Submit application" src="data:,"></button>
+    <form id="apply"><input type="hidden" name="job" value="1"></form>
+    <button id="outside" type="submit" form="apply">Apply</button>
     </body></html>"""
 
     async with async_api.async_playwright() as p:
@@ -162,12 +165,60 @@ async def test_the_gate_and_look_name_a_button_the_same_way():
         await page.set_content(page_html)
         seen = await page.evaluate(SNAPSHOT_JS, {"maxElements": 50, "maxText": 1000})
         look_names = {e["name"] for e in seen["elements"]}
-        for el_id in ("by", "wrapped", "tip"):
+        for el_id in ("by", "wrapped", "tip", "pic", "outside"):
             facts = await page.locator("#" + el_id).evaluate(ELEMENT_FACTS_JS)
             assert facts["name"] in look_names, (el_id, facts["name"], look_names)
             assert control_kind(facts["tag"], facts["type"], facts["name"], facts["autocomplete"],
                                 facts["in_form"], facts["role"], facts["page_has_answers"]) == "submit", el_id
         await browser.close()
+
+
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_look_lists_a_bare_rich_text_box_and_type_reads_it_back():
+    async_api = pytest.importorskip("playwright.async_api")
+    from src.services.browser_agent.page_js import SNAPSHOT_JS, TYPED_VALUE_JS
+
+    async with async_api.async_playwright() as p:
+        try:
+            browser = await p.chromium.launch()
+        except Exception as e:  # noqa: BLE001 — no Chromium on this machine
+            pytest.skip(f"Chromium not available: {e}")
+        page = await browser.new_page()
+        await page.set_content('<div contenteditable id="letter" aria-label="Cover letter"></div>'
+                               '<input id="name" aria-label="Name">')
+        seen = await page.evaluate(SNAPSHOT_JS, {"maxElements": 50, "maxText": 1000})
+        assert "Cover letter" in {e["name"] for e in seen["elements"]}
+        await page.fill("#letter", "Dear team")
+        await page.fill("#name", "Ada")
+        assert (await page.locator("#letter").evaluate(TYPED_VALUE_JS)).strip() == "Dear team"
+        assert await page.locator("#name").evaluate(TYPED_VALUE_JS) == "Ada"
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_a_dead_chromium_frees_every_session_it_held():
+    # One shared Chromium: when it dies, every session in it is dead and must not
+    # keep counting against max_sessions (CodeRabbit on #908).
+    import types
+
+    from src.services.browser_agent.agent import BrowserPool, Session
+
+    async def resolve(host, port=0, family=socket.AF_UNSPEC):
+        return []
+
+    class _Ctx:
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    pool = BrowserPool(max_sessions=2, idle_s=600, resolve=resolve)
+    pool._browser = types.SimpleNamespace(is_connected=lambda: False)
+    ctxs = [_Ctx(), _Ctx()]
+    pool._sessions = {"a": Session(context=ctxs[0], page=None), "b": Session(context=ctxs[1], page=None)}
+    assert await pool.get("a", create=False) is None
+    assert pool._sessions == {} and all(c.closed for c in ctxs)
 
 
 def test_chromium_launches_with_webrtc_kept_behind_the_proxy(monkeypatch):

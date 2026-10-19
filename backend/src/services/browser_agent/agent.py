@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from src.services.browser_agent.egress import EgressProxy, OpenFn
-from src.services.browser_agent.page_js import ELEMENT_FACTS_JS, SNAPSHOT_JS
+from src.services.browser_agent.page_js import ELEMENT_FACTS_JS, SNAPSHOT_JS, TYPED_VALUE_JS
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
 from src.services.fetch.guard import ResolveFn
 
@@ -146,6 +146,12 @@ class BrowserPool:
 
     async def get(self, user_id: str, *, create: bool) -> Optional[Session]:
         await self.reap()
+        if self._browser is not None and not self._browser.is_connected() and self._sessions:
+            # The one shared Chromium died: every session in it is dead, and a dead one
+            # would still count against max_sessions (CodeRabbit on #908).
+            logger.warning("browser_agent: Chromium is gone, dropping %d session(s)", len(self._sessions))
+            for dead in list(self._sessions):
+                await self.close(dead)
         s = self._sessions.get(user_id)
         if s is not None or not create:
             return s
@@ -341,7 +347,12 @@ async def _act(
             raise BrowserError(
                 "refused", "blocked_address", f"Job360's browser only opens public web pages ({verdict.reason})."
             )
-        page = _live_page(s)
+        try:
+            page = _live_page(s)
+        except BrowserError as exc:
+            if exc.reason != "no_page":
+                raise
+            page = s.page = await s.context.new_page()  # every tab was closed: open starts a new one
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
@@ -398,9 +409,10 @@ async def _act(
         if len(text) > MAX_TYPE_CHARS:
             raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
         await loc.fill(text)
-        typed = await loc.input_value()
+        # input_value() throws on a rich-text (contenteditable) box, so read what the page holds.
+        typed = await loc.evaluate(TYPED_VALUE_JS)
         out = await look(s)
-        out["typed_matches"] = typed == text
+        out["typed_matches"] = (typed or "").strip() == text.strip()
         return out
 
     if action == "choose":
