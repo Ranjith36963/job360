@@ -212,6 +212,21 @@ form; the test fails when the wait is removed.
     fields) or still the ad.
   - A field labelled "leave this blank" (a trap for bots) reads `leave_blank: true`, and `type` refuses it.
 
+**Step 6, proof and "did that do anything?" (2026-10-19):**
+- **`page_changed`** after every click. The browser watches the page from just before the click until it settles:
+  a new address, a new tab, a frame that navigated, any change to the page, or a change in the control itself (a
+  tick box) counts. When unsure, it counts as changed. Nothing changed: `next` says not to click it again
+  (nanobrowser's changed / none receipts).
+- **Never blind:** a control whose clicks changed nothing twice in a row is refused (`no_effect`) until something
+  else changes the page.
+- **Never twice:** after a final submit on a page, a second submit on the same page is refused
+  (`already_submitted`), unless the site said it did not take the first (`site_refused`). The gate still runs
+  check_submit on the retry.
+- **`repeat_warning`:** the same action with the same ref and text 3 times in a row (browser-use's loop nudge).
+- **Proof:** when a gated submit lands on the site's confirmation (`confirmation_seen`), a screenshot of that page
+  is stored as the application's proof (`proof_screenshot`, `via: browser`, the S7 store, at most 3 per
+  application). `proof_saved` says whether it was kept; a failed save never undoes the application.
+
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.

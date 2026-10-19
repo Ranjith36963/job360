@@ -242,3 +242,35 @@ FORM_STEP_JS = r"""
 IS_WORKDAY_FIELD_JS = r"""
 (el) => !!el.closest('[data-automation-id^="formField-"]')
 """
+
+# Did that click do anything? A MutationObserver counts the page's own changes from just before the
+# click to after it settles (nanobrowser src/browser-control/core/interaction/evidence.ts:1-3, :278,
+# :309-323: a baseline before dispatch, then changed | none). Our own ref tags are not counted.
+WATCH_START_JS = r"""
+() => {
+  if (window.__j360watch) window.__j360watch.disconnect();
+  window.__j360seen = 0;
+  const mo = new MutationObserver((ms) => {
+    for (const m of ms) {
+      if (m.type === 'attributes' && m.attributeName === 'data-j360-ref') continue;
+      window.__j360seen++;
+    }
+  });
+  mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  window.__j360watch = mo;
+  return true;
+}
+"""
+WATCH_READ_JS = r"""
+() => {
+  const n = window.__j360seen;
+  if (window.__j360watch) window.__j360watch.disconnect();
+  window.__j360watch = null;
+  return typeof n === 'number' ? n : -1;
+}
+"""
+# A control's own state, for clicks that change a property but not the page (a checkbox's checked).
+CONTROL_STATE_JS = r"""
+(el) => JSON.stringify([el.checked, el.value, el.getAttribute('aria-expanded'), el.getAttribute('aria-checked'),
+  el.getAttribute('aria-pressed'), el.isConnected])
+"""
