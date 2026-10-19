@@ -32,8 +32,15 @@ jobs:
   #
   # scripts/ci_scope.py answers `docs` / `frontend` / `full` from the changed
   # files, most restrictive wins, unknown is full, empty is full, and anything
-  # that is not a pull_request (push to main, schedule, dispatch) is full
-  # without looking -- main is production.
+  # that is not a pull_request (push to main, dispatch) is full unless it
+  # PROVES `tested` -- main is production.
+  #
+  # `tested` (CI audit 2026-10-19): a push to main skips the heavy steps ONLY
+  # when ci_scope.py proves the PR that produced this merge commit has the same
+  # tree, every required check on its head is green, and a successful run of
+  # THIS workflow uploaded `ci-tested-tree-<tree>` (only a `full` decision
+  # uploads it, named after the tree that run checked out). Anything else is
+  # `full`. See the docstring of scripts/ci_scope.py.
   #
   # JOBS BELOW ARE NEVER SKIPPED, ONLY THEIR STEPS. The ruleset on main and
   # scripts/merge_cage.py require checks BY NAME; a skipped job never reports
@@ -42,6 +49,13 @@ jobs:
     name: Scope (which checks this diff needs)
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    # Read-only lookups for the `tested` proof. Job-level, so no other job
+    # gains anything.
+    permissions:
+      contents: read
+      actions: read        # this workflow's earlier runs and their marker artifact
+      checks: read         # the required checks on the PR head
+      pull-requests: read  # which PR produced the pushed merge commit
     outputs:
       scope: ${{ steps.decide.outputs.scope }}
     steps:
@@ -58,9 +72,30 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --print-scope --summary)
+          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --workflow ci.yml --print-scope --summary)
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
+      # THE PROOF A LATER `tested` READS. Only a `full` decision writes it, and
+      # its name is the tree this run checked out (on a PR: the merge ref).
+      - name: Record the tree this full run tests
+        id: tree
+        if: steps.decide.outputs.scope == 'full'
+        run: |
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          printf 'tree=%s\nsha=%s\nevent=%s\nrun=%s\n' "$tree" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" "$GITHUB_RUN_ID" > tested-tree.txt
+      - name: Upload the full-scope marker
+        if: steps.decide.outputs.scope == 'full'
+        # A lost marker only makes a later main push run `full`. It must never fail
+        # `scope`: a red scope SKIPS the required jobs, and the ruleset passes skipped.
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ci-tested-tree-${{ steps.tree.outputs.tree }}
+          path: tested-tree.txt
+          retention-days: 7
+          overwrite: true
 
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
@@ -353,6 +388,8 @@ jobs:
         run: ./actionlint -shellcheck= -pyflakes= -color .github/workflows/*.yml
 
   # ─── Frontend ──────────────────────────────────────────────────────────────
+  # Steps run on an explicit list of scopes, never `!= 'docs'`: a negation
+  # would also admit `tested` (and any scope word added later).
   frontend:
     name: Frontend (Node 20)
     runs-on: ubuntu-latest
@@ -361,10 +398,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         with:
           node-version: "22"
           cache: npm
@@ -375,31 +412,31 @@ jobs:
       # It exists mainly for the local commit gate (scripts/agent-gate.sh), which
       # runs against installed node_modules and cannot see a pruned lock (#503).
       - name: Lockfile sync (scripts/check_lock_sync.py)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         run: python scripts/check_lock_sync.py frontend
 
       - name: Install frontend deps
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm ci
 
       - name: Type-check (tsc)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm run type-check
 
       - name: Lint (ESLint)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm run lint
 
       - name: Unit tests (vitest)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npx vitest run
 
       - name: Build (next build)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm run build
 
