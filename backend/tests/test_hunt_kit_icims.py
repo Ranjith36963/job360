@@ -108,3 +108,22 @@ def test_token_with_suffix_and_empty_board():
     assert kit_ats.fetch_icims({"token": "Careers-Acme.icims.com"}, http, stats) == []
     assert http.calls[0].startswith(HOST + "/jobs/search?ss=1&pr=0")
     assert stats["ok"] == 1 and stats["jobs"] == 0
+
+
+def test_detail_only_for_titles_that_pass_the_gate():
+    http = _stub(_routes())
+    row = {**ROW, "title_ok": lambda t: "Analyst" in t}
+    jobs = kit_ats.fetch_icims(row, http, {})
+    by = {j["url"].split("/jobs/")[1].split("/")[0]: j for j in jobs}
+    assert set(by) == {"1001", "1002", "1004"}  # non-matching cards are still returned
+    assert not any("/jobs/1001/" in u or "/jobs/1004/" in u for u in http.calls)  # no detail request for them
+    assert any("/jobs/1002/" in u for u in http.calls)
+    assert by["1001"]["description"] == "" and by["1001"]["posted"] == ""
+    assert by["1002"]["description"] and by["1002"]["posted"] == "2026-10-01"
+
+
+def test_gate_does_not_spend_the_detail_cap_on_non_matching_cards(monkeypatch):
+    monkeypatch.setattr(kit_ats, "ICIMS_DETAIL_CAP", 1)
+    http = _stub(_routes())
+    jobs = kit_ats.fetch_icims({**ROW, "title_ok": lambda t: "Analyst" in t or "Location" in t}, http, {})
+    assert [bool(j["description"]) for j in jobs] == [False, True, False]  # cap of 1 goes to the first match

@@ -146,6 +146,12 @@ def _get(http: Http, url: str, *, as_json: bool = True, **kw: Any) -> tuple[int,
         return 0, None
 
 
+def _title_ok(row: dict[str, Any], title: str) -> bool:
+    """May this card spend a detail request? True unless the row carries a ``title_ok`` test that rejects it."""
+    test = row.get("title_ok")
+    return bool(test(title)) if callable(test) else True
+
+
 def _count(stats: dict[str, Any], *, ok: bool, jobs: int = 0) -> None:
     """Update the shared tried/ok/jobs counters."""
     stats["tried"] = stats.get("tried", 0) + 1
@@ -425,7 +431,9 @@ def fetch_bamboohr(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> li
             jid = str(r["id"])
             loc = _bamboo_loc(r.get("atsLocation")) or _bamboo_loc(r.get("location"))
             desc, posted, remote = "", "", r.get("isRemote")
-            st, det = _get(http, f"{base}/{jid}/detail", headers={"Accept": "application/json"})
+            st, det = (0, None)
+            if _title_ok(row, str(r.get("jobOpeningName") or "")):  # a title the user does not search needs no detail
+                st, det = _get(http, f"{base}/{jid}/detail", headers={"Accept": "application/json"})
             opening = ((det.get("result") or {}).get("jobOpening")) if st == 200 and isinstance(det, dict) else None
             if isinstance(opening, dict):
                 desc = _text(opening.get("description"))
@@ -568,9 +576,11 @@ def fetch_icims(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[
                     seen.add(c["url"])
                     cards.append(c)
         jobs: list[Job] = []
-        for i, c in enumerate(cards):
+        details = 0  # detail requests so far: only cards whose title the user searches use the cap
+        for c in cards:
             loc, posted, desc, remote, extra = c["location"], "", "", None, {}
-            if i < ICIMS_DETAIL_CAP:
+            if details < ICIMS_DETAIL_CAP and _title_ok(row, c["title"]):
+                details += 1
                 st, det = _get(http, f"{c['url']}?in_iframe=1", as_json=False, headers={"Accept": "text/html"})
                 posting = _icims_posting(_icims_nodes(det)) if st == 200 and isinstance(det, str) else {}
                 if posting:
@@ -1092,7 +1102,7 @@ def _taleo_enrich(row: dict[str, Any], http: Http, jobs: list[Job]) -> None:
         limit = TALEO_DETAIL_LIMIT
     limit = max(1, min(limit, TALEO_DETAIL_MAX))
     failed = 0
-    for j in jobs[:limit]:
+    for j in [x for x in jobs if _title_ok(row, x["title"])][:limit]:
         try:  # best-effort enrichment: a bad detail page must never drop the listing
             st, det = _get(http, j["url"], as_json=False, headers={"Accept": "text/html"})
             if st == 200:

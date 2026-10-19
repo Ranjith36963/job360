@@ -58,6 +58,10 @@ def test_hunt_recipe_sends_the_assistant_to_the_kit_and_keeps_the_rules():
     # CAPTCHA or bot check stops that site and is never solved or dodged.
     assert "open indeed search and job pages yourself, slowly" in hunt
     assert "logged-out job pages at very low volume" in hunt
+    # Owner 2026-10-19: the hunt kit itself now reads LinkedIn, Glassdoor and Google Jobs at low volume;
+    # the assistant still reads Indeed by hand, and reads LinkedIn only when it runs no kit.
+    assert "the hunt kit now reads linkedin, glassdoor and google jobs itself at low volume" in hunt
+    assert "only without the kit" in hunt
     assert "never log in, spoof an app, use copied keys or proxies" in hunt
     assert "captcha or bot check = stop that site, never solve or dodge it" in hunt
     assert "--boards" not in hunt and "big boards" not in hunt and "browser hunt" not in hunt

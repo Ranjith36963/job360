@@ -1,5 +1,5 @@
 """More ATS board fetchers for the hunt kit: Rippling, Breezy, Pinpoint, Phenom, UKG (UltiPro), ADP Workforce Now,
-Cornerstone, Gem. Same contract as kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only
+Cornerstone, Gem, JazzHR, Softgarden, JOIN, Jibe, Keka, Zoho Recruit. Same contract as kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only
 through the ``http`` callable, no file IO at import, standard library only. Nothing here ranks or scores a job.
 
 Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
@@ -12,8 +12,12 @@ Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
   adp        cid/ccId from workforcenow.adp.com/.../recruitment.html?cid=<cid>&ccId=<ccId>
   cornerstone  <tenant>/<siteId> from <tenant>.csod.com/ux/ats/careersite/<siteId>/home (row may add corp)
   gem        board id from jobs.gem.com/<id>
+  paylocity  company GUID from recruiting.paylocity.com/Recruiting/Jobs/All/<guid>
+  keka       tenant from <tenant>.keka.com/careers (India)
+  zohorecruit  tenant from <tenant>.zohorecruit.in or .com/jobs/Careers (row may add tld "in" or "com")
 
-Endpoints and field names are adapted from the MIT-licensed career-ops providers and freehire adapters (see NOTICE.md).
+Endpoints and field names are adapted from the MIT-licensed career-ops providers and freehire adapters (see NOTICE.md);
+the Keka and Zoho Recruit readers come from our own read of their public career pages.
 """
 # ruff: noqa: E501
 from __future__ import annotations
@@ -40,6 +44,7 @@ try:  # shared helpers live in the sibling kit_ats.py
         _join,
         _remote_from,
         _text,
+        _title_ok,
     )
 except ImportError:  # loaded by file path: find the sibling file
     import importlib.util as _ilu
@@ -52,7 +57,7 @@ except ImportError:  # loaded by file path: find the sibling file
     _spec.loader.exec_module(_mod)
     MAX_PAGES, Http, Job = _mod.MAX_PAGES, _mod.Http, _mod.Job
     _count, _get, _iso_date, _job, _jobvite_date = _mod._count, _mod._get, _mod._iso_date, _mod._job, _mod._jobvite_date
-    _join, _remote_from, _text = _mod._join, _mod._remote_from, _mod._text
+    _join, _remote_from, _text, _title_ok = _mod._join, _mod._remote_from, _mod._text, _mod._title_ok
 
 _JSON = {"Accept": "application/json"}
 _POST = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -652,6 +657,249 @@ def _jibe(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- Keka Hire (India)
+# Source: own read of live Keka boards (2026-10-19), no third-party code. The careers page
+# https://<tenant>.keka.com/careers/ links its assets under /ats/documents/<GUID>/; the public list
+# /careers/api/embedjobs/default/active/<GUID> is a JSON array (id, title, description HTML, jobLocations
+# [{city, state, countryCode, countryName}], publishedOn, experience, departmentName, jobType). The posting
+# is /careers/jobdetails/<id>. robots.txt allows only /careers, so the reader makes exactly these two calls.
+_KEKA_GUID = re.compile(r"/ats/documents/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/")
+
+
+def keka_guid(page: Any) -> str:
+    """The portal GUID on a Keka careers page, '' when the page carries none."""
+    m = _KEKA_GUID.search(page) if isinstance(page, str) else None
+    return m.group(1).lower() if m else ""
+
+
+def keka_jobs(row: dict[str, Any], tenant: str, items: Any) -> list[Job] | None:
+    """Jobs from a Keka embedjobs list (None when it is not a list)."""
+    if not isinstance(items, list):
+        return None
+    jobs: list[Job] = []
+    for j in items[: MAX_PAGES * 100]:
+        if not isinstance(j, dict):
+            continue
+        title, jid = str(j.get("title") or "").strip(), str(j.get("id") or "").strip()
+        if not title or not jid.isdigit():
+            continue
+        places = [_join(x.get("city") or x.get("name"), x.get("state"), x.get("countryName") or x.get("countryCode"))
+                  for x in (j.get("jobLocations") or []) if isinstance(x, dict)]
+        place = " · ".join(dict.fromkeys(p for p in places if p))
+        jt = j.get("jobType")
+        jt_word = jt if isinstance(jt, str) and not jt.strip().isdigit() else ""  # a numeric code says nothing we can read
+        jobs.append(_job(row, "keka", title=title, url=f"https://{tenant}.keka.com/careers/jobdetails/{jid}", location=place,
+                         posted=_iso_date(j.get("publishedOn")), description=_text(j.get("description")),
+                         remote=_remote_from(place, jt_word),
+                         extra={"department": str(j.get("departmentName") or ""), "experience": str(j.get("experience") or "")}))
+    return jobs
+
+
+def _keka(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Keka Hire careers board (token = tenant of <tenant>.keka.com): careers page -> GUID -> active jobs list."""
+    tenant = str(row.get("token") or "").strip().lower()
+    if not _label(tenant):
+        return None
+    st, page = _get(http, f"https://{tenant}.keka.com/careers/", as_json=False, headers={"Accept": "text/html"})
+    guid = keka_guid(page) if st == 200 else ""
+    if not guid:
+        return None
+    st, items = _get(http, f"https://{tenant}.keka.com/careers/api/embedjobs/default/active/{guid}", headers=_JSON)
+    return keka_jobs(row, tenant, items) if st == 200 else None
+
+
+# --------------------------------------------------------------------------- Zoho Recruit
+# Source: own read of live Zoho Recruit career sites (2026-10-19), no third-party code. GET
+# https://<tenant>.zohorecruit.<in|com>/jobs/Careers carries the job rows as HTML-escaped JSON in a hidden
+# <input value="[{...}]"> (Posting_Title, City, State, Country, Remote_Job, id; some tenants add Date_Opened and
+# Job_Description). The posting is /jobs/Careers/<id>. An unknown tenant (or the wrong domain) answers 200
+# "Page does not exist". robots.txt allows /jobs.
+ZOHO_TLDS = ("in", "com")
+# `[^<>]` (not `[^>]`): a failed attempt stops at the next "<", so a page full of "<input " with no
+# ">" is read in linear time instead of quadratic (security review 2026-10-19).
+_INPUT_TAG = re.compile(r"<input\b[^<>]*>", re.I)
+_VALUE_ATTR = re.compile(r'\bvalue="([^"]*)"')
+
+
+def zoho_rows(page: Any) -> list[dict[str, Any]] | None:
+    """Job rows from a Zoho Recruit careers page; None when the page is not a career site."""
+    if not isinstance(page, str) or "Page does not exist" in page[:5000]:
+        return None
+    rows: list[dict[str, Any]] = []
+    portal = False
+    for tag in _INPUT_TAG.findall(page):
+        if 'type="hidden"' not in tag:
+            continue
+        v = _VALUE_ATTR.search(tag)
+        raw = html.unescape(v.group(1)) if v else ""
+        if not raw.startswith("[{"):
+            continue
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            continue
+        if data[0].get("api_name") == "Job_Openings":
+            portal = True  # the field layout block: a real career site even when it lists no jobs
+        elif "Posting_Title" in data[0] or "Job_Opening_Name" in data[0]:
+            portal = True
+            rows += [d for d in data if isinstance(d, dict)]
+    return rows if portal else None
+
+
+def _truthy(v: Any) -> bool:
+    return v is True or str(v).strip().lower() == "true"
+
+
+def zoho_jobs(row: dict[str, Any], origin: str, rows: list[dict[str, Any]]) -> list[Job]:
+    """Jobs from Zoho Recruit rows; every optional field may be missing."""
+    jobs: list[Job] = []
+    seen: set[str] = set()
+    for r in rows[: MAX_PAGES * 100]:
+        title = str(r.get("Posting_Title") or r.get("Job_Opening_Name") or "").strip()
+        jid = str(r.get("id") or "").strip()
+        if not title or not jid.isdigit() or jid in seen or r.get("Publish") is False:
+            continue
+        seen.add(jid)
+        place = _join(*(r.get(k) for k in ("City", "State", "Country") if str(r.get(k) or "").strip().lower() != "none"))
+        remote = True if _truthy(r.get("Remote_Job")) else _remote_from(place)
+        jobs.append(_job(row, "zohorecruit", title=title, url=f"{origin}/jobs/Careers/{jid}", location=place,
+                         posted=_iso_date(r.get("Date_Opened")), description=_text(r.get("Job_Description")), remote=remote,
+                         extra={"job_type": str(r.get("Job_Type") or "")}))
+    return jobs
+
+
+def _zohorecruit(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Zoho Recruit career site (token = tenant; row tld 'in' or 'com', else .in is tried first, then .com)."""
+    tenant, tld = str(row.get("token") or "").strip().lower(), str(row.get("tld") or "").strip().lower()
+    if not _label(tenant):
+        return None
+    for t in ((tld,) if tld in ZOHO_TLDS else ZOHO_TLDS):
+        origin = f"https://{tenant}.zohorecruit.{t}"
+        st, page = _get(http, f"{origin}/jobs/Careers", as_json=False, headers={"Accept": "text/html"})
+        rows = zoho_rows(page) if st == 200 else None
+        if rows is not None:
+            return zoho_jobs(row, origin, rows)
+    return None
+
+
+# --------------------------------------------------------------------------- Paylocity
+# Borrowed from freehire internal/ingest/sources/paylocity.go (MIT): board = company GUID (:13-14); listing GET
+# https://recruiting.paylocity.com/Recruiting/Jobs/All/<guid> (:45), whose window.pageData embeds the whole Jobs array,
+# sliced out by bracket matching (:53, bracketSlice in nextflight.go:117-152); brief fields JobId, JobTitle, LocationName,
+# PublishedDate, IsRemote, JobLocation.Country (:133-146); posting URL /Recruiting/Jobs/Details/<JobId> (:78); a brief with
+# no id is skipped (:75); a failed detail fetch keeps the job with no description (:69-73, :81); description is the <div>
+# after <div class="job-listing-header">Description</div> (:107-130), else the legacy schema.org ld+json "description"
+# (:84-89); remote = IsRemote or "remote" in the location (:101). Fixtures follow paylocity_test.go:11-32, :122, :140-145.
+# The listing is one request, so a bad listing fails the board (:46-60). The detail cap is the kit's own.
+PAYLOCITY_DETAIL_CAP = 25  # detail-page requests per board (the rest keep the listing fields, no description)
+_PAYLOCITY_JOBS_KEY = re.compile(r'"Jobs"\s*:')
+_PAYLOCITY_HEADER = re.compile(
+    r"""<div\b[^>]*class=["'][^"']*\bjob-listing-header\b[^"']*["'][^>]*>\s*Description\s*</div>\s*(<div\b[^>]*>)""", re.I)
+_PAYLOCITY_LD = re.compile(r"""<script\b[^>]*type=["']application/ld\+json["'][^>]*>([\s\S]*?)</script>""", re.I)
+_PAYLOCITY_DIV = re.compile(r"<(/?)div\b[^>]*>", re.I)
+_PAYLOCITY_DROP = re.compile(r"<(script|style)\b[^>]*>[\s\S]*?</\1\s*>", re.I)
+
+
+def _bracket_slice(s: str, key: re.Pattern[str], open_: str, close: str) -> str:
+    """The balanced ``open_...close`` text after the first ``key`` match, skipping brackets inside JSON strings ('' if none)."""
+    m = key.search(s)
+    if not m:
+        return ""
+    start = s.find(open_, m.end())
+    if start < 0:
+        return ""
+    depth, in_str, i = 0, False, start
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            if c == "\\":
+                i += 1  # skip the escaped character
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == open_:
+            depth += 1
+        elif c == close:
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+        i += 1
+    return ""
+
+
+def _paylocity_description(page: str) -> str:
+    """Description block of a detail page (the div after the 'Description' header), else the ld+json description."""
+    m = _PAYLOCITY_HEADER.search(page)
+    if m:
+        depth, end = 1, len(page)
+        for t in _PAYLOCITY_DIV.finditer(page, m.end()):
+            depth += -1 if t.group(1) else 1
+            if depth == 0:
+                end = t.start()
+                break
+        body = str(_text(_PAYLOCITY_DROP.sub("", page[m.end():end])))
+        if body:
+            return body
+    for raw in _PAYLOCITY_LD.findall(page):
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        for node in data if isinstance(data, list) else [data]:
+            if isinstance(node, dict) and node.get("description"):
+                return str(_text(_PAYLOCITY_DROP.sub("", html.unescape(str(node["description"])))))
+    return ""
+
+
+def fetch_paylocity(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
+    """Paylocity career site (token = company GUID): window.pageData Jobs list + per-job detail page (capped)."""
+    try:
+        guid = str(row.get("token") or "").strip()
+        if not _label(guid):
+            _count(stats, ok=False)
+            return []
+        base = "https://recruiting.paylocity.com/Recruiting/Jobs"
+        st, page = _get(http, f"{base}/All/{quote(guid, safe='')}", as_json=False, headers={"Accept": "text/html"})
+        briefs: Any = None
+        if st == 200 and isinstance(page, str):
+            try:
+                briefs = json.loads(_bracket_slice(page, _PAYLOCITY_JOBS_KEY, "[", "]") or "null")
+            except ValueError:
+                briefs = None
+        if not isinstance(briefs, list):  # not 200, no Jobs array, or unreadable: skip the board
+            _count(stats, ok=False)
+            return []
+        jobs: list[Job] = []
+        details = 0  # detail requests so far: only cards whose title the user searches use the cap
+        for b in briefs:
+            jid = b.get("JobId") if isinstance(b, dict) else None
+            if not isinstance(jid, int) or isinstance(jid, bool) or jid <= 0:
+                continue
+            url, place = f"{base}/Details/{jid}", str(b.get("LocationName") or "").strip()
+            desc = ""
+            title = str(b.get("JobTitle") or "")
+            if details < PAYLOCITY_DETAIL_CAP and _title_ok(row, title):
+                details += 1
+                dst, det = _get(http, url, as_json=False, headers={"Accept": "text/html"})
+                if dst == 200 and isinstance(det, str):  # a failing detail only costs the description
+                    desc = _paylocity_description(det)
+            loc = b.get("JobLocation")
+            country = str(loc.get("Country") or "") if isinstance(loc, dict) else ""
+            jobs.append(_job(row, "paylocity", title=title, url=url, location=place,
+                             posted=_iso_date(b.get("PublishedDate")), description=desc,
+                             remote=True if b.get("IsRemote") is True else _remote_from(place),
+                             extra={"country": country}))
+        jobs = [j for j in jobs if j["title"]]
+        _count(stats, ok=True, jobs=len(jobs))
+        return jobs
+    except Exception:  # noqa: BLE001 - fetchers must never raise
+        _count(stats, ok=False)
+        return []
+
+
 ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
     "rippling": _wrap(_rippling),
     "breezy": _wrap(_breezy),
@@ -665,4 +913,7 @@ ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Jo
     "softgarden": _wrap(_softgarden),
     "join": _wrap(_join_board),
     "jibe": _wrap(_jibe),
+    "keka": _wrap(_keka),
+    "zohorecruit": _wrap(_zohorecruit),
+    "paylocity": fetch_paylocity,
 }
