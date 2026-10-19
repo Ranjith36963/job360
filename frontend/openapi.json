@@ -9247,7 +9247,8 @@
               {
                 "enum": [
                   "ask",
-                  "auto"
+                  "auto",
+                  "skip"
                 ],
                 "type": "string"
               },
