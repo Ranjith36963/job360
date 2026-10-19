@@ -184,7 +184,9 @@ form; the test fails when the wait is removed.
 - **`choose`** works on custom dropdowns, not only `<select>`: it opens the list, finds the option wherever the
   site draws it (react-select, Workday's portal lists), clicks it and checks the field now shows it. It picks an
   exact match, or the only option that starts with or contains the text. Two candidates means no guess: it lists
-  the options it saw.
+  the options it saw. It looks in the field's own frame first, and in the list the field names as its own
+  (`aria-controls`); two open lists with no owner named are refused (`two_lists_open`), never guessed between.
+  A contenteditable box keeps what was typed: the React value setter is used only on inputs and text boxes.
 - **`upload`** also works from an "Attach" button by catching the file picker. `upload_confirmed` says whether the
   file name shows on the page, because Greenhouse can take the file and still show an error (ApplYourself).
 - **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
