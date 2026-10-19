@@ -1188,6 +1188,7 @@ export type AssistantFire = {
   count?: number;
   application_ids?: number[];
   session_url?: string | null;
+  retry_after?: number;
 };
 
 export async function getAssistantTrigger(): Promise<AssistantTrigger> {

@@ -133,7 +133,10 @@ async def test_a_refusal_never_breaks_send_and_says_why(authenticated_async_cont
             mocked.post(FIRE, status=401, payload={"type": "error"})
             out = (await client.post("/api/assistant-trigger/fire")).json()
         assert out["fired"] is False and out["reason"] == "rejected" and "401" in out["detail"]
-        # A failure does not start the cool-down: fixing the token and pressing again works at once.
+        # A failure does not start the cool-down: pressing again at once (no re-save) fires.
+        with aioresponses() as mocked:
+            mocked.post(FIRE, status=200, payload={"type": "routine_fire"})
+            assert (await client.post("/api/assistant-trigger/fire")).json()["fired"] is True
         await client.put("/api/assistant-trigger", json={"url": FIRE, "token": TOKEN})
         with aioresponses() as mocked:
             mocked.post(FIRE, status=429, headers={"Retry-After": "60"})
@@ -186,3 +189,43 @@ def test_no_mcp_tool_reaches_the_trigger():
     from src.api import mcp_server
 
     assert "assistant_trigger" not in Path(mcp_server.__file__).read_text(encoding="utf-8")
+
+
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_two_presses_at_once_start_one_session_and_a_late_yes_says_wait(authenticated_async_context):
+    import asyncio
+
+    calls: list[int] = []
+
+    async def slow(url, **kw):
+        calls.append(1)
+        await asyncio.sleep(0.3)   # the routine answers slowly: the second press arrives meanwhile
+        from aioresponses import CallbackResult
+        return CallbackResult(status=200, payload={"type": "routine_fire"})
+
+    async with authenticated_async_context() as client:
+        await _bring_approved(client)
+        await client.put("/api/assistant-trigger", json={"url": FIRE, "token": TOKEN})
+        with aioresponses() as mocked:
+            mocked.post(FIRE, callback=slow, repeat=True)
+            a, b = await asyncio.gather(
+                client.post("/api/assistant-trigger/fire"), client.post("/api/assistant-trigger/fire")
+            )
+        outs = sorted([a.json(), b.json()], key=lambda o: o["fired"])
+        assert len(calls) == 1 and outs[1]["fired"] is True
+        assert outs[0]["reason"] == "cooldown" and 1 <= outs[0]["retry_after"] <= 60
+
+
+@pytest.mark.asyncio
+async def test_a_list_too_long_for_one_start_is_refused_not_cut(authenticated_async_context, monkeypatch):
+    from src.services.browser_agent import trigger
+
+    monkeypatch.setattr(trigger, "MAX_TEXT", 200)
+    async with authenticated_async_context() as client:
+        await _bring_approved(client)
+        await client.put("/api/assistant-trigger", json={"url": FIRE, "token": TOKEN})
+        with aioresponses() as mocked:
+            out = (await client.post("/api/assistant-trigger/fire")).json()
+            assert not mocked.requests   # nothing was sent
+        assert out["fired"] is False and out["reason"] == "too_many"

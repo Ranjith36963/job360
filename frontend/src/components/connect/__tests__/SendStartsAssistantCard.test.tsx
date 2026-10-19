@@ -4,14 +4,19 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 const getAssistantTrigger = vi.fn();
 const saveAssistantTrigger = vi.fn();
 const deleteAssistantTrigger = vi.fn();
+const fireAssistant = vi.fn();
 vi.mock("@/lib/api", () => ({
   getAssistantTrigger: (...a: unknown[]) => getAssistantTrigger(...a),
   saveAssistantTrigger: (...a: unknown[]) => saveAssistantTrigger(...a),
   deleteAssistantTrigger: (...a: unknown[]) => deleteAssistantTrigger(...a),
+  fireAssistant: (...a: unknown[]) => fireAssistant(...a),
 }));
 const success = vi.fn();
 const error = vi.fn();
-vi.mock("sonner", () => ({ toast: { success: (m: string) => success(m), error: (m: string) => error(m) } }));
+const info = vi.fn();
+vi.mock("sonner", () => ({
+  toast: { success: (m: string) => success(m), error: (m: string) => error(m), info: (m: string) => info(m) },
+}));
 
 import { PC_LOOP_COMMAND, ROUTINE_PROMPT, SendStartsAssistantCard } from "../SendStartsAssistantCard";
 
@@ -24,8 +29,10 @@ beforeEach(() => {
   getAssistantTrigger.mockReset().mockResolvedValue({ set: false });
   saveAssistantTrigger.mockReset().mockResolvedValue(SET);
   deleteAssistantTrigger.mockReset().mockResolvedValue({ deleted: true });
+  fireAssistant.mockReset().mockResolvedValue({ fired: false, reason: "nothing_approved" });
   success.mockReset();
   error.mockReset();
+  info.mockReset();
 });
 
 describe("Start my assistant when I press Send", () => {
@@ -37,6 +44,18 @@ describe("Start my assistant when I press Send", () => {
       expect(text).toMatch(/Never type a password/);
     }
     expect(screen.getByTestId("pc-loop-command")).toHaveTextContent("/loop 5m");
+    // The fallback finds every yes (not only the batch queue) and fills the form before check_submit.
+    expect(PC_LOOP_COMMAND).toContain("submit_approved");
+    expect(PC_LOOP_COMMAND).not.toContain("queued=true");
+    expect(PC_LOOP_COMMAND.indexOf("get_recipe")).toBeLessThan(PC_LOOP_COMMAND.indexOf("check_submit"));
+  });
+
+  it("Start now sends every waiting yes, and says so when nothing waits", async () => {
+    getAssistantTrigger.mockResolvedValue(SET);
+    render(<SendStartsAssistantCard />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start now" }));
+    await waitFor(() => expect(fireAssistant).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(info).toHaveBeenCalledWith("Nothing is waiting on your yes right now."));
   });
 
   it("saves the link and token, then clears the token box and never shows it", async () => {

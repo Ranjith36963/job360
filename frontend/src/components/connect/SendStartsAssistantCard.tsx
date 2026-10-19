@@ -10,6 +10,7 @@ import {
   type AssistantTrigger,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
+import { startAssistantAfterSend } from "@/lib/assistant-start";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,10 +43,12 @@ export const ROUTINE_PROMPT = [
 ].join("\n");
 
 /** The no-cloud fallback: a Claude Code session left open on the user's own computer. */
-export const PC_LOOP_COMMAND = `/loop 5m Check Job360 for applications I pressed Send on: list_applications(queued=true) and, for each, check_submit; the ones that answer submit with reason user_approved are mine to send. Apply to each with my own browser (Claude in Chrome), following get_recipe("apply"), then record_application. CAPTCHA or sign-in: record_event blocked and move on. Never type a password.`;
+export const PC_LOOP_COMMAND = `/loop 5m Check Job360 for jobs I pressed Send on: whats_new since your last check, and take each submit_approved event (where=web) whose application is still open. For each, one at a time: follow get_recipe("apply") with my own browser (Claude in Chrome) to fill the form, call check_submit with that form_url right before the final click, submit only when it says submit, then record_application. CAPTCHA or sign-in: record_event blocked and move on. Never type a password.`;
 
 const RESULT_WORDS: Record<string, string> = {
   started: "started",
+  starting: "starting",
+  nothing_approved: "nothing was waiting",
   rate_limited: "busy (too many starts this hour)",
 };
 
@@ -91,6 +94,16 @@ export function SendStartsAssistantCard() {
     }
   }
 
+  async function startNow() {
+    setBusy(true);
+    try {
+      const out = await startAssistantAfterSend({ manual: true });
+      if (out) await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove() {
     setBusy(true);
     try {
@@ -126,9 +139,18 @@ export function SendStartsAssistantCard() {
               Last start: {resultText(view.last_result)}
               {view.last_fired_at ? `, ${formatDateTime(view.last_fired_at)}` : ""}
             </p>
-            <button type="button" className={DANGER_BTN_CLASS} disabled={busy} onClick={() => void remove()}>
-              Remove
-            </button>
+            <div className="flex gap-2">
+              <button type="button" className={PRIMARY_BTN_CLASS} disabled={busy} onClick={() => void startNow()}>
+                Start now
+              </button>
+              <button type="button" className={DANGER_BTN_CLASS} disabled={busy} onClick={() => void remove()}>
+                Remove
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Start now sends every job still waiting on your yes, for example one you sent within a minute of
+              the last start.
+            </p>
           </div>
         )}
 
