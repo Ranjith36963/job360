@@ -144,27 +144,3 @@ jobs:
 
   # Failures on main / on the schedule are reported as an issue by loop-red.yml
   # (one workflow_run watcher, so PRs no longer show a 'skipping' row for it).
-
-  # WAKE THE MERGE CAGE (2026-10-19). GitHub does not fire `check_suite` for
-  # Actions' own suites, so the arm in auto-merge.yml never heard that this
-  # workflow finished, and a green PR sat waiting for a hand merge. This job
-  # tells it. A `workflow_dispatch` is the one event GITHUB_TOKEN may start, and
-  # the arm never waits on this job's own check run (merge_cage.WAKE_JOB).
-  wake-cage:
-    name: Wake the merge cage
-    needs: [pip-audit, npm-audit, gitleaks, bandit]
-    if: always() && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # A fork PR's token cannot dispatch, and that must not read as red CI. A
-    # same-repository dispatch that fails DOES go red: nobody else would see it.
-    continue-on-error: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-    permissions:
-      actions: write
-    steps:
-      - name: Ask the arm to judge this PR again
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-        run: gh workflow run auto-merge.yml --ref main -f pr="$PR"

@@ -282,6 +282,10 @@ jobs:
   # workflow finished, and a green PR sat waiting for a hand merge. This job
   # tells it. A `workflow_dispatch` is the one event GITHUB_TOKEN may start, and
   # the arm never waits on this job's own check run (merge_cage.WAKE_JOB).
+  # ONE wake per push, here: `offline-suite` is the required check that finishes
+  # last (measured on #908, 2026-10-19). A wake in every workflow queued six cage
+  # runs per push onto a runner queue that already held 140. The 20-minute sweep
+  # and the CodeRabbit status event cover a check that finishes later.
   wake-cage:
     name: Wake the merge cage
     needs: [scope, offline-suite, frontend-e2e, loop2-e2e-spotlight]
