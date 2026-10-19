@@ -3341,6 +3341,11 @@ export interface components {
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
+            /**
+             * Origin
+             * @default
+             */
+            origin: string;
             /** Preflight */
             preflight?: {
                 [key: string]: unknown;
@@ -3597,10 +3602,7 @@ export interface components {
         };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv: string;
         };
         /** Body_upload_github_api_profile_github_post */
@@ -3610,10 +3612,7 @@ export interface components {
         };
         /** Body_upload_linkedin_api_profile_linkedin_post */
         Body_upload_linkedin_api_profile_linkedin_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upsert_preferences_api_profile_preferences_post */
@@ -3623,10 +3622,7 @@ export interface components {
         };
         /** Body_upsert_profile_api_profile_post */
         Body_upsert_profile_api_profile_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv?: string;
             /** Preferences */
             preferences?: string;
@@ -3653,8 +3649,15 @@ export interface components {
              * @default
              */
             location: string;
+            /** Origin */
+            origin?: ("ai_hunt" | "user_link" | "user_paste") | null;
             /** Posted At */
             posted_at?: string | null;
+            /**
+             * Queue
+             * @default false
+             */
+            queue: boolean;
             /** Remote */
             remote?: boolean | null;
             /** Title */
@@ -3685,6 +3688,10 @@ export interface components {
             /** Found On */
             found_on?: string | null;
             job: components["schemas"]["JobResponse"];
+            /** Queue Note */
+            queue_note?: string | null;
+            /** Queued */
+            queued?: boolean | null;
             /** Remote */
             remote?: boolean | null;
             /** Repost */
@@ -7188,6 +7195,8 @@ export interface components {
             detail: string;
             /** Reason */
             reason: string;
+            /** Type First */
+            type_first?: components["schemas"]["TypeFirstAnswer"][];
         };
         /** TailorBundle */
         TailorBundle: {
@@ -7300,6 +7309,13 @@ export interface components {
             name: string;
             /** Prefix */
             prefix: string;
+        };
+        /** TypeFirstAnswer */
+        TypeFirstAnswer: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
         };
         /**
          * UpdateContactRequest

@@ -85,28 +85,34 @@ async def test_verify_a_guess_saves_it_as_the_users_answer_and_the_next_fill_rea
 
 
 @pytest.mark.asyncio
-async def test_edit_a_guess_holds_send_until_the_assistant_types_the_users_word(
+async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_users_word(
     authenticated_async_context, fixture_user_id
 ):
+    word = "No - I live in London, open to relocating"
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         await _fill(client, app_id, [GUESS])
         fill = (await _card(client, app_id))["form_filled_event_id"]
-        resp = await _confirm(client, app_id, 0, fill, "No - I live in London, open to relocating")
+        resp = await _confirm(client, app_id, 0, fill, word)
         assert resp.status_code == 200, resp.text
         card = resp.json()
-        assert card["answers"][0]["changed_to"] == "No - I live in London, open to relocating"
-        assert _codes(card) == ["changed"] and card["answers"][0]["verified"] is False
+        assert (card["answers"][0]["changed_to"], card["answers"][0]["verified"]) == (word, True)
+        assert _codes(card) == ["changed"], "held from Send all, never from the user's own Send"
+        assert [r["answer"] for r in _approved(fixture_user_id)] == [word]
+        # The user's Send is the yes: no refill needed first.
         approve = await client.post(f"/api/applications/{app_id}/send/approve", params={"form_filled_event_id": fill})
-        assert approve.status_code == 409 and "changed an answer" in approve.json()["detail"]
-        assert [r["answer"] for r in _approved(fixture_user_id)] == ["No - I live in London, open to relocating"]
-        await _fill(client, app_id, [{**GUESS, "answer": "No - I live in London, open to relocating", "source": "approved"}])
+        assert approve.status_code == 201, approve.text
+        # ...and the gate tells the assistant what to type before it submits, after the yes too.
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.status_code == 200, check.text
+        assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}]
+        assert "type_first" in check.json()["detail"]
+        # Once the assistant fills with the user's word, nothing is left to type.
+        await _fill(client, app_id, [{**GUESS, "answer": word, "source": "approved"}])
         card = await _card(client, app_id)
         assert card["answers"][0]["verified"] is True and _codes(card) == []
-        ok = await client.post(
-            f"/api/applications/{app_id}/send/approve", params={"form_filled_event_id": card["form_filled_event_id"]}
-        )
-        assert ok.status_code == 201, ok.text
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["type_first"] == []
 
 
 @pytest.mark.asyncio

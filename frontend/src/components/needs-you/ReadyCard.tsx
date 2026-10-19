@@ -47,8 +47,8 @@ export function ReadyCard({
   const [busy, setBusy] = useState(false);
   const preparer = whoLabel(card.filled_by).name;
   const prepared = clock(card.filled_at);
-  // An answer the user edited is not in the form yet: no Send until the assistant fills it again.
-  const changed = card.answers.some((a) => a.changed_to != null);
+  // Answers the user edited: the yes still goes through, and the assistant types them before it sends.
+  const changed = card.answers.filter((a) => a.changed_to != null).length;
 
   async function decide(send: boolean) {
     setBusy(true);
@@ -144,8 +144,7 @@ export function ReadyCard({
         <button
           type="button"
           data-testid={`ready-send-${card.application_id}`}
-          disabled={busy || paused || changed}
-          title={changed ? "You changed an answer. Ask your assistant to fill the form again first." : undefined}
+          disabled={busy || paused}
           onClick={() => void decide(true)}
           className={cn(tap, "rounded-lg bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50")}
         >
@@ -171,9 +170,9 @@ export function ReadyCard({
             )}
           </p>
         )}
-        {changed ? (
-          <span data-testid={`ready-changed-${card.application_id}`} className="text-xs text-warning">
-            You changed an answer. Ask your assistant to fill the form again, then Send.
+        {changed > 0 ? (
+          <span data-testid={`ready-changed-${card.application_id}`} className="text-xs text-info">
+            {`You changed ${changed} answer${changed === 1 ? "" : "s"}. Your assistant types ${changed === 1 ? "it" : "them"} in before it sends.`}
           </span>
         ) : (
           <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
@@ -263,7 +262,7 @@ function AnswerRow({
           <span data-testid={`ready-answer-changed-${id}`} className="whitespace-pre-wrap font-medium">
             {a.changed_to}
           </span>
-          <span className="text-xs text-warning">Your answer. Not in the form yet.</span>
+          <span className="text-xs text-info">Your answer. Your assistant types it in before it sends.</span>
         </span>
       ) : (
         <span className="whitespace-pre-wrap break-words">{a.answer || "(blank)"}</span>

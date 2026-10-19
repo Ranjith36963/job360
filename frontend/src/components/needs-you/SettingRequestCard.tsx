@@ -87,7 +87,13 @@ export function describeSettingRequest(
         change: value == null || value === "" ? "No limit per company" : `At most ${String(value)} applications per company`,
       };
     case "assistant_settings.company_cap_days":
-      return { title: "Days for the company limit", change: `Count applications to one company over ${String(value)} days` };
+      return {
+        title: "Days for the company limit",
+        change:
+          value == null || value === ""
+            ? "Count applications to one company over the standard window"
+            : `Count applications to one company over ${String(value)} days`,
+      };
     case "assistant_settings.weekly_cap":
       return {
         title: "Weekly limit",

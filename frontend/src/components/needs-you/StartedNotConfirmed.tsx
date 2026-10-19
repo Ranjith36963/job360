@@ -53,6 +53,8 @@ export function StartedNotConfirmed() {
     try {
       const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
       const feed = await fetchWhatsNewPages(since, PAGES);
+      // A cut feed may miss the newest applied / submit_resolved: show nothing rather than a false row.
+      if (feed.truncated) return [];
       return startedNotConfirmed(feed.events, feed.applications);
     } catch {
       return [];

@@ -1,5 +1,5 @@
 # CLAUDE.md
-<!-- doc: LIVING | last-verified: 2026-10-19 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-10-19 by the CI-audit session (claims re-checked against code) -->
 <!-- SIZE BUDGET: <= 1,100 words (was 2,000; halved 2026-08-25 when the hard
      rules moved to a skill -- a budget left above the real size is slack, not
      headroom). This file is auto-loaded before every session,
