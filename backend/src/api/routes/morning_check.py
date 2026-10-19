@@ -142,8 +142,12 @@ async def _stopped(db: JobDatabase, user_id: str, since: str) -> tuple[TallyBuck
         "ORDER BY e.id DESC LIMIT ?",
         (user_id, since, _EVENT_SCAN),
     )
+    checked: set[int] = set()
     for d in (dict(r) for r in await cur.fetchall()):
         app_id = d["application_id"]
+        if app_id in checked:
+            continue
+        checked.add(app_id)
         if app_id not in seen["failed"] and await kit_service.submit_unconfirmed(db, user_id, app_id):
             seen["failed"][app_id] = _item(d, d["recorded_at"])
     pack = [TallyBucket(count=len(b), items=list(b.values())[:ITEMS_PER_BUCKET]) for b in seen.values()]

@@ -1481,7 +1481,9 @@ async def company_applied_count(
     re-label it (security review 2026-10-18). An ``applied`` replaced by a correction never
     counts (the ``_has_surviving_applied`` rule). The window is on ``occurred_at``, the date
     the user applied: a stop no yes clears must not fire on history recorded late (review
-    2026-10-18 chose this over ``recorded_at``). Scoped by ``user_id`` (rule #12)."""
+    2026-10-18 chose this over ``recorded_at``). A correction can move a date INTO the window but
+    never out: an application counts while any ``applied`` it replaced was dated inside it
+    (CodeRabbit 2026-10-18). Scoped by ``user_id`` (rule #12)."""
     cur = await db._db.execute(
         "SELECT j.normalized_company FROM applications a JOIN jobs j ON j.id = a.job_id "
         "WHERE a.id = ? AND a.user_id = ?",
@@ -1496,13 +1498,17 @@ async def company_applied_count(
         "SELECT COUNT(DISTINCT e.application_id) FROM application_events e "
         "JOIN applications a ON a.id = e.application_id JOIN jobs j ON j.id = a.job_id "
         "WHERE e.user_id = ? AND a.user_id = ? AND e.event_type = 'applied' "
-        "AND e.occurred_at >= ? "
+        "AND (e.occurred_at >= ? OR EXISTS (SELECT 1 FROM application_events o "
+        "WHERE o.application_id = e.application_id AND o.user_id = e.user_id AND o.event_type = 'applied' "
+        "AND o.id < e.id AND o.occurred_at >= ? "
+        "AND EXISTS (SELECT 1 FROM application_events c2 WHERE c2.corrects_event_id = o.id "
+        "AND c2.user_id = o.user_id AND c2.event_type = 'applied'))) "
         "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
         "AND e.application_id <> ? AND j.normalized_company = ? "
         "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
         "AND s.user_id = e.user_id AND s.event_type = ? AND s.id < e.id AND s.id NOT IN "
         "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))",
-        (user_id, user_id, cutoff, application_id, company, settings.SIMULATION_EVENT_TYPE, user_id),
+        (user_id, user_id, cutoff, cutoff, application_id, company, settings.SIMULATION_EVENT_TYPE, user_id),
     )
     got = await cur.fetchone()
     return int(got[0]) if got else 0

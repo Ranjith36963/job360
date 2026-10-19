@@ -100,23 +100,19 @@ def _days_since(iso: Optional[str], now: datetime) -> Optional[int]:
 
 async def preflight_rows(
     db: JobDatabase, user_id: str, rows: list[dict[str, Any]], queued_at: dict[int, str],
-    holds: dict[int, Any], cfg: Any,
+    holds: dict[int, Any], cfg: Any, profile: Any, overlay: list[dict[str, Any]],
 ) -> dict[int, dict[str, Any]]:
     """``{application_id: preflight}`` for queued ``rows`` (applications table rows). Per row:
     ``kit_missing`` (the job-country keys memory lacks, same functions the Needs-you card uses),
     ``has_cv``, ``duplicate_flag`` ('' / same_job / same_role / same_company), ``company_left``
     (null = no company limit), ``avoided`` (the user's own never-apply list), ``blocked_count``,
-    ``queued_days`` and ``hold`` (another session's live hold, else null)."""
+    ``queued_days`` and ``hold`` (another session's live hold, else null). ``profile`` / ``overlay``
+    are the caller's one ``load_profile_with_overlay`` read (never re-read here, never on the loop)."""
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 - profile <-> spine cycle
-    from src.services.profile.models import UserProfile  # noqa: PLC0415
-    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
-
     ids = [int(r["id"]) for r in rows]
     if not ids:
         return {}
     now = datetime.now(timezone.utc)
-    loaded, overlay = load_profile_with_overlay(user_id)
-    profile = loaded or UserProfile()
     blocked_n = await _blocked_counts(db, user_id, ids)
     cv_apps = await _with_kind(db, user_id, ids, "cv")
     cleared = await _cleared(db, user_id, ids)

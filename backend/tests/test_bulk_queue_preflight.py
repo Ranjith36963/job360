@@ -7,6 +7,7 @@ Postgres. Helpers are copied, never imported from another test module (schema is
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -237,14 +238,16 @@ async def test_preflight_kit_missing_names_what_memory_lacks_for_the_job_country
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         no_country = await _bring(client, _ad(1))
-        gb = await _bring(client, {**_ad(2, company="Contoso"), "location": "London, UK"})
+        gb = await _bring(client, {**_ad(2, company="Contoso"), "location": "London, UK", "country": "GB"})
         await _queue(client, no_country)
         await _queue(client, gb)
         rows = _by_id(await _queued(client))
-        assert "job_country" in rows[no_country]["preflight"]["kit_missing"]
-        assert all(isinstance(k, str) for k in rows[gb]["preflight"]["kit_missing"])
-        if "job_country" not in rows[gb]["preflight"]["kit_missing"]:
-            assert any(k.endswith("GB") or ".GB." in k for k in rows[gb]["preflight"]["kit_missing"])
+        assert rows[no_country]["preflight"]["kit_missing"] == ["job_country"]
+        gb_missing = rows[gb]["preflight"]["kit_missing"]
+        # the seeded profile has no UK right to work or salary: exactly those, from the job's country
+        assert gb_missing == [
+            "right_to_work.GB.work_authorization", "right_to_work.GB.needs_sponsorship", "salary.GB",
+        ]
 
 
 @pytest.mark.asyncio
@@ -258,6 +261,25 @@ async def test_blocked_count_and_hold_and_queued_days(authenticated_async_contex
             assert (await _event(client, app_id, "blocked", payload=blocked)).status_code == 201
         pre = _by_id(await _queued(client))[app_id]["preflight"]
         assert pre["blocked_count"] == 2
+        assert pre["hold"] is None and pre["queued_days"] == 0
+        # a kit read is a live hold; a queued event dated three days back reads queued_days 3
+        kit = await client.get(f"/api/applications/{app_id}/kit", params={"session": "batch-run"})
+        assert kit.status_code == 200, kit.text
+        from src.repositories import pgsync
+
+        conn = pgsync.connect(str(settings.DB_PATH))
+        try:
+            conn.execute(
+                "UPDATE application_events SET recorded_at = ?, occurred_at = ? "
+                "WHERE application_id = ? AND event_type = 'queued'",
+                ((datetime.now(timezone.utc) - timedelta(days=3, hours=1)).isoformat(),) * 2 + (app_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        pre = _by_id(await _queued(client))[app_id]["preflight"]
+        assert pre["queued_days"] == 3
+        assert pre["hold"] is not None and pre["hold"]["session"] == "batch-run"
         # the other worker's recipe rule: blocked_count >= 2 leaves the queue, with a closed reason
         out = await _event(client, app_id, "unqueued", payload={"reason": "blocked"})
         assert out.status_code == 201, out.text
@@ -307,7 +329,7 @@ async def test_queue_summary_counts_the_whole_open_queue(authenticated_async_con
         s = body["queue_summary"]
         assert set(s) == SUMMARY_KEYS
         assert s["queued"] == 4 and len(body["applications"]) == 4
-        assert s["ready_to_send"] == 1 and s["asked"] >= 1 and s["blocked"] == 1
+        assert s["ready_to_send"] == 1 and s["asked"] == 1 and s["blocked"] == 1
         assert s["submitted_today"] == 1 and s["daily_cap"] == 10 and s["daily_left"] == 9
         assert s["removed_today"] == {"duplicate": 1}
         # a page of 1 still summarises the whole queue

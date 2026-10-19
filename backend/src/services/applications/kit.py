@@ -437,7 +437,12 @@ async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) 
     if any(_page_of(e) is not None for e in events):
         fills = await _events(db, user_id, application_id, ("form_filled",))
         filled = fills[0]["payload"].get("fields_count") if fills else None
-        short, unreadable, incomplete = _paged_shortfalls(events, filled if isinstance(filled, int) else None)
+        # A RE-fill (a second form_filled) reopens every page swept before it (CodeRabbit 2026-10-18); the
+        # first form_filled, recorded once after the last page, does not.
+        refill_id = fills[0]["id"] if len(fills) > 1 else None
+        short, unreadable, incomplete = _paged_shortfalls(
+            events, filled if isinstance(filled, int) else None, refill_id
+        )
         # A mix of paged and unpaged events must never switch the unpaged checks OFF (review 2026-10-18):
         # the newest UNPAGED sweep's unreadable list always counts, and so does its count against the
         # newest unpaged check (a whole-form re-check that found more questions).
@@ -461,13 +466,16 @@ async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) 
     return short, unreadable, False
 
 
-def _paged_shortfalls(events: list[dict[str, Any]], filled: Optional[int]) -> tuple[bool, bool, bool]:
+def _paged_shortfalls(
+    events: list[dict[str, Any]], filled: Optional[int], refill_id: Optional[int] = None
+) -> tuple[bool, bool, bool]:
     """Bulk-apply F2, newest-first ``events`` of a multi-page form. Only events carrying a ``page`` count.
     N = ``pages_total`` of the newest paged event. For every page 1..N: the newest ``form_swept`` of that page
     must exist and be NEWER than the newest ``form_checked`` of that page (a page checked again after its sweep
     is open again; a page that was never swept is incomplete). The count is judged per page (its newest sweep
     read at least as many fields as its newest check listed), the unreadable list over every page's newest
-    sweep, and the pages' sweeps together must reach the newest ``form_filled`` ``fields_count``.
+    sweep, and the pages' sweeps together must reach the newest ``form_filled`` ``fields_count``. A page swept
+    before ``refill_id`` (the newest of two or more ``form_filled``) is open again.
     NOT IN REFERENCE as a gate: career-ops apply.md:315-342 repeats its sweep before every Next by prompt only."""
     paged = [e for e in events if _page_of(e) is not None]
     # The LARGEST pages_total ever declared (security review 2026-10-18): a later, smaller number cannot
@@ -489,7 +497,11 @@ def _paged_shortfalls(events: list[dict[str, Any]], filled: Optional[int]) -> tu
     swept_total = 0
     for page in range(1, total + 1):
         sweep, check = newest_sweep.get(page), newest_check.get(page)
-        if sweep is None or (check is not None and check["id"] > sweep["id"]):
+        if (
+            sweep is None
+            or (check is not None and check["id"] > sweep["id"])
+            or (refill_id is not None and sweep["id"] < refill_id)
+        ):
             incomplete = True
             continue
         got = sweep["payload"].get("fields_checked")
