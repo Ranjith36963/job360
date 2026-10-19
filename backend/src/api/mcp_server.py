@@ -975,7 +975,10 @@ def build_server(version: str = "") -> MCPServer:
         every artifact version (text omitted unless with_artifact_text=true),
         the whole event timeline, receipts, and `next_step` — what to do next,
         read off the stored state. Branch on `next_step.code`: judge_fit → call
-        save_fit; write_cv → save_artifact(kind="cv"); apply → the human applies,
+        save_fit; write_cv → save_artifact(kind="cv"); submit_now → the user
+        clicked Send on the web: open the form, check_submit, type its
+        type_first answers, record form_swept with `answers`, check_submit
+        again, submit, record_application; apply → the human applies,
         then record_application; record_receipt → record_application; schedule →
         record_event(interview_scheduled, scheduled_at=…); record_outcome → the
         interview date has passed, record how it went via record_event (
@@ -1261,9 +1264,9 @@ def build_server(version: str = "") -> MCPServer:
         answers?: [{question, answer, source, key?}]}, source = memory|profile|
         approved|written|guessed (key = kit key);
         form_checked {questions_count, answered, missing, answers?, page, pages_total};
-        cv_seen and submit_approved {artifact_id, sha256, where} only after the user said so (where=chat);
+        cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
-        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total};
+        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
@@ -1641,31 +1644,32 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def check_submit(application_id: int, form_url: str = "", session: str = "") -> dict[str, Any]:
-        """May you press the FINAL submit on this application's form? Call this
-        right before the submit with `form_url` (the page the form is on) and your `session` label
-        (the one you gave get_application_kit). ONE decision from the user's settings:
+        """Call right before the FINAL submit, with `form_url` (the page the form is on) and
+        your `session` label (as given to get_application_kit). ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
-        the user yes for this one application; `stop` - do not submit. `reason`
-        is a short code and `detail` one plain sentence you can show the user. Reasons:
+        the user yes for this one; `stop` - do not submit. `reason` = a code, `detail` = a
+        sentence for the user. Reasons:
         paused, already_applied, user_declined,
         daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
-        company_avoided (the user's own never-apply list), form_pages_incomplete (`stop`),
+        company_avoided (user's never-apply list), form_pages_incomplete (`stop`),
         form_not_recorded (`stop`: record `form_filled`),
         form_not_swept (`stop`: re-read every field, record `form_swept`),
         form_count_mismatch, unreadable_fields (`stop`: sweep again), form_check_missing (`stop`: call
         check_form), submit_unconfirmed (`stop`: `submit_attempted` has no outcome: never submit again),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), duplicate_role (`ask`: same company and title applied before),
+        in auto mode, else `ask`), duplicate_role (`ask`: same company+title before),
         new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
         profile), held_by_other_session (another session holds this kit),
-        unknown_site (`form_url` is not one plain http(s) address),
-        form_host_mismatch (`form_url` is not the site of your latest
-        `form_filled`), email_not_verified (email not confirmed), ask_always_site, job_override_confirm,
+        unknown_site (not one plain http(s) address),
+        form_host_mismatch (not the site of your latest
+        `form_filled`), email_not_verified, ask_always_site, job_override_confirm,
         submit_mode_confirm, cv_not_seen (auto mode, user has not seen the latest CV), practice_run,
         user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
         `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
         email_not_verified, blocked or held_by_other_session: tell the user.
-        Also `daily_left`, `company_left` (null = no limit).
+        Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
+        changed on the web - type each in, then form_swept with `answers`; until then
+        `stop` (type_first_pending), even after a yes.
         Read-only; after a real submit, call `record_application`."""
         try:
             async with _request_db() as db:

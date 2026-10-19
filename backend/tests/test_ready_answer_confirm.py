@@ -40,6 +40,14 @@ async def _fill(client: AsyncClient, app_id: int, answers: list[dict[str, Any]])
     assert resp.status_code == 201, resp.text
 
 
+async def _sweep(client: AsyncClient, app_id: int, answer: str) -> None:
+    """The assistant re-reads the one field and reports what the form now holds."""
+    payload = {"fields_checked": 1, "fixed": 1,
+               "answers": [{"question": GUESS["question"], "answer": answer, "source": "approved"}]}
+    resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_swept", "payload": payload})
+    assert resp.status_code == 201, resp.text
+
+
 async def _card(client: AsyncClient, app_id: int) -> dict[str, Any]:
     resp = await client.get("/api/ready-to-send", params={"application_id": app_id})
     assert resp.status_code == 200, resp.text
@@ -85,28 +93,69 @@ async def test_verify_a_guess_saves_it_as_the_users_answer_and_the_next_fill_rea
 
 
 @pytest.mark.asyncio
-async def test_edit_a_guess_holds_send_until_the_assistant_types_the_users_word(
+async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_users_word(
     authenticated_async_context, fixture_user_id
 ):
+    word = "No - I live in London, open to relocating"
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         await _fill(client, app_id, [GUESS])
         fill = (await _card(client, app_id))["form_filled_event_id"]
-        resp = await _confirm(client, app_id, 0, fill, "No - I live in London, open to relocating")
+        resp = await _confirm(client, app_id, 0, fill, word)
         assert resp.status_code == 200, resp.text
         card = resp.json()
-        assert card["answers"][0]["changed_to"] == "No - I live in London, open to relocating"
-        assert _codes(card) == ["changed"] and card["answers"][0]["verified"] is False
+        assert (card["answers"][0]["changed_to"], card["answers"][0]["verified"]) == (word, True)
+        assert _codes(card) == ["changed"], "held from Send all, never from the user's own Send"
+        assert [r["answer"] for r in _approved(fixture_user_id)] == [word]
+        # The user's Send is the yes: no refill needed first.
         approve = await client.post(f"/api/applications/{app_id}/send/approve", params={"form_filled_event_id": fill})
-        assert approve.status_code == 409 and "changed an answer" in approve.json()["detail"]
-        assert [r["answer"] for r in _approved(fixture_user_id)] == ["No - I live in London, open to relocating"]
-        await _fill(client, app_id, [{**GUESS, "answer": "No - I live in London, open to relocating", "source": "approved"}])
+        assert approve.status_code == 201, approve.text
+        # ...and the gate tells the assistant what to type before it submits, after the yes too.
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.status_code == 200, check.text
+        assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}]
+        # The LOCK: even after the yes, no submit until a sweep proves the form holds the user's words.
+        # Not swept yet: an earlier stop (form_not_swept) answers first - either way, no submit.
+        assert check.json()["decision"] == "stop", check.json()
+        # Negative control: a sweep that still reads the OLD answer does not open the lock.
+        await _sweep(client, app_id, GUESS["answer"])
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["decision"] == "stop", check.json()
+        assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}], check.json()
+        # The assistant types the user's word and sweeps: the lock opens (the yes still stands).
+        await _sweep(client, app_id, word)
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["type_first"] == [] and check.json()["reason"] != "type_first_pending", check.json()
+        # A newer sweep of ANOTHER page (it does not hold this answer) must not re-lock it (CodeRabbit #897).
+        other = {"fields_checked": 1, "fixed": 0, "page": 2, "pages_total": 2,
+                 "answers": [{"question": "Notice period", "answer": "1 month", "source": "memory"}]}
+        resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_swept", "payload": other})
+        assert resp.status_code == 201, resp.text
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["type_first"] == [], check.json()
+        # Once the assistant fills with the user's word, nothing is left to type.
+        await _fill(client, app_id, [{**GUESS, "answer": word, "source": "approved"}])
         card = await _card(client, app_id)
         assert card["answers"][0]["verified"] is True and _codes(card) == []
-        ok = await client.post(
-            f"/api/applications/{app_id}/send/approve", params={"form_filled_event_id": card["form_filled_event_id"]}
-        )
-        assert ok.status_code == 201, ok.text
+        check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert check.json()["type_first"] == []
+
+
+def test_the_lock_turns_submit_and_ask_into_stop_and_keeps_an_earlier_stop():
+    from src.services.applications.ready import type_first_lock
+    from src.services.profile.assistant_settings import REASONS, SubmitDecision
+
+    pending = [{"question": "Located in India?", "answer": "Yes"}]
+    yes = SubmitDecision("submit", "user_approved", "The user said yes.")
+    ask = SubmitDecision("ask", "practice_run", "Ask first.")
+    stop = SubmitDecision("stop", "form_not_swept", "Sweep first.")
+    for verdict in (yes, ask):
+        locked = type_first_lock(verdict, pending)
+        assert (locked.decision, locked.reason) == ("stop", "type_first_pending")
+        assert "form_swept" in locked.detail and "1 answer" in locked.detail
+    assert type_first_lock(stop, pending) is stop, "an earlier stop is no less a stop"
+    assert type_first_lock(yes, []) is yes, "nothing left to type: the yes goes through"
+    assert "type_first_pending" in REASONS
 
 
 @pytest.mark.asyncio

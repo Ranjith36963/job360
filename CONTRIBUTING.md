@@ -90,8 +90,6 @@ A PR is mergeable only when:
   **>= 1,586 collected**.
 - `pre-commit run --all-files` is clean.
 - CI is green on the PR branch.
-- At least one reviewer has approved (or owner self-approval on
-  trivial `docs/*` / `chore/*`).
 
 If the suite was green before your change and is red after, your change is the
 regression — fix it, do not merge around it.

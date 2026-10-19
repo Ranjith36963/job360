@@ -225,8 +225,11 @@ def _answer_rows(
         answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
                         "changed_to": changed_to})
         if changed_to is not None:
-            flags.append(_flag("changed", f"You changed an answer: {a['question']} {_DASH} your assistant must "
-                                          "fill the form again before it can go", key))
+            # Owner decision 2026-10-19: the user's own word IS verified, and Send stays open -
+            # check_submit hands the assistant this answer to type before it submits.
+            answers[-1]["verified"] = True
+            flags.append(_flag("changed", f"You changed an answer: {a['question']} {_DASH} your assistant types "
+                                          "your answer before it sends", key))
             continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
         if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
@@ -235,6 +238,71 @@ def _answer_rows(
         if src in ("memory", "approved") and key and key not in have and not verified:
             flags.append(_flag("not_in_memory", f"No longer in memory: {a['question']}", key))
     return answers, flags
+
+
+def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
+    """The LOCK (owner decision 2026-10-19 - not just an instruction): answers the user changed
+    on the web hold every submit, even after their yes, until a ``form_swept`` newer than the fill
+    reports those exact words in the form (``changed_answers`` returns ``[]`` then). A ``stop`` the
+    gate already gave stays as it is (it is no less a stop); ``submit`` and ``ask`` become
+    ``stop`` / ``type_first_pending``. A sweep never cancels the yes; a new fill does."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
+
+    if not type_first or verdict.decision == "stop":
+        return verdict
+    return settings_rules.SubmitDecision(
+        "stop", "type_first_pending",
+        f"Type the {len(type_first)} answer(s) the user changed (type_first) into their fields, "
+        "then record_event form_swept with `answers` (what the form now holds). Then check again.",
+    )
+
+
+async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[dict[str, str]]:
+    """The answers the user changed on the newest filled form: ``[{question, answer}]``
+    with the USER's answer, which the assistant must type before it submits. Read
+    from the newest ``form_filled`` whether or not the user already said yes."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_filled' ORDER BY id DESC LIMIT 1",
+        (app_row["id"], user_id),
+    )
+    row = await cur.fetchone()
+    typed = _json(row["payload"]).get("answers") if row is not None else None
+    if not isinstance(typed, list) or not typed:
+        return []
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    country = (str(app_row.get("job_country") or "").strip().upper()) or None
+    blocks, _ = kit.compute_answers(profile, overlay, country)
+    have = {i["key"]: i for block in blocks.values() for i in block}
+    answers, _ = _answer_rows(typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    pending = [{"question": a["question"], "answer": str(a["changed_to"])}
+               for a in answers if a["changed_to"] is not None]
+    if not pending:
+        return []
+    # Owner decision 2026-10-19: an answer is only off this list once a `form_swept` NEWER than
+    # the fill reports the form now holds the user's words - the assistant's proof that it typed them.
+    # A multi-page form is swept page by page (`page`), so the NEWEST sweep of EACH page counts
+    # (a page-2 sweep must not hide the page-1 sweep that holds the answer); unpaged = one page.
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_swept' AND id > (SELECT MAX(id) FROM application_events "
+        "WHERE application_id = ? AND user_id = ? AND event_type = 'form_filled') ORDER BY id DESC",
+        (app_row["id"], user_id, app_row["id"], user_id),
+    )
+    newest_per_page: dict[Any, Any] = {}
+    for row in await cur.fetchall():
+        payload = _json(row["payload"])
+        newest_per_page.setdefault(payload.get("page"), payload.get("answers"))
+    in_form = {
+        (_norm(h.get("question", "")), _norm(h.get("answer", "")))
+        for held in newest_per_page.values() for h in held or [] if isinstance(h, dict)
+    }
+    return [p for p in pending if (_norm(p["question"]), _norm(p["answer"])) not in in_form]
 
 
 async def ready_cards(

@@ -11915,6 +11915,13 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "type_first": {
+            "items": {
+              "$ref": "#/components/schemas/TypeFirstAnswer"
+            },
+            "title": "Type First",
+            "type": "array"
           }
         },
         "required": [
@@ -12221,6 +12228,24 @@
           "last_used_at"
         ],
         "title": "TokenSummary",
+        "type": "object"
+      },
+      "TypeFirstAnswer": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "TypeFirstAnswer",
         "type": "object"
       },
       "UpdateContactRequest": {

@@ -737,7 +737,7 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
-    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total"}),
+    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers"}),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
@@ -982,6 +982,8 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 ints[name] = value
         if len(ints) == 2 and ints["fixed"] > ints["fields_checked"]:
             problems.append("fixed cannot be more than fields_checked")
+        if "answers" in payload:
+            problems += answer_problems(payload["answers"])
         if "notes" in payload:
             notes = payload["notes"]
             if not isinstance(notes, str):
@@ -1133,6 +1135,10 @@ async def _check_kit_event(
                 "re-read every field on the page, then record the sweep",
             )
         swept: dict[str, Any] = {"fields_checked": checked, "fixed": fixed, "by": actor}
+        if "answers" in payload:
+            # Owner decision 2026-10-19: what the form holds after the sweep. The proof that the
+            # answers the user changed on the web (check_submit `type_first`) are now typed in.
+            swept["answers"] = clean_answers(payload["answers"])
         if paged:
             swept["page"], swept["pages_total"] = payload["page"], payload["pages_total"]
         if "notes" in payload:
