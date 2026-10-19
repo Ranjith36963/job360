@@ -36,7 +36,7 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If
    marks the round done; if the user skips, ask again only on the first form that
    needs it; a stored one is still confirmed on each form. (6) **settings** - one at a time: *Jobs at or above your line* - ask me
    / apply on its own (`assistant_settings.above_line` = ask | auto); *jobs below
-   your line* - the same (`assistant_settings.below_line`); not chosen = ask.
+   your line* - ask me / drop it (`assistant_settings.below_line` = ask | skip); not chosen = ask.
    *Submitting* - `confirm` (default) / `auto_when_sure` (you submit when
    `check_submit` says go; Indeed and LinkedIn always ask; the first is a practice
    run) -> `assistant_settings.submit_mode`. *A daily limit* - a number or none, no

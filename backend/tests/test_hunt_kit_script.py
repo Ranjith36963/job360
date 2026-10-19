@@ -308,8 +308,8 @@ def test_arbeitnow_style_visa_flag_becomes_a_visa_line() -> None:
 
 def test_select_sources_and_aliases() -> None:
     # 2026-10-17 (owner: search wider): Workday runs by default as a rotating slice;
-    # only the giant BambooHR list stays opt-in.
-    assert "workday" in hk.select_sources("default") and "bamboohr" not in hk.select_sources("default")
+    # BambooHR joined the default once the open lists rotate (--open-days).
+    assert "workday" in hk.select_sources("default") and "bamboohr" in hk.select_sources("default")
     assert "bamboohr" in hk.select_sources("all")
     assert hk.select_sources("weworkremotely,hn") == ["wwr", "hn"]
 
@@ -392,7 +392,9 @@ def test_companies_json_valid() -> None:
 def test_hunt_kit_has_no_board_scraper() -> None:
     """The opt-in big-board scraper (kit_boards.py + --boards, via python-jobspy)
     was removed 2026-10-14: those sites' terms forbid automated access. The
-    public ATS APIs and open feeds stay."""
+    public ATS APIs and open feeds stay. (2026-10-19: the owner added a DIFFERENT, stdlib-only
+    reader, kit_bigboards.py, for LinkedIn, Glassdoor and Google Jobs; none of the bans below
+    changed: no kit_boards.py, no --boards flag, no scrape_jobs, no jobspy import.)"""
     assert not (KIT_DIR / "kit_boards.py").exists()
     for f in (p for p in KIT_DIR.iterdir() if p.suffix in {".py", ".md", ".json"}):
         text = f.read_text(encoding="utf-8")
@@ -409,10 +411,20 @@ def test_hunt_kit_has_no_board_scraper() -> None:
 
 
 def test_kit_has_no_urls_for_big_boards_and_no_credentials() -> None:
-    bad = re.compile(r"https?://[^\s\"')>]*(linkedin|indeed|glassdoor|naukri|ziprecruiter|bayt)", re.I)
+    # Changed 2026-10-19 (owner decision, reverses the 2026-10-14/16 bans for two of the four sites): LinkedIn,
+    # Glassdoor and (not a URL pattern here) Google Jobs may be read by kit_bigboards.py ONLY. Indeed and
+    # ZipRecruiter URLs stay banned in every kit file (Indeed's only script route needs a key copied from its
+    # app), and no kit file may carry a credential: a key, token or bearer value.
+    banned = re.compile(r"https?://[^\s\"')>]*(indeed|ziprecruiter)", re.I)
+    only_bigboards = re.compile(r"https?://[^\s\"')>]*(linkedin|glassdoor)", re.I)
+    credential = re.compile(r"(?:api[_-]?key|bearer|authorization)\s*[:=]\s*[\"'][A-Za-z0-9_\-:.]{16,}", re.I)
     for f in KIT_DIR.glob("*.py"):
         text = f.read_text(encoding="utf-8")
-        assert not bad.search(text), f.name
+        assert not banned.search(text), f.name
+        assert not credential.search(text), f.name
+        if f.name != "kit_bigboards.py":
+            assert not only_bigboards.search(text), f.name
+    assert only_bigboards.search((KIT_DIR / "kit_bigboards.py").read_text(encoding="utf-8"))
 
 
 # ---- universe (run-time company lists)
