@@ -156,7 +156,11 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 
 **`key` action (2026-10-19):** ArrowDown, ArrowUp, Tab, Escape and Enter, for the suggestion lists real forms use
 (Greenhouse location and school, Workday dropdowns): type, ArrowDown, Enter. Enter is refused outside a suggestion
-list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`.
+list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. The list
+must be OPEN (`aria-expanded` true, or an option highlighted): a closed suggestion box in a form submits on Enter too.
+
+**CAPTCHA vs. invisible reCAPTCHA:** every Greenhouse posting loads an invisible reCAPTCHA that asks nothing, so it
+is not a stop. A reCAPTCHA image challenge or a tick-box widget is (freehire `atsapply/browser.go:167-234`).
 
 **Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
 the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.
@@ -183,6 +187,9 @@ form; the test fails when the wait is removed.
   the options it saw.
 - **`upload`** also works from an "Attach" button by catching the file picker. `upload_confirmed` says whether the
   file name shows on the page, because Greenhouse can take the file and still show an error (ApplYourself).
+- **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
+  `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); line breaks go
+  only into a multi-line box, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
 
 **Step 4, site playbooks for Greenhouse, Lever and Ashby (2026-10-19, `sites.py`):**
 - **`site`:** every read names the job site from the page's own address, or its frames (Greenhouse and iCIMS forms
@@ -210,21 +217,22 @@ form; the test fails when the wait is removed.
 - **Agencies and unknown sites:** no reference covers agency forms, so only general rules apply.
   - `application_form` says whether the page looks like the form itself (a file box, or 3 or more labelled
     fields) or still the ad.
-  - A field labelled "leave this blank" (a trap for bots) reads `leave_blank: true`, and `type` refuses it.
+  - A field labelled "leave this blank" (a trap for bots) reads `leave_blank: true`, and `type`, `choose`, `tick`
+    and `upload` refuse it. The label must say "this" or "the" field: "Middle name (leave blank)" is just optional.
 
 **Step 6, proof and "did that do anything?" (2026-10-19):**
 - **`page_changed`** after every click. The browser watches the page from just before the click until it settles:
   a new address, a new tab, a frame that navigated, any change to the page, or a change in the control itself (a
   tick box) counts. When unsure, it counts as changed. Nothing changed: `next` says not to click it again
   (nanobrowser's changed / none receipts).
-- **Never blind:** a control whose clicks changed nothing twice in a row is refused (`no_effect`) until something
-  else changes the page.
+- **Never blind:** a control whose clicks changed nothing twice in a row is refused (`no_effect`) until another
+  action (an answer typed, a box ticked, a scroll or a new page) gives it its tries back.
 - **Never twice:** after a final submit on a page, a second submit on the same page is refused
-  (`already_submitted`), unless the site said it did not take the first (`site_refused`). The gate still runs
-  check_submit on the retry.
+  (`already_submitted`), unless the site said it did not take the first (`site_refused`). Even then `check_submit`
+  holds a second submit until the user marks the first one "not sent" on Job360, so `next` says to ask them.
 - **`repeat_warning`:** the same action with the same ref and text 3 times in a row (browser-use's loop nudge).
 - **Proof:** when a gated submit lands on the site's confirmation (`confirmation_seen`), a screenshot of that page
-  is stored as the application's proof (`proof_screenshot`, `via: browser`, the S7 store, at most 3 per
+  (the tab that shows it, a new one included) is stored as the application's proof (`proof_screenshot`, `via: browser`, the S7 store, at most 3 per
   application). `proof_saved` says whether it was kept; a failed save never undoes the application.
 
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens

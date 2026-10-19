@@ -273,6 +273,7 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
 
 # Workday answers longer than this are filled, not keyed: keying 3,000 characters takes over a minute.
 KEYED_MAX_CHARS = 200
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 async def _type_into(loc: Any, text: str) -> str:
@@ -281,7 +282,10 @@ async def _type_into(loc: Any, text: str) -> str:
     not take it (one bounded heal, never a loop)."""
     typeahead = bool(await loc.evaluate(IS_TYPEAHEAD_JS))
     workday = not typeahead and bool(await loc.evaluate(IS_WORKDAY_FIELD_JS))
-    if typeahead or (workday and len(text) <= KEYED_MAX_CHARS):
+    # Never key a control character: as keys "\n" is Enter (it can submit the form, skipping
+    # check_submit) and "\t" is Tab (the rest would land in another field). fill() inserts them as text.
+    keyed = typeahead or (workday and len(text) <= KEYED_MAX_CHARS)
+    if keyed and not _CONTROL_CHARS.search(text):
         await loc.fill("")
         await loc.press_sequentially(text, delay=25)
     else:
@@ -304,6 +308,8 @@ def _pick(options: list[str], want: str) -> int:
     """Index of the option to click: an exact match (any case), else the ONLY option starting with it,
     else the ONLY option containing it; -1 when none or ambiguous (never a guess)."""
     w = " ".join(want.split()).casefold()
+    if not w:
+        return -1  # nothing asked for: never "the only option there is"
     norm = [" ".join(o.split()).casefold() for o in options]
     exact = [i for i, o in enumerate(norm) if o == w]
     if exact:
@@ -321,10 +327,11 @@ VISIBLE_OPTIONS = ", ".join(f"{part.strip()}:visible" for part in OPTION_SELECTO
 
 
 def _option_not_found(text: str, seen: list[str]) -> BrowserError:
-    listed = "; ".join(seen[:30]) if seen else "none were shown"
+    # Option labels are page text: clipped, and inside the untrusted marker like the rest of the page.
+    listed = _wrap_untrusted("; ".join(o[:60] for o in seen[:30])) if seen else "none were shown"
     return BrowserError(
         "refused", "option_not_found",
-        f"No single option matches '{text[:80]}'. Options seen: {listed}. Type part of it first, then choose again.",
+        f"No single option matches '{text[:80]}'. Type part of it first, then choose again. Options seen: {listed}",
     )
 
 
@@ -357,18 +364,23 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
         i = _pick(texts, text)
         if i < 0:
             continue  # an unrelated open list here; the one we want may be in another frame
+        before = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
         await options.nth(i).click()
         await _settle(page)
         shown = str(await loc.evaluate(SHOWN_VALUE_JS)).casefold()
-        # react-select keeps its input empty and shows the pick next to it: read the field's surroundings.
+        # The picked option's own text shows, or the asked-for text shows AND the field changed (what was
+        # typed into a suggestion box beforehand is no proof). react-select keeps its input empty and shows
+        # the pick next to it: then read the field's surroundings.
         confirmed = (
-            text.strip().casefold() in shown or texts[i].casefold() in shown
+            texts[i].casefold() in shown or (text.strip().casefold() in shown and shown != before)
             if shown.strip() else bool(await loc.evaluate(CHOSEN_NEARBY_JS, texts[i].casefold()))
         )
         if confirmed:
             return
         raise BrowserError(
-            "error", "choose_unconfirmed", f"Clicked '{texts[i]}' but the field shows '{shown[:80] or 'nothing'}'."
+            "error", "choose_unconfirmed",
+            f"Clicked option {i + 1} but the field does not show it. The field shows: "
+            + (_wrap_untrusted(shown[:60]) if shown.strip() else "nothing"),
         )
     await page.keyboard.press("Escape")
     raise _option_not_found(text, seen)
@@ -388,6 +400,8 @@ def _live_page(s: Session) -> Any:
 MAX_FRAMES = 20
 # How many frames are looked at to find the MAX_FRAMES shown ones.
 MAX_FRAMES_CHECKED = 100
+# Controls kept for embedded frames when the page has any shown one.
+FRAME_ELEMENT_FLOOR = 50
 FRAME_READ_TIMEOUT_S = 3.0
 
 
@@ -458,12 +472,18 @@ async def look(s: Session) -> dict[str, Any]:
     has_password = False
     above = below = 0
     read = 0
-    for i, frame in enumerate(page.frames[:MAX_FRAMES_CHECKED]):
+    frames = page.frames[:MAX_FRAMES_CHECKED]
+    # A page that embeds a shown frame (a Greenhouse or iCIMS form on a careers page) keeps part of
+    # the budget for it: 150 links on the page itself must not crowd the form out.
+    shown = [True] + [await _frame_shown(f) for f in frames[1:]]
+    embeds = any(shown[1:])
+    for i, frame in enumerate(frames):
         frame_urls.append(frame.url)
         # The cap counts frames READ: hidden ones (ads, trackers) before the form do not use it up.
-        if read >= MAX_FRAMES or (i and not await _frame_shown(frame)):
+        if read >= MAX_FRAMES or not shown[i]:
             continue
-        snap = await _read_frame(frame, MAX_ELEMENTS - len(elements), main=i == 0)
+        budget = MAX_ELEMENTS - (FRAME_ELEMENT_FLOOR if embeds else 0) if i == 0 else MAX_ELEMENTS - len(elements)
+        snap = await _read_frame(frame, budget, main=i == 0)
         if snap is None:
             continue
         read += 1
@@ -633,6 +653,10 @@ async def run(
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
+        if action not in ("click", "look"):
+            # The form changed (an answer typed, a box ticked, a new page): a control that did nothing
+            # before may work now, so it gets its tries back.
+            s.dead_clicks.clear()
         s.recent = ([*s.recent, (action, ref, text)])[-REPEAT_LIMIT:]
         if len(s.recent) == REPEAT_LIMIT and len(set(s.recent)) == 1 and action not in ("look", "scroll"):
             result["repeat_warning"] = (
@@ -681,6 +705,13 @@ async def _act(
     kind = await _kind(loc)
     page = _live_page(s)
 
+    # A trap field for bots says to leave it blank: never fill, pick, tick or upload into it.
+    fills = action in ("choose", "upload") or (action == "type" and text) or (action == "tick" and on)
+    if fills and is_honeypot(str((await loc.evaluate(ELEMENT_FACTS_JS)).get("name") or "")):
+        raise BrowserError(
+            "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
+        )
+
     if action == "click":
         submitted = False
         if s.dead_clicks.get(ref, 0) >= DEAD_CLICK_LIMIT:
@@ -716,10 +747,10 @@ async def _act(
         except Exception:  # noqa: BLE001 - unreadable: compared as changed
             before = None
         frames = await _watch(page)
-        await loc.click()
         if submitted:
-            # Set before the page is read: a page that cannot be read now still counts as submitted on.
+            # Set before the click: a click that fails after it reached the page still counts as one.
             s.submitted_on, s.submit_refused = url, False
+        await loc.click()
         await _settle(page)
         changed = await _changed(page, frames, url, tabs)
         if not changed:
@@ -743,11 +774,13 @@ async def _act(
             if out.get("site_refused"):
                 out["next"] = (
                     "The site says it did NOT take the application (site_refused). Read the page text for "
-                    "which fields, fix them, then check_submit again before another submit."
+                    "which fields, and fix them. check_submit holds a second submit until the user marks this "
+                    "one 'not sent' on Job360 (Needs you): ask them to, then submit again."
                 )
             elif out.get("confirmation_seen"):
                 out["next"] = "The site shows a confirmation: call record_application."
-                out["proof_saved"] = gate is not None and await _save_proof(page, gate)
+                # The tab look just read: a confirmation can open in a new tab.
+                out["proof_saved"] = gate is not None and await _save_proof(_live_page(s), gate)
             else:
                 out["next"] = (
                     "No confirmation on the page yet. Read it. Do NOT click submit again; if nothing "
@@ -761,12 +794,15 @@ async def _act(
                 "refused", "password_field",
                 "That is a password box. Job360 never types a password: the user signs in themselves.",
             )
-        if text and is_honeypot(str((await loc.evaluate(ELEMENT_FACTS_JS)).get("name") or "")):
-            raise BrowserError(
-                "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
-            )
         if len(text) > MAX_TYPE_CHARS:
             raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
+        if _CONTROL_CHARS.search(text.replace("\n", "")) or (
+            "\n" in text and not await loc.evaluate("(el) => el.tagName === 'TEXTAREA'")
+        ):
+            raise BrowserError(
+                "refused", "control_characters",
+                "Type plain text only: line breaks only into a multi-line box, never tabs or other control keys.",
+            )
         typed = await _type_into(loc, text)
         out = await look(s)
         out["typed_matches"] = typed == text
