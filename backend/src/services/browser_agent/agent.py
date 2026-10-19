@@ -33,8 +33,10 @@ from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
     ELEMENT_FACTS_JS,
     FOCUS_IN_LIST_JS,
+    FORM_STEP_JS,
     IS_TEXT_FIELD_JS,
     IS_TYPEAHEAD_JS,
+    IS_WORKDAY_FIELD_JS,
     LEVER_CHECK_JS,
     NATIVE_SET_JS,
     OWN_LIST_IDS_JS,
@@ -43,7 +45,7 @@ from src.services.browser_agent.page_js import (
     TICK_VIA_LABEL_JS,
 )
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
-from src.services.browser_agent.sites import outcome_for, site_for
+from src.services.browser_agent.sites import is_honeypot, looks_like_application, outcome_for, site_for
 from src.services.fetch.guard import ResolveFn
 
 logger = logging.getLogger("job360.services.browser_agent")
@@ -259,23 +261,31 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
     return await look(s)
 
 
+# Workday answers longer than this are filled, not keyed: keying 3,000 characters takes over a minute.
+KEYED_MAX_CHARS = 200
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 async def _type_into(loc: Any, text: str) -> str:
-    """Type and read back. Suggestion boxes key by key; plain fields fill(), then the native setter
-    if the site's framework did not take it (one bounded heal, never a loop)."""
+    """Type and read back. Suggestion boxes key by key; Workday's short fields key by key, then blur
+    so Workday commits them; other fields fill(), then the native setter if the site's framework did
+    not take it (one bounded heal, never a loop)."""
+    typeahead = bool(await loc.evaluate(IS_TYPEAHEAD_JS))
+    workday = not typeahead and bool(await loc.evaluate(IS_WORKDAY_FIELD_JS))
     # Never key a control character: as keys "\n" is Enter (it can submit the form, skipping
     # check_submit) and "\t" is Tab (the rest would land in another field). fill() inserts them as text.
-    if await loc.evaluate(IS_TYPEAHEAD_JS) and not _CONTROL_CHARS.search(text):
+    keyed = typeahead or (workday and len(text) <= KEYED_MAX_CHARS)
+    if keyed and not _CONTROL_CHARS.search(text):
         await loc.fill("")
         await loc.press_sequentially(text, delay=25)
     else:
         await loc.fill(text)
     shown = str(await loc.evaluate(SHOWN_VALUE_JS))
     # The native setter is an input's or a textarea's: a contenteditable box keeps what fill() left.
-    if shown != text and await loc.evaluate(IS_TEXT_FIELD_JS) and not await loc.evaluate(IS_TYPEAHEAD_JS):
+    if shown != text and not typeahead and await loc.evaluate(IS_TEXT_FIELD_JS):
         shown = str(await loc.evaluate(NATIVE_SET_JS, text))
+    if workday:
+        await loc.blur()
     return shown
 
 
@@ -517,6 +527,16 @@ async def look(s: Session) -> dict[str, Any]:
         "elements": elements,
         "text": _wrap_untrusted(text),
     }
+    try:
+        step = await asyncio.wait_for(page.evaluate(FORM_STEP_JS), FRAME_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 - a page mid-navigation: no step this read
+        step = None
+    if step:
+        out["form_step"] = step
+    for e in elements:
+        if is_honeypot(str(e.get("name") or "")):
+            e["leave_blank"] = True
+    out["application_form"] = looks_like_application(elements)
     site = site_for(page.url, frame_urls[1:])
     if site is not None:
         out["site"] = {"name": site.name, "tips": list(site.tips)}
@@ -654,6 +674,13 @@ async def _act(
     loc = await _locate(s, ref)
     kind = await _kind(loc)
     page = _live_page(s)
+
+    # A trap field for bots says to leave it blank: never fill, pick, tick or upload into it.
+    fills = action in ("choose", "upload") or (action == "type" and text) or (action == "tick" and on)
+    if fills and is_honeypot(str((await loc.evaluate(ELEMENT_FACTS_JS)).get("name") or "")):
+        raise BrowserError(
+            "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
+        )
 
     if action == "click":
         submitted = False

@@ -1090,6 +1090,123 @@ async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site
         await pool.shutdown()
 
 
+# ── Step 5: Workday's pages, iCIMS frames, Teamtailor ─────────────────────────
+
+WORKDAY = """<!doctype html><html><head><title>My Information - Workday</title></head><body>
+<div data-automation-id="progressBar"><ol>
+  <li><span>step 1 of 3</span><span>My Information</span></li>
+  <li><span>current step 2 of 3</span><span>My Experience</span></li>
+  <li><span>step 3 of 3</span><span>Review</span></li></ol></div>
+<div id="page">
+<div data-automation-id="formField-legalName"><label for="first">First Name</label>
+  <input id="first" aria-required="true"></div>
+<button type="button" id="save">Save and Continue</button></div>
+<script>
+  // Workday's own rule, simulated: a value only counts once it was typed (real keys) and the field left.
+  let keyed = false, committed = '';
+  const first = document.getElementById('first');
+  first.addEventListener('keydown', () => { keyed = true; });
+  first.addEventListener('blur', () => { committed = keyed ? first.value : ''; });
+  document.getElementById('save').onclick = () => {
+    if (!committed) {
+      first.setAttribute('aria-invalid', 'true');
+      return;
+    }
+    document.querySelector('[data-automation-id="progressBar"] ol').innerHTML =
+      '<li><span>step 2 of 3</span></li><li><span>current step 3 of 3</span><span>Review</span></li>';
+    document.getElementById('page').innerHTML = '<h2>Review</h2><p>First Name: ' + committed + '</p>';
+  };
+</script></body></html>"""
+ICIMS_HOST_PAGE = """<!doctype html><html><head><title>Careers - Acme</title></head><body>
+<h1>Careers at Acme</h1>
+<iframe id="icims_content_iframe" src="http://careers-acme.icims.com/jobs/1/apply?in_iframe=1"
+  style="width:800px;height:400px"></iframe></body></html>"""
+ICIMS_FORM = """<!doctype html><html><body><form>
+<label for="email">Email Address</label><input id="email" type="email">
+<label for="hp">Leave this field blank</label><input id="hp">
+<label for="cv">Resume</label><input id="cv" type="file"></form></body></html>"""
+
+
+@pytest.fixture
+async def wizard_site():
+    from aiohttp import web
+
+    def page(html):
+        async def handler(_):
+            return web.Response(text=html, content_type="text/html")
+
+        return handler
+
+    app = web.Application()
+    app.router.add_get("/en-US/External/job/1/apply", page(WORKDAY))
+    app.router.add_get("/careers", page(ICIMS_HOST_PAGE))
+    app.router.add_get("/jobs/1/apply", page(ICIMS_FORM))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_workday_steps_invalid_marks_keyed_typing_and_an_icims_frame(wizard_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    public = "93.184.216.34"
+    table = {"acme.wd3.myworkdayjobs.com": public, "jobs.example": public, "careers-acme.icims.com": public}
+    resolve, _ = _resolver(table)
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(wizard_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://acme.wd3.myworkdayjobs.com/en-US/External/job/1/apply")
+        assert page["site"]["name"] == "workday" and page["form_step"] == {"current": 2, "total": 3}
+        assert any("Month and Year" in t for t in page["site"]["tips"])
+        page = await run(pool, "u1", "click", ref=_ref(page, "Save and Continue"))   # a step, not the submit
+        assert next(e for e in page["elements"] if e["name"] == "First Name")["invalid"] is True
+        page = await run(pool, "u1", "type", ref=_ref(page, "First Name"), text="Ada")
+        assert page["typed_matches"] is True
+        page = await run(pool, "u1", "click", ref=_ref(page, "Save and Continue"))
+        assert page["form_step"] == {"current": 3, "total": 3} and "First Name: Ada" in page["text"]
+
+        page = await run(pool, "u1", "open", url="http://jobs.example/careers")
+        assert page["site"]["name"] == "icims"   # named by the frame that holds the form
+        assert page["application_form"] is True   # a file box: this is the form, not the ad
+        assert next(e for e in page["elements"] if e["name"] == "Leave this field blank")["leave_blank"] is True
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "type", ref=_ref(page, "Leave this field blank"), text="x")
+        assert exc.value.reason == "leave_blank"
+        page = await run(pool, "u1", "type", ref=_ref(page, "Email Address"), text="ada@example.com")
+        assert page["typed_matches"] is True
+    finally:
+        await pool.shutdown()
+
+
+def test_teamtailor_is_named_and_its_tips_ask_before_optional_consent():
+    from src.services.browser_agent.sites import site_for
+
+    tt = site_for("https://acme.teamtailor.com/jobs/1-engineer/applications/new")
+    assert tt.name == "teamtailor" and any("ask" in t for t in tt.tips)
+    assert site_for("https://teamtailor.com.evil.example/jobs") is None
+
+
+def test_the_form_not_the_ad_and_trap_fields():
+    from src.services.browser_agent.sites import is_honeypot, looks_like_application
+
+    def field(name, type_="text", tag="input"):
+        return {"tag": tag, "type": type_, "name": name}
+
+    ad = [{"tag": "a", "type": "", "name": "Apply now"}, field("Search jobs"), field("", "button", "button")]
+    assert not looks_like_application(ad)
+    assert looks_like_application([field("CV", "file")])
+    assert looks_like_application([field("First name"), field("Email", "email"), field("Why us?", "", "textarea")])
+    assert not looks_like_application([field("First name"), field("Email", "email"), field("", "hidden")])
+    assert is_honeypot("Leave this field blank") and is_honeypot("Please do not fill this in")
+    assert not is_honeypot("Leave date") and not is_honeypot("Blank space for notes")
+    assert not is_honeypot("Middle name (leave blank if none)")
+
+
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
