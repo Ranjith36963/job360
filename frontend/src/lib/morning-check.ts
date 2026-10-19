@@ -11,6 +11,7 @@ export const CHECK_LOOKBACK_DAYS = 1;
 export const LINE_SWITCH_LABEL: Record<string, string> = {
   ask: "Ask me",
   auto: "Apply on its own",
+  skip: "Drop it",
 };
 export const SUBMIT_MODE_LABEL: Record<string, string> = {
   confirm: "Confirm before sending",
@@ -59,4 +60,46 @@ export function scoreLineText(line: number | null | undefined): string {
 export function lineSwitchText(above: string | undefined, below: string | undefined): string {
   const w = (v: string | undefined) => (LINE_SWITCH_LABEL[v ?? "ask"] ?? "Ask me").toLowerCase();
   return `Above: ${w(above)} · Below: ${w(below)}`;
+}
+
+// ---- Batch auto apply (owner decision 2026-10-19) ----
+// One switch replaces "above / below / submit mode": ON = apply on its own to every
+// job at or above the score line (above_line auto + submit_mode auto_when_sure); OFF =
+// ask before each one (ask + confirm). Jobs below the line are dropped (below_line skip).
+
+/** Always shown, in amber, under the score line. */
+export const ALWAYS_ASKS =
+  "Your assistant always stops and asks you when it is not sure: a CAPTCHA, a login page, a guessed answer, or anything not verified.";
+
+/** ON only when BOTH halves are set; anything in between reads as off (it still asks). */
+export function batchOn(above: string | null | undefined, submit: string | null | undefined): boolean {
+  return above === "auto" && submit === "auto_when_sure";
+}
+
+export function batchText(on: boolean): string {
+  return on ? "Batch auto apply: on" : "Batch auto apply: off";
+}
+
+/** What happens to a job below the line, in words. */
+export function belowText(below: string | null | undefined): string {
+  if (below === "skip") return "Below the line: dropped";
+  return below === "auto" ? "Below the line: applies on its own" : "Below the line: asks you";
+}
+
+/** The PATCH edits to reach (score, batch) from what the server holds. Saving always
+ *  records "drop jobs below the line" - the user's own click, so never a default. */
+export function batchEdits(
+  state: { apply_min_score?: number | null; above_line?: string | null; below_line?: string | null; submit_mode?: string | null },
+  want: { scoreValue: number | null; batch: boolean },
+): { path: string; value: unknown }[] {
+  const out: { path: string; value: unknown }[] = [];
+  if (want.scoreValue !== (state.apply_min_score ?? null)) {
+    out.push({ path: "assistant_settings.apply_min_score", value: want.scoreValue });
+  }
+  const above = want.batch ? "auto" : "ask";
+  const submit = want.batch ? "auto_when_sure" : "confirm";
+  if ((state.above_line || "ask") !== above) out.push({ path: "assistant_settings.above_line", value: above });
+  if ((state.submit_mode || "confirm") !== submit) out.push({ path: "assistant_settings.submit_mode", value: submit });
+  if (state.below_line !== "skip") out.push({ path: "assistant_settings.below_line", value: "skip" });
+  return out;
 }
