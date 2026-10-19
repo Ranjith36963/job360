@@ -12,6 +12,10 @@ const api = vi.hoisted(() => ({
   withdrawAsk: vi.fn(),
   getAssistantSettings: vi.fn(),
   getReadyToSend: vi.fn(),
+  getProfile: vi.fn(),
+  uploadProfile: vi.fn(),
+  keepProfileEdit: vi.fn(),
+  takeBackProfileEdit: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" }));
@@ -84,6 +88,10 @@ function happy({ events = [event(1, "agent:Claude"), event(2, "web")], asks = []
   api.getStats.mockResolvedValue({ overall: { brought: 5, applied: 3, replied: 1, interview: 1 } });
   api.listApplications.mockResolvedValue({ applications: [app], total: 1 });
   api.listAsks.mockResolvedValue({ asks, open_count: asks.length });
+  api.getProfile.mockResolvedValue({
+    preferences: { assistant_notes: ["Never apply to agencies"] },
+    agent_edits: [],
+  });
 }
 
 beforeEach(() => {
@@ -98,8 +106,7 @@ describe("Home", () => {
     const h1 = await screen.findByRole("heading", { level: 1, name: /Your assistant \(Claude\) wrote 1 record/ });
     expect(h1).toHaveTextContent("Your assistant (Claude) wrote 1 record since you were last here. Two things need you.");
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(await screen.findByTestId("home-apps")).toHaveTextContent("Mistral AI");
-    expect(screen.getByTestId("row-fit")).toHaveTextContent("Good fit");
+    expect(screen.queryByTestId("home-apps")).toBeNull();
     expect(await screen.findByTestId("home-counts")).toHaveTextContent("jobs brought");
     expect(screen.getByTestId("home-feed")).toHaveTextContent("Document saved");
     expect(screen.getByRole("link", { name: "Jobs in" })).toHaveAttribute("href", "/bring");
@@ -206,7 +213,7 @@ describe("Home", () => {
     happy();
     api.getStats.mockRejectedValue(new Error("boom"));
     render(<Home />);
-    expect(await screen.findByTestId("home-apps")).toBeInTheDocument();
+    expect(await screen.findByTestId("home-feed")).toBeInTheDocument();
     expect(screen.queryByTestId("home-counts")).toBeNull();
     expect(screen.getByTestId("home-feed")).toBeInTheDocument();
   });
@@ -217,5 +224,35 @@ describe("Home", () => {
     render(<Home />);
     expect(await screen.findByText("Could not load your applications.")).toBeInTheDocument();
     expect(screen.getByTestId("home-retry")).toBeInTheDocument();
+  });
+
+  it("shows 'Things your assistant should know' ABOVE the sentence, saving the whole preferences block", async () => {
+    happy();
+    api.uploadProfile.mockResolvedValue({
+      preferences: { assistant_notes: ["Never apply to agencies", "No night shifts"] },
+      agent_edits: [],
+    });
+    render(<Home />);
+    const card = await screen.findByTestId("home-assistant-notes");
+    expect(card).toHaveTextContent("Things your assistant should know");
+    expect(card).toHaveTextContent("Never apply to agencies");
+    const h1 = await screen.findByTestId("home-sentence");
+    expect(card.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("New note for your assistant"), { target: { value: "No night shifts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    await waitFor(() => expect(api.uploadProfile).toHaveBeenCalledTimes(1));
+    const [cv, prefs] = api.uploadProfile.mock.calls[0];
+    expect(cv).toBeNull();
+    expect(prefs.assistant_notes).toEqual(["Never apply to agencies", "No night shifts"]);
+  });
+
+  it("no profile yet: the notes card is simply absent", async () => {
+    happy();
+    api.getProfile.mockRejectedValue(new Error("404"));
+    render(<Home />);
+    await screen.findByTestId("home-sentence");
+    await screen.findByTestId("home-feed");
+    expect(screen.queryByTestId("home-assistant-notes")).toBeNull();
   });
 });
