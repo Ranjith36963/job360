@@ -829,7 +829,7 @@ class SaveFitLineOut(BaseModel):
 
     score_line: Optional[int] = None
     side: Literal["above", "below", "unknown"]
-    switch: Optional[Literal["ask", "auto"]] = None
+    switch: Optional[Literal["ask", "auto", "skip"]] = None  # skip: below the line, drop the job
     next: str
 
 
