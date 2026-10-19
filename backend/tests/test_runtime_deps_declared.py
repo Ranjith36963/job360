@@ -46,6 +46,7 @@ ALLOWED_UNDECLARED = {
     "tomli": "only imported on Python < 3.11 (dep_file_parser.py)",
     "numpy": "optional; import wrapped in try/except (skill_normalizer.py)",
     "sentence-transformers": "optional extra; import wrapped in try/except (skill_normalizer.py)",
+    "playwright": "optional `browser` extra; import wrapped in try/except ImportError (browser_agent/agent.py)",
 }
 
 
