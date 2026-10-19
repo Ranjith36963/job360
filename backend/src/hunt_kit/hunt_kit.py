@@ -124,6 +124,7 @@ FEED_SOURCES = (
     "tyomarkkinatori",
     "trudvsem",
     "jobstreet",
+    "nav",
     "naukri",
     "bayt",
     "gulftalent",
