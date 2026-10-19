@@ -240,6 +240,23 @@ def _answer_rows(
     return answers, flags
 
 
+def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
+    """The LOCK (owner decision 2026-10-19 - not just an instruction): answers the user changed
+    on the web hold every submit, even after their yes, until a ``form_swept`` newer than the fill
+    reports those exact words in the form (``changed_answers`` returns ``[]`` then). A ``stop`` the
+    gate already gave stays as it is (it is no less a stop); ``submit`` and ``ask`` become
+    ``stop`` / ``type_first_pending``. A sweep never cancels the yes; a new fill does."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
+
+    if not type_first or verdict.decision == "stop":
+        return verdict
+    return settings_rules.SubmitDecision(
+        "stop", "type_first_pending",
+        f"Type the {len(type_first)} answer(s) the user changed (type_first) into their fields, "
+        "then record_event form_swept with `answers` (what the form now holds). Then check again.",
+    )
+
+
 async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[dict[str, str]]:
     """The answers the user changed on the newest filled form: ``[{question, answer}]``
     with the USER's answer, which the assistant must type before it submits. Read
@@ -263,7 +280,29 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     blocks, _ = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     answers, _ = _answer_rows(typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
-    return [{"question": a["question"], "answer": str(a["changed_to"])} for a in answers if a["changed_to"] is not None]
+    pending = [{"question": a["question"], "answer": str(a["changed_to"])}
+               for a in answers if a["changed_to"] is not None]
+    if not pending:
+        return []
+    # Owner decision 2026-10-19: an answer is only off this list once a `form_swept` NEWER than
+    # the fill reports the form now holds the user's words - the assistant's proof that it typed them.
+    # A multi-page form is swept page by page (`page`), so the NEWEST sweep of EACH page counts
+    # (a page-2 sweep must not hide the page-1 sweep that holds the answer); unpaged = one page.
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_swept' AND id > (SELECT MAX(id) FROM application_events "
+        "WHERE application_id = ? AND user_id = ? AND event_type = 'form_filled') ORDER BY id DESC",
+        (app_row["id"], user_id, app_row["id"], user_id),
+    )
+    newest_per_page: dict[Any, Any] = {}
+    for row in await cur.fetchall():
+        payload = _json(row["payload"])
+        newest_per_page.setdefault(payload.get("page"), payload.get("answers"))
+    in_form = {
+        (_norm(h.get("question", "")), _norm(h.get("answer", "")))
+        for held in newest_per_page.values() for h in held or [] if isinstance(h, dict)
+    }
+    return [p for p in pending if (_norm(p["question"]), _norm(p["answer"])) not in in_form]
 
 
 async def ready_cards(

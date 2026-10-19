@@ -2791,10 +2791,8 @@ async def submit_check(
         raise AssertionError("unreachable")  # pragma: no cover
     verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
     type_first = await ready_service.changed_answers(db, user.id, app_row)
+    verdict = ready_service.type_first_lock(verdict, type_first)
     detail = verdict.detail
-    if type_first:
-        detail = (f"{detail} First type the {len(type_first)} answer(s) the user changed (type_first) into "
-                  "their fields, replacing what is there.")
     get_audit_logger().info(
         "submit_check",
         extra={
