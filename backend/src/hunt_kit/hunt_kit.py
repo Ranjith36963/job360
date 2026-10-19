@@ -97,6 +97,8 @@ BOARD_SOURCES = (
     "softgarden",
     "join",
     "jibe",
+    "keka",
+    "zohorecruit",
 )
 FEED_SOURCES = (
     "freehire",
@@ -2591,12 +2593,14 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("softgarden", re.compile(r"^([a-z0-9-]+)\.softgarden\.io$")),
     ("join", re.compile(r"^join\.com$")),
     ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
+    ("keka", re.compile(r"^([a-z0-9-]+)\.keka\.com$")),
+    ("zohorecruit", re.compile(r"^([a-z0-9-]+)\.zohorecruit\.(?:in|com)$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|comeet\.com|join\.com|rippling\.com|dover\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|avature\.net|csod\.com|"
-    r"trakstar\.com|zohorecruit\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
+    r"trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:

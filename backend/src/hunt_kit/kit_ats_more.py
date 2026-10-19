@@ -1,5 +1,5 @@
 """More ATS board fetchers for the hunt kit: Rippling, Breezy, Pinpoint, Phenom, UKG (UltiPro), ADP Workforce Now,
-Cornerstone, Gem. Same contract as kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only
+Cornerstone, Gem, JazzHR, Softgarden, JOIN, Jibe, Keka, Zoho Recruit. Same contract as kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only
 through the ``http`` callable, no file IO at import, standard library only. Nothing here ranks or scores a job.
 
 Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
@@ -13,8 +13,11 @@ Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
   cornerstone  <tenant>/<siteId> from <tenant>.csod.com/ux/ats/careersite/<siteId>/home (row may add corp)
   gem        board id from jobs.gem.com/<id>
   paylocity  company GUID from recruiting.paylocity.com/Recruiting/Jobs/All/<guid>
+  keka       tenant from <tenant>.keka.com/careers (India)
+  zohorecruit  tenant from <tenant>.zohorecruit.in or .com/jobs/Careers (row may add tld "in" or "com")
 
-Endpoints and field names are adapted from the MIT-licensed career-ops providers and freehire adapters (see NOTICE.md).
+Endpoints and field names are adapted from the MIT-licensed career-ops providers and freehire adapters (see NOTICE.md);
+the Keka and Zoho Recruit readers come from our own read of their public career pages.
 """
 # ruff: noqa: E501
 from __future__ import annotations
@@ -654,6 +657,133 @@ def _jibe(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- Keka Hire (India)
+# Source: own read of live Keka boards (2026-10-19), no third-party code. The careers page
+# https://<tenant>.keka.com/careers/ links its assets under /ats/documents/<GUID>/; the public list
+# /careers/api/embedjobs/default/active/<GUID> is a JSON array (id, title, description HTML, jobLocations
+# [{city, state, countryCode, countryName}], publishedOn, experience, departmentName, jobType). The posting
+# is /careers/jobdetails/<id>. robots.txt allows only /careers, so the reader makes exactly these two calls.
+_KEKA_GUID = re.compile(r"/ats/documents/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/")
+
+
+def keka_guid(page: Any) -> str:
+    """The portal GUID on a Keka careers page, '' when the page carries none."""
+    m = _KEKA_GUID.search(page) if isinstance(page, str) else None
+    return m.group(1).lower() if m else ""
+
+
+def keka_jobs(row: dict[str, Any], tenant: str, items: Any) -> list[Job] | None:
+    """Jobs from a Keka embedjobs list (None when it is not a list)."""
+    if not isinstance(items, list):
+        return None
+    jobs: list[Job] = []
+    for j in items[: MAX_PAGES * 100]:
+        if not isinstance(j, dict):
+            continue
+        title, jid = str(j.get("title") or "").strip(), str(j.get("id") or "").strip()
+        if not title or not jid.isdigit():
+            continue
+        places = [_join(x.get("city") or x.get("name"), x.get("state"), x.get("countryName") or x.get("countryCode"))
+                  for x in (j.get("jobLocations") or []) if isinstance(x, dict)]
+        place = " · ".join(dict.fromkeys(p for p in places if p))
+        jt = j.get("jobType")
+        jt_word = jt if isinstance(jt, str) and not jt.strip().isdigit() else ""  # a numeric code says nothing we can read
+        jobs.append(_job(row, "keka", title=title, url=f"https://{tenant}.keka.com/careers/jobdetails/{jid}", location=place,
+                         posted=_iso_date(j.get("publishedOn")), description=_text(j.get("description")),
+                         remote=_remote_from(place, jt_word),
+                         extra={"department": str(j.get("departmentName") or ""), "experience": str(j.get("experience") or "")}))
+    return jobs
+
+
+def _keka(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Keka Hire careers board (token = tenant of <tenant>.keka.com): careers page -> GUID -> active jobs list."""
+    tenant = str(row.get("token") or "").strip().lower()
+    if not _label(tenant):
+        return None
+    st, page = _get(http, f"https://{tenant}.keka.com/careers/", as_json=False, headers={"Accept": "text/html"})
+    guid = keka_guid(page) if st == 200 else ""
+    if not guid:
+        return None
+    st, items = _get(http, f"https://{tenant}.keka.com/careers/api/embedjobs/default/active/{guid}", headers=_JSON)
+    return keka_jobs(row, tenant, items) if st == 200 else None
+
+
+# --------------------------------------------------------------------------- Zoho Recruit
+# Source: own read of live Zoho Recruit career sites (2026-10-19), no third-party code. GET
+# https://<tenant>.zohorecruit.<in|com>/jobs/Careers carries the job rows as HTML-escaped JSON in a hidden
+# <input value="[{...}]"> (Posting_Title, City, State, Country, Remote_Job, id; some tenants add Date_Opened and
+# Job_Description). The posting is /jobs/Careers/<id>. An unknown tenant (or the wrong domain) answers 200
+# "Page does not exist". robots.txt allows /jobs.
+ZOHO_TLDS = ("in", "com")
+# `[^<>]` (not `[^>]`): a failed attempt stops at the next "<", so a page full of "<input " with no
+# ">" is read in linear time instead of quadratic (security review 2026-10-19).
+_INPUT_TAG = re.compile(r"<input\b[^<>]*>", re.I)
+_VALUE_ATTR = re.compile(r'\bvalue="([^"]*)"')
+
+
+def zoho_rows(page: Any) -> list[dict[str, Any]] | None:
+    """Job rows from a Zoho Recruit careers page; None when the page is not a career site."""
+    if not isinstance(page, str) or "Page does not exist" in page[:5000]:
+        return None
+    rows: list[dict[str, Any]] = []
+    portal = False
+    for tag in _INPUT_TAG.findall(page):
+        if 'type="hidden"' not in tag:
+            continue
+        v = _VALUE_ATTR.search(tag)
+        raw = html.unescape(v.group(1)) if v else ""
+        if not raw.startswith("[{"):
+            continue
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            continue
+        if data[0].get("api_name") == "Job_Openings":
+            portal = True  # the field layout block: a real career site even when it lists no jobs
+        elif "Posting_Title" in data[0] or "Job_Opening_Name" in data[0]:
+            portal = True
+            rows += [d for d in data if isinstance(d, dict)]
+    return rows if portal else None
+
+
+def _truthy(v: Any) -> bool:
+    return v is True or str(v).strip().lower() == "true"
+
+
+def zoho_jobs(row: dict[str, Any], origin: str, rows: list[dict[str, Any]]) -> list[Job]:
+    """Jobs from Zoho Recruit rows; every optional field may be missing."""
+    jobs: list[Job] = []
+    seen: set[str] = set()
+    for r in rows[: MAX_PAGES * 100]:
+        title = str(r.get("Posting_Title") or r.get("Job_Opening_Name") or "").strip()
+        jid = str(r.get("id") or "").strip()
+        if not title or not jid.isdigit() or jid in seen or r.get("Publish") is False:
+            continue
+        seen.add(jid)
+        place = _join(*(r.get(k) for k in ("City", "State", "Country") if str(r.get(k) or "").strip().lower() != "none"))
+        remote = True if _truthy(r.get("Remote_Job")) else _remote_from(place)
+        jobs.append(_job(row, "zohorecruit", title=title, url=f"{origin}/jobs/Careers/{jid}", location=place,
+                         posted=_iso_date(r.get("Date_Opened")), description=_text(r.get("Job_Description")), remote=remote,
+                         extra={"job_type": str(r.get("Job_Type") or "")}))
+    return jobs
+
+
+def _zohorecruit(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Zoho Recruit career site (token = tenant; row tld 'in' or 'com', else .in is tried first, then .com)."""
+    tenant, tld = str(row.get("token") or "").strip().lower(), str(row.get("tld") or "").strip().lower()
+    if not _label(tenant):
+        return None
+    for t in ((tld,) if tld in ZOHO_TLDS else ZOHO_TLDS):
+        origin = f"https://{tenant}.zohorecruit.{t}"
+        st, page = _get(http, f"{origin}/jobs/Careers", as_json=False, headers={"Accept": "text/html"})
+        rows = zoho_rows(page) if st == 200 else None
+        if rows is not None:
+            return zoho_jobs(row, origin, rows)
+    return None
+
+
 # --------------------------------------------------------------------------- Paylocity
 # Borrowed from freehire internal/ingest/sources/paylocity.go (MIT): board = company GUID (:13-14); listing GET
 # https://recruiting.paylocity.com/Recruiting/Jobs/All/<guid> (:45), whose window.pageData embeds the whole Jobs array,
@@ -783,5 +913,7 @@ ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Jo
     "softgarden": _wrap(_softgarden),
     "join": _wrap(_join_board),
     "jibe": _wrap(_jibe),
+    "keka": _wrap(_keka),
+    "zohorecruit": _wrap(_zohorecruit),
     "paylocity": fetch_paylocity,
 }

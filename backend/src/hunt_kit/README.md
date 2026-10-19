@@ -73,8 +73,14 @@ Teamtailor, BambooHR, Workday, iCIMS, Oracle Recruiting Cloud (`oraclecloud`),
 SuccessFactors, Taleo, Jobvite, Eightfold. iCIMS reads the date and description
 from the first 20 ads of each board only; the rest come back undated.
 `kit_ats_more.py` adds Rippling, Breezy, Pinpoint, Phenom (branded career host), UKG
-UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN and
-Jibe. Phenom, UltiPro, ADP and Cornerstone list ads only (no description).
+UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN,
+Jibe, Keka Hire (`keka`) and Zoho Recruit (`zohorecruit`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
+some Zoho Recruit sites list no description either, so open the link to read the ad.
+
+India: many Indian employers post on Keka Hire and Zoho Recruit, not on the boards above. The
+`keka` and `zohorecruit` rows in `companies.json` (`source` `commoncrawl`, `country` `IN` when most
+of a board's jobs are in India) cover a few hundred of them. Use `--work-countries IN` to keep
+Indian jobs. Keka is read with exactly two requests per board (the careers page, then its public jobs list).
 
 Open feeds (no key): freehire.me, Himalayas, Remotive, Arbeitnow (uses its
 remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
@@ -115,7 +121,8 @@ When you show a job to the user, link back to the original listing (several feed
 ## The company list is only a starter
 
 `companies.json` is an open, third-party starter list (from jobsync, career-ops
-and job-board-aggregator, all MIT, plus employers from official visa-sponsor registers, see `NOTICE.md`). Many tokens are dead; that
+and job-board-aggregator, all MIT, plus employers from official visa-sponsor registers and Indian Keka / Zoho Recruit boards found
+in the Common Crawl URL index, see `NOTICE.md`). Many tokens are dead; that
 is fine, they answer 404 fast. Job360 never runs, ranks or uses this list.
 The user's own `preferences.target_companies` come first: pass them with
 `--companies-extra "ashby:acme,lever:foo"` (format `ats:token`) or edit the file.
@@ -127,7 +134,9 @@ Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT
 `adp:cid/ccId` (from `workforcenow.adp.com/...recruitment.html?cid=..&ccId=..`),
 `cornerstone:tenant/siteId` (from `tenant.csod.com/ux/ats/careersite/4/home`), `phenom:careers.example.com`
 (the branded career host). One slug each: `rippling:slug` (`ats.rippling.com/slug/jobs`), `breezy:tenant`,
-`pinpoint:tenant`, `jazzhr:tenant` (`tenant.applytojob.com`), `softgarden:tenant`, `jibe:slug`, `gem:id`
+`pinpoint:tenant`, `jazzhr:tenant` (`tenant.applytojob.com`), `softgarden:tenant`, `jibe:slug`,
+`keka:tenant` (`tenant.keka.com/careers`), `zohorecruit:tenant` (`tenant.zohorecruit.in`, then `.com` is tried;
+a `companies.json` row may set `"tld": "com"`), `gem:id`
 (`jobs.gem.com/id`), `join:slug` (`join.com/companies/slug`). Cornerstone sites that need a session cookie return no ads.
 Maintainers grow the list with `python scripts/harvest_hunt_boards.py` (from `backend/`;
 see its docstring). Its Workday rows share the daily Workday slice.
