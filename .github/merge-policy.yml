@@ -702,7 +702,17 @@ wip:
 # they just go to a human.
 size:
   max_files: 40
-  max_lines: 1500
+  # The ONE number (2026-10-19). merge_cage.py read 1200 from a constant while
+  # this file said 1500; the cage now reads only this. Kept at 1200, what ran.
+  max_lines: 1200
+  # Files a script writes and nobody reads line by line. Their lines are reported
+  # in the verdict but not counted against max_lines. EXACT paths only: a glob is
+  # a bypass waiting for a file.
+  generated:
+    - frontend/openapi.json
+    - frontend/src/lib/api-types.ts
+    - docs/GENERATED.md
+    - frontend/package-lock.json
 
 # ── Ratchets ───────────────────────────────────────────────────────────────
 # A ratchet is a number that may HOLD or IMPROVE and may never get worse.

@@ -28,6 +28,10 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
   every `**/CLAUDE.md` is human-only, so a CLAUDE.md fix (even a `last-verified` stamp) goes in its own PR.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
+- One PR per slice, under the cage cap (`size.max_lines` in `.github/merge-policy.yml`;
+  generated files don't count). Never keep pushing new slices onto an open PR: open the next.
+- Arm auto-merge once and leave it; the `merge-cage` status holds it. Never hand-merge past
+  a red or pending `merge-cage` unless the owner said so for that PR.
 - Read CI failures from the job summary, not the log tail (Postgres noise).
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
 - To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,

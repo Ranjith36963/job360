@@ -735,8 +735,38 @@ R_OK, R_ABSENT, R_ERROR = "ok", "absent", "error"
 # concluded SUCCESS.
 NEW_ALERT_RE = re.compile(r"(\d+)\s+new\s+alert", re.I)
 
-MAX_CHANGED_FILES = 40
-MAX_CHANGED_LINES = 1200
+# ONE SIZE CAP, READ FROM THE POLICY (2026-10-19). This file said 1200 while
+# merge-policy.yml said 1500, and nobody could say which number ran. The policy
+# is now the only place the numbers live. A missing or malformed `size:` refuses
+# at import, like every other policy read in this file: no cap is not "no limit".
+def _load_size() -> tuple[int, int, frozenset[str]]:
+    import yaml
+
+    try:
+        size = (yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8")) or {}).get("size")
+    except Exception as exc:
+        raise SystemExit(f"merge_cage: could not read `size:` from {POLICY_PATH.name}: {exc}") from exc
+    if not isinstance(size, dict):
+        raise SystemExit(f"merge_cage: {POLICY_PATH.name} has no `size:` mapping, so there is no "
+                         f"cap and nothing may merge unattended.")
+    try:
+        files, lines = int(size["max_files"]), int(size["max_lines"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"merge_cage: `size:` in {POLICY_PATH.name} needs integer max_files and "
+                         f"max_lines ({exc}).") from exc
+    gen = size.get("generated") or []
+    if not isinstance(gen, list) or not all(isinstance(g, str) and g and "*" not in g for g in gen):
+        raise SystemExit(f"merge_cage: `size.generated` in {POLICY_PATH.name} must be a list of "
+                         f"exact file paths. No globs: a pattern is a bypass waiting for a file.")
+    return files, lines, frozenset(gen)
+
+
+MAX_CHANGED_FILES, MAX_CHANGED_LINES, GENERATED_FILES = _load_size()
+
+# The commit status the arm posts, and the check run the CI workflows add to wake
+# the arm when they finish. See status_for() and auto-merge.yml.
+STATUS_CONTEXT = "merge-cage"
+WAKE_JOB = "Wake the merge cage"
 PER_PAGE = 100
 
 # EXACT check-run names, matched by EQUALITY. These were substrings, and a
@@ -984,7 +1014,10 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
         n = int(f.get("additions", 0)) + int(f.get("deletions", 0))
         name = str(f.get("filename", ""))
         recorded = (_FIXTURE_DIR in f"/{name}") and name.lower().endswith(_RECORDED_EXT)
-        if recorded:
+        # A generated file (openapi.json, api-types.ts, GENERATED.md) is written by a
+        # script, not read by a reviewer. EXACT paths from the policy only, and the
+        # discount is reported in the verdict like the fixture one.
+        if recorded or name in GENERATED_FILES:
             exempt += n
         else:
             read += n
@@ -1010,7 +1043,7 @@ def check_size(n_files: int, n_lines: int, deletions: list[str],
     return Verdict("SIZE", "fail" if reasons else "pass", reasons,
                    claim=(f"small enough to reason about ({n_files} files, "
                           f"{n_lines} lines to read"
-                          + (f" + {exempt_lines} recorded-fixture lines not counted"
+                          + (f" + {exempt_lines} recorded-fixture or generated lines not counted"
                              if exempt_lines else "") + ")"))
 
 
@@ -1051,7 +1084,10 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
     security.yml really did run. Naming the reason is the whole fix.
     """
     before = len(runs)
-    runs = without_own_run(runs)
+    # The CI workflows' last job only dispatches this arm. It is still running for
+    # a few seconds when the arm judges, and waiting on it would be waiting on the
+    # thing that woke us. Exact name, like every check name here.
+    runs = [r for r in without_own_run(runs) if r.get("name") != WAKE_JOB]
     total_count -= before - len(runs)
     reasons: list[str] = []
     cannot = ", ".join(sorted(MAIN_ONLY_CHECKS))
@@ -1720,7 +1756,10 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
                 "fixture_lines": exempt_lines,
                 "title": pr_json.get("title") or f"PR #{pr}",
                 "base": base_ref,
-                "merge_sha": pr_json.get("merge_commit_sha") or ""}
+                "merge_sha": pr_json.get("merge_commit_sha") or "",
+                # The commit this verdict is about. The arm posts the `merge-cage`
+                # status on THIS sha, never on whatever the head is by then.
+                "head_sha": ((pr_json.get("head") or {}).get("sha")) or ""}
     except Exception as exc:
         # A cage that cannot see the change must never approve it.
         return False, [Verdict("READ", "fail", [
@@ -1776,6 +1815,59 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
             f"FIX: run `python scripts/merge_cage.py --measure` and fix whatever it reports."]))
 
     return (not any(v.blocks for v in verdicts)), verdicts, meta
+
+
+# ── THE VERDICT AS A REQUIRED CHECK (2026-10-19) ────────────────────────────
+# Measured on 27 PRs merged 17-19 October: 2 merged by auto-merge cleanly. The
+# arm judged each PR about a minute after it opened, read "has not finished" as
+# a refusal, withdrew it from the queue, and nothing woke it again when CI went
+# green (GitHub does not fire `check_suite` for Actions' own suites). So every
+# green PR waited for a hand merge, and the hand merges walked past this cage.
+#
+# The fix is to stop toggling GitHub's queue and say the verdict where GitHub
+# can wait on it: a `merge-cage` commit status. Once the owner makes it a
+# required check, a PR stays queued and GitHub holds it until this says
+# `success`. "Still waiting" is `pending`, a real refusal is `failure`; both hold.
+_WAIT_MARKERS = ("has not finished", "cannot pass by being absent")
+
+
+def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
+    """(state, description) for the `merge-cage` commit status. Pure."""
+    if allowed:
+        return "success", "every cage passed"
+    blocks = blocks_of(verdicts) or ["refused, and no reason was recorded"]
+    waiting = [b for b in blocks if any(m in b for m in _WAIT_MARKERS)]
+    if len(waiting) == len(blocks):
+        return "pending", ("waiting: " + waiting[0])[:140]
+    real = next(b for b in blocks if b not in waiting)
+    return "failure", real[:140]
+
+
+def requires_context(rules: object, context: str) -> bool:
+    """Does this `GET /rules/branches/<b>` answer require `context`? Pure.
+
+    Anything unreadable is False, which keeps the old withdraw behaviour: the
+    direction that cannot let a refused PR through.
+    """
+    if not isinstance(rules, list):
+        return False
+    for rule in rules:
+        if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+            continue
+        for check in ((rule.get("parameters") or {}).get("required_status_checks") or []):
+            if isinstance(check, dict) and check.get("context") == context:
+                return True
+    return False
+
+
+def merge_cage_required(base_ref: str) -> bool:
+    if not base_ref:
+        return False
+    try:
+        return requires_context(json.loads(gh(["api", f"repos/{REPO}/rules/branches/{base_ref}"])),
+                                STATUS_CONTEXT)
+    except Exception:
+        return False
 
 
 def blocks_of(verdicts: list[Verdict]) -> list[str]:
@@ -2023,6 +2115,8 @@ DECISION_PATH = [
     # THE ANNOUNCE DECISION. On the decision path because an alert path that
     # spams is an alert path that gets muted, and a muted path protects nothing.
     "judge_transition", "transition_message",
+    # THE VERDICT GITHUB WAITS ON, and whether it is wired to hold anything.
+    "status_for", "requires_context",
     "as_reading", "measured_tree", "capability_gap",
     "page_was_full", "path_matches", "check_lists", "blocks_of", "plain_english", "decide",
     "slack",  # the announce path: a verdict nobody hears is a verdict that did not happen
@@ -2849,7 +2943,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
 
     _v_ex = check_size(3, 900, [], exempt_lines=2120)
     ok("the discount is SAID OUT LOUD, never silent",
-       "recorded-fixture lines not counted" in (_v_ex.claim or ""),
+       "recorded-fixture or generated lines not counted" in (_v_ex.claim or ""),
        "an exemption nobody can see is indistinguishable from a hole", ["check_size"])
 
     # B21 — A REQUIRED CHECK IS MATCHED BY EXACT NAME, AND THE DANGEROUS
@@ -3415,6 +3509,47 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        f"queued={_msg_q[:120]!r} withdrawn={_msg_w[:120]!r}",
        ["transition_message", "plain_english", "blocks_of"])
 
+    # ── THE VERDICT AS A REQUIRED CHECK (2026-10-19) ─────────────────────────
+    ST = ["status_for", "blocks_of"]
+    _wait = Verdict("PROOF", "fail", ["`offline-suite` has not finished (in_progress). FIX: wait."])
+    _absent = Verdict("PROOF", "fail", ["required check `CodeQL` did not run — it cannot pass "
+                                        "by being absent. FIX: wait."])
+    _real = Verdict("SIZE", "fail", ["4000 lines changed (cap 1200) — same reason."])
+    ok("an allowed PR posts merge-cage = success",
+       status_for(True, [Verdict("PATH", "pass", [], claim="x")])[0] == "success",
+       f"got {status_for(True, [])}", ST)
+    ok("checks still running post PENDING, not failure (the arm is waiting, not refusing)",
+       status_for(False, [_wait, _absent])[0] == "pending",
+       f"got {status_for(False, [_wait, _absent])}", ST)
+    ok("one real refusal among waits posts FAILURE and names the real reason",
+       status_for(False, [_wait, _real]) == ("failure", _real.reasons[0][:140]),
+       f"got {status_for(False, [_wait, _real])}", ST)
+    ok("a cage that did not run is a FAILURE, never a wait",
+       status_for(False, [Verdict("RATCHET", "not_checked", [])])[0] == "failure",
+       f"got {status_for(False, [Verdict('RATCHET', 'not_checked', [])])}", ST)
+    _rules = [{"type": "pull_request", "parameters": {}},
+              {"type": "required_status_checks", "parameters": {"required_status_checks": [
+                  {"context": "offline-suite"}, {"context": "merge-cage"}]}}]
+    ok("the arm HOLDS only when the ruleset really requires merge-cage",
+       requires_context(_rules, "merge-cage")
+       and not requires_context(_rules[:1], "merge-cage")
+       and not requires_context(_rules, "merge-cage-not")
+       and not requires_context({"message": "Not Found"}, "merge-cage")
+       and not requires_context(None, "merge-cage"),
+       "requires_context answered yes for a ruleset that does not require merge-cage",
+       ["requires_context"])
+    _gen = sorted(GENERATED_FILES)[0] if GENERATED_FILES else ""
+    _rs_read, _rs_ex = review_surface(
+        [{"filename": _gen, "additions": 500, "deletions": 0},
+         {"filename": _gen + ".py", "additions": 7, "deletions": 0}])
+    ok("a generated file from the policy is not counted; a look-alike path is",
+       bool(_gen) and (_rs_read, _rs_ex) == (7, 500),
+       f"generated={_gen!r} read={_rs_read} exempt={_rs_ex}", ["check_size"])
+    _wake = done + [{"name": WAKE_JOB, "status": "in_progress", "conclusion": None, "output": {}}]
+    ok("the CI job that wakes the arm is never something the arm waits on",
+       not any(WAKE_JOB in r for r in judge_check_runs(_wake, len(_wake))),
+       f"{judge_check_runs(_wake, len(_wake))}", ["judge_check_runs"])
+
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
     ok("COVERAGE (every function on the decision path is drilled)",
@@ -3751,6 +3886,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="hand the PR to GitHub's auto-merge queue if every cage allows it "
                          "AND its lane says a machine may decide it. Requires --lane: queuing "
                          "without knowing the lane is shipping without knowing who gets hurt.")
+    ap.add_argument("--commit-status", metavar="FILE",
+                    help="write the `merge-cage` commit status (state, description, sha) as "
+                         "JSON for the workflow to post with GITHUB_TOKEN. Not posted from "
+                         "here: a status posted with the owner's token wakes this arm again.")
     ap.add_argument("--lane", metavar="FILE",
                     help="the lane verdict JSON written by `python scripts/lane.py --json`")
     ap.add_argument("--baseline", help="JSON of ratchet values measured on the PR's base")
@@ -3889,7 +4028,17 @@ def main(argv: list[str] | None = None) -> int:
         # can know it, so it stays `unknown` for a run that did not touch the
         # queue at all — and a run that changed nothing announces nothing.
         queue_state = QUEUE_UNKNOWN
-        if args.queue and not allowed:
+        # HOLD, DON'T WITHDRAW, once GitHub itself waits on this verdict. With
+        # `merge-cage` required, a refused PR cannot merge while it stays queued,
+        # and leaving it queued is what lets it land the moment a later run says
+        # yes. Until the owner adds that rule, the old withdrawal still runs.
+        held = bool(args.queue and not allowed
+                    and merge_cage_required(str(meta.get("base") or "")))
+        if held:
+            print(f"HELD: PR #{args.pr} stays in GitHub's auto-merge queue. `{STATUS_CONTEXT}` "
+                  f"is a required check on `{meta.get('base')}`, and this run reports it as "
+                  f"not passing, so GitHub cannot merge it until a later run says it passes.")
+        if args.queue and not allowed and not held:
             ok_out, detail_out, queue_state = withdraw_auto_merge(args.pr)
             if ok_out:
                 print(f"WITHDRAWN: PR #{args.pr} is not allowed, so it is out of GitHub's "
@@ -3966,6 +4115,13 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.advise).write_text(advice_markdown(args.pr, meta, allowed, verdicts),
                                          encoding="utf-8")
             print(f"advice written to {args.advise} (label: {advice_label(allowed)})")
+
+        if args.commit_status:
+            state, description = status_for(allowed, verdicts)
+            Path(args.commit_status).write_text(json.dumps({
+                "state": state, "description": description,
+                "sha": meta.get("head_sha", ""), "context": STATUS_CONTEXT}), encoding="utf-8")
+            print(f"STATUS: {STATUS_CONTEXT} = {state} — {description}")
 
         if args.verdict_json:
             Path(args.verdict_json).write_text(json.dumps({
