@@ -412,7 +412,8 @@ def test_glassdoor_unknown_place_skips_that_search_and_goes_on():
     http = _http(h)
     jobs = kb.fetch_glassdoor(["a"], http, {}, days=BIG, countries=["DE", "GB"])
     assert len(seen_terms) == 2 and [j["extra"]["id"] for j in jobs] == ["5"]
-    assert http.calls[0]["url"].startswith("https://www.glassdoor.de/") and "www.glassdoor.co.uk" in http.calls[2]["url"]
+    hosts = [urlsplit(c["url"]).hostname for c in http.calls]
+    assert hosts[0] == "www.glassdoor.de" and hosts[2] == "www.glassdoor.co.uk"
 
 
 def test_glassdoor_star_has_no_location_lookup_and_countries_without_a_site_send_nothing():
