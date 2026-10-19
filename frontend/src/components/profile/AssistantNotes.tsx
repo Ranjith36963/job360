@@ -10,7 +10,7 @@ import type { ProfileEditHistoryRow } from "@/lib/api";
 import { actorName, formatEditedDate } from "@/lib/agent-edits";
 
 // ── Assistant notes ────────────────────────────────────────
-// "Things your assistant should know" — standing instructions, one short line
+// "Things your AI assistant should know" — standing instructions, one short line
 // each. The agent reads them first on every get_profile. Saved by the caller
 // (Profile: the debounced preferences save; Home: a save per change), so every
 // edit here is just `onChange(newList)` — no button of its own.
@@ -279,7 +279,7 @@ export function AssistantNotes({
     <div className="space-y-2" data-testid="assistant-notes">
       <div className="flex items-center justify-between gap-3">
         <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-          Things your assistant should know
+          Things your AI assistant should know
           {trailing}
         </Label>
         {showHistory && (
@@ -287,14 +287,17 @@ export function AssistantNotes({
             type="button"
             onClick={() => setHistoryOpen((o) => !o)}
             aria-expanded={historyOpen}
-            aria-label="History of things your assistant should know"
+            aria-label="History of things your AI assistant should know"
             className="shrink-0 font-mono text-[11px] text-faint underline-offset-2 hover:text-foreground hover:underline"
           >
             {historyOpen ? "Hide history" : "History"}
           </button>
         )}
       </div>
-      <p className="text-xs text-muted-foreground -mt-1">
+      <p data-testid="assistant-notes-tagline" className="-mt-1 text-base font-bold text-brand">
+        Set instructions for your AI assistant
+      </p>
+      <p className="text-xs text-muted-foreground">
         One line each — e.g. &quot;Never apply to recruitment agencies&quot;. Click a line to edit it. Your
         assistant reads these first, every time.
       </p>

@@ -227,7 +227,7 @@ describe("Home", () => {
     expect(screen.getByTestId("home-retry")).toBeInTheDocument();
   });
 
-  it("shows 'Things your assistant should know' ABOVE the sentence, saving the whole preferences block", async () => {
+  it("shows 'Things your AI assistant should know' ABOVE the sentence, saving the whole preferences block", async () => {
     happy();
     api.uploadProfile.mockResolvedValue({
       preferences: { assistant_notes: ["Never apply to agencies", "No night shifts"] },
@@ -235,7 +235,8 @@ describe("Home", () => {
     });
     render(<Home />);
     const card = await screen.findByTestId("home-assistant-notes");
-    expect(card).toHaveTextContent("Things your assistant should know");
+    expect(card).toHaveTextContent("Things your AI assistant should know");
+    expect(card).toHaveTextContent("Set instructions for your AI assistant");
     expect(card).toHaveTextContent("Never apply to agencies");
     const h1 = await screen.findByTestId("home-sentence");
     expect(card.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
