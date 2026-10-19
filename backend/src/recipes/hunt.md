@@ -34,9 +34,10 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
       Ashby `api.ashbyhq.com/posting-api/job-board/<token>` (token from the careers link); `target_companies` first.
    d. **Web search:** the kit README's "Search every source" queries (`site:` per board, HN, the country's job
       service). **Job alerts:** suggest LinkedIn, Indeed, freehire, Himalayas; the daily check reads them from Gmail.
-   e. **Indeed and LinkedIn (owner, 2026-10-16):** open Indeed search and job pages yourself, slowly; read LinkedIn's
-      logged-out job pages at very low volume (README "Indeed and LinkedIn"). Never log in, spoof an app, use copied
-      keys or proxies. A login wall, CAPTCHA or bot check = stop that site, never solve or dodge it; tell the user.
+   e. **LinkedIn, Glassdoor, Google Jobs, Indeed (owner, 2026-10-19):** the hunt kit now reads LinkedIn, Glassdoor and Google
+      Jobs itself at low volume (README "LinkedIn, Glassdoor, Google Jobs and Indeed"). You open Indeed search and job pages
+      yourself, slowly, and read LinkedIn's logged-out job pages at very low volume only without the kit. Never log in, spoof
+      an app, use copied keys or proxies. A login wall, CAPTCHA or bot check = stop that site, never solve or dodge it; tell the user.
    Prefer the employer's own posting; from a LinkedIn or Indeed ad follow "Apply on company site". Never log
    in for the user or type a password. **Handing off:** a helper gets `get_recipe("hunt")` and `search_brief`
    word for word plus one line naming its rows, never your own summary; check every job it returns against the rows before you bring

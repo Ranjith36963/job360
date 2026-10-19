@@ -290,7 +290,14 @@ def test_why_missed_verdicts(why_setup, tmp_path: Path) -> None:
 
 def test_why_missed_other_verdicts(why_setup, tmp_path: Path) -> None:
     ask = why_setup
-    assert ask("https://www.linkedin.com/jobs/view/123456")["verdict"] == "not_a_board_url"
+    # Owner decision 2026-10-19: the kit reads LinkedIn and Glassdoor itself (kit_bigboards), so their links are
+    # "feed_covered" now (they were "not_a_board_url" under the 2026-10-16 rule). Indeed is still never read.
+    r = ask("https://www.linkedin.com/jobs/view/123456")
+    assert (r["verdict"], r["board"]) == ("feed_covered", "feed:linkedin")
+    r = ask("https://www.glassdoor.co.uk/job-listing/j?jl=123")
+    assert (r["verdict"], r["board"]) == ("feed_covered", "feed:glassdoor")
+    r = ask("https://www.linkedin.com/jobs/view/123456", sources="greenhouse")
+    assert r["verdict"] == "board_in_list_source_skipped" and r["change"] == "--sources greenhouse,linkedin"
     assert ask("https://uk.indeed.com/viewjob?jk=abc")["verdict"] == "not_a_board_url"
     assert ask("https://acme.comeet.com/jobs/abc")["verdict"] == "ats_not_supported"  # breezy is read since kit_ats_more
     assert ask("https://careers.example.com/jobs/1")["verdict"] == "ats_not_supported"

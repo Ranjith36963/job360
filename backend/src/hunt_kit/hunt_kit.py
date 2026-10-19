@@ -6,8 +6,9 @@ Lever, Ashby, SmartRecruiters, Workable, Recruitee, Personio, Teamtailor, Bamboo
 Workday) plus open job feeds (freehire.me, Himalayas, Remotive, Arbeitnow, RemoteOK,
 Jobicy, Working Nomads, We Work Remotely, The Muse, Hacker News "Who is hiring").
 Official keyed APIs (Adzuna, Jooble) run only if you set their env vars.  It never
-reads Indeed, LinkedIn, Glassdoor or other big job sites; the assistant opens Indeed
-and LinkedIn's logged-out pages itself, slowly (README "Indeed and LinkedIn").
+reads Indeed or other big job sites (the assistant opens Indeed itself, slowly). Since the owner's
+decision of 2026-10-19 it does read LinkedIn, Glassdoor and Google Jobs, at low volume (kit_bigboards.py;
+README "LinkedIn, Glassdoor, Google Jobs and Indeed").
 
 It never logs in.  Standard library only (Python 3.10+).  It never ranks or scores:
 it filters by words and sorts newest first.  Your assistant reads each kept job's
@@ -124,6 +125,9 @@ FEED_SOURCES = (
     "naukri",
     "bayt",
     "gulftalent",
+    "linkedin",
+    "glassdoor",
+    "googlejobs",
     "reed",
     "usajobs",
     "whatjobs",
@@ -251,7 +255,7 @@ def _import_kit(name: str) -> Any:
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
 ATS_MODULES = ("kit_ats", "kit_ats_more")
-FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional")
+FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards")
 
 
 def _merged(attr: str, modules: tuple[str, ...]) -> dict[str, Any]:
@@ -695,9 +699,10 @@ def http_request(
     max_bytes: int = 20_000_000,
     method: str | None = None,
     headers: dict[str, str] | None = None,
+    once: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given); see _http_request. Notes the status for dead-board memory."""
-    res = _http_request(url, params, data, retries, max_bytes, method, headers)
+    res = _http_request(url, params, data, retries, max_bytes, method, headers, **({"once": True} if once else {}))
     log = getattr(_STATUS_TL, "log", None)
     if log is not None:
         log.append(res[0])
@@ -712,10 +717,12 @@ def _http_request(
     max_bytes: int = 20_000_000,
     method: str | None = None,
     headers: dict[str, str] | None = None,
+    once: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given). Returns (status, final_url, body).
 
     429 backs off, retries twice; 502/503/504 on a GET retry once; other 4xx never retry.
+    ``once=True`` sends the request exactly once, whatever the answer (kit_bigboards: a refusal ends the site).
     Status 0 = network error or refused URL. Max 3 in flight per host.
     Only public http(s) hosts are contacted. The User-Agent is ours unless the caller sets one. Never raises.
     """
@@ -740,6 +747,8 @@ def _http_request(
                 with _open(req, TIMEOUT_S) as r:
                     return r.status, r.geturl(), r.read(max_bytes)
             except urllib.error.HTTPError as e:
+                if once:
+                    return e.code, url, b""
                 if e.code == 429 and attempt < retries:
                     ra = e.headers.get("Retry-After", "") if e.headers else ""
                     wait = min(int(ra), 30) if ra.isdigit() else 4 * (attempt + 1)
@@ -771,13 +780,15 @@ def http(
     data: bytes | None = None,
     headers: dict[str, str] | None = None,
     as_json: bool = True,
+    once: bool = False,
 ) -> tuple[int, Any]:
     """The shared http helper handed to every kit module (contract signature).
 
     Returns (status, parsed_json_or_text_or_None); status 0 on network error.
-    Rate limiting (3 per host), 429 backoff and the User-Agent are built in.
+    Rate limiting (3 per host), 429 backoff and the User-Agent are built in. ``once=True`` sends the request
+    exactly once (no 429 backoff, no 5xx retry): kit_bigboards uses it so a refusal ends the site.
     """
-    st, _u, body = http_request(url, data=data, method=method, headers=headers)
+    st, _u, body = http_request(url, data=data, method=method, headers=headers, once=once)
     if not (200 <= st < 300):
         return st, None
     text = decode_body(body)
@@ -2537,6 +2548,9 @@ _FEED_HOSTS = (
     ("naukri", re.compile(r"(?:^|\.)naukri\.com$", re.I)),
     ("bayt", re.compile(r"(?:^|\.)bayt\.com$", re.I)),
     ("gulftalent", re.compile(r"(?:^|\.)gulftalent\.com$", re.I)),
+    # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
+    ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
+    ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
     ("adzuna", re.compile(r"(?:^|\.)adzuna\.[a-z.]+$", re.I)),
     ("jooble", re.compile(r"(?:^|\.)jooble\.org$", re.I)),
 )

@@ -7,8 +7,9 @@ search for you. Job360 only stores what your assistant brings back.
 
 It uses the same no-login methods as career-ops, jobsync and ai-job-search:
 company job boards that companies publish themselves, plus open feeds.
-It never logs in. Big job sites (Indeed, LinkedIn) are left to the assistant itself,
-slowly and logged out (see "Indeed and LinkedIn"). Python 3.10+, standard library only.
+It never logs in. It reads LinkedIn, Glassdoor and Google Jobs itself at low volume (owner decision
+2026-10-19); Indeed is left to the assistant, slowly and logged out (see "LinkedIn, Glassdoor, Google Jobs and Indeed").
+Python 3.10+, standard library only.
 
 It never ranks or scores. It filters by words and sorts newest first.
 The assistant judges fit.
@@ -99,6 +100,8 @@ Russia Rabota Rossii (`trudvsem`, Moscow region only), SEEK / Jobstreet / JobsDB
 
 India and Gulf (`kit_regional.py`; unofficial site endpoints behind bot protection, so a site that refuses scripts is skipped): Naukri (`naukri`: IN, searched by job title, ~300-character snippet), Bayt (`bayt`: AE SA QA KW BH OM, searched by title; the newest 15 ads also get their full description) and GulfTalent (`gulftalent`: same six countries, found through the site's sitemap by matching your titles to the ad addresses; 25 ads read per run). At most 45 requests per site per run. Bayt and GulfTalent may refuse a plain script from some networks; Naukri works from a home connection but not from hosting networks.
 
+Big job sites (`kit_bigboards.py`; owner decision 2026-10-19, see "LinkedIn, Glassdoor, Google Jobs and Indeed"): LinkedIn (`linkedin`, logged-out guest search plus job pages), Glassdoor (`glassdoor`, its own search endpoint; countries with a Glassdoor site) and Google Jobs (`googlejobs`, ads with their text). Low volume (5 searches, 3 pages, 10 detail fetches per site, 5 seconds apart) and each site stops at its first refusal, login or CAPTCHA page.
+
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
 - Jooble: get a free key at https://jooble.org/api/about . Set `JOOBLE_KEY`. Jooble gives short snippets.
@@ -188,7 +191,7 @@ The kit is one source. Use all of these too, for every row's place x title.
 - `site:boards.greenhouse.io OR site:job-boards.greenhouse.io "<title>" <place>`
 - `site:jobs.lever.co "<title>" <place>`, `site:jobs.ashbyhq.com "<title>" <place>`
 - `site:myworkdayjobs.com "<title>" <place>`, `site:icims.com "<title>" <place>`, `site:apply.workable.com "<title>" <place>`
-- Big national boards the kit leaves to you, like Indeed and LinkedIn: India `site:naukri.com "<title>" <place>`, the Gulf `site:bayt.com "<title>" <place>`. Open each ad logged out.
+- Big national boards the kit does not read, like Indeed: India `site:naukri.com "<title>" <place>`, the Gulf `site:bayt.com "<title>" <place>`. Open each ad logged out.
 - Social posts: `("hiring" OR "open role" OR "we're hiring" OR "join our team") "<title>"` with `site:x.com` or `site:linkedin.com/posts`, read through web search only (no login).
 A new employer board found this way can be added with `--companies-extra "ats:token"`.
 
@@ -199,15 +202,18 @@ Known public services: Germany `rest.arbeitsagentur.de/jobboerse/jobsuche-servic
 
 **Schedules and alerts.** Offer to put `run 360 daily` in the user's own scheduler (a scheduled task, cron); with `--history` each run shows only new jobs. A busy search can run every few hours. Free job alerts (freehire saved searches, Himalayas, LinkedIn, Indeed) land in Gmail, where the daily check reads them.
 
-## Indeed and LinkedIn
+## LinkedIn, Glassdoor, Google Jobs and Indeed
 
-Owner rule, 2026-10-16. The assistant itself, never this script, with no login:
+Owner decision, 2026-10-19 (it reverses the 2026-10-14 removal of the big-board reader and the 2026-10-16 rule that
+only the assistant reads LinkedIn). No login anywhere.
 
-- **Indeed:** open Indeed search pages (`/jobs?q=<title>&l=<place>`, at most 10 pages, `&start=0&` to `&start=90&`; keep the trailing `&`, robots.txt allows only that form) and job pages yourself, slowly: one page at a time, a few seconds apart. Indeed's robots.txt allows assistant agents (`Claude-User`, `ChatGPT-User`) on those pages; its terms still bar scraping, so keep it small.
-- **LinkedIn:** read the logged-out job pages at very low volume: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<title>&location=<place>&start=<0,10,20>` (10 jobs a page, at most 3 pages a query, 5+ seconds apart), then `https://www.linkedin.com/jobs/view/<id>` for one job. This is against LinkedIn's terms; the risk is a block, not the user's account.
-- **Stop rule:** a login page, a CAPTCHA, a "security check", HTTP 429 or any other non-200 answer = stop that site for the run. Never solve, skip or get around it, and never retry harder. Tell the user; they can open the page themselves.
-- **Never:** log in or type a password, pretend to be an app, use keys or tokens copied from an app, use proxies or rotate IPs, use anti-detection browser flags.
-- Prefer the employer's own posting: follow "Apply on company site" and bring that link.
+- **The script reads LinkedIn, Glassdoor and Google Jobs** (`kit_bigboards.py`; sources `linkedin`, `glassdoor`, `googlejobs`, on by default). Each searches your titles x your `--work-countries` (with `--visa-onsite` also with no location; the kit then keeps only ads that say they sponsor a visa). A site is skipped when none of your countries has a place name in the kit. Hard limits per site per run: 5 searches (a title in a place), 3 result pages per search, 10 ads whose full text is fetched (LinkedIn job pages, Glassdoor details; Google sends the text with the ad), and 5 seconds between requests. A request is never retried.
+- **Stop rule (script and assistant alike):** a login page, a CAPTCHA, a "security check", HTTP 429, 999 or any other non-200 answer = stop that site for the run. Never solve, skip or get around it, and never retry harder. The script prints a warning and keeps what it read; tell the user, who can open the page themselves.
+- **Expect refusals.** These are unofficial front-end endpoints behind bot protection. Glassdoor checks the TLS handshake of the client and often refuses a plain script; Google can show a consent or "unusual traffic" page; LinkedIn can block a repeated search. Each simply ends that site. This is against these sites' terms; the risk is a block of the user's IP, not their account.
+- **Indeed stays with the assistant, never this script**, with no login: open Indeed search pages (`/jobs?q=<title>&l=<place>`, at most 10 pages, `&start=0&` to `&start=90&`; keep the trailing `&`, robots.txt allows only that form) and job pages yourself, slowly: one page at a time, a few seconds apart. Indeed's robots.txt allows assistant agents (`Claude-User`, `ChatGPT-User`) on those pages; its terms still bar scraping, so keep it small. The only script route into Indeed needs its app's key copied out of the app, which is not allowed.
+- **Without Python (no kit):** the assistant may read LinkedIn's logged-out job pages itself at the same volume: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<title>&location=<place>&start=<0,10,20>` (10 jobs a page, at most 3 pages a query, 5+ seconds apart), then `https://www.linkedin.com/jobs/view/<id>` for one job. Never after the script stopped on LinkedIn: a stopped site stays stopped for the run.
+- **Never:** log in or type a password, pretend to be an app, use keys or tokens copied from an app (Glassdoor's token comes from its own public page), use proxies or rotate IPs, use anti-detection browser flags.
+- Prefer the employer's own posting: follow "Apply on company site" (LinkedIn) or the employer's link (Google Jobs) and bring that link. The script cannot read LinkedIn's "Apply on company site" address; Glassdoor ads carry the employer's website in `extra.company_site`.
 
 ## What the assistant must do next
 
@@ -222,7 +228,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_niche.py` niche boards
+- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
