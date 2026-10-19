@@ -1,8 +1,8 @@
 # The Job360 browser agent
-<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) | slice 1 built, OFF until the owner turns it on -->
+<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) | slices 1-2 built, OFF until the owner turns it on -->
 
 What the owner and Claude discussed and agreed on 2026-10-19, in plain words.
-**Slice 1 is built and OFF** until the owner sets `BROWSER_AGENT_ENABLED=1` on Railway (section 9). Slices 2-4 are not built.
+**Slices 1 and 2 are built and OFF** until the owner sets `BROWSER_AGENT_ENABLED=1` on Railway (section 9). Slices 3-4 are not built.
 
 ## 1. Where we started: bulk apply (already live)
 
@@ -100,14 +100,14 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 | B. Keep the user's logins | **Yes**, as the sign-in cookie only, encrypted, never a password ("storing logins is fine") |
 | Rule 5 "browser automation of our own: never" | **Replaced** by VISION decision 29 |
 | Pay a vendor | **No** |
-| When to build | **Go** (owner, 2026-10-19): slice 1 built, off by default. |
+| When to build | **Go** (owner, 2026-10-19): slices 1-2 built, off by default. |
 
 ## 9. Build plan (when the owner says go)
 
 | Slice | What |
 |---|---|
 | 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off by default** behind one switch. |
-| 2 | **Sign in once:** a live view on the Job360 site; the cookie is kept, encrypted, per site. |
+| 2 ✅ | **Sign in once:** a live view on the Job360 site; the cookie is kept, encrypted, per site. |
 | 3 | **Hand-off:** a job the cloud browser couldn't finish shows on Needs you with "finish it with your assistant's browser". |
 | 4 | **Measure:** test real career sites (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and record which work from the cloud. |
 
@@ -129,6 +129,21 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
 - **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback.
+
+**Slice 2 (built 2026-10-19, off by default): sign in once.**
+- **Where:** Settings → **Job sites** on the Job360 website. Type the job site's sign-in page and press Start.
+- **How:** a live picture of your own cloud browser. Click on the picture to click there; type in the box below
+  (hidden by default, because it may be a password), Enter / Tab / Backspace / Escape and scroll buttons.
+  When you are signed in, press **"I'm signed in: keep me signed in"**.
+- **What is kept:** only the cookies and site storage that belong to that site, encrypted (Fernet; the key is
+  `BROWSER_SIGN_IN_KEY`, or derived from `SESSION_SECRET` so production needs nothing new). Never what you typed:
+  your password goes straight to the site and is not logged, stored or sent back. Table `browser_sign_ins`
+  (migration 0065), one row per (user, site); **Forget** deletes it; deleting the account deletes them all.
+- **Who can use it:** only you, in a signed-in browser session. An assistant's token is refused (403), so no AI can
+  drive the live view or type into it. The assistant's own `browser` tool simply starts already signed in.
+- **Changing `SESSION_SECRET`** signs everyone out of every saved site (they sign in again). Nothing breaks.
+- **Checked end to end** in a real browser against a local test site: the page signs in, keeps the site, lists it,
+  the password is in neither the logs nor the database, and an assistant's new browser opens already signed in.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 

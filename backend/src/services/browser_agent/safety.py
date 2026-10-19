@@ -122,8 +122,8 @@ def blocker_for(frame_urls: list[str], page_text: str, has_password_box: bool) -
     if has_password_box:
         return Blocker(
             "login_required",
-            "This page asks for a sign-in. Job360's browser never types a password: the user signs in "
-            "themselves.",
+            "This page asks for a sign-in. Job360's browser never types a password: the user signs in once "
+            "themselves on the Job360 website (Browser page, 'Keep me signed in'), then try again.",
         )
     return None
 

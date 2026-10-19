@@ -72,6 +72,9 @@ class Gate:
 
 # doc_kind -> (file name, PDF bytes) for an upload, injected by the MCP tool.
 FileFn = Callable[[str], Awaitable[tuple[str, bytes]]]
+# Loads the user's saved sign-ins as one Playwright storage state (slice 2), injected by the route.
+StateFn = Callable[[], Awaitable[dict[str, Any]]]
+VIEWPORT = {"width": 1280, "height": 900}
 
 
 @dataclass
@@ -141,7 +144,9 @@ class BrowserPool:
             if now - s.last_used > self.idle_s and not s.lock.locked():
                 await self.close(user_id)
 
-    async def get(self, user_id: str, *, create: bool) -> Optional[Session]:
+    async def get(
+        self, user_id: str, *, create: bool, load_state: Optional[StateFn] = None
+    ) -> Optional[Session]:
         await self.reap()
         s = self._sessions.get(user_id)
         if s is not None or not create:
@@ -150,9 +155,9 @@ class BrowserPool:
             s = self._sessions.get(user_id)
             if s is not None:
                 return s
-            return await self._create(user_id)
+            return await self._create(user_id, load_state)
 
-    async def _create(self, user_id: str) -> Session:
+    async def _create(self, user_id: str, load_state: Optional[StateFn]) -> Session:
         """Build one user's browser. Called with ``_create_lock`` held."""
         if len(self._sessions) >= self.max_sessions:
             raise BrowserError(
@@ -160,8 +165,11 @@ class BrowserPool:
                 "Every Job360 browser is in use right now. Try again in a few minutes, or use your own browser.",
             )
         browser = await self._ensure_browser()
+        # Slice 2: the user's saved sign-ins (cookies + site storage) ride into the new browser.
+        state = await load_state() if load_state is not None else None
         context = await browser.new_context(
-            accept_downloads=False, service_workers="block", locale="en-GB", viewport={"width": 1280, "height": 900}
+            accept_downloads=False, service_workers="block", locale="en-GB", viewport=dict(VIEWPORT),
+            storage_state=state if state and (state.get("cookies") or state.get("origins")) else None,
         )
         context.set_default_timeout(ACTION_TIMEOUT_MS)
         context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
@@ -295,6 +303,7 @@ async def run(
     doc_kind: str = "",
     gate: Optional[Gate] = None,
     files: Optional[FileFn] = None,
+    load_state: Optional[StateFn] = None,
 ) -> dict[str, Any]:
     """Carry out one action for one user and return what the page looks like after it."""
     if action not in ACTIONS:
@@ -302,7 +311,7 @@ async def run(
     if action == "close":
         closed = await pool.close(user_id)
         return {"status": "ok", "closed": closed}
-    s = await pool.get(user_id, create=action == "open")
+    s = await pool.get(user_id, create=action == "open", load_state=load_state)
     if s is None:
         raise BrowserError("refused", "no_browser", "No browser is open. Start with action open and a url.")
     async with s.lock:
@@ -418,6 +427,107 @@ async def _act(
         await loc.set_input_files(path)
     await _settle(page)
     return await look(s)
+
+
+# ── The live view: the USER signs in themselves (slice 2) ─────────────────────
+#
+# Reached only from the Job360 website with a browser session, never a token
+# (routes/browser.py uses require_session_user): an assistant can never drive
+# these. What the user types goes straight to the page and is never logged,
+# stored or returned. Keep = save what the SITE chose to remember (sign_ins.py).
+
+LIVE_ACTIONS = ("start", "shot", "click", "type", "key", "scroll", "keep", "cancel")
+LIVE_KEYS = frozenset({"Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"})
+# The site the user started signing in on, per user: Keep saves it (and where the sign-in ended up).
+_live_hosts: dict[str, str] = {}
+
+
+async def _shot(s: Session) -> dict[str, Any]:
+    import base64  # noqa: PLC0415
+
+    page = _live_page(s)
+    png = await page.screenshot(type="jpeg", quality=60)
+    return {
+        "status": "ok", "url": page.url, "title": await page.title(),
+        "width": VIEWPORT["width"], "height": VIEWPORT["height"],
+        "image": "data:image/jpeg;base64," + base64.b64encode(png).decode(),
+    }
+
+
+async def live(
+    pool: BrowserPool,
+    user_id: str,
+    action: str,
+    *,
+    url: str = "",
+    x: float = 0,
+    y: float = 0,
+    text: str = "",
+    key: str = "",
+    dy: float = 0,
+    load_state: Optional[StateFn] = None,
+    keep: Optional[Callable[[str, dict[str, Any]], Awaitable[int]]] = None,
+) -> dict[str, Any]:
+    """One step of the user's own sign-in, returning a fresh picture of the page."""
+    if action not in LIVE_ACTIONS:
+        raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(LIVE_ACTIONS) + ".")
+    if action == "cancel":
+        _live_hosts.pop(user_id, None)
+        return {"status": "ok", "closed": await pool.close(user_id)}
+    s = await pool.get(user_id, create=action == "start", load_state=load_state)
+    if s is None:
+        raise BrowserError("refused", "no_browser", "Start again: type the job site's address and press Start.")
+    async with s.lock:
+        s.last_used = time.monotonic()
+        page = _live_page(s)
+        try:
+            if action == "start":
+                verdict = await pool.screen.screen(url)
+                if not verdict.ok:
+                    raise BrowserError(
+                        "refused", "blocked_address", f"Only public web pages can be opened ({verdict.reason})."
+                    )
+                from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+                _live_hosts[user_id] = site_host(url)
+                await page.goto(url, wait_until="domcontentloaded")
+            elif action == "click":
+                if not (0 <= x <= VIEWPORT["width"] and 0 <= y <= VIEWPORT["height"]):
+                    raise BrowserError("refused", "off_page", "That click is outside the page.")
+                await page.mouse.click(x, y)
+                await _settle(page)
+            elif action == "type":
+                if len(text) > MAX_TYPE_CHARS:
+                    raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters.")
+                await page.keyboard.type(text)
+            elif action == "key":
+                if key not in LIVE_KEYS:
+                    raise BrowserError("refused", "bad_key", "key must be one of: " + ", ".join(sorted(LIVE_KEYS)))
+                await page.keyboard.press(key)
+                await _settle(page)
+            elif action == "scroll":
+                await page.mouse.wheel(0, max(-3000.0, min(3000.0, dy)))
+            elif action == "keep":
+                if keep is None:
+                    raise BrowserError("refused", "cannot_keep", "Sign-ins cannot be kept here.")
+                from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+                state = await s.context.storage_state()
+                hosts = {h for h in (_live_hosts.get(user_id, ""), site_host(page.url)) if h}
+                if not hosts:
+                    raise BrowserError("refused", "no_site", "Open the job site first.")
+                kept = {h: await keep(h, state) for h in sorted(hosts)}
+                out = await _shot(s)
+                out["kept"] = kept
+                return out
+            return await _shot(s)
+        except BrowserError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - shown to the user in one line
+            first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
+            raise BrowserError("error", "browser_error", first) from None
+        finally:
+            s.last_used = time.monotonic()
 
 
 # ── The process-wide pool ─────────────────────────────────────────────────────

@@ -12,17 +12,23 @@ with the caller's assistant; the safety stays here and in
 * the final submit runs the caller's ``submit_check`` and records
   ``submit_attempted`` first, both scoped to the caller;
 * uploads are only the caller's own saved CV / cover letter for that
-  application, rendered by Job360.
+  application, rendered by Job360;
+* slice 2: the user signs in to a job site THEMSELVES in a live view
+  (``POST /api/browser/live``, a browser session only — never a token, so no
+  assistant can drive it or type into it). "Keep me signed in" saves what the
+  site remembered, encrypted (``services/browser_agent/sign_ins.py``); every
+  later browser of that user starts with it. What the user types is never
+  logged, stored or returned.
 """
 from __future__ import annotations
 
 import contextlib
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
 from src.core import settings
 from src.services.applications import spine as applications_spine
@@ -90,6 +96,21 @@ def _gate_and_files(
     return browser_agent.Gate(check=_check, mark_attempt=_mark), _files
 
 
+def _loader(user: CurrentUser) -> browser_agent.StateFn:
+    """The user's saved sign-ins, read only when a NEW browser is started for them."""
+
+    async def _load() -> dict[str, Any]:
+        from src.services.browser_agent import sign_ins  # noqa: PLC0415
+
+        try:
+            async with _db() as db:
+                return await sign_ins.load_all(db, user.id)
+        except sign_ins.SignInKeyMissingError:
+            return {}
+
+    return _load
+
+
 def _audit(user: CurrentUser, action: str, result: str, reason: str = "") -> None:
     get_audit_logger().info(
         "browser_action",
@@ -118,10 +139,91 @@ async def browser_action(
     try:
         result = await browser_agent.run(
             browser_agent.get_pool(), user.id, body.action, url=body.url, ref=body.ref, text=body.text,
-            on=body.on, doc_kind=body.doc_kind, gate=gate, files=files,
+            on=body.on, doc_kind=body.doc_kind, gate=gate, files=files, load_state=_loader(user),
         )
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
         return exc.as_dict()
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
     return result
+
+
+# ── Slice 2: the user's own sign-in, on the website only ──────────────────────
+
+
+class LiveActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = Field(max_length=16)
+    url: str = Field("", max_length=2048)
+    x: float = 0
+    y: float = 0
+    text: str = Field("", max_length=browser_agent.MAX_TYPE_CHARS)
+    key: str = Field("", max_length=16)
+    dy: float = 0
+
+
+@router.post("/browser/live")
+async def browser_live(
+    body: LiveActionRequest,
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the user's own hands only, never a token
+) -> dict[str, Any]:
+    """One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
+    type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
+    logged or returned; the audit line names the action only."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        _audit(user, f"live_{body.action}", "off")
+        return dict(OFF)
+    from src.services.browser_agent import sign_ins  # noqa: PLC0415
+
+    async def _keep(host: str, state: dict[str, Any]) -> int:
+        try:
+            async with _db() as db:
+                return await sign_ins.save(db, user.id, host, state)
+        except sign_ins.SignInKeyMissingError:
+            raise browser_agent.BrowserError(
+                "refused", "no_key", "This server cannot keep sign-ins yet (no SESSION_SECRET)."
+            ) from None
+
+    try:
+        result = await browser_agent.live(
+            browser_agent.get_pool(), user.id, body.action, url=body.url, x=body.x, y=body.y, text=body.text,
+            key=body.key, dy=body.dy, load_state=_loader(user), keep=_keep,
+        )
+    except browser_agent.BrowserError as exc:
+        _audit(user, f"live_{body.action}", exc.status, exc.reason)
+        return exc.as_dict()
+    _audit(user, f"live_{body.action}", str(result.get("status", "")))
+    return result
+
+
+@router.get("/browser/sign-ins")
+async def list_sign_ins(
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The job sites the user's cloud browser is kept signed in to (never a cookie value)."""
+    from src.services.browser_agent import sign_ins  # noqa: PLC0415
+
+    async with _db() as db:
+        sites = await sign_ins.list_sites(db, user.id)
+    return {"enabled": settings.BROWSER_AGENT_ENABLED, "sites": sites}
+
+
+@router.delete("/browser/sign-ins/{host}")
+async def forget_sign_in(
+    host: str,
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Forget one saved sign-in. The user's live browser (if any) is closed so it forgets too."""
+    from src.services.browser_agent import sign_ins  # noqa: PLC0415
+
+    clean = sign_ins.site_host(host)
+    if not clean:
+        raise HTTPException(status_code=422, detail="not a site")
+    async with _db() as db:
+        forgotten = await sign_ins.forget(db, user.id, clean)
+    if not forgotten:
+        raise HTTPException(status_code=404, detail="no saved sign-in for that site")
+    await browser_agent.get_pool().close(user.id)
+    _audit(user, "forget_sign_in", "ok")
+    return {"forgotten": clean}

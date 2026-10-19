@@ -15,9 +15,9 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0064** | `backend/migrations/` |
-| Migration files | **65** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 22 route modules (129 endpoints) | `backend/src/api/routes/` |
+| Migration head | **0065** | `backend/migrations/` |
+| Migration files | **66** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 22 route modules (132 endpoints) | `backend/src/api/routes/` |
 | Test files | across 231 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 30 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
@@ -99,6 +99,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/jobs/bring` | `bring.py` |
 | `POST` | `/api/jobs/fetch-url` | `bring.py` |
 | `POST` | `/api/browser` | `browser.py` |
+| `POST` | `/api/browser/live` | `browser.py` |
+| `GET` | `/api/browser/sign-ins` | `browser.py` |
+| `DELETE` | `/api/browser/sign-ins/{host}` | `browser.py` |
 | `GET` | `/api/applications/{application_id}/calendar.ics` | `calendar.py` |
 | `DELETE` | `/api/calendar-feed` | `calendar.py` |
 | `GET` | `/api/calendar-feed` | `calendar.py` |
@@ -163,5 +166,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**129 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**132 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

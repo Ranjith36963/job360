@@ -6134,6 +6134,54 @@
         "title": "ListPeopleResponse",
         "type": "object"
       },
+      "LiveActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "maxLength": 16,
+            "title": "Action",
+            "type": "string"
+          },
+          "dy": {
+            "default": 0,
+            "title": "Dy",
+            "type": "number"
+          },
+          "key": {
+            "default": "",
+            "maxLength": 16,
+            "title": "Key",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "maxLength": 5000,
+            "title": "Text",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Url",
+            "type": "string"
+          },
+          "x": {
+            "default": 0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "default": 0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "LiveActionRequest",
+        "type": "object"
+      },
       "LivezResponse": {
         "properties": {
           "status": {
@@ -17887,6 +17935,229 @@
           }
         },
         "summary": "Browser Action",
+        "tags": [
+          "browser"
+        ]
+      }
+    },
+    "/api/browser/live": {
+      "post": {
+        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only.",
+        "operationId": "browser_live_api_browser_live_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Browser Live Api Browser Live Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Browser Live",
+        "tags": [
+          "browser"
+        ]
+      }
+    },
+    "/api/browser/sign-ins": {
+      "get": {
+        "description": "The job sites the user's cloud browser is kept signed in to (never a cookie value).",
+        "operationId": "list_sign_ins_api_browser_sign_ins_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Sign Ins Api Browser Sign Ins Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sign Ins",
+        "tags": [
+          "browser"
+        ]
+      }
+    },
+    "/api/browser/sign-ins/{host}": {
+      "delete": {
+        "description": "Forget one saved sign-in. The user's live browser (if any) is closed so it forgets too.",
+        "operationId": "forget_sign_in_api_browser_sign_ins__host__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "host",
+            "required": true,
+            "schema": {
+              "title": "Host",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Forget Sign In Api Browser Sign Ins  Host  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Forget Sign In",
         "tags": [
           "browser"
         ]

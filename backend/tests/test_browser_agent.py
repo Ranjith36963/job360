@@ -356,3 +356,176 @@ async def test_two_opens_at_once_make_one_browser_and_respect_the_cap(pool):
     assert len(pool._sessions) == 1  # noqa: SLF001 - the cap is 1
     busy = [r for r in results if isinstance(r, BrowserError)]
     assert len(busy) == 1 and busy[0].status == "busy"
+
+# ── Slice 2: the user's own sign-in, kept encrypted ───────────────────────────
+
+
+@pytest.fixture
+def secret(monkeypatch):
+    """The key derived from SESSION_SECRET (production's default)."""
+    monkeypatch.delenv("BROWSER_SIGN_IN_KEY", raising=False)
+    monkeypatch.setenv("SESSION_SECRET", "test-secret-for-sign-ins")
+
+
+@pytest.fixture
+def sign_in_key(monkeypatch):
+    """An explicit key. SESSION_SECRET is left alone: it also signs the test's login cookie."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("BROWSER_SIGN_IN_KEY", Fernet.generate_key().decode())
+
+
+def test_a_sign_in_is_encrypted_and_only_the_site_it_was_for_is_kept(secret, monkeypatch):
+    from src.services.browser_agent import sign_ins
+
+    state = {
+        "cookies": [
+            {"name": "sid", "value": "VAL-sid-77", "domain": ".acme.wd5.myworkdayjobs.com", "path": "/"},
+            {"name": "wd", "value": "BBB", "domain": "myworkdayjobs.com", "path": "/"},
+            {"name": "other", "value": "CCC", "domain": ".google.com", "path": "/"},
+        ],
+        "origins": [
+            {"origin": "https://acme.wd5.myworkdayjobs.com", "localStorage": [{"name": "k", "value": "v"}]},
+            {"origin": "https://evil.example", "localStorage": []},
+        ],
+    }
+    part = sign_ins.state_for_host(state, "acme.wd5.myworkdayjobs.com")
+    assert sorted(c["name"] for c in part["cookies"]) == ["sid", "wd"]
+    assert [o["origin"] for o in part["origins"]] == ["https://acme.wd5.myworkdayjobs.com"]
+
+    token = sign_ins.encrypt_state(part)
+    assert "VAL-sid-77" not in token and "acme" not in token
+    assert sign_ins.decrypt_state(token) == part
+    # A rotated key signs the user out instead of crashing.
+    monkeypatch.setenv("SESSION_SECRET", "rotated")
+    assert sign_ins.decrypt_state(token) is None
+
+    merged = sign_ins.merge_states([part, {"cookies": [dict(part["cookies"][0], value="NEW")], "origins": []}])
+    assert next(c for c in merged["cookies"] if c["name"] == "sid")["value"] == "NEW"
+    assert sign_ins.site_host("https://Jobs.Acme.com./apply?x=1") == "jobs.acme.com"
+    assert sign_ins.site_host("jobs.acme.com") == "jobs.acme.com"
+
+
+def test_no_secret_means_no_kept_sign_ins(monkeypatch):
+    from src.services.browser_agent import sign_ins
+
+    monkeypatch.delenv("BROWSER_SIGN_IN_KEY", raising=False)
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
+    with pytest.raises(sign_ins.SignInKeyMissingError):
+        sign_ins.encrypt_state({"cookies": [], "origins": []})
+
+
+@pytest.mark.asyncio
+async def test_saved_sign_ins_are_per_user_listed_without_values_and_forgettable(
+    authenticated_async_context, sign_in_key
+):
+    import contextlib
+
+    from src.api.dependencies import get_request_db
+    from src.services.browser_agent import sign_ins
+
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            kept = await sign_ins.save(db, user_id, "jobs.acme.com", {
+                "cookies": [{"name": "sid", "value": "SECRET-VALUE", "domain": "jobs.acme.com", "path": "/"}],
+                "origins": [],
+            })
+            assert kept == 1
+            assert (await sign_ins.load_all(db, user_id))["cookies"][0]["value"] == "SECRET-VALUE"
+            assert (await sign_ins.load_all(db, "someone-else"))["cookies"] == []
+        listed = await client.get("/api/browser/sign-ins")
+        assert listed.status_code == 200
+        assert [s["site_host"] for s in listed.json()["sites"]] == ["jobs.acme.com"]
+        assert "SECRET-VALUE" not in listed.text
+        assert (await client.delete("/api/browser/sign-ins/jobs.acme.com")).status_code == 200
+        assert (await client.delete("/api/browser/sign-ins/jobs.acme.com")).status_code == 404
+        assert (await client.get("/api/browser/sign-ins")).json()["sites"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_live_view_is_for_the_users_own_hands_only(authenticated_async_context):
+    """A token (an assistant) can never drive the sign-in view: it is where a password is typed."""
+    async with authenticated_async_context() as client:
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api.main import app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        for method, path, body in (
+            ("post", "/api/browser/live", {"action": "start", "url": "https://jobs.acme.com/"}),
+            ("get", "/api/browser/sign-ins", None),
+            ("delete", "/api/browser/sign-ins/jobs.acme.com", None),
+        ):
+            resp = await getattr(agent, method)(path, **({"json": body} if body else {}))
+            assert resp.status_code == 403, (path, resp.status_code)
+        # ...while the agent's own browser route answers it (off by default).
+        assert (await agent.post("/api/browser", json={"action": "look"})).json()["status"] == "off"
+
+
+LOGIN = """<!doctype html><html><head><title>Sign in - Acme</title></head><body>
+<script>if (document.cookie.includes('sid=')) document.write('<h1>Signed in as Ada</h1>');</script>
+<form onsubmit="event.preventDefault(); document.cookie='sid=ok; path=/; max-age=3600'; location.reload();">
+  <input id="email" style="position:absolute;left:20px;top:200px;width:300px;height:30px">
+  <input id="pw" type="password" style="position:absolute;left:20px;top:260px;width:300px;height:30px">
+  <button type="submit" style="position:absolute;left:20px;top:320px">Sign in</button>
+</form></body></html>"""
+
+
+@pytest.fixture
+async def login_site():
+    from aiohttp import web
+
+    async def login(_):
+        return web.Response(text=LOGIN, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/login", login)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_the_user_signs_in_once_and_the_next_browser_is_already_signed_in(login_site):
+    from src.services.browser_agent.agent import BrowserPool, live, run
+    from src.services.browser_agent.sign_ins import state_for_host
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(login_site))
+    vault: dict[str, dict] = {}
+
+    async def keep(host, state):
+        vault[host] = state_for_host(state, host)
+        return len(vault[host]["cookies"])
+
+    async def load():
+        return {"cookies": [c for st in vault.values() for c in st["cookies"]], "origins": []}
+
+    try:
+        shot = await live(pool, "u1", "start", url="http://jobs.example/login", load_state=load, keep=keep)
+        assert shot["image"].startswith("data:image/jpeg;base64,") and shot["title"] == "Sign in - Acme"
+        await live(pool, "u1", "click", x=100, y=215)
+        await live(pool, "u1", "type", text="ada@example.com")
+        await live(pool, "u1", "click", x=100, y=275)
+        typed = await live(pool, "u1", "type", text="the-users-own-password")
+        assert "the-users-own-password" not in str({k: v for k, v in typed.items() if k != "image"})
+        await live(pool, "u1", "key", key="Enter")
+        kept = await live(pool, "u1", "keep", keep=keep)
+        assert kept["kept"] == {"jobs.example": 1}
+        assert vault["jobs.example"]["cookies"][0]["name"] == "sid"
+        assert all("password" not in str(c) for c in vault["jobs.example"]["cookies"])
+        await live(pool, "u1", "cancel")
+
+        # A brand-new browser for the same user (the assistant's) starts signed in.
+        page = await run(pool, "u1", "open", url="http://jobs.example/login", load_state=load)
+        assert "Signed in as Ada" in page["text"]
+    finally:
+        await pool.shutdown()

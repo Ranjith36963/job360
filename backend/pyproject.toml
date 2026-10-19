@@ -67,6 +67,10 @@ dependencies = [
     # #11/#16 — small and C-backed, but not on the import path.
     "rapidfuzz>=3.0",
     "sentry-sdk>=1.40.0",           # error tracking + performance monitoring (Phase 3)
+    # Fernet for the browser agent's saved sign-ins (services/browser_agent/
+    # sign_ins.py). It was already installed (pdfplumber -> pdfminer.six needs
+    # it); named here because we now import it ourselves.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
