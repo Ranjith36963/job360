@@ -49,6 +49,29 @@ describe("AssistantNotes — edit a line", () => {
     }
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("Enter and Escape that an IME is composing with are left to the IME", () => {
+    const onChange = vi.fn();
+    render(<AssistantNotes notes={["One"]} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Change note: One" }));
+    const input = screen.getByLabelText("Edit note: One");
+    fireEvent.change(input, { target: { value: "日本" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    // Still editing, nothing saved or thrown away.
+    expect(screen.getByLabelText("Edit note: One")).toHaveValue("日本");
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith(["日本"]);
+
+    onChange.mockClear();
+    const add = screen.getByLabelText("New note for your assistant");
+    fireEvent.change(add, { target: { value: "東京" } });
+    fireEvent.keyDown(add, { key: "Enter", isComposing: true });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(add).toHaveValue("東京");
+  });
 });
 
 describe("AssistantNotes — history", () => {
@@ -81,6 +104,21 @@ describe("AssistantNotes — history", () => {
     rerender(<AssistantNotes notes={["Keep"]} onChange={vi.fn()} showHistory />);
     fireEvent.click(screen.getByRole("button", { name: "History of things your assistant should know" }));
     await waitFor(() => expect(screen.getByTestId("notes-history")).toHaveTextContent("Oops"));
+  });
+
+  it("a failed load is said even when lines from this view are listed, and clears on a good reload", async () => {
+    api.getProfileEditHistory.mockRejectedValueOnce(new Error("500"));
+    const { rerender } = render(<AssistantNotes notes={["Keep", "Oops"]} onChange={vi.fn()} showHistory />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove note: Oops" }));
+    rerender(<AssistantNotes notes={["Keep"]} onChange={vi.fn()} showHistory />);
+    fireEvent.click(screen.getByRole("button", { name: "History of things your assistant should know" }));
+    expect(await screen.findByText("Couldn't load the history")).toBeInTheDocument();
+    expect(screen.getByTestId("notes-history")).toHaveTextContent("Oops");
+
+    // The list changes length, History reloads, and this time the load works.
+    api.getProfileEditHistory.mockResolvedValue([]);
+    rerender(<AssistantNotes notes={["Keep", "New"]} onChange={vi.fn()} showHistory />);
+    await waitFor(() => expect(screen.queryByText("Couldn't load the history")).toBeNull());
   });
 
   it("says so when nothing was ever removed", async () => {

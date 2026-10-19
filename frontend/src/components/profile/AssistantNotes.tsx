@@ -17,7 +17,9 @@ import { actorName, formatEditedDate } from "@/lib/agent-edits";
 //
 // Each line can be edited in place (Enter or click away saves, Esc cancels),
 // and a History button inside the box lists the lines you once had but no
-// longer do, each with an "Add back" — so a line removed by mistake is never lost.
+// longer do, each with an "Add back". History can only show what the profile
+// edit log still holds (it keeps a bounded number of snapshots), plus lines
+// removed in this view — a line older than that is not listed.
 
 const NOTES_PATH = "preferences.assistant_notes";
 
@@ -27,6 +29,11 @@ const NOTES_PATH = "preferences.assistant_notes";
 const NOTE_MAX_CHARS = 200;
 
 const sameLine = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+// While an IME is composing (Japanese, Chinese, Korean…), Enter confirms the
+// character and Escape cancels it — neither is meant for the note. Safari
+// reports keyCode 229 instead of isComposing for the confirming key.
+const composing = (e: React.KeyboardEvent) => e.nativeEvent.isComposing || e.keyCode === 229;
 
 type PastLine = { text: string; by: string; at: string };
 
@@ -51,11 +58,13 @@ function NoteRow({
   others,
   onSave,
   onRemove,
+  disabled,
 }: {
   note: string;
   others: string[];
   onSave: (next: string) => void;
   onRemove: () => void;
+  disabled: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(note);
@@ -95,6 +104,7 @@ function NoteRow({
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => finish(true)}
           onKeyDown={(e) => {
+            if (composing(e)) return;
             if (e.key === "Enter") {
               e.preventDefault();
               finish(true);
@@ -109,8 +119,9 @@ function NoteRow({
         <button
           type="button"
           onClick={open}
+          disabled={disabled}
           aria-label={`Edit note: ${note}`}
-          className="min-w-0 flex-1 cursor-text break-words text-left"
+          className="min-w-0 flex-1 cursor-text break-words text-left disabled:cursor-default"
         >
           {note}
         </button>
@@ -121,7 +132,8 @@ function NoteRow({
             type="button"
             aria-label={`Change note: ${note}`}
             onClick={open}
-            className="rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100"
+            disabled={disabled}
+            className="rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100 disabled:opacity-30"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
@@ -129,7 +141,8 @@ function NoteRow({
             type="button"
             aria-label={`Remove note: ${note}`}
             onClick={onRemove}
-            className="rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100"
+            disabled={disabled}
+            className="rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100 disabled:opacity-30"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -143,10 +156,12 @@ function NotesHistory({
   notes,
   gone,
   onAddBack,
+  disabled,
 }: {
   notes: string[];
   gone: string[];
   onAddBack: (text: string) => void;
+  disabled: boolean;
 }) {
   const [rows, setRows] = useState<ProfileEditHistoryRow[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -154,7 +169,11 @@ function NotesHistory({
   useEffect(() => {
     let live = true;
     getProfileEditHistory(NOTES_PATH)
-      .then((r) => live && setRows(r))
+      .then((r) => {
+        if (!live) return;
+        setRows(r);
+        setFailed(false);
+      })
       .catch(() => live && setFailed(true));
     return () => {
       live = false;
@@ -173,12 +192,15 @@ function NotesHistory({
       <p className="mb-1.5 font-mono text-[11px] uppercase tracking-[0.09em] text-faint">
         Lines you had before
       </p>
-      {failed && rows === null && past.length === 0 ? (
-        <p className="text-xs text-destructive">Couldn&apos;t load the history</p>
-      ) : rows === null && past.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
-      ) : past.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Nothing removed yet.</p>
+      {/* A failed load is always said, even when lines from this view are
+          listed — otherwise a partial list would look complete. */}
+      {failed && <p className="mb-1.5 text-xs text-destructive">Couldn&apos;t load the history</p>}
+      {past.length === 0 ? (
+        failed ? null : rows === null ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">Nothing removed yet.</p>
+        )
       ) : (
         <ul className="space-y-1.5">
           {past.map((p) => (
@@ -195,7 +217,8 @@ function NotesHistory({
                 type="button"
                 aria-label={`Add back: ${p.text}`}
                 onClick={() => onAddBack(p.text)}
-                className="shrink-0 font-mono text-[11px] text-faint underline-offset-2 hover:text-foreground hover:underline"
+                disabled={disabled}
+                className="shrink-0 font-mono text-[11px] text-faint underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
               >
                 Add back
               </button>
@@ -213,6 +236,7 @@ export function AssistantNotes({
   trailing,
   footer,
   showHistory = false,
+  disabled = false,
 }: {
   notes: string[];
   onChange: (notes: string[]) => void;
@@ -220,6 +244,8 @@ export function AssistantNotes({
   footer?: React.ReactNode;
   /** Show the History button. Off when there is no profile yet (nothing to show). */
   showHistory?: boolean;
+  /** Lock every edit control, e.g. while a Keep / Take back is changing this list. */
+  disabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -272,7 +298,9 @@ export function AssistantNotes({
         One line each — e.g. &quot;Never apply to recruitment agencies&quot;. Click a line to edit it. Your
         assistant reads these first, every time.
       </p>
-      {showHistory && historyOpen && <NotesHistory notes={notes} gone={gone} onAddBack={addBack} />}
+      {showHistory && historyOpen && (
+        <NotesHistory notes={notes} gone={gone} onAddBack={addBack} disabled={disabled} />
+      )}
       {notes.length > 0 && (
         <ul className="space-y-1.5">
           {notes.map((note, i) => (
@@ -282,6 +310,7 @@ export function AssistantNotes({
               others={notes.filter((_, j) => j !== i)}
               onSave={(next) => edit(i, next)}
               onRemove={() => remove(i)}
+              disabled={disabled}
             />
           ))}
         </ul>
@@ -290,8 +319,10 @@ export function AssistantNotes({
         <Input
           value={draft}
           maxLength={NOTE_MAX_CHARS}
+          disabled={disabled}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
+            if (composing(e)) return;
             if (e.key === "Enter") {
               e.preventDefault();
               add();
@@ -305,7 +336,7 @@ export function AssistantNotes({
           type="button"
           variant="outline"
           onClick={add}
-          disabled={!draft.trim()}
+          disabled={disabled || !draft.trim()}
           aria-label="Add note"
           className="shrink-0"
         >
