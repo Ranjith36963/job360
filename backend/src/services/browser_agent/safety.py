@@ -25,8 +25,8 @@ from src.services.fetch.guard import ResolveFn, screen_host, screen_url
 
 # "Submit" in a button's name always means the end of a form.
 _STRONG_SUBMIT = re.compile(r"\bsubmit", re.IGNORECASE)
-# These mean the end only on a button that belongs to a form: a job ad's
-# "Apply for this job" LINK just opens the form and is an ordinary click.
+# These mean the end on a button in a form, or on any page where answers have
+# been typed; a job ad's "Apply for this job" (nothing typed yet) just opens the form.
 _SUBMIT_WORDS = re.compile(r"\b(apply|send|finish|complete|confirm)\b", re.IGNORECASE)
 # Words that make a submit-shaped button a step, not the end: multi-page forms
 # (Workday, SmartRecruiters) use <button type=submit> for "Next".
@@ -38,15 +38,25 @@ _PASSWORD_NAME = re.compile(r"pass(word|code|phrase)|\bpwd\b", re.IGNORECASE)
 
 
 def control_kind(
-    tag: str, input_type: str, name: str, autocomplete: str = "", in_form: bool = False, role: str = ""
+    tag: str,
+    input_type: str,
+    name: str,
+    autocomplete: str = "",
+    in_form: bool = False,
+    role: str = "",
+    page_has_answers: bool = False,
 ) -> str:
     """``password`` | ``submit`` | ``field`` for one control on the page.
 
     ``tag`` is the lower-case element name, ``input_type`` its ``type``
     attribute (lower case, may be empty), ``name`` its visible label or text,
     ``autocomplete`` its autocomplete attribute, ``in_form`` whether it sits
-    inside a ``<form>`` and ``role`` its ARIA role (a ``<div role=button>`` is a
-    button too). When unsure, a button counts as the final submit: the
+    inside a ``<form>``, ``role`` its ARIA role (a ``<div role=button>`` is a
+    button too) and ``page_has_answers`` whether any field on the page already
+    holds a typed answer or a chosen file. "Apply" / "Send" / "Finish" on a
+    button counts as the final submit inside a form OR on a page with answers
+    (React forms often have no ``<form>``); on a page with nothing typed it is
+    the ad's "Apply for this job" that opens the form. When unsure, a button counts as the final submit: the
     gate then asks, which is the safe side.
     """
     tag = (tag or "").lower()
@@ -69,7 +79,7 @@ def control_kind(
         return "submit"
     if tag == "a" and role != "button":
         return "field"
-    if in_form and _SUBMIT_WORDS.search(name):
+    if (in_form or page_has_answers) and _SUBMIT_WORDS.search(name):
         return "submit"
     # A real submit button of a form with no clear name: the safe side.
     if in_form and input_type in ("submit", "image", "") and not name.strip():

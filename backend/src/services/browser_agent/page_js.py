@@ -92,6 +92,13 @@ ELEMENT_FACTS_JS = r"""
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
     in_form: !!el.closest('form'), role: el.getAttribute('role') || '',
+    // Any typed answer or chosen file anywhere on the page: the form is being filled.
+    page_has_answers: Array.from(el.ownerDocument.querySelectorAll('input, textarea')).some((f) => {
+      const t = (f.type || '').toLowerCase();
+      if (['hidden', 'submit', 'button', 'image', 'checkbox', 'radio', 'password', 'search'].includes(t)) return false;
+      if (t === 'file') return !!(f.files && f.files.length);
+      return !!(f.value || '').trim();
+    }),
   };
 }
 """

@@ -27,12 +27,14 @@ RUN pip install --no-cache-dir --upgrade pip \
 # runtime flag turns the `browser` MCP tool on. Unset = the same image as before.
 ARG BROWSER_AGENT_ENABLED=0
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN if [ "$BROWSER_AGENT_ENABLED" = "1" ] || [ "$BROWSER_AGENT_ENABLED" = "true" ]; then \
-      pip install --no-cache-dir ".[browser]" \
-      && python -m playwright install --with-deps chromium \
-      && chmod -R a+rX /ms-playwright \
-      && rm -rf /var/lib/apt/lists/*; \
-    fi
+# Same values as the runtime flag (core/settings.py): 1 / true / yes, any case, spaces trimmed.
+RUN case "$(printf '%s' "$BROWSER_AGENT_ENABLED" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in \
+      1|true|yes) \
+        pip install --no-cache-dir ".[browser]" \
+        && python -m playwright install --with-deps chromium \
+        && chmod -R a+rX /ms-playwright \
+        && rm -rf /var/lib/apt/lists/* ;; \
+    esac
 
 # Drop privileges — never run the app as root in production.
 RUN addgroup --system job360 \

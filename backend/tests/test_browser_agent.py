@@ -5,10 +5,10 @@ Three layers, each pinned here:
 1. The hard lines as pure rules (``safety.py``) — no browser, no network.
 2. The switch: OFF by default, the route and the MCP tool both answer ``off``.
 3. A real Chromium run against a local test site (skipped when Playwright or
-   its Chromium is not installed, as on CI). The site is served on loopback;
-   Chromium is pointed at it with ``--host-resolver-rules`` while the SSRF
-   screen sees a public address from a fake resolver, so nothing leaves the
-   machine (rule #4).
+   its Chromium is not installed, as on CI). The site is served on loopback.
+   Chromium reaches it only through the egress proxy: a fake resolver gives
+   ``jobs.example`` a public address and the proxy's injected connector maps
+   that address to the loopback site, so nothing leaves the machine (rule #4).
 """
 from __future__ import annotations
 
@@ -22,30 +22,34 @@ from src.services.browser_agent.safety import RequestScreen, blocker_for, contro
 
 
 @pytest.mark.parametrize(
-    ("tag", "input_type", "name", "autocomplete", "in_form", "role", "kind"),
+    ("tag", "input_type", "name", "autocomplete", "in_form", "role", "answers", "kind"),
     [
-        ("input", "password", "Password", "", True, "", "password"),
-        ("input", "text", "Your password", "", True, "", "password"),
-        ("input", "text", "Email", "current-password", True, "", "password"),
-        ("input", "text", "First name", "", True, "", "field"),
-        ("textarea", "", "Why do you want this job?", "", True, "", "field"),
-        ("button", "submit", "Submit application", "", True, "", "submit"),
-        ("button", "button", "Submit", "", False, "", "submit"),
-        ("input", "submit", "Send", "", True, "", "submit"),
-        ("button", "submit", "Apply", "", True, "", "submit"),
-        ("button", "submit", "", "", True, "", "submit"),
-        ("div", "", "Submit application", "", False, "button", "submit"),
+        ("input", "password", "Password", "", True, "", False, "password"),
+        ("input", "text", "Your password", "", True, "", False, "password"),
+        ("input", "text", "Email", "current-password", True, "", False, "password"),
+        ("input", "text", "First name", "", True, "", False, "field"),
+        ("textarea", "", "Why do you want this job?", "", True, "", False, "field"),
+        ("button", "submit", "Submit application", "", True, "", False, "submit"),
+        ("button", "button", "Submit", "", False, "", False, "submit"),
+        ("input", "submit", "Send", "", True, "", False, "submit"),
+        ("button", "submit", "Apply", "", True, "", False, "submit"),
+        ("button", "submit", "", "", True, "", False, "submit"),
+        ("div", "", "Submit application", "", False, "button", False, "submit"),
+        # React forms without a <form>: once answers are typed, "Send" / "Apply" is the end.
+        ("div", "", "Send application", "", False, "button", True, "submit"),
+        ("button", "button", "Complete application", "", False, "", True, "submit"),
         # Steps of a multi-page form are not the final submit, even as type=submit.
-        ("button", "submit", "Next", "", True, "", "field"),
-        ("button", "submit", "Save and continue", "", True, "", "field"),
-        # A job ad's "Apply" LINK only opens the form.
-        ("a", "", "Apply for this job", "", False, "", "field"),
-        ("button", "button", "Apply for this job", "", False, "", "field"),
-        ("a", "", "Submit application", "", False, "", "submit"),
+        ("button", "submit", "Next", "", True, "", True, "field"),
+        ("button", "submit", "Save and continue", "", True, "", True, "field"),
+        # A job ad's "Apply" (nothing typed yet) only opens the form.
+        ("a", "", "Apply for this job", "", False, "", False, "field"),
+        ("a", "", "Apply for this job", "", False, "", True, "field"),
+        ("button", "button", "Apply for this job", "", False, "", False, "field"),
+        ("a", "", "Submit application", "", False, "", False, "submit"),
     ],
 )
-def test_control_kind(tag, input_type, name, autocomplete, in_form, role, kind):
-    assert control_kind(tag, input_type, name, autocomplete, in_form, role) == kind
+def test_control_kind(tag, input_type, name, autocomplete, in_form, role, answers, kind):
+    assert control_kind(tag, input_type, name, autocomplete, in_form, role, answers) == kind
 
 
 def test_a_captcha_frame_or_text_needs_the_user():
@@ -160,14 +164,20 @@ async def site():
     async def captcha(_):
         return web.Response(text=CAPTCHA, content_type="text/html")
 
+    async def to_private(_):
+        raise web.HTTPFound(f"http://127.0.0.1:{site_port[0]}/form")
+
+    site_port: list[int] = []
     app = web.Application()
     app.router.add_get("/form", form)
     app.router.add_get("/captcha", captcha)
+    app.router.add_get("/to-private", to_private)
     runner = web.AppRunner(app)
     await runner.setup()
     tcp = web.TCPSite(runner, "127.0.0.1", 0)
     await tcp.start()
     port = tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001 - the test site's own port
+    site_port.append(port)
     yield port
     await runner.cleanup()
 
@@ -176,13 +186,27 @@ async def site():
 async def pool(site):
     from src.services.browser_agent.agent import BrowserPool
 
-    resolve, _ = _resolver({"jobs.example": "93.184.216.34"})
-    p = BrowserPool(
-        max_sessions=1, idle_s=600, resolve=resolve,
-        launch_args=[f"--host-resolver-rules=MAP jobs.example 127.0.0.1:{site}"],
-    )
+    p = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(site))
     yield p
     await p.shutdown()
+
+
+def _site_resolver():
+    """jobs.example looks public to the guard; 127.0.0.1 resolves to itself (and is denied)."""
+    table = {"jobs.example": "93.184.216.34", "127.0.0.1": "127.0.0.1"}
+    resolve, _ = _resolver(table)
+    return resolve
+
+
+def _to_site(port: int):
+    """The proxy's connector: the public test address is really the loopback test site."""
+    import asyncio
+
+    async def open_connection(host, p):
+        assert host == "93.184.216.34", f"the proxy tried to connect to {host}"
+        return await asyncio.open_connection("127.0.0.1", port)
+
+    return open_connection
 
 
 def _ref(page: dict, name: str) -> str:
@@ -278,3 +302,57 @@ async def test_one_browser_per_user_and_a_cap_on_live_browsers(pool):
     assert exc.value.status == "busy"
     assert (await run(pool, "u1", "close"))["closed"] is True
     assert (await run(pool, "u2", "open", url="http://jobs.example/form"))["title"] == "Apply - Acme"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_redirect_to_a_private_address_never_reaches_the_page(pool, site):
+    """CodeRabbit on #902: route() never sees redirect hops. The egress proxy does."""
+    from src.services.browser_agent.agent import BrowserError, run
+
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/to-private")
+    except BrowserError as exc:
+        assert exc.reason == "load_failed"
+    else:
+        assert "Senior Engineer" not in page["text"]
+    assert any(d.startswith("127.0.0.1") for d in pool.egress.denied)
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_page_scripts_cannot_reach_a_private_address_either(pool, site):
+    from src.services.browser_agent.agent import run
+
+    page = await run(pool, "u1", "open", url="http://jobs.example/form")
+    s = pool._sessions["u1"]  # noqa: SLF001 - the test reaches into its own pool
+    result = await s.page.evaluate(
+        """async (port) => {
+          try { const r = await fetch(`http://127.0.0.1:${port}/form`, {mode: 'no-cors'}); return 'reached'; }
+          catch (e) { return 'blocked'; }
+        }""",
+        site,
+    )
+    assert page["title"] == "Apply - Acme"
+    assert result == "blocked" or any(d.startswith("127.0.0.1") for d in pool.egress.denied)
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_two_opens_at_once_make_one_browser_and_respect_the_cap(pool):
+    import asyncio
+
+    from src.services.browser_agent.agent import BrowserError, run
+
+    results = await asyncio.gather(
+        run(pool, "u1", "open", url="http://jobs.example/form"),
+        run(pool, "u1", "open", url="http://jobs.example/form"),
+        run(pool, "u2", "open", url="http://jobs.example/form"),
+        return_exceptions=True,
+    )
+    assert len(pool._sessions) == 1  # noqa: SLF001 - the cap is 1
+    busy = [r for r in results if isinstance(r, BrowserError)]
+    assert len(busy) == 1 and busy[0].status == "busy"

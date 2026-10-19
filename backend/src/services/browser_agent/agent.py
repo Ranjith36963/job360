@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from src.services.browser_agent.egress import EgressProxy, OpenFn
 from src.services.browser_agent.page_js import ELEMENT_FACTS_JS, SNAPSHOT_JS
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
 from src.services.fetch.guard import ResolveFn
@@ -91,15 +92,21 @@ class BrowserPool:
         idle_s: float,
         resolve: ResolveFn,
         launch_args: Optional[list[str]] = None,
+        open_connection: Optional[OpenFn] = None,
     ) -> None:
         self.max_sessions = max_sessions
         self.idle_s = idle_s
         self.screen = RequestScreen(resolve)
+        # The one way out for Chromium's traffic (egress.py): screens and pins every connection.
+        self.egress = EgressProxy(resolve, open_connection)
         self._launch_args = list(launch_args or [])
         self._sessions: dict[str, Session] = {}
         self._playwright: Any = None
         self._browser: Any = None
         self._start_lock = asyncio.Lock()
+        # Session creation awaits several times; two `open`s at once must not both pass the
+        # "no session yet" and "under the cap" checks (CodeRabbit on #902).
+        self._create_lock = asyncio.Lock()
 
     async def _ensure_browser(self) -> Any:
         async with self._start_lock:
@@ -113,8 +120,17 @@ class BrowserPool:
                 ) from None
             if self._playwright is None:
                 self._playwright = await async_playwright().start()
+            if not self.egress.port:
+                await self.egress.start()
             self._browser = await self._playwright.chromium.launch(
-                headless=True, args=["--disable-dev-shm-usage", *self._launch_args]
+                headless=True,
+                args=[
+                    "--disable-dev-shm-usage",
+                    # Every connection, loopback included, leaves through the screening proxy.
+                    f"--proxy-server=http://127.0.0.1:{self.egress.port}",
+                    "--proxy-bypass-list=<-loopback>",
+                    *self._launch_args,
+                ],
             )
             return self._browser
 
@@ -130,6 +146,14 @@ class BrowserPool:
         s = self._sessions.get(user_id)
         if s is not None or not create:
             return s
+        async with self._create_lock:
+            s = self._sessions.get(user_id)
+            if s is not None:
+                return s
+            return await self._create(user_id)
+
+    async def _create(self, user_id: str) -> Session:
+        """Build one user's browser. Called with ``_create_lock`` held."""
         if len(self._sessions) >= self.max_sessions:
             raise BrowserError(
                 "busy", "all_browsers_busy",
@@ -181,6 +205,8 @@ class BrowserPool:
         if self._playwright is not None:
             await self._playwright.stop()
             self._playwright = None
+        await self.egress.close()
+        self.egress.port = 0
 
 
 def _live_page(s: Session) -> Any:
@@ -246,7 +272,7 @@ async def _kind(loc: Any) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
     return control_kind(
         facts.get("tag", ""), facts.get("type", ""), facts.get("name", ""), facts.get("autocomplete", ""),
-        bool(facts.get("in_form")), facts.get("role", ""),
+        bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
     )
 
 
