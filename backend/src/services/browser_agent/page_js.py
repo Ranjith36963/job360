@@ -7,48 +7,81 @@ Playwright import at module level (rule #16).
 """
 from __future__ import annotations
 
-# Returns {elements: [...], text: str, has_password_box: bool}.
-# Each element: {ref, tag, type, role, name, value, checked, required,
-# disabled, autocomplete, in_form, options}.
+# Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int}.
+# Each element: {ref, tag, type, role, name, value, checked, required, disabled, autocomplete,
+# in_form, options, via_label}.
+#
+# Learned from the open-source browser agents (docs/product/BROWSER_AGENT.md, research 2026-10-19):
+# * nearest-first budget: when a page has more controls than fit, keep the ones closest to what is
+#   on screen and SAY how many were left above / below (nanobrowser window.ts:110-138,
+#   browser-use prompts.py:268-280), instead of silently cutting at the first N in page order;
+# * open shadow roots are read (Playwright injected.js:4410-4421; SmartRecruiters' spl-* widgets);
+# * a 0x0 / transparent checkbox or radio behind a styled label is read through its label
+#   (Skyvern domUtils.js:514-526, nanobrowser enrich.ts:3-5).
 SNAPSHOT_JS = r"""
 (args) => {
   const maxElements = args.maxElements, maxText = args.maxText, maxName = 120;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
-    + '[role=combobox], [role=option], [role=tab], [role=link], [contenteditable=true]';
-  const visible = (el) => {
-    if (el.type === 'file') return true;  // file inputs are often hidden behind a styled button
+    + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=true]';
+  // Every match in the document AND in open shadow roots, in document order.
+  const all = [];
+  const walk = (root, depth) => {
+    for (const el of root.querySelectorAll(sel)) all.push(el);
+    if (depth > 6) return;
+    for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
+  };
+  walk(document, 0);
+  const shown = (el) => {
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return false;
     const s = getComputedStyle(el);
     return s.visibility !== 'hidden' && s.display !== 'none';
   };
+  const labelEl = (el) => {
+    if (el.labels && el.labels.length) return el.labels[0];
+    return el.closest('label');
+  };
   const clip = (t, n) => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
   const labelOf = (el) => {
     const aria = el.getAttribute('aria-label');
     if (aria) return aria;
+    const root = el.getRootNode();
     const by = el.getAttribute('aria-labelledby');
-    if (by) {
-      const t = by.split(/\s+/).map(id => document.getElementById(id)).filter(Boolean).map(n => n.innerText).join(' ');
+    if (by && root.getElementById) {
+      const t = by.split(/\s+/).map(id => root.getElementById(id)).filter(Boolean).map(n => n.innerText).join(' ');
       if (t.trim()) return t;
     }
-    if (el.id) {
-      const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-      if (l && l.innerText.trim()) return l.innerText;
-    }
-    const wrap = el.closest('label');
-    if (wrap && wrap.innerText.trim()) return wrap.innerText;
+    const l = labelEl(el);
+    if (l && l.innerText.trim()) return l.innerText;
     if (el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) return el.value;
     return el.getAttribute('placeholder') || el.getAttribute('title') || el.innerText || el.getAttribute('name') || '';
   };
+  const vh = window.innerHeight || 900;
   let n = 0, hasPassword = false;
-  const out = [];
-  for (const el of document.querySelectorAll(sel)) {
-    if (!visible(el)) continue;
+  const candidates = [];
+  all.forEach((el, order) => {
     const tag = el.tagName.toLowerCase();
     const type = (el.type || el.getAttribute('type') || '').toLowerCase();
+    let box = el, viaLabel = false;
+    if (!shown(el)) {
+      if (type === 'file') box = el;  // file inputs often sit behind a styled button: always listed
+      else if ((type === 'checkbox' || type === 'radio') && labelEl(el) && shown(labelEl(el))) {
+        box = labelEl(el); viaLabel = true;
+      } else return;
+    }
     const isPassword = type === 'password' || (el.getAttribute('autocomplete') || '').includes('password');
     if (isPassword) hasPassword = true;
-    if (out.length >= maxElements) continue;
+    const r = box.getBoundingClientRect();
+    const dist = r.bottom < 0 ? -r.bottom : r.top > vh ? r.top - vh : 0;
+    candidates.push({ el, tag, type, viaLabel, isPassword, order, dist, above: r.bottom < 0 });
+  });
+  // Nearest the screen first; ties keep page order. Then back to page order for reading.
+  const kept = candidates.slice().sort((a, b) => a.dist - b.dist || a.order - b.order).slice(0, maxElements);
+  const keptSet = new Set(kept);
+  let omittedAbove = 0, omittedBelow = 0;
+  for (const c of candidates) if (!keptSet.has(c)) { if (c.above) omittedAbove++; else omittedBelow++; }
+  kept.sort((a, b) => a.order - b.order);
+  const out = kept.map(({ el, tag, type, viaLabel, isPassword }) => {
     let ref = el.getAttribute('data-j360-ref');
     if (!ref) {
       ref = 'e' + (++n) + '_' + Math.random().toString(36).slice(2, 6);
@@ -60,6 +93,7 @@ SNAPSHOT_JS = r"""
       disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
       autocomplete: el.getAttribute('autocomplete') || '', in_form: !!el.closest('form'),
     };
+    if (viaLabel) item.via_label = true;
     if (isPassword) item.value = '';
     else if (tag === 'select') {
       item.value = el.selectedOptions.length ? clip(el.selectedOptions[0].text, maxName) : '';
@@ -69,10 +103,12 @@ SNAPSHOT_JS = r"""
       else if (type === 'file') item.value = Array.from(el.files || []).map(f => f.name).join(', ');
       else item.value = clip(el.value, 300);
     } else if (el.getAttribute('aria-checked') !== null) item.checked = el.getAttribute('aria-checked') === 'true';
-    out.push(item);
-  }
+    return item;
+  });
   const text = clip(document.body ? document.body.innerText : '', maxText);
-  return { elements: out, text, has_password_box: hasPassword };
+  return {
+    elements: out, text, has_password_box: hasPassword, omitted_above: omittedAbove, omitted_below: omittedBelow,
+  };
 }
 """
 
@@ -82,10 +118,7 @@ ELEMENT_FACTS_JS = r"""
 (el) => {
   const aria = el.getAttribute('aria-label');
   let name = aria || '';
-  if (!name && el.id) {
-    const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-    if (l) name = l.innerText;
-  }
+  if (!name && el.labels && el.labels.length) name = el.labels[0].innerText;
   if (!name && el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) name = el.value;
   if (!name) name = el.innerText || el.getAttribute('placeholder') || el.getAttribute('name') || '';
   return {
@@ -116,5 +149,17 @@ FOCUS_IN_LIST_JS = r"""
   // submits on Enter like any field (implicit submission), which would skip check_submit.
   const box = el.closest('[role=combobox]') || el;
   return box.getAttribute('aria-expanded') === 'true' || !!el.getAttribute('aria-activedescendant');
+}
+"""
+
+# A checkbox / radio hidden behind its styled label: click the label (what a person does), then
+# report the real state. Used only after Playwright's own set_checked refused the hidden input.
+TICK_VIA_LABEL_JS = r"""
+(el, on) => {
+  if (el.checked !== on) {
+    const label = (el.labels && el.labels[0]) || el.closest('label');
+    (label || el).click();
+  }
+  return el.checked;
 }
 """
