@@ -160,3 +160,5 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - How many real career sites work from our cloud browser? Slice 4 measures it.
 - A cloud routine needs a way to start from Job360's Needs you page; check what Claude routines allow.
 - Hosting cost per active user once it's on.
+- Slice 4 needs the open internet: run it from production once the switch is on.
+- CI does not install Chromium, so the real-browser tests skip there; adding it is a `.github/` (owner-lane) change.
