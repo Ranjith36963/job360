@@ -240,7 +240,7 @@ function TagInput({
 // input from accepting what the server would refuse.
 const NOTE_MAX_CHARS = 200;
 
-function AssistantNotes({
+export function AssistantNotes({
   notes,
   onChange,
   trailing,
@@ -341,7 +341,7 @@ const asArr = (val: unknown): string[] =>
 // itself would be posted to the server as though the user had typed it.
 const EXPERIENCE_UNSET = "unspecified";
 
-function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
+export function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
   return {
     target_job_titles: asArr(raw.target_job_titles),
     additional_skills: asArr(raw.additional_skills),
