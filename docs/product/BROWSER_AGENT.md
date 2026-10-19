@@ -163,6 +163,16 @@ the page's own requests to finish, because single-page sites (React forms) draw 
 `scroll` (text `down` or `up`) loads questions that only appear further down. Both tested on a local single-page
 form; the test fails when the wait is removed.
 
+**Step 2, better page reading (2026-10-19, from the browser-agent research):**
+- **Nearest the screen first:** when a page has more controls than fit (150), the ones nearest what is on screen are
+  listed and `more_elements` says how many are above and below. Before, a long form's Submit could never be reached.
+- **Hidden checkboxes and radios:** custom-styled ones (the real input is invisible, the label is the card the user
+  clicks) are read and ticked through their label.
+- **Shadow DOM:** inputs inside open shadow roots are read (SmartRecruiters builds its whole form this way).
+- **Frames:** invisible frames are skipped, at most 20 are read, and each read has 3 seconds.
+- **Untrusted text:** the page text sits inside a marker with a random code per read. A site that plants a fake end
+  marker gets it removed, so its text cannot pose as instructions.
+
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
