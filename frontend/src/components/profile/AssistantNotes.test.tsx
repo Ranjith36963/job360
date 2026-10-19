@@ -64,7 +64,7 @@ describe("AssistantNotes — history", () => {
     ]);
     const onChange = vi.fn();
     render(<AssistantNotes notes={["Keep me"]} onChange={onChange} showHistory />);
-    fireEvent.click(screen.getByRole("button", { name: "History of things your assistant should know" }));
+    fireEvent.click(screen.getByRole("button", { name: "History of things your AI assistant should know" }));
     const rows = await screen.findAllByTestId("notes-history-row");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveTextContent("Never skip a job because of a CAPTCHA");
@@ -79,14 +79,14 @@ describe("AssistantNotes — history", () => {
     const { rerender } = render(<AssistantNotes notes={["Keep", "Oops"]} onChange={vi.fn()} showHistory />);
     fireEvent.click(screen.getByRole("button", { name: "Remove note: Oops" }));
     rerender(<AssistantNotes notes={["Keep"]} onChange={vi.fn()} showHistory />);
-    fireEvent.click(screen.getByRole("button", { name: "History of things your assistant should know" }));
+    fireEvent.click(screen.getByRole("button", { name: "History of things your AI assistant should know" }));
     await waitFor(() => expect(screen.getByTestId("notes-history")).toHaveTextContent("Oops"));
   });
 
   it("says so when nothing was ever removed", async () => {
     api.getProfileEditHistory.mockResolvedValue([row(["Keep"])]);
     render(<AssistantNotes notes={["Keep"]} onChange={vi.fn()} showHistory />);
-    fireEvent.click(screen.getByRole("button", { name: "History of things your assistant should know" }));
+    fireEvent.click(screen.getByRole("button", { name: "History of things your AI assistant should know" }));
     expect(await screen.findByText("Nothing removed yet.")).toBeInTheDocument();
   });
 
@@ -97,7 +97,7 @@ describe("AssistantNotes — history", () => {
     rerender(<AssistantNotes notes={["Keep", "X"]} onChange={vi.fn()} showHistory />);
     fireEvent.click(screen.getByRole("button", { name: "Remove note: X" }));
     rerender(<AssistantNotes notes={["Keep"]} onChange={vi.fn()} showHistory />);
-    fireEvent.click(screen.getByRole("button", { name: "History of things your assistant should know" }));
+    fireEvent.click(screen.getByRole("button", { name: "History of things your AI assistant should know" }));
     await waitFor(() => expect(screen.getAllByTestId("notes-history-row")).toHaveLength(1));
   });
 });

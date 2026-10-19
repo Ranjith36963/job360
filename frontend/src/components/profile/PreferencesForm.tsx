@@ -27,7 +27,6 @@ import { ClearButton } from "@/components/profile/ClearButton";
 import { EditedMark } from "@/components/profile/EditedMark";
 import { FieldHistory } from "@/components/profile/FieldHistory";
 import { CountryPicker } from "@/components/profile/CountryPicker";
-import { AssistantNotes } from "@/components/profile/AssistantNotes";
 import { findAgentEdit, type AgentEdit } from "@/lib/agent-edits";
 import type { PreferencesRequest } from "@/lib/types";
 
@@ -342,7 +341,6 @@ const ALL_PREFERENCE_FIELDS: { field: string; label: string }[] = [
   { field: "dealbreakers", label: "Dealbreakers" },
   { field: "avoid_companies", label: "Companies to avoid" },
   { field: "about_me", label: "About Me" },
-  { field: "assistant_notes", label: "Things your assistant should know" },
 ];
 
 // ── Preferences Form ───────────────────────────────────────
@@ -857,18 +855,9 @@ export function PreferencesForm({
           />
         </div>
 
-        <Separator />
-
-        {/* ── Things your assistant should know ────
-            Standing instructions (preferences.assistant_notes). The agent
-            reads them first on every get_profile; empty = nothing to say
-            (rule #29). */}
-        <AssistantNotes
-          notes={assistantNotes}
-          onChange={setAssistantNotes}
-          trailing={markOf("assistant_notes")}
-          showHistory={showFieldHistory}
-        />
+        {/* "Things your AI assistant should know" lives on Home only (owner,
+            2026-10-19). The notes are still hydrated and sent back in every
+            save above, so a Profile save never wipes them. */}
 
         {/* Excluded Companies removed entirely (not just the UI control) —
             a grep of backend/src turned up ZERO consumers of the

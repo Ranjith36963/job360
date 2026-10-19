@@ -1,8 +1,8 @@
 /**
- * PreferencesForm — "Things your assistant should know" (owner decision,
- * 2026-09-25). Standing instructions, one line each, saved through the normal
- * debounced preferences save as `assistant_notes`. Empty = nothing to say
- * (rule #29): hydration alone never saves.
+ * PreferencesForm — "Things your AI assistant should know" lives on Home only
+ * (owner, 2026-10-19). Profile no longer shows the notes, but every Profile
+ * save still sends them back unchanged: the save replaces the whole
+ * preferences block, so dropping them here would wipe them.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -16,77 +16,48 @@ describe("PreferencesForm — assistant notes", () => {
     vi.clearAllMocks();
   });
 
-  it("shows the saved notes and does not save on hydration", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
+  it("does not show the notes on Profile", () => {
     render(
       <PreferencesForm
         preferences={{ assistant_notes: ["Never apply to agencies"] }}
-        onSave={onSave}
+        onSave={vi.fn()}
         loading={false}
       />
     );
-    expect(screen.getByText("Things your assistant should know")).toBeTruthy();
-    expect(screen.getByText("Never apply to agencies")).toBeTruthy();
-    await act(async () => {
-      vi.advanceTimersByTime(2000);
-    });
-    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.queryByText(/should know/i)).toBeNull();
+    expect(screen.queryByText("Never apply to agencies")).toBeNull();
+    expect(screen.queryByTestId("assistant-notes")).toBeNull();
   });
 
-  it("adds a line and saves the full list", async () => {
+  it("a Profile save keeps the notes exactly as stored", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
       <PreferencesForm
-        preferences={{ assistant_notes: ["Never apply to agencies"] }}
+        preferences={{ assistant_notes: ["Never apply to agencies", "No night shifts"] }}
         onSave={onSave}
         loading={false}
       />
     );
-    const input = screen.getByLabelText("New note for your assistant");
-    fireEvent.change(input, { target: { value: "  On holiday until 3 Oct " } });
-    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
-    expect(screen.getByText("On holiday until 3 Oct")).toBeTruthy();
-
+    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
+      target: { value: "Data engineer" },
+    });
     await act(async () => {
       vi.advanceTimersByTime(900);
     });
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistant_notes: ["Never apply to agencies", "On holiday until 3 Oct"],
+        about_me: "Data engineer",
+        assistant_notes: ["Never apply to agencies", "No night shifts"],
       })
     );
   });
 
-  it("removes a line and saves the list without it", async () => {
+  it("hydration alone never saves", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
-      <PreferencesForm
-        preferences={{ assistant_notes: ["Keep", "Drop me"] }}
-        onSave={onSave}
-        loading={false}
-      />
+      <PreferencesForm preferences={{ assistant_notes: ["Keep"] }} onSave={onSave} loading={false} />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Remove note: Drop me" }));
-    expect(screen.queryByText("Drop me")).toBeNull();
-    await act(async () => {
-      vi.advanceTimersByTime(900);
-    });
-    expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ assistant_notes: ["Keep"] })
-    );
-  });
-
-  it("an empty note is never added", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
-    expect(
-      (screen.getByRole("button", { name: "Add note" }) as HTMLButtonElement).disabled
-    ).toBe(true);
-    fireEvent.change(screen.getByLabelText("New note for your assistant"), {
-      target: { value: "   " },
-    });
-    fireEvent.keyDown(screen.getByLabelText("New note for your assistant"), { key: "Enter" });
     await act(async () => {
       vi.advanceTimersByTime(2000);
     });
