@@ -45,7 +45,7 @@ const ev = (id: number, application_id: number, event_type: string) => ({
 });
 const queued = {
   applications: [
-    { id: 11, queue_position: 1, job_title: "Data Analyst", job_company: "Acme", preflight: { has_cv: false, kit_missing: ["a", "b"] } },
+    { id: 11, queue_position: 1, job_title: "Data Analyst", job_company: "Acme", origin: "ai_hunt", preflight: { has_cv: false, kit_missing: ["a", "b"] } },
     { id: 12, queue_position: 2, job_title: "Engineer", job_company: "Beta", preflight: {} },
   ],
   total: 2,
@@ -120,7 +120,8 @@ describe("BatchApplyPanel", () => {
 
     it("starts auto for a while after one confirm", async () => {
       render(<BatchApplyPanel />);
-      fireEvent.change(await screen.findByTestId("auto-grant-count"), { target: { value: "3" } });
+      fireEvent.click(await screen.findByTestId("mode-while"));
+      fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "3" } });
       const later = new Date(Date.now() + 2 * 3600_000);
       const pad = (n: number) => String(n).padStart(2, "0");
       const local = `${later.getFullYear()}-${pad(later.getMonth() + 1)}-${pad(later.getDate())}T${pad(later.getHours())}:${pad(later.getMinutes())}`;
@@ -128,7 +129,7 @@ describe("BatchApplyPanel", () => {
       fireEvent.click(screen.getByTestId("auto-grant-save"));
       fireEvent.click(screen.getByTestId("auto-grant-confirm"));
       await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
-      expect(updateProfileFields.mock.calls[0][0]).toHaveLength(2);
+      expect(updateProfileFields.mock.calls[0][0]).toHaveLength(4);
     });
 
     it("shows a retry when the rules cannot load", async () => {
@@ -150,13 +151,16 @@ describe("BatchApplyPanel", () => {
       expect(screen.getByTestId("batch-row-problems-11")).toHaveTextContent("Missing 2 answers");
       expect(screen.getByTestId("batch-row-problems-11")).toHaveTextContent("No CV yet");
       expect(screen.queryByTestId("batch-row-problems-12")).toBeNull();
+      // where each job came from
+      expect(screen.getByTestId("batch-row-origin-11")).toHaveTextContent("AI hunt");
+      expect(screen.queryByTestId("batch-row-origin-12")).toBeNull();
     });
 
     it("says so when the batch is empty", async () => {
       listApplications.mockResolvedValue({ applications: [], total: 0, queue_summary: null });
       render(<BatchApplyPanel />);
       expect(await screen.findByTestId("batch-queue-empty")).toHaveTextContent(
-        "No jobs in your batch. Add one from any application page with Add to batch.",
+        "Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt: the jobs it finds come here.",
       );
     });
 

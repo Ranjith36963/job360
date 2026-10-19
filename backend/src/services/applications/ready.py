@@ -225,8 +225,11 @@ def _answer_rows(
         answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
                         "changed_to": changed_to})
         if changed_to is not None:
-            flags.append(_flag("changed", f"You changed an answer: {a['question']} {_DASH} your assistant must "
-                                          "fill the form again before it can go", key))
+            # Owner decision 2026-10-19: the user's own word IS verified, and Send stays open -
+            # check_submit hands the assistant this answer to type before it submits.
+            answers[-1]["verified"] = True
+            flags.append(_flag("changed", f"You changed an answer: {a['question']} {_DASH} your assistant types "
+                                          "your answer before it sends", key))
             continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
         if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
@@ -235,6 +238,32 @@ def _answer_rows(
         if src in ("memory", "approved") and key and key not in have and not verified:
             flags.append(_flag("not_in_memory", f"No longer in memory: {a['question']}", key))
     return answers, flags
+
+
+async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[dict[str, str]]:
+    """The answers the user changed on the newest filled form: ``[{question, answer}]``
+    with the USER's answer, which the assistant must type before it submits. Read
+    from the newest ``form_filled`` whether or not the user already said yes."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_filled' ORDER BY id DESC LIMIT 1",
+        (app_row["id"], user_id),
+    )
+    row = await cur.fetchone()
+    typed = _json(row["payload"]).get("answers") if row is not None else None
+    if not isinstance(typed, list) or not typed:
+        return []
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    country = (str(app_row.get("job_country") or "").strip().upper()) or None
+    blocks, _ = kit.compute_answers(profile, overlay, country)
+    have = {i["key"]: i for block in blocks.values() for i in block}
+    answers, _ = _answer_rows(typed, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    return [{"question": a["question"], "answer": str(a["changed_to"])} for a in answers if a["changed_to"] is not None]
 
 
 async def ready_cards(
