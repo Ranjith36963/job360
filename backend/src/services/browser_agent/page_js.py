@@ -110,9 +110,11 @@ FOCUS_IN_LIST_JS = r"""
   const el = document.activeElement;
   if (!el || el === document.body) return false;
   const role = (el.getAttribute('role') || '').toLowerCase();
-  if (['combobox', 'option', 'listbox', 'searchbox'].includes(role)) return true;
-  if (el.getAttribute('aria-autocomplete') || el.getAttribute('aria-activedescendant')) return true;
-  if (el.getAttribute('aria-expanded') === 'true') return true;
-  return !!el.closest('[role=listbox], [role=combobox]');
+  // Focus on an option of an open list: Enter picks it.
+  if (role === 'option' || el.closest('[role=listbox]')) return true;
+  // A suggestion box counts only while its list is OPEN: a closed combobox inside a form
+  // submits on Enter like any field (implicit submission), which would skip check_submit.
+  const box = el.closest('[role=combobox]') || el;
+  return box.getAttribute('aria-expanded') === 'true' || !!el.getAttribute('aria-activedescendant');
 }
 """
