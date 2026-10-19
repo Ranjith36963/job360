@@ -94,6 +94,9 @@ SNAPSHOT_JS = r"""
       autocomplete: el.getAttribute('autocomplete') || '', in_form: !!el.closest('form'),
     };
     if (viaLabel) item.via_label = true;
+    // The site's own "this answer is wrong / missing" mark: Workday sets it only after Save
+    // (ats-autofill skills/fill-app/dom-toolkit.js:431-437).
+    if (el.getAttribute('aria-invalid') === 'true') item.invalid = true;
     if (isPassword) item.value = '';
     else if (tag === 'select') {
       item.value = el.selectedOptions.length ? clip(el.selectedOptions[0].text, maxName) : '';
@@ -209,4 +212,33 @@ LEVER_CHECK_JS = r"""
     cookie_banner: !!(r && r.width > 1 && r.height > 1 && getComputedStyle(banner).visibility !== 'hidden'),
   };
 }
+"""
+
+# Workday's page position: its progress bar announces "current step 2 of 7" for screen readers
+# (offeros apps/extension/src/lib/autofill/wizard-dom.ts:6-12; packages/autofill/src/wizard.ts:36).
+FORM_STEP_JS = r"""
+() => {
+  const bar = document.querySelector('[data-automation-id="progressBar"]');
+  if (!bar) return null;
+  const re = /^(current\s+)?step\s+(\d+)\s+of\s+(\d+)$/i;
+  let current = 0, total = 0, first = 0;
+  for (const el of bar.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    const m = re.exec((el.textContent || '').trim());
+    if (!m) continue;
+    total = Math.max(total, Number(m[3]));
+    if (!first) first = Number(m[2]);
+    if (m[1]) current = Number(m[2]);
+  }
+  if (!total) return null;
+  return { current: current || first, total };
+}
+"""
+
+# A Workday field: every one sits in a div[data-automation-id^="formField-"] (offeros
+# apps/extension/src/lib/autofill/recipes.ts:14-16). Workday ignores script-set values, so these are
+# typed as real keys and then left (blur), which is when Workday commits and checks them
+# (ats-autofill skills/fill-app/workday.md:11-17; career-ops modes/apply.md:454).
+IS_WORKDAY_FIELD_JS = r"""
+(el) => !!el.closest('[data-automation-id^="formField-"]')
 """

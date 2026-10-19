@@ -32,7 +32,9 @@ from src.services.browser_agent.egress import EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     ELEMENT_FACTS_JS,
     FOCUS_IN_LIST_JS,
+    FORM_STEP_JS,
     IS_TYPEAHEAD_JS,
+    IS_WORKDAY_FIELD_JS,
     LEVER_CHECK_JS,
     NATIVE_SET_JS,
     SHOWN_VALUE_JS,
@@ -40,7 +42,7 @@ from src.services.browser_agent.page_js import (
     TICK_VIA_LABEL_JS,
 )
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
-from src.services.browser_agent.sites import outcome_for, site_for
+from src.services.browser_agent.sites import is_honeypot, looks_like_application, outcome_for, site_for
 from src.services.fetch.guard import ResolveFn
 
 logger = logging.getLogger("job360.services.browser_agent")
@@ -256,17 +258,26 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
     return await look(s)
 
 
+# Workday answers longer than this are filled, not keyed: keying 3,000 characters takes over a minute.
+KEYED_MAX_CHARS = 200
+
+
 async def _type_into(loc: Any, text: str) -> str:
-    """Type and read back. Suggestion boxes key by key; plain fields fill(), then the native setter
-    if the site's framework did not take it (one bounded heal, never a loop)."""
-    if await loc.evaluate(IS_TYPEAHEAD_JS):
+    """Type and read back. Suggestion boxes key by key; Workday's short fields key by key, then blur
+    so Workday commits them; other fields fill(), then the native setter if the site's framework did
+    not take it (one bounded heal, never a loop)."""
+    typeahead = bool(await loc.evaluate(IS_TYPEAHEAD_JS))
+    workday = not typeahead and bool(await loc.evaluate(IS_WORKDAY_FIELD_JS))
+    if typeahead or (workday and len(text) <= KEYED_MAX_CHARS):
         await loc.fill("")
         await loc.press_sequentially(text, delay=25)
     else:
         await loc.fill(text)
     shown = str(await loc.evaluate(SHOWN_VALUE_JS))
-    if shown != text and not await loc.evaluate(IS_TYPEAHEAD_JS):
+    if shown != text and not typeahead:
         shown = str(await loc.evaluate(NATIVE_SET_JS, text))
+    if workday:
+        await loc.blur()
     return shown
 
 
@@ -421,6 +432,16 @@ async def look(s: Session) -> dict[str, Any]:
         "elements": elements,
         "text": _wrap_untrusted(text),
     }
+    try:
+        step = await asyncio.wait_for(page.evaluate(FORM_STEP_JS), FRAME_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 - a page mid-navigation: no step this read
+        step = None
+    if step:
+        out["form_step"] = step
+    for e in elements:
+        if is_honeypot(str(e.get("name") or "")):
+            e["leave_blank"] = True
+    out["application_form"] = looks_like_application(elements)
     site = site_for(page.url, frame_urls[1:])
     if site is not None:
         out["site"] = {"name": site.name, "tips": list(site.tips)}
@@ -600,6 +621,10 @@ async def _act(
             raise BrowserError(
                 "refused", "password_field",
                 "That is a password box. Job360 never types a password: the user signs in themselves.",
+            )
+        if text and is_honeypot(str((await loc.evaluate(ELEMENT_FACTS_JS)).get("name") or "")):
+            raise BrowserError(
+                "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
             )
         if len(text) > MAX_TYPE_CHARS:
             raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")

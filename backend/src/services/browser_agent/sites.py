@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
 
@@ -27,7 +27,8 @@ class Site:
 # Host lists: ApplYourself src/discovery/sources/ats/registry.py:56-95 (greenhouse, lever,
 # ashby, workday); ats-autofill skills/fill-app/workday.md:8 (myworkdaysite); offeros
 # apps/extension/src/lib/autofill/recipes.ts:48-53 (icims, never login.icims.com); PINGx969
-# packages/field-detector/src/adapters.ts:323-325 (smartrecruiters). A suffix match on the
+# packages/field-detector/src/adapters.ts:323-325 (smartrecruiters), :519-520 (teamtailor; tips from
+# its e2e/mock-site/ats/teamtailor.html:11-13, inspected live by its author). A suffix match on the
 # host, never a substring of the URL (registry.py:24-26).
 SITES: tuple[Site, ...] = (
     Site("greenhouse", ("greenhouse.io",), (
@@ -48,7 +49,11 @@ SITES: tuple[Site, ...] = (
         "One application per email per company: a second job at the same company can merge. Ask the user.",
     )),
     Site("workday", ("myworkdayjobs.com", "myworkdaysite.com"), (
-        "Many pages: fill one, read every value back, then Save and Continue. Errors only show after Save.",
+        "Many pages (form_step says which): fill one, read every value back, then Save and Continue.",
+        "Errors show only after Save: fix every field marked invalid, then Save again. Still stuck after 2 "
+        "Saves: stop and record blocked.",
+        "Dates are separate Month and Year boxes: type the real numbers.",
+        "Work and school entries: Add one, fill it, then Add the next (the new one is the last on the page).",
         "A sign-in or create-account page is Needs you (account_needed); never make an account.",
     )),
     Site("smartrecruiters", ("smartrecruiters.com", "smartr.me"), (
@@ -58,6 +63,11 @@ SITES: tuple[Site, ...] = (
         "The form is often inside an iframe; refs work across frames as usual.",
         "A sign-in page is Needs you; never make an account.",
     ), deny_hosts=("login.icims.com",)),
+    Site("teamtailor", ("teamtailor.com",), (
+        "Required fields end in a hidden \"Required\": the field name may read \"First nameRequired\".",
+        "Yes/No questions start with a short title before the question: answer the question itself.",
+        "Consent boxes: the privacy one is needed to apply; future-job contact is the user's choice, so ask.",
+    )),
 )
 
 
@@ -119,3 +129,29 @@ def outcome_for(site: Optional[Site], url: str, text: str) -> Outcome:
     lever_thanks = site is not None and site.name == "lever" and path.endswith("/thanks")
     confirmed = not refused and (lever_thanks or bool(_CONFIRMED.search(text or "")))
     return Outcome(confirmed, refused)
+
+
+# Any career page, agency sites included (recruitment-agency forms: NOT IN REFERENCE, so only the
+# generic rules apply there).
+# "Is this the form, or still the ad?": a file box, or 3+ labelled fields (offeros
+# apps/extension/src/lib/autofill/recipes.ts:104-126, wrong on the safe side on purpose).
+MIN_LABELLED_FIELDS = 3
+_FIELD_TAGS = ("input", "select", "textarea")
+_NOT_FIELD_TYPES = ("submit", "button", "image", "reset", "hidden")
+# A trap field for bots: its label says to leave it empty (ats-autofill skills/fill-app/dom-toolkit.js:790).
+# "Leave blank if none" is an ordinary optional field, not a trap.
+_HONEYPOT = re.compile(
+    r"leave (?:this|the)?\s*(?:field|box)?\s*blank(?!\s*(?:if|unless|when|for)\b)|do ?n['o]?t fill", re.IGNORECASE
+)
+
+
+def looks_like_application(elements: Sequence[dict[str, Any]]) -> bool:
+    fields = [
+        e for e in elements
+        if e.get("tag") in _FIELD_TAGS and e.get("type") not in _NOT_FIELD_TYPES and str(e.get("name") or "").strip()
+    ]
+    return any(e.get("type") == "file" for e in fields) or len(fields) >= MIN_LABELLED_FIELDS
+
+
+def is_honeypot(name: str) -> bool:
+    return bool(_HONEYPOT.search(name or ""))
