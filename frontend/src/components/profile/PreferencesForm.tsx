@@ -230,97 +230,6 @@ function TagInput({
   );
 }
 
-// ── Assistant notes ────────────────────────────────────────
-// "Things your assistant should know" — standing instructions, one short line
-// each. The agent reads them first on every get_profile. Saved through the
-// normal debounced preferences save (no button of its own).
-
-// Mirrors the backend's PROFILE_NOTE_MAX_CHARS default. The server is the
-// real guard (a longer note is a 422 naming the limit); this only stops the
-// input from accepting what the server would refuse.
-const NOTE_MAX_CHARS = 200;
-
-export function AssistantNotes({
-  notes,
-  onChange,
-  trailing,
-  footer,
-}: {
-  notes: string[];
-  onChange: (notes: string[]) => void;
-  trailing?: React.ReactNode;
-  footer?: React.ReactNode;
-}) {
-  const [draft, setDraft] = useState("");
-  const add = () => {
-    const text = draft.trim();
-    if (!text) return;
-    if (!notes.some((n) => n.toLowerCase() === text.toLowerCase())) {
-      onChange([...notes, text]);
-    }
-    setDraft("");
-  };
-  return (
-    <div className="space-y-2" data-testid="assistant-notes">
-      <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-        Things your assistant should know
-        {trailing}
-      </Label>
-      <p className="text-xs text-muted-foreground -mt-1">
-        One line each — e.g. &quot;Never apply to recruitment agencies&quot;. Your
-        assistant reads these first, every time.
-      </p>
-      {notes.length > 0 && (
-        <ul className="space-y-1.5">
-          {notes.map((note, i) => (
-            <li
-              key={`${note}-${i}`}
-              className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm"
-            >
-              <span className="break-words">{note}</span>
-              <button
-                type="button"
-                aria-label={`Remove note: ${note}`}
-                onClick={() => onChange(notes.filter((_, j) => j !== i))}
-                className="shrink-0 rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="flex gap-2">
-        <Input
-          value={draft}
-          maxLength={NOTE_MAX_CHARS}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add();
-            }
-          }}
-          placeholder="Add a line for your assistant"
-          aria-label="New note for your assistant"
-          className="flex-1"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          onClick={add}
-          disabled={!draft.trim()}
-          aria-label="Add note"
-          className="shrink-0"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      {footer}
-    </div>
-  );
-}
-
 // ── Normalization helpers ──────────────────────────────────
 // One source of truth for turning either the raw `preferences` prop OR the
 // live form state into a canonical PreferencesRequest. Auto-save compares a
@@ -432,7 +341,6 @@ const ALL_PREFERENCE_FIELDS: { field: string; label: string }[] = [
   { field: "dealbreakers", label: "Dealbreakers" },
   { field: "avoid_companies", label: "Companies to avoid" },
   { field: "about_me", label: "About Me" },
-  { field: "assistant_notes", label: "Things your assistant should know" },
 ];
 
 // ── Preferences Form ───────────────────────────────────────
@@ -947,17 +855,9 @@ export function PreferencesForm({
           />
         </div>
 
-        <Separator />
-
-        {/* ── Things your assistant should know ────
-            Standing instructions (preferences.assistant_notes). The agent
-            reads them first on every get_profile; empty = nothing to say
-            (rule #29). */}
-        <AssistantNotes
-          notes={assistantNotes}
-          onChange={setAssistantNotes}
-          trailing={markOf("assistant_notes")}
-        />
+        {/* "Things your AI assistant should know" lives on Home only (owner,
+            2026-10-19). The notes are still hydrated and sent back in every
+            save above, so a Profile save never wipes them. */}
 
         {/* Excluded Companies removed entirely (not just the UI control) —
             a grep of backend/src turned up ZERO consumers of the
