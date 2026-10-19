@@ -66,9 +66,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -1404,6 +1406,14 @@ def judge_threads(nodes: list[dict], has_next: bool) -> list[str]:
 # list whatever the source was.
 REVIEWER_CHECK = "CodeRabbit"
 REVIEW_SKIPPED_RE = re.compile(r"review\s+skipped", re.IGNORECASE)
+# "Review rate limited" (2026-10-19). CodeRabbit's free OSS tier allows about
+# one review an hour; past that it posts `success | Review rate limited` and
+# reviews nothing. This cage read that as a pass, so "a reviewer looked" was
+# true on paper for PRs nobody looked at. It now waits, and asks again.
+REVIEW_RATE_LIMITED_RE = re.compile(r"rate[\s-]*limit", re.IGNORECASE)
+REVIEW_COMPLETED_RE = re.compile(r"review\s+completed", re.IGNORECASE)
+# Every reason the arm can clear by asking CodeRabbit again carries this.
+ASK_AGAIN = "the arm asks it again"
 
 
 def judge_review_evidence(check_runs: list[dict]) -> list[str]:
@@ -1444,9 +1454,15 @@ def judge_review_evidence(check_runs: list[dict]) -> list[str]:
                 f"no reviewer has looked at this PR: {REVIEWER_CHECK} reported \"{title}\" — a "
                 f"SKIPPED review produces no findings, and no findings is exactly what an "
                 f"answered review looks like from the outside. This cage will not tell the two "
-                f"apart by guessing the permissive one. "
-                f"FIX: enable CodeRabbit reviews for this repository (app settings), or wait for "
-                f"it to run, then re-judge.")
+                f"apart by guessing the permissive one, so the review has not finished and "
+                f"{ASK_AGAIN} (at most every 30 minutes). "
+                f"FIX: nothing; or post `@coderabbitai review` yourself.")
+        elif REVIEW_RATE_LIMITED_RE.search(title):
+            reasons.append(
+                f"no reviewer has looked at this PR yet: {REVIEWER_CHECK} reported \"{title}\" — "
+                f"it hit its review limit and reviewed nothing, so the review has not finished "
+                f"and {ASK_AGAIN} (at most every 30 minutes) until the limit resets. "
+                f"FIX: nothing; or raise the CodeRabbit plan's limit.")
     return reasons
 
 
@@ -1465,6 +1481,17 @@ def review_evidence(pr: int) -> list[dict]:
         gh(["api", f"repos/{REPO}/commits/{sha}/check-runs?per_page={PER_PAGE}"])
     ).get("check_runs") or [])
     combined = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/status"]))
+    latest = {st.get("context"): st for st in (combined.get("statuses") or [])}
+    cr = latest.get(REVIEWER_CHECK)
+    if cr is not None and (REVIEW_SKIPPED_RE.search(cr.get("description") or "")
+                           or REVIEW_RATE_LIMITED_RE.search(cr.get("description") or "")):
+        # The combined status shows only the LATEST CodeRabbit line. A later
+        # "rate limited" (someone asked again) must not erase a review that
+        # really finished on this same commit, so read the commit's history.
+        history = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/statuses?per_page={PER_PAGE}"]))
+        if any(h.get("context") == REVIEWER_CHECK
+               and REVIEW_COMPLETED_RE.search(h.get("description") or "") for h in history):
+            cr["description"] = "Review completed (earlier on this commit)"
     for st in (combined.get("statuses") or []):
         state = st.get("state") or ""
         runs.append({
@@ -1868,6 +1895,37 @@ def merge_cage_required(base_ref: str) -> bool:
                                 STATUS_CONTEXT)
     except Exception:
         return False
+
+
+ASK_AGAIN_EVERY_S = 30 * 60
+
+
+def ask_reviewer_again(pr: int, now: float | None = None) -> str:
+    """Post `@coderabbitai review` as the owner, at most every 30 minutes. -> what happened.
+
+    Only with CODERABBIT_TRIGGER_TOKEN (the owner's own token; CodeRabbit is not
+    known to honour a bot's comment). Never raises: asking is a courtesy that
+    makes the REVIEW cage satisfiable, never a verdict.
+    """
+    token = os.environ.get("CODERABBIT_TRIGGER_TOKEN", "")
+    if not token:
+        return "not asked: CODERABBIT_TRIGGER_TOKEN is not set"
+    try:
+        comments = json.loads(gh(["api", f"repos/{REPO}/issues/{pr}/comments?per_page={PER_PAGE}"]))
+        asked = [c.get("created_at") or "" for c in comments
+                 if (c.get("body") or "").strip().lower().startswith("@coderabbitai review")]
+        if asked:
+            last = datetime.fromisoformat(max(asked).replace("Z", "+00:00")).timestamp()
+            if (now if now is not None else time.time()) - last < ASK_AGAIN_EVERY_S:
+                return "not asked: it was asked less than 30 minutes ago"
+        env = {**os.environ, "GH_TOKEN": token}
+        proc = subprocess.run(["gh", "api", f"repos/{REPO}/issues/{pr}/comments",
+                               "-f", "body=@coderabbitai review"], capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=60, env=env,
+                              check=False)
+        return "asked again" if proc.returncode == 0 else f"could not ask: {proc.stderr.strip()[:120]}"
+    except Exception as exc:
+        return f"could not ask: {type(exc).__name__}: {exc}"
 
 
 def blocks_of(verdicts: list[Verdict]) -> list[str]:
@@ -2586,6 +2644,16 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # A reviewer is matched by EXACT name — B21's lesson, applied before it bites
     # here: a substring match would let `CodeRabbit (experimental)` or
     # `pre-CodeRabbit` stand in for the reviewer the owner's gate names.
+    _rev_limited = {"name": REVIEWER_CHECK, "status": "completed", "conclusion": "success",
+                    "output": {"title": "Review rate limited"}}
+    red("a RATE-LIMITED review is refused: it reviewed nothing (2026-10-19)",
+        judge_review_evidence(done + [_rev_limited]), "hit its review limit", RE)
+    ok("...and a rate-limited or skipped review is a WAIT the arm can clear by asking again",
+       all(status_for(False, [Verdict("REVIEW", "fail", judge_review_evidence(done + [r]))])[0]
+           == "pending" and ASK_AGAIN in judge_review_evidence(done + [r])[0]
+           for r in (_rev_limited, _rev_skipped)),
+       "a reviewer that has not looked was posted as a final failure, or nobody re-asks it",
+       RE + ["status_for"])
     ok("a similarly-named check cannot stand in for the reviewer",
        bool(judge_review_evidence(done + [{**_rev_looked, "name": "CodeRabbit-lite"}])),
        "a check whose name merely CONTAINS the reviewer's satisfied the evidence test", RE)
@@ -2759,6 +2827,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         def skipped_gh(a: list[str]) -> str:
             if " ".join(a).endswith("/status"):
                 return _statuses("Review skipped: manual review required for this OSS repository")
+            if "/statuses?" in " ".join(a):
+                return json.dumps([{"context": REVIEWER_CHECK, "description":
+                                    "Review skipped: manual review required for this OSS repository"}])
             return fake_gh(a)
 
         globals()["gh"] = skipped_gh
@@ -2768,6 +2839,27 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
            and any("no reviewer has looked" in r for r in v_vacuous.reasons),
            f"{v_vacuous.status}: {v_vacuous.reasons} — 'nobody looked' was read as "
            f"'nothing found', which is the whole hole", ["check_review"])
+
+        # A later "rate limited" (someone asked again) must not erase a review
+        # that really finished on the same commit — and must refuse when none did.
+        def limited_gh(history: list[str]):
+            def _gh(a: list[str]) -> str:
+                j = " ".join(a)
+                if j.endswith("/status"):
+                    return _statuses("Review rate limited")
+                if "/statuses?" in j:
+                    return json.dumps([{"context": REVIEWER_CHECK, "description": d} for d in history])
+                return fake_gh(a)
+            return _gh
+        globals()["gh"] = limited_gh(["Review rate limited", "Review completed", "Review in progress"])
+        v_kept = check_review(1)
+        globals()["gh"] = limited_gh(["Review rate limited", "Review in progress"])
+        v_none = check_review(1)
+        ok("a rate limit after a FINISHED review keeps it; one with no finished review refuses",
+           v_kept.status == "pass" and v_none.status == "fail"
+           and any("hit its review limit" in r for r in v_none.reasons),
+           f"kept={v_kept.status}:{v_kept.reasons} none={v_none.status}:{v_none.reasons}",
+           ["check_review", "judge_review_evidence"])
         globals()["gh"] = fake_gh
         # `done` is the REQUIRED_CHECKS list, which is not the same set as the
         # tag checks — so a harness lane whose `ci` tag names jobs this fake
@@ -3538,7 +3630,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        and not requires_context(None, "merge-cage"),
        "requires_context answered yes for a ruleset that does not require merge-cage",
        ["requires_context"])
-    _gen = sorted(GENERATED_FILES)[0] if GENERATED_FILES else ""
+    _gen = min(GENERATED_FILES) if GENERATED_FILES else ""
     _rs_read, _rs_ex = review_surface(
         [{"filename": _gen, "additions": 500, "deletions": 0},
          {"filename": _gen + ".py", "additions": 7, "deletions": 0}])
@@ -4028,17 +4120,35 @@ def main(argv: list[str] | None = None) -> int:
         # can know it, so it stays `unknown` for a run that did not touch the
         # queue at all — and a run that changed nothing announces nothing.
         queue_state = QUEUE_UNKNOWN
+        # THE OWNER'S SWITCH (2026-10-19). Repository variable AUTO_MERGE: `off`
+        # stops every machine merge — nothing is queued and anything queued is
+        # taken back. Anything else (or unset) is on. Only the owner sets it.
+        switch_off = os.environ.get("AUTO_MERGE_SWITCH", "on").strip().lower() == "off"
+        if args.queue and switch_off:
+            print(f"SWITCHED OFF: the owner set AUTO_MERGE=off, so PR #{args.pr} is not queued "
+                  f"and is taken out of the queue if it was in it.")
+            allowed_to_queue = False
+        else:
+            allowed_to_queue = allowed
         # HOLD, DON'T WITHDRAW, once GitHub itself waits on this verdict. With
         # `merge-cage` required, a refused PR cannot merge while it stays queued,
-        # and leaving it queued is what lets it land the moment a later run says
-        # yes. Until the owner adds that rule, the old withdrawal still runs.
-        held = bool(args.queue and not allowed
+        # so the arm keeps auto-merge ON for every PR its lane lets a machine
+        # decide ("always on" — the owner, 2026-10-19), and it lands the moment
+        # a later run says yes. Until the owner adds that rule, the old
+        # withdrawal still runs.
+        held = bool(args.queue and not allowed and not switch_off
                     and merge_cage_required(str(meta.get("base") or "")))
         if held:
-            print(f"HELD: PR #{args.pr} stays in GitHub's auto-merge queue. `{STATUS_CONTEXT}` "
-                  f"is a required check on `{meta.get('base')}`, and this run reports it as "
-                  f"not passing, so GitHub cannot merge it until a later run says it passes.")
-        if args.queue and not allowed and not held:
+            print(f"HELD: PR #{args.pr} is held by `{STATUS_CONTEXT}`, a required check on "
+                  f"`{meta.get('base')}`; GitHub cannot merge it until a later run says it passes.")
+            if (lane_verdict or {}).get("auto_merge"):
+                ok_arm, detail_arm, _ = request_auto_merge(args.pr)
+                print(f"ALWAYS ON: auto-merge {'is on' if ok_arm else 'could not be turned on'} "
+                      f"for PR #{args.pr} — {detail_arm}")
+        if args.queue and not switch_off and not allowed and any(
+                ASK_AGAIN in b for b in blocks):
+            print(f"REVIEWER: {ask_reviewer_again(args.pr)}")
+        if args.queue and (switch_off or not allowed) and not held:
             ok_out, detail_out, queue_state = withdraw_auto_merge(args.pr)
             if ok_out:
                 print(f"WITHDRAWN: PR #{args.pr} is not allowed, so it is out of GitHub's "
@@ -4051,7 +4161,7 @@ def main(argv: list[str] | None = None) -> int:
                       f"`gh pr merge {args.pr} --disable-auto`.", file=sys.stderr)
                 print(f"::error::could not withdraw PR #{args.pr} from the auto-merge queue "
                       f"after the cage refused it")
-        if args.queue and allowed:
+        if args.queue and allowed_to_queue:
             ok_queue, detail, queue_state = request_auto_merge(args.pr)
             if ok_queue:
                 queued = True
