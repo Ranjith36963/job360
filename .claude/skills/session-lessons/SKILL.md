@@ -24,6 +24,12 @@ delete a lesson; if one stops being true, say so on its line and why.
 
 ## Watching PRs
 
+- 2026-10-19: `drift-check` went red on every PR at midnight because CLAUDE.md and
+  backend/CLAUDE.md passed the 45-day `last-verified` limit. I re-verified them and
+  bumped the stamps INSIDE product PR #888. Every `**/CLAUDE.md` is human-only
+  (merge-policy.yml:56), so auto-merge.yml disarmed #888 50 s after it was armed, and
+  the owner had to merge by hand. **Rule:** a CLAUDE.md edit, even a date stamp, is its
+  own PR, opened alone, with the owner told it needs their click.
 - 2026-10-15: subscribing to PR activity on four PRs flooded the conversation.
   Every bot comment (merge-cage, lane advice, CodeRabbit rate-limit edits, WIP
   parking) arrived as a long event, and each subscription re-sent a long
