@@ -76,6 +76,7 @@ permissions:
   contents: write # the queue request
   pull-requests: write # `gh pr merge --auto`, and the comment when it refuses
   checks: read
+  statuses: write # the `merge-cage` commit status, the verdict GitHub waits on
 
 concurrency:
   # Never two arms on one PR. `cancel-in-progress: false` because a half-run
@@ -520,6 +521,12 @@ jobs:
           PR: ${{ matrix.pr }}
           BASE_JSON: ${{ steps.baseline.outputs.json }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          # The owner's switch: repository variable AUTO_MERGE. `off` stops every
+          # machine merge and takes back anything queued; unset or `on` is on.
+          AUTO_MERGE_SWITCH: ${{ vars.AUTO_MERGE || 'on' }}
+          # The owner's token, to ask CodeRabbit again when it skipped or hit its
+          # limit (it is not known to honour a bot's comment). Same secret as pr-advisor.yml.
+          CODERABBIT_TRIGGER_TOKEN: ${{ secrets.CODERABBIT_TRIGGER_TOKEN }}
         run: |
           set -euo pipefail
           set +e
@@ -529,7 +536,8 @@ jobs:
             --lane lane.json \
             --queue \
             --slack \
-            --verdict-json verdict.json | tee cage-output.txt
+            --verdict-json verdict.json \
+            --commit-status status.json | tee cage-output.txt
           rc=${PIPESTATUS[0]}
           set -e
 
@@ -545,6 +553,38 @@ jobs:
             4) echo "::error::PR #$PR: merge_cage was called wrongly by this workflow."; exit 1 ;;
             *) echo "::error::PR #$PR: merge_cage exited $rc — an undefined code."; exit 1 ;;
           esac
+
+      # THE VERDICT WHERE GITHUB CAN WAIT ON IT (2026-10-19). The `merge-cage`
+      # commit status, on the exact commit the cage judged. Posted with
+      # GITHUB_TOKEN on purpose: a status posted with MERGE_TOKEN fires this
+      # file's own `status` trigger and wakes the arm again, forever. No verdict
+      # (the cage broke, or the judge step died) is posted as `error`, never
+      # left silent, because a silent check is one GitHub may treat as absent.
+      - name: Report the verdict as the merge-cage status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ matrix.pr }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          state=""; desc=""; sha=""
+          if [ -s status.json ]; then
+            state=$(jq -r '.state // empty' status.json 2>/dev/null || true)
+            desc=$(jq -r '.description // empty' status.json 2>/dev/null || true)
+            sha=$(jq -r '.sha // empty' status.json 2>/dev/null || true)
+          fi
+          # A missing, unreadable or unknown verdict is `error`, never silence.
+          case "$state" in success|pending|failure|error) ;; *)
+            state=error
+            desc="the merge cage did not reach a verdict; see the run" ;;
+          esac
+          [ -n "$sha" ] || sha=$(gh api "repos/$GH_REPO/pulls/$PR" --jq .head.sha)
+          [ -n "$sha" ] || { echo "::error::no commit to post merge-cage on for PR #$PR"; exit 1; }
+          gh api "repos/$GH_REPO/statuses/$sha" -f state="$state" -f context=merge-cage \
+            -f description="${desc:0:140}" -f target_url="$RUN_URL" > /dev/null
+          echo "merge-cage = $state on \`${sha:0:7}\`: $desc" >> "$GITHUB_STEP_SUMMARY"
 
       # HONESTY RULE: every PR this lane looks at gets one line saying what
       # happened and why. A queue manager that silently skips is how work rots
