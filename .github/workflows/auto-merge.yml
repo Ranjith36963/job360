@@ -100,6 +100,21 @@ jobs:
   # made six PRs look broken when none were.
   precheck:
     name: Are the rules available yet
+    # A WAKE THAT CANNOT CHANGE A VERDICT STARTS NO RUNNER (2026-10-20). That
+    # afternoon 165 runs sat queued behind about 20 runner slots, 68 of them this
+    # cage's, and it finished none for an hour: green PRs went unjudged. A
+    # pending status, a check suite that was cancelled or went stale (a newer
+    # push replaced it), and a suite with no PR all reached `pick` and found
+    # nothing to judge, after queueing for two runners first. A skipped job
+    # takes no runner, and everything below `needs` this one. A `skipped` suite
+    # is still let through: a skipped required check counts as passing, so it
+    # can be the last thing a PR waits on.
+    if: >-
+      !(github.event_name == 'status' && github.event.state == 'pending') &&
+      !(github.event_name == 'check_suite' &&
+        (github.event.check_suite.conclusion == 'cancelled' ||
+         github.event.check_suite.conclusion == 'stale' ||
+         toJSON(github.event.check_suite.pull_requests) == '[]'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
