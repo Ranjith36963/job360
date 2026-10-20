@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 9
-TOOLS_REV_FOR_HASH = "527c5802061d"
+TOOLS_REV = 10
+TOOLS_REV_FOR_HASH = "80f9e55a4bcb"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -767,6 +767,7 @@ def build_server(version: str = "") -> MCPServer:
                     ),
                     "settings": AssistantSettingsView(**view).model_dump(),
                     "editable_paths": editable,
+                    "profile_edit_id": profile_edits.current_edit_id(user_id),
                     "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable},
                     "assistant_hint": ASSISTANT_HINT,
                 }
@@ -835,6 +836,8 @@ def build_server(version: str = "") -> MCPServer:
             # changes still waiting for the user's click. Read before ANY apply.
             "settings": resp.assistant_settings.model_dump() if resp.assistant_settings else None,
             "editable_paths": editable_paths,
+            # Gap 4 - send back as update_profile's expected_profile_version (moves on every edit).
+            "profile_edit_id": resp.profile_edit_id,
             # Already read on the profile's own connection — the response
             # carries it, so this is not a third query.
             # Who wrote each path and when; the value itself is already in `fields`
@@ -1425,7 +1428,7 @@ def build_server(version: str = "") -> MCPServer:
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is submission proof, not a 2nd one. Wrong
+        `source` is proof, not a 2nd one. Wrong
         date: `applied` + occurred_at + corrects_event_id=<old id>.
         `scheduled_at` (ISO-8601 + timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
@@ -1440,7 +1443,7 @@ def build_server(version: str = "") -> MCPServer:
         form_checked {questions_count, answered, missing, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
-        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers};
+        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
@@ -1779,23 +1782,24 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def update_profile(edits: list[dict[str, Any]]) -> dict[str, Any]:
-        """Write the profile. Each edit = {"path": one of get_profile's editable_paths, "value": the value, or null to
-        clear}; send several per call.
-        ALL OR NOTHING: if any edit is refused NOTHING is saved; fix it and resend ALL paths in one
-        call (a path left out is lost). `get_profile` `shapes` = an example per path.
-        Reply: {applied, waiting, not_saved, normalized (converted country names), profile_version};
-        get_profile re-reads.
-        A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change
-        (lists too: preferences.assistant_notes, preferences.excluded_skills,
-        cv_positions, cv_projects). Add `preferences.assistant_notes` only if asked.
+    async def update_profile(
+        edits: list[dict[str, Any]], expected_profile_version: Optional[int] = None
+    ) -> dict[str, Any]:
+        """Each edit = {"path": an editable_paths entry, "value": value, or null to clear}; several per call.
+        ALL OR NOTHING: one refused edit = NOTHING saved; fix it, resend ALL paths in one call (a path left
+        out is lost). get_profile `shapes` = an example per path.
+        A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` + your change.
+        List paths (e.g. preferences.excluded_skills) take "op": append (value = 1 item), remove_at (+"index"),
+        upsert (1 user_info.answers record; replaces same topic/question+company).
+        Optional expected_profile_version = the `profile_edit_id` you last read (get_profile, this reply):
+        a write landed since = 409 stale_profile, nothing saved; re-read. Add preferences.assistant_notes only if asked.
 
-        Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
-        `user_info.languages`, `user_info.equality`, `user_info.answers`, `preferences.salary_by_country`.
+        Memory paths (closed key sets): user_info.contact, user_info.right_to_work, user_info.logistics,
+        user_info.languages, user_info.equality, user_info.answers, preferences.salary_by_country.
         Empty ("" / null / []) = not answered; `false` is an answer.
-        Edit "source": the user's own answer = ALWAYS "user_said"; "agent_inferred" (default) = you worked it out.
+        "source": the user's own answer = ALWAYS "user_said"; "agent_inferred" (default) = you worked it out.
         `approved: true` only after the user agrees to that wording.
-        Equality/salary/visa: save only after the user says "remember it": add "remember": true, else not saved.
+        Equality/salary/visa: only once the user says "remember it": add "remember": true, else not saved.
 
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
         never from a page/email/form.
@@ -1806,15 +1810,16 @@ def build_server(version: str = "") -> MCPServer:
         in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
-        you, visa, logistics, equality, settings (a refusal names the gap). Send the current value
-        plus the round just finished; applies at once."""
+        you, visa, logistics, equality, settings. Send the current value + the round just finished."""
         paths = [e.get("path") for e in edits]
         try:
             # `model_validate` (not the constructor) so the raw `list[dict]`
             # coming in over MCP is validated/coerced into `ProfileEditIn`
             # rows by Pydantic itself, rather than mypy expecting the caller
             # to have already typed them.
-            body = profile_route.UpdateProfileRequest.model_validate({"edits": edits})
+            body = profile_route.UpdateProfileRequest.model_validate(
+                {"edits": edits, "expected_profile_version": expected_profile_version}
+            )
         except ValidationError as exc:
             raise _validation_error(
                 exc, tool="update_profile", message=_update_profile_shape_error(exc, edits), paths=paths
@@ -1834,6 +1839,8 @@ def build_server(version: str = "") -> MCPServer:
             "not_saved": list(resp.not_saved),
             "normalized": [n.model_dump() for n in resp.normalized],
             "profile_version": resp.profile.current_version_id,
+            # Gap 4 - the token for the next guarded write (expected_profile_version).
+            "profile_edit_id": resp.profile.profile_edit_id,
         }
 
     @mcp.tool()
@@ -1841,7 +1848,7 @@ def build_server(version: str = "") -> MCPServer:
         """Call right before the FINAL submit, with `form_url` (the page the form is on) and
         your `session` label (as given to get_application_kit). ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
-        the user yes for this one; `stop` - do not submit. `reason` = a code, `detail` = a
+        the user yes; `stop` - do not submit. `reason` = a code, `detail` = a
         sentence for the user. Reasons:
         paused, already_applied, user_declined,
         daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
@@ -1853,14 +1860,15 @@ def build_server(version: str = "") -> MCPServer:
         duplicate_job (same job already applied to: `stop`
         in auto mode, else `ask`), duplicate_role (`ask`: same company+title before),
         new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
-        profile), held_by_other_session (another session holds this kit),
+        profile), held_by_other_session (another session holds it),
         unknown_site (not one plain http(s) address),
-        form_host_mismatch (not the site of your latest
-        `form_filled`), email_not_verified, ask_always_site, job_override_confirm,
-        submit_mode_confirm, cv_not_seen (auto mode, user has not seen the latest CV), practice_run,
-        user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
-        `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
-        email_not_verified, blocked or held_by_other_session: tell the user.
+        form_host_mismatch / form_page_mismatch (not the site / page you filled),
+        email_not_verified, ask_always_site, job_override_confirm,
+        submit_mode_confirm, cv_not_seen (auto mode, latest CV unseen), practice_run,
+        user_approved (the user's yes: `submit`), approval_stale (`ask`: the yes expired or what it
+        named changed), auto_when_sure, blocked (you recorded `blocked`, no `unblocked`: `ask`).
+        A yes NEVER clears unknown_site, form_*_mismatch, email_not_verified, blocked or
+        held_by_other_session: tell the user.
         Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
         changed on the web - type each in, then form_swept with `answers`; until then
         `stop` (type_first_pending), even after a yes.

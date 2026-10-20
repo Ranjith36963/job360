@@ -324,6 +324,10 @@ class ProfileResponse(BaseModel):
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.
     current_version_id: Optional[int] = None
+    # Gap 4 (slice 26) — MAX(profile_edits.id) for the user, read BEFORE the profile
+    # (0 = none yet). It moves on every accepted edit, unlike `current_version_id`;
+    # send it back as `expected_profile_version` to refuse a write over a newer one.
+    profile_edit_id: int = 0
     # Slice 4 (spec R11) — the current agent-edit overlay: every path an
     # agent has SET and not since cleared, as {path, value, set_by, set_at}.
     # Provenance made visible: the web profile page renders each overlaid
