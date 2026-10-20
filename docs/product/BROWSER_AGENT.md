@@ -175,7 +175,12 @@ form; the test fails when the wait is removed.
 - **Shadow DOM:** inputs inside open shadow roots are read (SmartRecruiters builds its whole form this way).
 - **Frames:** invisible frames are skipped, at most 20 are read, and each read has 3 seconds.
 - **Untrusted text:** the page text sits inside a marker with a random code per read. A site that plants a fake end
-  marker gets it removed, so its text cannot pose as instructions.
+  marker gets it removed, so its text cannot pose as instructions. Everything else the page sets is bounded too: the
+  title (200 characters), the address (2,000), each control's tag, type, role and autocomplete (40), and the whole
+  element list (60,000 characters as JSON; the rest count in `more_elements`). A `data-j360-ref` the page wrote itself
+  (not Job360's shape, or shared by two controls) is replaced, and a ref found on two elements is refused, never guessed.
+- **A page that did not load:** `look` on Chromium's own error page (`chrome-error://`) answers `load_failed`, never an
+  empty `ok`.
 
 **Step 3, typing and dropdowns that hold (2026-10-19):**
 - **`type`** reads the value back. A suggestion box (combobox, autocomplete) is typed key by key so the site's
@@ -258,6 +263,9 @@ sends every job still waiting on your yes.
   applies with Job360's `browser` tool and your saved sign-ins, running `check_submit` (your yes shows as
   `user_approved`) before every final click.
 - **Any other assistant:** any https webhook gets the same `{"text": ...}` and bearer token.
+- **The ad's words are not instructions:** each job title and company in the text is one line of at most 120
+  characters, inside a job-list marker with a random code per start, under a line saying they are ad text. The card's
+  routine instructions say only Job360's fixed text is the instruction, and only the `application_id` is used.
 - **No cloud:** the card also gives a `/loop 5m ...` command to leave running in Claude Code on your own computer;
   it applies with your own Chrome and sign-ins (computer on).
 - **Safety:** set, changed and fired only from the website (an assistant's token gets 403, and no MCP tool reaches
