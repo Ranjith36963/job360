@@ -541,9 +541,28 @@ REGISTRY: dict[str, Guard] = {
         since="2026-08-16",
     ),
     "scripts/sentry_poll.py": Guard(
-        status="owed",
-        reason="reads the live Sentry API; needs a recorded issue payload",
-        since="2026-08-16",
+        status="drilled",
+        # WAS `owed` since 2026-08-16 ("needs a recorded issue payload"). 2026-10-20
+        # (FC-009, from PR #728): the trip rule is the pure `decide()`, and the drill
+        # runs report() under the post-merge-watch preset on fixture worlds: the 3
+        # REAL 2026-10-03 noise issues and pre-deploy noise must NOT trip; a new
+        # backend error rolls back backend, a frontend one frontend only. The live
+        # urllib GET stays undrilled: a recorded response would rot.
+        drill=[sys.executable, "scripts/sentry_poll.py", "--drill"],
+        # NEGATIVE CONTROL: the rule swapped for "ignore everything"; the must-trip
+        # worlds then fail, so this must exit non-zero.
+        negative=[sys.executable, "scripts/sentry_poll.py", "--drill", "--blind"],
+    ),
+    "scripts/deploy_settle.py": Guard(
+        status="drilled",
+        # 2026-10-20 (FC-009): post-merge-watch waits until /api/version serves THIS
+        # sha, not "any readyz 200", which the OLD container answers. Drill: the real
+        # wait loop on a fake clock/HTTP/git ("old sha still live" -> never_live), plus
+        # the workflow's own `decide` step executed by bash (never_live -> red, no
+        # rollback; frontend error -> frontend only).
+        drill=[sys.executable, "scripts/deploy_settle.py", "--drill"],
+        # NEGATIVE CONTROL: any answer counts as live (the old rule); must exit non-zero.
+        negative=[sys.executable, "scripts/deploy_settle.py", "--drill", "--blind"],
     ),
     # ── THE GUARD THIS PR WIRES UP (harness simplification slice 5, W1) ─────
     # A guard and its declaration land together, always -- same rule as the

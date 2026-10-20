@@ -12658,6 +12658,19 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VersionResponse": {
+        "properties": {
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      },
       "WhatsNewApplicationOut": {
         "properties": {
           "id": {
@@ -17170,7 +17183,7 @@
         ]
       },
       "put": {
-        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.",
+        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.\n\nAn unexpected error must not carry the plaintext token into an error report: the body is emptied of\nit, the error is logged without its traceback or message, and a plain 500 replaces it (from None).",
         "operationId": "put_trigger_api_assistant_trigger_put",
         "parameters": [
           {
@@ -17687,7 +17700,7 @@
     },
     "/api/auth/password-reset/confirm": {
       "post": {
-        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session for that user is revoked\n(forces re-login on all devices \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
+        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session, agent token and OAuth grant\nfor that user is revoked (forces re-login on all devices and reconnection\nof every assistant \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
         "operationId": "password_reset_confirm_api_auth_password_reset_confirm_post",
         "requestBody": {
           "content": {
@@ -21409,7 +21422,7 @@
     },
     "/api/readyz": {
       "get": {
-        "description": "Readiness probe \u2014 checks real dependencies before accepting traffic.\n\nChecks:\n  * db   \u2014 trivial ``SELECT 1`` through the pg connection layer.\n  * redis \u2014 ping via redis-py. Skipped (not failed) when REDIS_URL unset.\n\nReturns 200 ``{status:\"ready\", ...}`` when all checks pass,\n503 ``{status:\"not ready\", ...}`` when any required check fails.",
+        "description": "Readiness probe: can the request path get a DB connection right now?\n\nProduction borrows a connection from the SAME pool ``get_request_db`` uses\n(``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and\nruns ``SELECT 1`` under the same bound. A pinned pool (every connection\nheld) or an unreachable database answers 503, which is what Railway's deploy\nhealthcheck (``backend/railway.json``) and the uptime probe need to see.\n\n200 ``{\"status\": \"ready\", \"pool\": {size, idle, used, waiting, max}}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}``\n\nTest mode has no request-path pool (``get_request_db`` opens a fresh\nconnection per request there), so the probe opens one the same way and\n``pool`` is null. Redis is no longer checked: the service was deleted\n2026-09-02 and the auth rate limiter falls back without it.",
         "operationId": "readyz_api_readyz_get",
         "responses": {
           "200": {
@@ -22492,6 +22505,28 @@
         "summary": "Revoke Token",
         "tags": [
           "tokens"
+        ]
+      }
+    },
+    "/api/version": {
+      "get": {
+        "description": "The commit this process was deployed from (2026-10-20).\n\npost-merge-watch.yml polls this until it reports the merge SHA, so \"deployed\"\nmeans THIS commit is serving, not that the old container still answers 200\n(readyz and /health cannot tell the two apart). Railway injects\nRAILWAY_GIT_COMMIT_SHA on every GitHub deploy, and a rollback restores the old\ndeployment's variables, so after a rollback this reports the old SHA. Public and\ndata-free: the SHA is already public on GitHub. ``no-store`` so no proxy can\nserve an old SHA after the swap.",
+        "operationId": "version_api_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Version",
+        "tags": [
+          "health"
         ]
       }
     },
