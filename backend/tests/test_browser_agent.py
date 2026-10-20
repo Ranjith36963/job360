@@ -156,6 +156,10 @@ FORM = """<!doctype html><html><head><title>Apply - Acme</title></head><body>
   <button type="submit">Submit application</button>
 </form></body></html>"""
 CAPTCHA = """<!doctype html><html><body><p>Checking your browser before you continue.</p></body></html>"""
+LINKS = """<!doctype html><html><head><title>Links - Acme</title></head><body>
+<a href="/to-private">Partner site</a>
+<a href="/to-private" target="_blank">Apply in a new tab</a>
+<a href="/links" target="_blank">Careers in a new tab</a></body></html>"""
 
 
 def _chromium_available() -> bool:
@@ -185,11 +189,31 @@ async def site():
     async def to_private(_):
         raise web.HTTPFound(f"http://127.0.0.1:{site_port[0]}/form")
 
+    async def links(_):
+        return web.Response(text=LINKS, content_type="text/html")
+
+    async def to_dead(_):
+        raise web.HTTPFound("http://dead.example/")
+
+    async def to_nowhere(_):
+        raise web.HTTPFound("http://nowhere.example/")
+
+    async def fake_block(_):
+        # A site's own 403 that copies the proxy's header name and words, without the proxy's mark.
+        from src.services.browser_agent.egress import BLOCK_HEADER
+
+        return web.Response(status=403, text="Job360's browser only reaches the public internet.",
+                            headers={BLOCK_HEADER: "forged"})
+
     site_port: list[int] = []
     app = web.Application()
     app.router.add_get("/form", form)
     app.router.add_get("/captcha", captcha)
     app.router.add_get("/to-private", to_private)
+    app.router.add_get("/links", links)
+    app.router.add_get("/fake-block", fake_block)
+    app.router.add_get("/to-dead", to_dead)
+    app.router.add_get("/to-nowhere", to_nowhere)
     runner = web.AppRunner(app)
     await runner.setup()
     tcp = web.TCPSite(runner, "127.0.0.1", 0)
@@ -326,16 +350,83 @@ async def test_one_browser_per_user_and_a_cap_on_live_browsers(pool):
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_a_redirect_to_a_private_address_never_reaches_the_page(pool, site):
-    """CodeRabbit on #902: route() never sees redirect hops. The egress proxy does."""
+    """CodeRabbit on #902: route() never sees redirect hops. The egress proxy does. And its refusal is
+    never read as a loaded page (production: an open that redirected to 127.0.0.1 came back "ok" with
+    the proxy's 403 text): open, click and back answer blocked_address, as a direct private open does."""
     from src.services.browser_agent.agent import BrowserError, run
 
-    try:
-        page = await run(pool, "u1", "open", url="http://jobs.example/to-private")
-    except BrowserError as exc:
-        assert exc.reason == "load_failed"
-    else:
-        assert "Senior Engineer" not in page["text"]
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "open", url="http://jobs.example/to-private")
+    assert exc.value.status == "refused" and exc.value.reason == "blocked_address"
+    # A look at that tab says the same, never "ok" with the proxy's text.
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "look")
+    assert exc.value.reason == "blocked_address"
     assert any(d.startswith("127.0.0.1") for d in pool.egress.denied)
+
+    page = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(page, "Partner site"))
+    assert out["status"] == "refused" and out["reason"] == "blocked_address"
+    assert "text" not in out and "elements" not in out
+
+    # Only the proxy's own mark counts: a site's 403 with the same header name and words is a page.
+    page = await run(pool, "u1", "open", url="http://jobs.example/fake-block")
+    assert page["status"] == "ok" and "public internet" in page["text"]
+
+    # Back onto the refused address (history holds 127.0.0.1 itself) is refused the same way.
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    await run(pool, "u1", "click", ref=_ref(links, "Partner site"))
+    await run(pool, "u1", "open", url="http://jobs.example/links")
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "back")
+    assert exc.value.reason == "blocked_address"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_new_tab_that_redirects_to_a_private_address_is_refused_too(pool):
+    """Review of the small-truths branch: an "Apply" link with target=_blank opens a new tab, and for a
+    new tab's first load Playwright cannot name the frame, so the proxy's 403 came back "ok"."""
+    from src.services.browser_agent.agent import run
+
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(links, "Apply in a new tab"))
+    assert out["status"] == "refused" and out["reason"] == "blocked_address"
+    assert "text" not in out and "elements" not in out
+
+    # A new tab onto a public page is still a page.
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(links, "Careers in a new tab"))
+    assert out["status"] == "ok" and out["title"] == "Links - Acme"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_public_site_that_cannot_be_found_or_does_not_answer_is_load_failed_not_private(site):
+    """The proxy also refuses a host it cannot resolve or reach: that is a dead link, not a private
+    address, so it answers load_failed with no "private" wording."""
+    import asyncio
+
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    resolve, _ = _resolver({"jobs.example": "93.184.216.34", "dead.example": "93.184.216.35"})
+
+    async def open_connection(host, p):
+        if host == "93.184.216.35":
+            raise ConnectionRefusedError("nobody home")
+        return await asyncio.open_connection("127.0.0.1", site)
+
+    p = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=open_connection)
+    try:
+        for url in ("http://jobs.example/to-dead", "http://jobs.example/to-nowhere", "http://dead.example/"):
+            with pytest.raises(BrowserError) as exc:
+                await run(p, "u1", "open", url=url)
+            assert exc.value.status == "error" and exc.value.reason == "load_failed", url
+            assert "private" not in exc.value.detail, url
+    finally:
+        await p.shutdown()
 
 
 @needs_chromium
@@ -593,6 +684,8 @@ async def test_a_captcha_refusal_on_an_action_also_records_blocked(authenticated
             )
             rows = [json.loads(r["payload"]) for r in await cur.fetchall()]
         assert len(rows) == 1 and rows[0]["reason"] == "captcha" and rows[0]["page_host"] == "jobs.acme.com"
+        # "ChatGPT agent" was retired by OpenAI: the hand-off names a browser that survives renames.
+        assert "ChatGPT's own browser" in rows[0]["detail"] and "ChatGPT agent" not in rows[0]["detail"]
 
 
 @pytest.mark.asyncio
@@ -1426,6 +1519,62 @@ async def test_the_route_keeps_the_proof_screenshot_on_the_callers_application(a
     assert events[0]["via"] == "browser" and shots[0]["created_by"] == "token:claude"
 
 
+@pytest.mark.asyncio
+async def test_a_refused_submit_claim_is_a_refusal_and_nothing_is_clicked(authenticated_async_context, monkeypatch):
+    """G338: another session already recorded submit_attempted, so the route's mark_attempt gets
+    a 409; the browser answers refused / submit_already_started and never clicks."""
+    import dataclasses
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_route
+    from src.services.browser_agent import agent
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/9",
+        })
+        app_id = brought.json()["application_id"]
+        first = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "submit_attempted"})
+        assert first.status_code == 201, first.text
+        user = CurrentUser(
+            id=authenticated_async_context.fixture_user_id, email="ada@example.com", auth_via="token",
+            actor_name="claude",
+        )
+        gate, _ = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        with pytest.raises(agent.BrowserError) as exc:
+            await gate.mark_attempt()
+        assert exc.value.as_dict() == {
+            "status": "refused", "reason": "submit_already_started",
+            "detail": "Another session already started submitting this application; nothing was clicked.",
+        }
+
+        # The same refusal inside the browser's click: check_submit said submit, the claim is refused,
+        # and the control is never clicked.
+        loc = MagicMock(click=AsyncMock(), evaluate=AsyncMock(return_value={}))
+        page = MagicMock(url="https://jobs.acme.com/apply/9")
+        monkeypatch.setattr(agent, "_page_captcha", AsyncMock(return_value=False))
+        monkeypatch.setattr(agent, "_live_page", lambda s: page)
+        monkeypatch.setattr(agent, "_find", AsyncMock(return_value=(MagicMock(), loc)))
+        monkeypatch.setattr(agent, "_refuse_captcha_frame", lambda frame: None)
+        monkeypatch.setattr(agent, "_kind", AsyncMock(return_value="submit"))
+        go = AsyncMock(return_value={"decision": "submit", "reason": "auto_when_sure", "detail": ""})
+        session = SimpleNamespace(dead_clicks={}, submitted_on=(None, ""), submit_refused=False)
+        with pytest.raises(agent.BrowserError) as exc:
+            await agent._act(  # noqa: SLF001
+                MagicMock(), session, "click", url="", ref="e1", text="", on=True, doc_kind="",
+                gate=dataclasses.replace(gate, check=go), files=None,
+            )
+        assert (exc.value.status, exc.value.reason) == ("refused", "submit_already_started")
+        go.assert_awaited_once()
+        loc.click.assert_not_called()
+        assert session.submitted_on == (None, "")
+        events = await client.get(f"/api/applications/{app_id}")
+        assert [e["event_type"] for e in events.json()["events"]].count("submit_attempted") == 1
+
+
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
@@ -1689,3 +1838,46 @@ async def test_opening_three_different_pages_is_no_repeat(pool):
     for _ in range(2):
         await run(pool, "u1", "open", url="http://jobs.example/form?job=1")
     assert "3 times in a row" in (await run(pool, "u1", "open", url="http://jobs.example/form?job=1"))["repeat_warning"]
+
+
+@pytest.mark.asyncio
+async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(authenticated_async_context):
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_route
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+    from src.services.profile.storage import save_profile, save_user_info
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/9",
+        })
+        app_id = brought.json()["application_id"]
+        for kind in ("cv", "cover_letter"):
+            saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": kind, "text": "Hello"})
+            assert saved.status_code in (200, 201)
+        user_id = authenticated_async_context.fixture_user_id
+        user = CurrentUser(id=user_id, email="ada@example.com", auth_via="token", actor_name="claude")
+        _, files = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        # No name known yet: the plain defaults.
+        assert [(await files(k))[0] for k in ("cv", "cover_letter")] == ["CV.pdf", "Cover_letter.pdf"]
+        save_profile(
+            UserProfile(cv_data=CVData(raw_text="Data engineer.", name="Ranjith Maliga-Guruprakash")),
+            user_id, source_action="cv_upload",
+        )
+        name, pdf = await files("cv")
+        assert name == "Ranjith_Maliga-Guruprakash_CV.pdf" and pdf.startswith(b"%PDF")
+        assert (await files("cover_letter"))[0] == "Ranjith_Maliga-Guruprakash_Cover_Letter.pdf"
+        # Two 200-character legal names must not make a file name the disk refuses.
+        save_user_info(
+            user_id, UserInfo(contact={"legal_first_name": "A" * 200, "legal_last_name": "B" * 200}), "test"
+        )
+        for kind, tail in (("cv", "_CV.pdf"), ("cover_letter", "_Cover_Letter.pdf")):
+            long_name = (await files(kind))[0]
+            assert len(long_name.encode()) <= 150 and long_name.startswith("AAAA") and long_name.endswith(tail)
+
+
+FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
+""" + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
+<iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
+</body></html>"""
