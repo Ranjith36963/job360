@@ -329,8 +329,10 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # `docs/harness/**` is a real fast lane, so the safe files are now genuinely
     # safe and the migration is genuinely the thing doing the work.
     many_docs = [f"docs/harness/note{i}.md" for i in range(40)]
-    check("precedence: 40 docs + 1 migration is a PRODUCT_OWNER pr",
-          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_owner")
+    check("precedence: 40 docs + 1 settings change is a PRODUCT_OWNER pr",
+          classify([*many_docs, "backend/src/core/settings.py"], policy)["lane"], "product_owner")
+    check("precedence: 40 docs + 1 migration is a PRODUCT_HUMAN pr (owner, 2026-10-20)",
+          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_human")
     check("precedence: product + harness is PRODUCT",
           classify(["docs/harness/a.md", "backend/src/main.py"], policy)["lane"], "product")
 
@@ -359,9 +361,16 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # ...and the negative control, or the case above is bought by refusing
     # everything: the migration ALONE is the watched lane and a machine may merge
     # it (owner decision 2026-09-17).
-    mig_only = classify(["backend/migrations/0042_x.up.sql"], policy)
-    check("NEGATIVE CONTROL: a migration alone is product_owner and machine-mergeable",
-          (mig_only["lane"], mig_only["auto_merge"]), ("product_owner", True))
+    settings_only = classify(["backend/src/core/settings.py"], policy)
+    check("NEGATIVE CONTROL: a settings change alone is product_owner and machine-mergeable",
+          (settings_only["lane"], settings_only["auto_merge"]), ("product_owner", True))
+    # OWNER 2026-10-20: migrations and auth wait for his hand, and stay watched.
+    for f in ("backend/migrations/0042_x.up.sql", "backend/src/api/routes/auth.py",
+              "backend/src/services/auth/tokens.py", "backend/src/api/routes/account_delete.py"):
+        got = classify([f], policy)
+        check(f"product_human: {f} waits for the owner and is still watched",
+              (got["lane"], got["auto_merge"], bool(got.get("watch_minutes")), got.get("rollback")),
+              ("product_human", False, True, "railway"))
 
     # 4. The cage may not edit the cage.
     check("recursion: editing the policy file is owner-only",
@@ -479,7 +488,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     identical treatment the split is decoration, so pin the difference:
     #     a hand-merged migration still reaches users and must still be watched;
     #     a hand-merged cage edit has nobody downstream and must not be.
-    mig = classify(["backend/migrations/007_x.sql"], policy)
+    mig = classify(["backend/src/core/settings.py"], policy)  # migrations are product_human since 2026-10-20
     cage = classify(["scripts/merge_cage.py"], policy)
     check("product_owner is WATCHED even though you merge it by hand",
           bool(mig.get("watch_minutes")), True)
