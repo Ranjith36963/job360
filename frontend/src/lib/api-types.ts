@@ -1053,6 +1053,9 @@ export interface paths {
         /**
          * Put Trigger
          * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         *
+         *     An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+         *     it, the error is logged without its traceback or message, and a plain 500 replaces it (from None).
          */
         put: operations["put_trigger_api_assistant_trigger_put"];
         post?: never;
@@ -1246,8 +1249,9 @@ export interface paths {
          * Password Reset Confirm
          * @description Validate the token and set the new password.
          *
-         *     On success: 204, and every existing session for that user is revoked
-         *     (forces re-login on all devices — security best practice after reset).
+         *     On success: 204, and every existing session, agent token and OAuth grant
+         *     for that user is revoked (forces re-login on all devices and reconnection
+         *     of every assistant — security best practice after reset).
          *     The caller's session cookie is cleared too so the API response itself
          *     can't accidentally land the caller into the just-reset account.
          *
@@ -2549,14 +2553,21 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Readiness probe — checks real dependencies before accepting traffic.
+         * @description Readiness probe: can the request path get a DB connection right now?
          *
-         *     Checks:
-         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
-         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *     Production borrows a connection from the SAME pool ``get_request_db`` uses
+         *     (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+         *     runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+         *     held) or an unreachable database answers 503, which is what Railway's deploy
+         *     healthcheck (``backend/railway.json``) and the uptime probe need to see.
          *
-         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
-         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         *     200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+         *
+         *     Test mode has no request-path pool (``get_request_db`` opens a fresh
+         *     connection per request there), so the probe opens one the same way and
+         *     ``pool`` is null. Redis is no longer checked: the service was deleted
+         *     2026-09-02 and the auth rate limiter falls back without it.
          */
         get: operations["readyz_api_readyz_get"];
         put?: never;
@@ -4108,6 +4119,8 @@ export interface components {
         };
         /** ContactOutreachOut */
         ContactOutreachOut: {
+            /** Interactions */
+            interactions?: components["schemas"]["OutreachEntryOut"][];
             last_reply: components["schemas"]["OutreachEntryOut"] | null;
             last_sent: components["schemas"]["OutreachEntryOut"] | null;
             /** Message Count */
@@ -5063,6 +5076,7 @@ export interface components {
             follow_up_on?: string | null;
             /** Id */
             id: number;
+            referred_by?: components["schemas"]["KitReferredByOut"] | null;
             /** Status */
             status: string;
             /** Submit Override */
@@ -5210,6 +5224,13 @@ export interface components {
             key: string;
             /** Why */
             why: string;
+        };
+        /** KitReferredByOut */
+        KitReferredByOut: {
+            /** Contact Id */
+            contact_id: number;
+            /** Name */
+            name: string;
         };
         /** KitSameJobOut */
         KitSameJobOut: {
@@ -5486,7 +5507,8 @@ export interface components {
          * @description One row of a contact's outreach ledger — a drafted message VERSION
          *     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
          *     (``version_no`` null — unversioned, a person can be sent to or replied
-         *     to many times).
+         *     to many times). Also a meeting/call/intro/referral entry (``follow_up_on``
+         *     is set only on those).
          */
         OutreachEntryOut: {
             /** Channel */
@@ -5495,6 +5517,8 @@ export interface components {
             contact_id: number;
             /** Entry */
             entry: string;
+            /** Follow Up On */
+            follow_up_on?: string | null;
             /** Id */
             id: number;
             /** Occurred At */
@@ -6212,6 +6236,8 @@ export interface components {
             proof?: components["schemas"]["ProofOut"];
             /** Recorded By */
             recorded_by?: string | null;
+            /** Referred By Contact Id */
+            referred_by_contact_id?: number | null;
             /** Sent At */
             sent_at: string;
         };
@@ -6354,6 +6380,8 @@ export interface components {
              * @default
              */
             note: string;
+            /** Referred By Contact Id */
+            referred_by_contact_id?: number | null;
         };
         /** RecordApplicationReceiptResponse */
         RecordApplicationReceiptResponse: {
@@ -6388,6 +6416,8 @@ export interface components {
             possible_duplicate: string;
             /** Receipt Id */
             receipt_id: number;
+            /** Referred By Contact Id */
+            referred_by_contact_id?: number | null;
             /** Sent At */
             sent_at: string;
             /** Url */
@@ -7208,6 +7238,43 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** StatsReferralGroupOut */
+        StatsReferralGroupOut: {
+            /** Applied */
+            applied: number;
+            /** Brought */
+            brought: number;
+            /** Interview */
+            interview: number;
+            /** Interview Rate */
+            interview_rate: number | null;
+            /** Offer */
+            offer: number;
+            /** Offer Rate */
+            offer_rate: number | null;
+            /** Rejected */
+            rejected: number;
+            /** Replied */
+            replied: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+        };
+        /**
+         * StatsReferralsOut
+         * @description ``stats(view="referrals")``: referred vs not. Facts only, never a ranking.
+         */
+        StatsReferralsOut: {
+            /** N */
+            n: number;
+            not_referred: components["schemas"]["StatsReferralGroupOut"];
+            /** Note */
+            note: string;
+            /** Referral Asked */
+            referral_asked: number;
+            referred: components["schemas"]["StatsReferralGroupOut"];
+        };
         /** StatsResponse */
         StatsResponse: {
             /** Applications Truncated */
@@ -7247,6 +7314,7 @@ export interface components {
             lesson_effect?: components["schemas"]["StatsLessonEffectOut"] | null;
             overall: components["schemas"]["StatsOverallOut"];
             patterns?: components["schemas"]["StatsPatternsOut"] | null;
+            referrals?: components["schemas"]["StatsReferralsOut"] | null;
             score_line: components["schemas"]["StatsScoreLineOut"];
             /** Since */
             since: string | null;

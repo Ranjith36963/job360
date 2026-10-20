@@ -105,6 +105,42 @@ describe("Contacts", () => {
     expect(screen.getByText(/Sent on .* via LinkedIn/)).toBeInTheDocument();
   });
 
+  it("lists meetings and referrals as read-only lines, and nothing without them", () => {
+    const base = {
+      contact_id: 1, version_no: null, recorded_at: "2026-10-14T16:00:00+00:00", recorded_by: "web",
+      source_message_id: "",
+    };
+    const contact = makeContact({
+      outreach: {
+        ...emptyOutreach(),
+        interactions: [
+          {
+            ...base, id: 1, entry: "meeting", channel: "video", text: "Coffee chat about the data team",
+            occurred_at: "2026-10-14T15:00:00+00:00", follow_up_on: "2026-10-27",
+          },
+          {
+            ...base, id: 2, entry: "referral_given", channel: "email", text: "",
+            occurred_at: "2026-10-15T09:00:00+00:00", follow_up_on: null,
+          },
+        ],
+      },
+    });
+    const { unmount } = render(<Contacts applicationId={42} contacts={[contact]} />);
+    const items = screen.getAllByTestId("contact-interaction");
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain("Meeting on");
+    expect(items[0].textContent).toContain("via video");
+    expect(items[0].textContent).toContain("follow up");
+    expect(items[0].textContent).toMatch(/27 Oct|Oct 27/);
+    expect(items[0].textContent).toContain("Coffee chat about the data team");
+    expect(items[1].textContent).toContain("Referral given");
+    expect(items[1].textContent).toContain("via email");
+    unmount();
+
+    render(<Contacts applicationId={42} contacts={[makeContact()]} />);
+    expect(screen.queryByTestId("contact-interactions")).toBeNull();
+  });
+
   it('shows "No reply yet" when nobody has replied', () => {
     render(<Contacts applicationId={42} contacts={[makeContact()]} />);
     expect(screen.getByText("No reply yet.")).toBeInTheDocument();

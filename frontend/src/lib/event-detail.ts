@@ -48,9 +48,19 @@ export function contactNameOf(e: { payload?: unknown }): string | null {
 
 /** The one-line title for an event: the label, made specific when the payload
  * allows. Never claims more than the payload carries. */
+const CONTACT_EVENTS = new Set([
+  "outreach_sent",
+  "outreach_replied",
+  "contact_meeting",
+  "contact_call",
+  "contact_intro",
+  "referral_asked",
+  "referral_given",
+]);
+
 export function eventTitle(e: { event_type: string; payload?: unknown; recorded_by?: string }): string {
   if (e.event_type === "artifact_saved") return artifactTitle(e) ?? eventLabel(e);
-  if (e.event_type === "outreach_sent" || e.event_type === "outreach_replied") {
+  if (CONTACT_EVENTS.has(e.event_type)) {
     const name = contactNameOf(e);
     return name ? `${eventLabel(e)} · ${name}` : eventLabel(e);
   }
