@@ -203,6 +203,18 @@ def test_bayt_star_spans_gulf_markets_within_the_request_cap():
     assert len(http.calls) <= kr.REGIONAL_MAX_REQUESTS
 
 
+
+def test_wanted_puts_the_users_own_markets_first():
+    assert kr._wanted(["OM", "*"], *kr.BAYT_MARKETS)[0] == "OM"
+    assert kr._wanted(["OM", "*"], *kr.BAYT_MARKETS)[1:] == ["AE", "SA", "QA", "KW", "BH"]
+    assert kr._wanted(["OM"], *kr.BAYT_MARKETS) == ["OM"]
+
+
+def test_bayt_star_searches_the_users_own_market_first():
+    http = _http({"-jobs/": (200, BAYT_PAGE), "": (200, _detail())})
+    kr.fetch_bayt(["a"], http, {}, days=BIG, countries=["OM", "*"])
+    assert http.calls[0]["url"].split("/en/")[1].split("/")[0] == "oman"
+
 # ------------------------------------------------------------------------------- GulfTalent
 GT_JOB = "https://www.gulftalent.com/uae/jobs/maintenance-specialist-604168"
 GT_INDEX = ('<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'

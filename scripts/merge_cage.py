@@ -1241,7 +1241,7 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
                  "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL",
                  "reviewer-security"),
     # The eyes, AND the two ci-offline.yml jobs they defer to. Since 2026-10-19
-    # (CI audit) `verify / backend` and `verify / frontend` do not re-run Q1-Q4
+    # (CI audit) `verify / backend` and `verify / frontend` do not re-run Q1-Q3
     # or Playwright when ci_scope.py says offline-suite / frontend-e2e already
     # run them on this same tree; they record that instead. Naming those two
     # here keeps `verify` self-contained: it is never earned by a deferral to

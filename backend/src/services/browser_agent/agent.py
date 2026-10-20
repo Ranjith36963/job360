@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
-from src.services.browser_agent.egress import EgressProxy, OpenFn
+from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
     CONTROL_STATE_JS,
@@ -144,6 +144,11 @@ class Session:
     recent: list[tuple[str, str, str, str]] = field(default_factory=list)
     # A live sign-in view closes at this time (monotonic) however busy it is; None = no limit.
     closes_at: Optional[float] = None
+    # Tabs whose last main-frame load the egress proxy refused (a redirect hop to a private address,
+    # or a host it could not reach), with the reason the agent answers.
+    blocked_tabs: dict[Any, str] = field(default_factory=dict)
+    # Addresses of refused loads Playwright could not tie to a tab (a new tab's first load).
+    blocked_urls: dict[str, str] = field(default_factory=dict)
     # The assistant session (its `session` label) driving this browser: another one is refused.
     owner: str = ""
 
@@ -267,6 +272,41 @@ class BrowserPool:
             s.page = new_page
 
         context.on("page", _on_page)
+
+        def _main_frame(message: Any) -> Any:
+            frame = message.frame
+            return frame if frame.parent_frame is None else None
+
+        def _on_request(request: Any) -> None:
+            try:
+                frame = _main_frame(request) if request.is_navigation_request() else None
+            except Exception:  # noqa: BLE001 - a request with no frame (a worker): not a page load
+                return
+            if frame is not None:
+                # The tab moves on: its refusal (by tab or by address) is over.
+                s.blocked_tabs.pop(frame.page, None)
+                s.blocked_urls.pop(frame.page.url, None)
+
+        def _on_response(response: Any) -> None:
+            # Only the proxy's own 403 holds its per-process mark: a site cannot send it.
+            reason = _REFUSAL.get(response.headers.get(BLOCK_HEADER, "")) if response.status == 403 else None
+            if reason is None:
+                return
+            try:
+                if not response.request.is_navigation_request():
+                    return
+            except Exception:  # noqa: BLE001 - a response with no request: not a page load
+                return
+            try:
+                frame = _main_frame(response)
+            except Exception:  # noqa: BLE001 - a new tab's first load has no frame yet: keep its address
+                s.blocked_urls[response.url] = reason
+                return
+            if frame is not None:
+                s.blocked_tabs[frame.page] = reason
+
+        context.on("request", _on_request)
+        context.on("response", _on_response)
         self._sessions[user_id] = s
         return s
 
@@ -292,6 +332,31 @@ class BrowserPool:
             self._playwright = None
         await self.egress.close()
         self.egress.port = 0
+
+
+BLOCKED_HOP = (
+    "That led to a private or local address, and Job360's browser only opens public web pages. "
+    "Open another link."
+)
+UNREACHABLE_HOP = "That site could not be found or did not answer. Open another link."
+# The proxy's own marks (fresh each process: a site cannot send them) and what each one answers.
+_REFUSAL = {BLOCK_MARK: "blocked_address", UNREACHABLE_MARK: "load_failed"}
+
+
+def _refusal(s: Session, page: Any) -> Optional[BrowserError]:
+    """The proxy's refusal if it is the tab's last load (a new tab is known by its address)."""
+    if page not in s.blocked_tabs and page.url in s.blocked_urls:
+        s.blocked_tabs[page] = s.blocked_urls.pop(page.url)
+    reason = s.blocked_tabs.get(page)
+    if reason == "load_failed":
+        return BrowserError("error", "load_failed", UNREACHABLE_HOP)
+    return _hop_refused() if reason else None
+
+
+def _hop_refused() -> BrowserError:
+    """A load the screen or the egress proxy refused (a redirect hop, a history entry): the same
+    answer as opening that address directly."""
+    return BrowserError("refused", "blocked_address", BLOCKED_HOP)
 
 
 async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
@@ -639,6 +704,9 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     page = _live_page(s)
     if page.url.startswith("chrome-error://"):
         return _load_failed(page, after_action)
+    refused = _refusal(s, page)
+    if refused is not None:  # the tab holds the proxy's refusal, never a page to read as "ok"
+        raise refused
     elements: list[dict[str, Any]] = []
     places: list[tuple[float, bool]] = []
     texts: list[str] = []
@@ -969,13 +1037,23 @@ async def _act(
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
         await _settle(page)
+        if (refusal := _refusal(s, page)) is not None:
+            raise refusal
         return await look(s)
     if action == "look":
         return await look(s)
     if action == "back":
         page = _live_page(s)
-        await page.go_back()
+        try:
+            await page.go_back()
+        except Exception as exc:
+            # The history entry is a private address: the request screen (route) refused it.
+            if "ERR_BLOCKED_BY_CLIENT" in str(exc):
+                raise _hop_refused() from None
+            raise
         await _settle(page)
+        if (refusal := _refusal(s, page)) is not None:
+            raise refusal
         return await look(s, after_action=True)
     # A CAPTCHA stops the run: past this point every action could work the check itself.
     if await _page_captcha(_live_page(s)):
@@ -1060,7 +1138,8 @@ async def _act(
         else:
             s.dead_clicks[ref] = s.dead_clicks.get(ref, 0) + 1
         try:
-            out = await look(s, after_action=True)
+            # The proxy's refusal is never read as the page (a submit that went still says so below).
+            out = refusal.as_dict() if (refusal := _refusal(s, s.page)) else await look(s, after_action=True)
         except Exception as exc:  # noqa: BLE001 - after a submit, any failure to read must still say it went
             if not submitted:
                 raise
@@ -1111,6 +1190,8 @@ async def _act(
             )
         if len(text) > MAX_TYPE_CHARS:
             raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
+        # Windows line breaks are line breaks: "\r\n" and a lone "\r" become "\n" before the check.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         if _CONTROL_CHARS.search(text.replace("\n", "")) or (
             "\n" in text and not await loc.evaluate("(el) => el.tagName === 'TEXTAREA'")
         ):
