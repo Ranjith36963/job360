@@ -1,10 +1,11 @@
-"""Job-site feeds, set A (part 1 of 3), for the Job360 hunt kit: Djinni, WUZZUF, InfoJobs and Instaffo.
-JobiDanmark, remote.com, WORK180 and two per-company ATS readers (Deel and Dover) follow in the next parts.
+"""Job-site feeds, set A (parts 1 and 2 of 3), for the Job360 hunt kit: remote.com, Djinni, WORK180, WUZZUF, InfoJobs, Instaffo, JobiDanmark.
+Two per-company ATS readers, Deel and Dover, follow in the next part.
 
 Feed contract is the same as ``kit_regional.FEEDS``: ``fetch_x(queries, http, stats, *, days, countries) -> list[Job]``,
 never raises, networking only through the ``http`` callable the core passes in. A country-gated feed runs ONLY when one of
 its countries is in the user's ``countries`` (or "*", the ``--visa-onsite`` value: then it runs everywhere it can and the CORE
-keeps only ads that say they sponsor a visa) and sends no request otherwise. Djinni is not gated: it lists a candidate-residence area per ad that is carried into ``location``. Nothing here ranks
+keeps only ads that say they sponsor a visa) and sends no request otherwise. remote.com and Djinni are not gated: the first is
+a remote-jobs board, the second lists a candidate-residence area per ad that is carried into ``location``. Nothing here ranks
 or scores. No logins, no cookies. Standard library only.
 
 Every ad names its own employer; the board name is never put in ``company``. Each site has a small request cap, and the first
@@ -26,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 try:
     import kit_regional as _kr  # type: ignore[import-not-found]  # sibling file, not a package module
@@ -54,12 +55,18 @@ _LD = _kr._LD
 
 SITE_MAX_REQUESTS = 25  # hard cap per site per run
 PAUSE_S = 0.6  # between requests to the HTML sites (freehire djinni.go:33-37: a fast burst is answered 403)
+WORK180_PAUSE_S = 5.0  # freehire work180.go:60-67: robots.txt Crawl-delay 5 for every user agent
+RDC_PAGES = 5  # remote.com listing pages (20 postings each)
+RDC_DETAIL_CAP = 10
 DJINNI_PAGES = 3
+W180_DETAIL_CAP = 8
 WUZZUF_PAGE = 20
 WUZZUF_BATCH = 10
 INFOJOBS_PAGES = 4
 INFOJOBS_DETAIL_CAP = 8
 INSTAFFO_DETAIL_CAP = 10
+JD_PAGES = 3
+JD_DETAIL_CAP = 10
 
 _WS = re.compile(r"\s+")
 
@@ -67,6 +74,10 @@ _WS = re.compile(r"\s+")
 def _pause(seconds: float) -> None:
     if seconds > 0:
         time.sleep(seconds)
+
+
+def _now() -> float:
+    return time.monotonic()
 
 
 def _wanted(countries: list[str], *codes: str) -> list[str]:
@@ -131,6 +142,102 @@ def _days_ok(job: Job, days: int) -> bool:
     return bool(_keep([job], [], days, search=False))
 
 
+# ------------------------------------------------------------------ Next.js / RSC flight primitives
+# Borrowed from freehire internal/ingest/sources/nextflight.go:117-152 (bracketSlice: the balanced run after a key,
+# counting brackets only outside JSON strings), :154-165 (text rows "<id>:T<hexlen>,<bytes>", id and length in lowercase hex,
+# content sliced by BYTE length), :80-85 (nextFlightPush regexp) and :86-110 (chunks are JS strings, concatenated).
+_PUSH = re.compile(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)')
+_ROW = re.compile(rb"[^0-9a-f]([0-9a-f]+):T([0-9a-f]+),")
+
+
+def _bracket(s: str, key: str, open_: str, close: str) -> str:
+    """The balanced ``open_...close`` text after the first ``key`` ('' when absent); brackets inside strings do not count."""
+    at = s.find(key)
+    if at < 0:
+        return ""
+    start = s.find(open_, at)
+    if start < 0:
+        return ""
+    depth, in_str, i = 0, False, start
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == open_:
+            depth += 1
+        elif c == close:
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+        i += 1
+    return ""
+
+
+def _flight_rows(flight: str) -> dict[str, str]:
+    """Text rows of a flight stream keyed by id (content cut by its declared byte length)."""
+    raw = flight.encode("utf-8", "replace")
+    rows: dict[str, str] = {}
+    pos = 0
+    while True:
+        m = _ROW.search(raw, pos)
+        if not m:
+            break
+        try:
+            n = int(m.group(2), 16)
+        except ValueError:
+            pos = m.end()
+            continue
+        end = m.end() + n
+        if end > len(raw):  # a declared length past the buffer is hostile or cut off: skip the row, never copy the tail
+            pos = m.end()
+            continue
+        rows[m.group(1).decode()] = raw[m.end():end].decode("utf-8", "replace")
+        pos = end  # rows never overlap, so the scan (and the copying) stays linear in the body
+    return rows
+
+
+def _decode_flight(page: str) -> str:
+    """The flight stream a Next.js HTML page inlines: every self.__next_f.push([1,"..."]) chunk, JS-decoded and joined."""
+    out: list[str] = []
+    for m in _PUSH.finditer(page or ""):
+        try:
+            chunk = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(chunk, str):
+            out.append(chunk)
+    return "".join(out)
+
+
+def _job_posting_node(data: Any) -> dict[str, Any]:
+    """The schema.org JobPosting inside a decoded JSON document (object, array or @graph), else {}."""
+    nodes = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
+    for n in nodes:
+        t = n.get("@type") if isinstance(n, dict) else None
+        if t == "JobPosting" or (isinstance(t, list) and "JobPosting" in t):
+            return dict(n)
+    return {}
+
+
+def _flight_job_posting(flight: str) -> dict[str, Any]:
+    """The first JobPosting carried in a flight text row (rows tried in id order), else {} (freehire nextflight.go:59-77)."""
+    rows = _flight_rows(flight)
+    for rid in sorted(rows):
+        try:
+            data = json.loads(rows[rid], strict=False)
+        except ValueError:
+            continue
+        node = _job_posting_node(data)
+        if node:
+            return node
+    return {}
+
+
 def _d(value: Any) -> dict[str, Any]:
     """``value`` when it is a dict, else {} (so nested JSON reads cannot fail on null or a list)."""
     return value if isinstance(value, dict) else {}
@@ -141,6 +248,110 @@ def _json(raw: str) -> Any:
         return json.loads(raw)
     except ValueError:
         return None
+
+
+# --------------------------------------------------------------------------------------- remote.com
+# Borrowed from freehire internal/ingest/sources/remotedotcom.go:38 (listing https://remote.com/jobs/all?page=N, 20 a page),
+# :41 (posting https://remote.com/jobs/<company slug>/<posting slug>), :53 (header "RSC: 1" makes both answer the flight, not
+# HTML), :245-254 (the listing inlines a "jobsData" object; the balanced {} after the key), :66-71 and :90-125 (jobs[]: status,
+# slug, title, publishedAt, employmentType, seniority, companyProfile{name,slug}, workplaceLocation{type,city,country{name}},
+# hiringLocation{type,timezone{name},includedLocations[{type,value{name}}]}), :281-283 (usable = status "published" + slug + a
+# company name), :320-357 (location: a hybrid/on-site desk wins; a remote ad says who may apply: global = "Worldwide", a location
+# set = the names, a timezone = "<name> timezone"), :259-270 and :257-270 (the body is a schema.org JobPosting in a flight TEXT
+# ROW of the posting page), :388-403 (compensation is in MINOR units; the kit does not use it). freehire internal/ingest/sources/AGENTS.md:263 measured
+# ~4,100 of 5,745 postings as employers that run their own ATS: those still show here with remote.com's link.
+# NOT IN REFERENCE: a keyword parameter (the listing is read newest pages first and filtered here), and that the listing is
+# ordered newest first.
+RDC_LIST = "https://remote.com/jobs/all?page=%d"
+RDC_JOB = "https://remote.com/jobs/%s/%s"
+RDC_HEADERS = {"RSC": "1"}
+
+
+def _rdc_place(p: dict[str, Any]) -> str:
+    w = p.get("workplaceLocation")
+    if isinstance(w, dict) and w.get("type") and w.get("type") != "remote":
+        country = w.get("country")
+        parts = [str(w.get("city") or "").strip(), str(country.get("name") or "").strip() if isinstance(country, dict) else ""]
+        text = ", ".join(x for x in parts if x)
+        if text:
+            return text
+    h = p.get("hiringLocation")
+    if not isinstance(h, dict):
+        return ""
+    if h.get("type") == "global":
+        return "Worldwide"
+    if h.get("type") == "location":
+        names: list[str] = []
+        for loc in h.get("includedLocations") or []:
+            v = loc.get("value") if isinstance(loc, dict) else None
+            nm = str(v.get("name") or "").strip() if isinstance(v, dict) else ""
+            if nm and nm not in names:
+                names.append(nm)
+        return ", ".join(names)
+    tz = h.get("timezone")
+    if h.get("type") == "timezone" and isinstance(tz, dict) and tz.get("name"):
+        return f"{tz['name']} timezone"
+    return ""
+
+
+def parse_remotedotcom_listing(flight: Any) -> tuple[list[Job], int, int]:
+    """(jobs, totalPages, raw rows on the page) from one listing flight: published postings with an employer, no body yet."""
+    raw = _bracket(flight if isinstance(flight, str) else "", '"jobsData":', "{", "}")
+    data = _json(raw) if raw else None
+    if not isinstance(data, dict):
+        return [], 0, 0
+    out: list[Job] = []
+    rows = data.get("jobs")
+    for p in rows if isinstance(rows, list) else []:
+        if not isinstance(p, dict):
+            continue
+        prof = _d(p.get("companyProfile"))
+        slug, name = str(p.get("slug") or "").strip(), str(prof.get("name") or "").strip()
+        title = _WS.sub(" ", str(p.get("title") or "")).strip()
+        if p.get("status") != "published" or not (slug and name and title and prof.get("slug")):
+            continue
+        w = p.get("workplaceLocation")
+        wtype = str(w.get("type") or "") if isinstance(w, dict) else ""
+        extra: dict[str, Any] = {}
+        if p.get("employmentType"):
+            extra["employment_type"] = str(p["employmentType"])
+        if isinstance(p.get("seniority"), list) and p["seniority"]:
+            extra["seniority"] = [str(x) for x in p["seniority"] if x]
+        out.append(_made("remotedotcom", "remote.com", title=title, company=name,
+                         url=RDC_JOB % (quote(str(prof["slug"]), safe=""), quote(slug, safe="")), place=_rdc_place(p), country="",
+                         posted=_date(str(p.get("publishedAt") or "")), remote=True if wtype == "remote" else None,
+                         extra=extra))
+    pages = data.get("totalPages")
+    return out, pages if isinstance(pages, int) and not isinstance(pages, bool) else 0, len(rows) if isinstance(rows, list) else 0
+
+
+@_feed
+def fetch_remotedotcom(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """remote.com's public board (RSC flight): a few listing pages, then the body of each listed ad the queries match."""
+    budget = _Budget(SITE_MAX_REQUESTS)
+    qs = _queries(queries)
+    seen: list[Job] = []
+    for page in range(1, RDC_PAGES + 1):
+        flight = _list_get(http, stats, "remotedotcom", budget, RDC_LIST % page, as_json=False, headers=RDC_HEADERS)
+        jobs, total, rows = parse_remotedotcom_listing(flight)
+        seen += jobs
+        if not rows or (total and page >= total):  # the RAW page decides: a page of filtered-out rows is not the end
+            break
+    seen = _unique(seen)
+    out: list[Job] = []
+    details = 0
+    for j in seen:
+        if not (_days_ok(j, days) and _hit(f"{j['title']} {j['company']} {j['location']}", qs)):
+            continue
+        if details < RDC_DETAIL_CAP and budget.left > 0:
+            details += 1
+            flight = _fetch(http, stats, "remotedotcom", budget, j["url"], as_json=False, headers=RDC_HEADERS)
+            desc = str(_flight_job_posting(flight).get("description") or "") if isinstance(flight, str) else ""
+            if strip_html(desc):
+                j["description"] = strip_html(desc)
+                j["extra"].pop("title_only", None)
+        out.append(j)
+    return out
 
 
 # ------------------------------------------------------------------------------------------ Djinni
@@ -201,6 +412,142 @@ def fetch_djinni(queries: list[str], http: HttpFn, stats: Stats, *, days: int, c
         seen_urls.update(j["url"] for j in fresh)
         jobs += fresh
     return _keep(jobs, queries, days)
+
+
+# ------------------------------------------------------------------------------------------ WORK180
+# Borrowed from freehire internal/ingest/sources/work180.go:49 (origin https://work180.com), :54-58 (boards: au = /en-au,
+# uk = /en-gb, us = /en-us; en-au also carries New Zealand, :26-27), :145 (the region's jobs sitemap
+# /<locale>/jobs-sitemap.xml names every posting), :135 (posting path /<locale>/for-women/employer/<employer slug>/job/<id>/<slug>),
+# :152-181 (only https work180.com URLs under the board's own locale count; id > 0), :162 (newest = highest id first), :60-67
+# (robots.txt Crawl-delay 5: posting pages are paced 5 s apart), :186-187 and :217-219 (the first 403/429 ends the run's page
+# reads), :311-355 (the page's schema.org JobPosting: identifier.value must equal the sitemap id, title, description, datePosted,
+# hiringOrganization.name, jobLocation[].address.name, jobLocationType TELECOMMUTE, employmentType), :323-325 and :301-309 (the
+# page's RSC record under "job":{"id":"<id>"} says expired / applicationType EXTERNAL + applicationLink = the employer's own ATS
+# page, kept as extra.apply_url only: the job url stays on work180.com), :376-411 (the record is found in the joined self.__next_f.push chunks).
+# freehire work180_test.go fixtures: testdata/work180_detail_au.html, work180_jobs_sitemap_au.xml.
+# NOT IN REFERENCE: nothing else; the sitemap states no employer NAME, so the title/employer slug in the URL is what the user's
+# queries are matched against before a page is spent, and the employer name comes from the page.
+W180_BASE = "https://work180.com"
+W180_BOARDS = {  # ISO country -> board locale
+    "AU": "en-au", "NZ": "en-au", "GB": "en-gb", "US": "en-us",
+}
+_W180_PATH = re.compile(r"^/(en-[a-z]{2})/for-women/employer/([^/]+)/job/([0-9]+)(?:/([^/]*))?/?$")
+_LOC = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.I)
+
+
+def parse_work180_sitemap(xml: Any, locale: str) -> list[dict[str, Any]]:
+    """Posting entries (id, url, employer slug, title slug) of one region's jobs sitemap, newest id first."""
+    out: dict[int, dict[str, Any]] = {}
+    for m in _LOC.finditer(xml if isinstance(xml, str) else ""):
+        u = urlsplit(html.unescape(m.group(1)))
+        if u.scheme != "https" or (u.hostname or "").lower() != "work180.com":
+            continue
+        pm = _W180_PATH.match(u.path)
+        if not pm or pm.group(1) != locale:
+            continue
+        pid = int(pm.group(3))
+        if pid > 0 and pid not in out:
+            out[pid] = {"id": pid, "url": W180_BASE + u.path, "employer": pm.group(2), "slug": pm.group(4) or ""}
+    return [out[k] for k in sorted(out, reverse=True)]
+
+
+def _w180_record(page: str, pid: str) -> dict[str, Any]:
+    """The posting's own record from the page's RSC payload: the object after ``"job":`` whose id is this posting's."""
+    flight = _decode_flight(page)
+    marker = '"job":{"id":' + json.dumps(pid)
+    i = flight.find(marker)
+    if i < 0:
+        return {}
+    try:
+        rec, _ = json.JSONDecoder().raw_decode(flight[i + len('"job":'):])
+    except ValueError:
+        return {}
+    return rec if isinstance(rec, dict) and str(rec.get("id")) == pid else {}
+
+
+def _plain_https(link: str) -> bool:
+    """True for an https URL with a host and no userinfo, port or whitespace (the employer's own page, not a trick URL)."""
+    if not re.match(r"https://[^\s]+$", link):
+        return False
+    try:
+        u = urlsplit(link)
+        return bool(u.hostname) and "@" not in u.netloc and u.port is None
+    except ValueError:
+        return False
+
+
+def parse_work180_posting(page: Any, entry: dict[str, Any]) -> Job | None:
+    """One WORK180 posting page to a Job, or None (no JobPosting for this id, expired, no employer/title/body)."""
+    text = page if isinstance(page, str) else ""
+    p = _ld_posting(text)
+    pid = str(entry["id"])
+    ident = p.get("identifier")
+    if not p or not isinstance(ident, dict) or str(ident.get("value") or "").strip() != pid:
+        return None
+    rec = _w180_record(text, pid)
+    if rec.get("expired") not in (None, ""):
+        return None
+    emp = rec.get("employer")
+    company = _posting_company(p) or (str(emp.get("name") or "").strip() if isinstance(emp, dict) else "")
+    title = _WS.sub(" ", str(p.get("title") or "")).strip()
+    desc = p.get("description") or ""
+    if not (company and title and strip_html(desc)):
+        return None
+    url = entry["url"]  # always the work180.com link (checked against the sitemap): a job URL never leaves the board's host
+    link = str(rec.get("applicationLink") or "").strip()
+    extra = {"listed_on": entry["url"]}
+    if str(rec.get("applicationType") or "").upper() == "EXTERNAL" and _plain_https(link):
+        extra["apply_url"] = link  # the employer's own page, carried as data only; an EMAIL application names a mail relay
+    places: list[str] = []
+    locs = p.get("jobLocation")
+    for loc in locs if isinstance(locs, list) else [locs]:
+        a = loc.get("address") if isinstance(loc, dict) else None
+        if isinstance(a, dict):
+            nm = str(a.get("name") or "").strip() or ", ".join(x for x in (str(a.get("addressLocality") or "").strip(), str(a.get("addressRegion") or "").strip()) if x)
+            if nm and nm not in places:
+                places.append(nm)
+    remote = str(p.get("jobLocationType") or "").upper() == "TELECOMMUTE"
+    return _made("work180", "WORK180", title=title, company=company, url=url, place="; ".join(places), country="",
+                 posted=_date(str(p.get("datePosted") or "")), description=desc, remote=True if remote else None,
+                 extra=extra)
+
+
+@_feed
+def fetch_work180(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """WORK180 (employers endorsed for supporting women): the region's jobs sitemap, then a few posting pages (paced 5 s)."""
+    locales = list(dict.fromkeys(W180_BOARDS[c] for c in _wanted(countries, *W180_BOARDS)))
+    if not locales:
+        return []
+    qs = _queries(queries)
+    budget = _Budget(SITE_MAX_REQUESTS)
+    jobs: list[Job] = []
+    last: list[float] = []  # monotonic time the last work180.com request was sent
+
+    def paced(url: str, **kw: Any) -> tuple[int, Any]:
+        """EVERY request to work180.com (sitemaps included, and the first one of a second region) waits until the
+        robots.txt Crawl-delay has passed since the previous one."""
+        if last:
+            gap = WORK180_PAUSE_S - (_now() - last[0])
+            if gap > 0:
+                _pause(gap)
+        last[:] = [_now()]  # request starts are what the Crawl-delay spaces
+        return http(url, **kw)
+
+    for locale in locales:
+        if budget.left <= 0:
+            break
+        xml = _list_get(paced, stats, "work180", budget, f"{W180_BASE}/{locale}/jobs-sitemap.xml", as_json=False)
+        spent = 0
+        for entry in parse_work180_sitemap(xml, locale):
+            if spent >= W180_DETAIL_CAP or budget.left <= 0:
+                break
+            if not _hit((entry["slug"] + " " + entry["employer"]).replace("-", " "), qs):
+                continue
+            spent += 1
+            job = parse_work180_posting(_fetch(paced, stats, "work180", budget, entry["url"], as_json=False), entry)
+            if job:
+                jobs.append(job)
+    return _keep(_unique(jobs), queries, days)
 
 
 # ------------------------------------------------------------------------------------------ WUZZUF
@@ -393,7 +740,6 @@ def fetch_infojobs(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
 INSTAFFO_HOST = "jobs.instaffo.com"
 INSTAFFO_INDEX = "https://jobs.instaffo.com/sitemap.xml"
 _INSTAFFO_ID = re.compile(r"/de/job/([^/?#]+-[0-9a-f]{12})$")
-_LOC = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.I)
 
 
 def parse_sitemap(xml: Any) -> list[tuple[str, str]]:
@@ -459,9 +805,82 @@ def fetch_instaffo(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
             jobs.append(job)
     return _keep(_unique(jobs), queries, days)
 
+
+# ---------------------------------------------------------------------------------------- JobiDanmark
+# Borrowed from freehire internal/ingest/sources/jobdanmark.go:30 and :33 (POST https://jobdanmark.dk/api/jobsearch/search/<page>,
+# page 1-based), :51-58 (body jobTypes [], filters [], locationMode "Text", distance 50: the unfiltered catalogue, freshest first),
+# :60-75 (response items[] title, companyName, companyAddress, url (site-relative /job/<slug>), publishedDate DD-MM-YYYY; totalPages),
+# :103-109 (stop on an empty page or at totalPages), :121-135 (an item needs title, employer and url; query and fragment are
+# stripped from the url), :154-173 (the detail page's schema.org JobPosting gives the description and a date-only datePosted),
+# :135 (the list date wins only when the page has none). NOT IN REFERENCE: a keyword filter in ``filters`` (the newest pages are
+# read and matched here on title and employer), and the Content-Type header (freehire's PostJSON client sends JSON).
+JD_HOST = "jobdanmark.dk"
+JD_BASE = "https://jobdanmark.dk"
+JD_SEARCH = "https://jobdanmark.dk/api/jobsearch/search/%d"
+_DDMMYYYY = re.compile(r"^(\d{2})-(\d{2})-(\d{4})$")
+
+
+def parse_jobdanmark_items(payload: Any) -> tuple[list[dict[str, str]], int, int]:
+    """(items with title/company/address/url/posted, totalPages, raw rows on the page) of one search page.
+
+    Only a site-relative path ("/job/<slug>") is accepted and rebuilt on https://jobdanmark.dk; any absolute URL or other form
+    ("//host/x", ".evil.net/x", "@evil.net/x") is dropped."""
+    out: list[dict[str, str]] = []
+    rows = payload.get("items") if isinstance(payload, dict) else None
+    for it in rows if isinstance(rows, list) else []:
+        if not isinstance(it, dict):
+            continue
+        path = re.split(r"[?#]", str(it.get("url") or "").strip(), maxsplit=1)[0].rstrip("/")
+        title, company = _WS.sub(" ", str(it.get("title") or "")).strip(), str(it.get("companyName") or "").strip()
+        if not (title and company and path.startswith("/") and not path.startswith("//")):
+            continue
+        url = _pinned(JD_BASE + path, JD_HOST)
+        if not url:
+            continue
+        m = _DDMMYYYY.match(str(it.get("publishedDate") or "").strip())
+        out.append({"title": title, "company": company, "address": str(it.get("companyAddress") or "").strip(),
+                    "url": url, "posted": f"{m.group(3)}-{m.group(2)}-{m.group(1)}" if m else ""})
+    tp = payload.get("totalPages") if isinstance(payload, dict) else 0
+    return out, tp if isinstance(tp, int) and not isinstance(tp, bool) else 0, len(rows) if isinstance(rows, list) else 0
+
+
+@_feed
+def fetch_jobdanmark(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """JobiDanmark (Denmark), only when DK is one of the user's countries: newest search pages, detail page for the matches."""
+    if not _wanted(countries, "DK"):
+        return []
+    budget = _Budget(SITE_MAX_REQUESTS)
+    qs = _queries(queries)
+    body = json.dumps({"jobTypes": [], "filters": [], "locationMode": "Text", "distance": 50}).encode()
+    items: list[dict[str, str]] = []
+    for page in range(1, JD_PAGES + 1):
+        got, total, rows = parse_jobdanmark_items(_list_get(http, stats, "jobdanmark", budget, JD_SEARCH % page, method="POST", data=body,
+                                                      headers={"Content-Type": "application/json"}))
+        items += got
+        if not rows or (total and page >= total):  # the RAW page decides, not the kept items
+            break
+    jobs: list[Job] = []
+    details = 0
+    for it in items:
+        if not _hit(f"{it['title']} {it['company']}", qs):
+            continue
+        desc, posted = "", it["posted"]
+        if details < JD_DETAIL_CAP and budget.left > 0:
+            details += 1
+            _pause(PAUSE_S)
+            p = _ld_posting(str(_fetch(http, stats, "jobdanmark", budget, it["url"], as_json=False) or ""))
+            desc = str(p.get("description") or "")
+            posted = _date(str(p.get("datePosted") or "")) or posted
+        jobs.append(_made("jobdanmark", "JobiDanmark", title=it["title"], company=it["company"], url=it["url"], place=it["address"],
+                          country="Denmark", posted=posted, description=desc))
+    return _keep(_unique(jobs), queries, days, search=False)
+
 FEEDS: dict[str, Callable[..., list[Job]]] = {
+    "remotedotcom": fetch_remotedotcom,
     "djinni": fetch_djinni,
+    "work180": fetch_work180,
     "wuzzuf": fetch_wuzzuf,
     "infojobs": fetch_infojobs,
     "instaffo": fetch_instaffo,
+    "jobdanmark": fetch_jobdanmark,
 }
