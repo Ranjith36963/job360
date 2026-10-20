@@ -399,6 +399,9 @@ stable `message_id` (e.g. "pasted:<sender>:<subject>:<date>"). Job360 marks an
 was checked (mark_inbox_checked at or after day 45; never checked = never auto-ghosted)
 (recorded_by system, payload auto=true); a later employer reply moves it off ghosted.
 Record outcomes at once; see `get_recipe("feedback")`.
+Interview details (all optional, 422 naming the key): interview_requested/interview_scheduled
+take `round` (<= 60; e.g. screen, technical, onsite, final), `link`
+(http(s) URL, <= 500), `duration_minutes` (5 to 480), `location` (<= 200).
 
 Wrong applied date: get_application -> timeline, take the `applied` event_id,
 then record_event `applied` with the right `occurred_at` and `corrects_event_id`
