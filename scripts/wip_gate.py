@@ -133,6 +133,26 @@ def load_wip_limit(path: Path = POLICY_PATH) -> int:
     return limit
 
 
+def human_only_labels(path: Path = POLICY_PATH) -> frozenset[str]:
+    """The `lane:*` labels of every lane the policy marks `auto_merge: false`.
+
+    A PR in such a lane only ever merges by the owner's hand, so it never
+    leaves the queue on its own. Read from the policy, never a hardcoded
+    list: the owner flips `auto_merge` there (product_owner was flipped on
+    2026-09-17), and a list here would drift from it. Label spelling follows
+    pr-advisor.yml's lane job: `product_owner` -> `lane:product-owner`.
+    """
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    lanes = data.get("lanes") if isinstance(data, dict) else None
+    if not isinstance(lanes, dict):
+        raise PolicyError(f"policy file has no `lanes:` mapping ({path})")
+    return frozenset(
+        f"lane:{name.replace('_', '-')}"
+        for name, spec in lanes.items()
+        if isinstance(spec, dict) and spec.get("auto_merge") is False
+    )
+
+
 def _is_exempt_author(author: str | None) -> bool:
     return author in DEPENDABOT_AUTHORS
 
@@ -149,7 +169,52 @@ def _is_parked(labels: Any) -> bool:
     return bool(labels) and PARKED_LABEL in labels
 
 
-def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int) -> dict[str, Any]:
+def _is_human_only(labels: Any, human_only: frozenset[str]) -> bool:
+    return bool(labels) and bool(human_only.intersection(labels))
+
+
+def _holds_slot(p: dict[str, Any], human_only: frozenset[str]) -> bool:
+    """Does this open PR count against the limit?
+
+    HUMAN-ONLY PRS HOLD NO SLOT (2026-10-20). Measured that day: 17 of 24
+    open PRs were parked while the slots were held by PRs in the
+    `harness_owner` lane (#728, #952, #954), which wait on the owner's hand
+    and so never free a slot. Green machine-mergeable PRs sat parked behind
+    them. A PR with no lane label yet still counts: unknown is not human-only.
+    """
+    return not (
+        p.get("isDraft")
+        or _is_parked(p.get("labels"))
+        or _is_exempt_author(p.get("author"))
+        or _is_revert(p.get("headRefName"))
+        or _is_human_only(p.get("labels"), human_only)
+    )
+
+
+def pick_unpark(open_prs: list[dict[str, Any]], limit: int,
+                human_only: frozenset[str] = frozenset()) -> list[int]:
+    """The parked PRs to put back in the queue now: oldest first, as many as
+    there are free slots. PURE.
+
+    NOTHING USED TO UNPARK (2026-10-20). A park only ever ended by hand, so a
+    parked PR stayed out of the merge cage's sight forever, and with
+    `merge-cage` a required check it could never merge, however green it was.
+    A human-only PR is never picked: unparking it frees nothing for anyone.
+    """
+    free = limit - sum(1 for p in open_prs if _holds_slot(p, human_only))
+    if free <= 0:
+        return []
+    parked = sorted(
+        (p for p in open_prs
+         if _is_parked(p.get("labels")) and not p.get("isDraft")
+         and not _is_human_only(p.get("labels"), human_only)),
+        key=lambda p: p.get("number") or 0,
+    )
+    return [p["number"] for p in parked[:free]]
+
+
+def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int,
+           human_only: frozenset[str] = frozenset()) -> dict[str, Any]:
     """PURE decision function -- the thing the drill breaks.
 
     `open_prs` items carry: number (int), isDraft (bool), author (the login
@@ -200,19 +265,8 @@ def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int) -> dict[str
             "emergency revert, and an emergency revert must never be parked.",
         }
 
-    blockers: list[dict[str, Any]] = []
-    for p in open_prs:
-        if p.get("number") == this_pr:
-            continue
-        if p.get("isDraft"):
-            continue
-        if _is_parked(p.get("labels")):
-            continue
-        if _is_exempt_author(p.get("author")):
-            continue
-        if _is_revert(p.get("headRefName")):
-            continue
-        blockers.append(p)
+    blockers = [p for p in open_prs
+                if p.get("number") != this_pr and _holds_slot(p, human_only)]
 
     count = len(blockers)
     names = ", ".join(f"#{p.get('number')}" for p in sorted(blockers, key=lambda p: p.get("number") or 0))
@@ -223,7 +277,8 @@ def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int) -> dict[str
             "count": count,
             "why": (
                 f"WIP limit is {limit}; {count} other open, non-draft, non-parked, "
-                f"non-dependabot, non-revert PR(s) are already ahead of PR #{this_pr}: {names}."
+                f"non-dependabot, non-revert, non-human-only PR(s) are already ahead of "
+                f"PR #{this_pr}: {names}."
             ),
         }
     return {
@@ -441,6 +496,35 @@ def _drill() -> int:
         check(f"this repo's .github/merge-policy.yml has a usable wip.limit ({exc})",
               False, True)
 
+    # 17. A human-only PR (`auto_merge: false` lane) holds no slot, but a PR
+    #     in a lane a machine merges still does.
+    ho = frozenset({"lane:harness-owner"})
+    v = decide([pr(1), pr(2, labels=["lane:harness-owner"]), pr(3, labels=["lane:harness-owner"])],
+               this_pr=1, limit=2, human_only=ho)
+    check("two human-only PRs don't count toward the limit", v["park"], False)
+    v = decide([pr(1), pr(2, labels=["lane:product-owner"]), pr(3, labels=["lane:product"])],
+               this_pr=1, limit=2, human_only=ho)
+    check("PRs in lanes a machine merges still count -> parks", v["park"], True)
+
+    # 18. UNPARK: the oldest parked PRs come back, as many as slots are free,
+    #     never a human-only one, and none at all when the queue is full.
+    P = "wip:parked"
+    prs = [pr(10), pr(11, labels=["lane:harness-owner"]), pr(14, labels=[P]),
+           pr(12, labels=[P]), pr(13, labels=[P, "lane:harness-owner"]), pr(15, labels=[P])]
+    check("2 free slots -> the 2 oldest parked, skipping the human-only one",
+          pick_unpark(prs, limit=3, human_only=ho), [12, 14])
+    check("queue full -> nothing is unparked",
+          pick_unpark([pr(1), pr(2), pr(3, labels=[P])], limit=2, human_only=ho), [])
+    check("a parked draft is never unparked",
+          pick_unpark([pr(1, draft=True, labels=[P])], limit=2, human_only=ho), [])
+
+    # 19. The real policy names harness_owner, and only it, as human-only.
+    try:
+        check("this repo's policy: human-only lanes are exactly lane:harness-owner",
+              human_only_labels(POLICY_PATH), frozenset({"lane:harness-owner"}))
+    except PolicyError as exc:
+        check(f"this repo's policy lists its human-only lanes ({exc})", False, True)
+
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n{passed}/{len(cases)}")
     return 0 if passed == len(cases) else 1
@@ -453,17 +537,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pr", type=int, help="the PR number being judged")
     ap.add_argument("--json", metavar="FILE", help="write the decision JSON here")
     ap.add_argument("--drill", action="store_true", help="break the classifier on purpose")
+    ap.add_argument("--unpark", action="store_true",
+                    help="remove wip:parked from the oldest parked PRs while slots are free")
     args = ap.parse_args(argv)
 
     if args.drill:
         return _drill()
 
-    if args.pr is None:
-        print("wip_gate: --pr is required outside --drill", file=sys.stderr)
+    if args.pr is None and not args.unpark:
+        print("wip_gate: --pr or --unpark is required outside --drill", file=sys.stderr)
         return 2
 
     try:
         limit = load_wip_limit()
+        human_only = human_only_labels()
     except PolicyError as exc:
         # LOUD REFUSAL, per the module docstring: a misread policy must never
         # park a real PR. Exit 2 is "the gate could not judge", not "no park".
@@ -478,7 +565,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wip_gate: could not read open PRs: {exc}", file=sys.stderr)
         return 2
 
-    verdict = decide(open_prs, args.pr, limit)
+    if args.unpark:
+        picked = pick_unpark(open_prs, limit, human_only)
+        print(f"wip_gate: unparking {picked or 'nothing'} (limit {limit})")
+        for n in picked:
+            subprocess.run(["gh", "pr", "edit", str(n), "--remove-label", PARKED_LABEL],
+                           check=True, timeout=60)
+            note = ("**Unparked:** a WIP slot freed, so this PR is back in the merge "
+                    "queue. The merge cage will judge it on its next pass.")
+            subprocess.run(["gh", "pr", "comment", str(n), "--body", note], check=False, timeout=60)
+        return 0
+
+    verdict = decide(open_prs, args.pr, limit, human_only)
     text = json.dumps(verdict, indent=2, sort_keys=True)
     print(text)
     if args.json:

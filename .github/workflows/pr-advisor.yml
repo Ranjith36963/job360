@@ -743,7 +743,7 @@ jobs:
         run: |
           set -euo pipefail
           gh label create wip:parked --color B60205 \
-            --description "Parked by the WIP limit; remove the label when a slot frees" \
+            --description "Parked by the WIP limit; unparked automatically when a slot frees" \
             --force
           gh pr edit "$PR" --add-label wip:parked
 
@@ -755,7 +755,7 @@ jobs:
           WHY: ${{ steps.decide.outputs.why }}
         run: |
           set -euo pipefail
-          gh pr comment "$PR" --body "$(printf '**Parked by the WIP limit (label `wip:parked`).**\n\n%s\n\nThis is not a rejection. Nothing about your PR was touched, and no work is lost — it is simply not counted against the limit while it carries the label. Remove the label with `gh pr edit %s --remove-label wip:parked` when a slot frees (a PR ahead of you merges or closes) to put it straight back in the queue.' "$WHY" "$PR")"
+          gh pr comment "$PR" --body "$(printf '**Parked by the WIP limit (label `wip:parked`).**\n\n%s\n\nThis is not a rejection. Nothing about your PR was touched, and no work is lost — it is simply not counted against the limit while it carries the label. When a slot frees (a PR ahead of you merges or closes), the merge cage'"'"'s 20-minute sweep removes the label for you, oldest parked PR first. To jump the queue, remove it yourself with `gh pr edit %s --remove-label wip:parked`.' "$WHY" "$PR")"
 
       - name: Tell the owner in Slack — a PR was parked
         if: steps.decide.outputs.park == 'true' && steps.park.outcome == 'success'
