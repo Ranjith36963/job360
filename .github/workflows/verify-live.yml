@@ -330,6 +330,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$be" != "success" ] || [ "$fe" != "success" ]; then
+            # A CANCELLED eye judged nothing (a newer push cancelled this run):
+            # say so instead of "did not behave", but still exit 1, since a
+            # required check must never pass unjudged. Any real `failure` keeps
+            # the RED message below.
+            if [ "$be" != "failure" ] && [ "$fe" != "failure" ] && { [ "$be" = "cancelled" ] || [ "$fe" = "cancelled" ]; }; then
+              echo "::error::verify: not judged — the run was cancelled (a newer push superseded it)."
+              exit 1
+            fi
             echo "::error::verify is RED — the app was run and it did not behave."
             exit 1
           fi
