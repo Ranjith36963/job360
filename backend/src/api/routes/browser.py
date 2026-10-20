@@ -193,7 +193,7 @@ async def browser_action(
 _BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed"}
 HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. Finish it with your own assistant's browser when your computer is on "
-    "(Claude in Chrome, Gemini in Chrome, ChatGPT agent), or sign in once on Settings, Job sites."
+    "(Claude in Chrome, Gemini in Chrome, ChatGPT's own browser), or sign in once on Settings, Job sites."
 )
 
 
