@@ -330,7 +330,7 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 # lane. Drilled in `scripts/lane.py`: "a migration AND a workflow file is
 # harness_owner, never machine-merged" — put this tuple back the old way and that
 # case goes red.
-LANES: tuple[str, ...] = ("harness_owner", "product_owner", "product", "harness")
+LANES: tuple[str, ...] = ("harness_owner", "product_human", "product_owner", "product", "harness")
 
 # pattern -> the sentence printed when it refuses. Keys MUST exist in the policy
 # as the path of an `auto_merge: false` lane, and `check_lists()` refuses a key
@@ -354,6 +354,16 @@ _CHECK_FACTORY = ("a workflow that PRODUCES a required check — the ruleset tru
                   + _OWNER_MERGES)
 
 DENY_REASONS: dict[str, str] = {
+    # ── OWNER 2026-10-20: migrations and auth wait for his hand again ────────
+    # "Only migration, auth ... for those things harness owner should come."
+    "backend/src/api/routes/auth.py": f"authentication — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/services/auth/**": f"authentication — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/api/routes/account*.py":
+        f"account management — the owner merges it. {_OWNER_MERGES}",
+    "backend/migrations/**":
+        "schema change — irreversible against live data: a Railway rollback restores "
+        "the previous IMAGE, not the previous SCHEMA. Every migration ships with its "
+        f"`.down.sql`. {_OWNER_MERGES}",
     # ── the harness must not quietly edit its own cage ───────────────────────
     # `.github/**` and `scripts/**` were blanket keys here until 2026-10-18,
     # when the owner moved both blankets to the `harness` lane ("let PRs
@@ -467,10 +477,6 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/models.py":
         f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_WATCHED}",
     # ── users: identity, sessions, anything that can lock someone out ────────
-    "backend/src/api/routes/auth.py": f"authentication — a user decision. {_WATCHED}",
-    "backend/src/services/auth/**": f"authentication — a user decision. {_WATCHED}",
-    "backend/src/api/routes/account*.py":
-        f"account management — a user decision. {_WATCHED}",
     "backend/src/services/notifications/**":
         f"sends real messages to real people. {_WATCHED}",
     # This one was denied on its PATH precisely because a path cage cannot tell a
@@ -482,11 +488,6 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/api/routes/profile.py":
         f"a per-user API route — rules #12/#25. {_WATCHED}",
     # ── infrastructure ───────────────────────────────────────────────────────
-    "backend/migrations/**":
-        f"schema change — irreversible against live data. {_WATCHED} "
-        "NOTE: a Railway rollback restores the previous IMAGE, not the previous "
-        "SCHEMA. The watcher can undo the deploy; only a down-migration undoes the "
-        "table. Hard rule: every migration ships with its `.down.sql`.",
     "**/*docker-compose*": f"infrastructure decision. {_WATCHED}",
     "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
     "**/railway.json": f"infrastructure decision. {_WATCHED}",
@@ -2286,11 +2287,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # go red — which is correct: the policy and its drill have to say the same
     # thing, and that is the whole reason both lists come from one file.
     flipped = ["backend/src/services/skill_matcher.py",
-               "backend/src/api/routes/auth.py",
                "backend/src/api/routes/profile.py",
                "docker-compose.prod.yml",
                "frontend/package.json",
-               "backend/migrations/0042_x.up.sql",
                "docs/product/product_design_rules.md",
                "backend/src/core/settings.py"]
     still_denied = [f for f in flipped if check_paths([f]).status != "pass"]
@@ -2298,6 +2297,11 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not still_denied,
        f"`product_owner` is flipped in the policy but the cage still refuses: {still_denied}",
        P)
+    # OWNER 2026-10-20: migrations and auth left the flip and wait for his hand.
+    for owner_only in ("backend/migrations/0042_x.up.sql", "backend/src/api/routes/auth.py",
+                       "backend/src/services/auth/session.py", "backend/src/api/routes/account_x.py"):
+        red(f"migrations and auth are the owner's to merge: {owner_only}",
+            check_paths([owner_only]), "merges it by hand", P)
     # The witness moved on 2026-08-26 and the invariant did not. It used to be
     # `backend/src/some_new_module.py`, which was only "unrecognised" because
     # the cage's hand-typed ALLOW list had never heard of `backend/src/**` —

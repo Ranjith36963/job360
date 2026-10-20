@@ -411,7 +411,6 @@ lanes:
     description: "The product's sharp end — merged by a machine only under the watcher."
     paths:
       # irreversible against live data
-      - "backend/migrations/**"
       - "backend/src/models.py"          # normalized_key -> dedup -> lost rows
       # secrets and infrastructure
       - "**/*.env*"
@@ -451,14 +450,32 @@ lanes:
       - "backend/src/services/uk_gate.py"
       - "backend/src/services/visa_signal.py"
       - "backend/src/services/profile/**"
-      - "backend/src/api/routes/auth.py"
-      - "backend/src/services/auth/**"
-      - "backend/src/api/routes/account*.py"
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
     requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true           # FLIPPED 2026-09-17 — the watcher below is the argument
     watch_minutes: 15          # ...and it is not optional; this is what buys the speed
+    rollback: railway
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT_HUMAN — reaches users AND waits for your hand (owner, 2026-10-20).
+  #
+  # "Only migration, auth ... for those things harness owner should come, not
+  # for everything." A schema change cannot be undone by a Railway rollback (it
+  # restores the image, not the tables), and the login path can lock every user
+  # out. So these two wait for a person -- and, because they still reach live
+  # users, they keep product_owner's full gate, the 15-minute watcher and the
+  # Railway rollback after he merges. Everything else stays machine-merged.
+  # ─────────────────────────────────────────────────────────────────────────
+  product_human:
+    paths:
+      - "backend/migrations/**"
+      - "backend/src/api/routes/auth.py"
+      - "backend/src/services/auth/**"
+      - "backend/src/api/routes/account*.py"
+    requires: [ci, review, security, verify, ratchets, bugs]
+    auto_merge: false          # your hand -- migrations and auth only
+    watch_minutes: 15          # still reaches users, so still watched
     rollback: railway
 
   # ─────────────────────────────────────────────────────────────────────────
