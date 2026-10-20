@@ -1499,6 +1499,62 @@ async def test_the_route_keeps_the_proof_screenshot_on_the_callers_application(a
     assert events[0]["via"] == "browser" and shots[0]["created_by"] == "token:claude"
 
 
+@pytest.mark.asyncio
+async def test_a_refused_submit_claim_is_a_refusal_and_nothing_is_clicked(authenticated_async_context, monkeypatch):
+    """G338: another session already recorded submit_attempted, so the route's mark_attempt gets
+    a 409; the browser answers refused / submit_already_started and never clicks."""
+    import dataclasses
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_route
+    from src.services.browser_agent import agent
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/9",
+        })
+        app_id = brought.json()["application_id"]
+        first = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "submit_attempted"})
+        assert first.status_code == 201, first.text
+        user = CurrentUser(
+            id=authenticated_async_context.fixture_user_id, email="ada@example.com", auth_via="token",
+            actor_name="claude",
+        )
+        gate, _ = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        with pytest.raises(agent.BrowserError) as exc:
+            await gate.mark_attempt()
+        assert exc.value.as_dict() == {
+            "status": "refused", "reason": "submit_already_started",
+            "detail": "Another session already started submitting this application; nothing was clicked.",
+        }
+
+        # The same refusal inside the browser's click: check_submit said submit, the claim is refused,
+        # and the control is never clicked.
+        loc = MagicMock(click=AsyncMock(), evaluate=AsyncMock(return_value={}))
+        page = MagicMock(url="https://jobs.acme.com/apply/9")
+        monkeypatch.setattr(agent, "_page_captcha", AsyncMock(return_value=False))
+        monkeypatch.setattr(agent, "_live_page", lambda s: page)
+        monkeypatch.setattr(agent, "_find", AsyncMock(return_value=(MagicMock(), loc)))
+        monkeypatch.setattr(agent, "_refuse_captcha_frame", lambda frame: None)
+        monkeypatch.setattr(agent, "_kind", AsyncMock(return_value="submit"))
+        go = AsyncMock(return_value={"decision": "submit", "reason": "auto_when_sure", "detail": ""})
+        session = SimpleNamespace(dead_clicks={}, submitted_on=(None, ""), submit_refused=False)
+        with pytest.raises(agent.BrowserError) as exc:
+            await agent._act(  # noqa: SLF001
+                MagicMock(), session, "click", url="", ref="e1", text="", on=True, doc_kind="",
+                gate=dataclasses.replace(gate, check=go), files=None,
+            )
+        assert (exc.value.status, exc.value.reason) == ("refused", "submit_already_started")
+        go.assert_awaited_once()
+        loc.click.assert_not_called()
+        assert session.submitted_on == (None, "")
+        events = await client.get(f"/api/applications/{app_id}")
+        assert [e["event_type"] for e in events.json()["events"]].count("submit_attempted") == 1
+
+
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
