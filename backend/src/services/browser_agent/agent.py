@@ -43,11 +43,13 @@ from src.services.browser_agent.page_js import (
     OWN_LIST_IDS_JS,
     SHOWN_VALUE_JS,
     SNAPSHOT_JS,
+    SUBMIT_GUARD_READ_JS,
+    SUBMIT_GUARD_START_JS,
     TICK_VIA_LABEL_JS,
     WATCH_READ_JS,
     WATCH_START_JS,
 )
-from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
+from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
 from src.services.browser_agent.sites import is_honeypot, looks_like_application, outcome_for, site_for
 from src.services.fetch.guard import ResolveFn
 
@@ -262,7 +264,10 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
         raise BrowserError("refused", "bad_key", "key (in text) must be one of: " + ", ".join(sorted(AGENT_KEYS)))
     page = _live_page(s)
     if ref:
-        await (await _locate(s, ref)).focus()
+        frame, loc = await _find(s, ref)
+        _refuse_captcha_frame(frame)
+        await loc.focus()
+    guarded = None
     if key == "Enter":
         frame = page.main_frame
         for f in page.frames:  # the focus may live in a frame (an embedded form)
@@ -271,14 +276,29 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
                     frame = f
             except Exception:  # noqa: BLE001, S112 - a frame mid-navigation
                 continue
+        _refuse_captcha_frame(frame)
         if not await frame.evaluate(FOCUS_IN_LIST_JS):
             raise BrowserError(
                 "refused", "enter_may_submit",
-                "Enter is only pressed inside a suggestion list (a combobox). In an ordinary field it can submit "
-                "the form: click the form's submit button instead, so check_submit runs.",
+                "Enter is only pressed on a highlighted option of a suggestion list (type, then ArrowDown). "
+                "Anywhere else it can submit the form: click the form's submit button instead, so check_submit runs.",
             )
+        # Defence in depth: a site that lets Enter through to its form would submit it. Stop that submit.
+        await frame.evaluate(SUBMIT_GUARD_START_JS)
+        guarded = frame
     await page.keyboard.press(key)
     await _settle(page)
+    if guarded is not None:
+        try:
+            submitted = await guarded.evaluate(SUBMIT_GUARD_READ_JS)
+        except Exception:  # noqa: BLE001 - the frame navigated: no submit got past the guard to do it
+            submitted = False
+        if submitted:
+            raise BrowserError(
+                "refused", "enter_may_submit",
+                "That Enter would have submitted the form; Job360 stopped it. Click an option instead, and the "
+                "form's submit button only when it is time, so check_submit runs.",
+            )
     return await look(s)
 
 
@@ -580,8 +600,40 @@ async def look(s: Session) -> dict[str, Any]:
     return out
 
 
-async def _locate(s: Session, ref: str) -> Any:
-    return (await _find(s, ref))[1]
+CAPTCHA_DETAIL = (
+    "This page asks for a human check (CAPTCHA). Job360's browser never solves one and does nothing more on "
+    "this page: stop this job; the user finishes it with their own browser."
+)
+
+
+def _refuse_captcha_frame(frame: Any) -> None:
+    """Nothing inside a CAPTCHA's own frame (or a frame within it) is ever clicked, typed or keyed."""
+    while frame is not None:
+        if _captcha_frame(frame.url or ""):
+            raise BrowserError("needs_you", "captcha", CAPTCHA_DETAIL)
+        frame = frame.parent_frame
+
+
+# The frame's text as look reads it (whitespace folded, so a phrase split over lines still matches).
+_BODY_TEXT_JS = "(n) => (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, n)"
+
+
+async def _page_captcha(page: Any) -> bool:
+    """Whether the page shows a CAPTCHA now: the same frames and text ``look`` reads."""
+    urls: list[str] = []
+    texts: list[str] = []
+    read = 0
+    for i, f in enumerate(page.frames):
+        urls.append(f.url)
+        if i >= MAX_FRAMES_CHECKED or read >= MAX_FRAMES or (i and not await _frame_shown(f)):
+            continue
+        try:
+            texts.append(await asyncio.wait_for(f.evaluate(_BODY_TEXT_JS, MAX_TEXT), FRAME_READ_TIMEOUT_S))
+        except Exception:  # noqa: BLE001, S112 - a frame mid-navigation: its address still counts
+            continue
+        read += 1
+    blocker = blocker_for(urls, "\n\n".join(texts)[:MAX_TEXT], False)
+    return blocker is not None and blocker.reason == "captcha"
 
 
 async def _find(s: Session, ref: str) -> tuple[Any, Any]:
@@ -747,6 +799,9 @@ async def _act(
         await page.go_back()
         await _settle(page)
         return await look(s)
+    # A CAPTCHA stops the run: past this point every action could work the check itself.
+    if await _page_captcha(_live_page(s)):
+        raise BrowserError("needs_you", "captcha", CAPTCHA_DETAIL)
     if action == "key":
         return await _press(s, ref, text)
     if action == "scroll":
@@ -758,6 +813,7 @@ async def _act(
         return await look(s)
 
     frame, loc = await _find(s, ref)
+    _refuse_captcha_frame(frame)
     kind = await _kind(loc)
     page = _live_page(s)
 

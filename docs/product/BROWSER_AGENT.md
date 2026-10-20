@@ -156,11 +156,16 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 
 **`key` action (2026-10-19):** ArrowDown, ArrowUp, Tab, Escape and Enter, for the suggestion lists real forms use
 (Greenhouse location and school, Workday dropdowns): type, ArrowDown, Enter. Enter is refused outside a suggestion
-list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. The list
-must be OPEN (`aria-expanded` true, or an option highlighted): a closed suggestion box in a form submits on Enter too.
+list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. An option
+must be highlighted (focus on an option, or `aria-activedescendant` naming one): a closed suggestion box, or an open
+list that shows "No options", submits on Enter too. And if a site lets an allowed Enter through to its form anyway,
+the submit is stopped before the page sees it and the key is refused (`enter_may_submit`).
 
 **CAPTCHA vs. invisible reCAPTCHA:** every Greenhouse posting loads an invisible reCAPTCHA that asks nothing, so it
 is not a stop. A reCAPTCHA image challenge or a tick-box widget is (freehire `atsapply/browser.go:167-234`).
+Once a page shows a CAPTCHA, every action but `look`, `back`, `open` and `close` is refused (`needs_you`, reason
+`captcha`), and nothing inside a CAPTCHA's own frame is ever clicked, typed or keyed: the cloud browser never ticks
+"I'm not a robot" itself.
 
 **Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
 the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.
