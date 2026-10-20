@@ -317,6 +317,57 @@ def test_change_password_revokes_all_user_sessions(client):
     assert client.get("/api/auth/me").status_code == 401, "session B survived"
 
 
+async def _give_agent_access(db_path: str, user_id: str) -> str:
+    """One personal `j360_` token and one live OAuth grant for the user."""
+    from src.services.auth import api_tokens
+
+    minted = await api_tokens.mint(db_path, user_id=user_id, name="claude")
+    assert minted is not None
+    async with pg.connect(db_path) as db:
+        await db.execute(
+            "INSERT INTO oauth_clients (id, client_name, redirect_uris) VALUES (?, ?, ?)",
+            ("j360c_test", "Test client", '["https://claude.ai/cb"]'),
+        )
+        await db.execute(
+            "INSERT INTO oauth_grants (user_id, client_id, scope) VALUES (?, ?, ?)",
+            (user_id, "j360c_test", "mcp"),
+        )
+        await db.commit()
+    return str(minted["token"])
+
+
+async def _live_grants(db_path: str, user_id: str) -> int:
+    async with pg.connect(db_path) as db:
+        cur = await db.execute(
+            "SELECT COUNT(*) FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL", (user_id,)
+        )
+        row = await cur.fetchone()
+        return int(row[0])
+
+
+@pytest.mark.parametrize(
+    "path,body",
+    [
+        ("/api/auth/users/me/password", {"current_password": "oldpassword1", "new_password": "newpassword1"}),
+        ("/api/auth/users/me/email", {"current_password": "oldpassword1", "new_email": "moved@example.com"}),
+    ],
+)
+def test_credential_change_revokes_agent_tokens_and_grants(client, temp_db, path, body):
+    """Gap roadmap slice 2: a password or email change locks out every
+    assistant too, not only cookie sessions."""
+    from src.services.auth import api_tokens
+
+    user = _register(client, "agents@example.com", "oldpassword1")
+    token = asyncio.run(_give_agent_access(temp_db, user["id"]))
+    assert asyncio.run(api_tokens.resolve(temp_db, token)) is not None
+
+    r = client.patch(path, json=body)
+    assert r.status_code == 204, r.text
+
+    assert asyncio.run(api_tokens.resolve(temp_db, token)) is None, "agent token survived"
+    assert asyncio.run(_live_grants(temp_db, user["id"])) == 0, "OAuth grant survived"
+
+
 def test_change_password_short_new_password(client):
     """new_password shorter than 8 chars is rejected by Pydantic (422)."""
     _register(client, "pw_short@example.com")

@@ -1531,7 +1531,7 @@ export interface paths {
         post?: never;
         /**
          * Forget Sign In
-         * @description Forget one saved sign-in. The user's live browser (if any) is closed so it forgets too.
+         * @description Forget one saved sign-in. The user's browsers (if any) are closed so they forget too.
          */
         delete: operations["forget_sign_in_api_browser_sign_ins__host__delete"];
         options?: never;
