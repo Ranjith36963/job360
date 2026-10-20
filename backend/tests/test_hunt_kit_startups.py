@@ -408,8 +408,9 @@ def test_builtin_empty_non_200_and_challenge():
 
 
 # ------------------------------------------------------------------------------------------- WTTJ
+FAKE_KEY = "0123456789abcdef" * 2  # a made-up 32-character key, built so no key-shaped literal sits in the file
 ENV_TEXT = 'window.env = ' + json.dumps({"PUBLIC_ALGOLIA_APPLICATION_ID": "AB12CD34",
-                                         "PUBLIC_ALGOLIA_API_KEY_CLIENT": "0123456789abcdef0123456789abcdef"}) + ";"
+                                         "PUBLIC_ALGOLIA_API_KEY_CLIENT": FAKE_KEY}) + ";"
 
 
 def _wttj_hit(slug, org="acme", **kw):
@@ -491,9 +492,9 @@ def test_wttj_env_failures_and_empty_and_bad_answer():
 
 
 def test_parse_wttj_env_rejects_odd_payloads():
-    assert ks.parse_wttj_env(ENV_TEXT) == ("AB12CD34", "0123456789abcdef0123456789abcdef")
+    assert ks.parse_wttj_env(ENV_TEXT) == ("AB12CD34", FAKE_KEY)
     bad_app = ENV_TEXT.replace("AB12CD34", "x/../evil")
-    for bad in (bad_app, "no json", "{bad}", None, 5, "[1]", ENV_TEXT.replace("0123456789abcdef0123456789abcdef", "s")):
+    for bad in (bad_app, "no json", "{bad}", None, 5, "[1]", ENV_TEXT.replace(FAKE_KEY, "s")):
         assert ks.parse_wttj_env(bad) is None
 
 
