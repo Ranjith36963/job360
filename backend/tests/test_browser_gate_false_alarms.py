@@ -35,7 +35,7 @@ _EU_VERBS = ("absenden", "senden", "bewerben", "envoyer", "postuler", "soumettre
         ("button", "", "Submitted applications", False, "tab", True, {"owns_form": False}, "field"),
         ("input", "button", "Submitted applications", True, "tab", True, {}, "field"),
         ("input", "submit", "Submitted applications", True, "tab", True, {"owns_form": True}, "submit"),
-        ("input", "text", "Password", True, "tab", True, {}, "password"),
+        ("input", "text", "Passwort", True, "tab", True, {}, "password"),
         ("input", "text", "Employer", True, "tab", True, {}, "field"),
         ("span", "", "Submit", True, "switch", False, {}, "submit"),
         # Other languages: the end once answers are held; a link names it with the application.
