@@ -55,6 +55,7 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 | [`product/DEPLOY.md`](product/DEPLOY.md) | How a merge to `main` reaches production on Railway. |
 | [`product/RUNBOOK-backups.md`](product/RUNBOOK-backups.md) | Postgres backup/restore procedure. |
 | [`product/BREACH-RUNBOOK.md`](product/BREACH-RUNBOOK.md) | Security-incident response steps. |
+| [`product/hunt-kit-smoke-2026-10-20.md`](product/hunt-kit-smoke-2026-10-20.md) | Snapshot: the live hunt-kit smoke test from the owner's PC (coverage table, warnings, 8 problems with fixes). |
 | [`product/troubleshooting.md`](product/troubleshooting.md) | Dev-environment FAQ: port conflicts, Postgres connection/schema errors in tests, a CV that uploads but leaves the profile thin. |
 
 ---

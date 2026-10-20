@@ -43,6 +43,11 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,
   `@mcp.tool()`, the decorator) — never X's importers; they cannot show a second doer.
 
+## Probing job sites
+- Call a site "blocked" only after testing the exact endpoint the reader uses, and name it
+  (2026-10-19: Bayt/GulfTalent web pages gave 403; the readers' endpoints worked).
+- A test run gets a NEW folder: check it does not exist (`test -e`) before downloading into it.
+
 ## Real applications for the owner
 - An answer that is not clearly yes/no gets one clarifying question.
 - Never write a claim into a CV, letter or outreach that the profile and the owner's
