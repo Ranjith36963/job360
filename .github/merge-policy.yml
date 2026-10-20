@@ -717,7 +717,6 @@ size:
   generated:
     - frontend/openapi.json
     - frontend/src/lib/api-types.ts
-    - docs/GENERATED.md
 
 # ── Ratchets ───────────────────────────────────────────────────────────────
 # A ratchet is a number that may HOLD or IMPROVE and may never get worse.
