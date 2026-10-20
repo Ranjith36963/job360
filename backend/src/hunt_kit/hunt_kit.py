@@ -133,6 +133,10 @@ BOARD_SOURCES = (
     "recruiterflow",
     "deel",
     "dover",
+    "wpyoast",
+    "careerspage",
+    "jobboardly",
+    "jobappnetwork",
 )
 FEED_SOURCES = (
     "freehire",
@@ -2714,7 +2718,7 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com)$", re.I)
+    r"dayforcehcm\.com|trakstar\.com|homerun\.co|factorialhr\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:

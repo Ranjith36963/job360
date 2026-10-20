@@ -57,10 +57,12 @@ def _run(name: str, row: dict, http, *, check: bool = True):
 
 # --------------------------------------------------------------------------- shared
 def test_registry_and_hunt_kit_wiring():
-    assert set(F) == {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream"}
+    assert set(F) == {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream", "wpyoast",
+                      "careerspage", "jobboardly", "jobappnetwork"}
     src = (KIT_DIR / "kit_ats_misc2.py").read_text(encoding="utf-8")
     assert src.count("Borrowed from freehire internal/ingest/sources/") >= len(F)  # every reader names its reference file
-    for fname in ("opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream"):
+    for fname in ("opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream", "wpyoast",
+                  "careerspage", "jobboardly", "jobappnetwork"):
         assert f"sources/{fname}.go" in src
 
 
@@ -70,6 +72,10 @@ BAD_TOKENS = {
     "recruitingsolutions": ["", "bad token", "x/y"],
     "werecruit": ["", "idiap", "en/", "/idiap", "en/a/b"],
     "workstream": ["", "zzzzzzzz", "965a796", "965A796B0"],
+    "wpyoast": ["", "nodot", "a b.com"],
+    "careerspage": ["", "-x", "a.b", "x_y"],
+    "jobboardly": ["", "a.b", "https://x.jobboardly.com", "-x", "x_y"],
+    "jobappnetwork": ["", "abc", "0", "-5", "1.5"],
 }
 
 
@@ -81,7 +87,9 @@ def test_bad_token_makes_no_request_and_counts_not_ok(name, tok):
 
 
 GOOD_TOKEN = {"opencats": "careers.boomit.pt/careers", "odoo": "jobs.amewaregroup.com", "recruitingsolutions": "riv-prod",
-              "teamex": "global", "wantapply": "global", "werecruit": "en/idiap", "workstream": "965a796b"}
+              "teamex": "global", "wantapply": "global", "werecruit": "en/idiap", "workstream": "965a796b",
+              "wpyoast": "careers.acme.com", "careerspage": "davidjoseph-co", "jobboardly": "kubernetes-jobs",
+              "jobappnetwork": "20448"}
 
 
 @pytest.mark.parametrize("name", sorted(F))
@@ -446,6 +454,168 @@ def test_workstream_live_career_site_with_nothing_open_is_ok_and_empty():
     assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
 
 
+# --------------------------------------------------------------------------- WordPress / Yoast
+WP_INDEX = ('<sitemapindex><sitemap><loc>https://careers.acme.com/page-sitemap.xml</loc></sitemap>'
+            '<sitemap><loc>https://careers.acme.com/job_listing-sitemap.xml</loc></sitemap></sitemapindex>')
+WP_JOB = "https://careers.acme.com/job/640127-electrical-engineer-corona-california/"
+WP_DETAIL = ('<html><script type="application/ld+json">{"@context":"https://schema.org/","@type":"JobPosting","title":"Electrical Engineer III &#8211; Design",'
+             '"description":"<p>Design things.</p><script>alert(1)<\\/script>","datePosted":"2026-05-19T00:00:00Z",'
+             '"hiringOrganization":{"@type":"Organization","name":"Acme Group"},'
+             '"jobLocation":{"@type":"Place","address":{"@type":"PostalAddress","addressLocality":"Corona","addressRegion":"CA","addressCountry":"US"}}}</script></html>')
+
+
+def test_wpyoast_index_to_job_sitemap_to_detail():
+    sm = f'<urlset><url><loc>{WP_JOB}</loc></url><url><loc>https://careers.acme.com/page/about/</loc></url><url><loc>https://evil.example.org/job/1-x/</loc></url></urlset>'
+    http = _stub({"/job/640127-": (200, WP_DETAIL), "job_listing-sitemap.xml": (200, sm), "https://careers.acme.com/sitemap.xml": (200, WP_INDEX)})
+    jobs, stats = _run("wpyoast", {"name": "Fallback", "token": "careers.acme.com"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1}
+    j = jobs[0]
+    assert j["title"] == "Electrical Engineer III – Design" and j["company"] == "Acme Group" and j["url"] == WP_JOB
+    assert j["location"] == "Corona, CA, US" and j["posted"] == "2026-05-19" and j["description"] == "Design things." and j["extra"]["job_id"] == "640127"
+
+
+def test_wpyoast_no_job_listing_sitemap_is_empty_not_an_error():
+    only_pages = "<sitemapindex><sitemap><loc>https://careers.acme.com/page-sitemap.xml</loc></sitemap></sitemapindex>"
+    jobs, stats = _run("wpyoast", {"token": "careers.acme.com"}, _stub({"/sitemap.xml": (200, only_pages)}))
+    assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
+
+
+def test_wpyoast_job_sitemap_failure_fails_board_and_detail_without_jobposting_is_dropped():
+    http = _stub({"job_listing-sitemap.xml": (503, None), "/sitemap.xml": (200, WP_INDEX)})
+    assert _run("wpyoast", {"token": "careers.acme.com"}, http)[1] == {"tried": 1, "jobs": 0}
+    sm = f"<urlset><url><loc>{WP_JOB}</loc></url></urlset>"
+    http = _stub({"/job/640127-": (200, "<html>no ld</html>"), "job_listing-sitemap.xml": (200, sm), "/sitemap.xml": (200, WP_INDEX)})
+    assert _run("wpyoast", {"token": "careers.acme.com"}, http)[0] == []
+
+
+# --------------------------------------------------------------------------- careers-page.com
+U1, U2, U3 = "f2222f51-835a-4d0a-9435-291cd2bdaa06", "a593c5a5-855d-4660-ad73-f68ababc77fd", "b1763eee-15ef-4dc5-963d-d783ff466124"
+
+
+def _cp_list(*ids):
+    cards = "".join(f'<div class="job-card"><a href="/jobs/{u}">A Role</a><a href="jobs/{u}/refer">Refer</a><a href="jobs/{u}/apply">Apply</a></div>' for u in ids)
+    return f'<html><body>{cards}<div class="pagination-wrapper"><a href="?page=2">Next</a></div></body></html>'
+
+
+def _cp_detail(title):
+    return ('<html><script type="application/ld+json">{"@type":"JobPosting","title":"' + title + '","description":"<h2>About</h2><p>Build things.</p><script>alert(1)<\\/script>",'
+            '"datePosted":"2026-06-29T19:22:10.912789+00:00","hiringOrganization":{"@type":"Organization","name":"David Joseph & Company"},'
+            '"jobLocation":{"@type":"Place","address":{"@type":"PostalAddress","addressLocality":"New York","addressCountry":"United States"}}}</script></html>')
+
+
+def test_careerspage_paginates_ignores_refer_apply_links_and_maps_detail():
+    http = _stub({"?page=1": (200, _cp_list(U1, U2)), "?page=2": (200, _cp_list(U3)), "?page=3": (200, "<html><body></body></html>"),
+                  f"/jobs/{U1}": (200, _cp_detail("Founding Software Engineer")), f"/jobs/{U2}": (200, _cp_detail("Designer")),
+                  f"/jobs/{U3}": (200, _cp_detail("Analyst"))})
+    jobs, stats = _run("careerspage", {"name": "Fallback Co", "token": "davidjoseph-co"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 3}
+    j = jobs[0]
+    assert j["url"] == f"https://davidjoseph-co.careers-page.com/jobs/{U1}" and j["title"] == "Founding Software Engineer"
+    assert j["company"] == "David Joseph & Company" and j["location"] == "New York, United States" and j["posted"] == "2026-06-29"
+    assert "Build things." in j["description"] and "alert" not in j["description"] and j["extra"]["job_id"] == U1
+    assert [c[0] for c in http.calls[:3]] == [f"https://davidjoseph-co.careers-page.com/?page={n}" for n in (1, 2, 3)]
+
+
+def test_careerspage_later_listing_failure_keeps_earlier_links_and_throttle_stops_details():
+    http = _stub({"?page=1": (200, _cp_list(U1)), "?page=2": (503, None), f"/jobs/{U1}": (429, None)})
+    jobs, _ = _run("careerspage", {"token": "acme"}, http)
+    assert jobs == [] and len(http.calls) == 3
+    http = _stub({"?page=1": (200, _cp_list(U1)), "?page=2": (503, None), f"/jobs/{U1}": (200, _cp_detail("Dev"))})
+    assert len(_run("careerspage", {"token": "acme"}, http)[0]) == 1
+
+
+def test_careerspage_empty_board():
+    jobs, stats = _run("careerspage", {"token": "acme"}, _stub({"?page=1": (200, "<html><body></body></html>")}))
+    assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
+
+
+# --------------------------------------------------------------------------- Jobboardly
+JB = [
+    {"title": "Kubernetes Platform Engineer", "arrangement": "fulltime", "location": "onsite", "location_limits": [], "published_at": "2026-10-16T08:00:00Z",
+     "description": {"html": "<p><b>The Opportunity:</b> Run clusters.</p><script>x()</script>"},
+     "company": {"name": "Booz Allen Hamilton", "location": "Fort Bragg, North Carolina, United States"},
+     "salary": {"schedule": "yearly", "minimum": {"cents": 6940000, "currency_iso": "USD"}, "maximum": {"cents": 15800000, "currency_iso": "USD"}},
+     "links": {"self": "https://kubernetesjobs.com/jobs/kubernetes-platform-engineer-1da9413c"}},
+    {"title": "SRE", "arrangement": "parttime", "location": "remote", "location_limits": ["US"], "published_at": "2026-10-15",
+     "description": {"html": "<p>Remote.</p>"}, "company": {"name": "Acme Cloud", "location": None}, "salary": None,
+     "links": {"self": "https://kubernetes-jobs.jobboardly.com/jobs/sre-aaaaaaaa"}},
+    {"title": "Worldwide Contractor", "arrangement": "contract", "location": "remote", "location_limits": ["Worldwide"],
+     "description": {"html": ""}, "company": {"name": "Globex", "location": ""},
+     "salary": {"schedule": "hourly", "minimum": {"cents": 8000, "currency_iso": "USD"}, "maximum": None},
+     "links": {"self": "https://kubernetes-jobs.jobboardly.com/jobs/worldwide-contractor-bbbbbbbb"}},
+    {"title": "Podcast Sponsorship Coordinator", "arrangement": None, "location": "hybrid", "application_link": "someone@example.com",
+     "description": {"html": "<p>Coordinate.</p>"}, "company": {"name": "Mamas Inc", "location": "Austin, Texas"},
+     "links": {"self": "https://hire-mamas.jobboardly.com/jobs/business-development-fe01dc06"}},
+    {"title": "No company", "company": {"name": ""}, "links": {"self": "https://x.jobboardly.com/jobs/a-cccccccc"}},
+    {"title": "Not a posting page", "company": {"name": "Z"}, "links": {"self": "https://x.jobboardly.com/other/a-dddddddd"}},
+    {"title": "Mixed currencies", "company": {"name": "Z"}, "links": {"self": "https://x.jobboardly.com/jobs/mixed-eeeeeeee"},
+     "salary": {"schedule": "yearly", "minimum": {"cents": 100, "currency_iso": "USD"}, "maximum": {"cents": 200, "currency_iso": "EUR"}}},
+]
+
+
+def test_jobboardly_maps_postings_to_their_own_employers():
+    http = _stub({"https://kubernetes-jobs.jobboardly.com/jobs.json": (200, JB)})
+    jobs, stats = _run("jobboardly", {"name": "Kubernetes Jobs", "token": "Kubernetes-Jobs"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 5} and len(http.calls) == 1
+    a, b, c, d, e = jobs
+    assert a["company"] == "Booz Allen Hamilton" and a["url"] == "https://kubernetesjobs.com/jobs/kubernetes-platform-engineer-1da9413c"
+    assert a["location"] == "Fort Bragg, North Carolina, United States" and a["extra"]["work_mode"] == "onsite" and a["remote"] is None
+    assert a["extra"]["employment_type"] == "full_time" and a["posted"] == "2026-10-16"
+    assert (a["extra"]["salary_min"], a["extra"]["salary_max"], a["extra"]["salary_currency"], a["extra"]["salary_period"]) == (69400, 158000, "USD", "year")
+    assert "The Opportunity:" in a["description"] and "x()" not in a["description"]
+    assert b["remote"] is True and b["location"] == "US" and "salary_min" not in b["extra"]
+    assert c["location"] == "Worldwide" and c["extra"]["salary_min"] == 80 and c["extra"]["salary_period"] == "hour" and "salary_max" not in c["extra"]
+    assert d["url"] == "https://hire-mamas.jobboardly.com/jobs/business-development-fe01dc06" and d["extra"]["work_mode"] == "hybrid"
+    assert "salary_min" not in e["extra"]  # two currencies state no salary
+
+
+def test_jobboardly_empty_board():
+    jobs, stats = _run("jobboardly", {"token": "b"}, _stub({"jobs.json": (200, [])}))
+    assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
+
+
+# --------------------------------------------------------------------------- JobAppNetwork
+def _jan_hit(jid, title="Shift Leader"):
+    return {"_source": {"jobId": jid, "title": title, "description": "<p>Lead the shift.</p><script>x()</script>",
+                        "address": {"city": "Houston", "stateOrProvince": "TX", "country": "US"}, "clientId": 20448,
+                        "internalOrExternal": "externalOnly", "createdDate": "2022-02-16"}}
+
+
+def test_jobappnetwork_scopes_the_search_to_one_client_and_external_postings():
+    http = _stub({"proxy-es/search-en-us/posting/_search": (200, {"hits": {"total": 1, "hits": [_jan_hit(7216553)]}})})
+    jobs, stats = _run("jobappnetwork", {"name": "HZ Coffee Group LLC", "token": "20448"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1}
+    url, method, body, _h = http.calls[0]
+    assert url == "https://prod-kong.internal.talentreef.com/apply/proxy-es/search-en-us/posting/_search" and method == "POST"
+    assert body == {"query": {"bool": {"filter": [{"term": {"clientId": 20448}}, {"term": {"internalOrExternal": "externalOnly"}}]}}, "from": 0, "size": 100}
+    j = jobs[0]
+    assert j["url"] == "https://apply.jobappnetwork.com/clients/20448/posting/7216553/" and j["company"] == "HZ Coffee Group LLC"
+    assert (j["title"], j["location"], j["posted"], j["description"]) == ("Shift Leader", "Houston, TX, US", "2022-02-16", "Lead the shift.")
+
+
+def test_jobappnetwork_pages_until_total_and_keeps_page_one_when_a_later_page_fails():
+    def pager(url, method, body, headers):
+        frm = body["from"]
+        if frm == 0:
+            return 200, {"hits": {"total": 250, "hits": [_jan_hit(i) for i in range(100)]}}
+        if frm == 100:
+            return 200, {"hits": {"total": {"value": 250}, "hits": [_jan_hit(i) for i in range(100, 200)]}}
+        return 503, None
+
+    http = _stub({"_search": pager})
+    jobs, _ = _run("jobappnetwork", {"token": "1"}, http)
+    assert len(jobs) == 200 and [c[2]["from"] for c in http.calls] == [0, 100, 200]
+    http = _stub({"_search": lambda *a: (200, {"hits": {"total": 5, "hits": [_jan_hit(1)]}}) if a[2]["from"] == 0 else (200, {"hits": {"total": 5, "hits": []}})})
+    assert len(_run("jobappnetwork", {"token": "1"}, http)[0]) == 1 and len(http.calls) == 2  # an empty page ends the walk
+
+
+def test_jobappnetwork_empty_and_postings_without_id_are_skipped():
+    jobs, stats = _run("jobappnetwork", {"token": "1"}, _stub({"_search": (200, {"hits": {"total": 0, "hits": []}})}))
+    assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
+    bad = {"hits": {"total": 2, "hits": [{"_source": {"title": "No id"}}, _jan_hit(5, title="")]}}
+    assert _run("jobappnetwork", {"token": "1"}, _stub({"_search": (200, bad)}))[0] == []
+
+
 # --------------------------------------------------------------------------- wiring into hunt_kit.py and the served files
 def test_registered_in_hunt_kit_and_served():
     hk = _load("hunt_kit_misc2_under_test", "hunt_kit.py")
@@ -511,3 +681,12 @@ def test_hostile_pages_stay_fast_for_dom_build_odoo_listing_and_detail_reads():
     page = "<html>" + '<div itemprop="description">x' * 8000
     http = _stub({"/jobs/detail/y-2": (200, page), "/jobs": (200, '<a href="/jobs/detail/y-2">Engineer</a>')})
     _fast(lambda: _run("odoo", {"token": "a.example.com"}, http, check=False), 2.0)
+
+
+@pytest.mark.parametrize("bad", ["Infinity", "-Infinity", "NaN", "1e999", "1" + "0" * 400])
+def test_jobboardly_non_finite_salary_keeps_the_board(bad):
+    raw = ('[{"title":"SRE","company":{"name":"Acme"},"links":{"self":"https://x.jobboardly.com/jobs/sre-aaaaaaaa"},'
+           '"salary":{"schedule":"yearly","minimum":{"cents":%s,"currency_iso":"USD"},"maximum":{"cents":200000,"currency_iso":"USD"}}}]' % bad)
+    jobs, stats = _run("jobboardly", {"token": "b"}, _stub({"jobs.json": (200, json.loads(raw))}))
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1}
+    assert jobs[0]["extra"]["salary_max"] == 2000 and "salary_min" not in jobs[0]["extra"]

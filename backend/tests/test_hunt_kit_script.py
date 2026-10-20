@@ -374,7 +374,8 @@ def test_companies_json_valid() -> None:
     } | {"rippling", "breezy", "pinpoint", "phenom", "ultipro", "adp", "cornerstone", "gem",
          "jazzhr", "softgarden", "join", "jibe", "keka", "zohorecruit"} | {"avature", "comeet", "hibob", "pageup", "freshteam"}  # the kit_ats_more and kit_ats_extra types
     ok |= {"betterteam", "catsone", "clinch", "crelate", "erecruiter", "gr8people", "hrmanager", "ismartrecruit", "loxo", "mindsight"}  # the kit_ats_misc1 types
-    ok |= {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream"}  # the kit_ats_misc2 types
+    ok |= {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream", "wpyoast",
+           "careerspage", "jobboardly", "jobappnetwork"}  # the kit_ats_misc2 types
     ok |= {"bullhorn", "careerplug", "hireology", "hiringthing", "hrmdirect", "isolvedhire", "paycom", "paycor",
           "jobscore", "recruiterflow"}  # the kit_ats_us types
     seen = set()
