@@ -331,7 +331,7 @@ jobs:
         run: python scripts/review_debt.py --drill
 
       # The guard on the one route that makes outbound requests to a URL a
-      # stranger chose (docs/plans/2026-09-04-url-fetch/spec.md). Ten
+      # stranger chose (backend/src/services/fetch/guard.py). Ten
       # mutations, each a real SSRF bypass, plus a negative control.
       - name: The SSRF guard can still fail
         if: needs.scope.outputs.scope == 'full'

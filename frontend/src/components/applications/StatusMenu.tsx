@@ -6,6 +6,7 @@ import { recordApplicationEvent } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { Button } from "@/components/ui/button";
+import { StatusForm, hasStatusForm, type StatusFormBody } from "@/components/applications/StatusForm";
 
 /**
  * "What happened?" — the seeker records a status change straight onto the
@@ -39,11 +40,11 @@ export function StatusMenu({
   const [pending, setPending] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const confirm = useCallback(async () => {
+  const confirm = useCallback(async (body?: StatusFormBody) => {
     if (!pending) return;
     setSaving(true);
     try {
-      await recordApplicationEvent(applicationId, { event_type: pending });
+      await recordApplicationEvent(applicationId, body ?? { event_type: pending });
       setPending(null);
       await onRecorded();
     } catch (err) {
@@ -78,7 +79,16 @@ export function StatusMenu({
           ))}
         </select>
       </label>
-      {pending && (
+      {pending && hasStatusForm(pending) && (
+        <StatusForm
+          key={pending}
+          eventType={pending}
+          saving={saving}
+          onSubmit={(body) => void confirm(body)}
+          onCancel={cancel}
+        />
+      )}
+      {pending && !hasStatusForm(pending) && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
           <span>
             Record &quot;{STATUS_LABEL[pending] ?? pending}&quot;? This is added to the history.
