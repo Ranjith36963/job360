@@ -23,6 +23,9 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   active the mode resolves to auto, after that it is the user's own ``submit_mode``
 * ``paused_until`` — ``""`` | ``"until_resumed"`` | an ISO-8601 time in the future
 * ``pause_reason`` — one short line for the user's own memory
+* ``outreach_send`` — ``draft_only`` (default) | ``auto``: may the assistant press Send on an outreach
+  email (feature 10 gate). Its own consent, never implied by the Gmail mode
+  ``preferences.daily_check`` (owner 2026-10-20, G087).
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -63,6 +66,7 @@ from src.repositories import pgsync
 from src.services.profile import edits as profile_edits
 from src.services.profile.models import (
     VALID_DAILY_CHECK_VALUES,
+    VALID_OUTREACH_SEND_VALUES,
     VALID_SUBMIT_MODES,
     AssistantSettings,
     UserProfile,
@@ -94,11 +98,14 @@ AUTO_GRANT_UNTIL_PATH = f"{HEAD}.auto_grant_until"
 PAUSED_UNTIL_PATH = f"{HEAD}.paused_until"
 PAUSE_REASON_PATH = f"{HEAD}.pause_reason"
 AUTO_EMPLOYER_EMAILS_PATH = f"{HEAD}.auto_employer_emails"
+OUTREACH_SEND_PATH = f"{HEAD}.outreach_send"
+DEFAULT_OUTREACH_SEND = "draft_only"
+OUTREACH_SEND_AUTO = "auto"
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
-    AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH,
+    AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -342,6 +349,8 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
+    if path == OUTREACH_SEND_PATH:
+        return _closed_set(path, value, VALID_OUTREACH_SEND_VALUES)
     raise _bad(path, "is not an assistant setting")  # pragma: no cover — callers pass SETTING_PATHS
 
 
@@ -369,6 +378,7 @@ class EffectiveSettings:
     apply_hours: Optional[tuple[str, str]] = None
     auto_grant_count: Optional[int] = None
     auto_grant_until: str = ""
+    outreach_send: str = DEFAULT_OUTREACH_SEND
 
 
 def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
@@ -379,9 +389,14 @@ def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
     return None
 
 
+def _outreach_send(raw: Any) -> str:
+    """Only a stored ``auto`` sends; "" / anything else (a historical row) reads as ``draft_only`` (G087)."""
+    return OUTREACH_SEND_AUTO if raw == OUTREACH_SEND_AUTO else DEFAULT_OUTREACH_SEND
+
+
 def effective(s: AssistantSettings) -> EffectiveSettings:
     """Fill the safe defaults: no score line / ask / ask / confirm / no cap / not paused /
-    no company limit (and the default window when the user set a limit without days)."""
+    no company limit (and the default window when the user set a limit without days) / draft only."""
     return EffectiveSettings(
         apply_min_score=None if s.apply_min_score is None else int(s.apply_min_score),
         above_line=s.above_line or DEFAULT_LINE_SWITCH,
@@ -400,6 +415,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         apply_hours=_hours_tuple(s.apply_hours),
         auto_grant_count=None if s.auto_grant_count is None else int(s.auto_grant_count),
         auto_grant_until=s.auto_grant_until or "",
+        outreach_send=_outreach_send(s.outreach_send),
     )
 
 
@@ -448,6 +464,8 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw or ""
     if path == AUTO_EMPLOYER_EMAILS_PATH:
         return bool(raw)
+    if path == OUTREACH_SEND_PATH:
+        return _outreach_send(raw)
     raise KeyError(path)
 
 
@@ -538,7 +556,9 @@ def classify_change(
     pause_reason         never                                          always
     auto_employer_       off -> on (the assistant emails employers     on -> off (the stop
     emails               in the owner's name)                          switch; applies at once)
-    preferences.         anything -> auto (the assistant sends mail     every other value
+    outreach_send        draft_only -> auto (the assistant sends       auto -> draft_only
+                         outreach in the user's name)                  (applies at once)
+    preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
     """
@@ -589,6 +609,8 @@ def classify_change(
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
     if path == AUTO_EMPLOYER_EMAILS_PATH:
         return "riskier" if (bool(after) and not bool(before)) else "safer"
+    if path == OUTREACH_SEND_PATH:
+        return "riskier" if (after == OUTREACH_SEND_AUTO and before != OUTREACH_SEND_AUTO) else "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
 
 
@@ -1294,8 +1316,6 @@ def may_send_outreach(
     facts: OutreachFacts,
     counts: OutreachCounts,
     now: datetime,
-    *,
-    inbox_mode: str = "",
 ) -> OutreachDecision:
     """May the assistant press Send on this outreach email? Pure; first match wins.
 
@@ -1305,8 +1325,8 @@ def may_send_outreach(
     daily_outreach_cap_reached (``OUTREACH_AUTO_SENDS_MAX_PER_DAY``),
     company_cap_reached (``OUTREACH_COMPANY_MAX`` within
     ``OUTREACH_COMPANY_WINDOW_DAYS``).
-    ASK (save a Gmail draft, ask_user): mode_not_auto (``preferences.daily_check``
-    is not ``auto``/``scheduled``), no_found_via, unlinked_contact.
+    ASK (save a Gmail draft, ask_user): mode_not_auto (``assistant_settings.outreach_send``
+    is not ``auto``; the Gmail mode never counts), no_found_via, unlinked_contact.
     SEND: auto_mode.
     """
     if is_paused(cfg.paused_until, now):
@@ -1344,9 +1364,10 @@ def may_send_outreach(
             f"Enough people at this company were emailed in the last {settings.OUTREACH_COMPANY_WINDOW_DAYS} days. "
             "Do not send.",
         )
-    if not _is_auto_inbox(inbox_mode):
+    if cfg.outreach_send != OUTREACH_SEND_AUTO:
         return OutreachDecision(
-            "ask", "mode_not_auto", "The user sends outreach themselves. Save a Gmail draft and ask_user.",
+            "ask", "mode_not_auto",
+            "Sending outreach is off (outreach_send is draft_only): save a Gmail draft and ask_user.",
         )
     if not facts.found_via:
         return OutreachDecision(
@@ -1358,7 +1379,8 @@ def may_send_outreach(
         )
     return OutreachDecision(
         "send", "auto_mode",
-        "Auto mode: you may press Send in Gmail, then record outreach_sent with the Gmail message id as source.",
+        "outreach_send is auto: you may press Send in Gmail, then record outreach_sent "
+        "with the Gmail message id as source.",
     )
 
 
@@ -1799,6 +1821,7 @@ def build_settings_view(
         },
         "pause_reason": {"value": raw.pause_reason, "effective": eff.pause_reason},
         "auto_employer_emails": {"value": raw.auto_employer_emails, "effective": eff.auto_employer_emails},
+        "outreach_send": {"value": raw.outreach_send, "effective": eff.outreach_send},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,

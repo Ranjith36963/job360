@@ -48,6 +48,7 @@ VALID_LANGUAGE_LEVELS: frozenset[str] = frozenset({"native", "fluent", "professi
 # kept so old tests and stored rows still import.
 VALID_APPLY_MODES: frozenset[str] = frozenset({"ask_each", "apply_all", "selective_above_score"})
 VALID_SUBMIT_MODES: frozenset[str] = frozenset({"confirm", "auto_when_sure"})
+VALID_OUTREACH_SEND_VALUES: frozenset[str] = frozenset({"draft_only", "auto"})
 
 
 @dataclass
@@ -728,6 +729,10 @@ class AssistantSettings:
     # Feedback loop slice 2: may the assistant send the check-in / feedback emails on its own?
     # False (default) = it may only draft. Turning it ON is a riskier change.
     auto_employer_emails: bool = False
+    # Owner 2026-10-20 (G087): may the assistant press Send on an outreach email? "draft_only" (default; "" = not
+    # chosen) | "auto". Separate from preferences.daily_check (reading Gmail never grants sending). Turning it to
+    # auto is a riskier change.
+    outreach_send: str = ""
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

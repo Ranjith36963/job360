@@ -279,6 +279,7 @@ class AssistantSettingsView(BaseModel):
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut
+    outreach_send: SettingFieldOut
     paused: bool
     inbox_mode: str = ""
     check_every: str = ""

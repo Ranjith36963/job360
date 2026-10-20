@@ -1685,7 +1685,8 @@ export interface paths {
          * Outreach Check
          * @description THE one gate before pressing Send on an outreach email (feature 10).
          *
-         *     Reads the user's settings, this contact's facts and the saved message
+         *     Reads the user's settings (``assistant_settings.outreach_send`` decides send vs
+         *     ask; the Gmail mode never does), this contact's facts and the saved message
          *     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
          *     kind="outreach"`` created), plus today's recorded sends, then answers
          *     through ``settings_rules.may_send_outreach`` - the same function for this
@@ -3674,6 +3675,7 @@ export interface components {
              * @default []
              */
             notes: string[];
+            outreach_send: components["schemas"]["SettingFieldOut"];
             pause_reason: components["schemas"]["SettingFieldOut"];
             /** Paused */
             paused: boolean;

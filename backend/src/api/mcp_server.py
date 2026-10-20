@@ -1609,7 +1609,7 @@ def build_server(version: str = "") -> MCPServer:
         `apply_min_score` is the user's OWN score line (0-100, no default; ask,
         never guess); `above_line` ask|auto, `below_line` ask|auto|skip (skip = drop the job).
         More freedom (an `auto` switch, a line move making a side auto, auto_when_sure, a higher or
-        removed daily_cap, ending a pause, `preferences.daily_check` = "auto") is NOT applied: it returns
+        removed daily_cap, ending a pause, `daily_check`/`outreach_send` = "auto") is NOT applied: it returns
         in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
@@ -1745,7 +1745,7 @@ def build_server(version: str = "") -> MCPServer:
         not_latest_draft, not_email_channel (LinkedIn/other: the user sends),
         no_email, already_sent, replied, application_closed,
         daily_outreach_cap_reached, company_cap_reached. Ask reasons:
-        mode_not_auto, no_found_via, unlinked_contact. Send: auto_mode.
+        mode_not_auto (outreach_send is not auto), no_found_via, unlinked_contact. Send: auto_mode.
         `sent_today` / `daily_max` = recorded sends today vs the cap."""
         try:
             async with _request_db() as db:
