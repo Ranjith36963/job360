@@ -180,7 +180,9 @@ Apify web-fetch tool, before you build. Never cite from memory.
 - 2026-10-15: every PR that added a test file bumped the same count in
   docs/GENERATED.md, so each later PR went stale after a merge. **Rule:**
   before merging a queued PR, merge origin/main into it and run
-  `python3 scripts/gen_doc_blocks.py --write`.
+  `python3 scripts/gen_doc_blocks.py --write`. (No longer true: the file and
+  its generator were deleted 2026-10-20, owner's call, because 22 of 36 open
+  PRs conflicted on it.)
 
 - 2026-10-15: a one-line `git merge ...; git add -A; git commit` kept going
   after the merge CONFLICTED and pushed a commit full of conflict markers
@@ -190,13 +192,13 @@ Apify web-fetch tool, before you build. Never cite from memory.
   `git merge ...; git add -A; git commit` ran on past a CONFLICT (no markers landed, by luck:
   the conflicted file was one we kept whole). **Rule:** merge through a script that exits on
   a non-zero merge (`set -e`, or `if ! git merge ...; then exit 2; fi`), auto-resolves only
-  `docs/GENERATED.md` (take main's, regenerate) and stops on anything else.
+  generated files (take main's, regenerate) and stops on anything else.
 - 2026-10-20: `isolation: "worktree"` agents start from origin/main, not from the lead's
   checkout, so a slice meant to stack on an open PR was built without its base; one worker
   halted (right), its empty worktree vanished, and it had to be re-dispatched. **Rule:** a
   stacked worker's prompt names the base branch and its first step,
   `git fetch origin <base> && git merge --no-edit origin/<base>` (a merge commit, never
-  `--ff-only` or rebase), and tells it to stop on any conflict but GENERATED.md.
+  `--ff-only` or rebase), and tells it to stop on any conflict.
 - 2026-10-20: six PRs that each added an MCP tool parameter went red on
   `test_mcp_tools_rev` one after another: each bumped `TOOLS_REV` from the same main and
   pinned its own hash, so every merge made the rest stale. **Rule:** after merging main into

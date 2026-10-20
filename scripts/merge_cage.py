@@ -766,6 +766,36 @@ def _load_size() -> tuple[int, int, frozenset[str]]:
 
 MAX_CHANGED_FILES, MAX_CHANGED_LINES, GENERATED_FILES = _load_size()
 
+
+def _load_data_cap() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
+    """(max_data_lines, data_extensions, data_paths) from `size:`. Absent means no
+    wider cap for data (it counts as code, as before); present but malformed refuses."""
+    import yaml
+
+    size = (yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8")) or {}).get("size") or {}
+    if "max_data_lines" not in size:
+        return MAX_CHANGED_LINES, (), ()
+    exts = size.get("data_extensions") or []
+    paths = size.get("data_paths") or []
+    try:
+        cap = int(size["max_data_lines"])
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"merge_cage: `size.max_data_lines` must be an integer ({exc}).") from exc
+    if cap < MAX_CHANGED_LINES or not isinstance(exts, list) or not all(
+            isinstance(e, str) and e.startswith(".") for e in exts):
+        raise SystemExit("merge_cage: `size.max_data_lines` must be >= max_lines and "
+                         "`size.data_extensions` a list like ['.json'].")
+    if not isinstance(paths, list) or not all(
+            isinstance(x, str) and x.endswith("/") and "*" not in x and not x.startswith("/")
+            for x in paths):
+        raise SystemExit("merge_cage: `size.data_paths` must be folder prefixes ending in '/', "
+                         "no globs: a pattern is a bypass waiting for a file.")
+    return cap, tuple(e.lower() for e in exts), tuple(paths)
+
+
+MAX_DATA_LINES, DATA_EXTENSIONS, DATA_PATHS = _load_data_cap()
+_LOCKFILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "uv.lock")
+
 # The commit status the arm posts, and the check run the CI workflows add to wake
 # the arm when they finish. See status_for() and auto-merge.yml.
 STATUS_CONTEXT = "merge-cage"
@@ -1021,7 +1051,7 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
         n = int(f.get("additions", 0)) + int(f.get("deletions", 0))
         name = str(f.get("filename", ""))
         recorded = (_FIXTURE_DIR in f"/{name}") and name.lower().endswith(_RECORDED_EXT)
-        # A generated file (openapi.json, api-types.ts, GENERATED.md) is written by a
+        # A generated file (openapi.json, api-types.ts) is written by a
         # script, not read by a reviewer. EXACT paths from the policy only, and the
         # discount is reported in the verdict like the fixture one.
         if recorded or name in GENERATED_FILES:
@@ -1031,8 +1061,29 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
     return read, exempt
 
 
+def data_lines(files_json: list[dict]) -> int:
+    """How many of the counted lines are DATA (owner, 2026-10-20). Pure.
+
+    Data: a data extension AND a path under `size.data_paths`, not under `.github/`,
+    not a lockfile, and not already exempt as a fixture or generated file (those are
+    not counted at all). The path rule is why `package.json` or `requirements.txt`
+    can never ride the wider cap."""
+    n = 0
+    for f in files_json:
+        name = str(f.get("filename", ""))
+        low = name.lower()
+        if (not DATA_EXTENSIONS or not low.endswith(DATA_EXTENSIONS)
+                or not name.startswith(DATA_PATHS)
+                or name.startswith(".github/") or low.rsplit("/", 1)[-1] in _LOCKFILES
+                or name in GENERATED_FILES
+                or ((_FIXTURE_DIR in f"/{name}") and low.endswith(_RECORDED_EXT))):
+            continue
+        n += int(f.get("additions", 0)) + int(f.get("deletions", 0))
+    return n
+
+
 def check_size(n_files: int, n_lines: int, deletions: list[str],
-               exempt_lines: int = 0) -> Verdict:
+               exempt_lines: int = 0, data: int = 0) -> Verdict:
     """SIZE: within the policy's file and line caps, and no file deleted. Generated lines are reported, not counted."""
     reasons: list[str] = []
     # OWNER, 2026-10-20: deleting a file waits for him only when the file is his
@@ -1050,13 +1101,19 @@ def check_size(n_files: int, n_lines: int, deletions: list[str],
             f"{n_files} files changed (cap {MAX_CHANGED_FILES}) — a change this wide is a "
             f"judgement call by size alone. FIX: split it into PRs under the cap, or the "
             f"owner merges it by hand.")
-    if n_lines > MAX_CHANGED_LINES:
+    code = n_lines - data
+    if code > MAX_CHANGED_LINES:
         reasons.append(
-            f"{n_lines} lines changed (cap {MAX_CHANGED_LINES}) — same reason. FIX: split it "
+            f"{code} lines of code changed (cap {MAX_CHANGED_LINES}) — same reason. FIX: split it "
             f"into PRs under the cap, or the owner merges it by hand.")
+    if n_lines > MAX_DATA_LINES:
+        reasons.append(
+            f"{n_lines} lines changed in all, {data} of them data (cap {MAX_DATA_LINES}) — same "
+            f"reason. FIX: split it into PRs under the cap, or the owner merges it by hand.")
     return Verdict("SIZE", "fail" if reasons else "pass", reasons,
                    claim=(f"small enough to reason about ({n_files} files, "
                           f"{n_lines} lines to read"
+                          + (f", {data} of them data" if data else "")
                           + (f" + {exempt_lines} recorded-fixture or generated lines not counted"
                              if exempt_lines else "") + ")"))
 
@@ -1785,6 +1842,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
         # The cap counts what a reviewer READS -- recorded fixtures are reported
         # separately rather than folded in. See review_surface().
         changed_lines, exempt_lines = review_surface(files_json)
+        changed_data = data_lines(files_json)
         # A MISSING base ref is not `main`. Defaulting an unknown base to the one
         # value that unlocks the full check list would be the permissive guess,
         # and the permissive guess is what this file exists to refuse. An empty
@@ -1792,6 +1850,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
         base_ref = ((pr_json.get("base") or {}).get("ref")) or ""
         meta = {"files": len(files), "lines": changed_lines,
                 "fixture_lines": exempt_lines,
+                "data_lines": changed_data,
                 "title": pr_json.get("title") or f"PR #{pr}",
                 "base": base_ref,
                 "merge_sha": pr_json.get("merge_commit_sha") or "",
@@ -1811,7 +1870,8 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
     if truncation:
         verdicts.append(Verdict("READ", "fail", truncation))
 
-    verdicts.append(check_size(len(files), changed_lines, deletions, exempt_lines))
+    verdicts.append(check_size(len(files), changed_lines, deletions, exempt_lines,
+                               meta.get("data_lines", 0)))
     verdicts.append(check_paths(files))
 
     for name, fn in (("PROOF", lambda p: check_proof(p, base_ref)), ("REVIEW", check_review)):
@@ -3061,6 +3121,29 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        "the extension alone was enough to exempt a file", ["review_surface"])
 
     _v_ex = check_size(3, 900, [], exempt_lines=2120)
+    # B22b — DATA GETS THE WIDER CAP, CODE DOES NOT (owner, 2026-10-20).
+    _dc = [{"filename": "backend/src/hunt_kit/companies.json", "additions": 2400, "deletions": 0},
+           {"filename": "backend/tests/test_hunt_kit_gulf.py", "additions": 400, "deletions": 0}]
+    ok("2,400 data lines + 400 code lines fit under the data cap",
+       data_lines(_dc) == 2400 and check_size(2, 2800, [], 0, data_lines(_dc)).status == "pass",
+       f"data={data_lines(_dc)}", ["data_lines", "check_size"])
+    ok("1,200 lines of CODE still fail, whatever the data cap",
+       check_size(1, 1200, [], 0, 0).status == "fail", "code rode the data cap", ["check_size"])
+    ok("data past the total cap fails",
+       check_size(2, MAX_DATA_LINES + 1, [], 0, MAX_DATA_LINES - 100).status == "fail",
+       "the data cap had no ceiling", ["check_size"])
+    _not_data = [{"filename": ".github/workflows/x.yml", "additions": 500, "deletions": 0},
+                 {"filename": "frontend/package-lock.json", "additions": 500, "deletions": 0},
+                 {"filename": "backend/src/x.py", "additions": 500, "deletions": 0},
+                 # reviewer-security P2 on #1014: data extension, but NOT in a data folder
+                 {"filename": "frontend/package.json", "additions": 500, "deletions": 0},
+                 {"filename": "backend/requirements.txt", "additions": 500, "deletions": 0},
+                 {"filename": "docker-compose.prod.yml", "additions": 500, "deletions": 0},
+                 # a data folder name inside another path does not count: prefix only
+                 {"filename": "frontend/backend/data/x.json", "additions": 500, "deletions": 0}]
+    ok("a workflow, a lockfile, a .py, package.json, requirements.txt and a compose file are never data",
+       data_lines(_not_data) == 0, f"got {data_lines(_not_data)}", ["data_lines"])
+
     ok("the discount is SAID OUT LOUD, never silent",
        "recorded-fixture or generated lines not counted" in (_v_ex.claim or ""),
        "an exemption nobody can see is indistinguishable from a hole", ["check_size"])
