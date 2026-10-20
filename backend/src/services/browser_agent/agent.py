@@ -1120,13 +1120,22 @@ async def live(
             elif action == "keep":
                 if keep is None:
                     raise BrowserError("refused", "cannot_keep", "Sign-ins cannot be kept here.")
-                from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+                from src.services.browser_agent.sign_ins import site_host, state_for_host  # noqa: PLC0415
 
                 state = await s.context.storage_state()
                 hosts = {h for h in (_live_hosts.get(user_id, ""), site_host(page.url)) if h}
                 if not hosts:
                     raise BrowserError("refused", "no_site", "Open the job site first.")
                 kept = {h: await keep(h, state) for h in sorted(hosts)}
+                # The assistant's browser, if open, loaded the saved sign-ins before this one: hand it the cookies.
+                agent_s = pool._sessions.get(user_id)
+                cookies = [c for h in sorted(hosts) for c in state_for_host(state, h)["cookies"]]
+                if agent_s is not None and cookies:
+                    try:
+                        async with agent_s.lock:
+                            await agent_s.context.add_cookies(cookies)
+                    except Exception:  # noqa: BLE001 - closed meanwhile: its next browser loads them anyway
+                        logger.debug("browser_agent could not hand the sign-in over", exc_info=True)
                 out = await _shot(s)
                 out["kept"] = kept
                 return out

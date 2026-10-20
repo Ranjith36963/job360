@@ -6,6 +6,8 @@
 * A close waits for the action in flight; it never closes a browser mid-action.
 * The page's 1.5 s picture refresh does not keep a live view open: only the user's own steps do,
   and a live view has a hard maximum lifetime.
+* Keep hands the sign-in to the assistant's browser if it is already open (it loaded the saved
+  sign-ins before this one existed).
 """
 from __future__ import annotations
 
@@ -134,5 +136,116 @@ async def test_a_live_view_closes_after_its_maximum_lifetime(two_page_site, monk
             await live(pool, "u1", "click", x=10, y=10)
         assert exc.value.reason == "no_browser"
         assert pool._sessions == {}  # noqa: SLF001
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_keep_signs_in_the_assistants_browser_that_is_already_open(two_page_site):
+    from src.services.browser_agent.agent import BrowserPool, live, run
+    from src.services.browser_agent.sign_ins import state_for_host
+
+    pool = BrowserPool(max_sessions=2, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(two_page_site))
+    vault: dict[str, dict] = {}
+
+    async def keep(host, state):
+        vault[host] = state_for_host(state, host)
+        return len(vault[host]["cookies"])
+
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/login")  # the assistant hits a sign-in page
+        assert "Signed in as Ada" not in page["text"]
+        await live(pool, "u1", "start", url="http://jobs.example/login", keep=keep)
+        await live(pool, "u1", "click", x=100, y=215)
+        await live(pool, "u1", "type", text="ada@example.com")
+        await live(pool, "u1", "key", key="Enter")
+        assert (await live(pool, "u1", "keep", keep=keep))["kept"] == {"jobs.example": 1}
+
+        again = await run(pool, "u1", "open", url="http://jobs.example/login")  # "then try again"
+        assert "Signed in as Ada" in again["text"]
+        assert len(pool._sessions) == 2  # noqa: SLF001 - the same open browser, not a new one
+    finally:
+        await pool.shutdown()
+
+
+async def _sign_in(pool, user_id, keep):
+    """The user signs in on the live view (the test site sets its cookie on Enter) and presses Keep."""
+    from src.services.browser_agent.agent import live
+
+    await live(pool, user_id, "start", url="http://jobs.example/login")
+    await live(pool, user_id, "click", x=100, y=215)
+    await live(pool, user_id, "type", text="ada@example.com")
+    await live(pool, user_id, "key", key="Enter")
+    return await live(pool, user_id, "keep", keep=keep)
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_keep_signs_in_the_assistants_open_browser_too(two_page_site):
+    from src.services.browser_agent.agent import BrowserPool, run
+    from src.services.browser_agent.sign_ins import state_for_host
+
+    pool = BrowserPool(max_sessions=3, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(two_page_site))
+    vault: dict[str, dict] = {}
+
+    async def keep(host, state):
+        vault[host] = state_for_host(state, host)
+        return len(vault[host]["cookies"])
+
+    try:
+        before = await run(pool, "u1", "open", url="http://jobs.example/login")  # the assistant's browser is open
+        assert "Signed in as Ada" not in str(before)
+        await run(pool, "u2", "open", url="http://jobs.example/login")  # another user's too
+        assert (await _sign_in(pool, "u1", keep))["kept"] == {"jobs.example": 1}
+
+        after = await run(pool, "u1", "open", url="http://jobs.example/login")
+        assert "Signed in as Ada" in after["text"]  # the open browser got the sign-in, no restart needed
+        other = await run(pool, "u2", "open", url="http://jobs.example/login")
+        assert "Signed in as Ada" not in str(other)  # only that user's own browser
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_second_start_gets_the_full_lifetime(two_page_site):
+    from src.services.browser_agent import agent
+    from src.services.browser_agent.agent import BrowserPool, live
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(two_page_site))
+    try:
+        await live(pool, "u1", "start", url="http://jobs.example/login")
+        (s,) = pool._sessions.values()  # noqa: SLF001
+        s.closes_at = time.monotonic() + 5  # the first sign-in nearly used its 15 minutes
+        await live(pool, "u1", "shot")
+        assert s.closes_at < time.monotonic() + 10  # a picture does not extend it
+        await live(pool, "u1", "start", url="http://jobs.example/login")
+        assert s.closes_at > time.monotonic() + agent.LIVE_MAX_SECONDS - 60  # Start again: the full time
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_live_view_does_not_take_an_assistants_browser(two_page_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, live, run
+
+    pool = BrowserPool(max_sessions=1, max_live=1, idle_s=600, resolve=_site_resolver(),
+                       open_connection=_to_site(two_page_site))
+    try:
+        await live(pool, "u1", "start", url="http://jobs.example/login")
+        page = await run(pool, "u2", "open", url="http://jobs.example/job")  # not all_browsers_busy
+        assert page["title"] == "Job - Acme"
+        with pytest.raises(BrowserError) as exc:
+            await live(pool, "u2", "start", url="http://jobs.example/login")
+        assert exc.value.reason == "all_browsers_busy"  # live views have their own cap
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u3", "open", url="http://jobs.example/job")
+        assert exc.value.reason == "all_browsers_busy"  # and so do the assistants
     finally:
         await pool.shutdown()

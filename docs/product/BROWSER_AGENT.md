@@ -143,7 +143,8 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Who can use it:** only you, in a signed-in browser session. An assistant's token is refused (403), so no AI can
   drive the live view or type into it. The live view is its own browser, not the one the assistant's `browser` tool
   drives: the assistant cannot see your sign-in, and Start or Cancel never touches its half-filled form. Both count
-  toward `BROWSER_AGENT_MAX_SESSIONS`. The assistant's own `browser` tool simply starts already signed in.
+  toward `BROWSER_AGENT_MAX_SESSIONS`. The assistant's own `browser` tool starts already signed in, and Keep
+  hands the new sign-in's cookies to its browser if it is already open, so "sign in, then try again" works at once.
 - **How long it stays open:** the picture refreshes every 1.5 s while the tab is shown, and stops after Keep. The
   refresh does not keep the browser open: it closes after `BROWSER_AGENT_IDLE_SECONDS` without a click, key or typing
   of yours, and 15 minutes after Start at the latest.
