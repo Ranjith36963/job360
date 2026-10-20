@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 11
-TOOLS_REV_FOR_HASH = "27a16bd9a721"
+TOOLS_REV = 12
+TOOLS_REV_FOR_HASH = "354e28e89fd2"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1606,6 +1606,8 @@ def build_server(version: str = "") -> MCPServer:
         occurred_at: Optional[str] = None,
         found_via: Optional[str] = None,
         source_url: Optional[str] = None,
+        phone: Optional[str] = None,
+        links: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
@@ -1613,15 +1615,16 @@ def build_server(version: str = "") -> MCPServer:
         later by adding them again with an application_id). Adding the SAME
         person again (same application, or same user when cold) returns the
         existing contact (already_existed=true, matched_on = "email",
-        "linkedin_url" or "name") instead of a duplicate, so re-running this
-        never doubles up: same email; else same LinkedIn URL; else same name
-        (on a job: unless both have different LinkedIn URLs; cold: only when
-        neither has one). A match changes nothing: use update_contact to add
-        what is new. Draft outreach for them with save_artifact(contact_id=...).
-        `found_via` = where you found them: "company_site", "linkedin",
-        "apollo", "referral", "job_ad", "email", "event" or "other" (leave it
-        out if you do not know). `source_url` = the page you found them on
-        (http/https); Job360 stores it, never opens it."""
+        "linkedin_url", "phone" or "name") instead of a duplicate, so re-running
+        this never doubles up: same email; else same LinkedIn URL; else same phone
+        (7+ digits); else same name (on a job: unless both have different LinkedIn
+        URLs or phones; cold: only when neither has either). A match changes
+        nothing: use update_contact to add what is new. Draft outreach for them
+        with save_artifact(contact_id=...). `found_via` = where you found them:
+        "company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event"
+        or "other" (leave it out if you do not know). `source_url` = the page you
+        found them on (http/https); Job360 stores it, never opens it. `phone` is
+        kept as + and digits; `links` = up to 5 other http/https profile URLs."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
@@ -1629,12 +1632,13 @@ def build_server(version: str = "") -> MCPServer:
                 body: Any = applications_route.AddPersonRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
-                    source_url=source_url,
+                    source_url=source_url, phone=phone, links=links,
                 )
             else:
                 body = applications_route.AddContactRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, found_via=found_via, source_url=source_url,
+                    phone=phone, links=links,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1664,18 +1668,20 @@ def build_server(version: str = "") -> MCPServer:
         notes: Optional[str] = None,
         found_via: Optional[str] = None,
         source_url: Optional[str] = None,
+        phone: Optional[str] = None,
+        links: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
         Only fields you pass are changed. `found_via` takes the same closed
-        set as add_contact; `source_url` is http/https; "" clears either. A foreign/unknown contact_id reads
-        404."""
+        set as add_contact; `source_url` is http/https; `phone`; `links` (the whole
+        list, max 5); "" or [] clears. A foreign/unknown contact_id reads 404."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
             body = applications_route.UpdateContactRequest(
                 name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
-                source_url=source_url,
+                source_url=source_url, phone=phone, links=links,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1697,7 +1703,8 @@ def build_server(version: str = "") -> MCPServer:
         message count. `email` narrows to one person. Give `contact_id` for
         that ONE record in full: every message VERSION, every sent/reply
         mark, and the detail-edit history. `reachable` = an email or LinkedIn URL is
-        saved; `source_url` = where they were found."""
+        saved; `source_url` = where they were found. `confirmed` = the user confirmed
+        this person on the website; `phone`/`links` as saved."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_people(contact_id, email, db, _user())

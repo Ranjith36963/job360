@@ -297,6 +297,9 @@ class AddContactRequest(BaseModel):
     # CONTACT_FOUND_VIA, checked by contacts._validate_found_via at call time.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
+    # Stored only; phone normalised to +digits, links http(s), max CONTACT_LINKS_MAX.
+    phone: Optional[str] = None
+    links: Optional[list[str]] = None
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -592,6 +595,9 @@ class ContactOut(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; null = unset.
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    phone: Optional[str] = None
+    links: list[str] = Field(default_factory=list)
+    confirmed: bool = False  # the user confirmed this person on the web (web-added = confirmed)
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
     added_by: str
@@ -1272,7 +1278,8 @@ class AddContactResponse(BaseModel):
     contact_id: int
     already_existed: bool
     event_id: Optional[int]
-    matched_on: Optional[str] = None  # "email" | "linkedin_url" | "name" when already_existed; null on a create
+    # "email" | "linkedin_url" | "phone" | "name" when already_existed; null on a create
+    matched_on: Optional[str] = None
 
 
 class AddPersonRequest(AddContactRequest):
@@ -1303,6 +1310,8 @@ class UpdateContactRequest(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; "" clears it.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # "" clears it
+    phone: Optional[str] = None  # "" clears it
+    links: Optional[list[str]] = None  # [] clears it
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1352,6 +1361,9 @@ class PersonOut(BaseModel):
     notes: str
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    phone: Optional[str] = None
+    links: list[str] = Field(default_factory=list)
+    confirmed: bool = False  # the user confirmed this person on the web (web-added = confirmed)
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
@@ -2107,15 +2119,15 @@ async def add_contact(
 ) -> dict[str, Any]:
     """201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
     for the same person seen again on this application (R2): same email, else
-    (no email) same normalised LinkedIn URL, else same name unless both carry
-    different LinkedIn URLs. The status code is set dynamically since the
+    (no email) same normalised LinkedIn URL, else same phone (7+ digits), else
+    same name unless both carry different LinkedIn URLs or phones. The status code is set dynamically since the
     same call can legitimately answer either."""
     try:
         result = await contacts_service.add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, phone=body.phone, links=body.links,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2140,20 +2152,34 @@ async def add_person(
     networking), or a linked one when ``application_id`` is given. Same
     idempotency/cap/rate-limit rules as the per-application route, just
     scoped to the USER instead of an application when there is none. Cold
-    scope without an email: same LinkedIn URL, else same name only when
-    neither side has a LinkedIn URL. ``source_url`` is stored, never fetched."""
+    scope without an email: same LinkedIn URL, else same phone (7+ digits),
+    else same name only when neither side has a LinkedIn URL or a phone. ``source_url`` is stored, never fetched."""
     try:
         result = await contacts_service.add_contact(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, phone=body.phone, links=body.links,
         )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     response.status_code = 200 if result["already_existed"] else 201
     return {**result, "contact_id": result["contact"]["id"]}
+
+
+@router.post("/contacts/{contact_id}/confirm", response_model=ContactOut, dependencies=AUTH_FIRST)
+async def confirm_contact(
+    contact_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """The user's own Confirm on a person their assistant added. Session only; no MCP twin."""
+    try:
+        return await contacts_service.confirm_contact(db, user.id, contact_id, actor_for(user))
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 @router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
@@ -2172,6 +2198,7 @@ async def update_contact(
             db, user.id, contact_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, found_via=body.found_via, source_url=body.source_url,
+            phone=body.phone, links=body.links,
         )
     except SpineError as exc:
         _raise(exc)

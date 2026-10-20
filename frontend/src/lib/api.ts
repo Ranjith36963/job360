@@ -1087,6 +1087,9 @@ export async function addContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string;
+    source_url?: string;
+    phone?: string;
+    links?: string[];
     occurred_at?: string;
   }
 ): Promise<AddContactResult> {
@@ -1111,9 +1114,16 @@ export async function updateContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string; // "" clears it; null would mean "not given"
+    phone?: string; // "" clears it
+    links?: string[]; // [] clears it
   }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+/** The user's own Confirm on a person their assistant added (session only). */
+export async function confirmContact(contactId: number): Promise<Contact> {
+  return request(`/api/contacts/${contactId}/confirm`, { method: "POST" });
 }
 
 // ---- Morning check (S5b) ----
