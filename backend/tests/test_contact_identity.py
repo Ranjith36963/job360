@@ -309,6 +309,15 @@ async def test_source_url_add_edit_clear_and_validate(authenticated_async_contex
         none = await _add_person(client, name="Src None")
         assert none.status_code == 201 and none.json()["contact"]["source_url"] is None
 
+        monkeypatch.setattr(settings, "CONTACT_SOURCE_URL_MAX_CHARS", 1000)
+        url = "https://northwind.example/" + "a" * 700
+        kept = await _add_person(client, name="Src Kept", source_url=url)
+        assert kept.status_code == 201, kept.text
+        assert kept.json()["contact"]["source_url"] == url
+
+        ctrl = await _add_person(client, name="Src Ctrl", source_url="https://northwind.example/a\nb")
+        assert ctrl.status_code == 422 and "source_url" in ctrl.text
+
 
 @pytest.mark.asyncio
 async def test_stats_by_contact_found_via_counts_reachable(authenticated_async_context):

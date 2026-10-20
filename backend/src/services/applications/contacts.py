@@ -159,13 +159,15 @@ def _validate_source_url(raw: Optional[str]) -> Optional[str]:
     (rule #29). Stored only, never fetched (M2)."""
     if raw is None or not raw.strip():
         return None
-    value = safe_log_value(raw.strip())
+    value = raw.strip()
     if len(value) > settings.CONTACT_SOURCE_URL_MAX_CHARS:
         raise SpineError(
             422, f"source_url exceeds CONTACT_SOURCE_URL_MAX_CHARS ({settings.CONTACT_SOURCE_URL_MAX_CHARS} chars)"
         )
     if not value.startswith(("https://", "http://")):
         raise SpineError(422, "source_url must start with http:// or https://")
+    if any(ord(c) < 32 or ord(c) == 127 or c.isspace() for c in value):
+        raise SpineError(422, "source_url must not contain spaces or control characters")
     return value
 
 
