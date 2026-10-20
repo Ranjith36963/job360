@@ -27,9 +27,11 @@ connection; it queries no application tables, so `public` search_path is fine).
 
 import asyncio
 
+import psycopg
 import pytest
 from psycopg_pool import PoolTimeout
 
+from src.core import settings
 from src.repositories import pg
 from src.repositories import pool as poolmod
 
@@ -215,3 +217,48 @@ async def test_get_pool_is_a_singleton_and_closes_clean():
             assert (await cur.fetchone())[0] == 1
     finally:
         await poolmod.close_pool()
+
+
+async def _show_statement_timeout(conn: pg.Connection) -> str:
+    cur = await conn.execute("SHOW statement_timeout")
+    return str((await cur.fetchone())[0])
+
+
+@pytest.mark.asyncio
+async def test_pooled_connections_carry_the_statement_timeout_setting(monkeypatch):
+    """The app-wide pool sets DB_STATEMENT_TIMEOUT_MS on every connection it
+    opens, and the setting survives a return to the pool and a second borrow."""
+    monkeypatch.setattr(settings, "DB_STATEMENT_TIMEOUT_MS", 30000)
+    await poolmod.close_pool()
+    try:
+        p = await poolmod.get_pool()
+        async with poolmod.acquire(p) as c:
+            assert await _show_statement_timeout(c) == "30s"
+        async with poolmod.acquire(p) as c:  # returned, reset, borrowed again
+            assert await _show_statement_timeout(c) == "30s"
+    finally:
+        await poolmod.close_pool()
+
+
+@pytest.mark.asyncio
+async def test_statement_timeout_cancels_a_runaway_query_on_a_pooled_connection():
+    """The setting is live, not decorative: a query that runs past it is cancelled."""
+    p = poolmod.build_pool(pg.DEFAULT_DSN, min_size=1, max_size=1, statement_timeout_ms=100)
+    await p.open()
+    await p.wait()
+    try:
+        async with poolmod.acquire(p) as c:
+            assert await _show_statement_timeout(c) == "100ms"
+            with pytest.raises(psycopg.errors.QueryCanceled):
+                await c.execute("SELECT pg_sleep(2)")
+    finally:
+        await p.close()
+
+
+@pytest.mark.asyncio
+async def test_non_pooled_connections_do_not_get_the_pool_statement_timeout(monkeypatch):
+    """Migrations and boot DDL open their own connection via pg.connect, not the
+    pool: the request budget must not reach them and cut a long migration off."""
+    monkeypatch.setattr(settings, "DB_STATEMENT_TIMEOUT_MS", 30000)
+    async with pg.connect() as c:
+        assert await _show_statement_timeout(c) != "30s"
