@@ -53,6 +53,7 @@ _HTML = {"Accept": "text/html"}
 DETAIL_CAP = 25  # detail-page requests per board (the rest keep the listing fields; each reader's note says what that loses)
 _CLEAN_CAP = 200_000  # characters of a description that _clean looks at (hostile pages cannot make it slow)
 _ANCHOR_CAP = 5000  # anchors read per page
+_ANCHOR_TEXT_CAP = 2000  # characters of text read per anchor
 _LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,78}[A-Za-z0-9])?")
 _HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
 _GENERIC = {"apply", "apply now", "learn more", "view", "view job", "view details", "details", "read more", "more"}
@@ -159,6 +160,7 @@ class _Tree(HTMLParser):
         self.cur = self.root
         self.ld: list[str] = []
         self._ld: list[str] | None = None
+        self._open: dict[str, int] = {}  # open-element count per tag: a stray end tag returns at once instead of climbing
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         a = {k: v or "" for k, v in attrs}
@@ -173,11 +175,21 @@ class _Tree(HTMLParser):
             if o is not None and o.tag != "a":
                 o = None
             if o is not None and o.parent is not None:
-                self.cur = o.parent
+                self._close_to(o)
         n = _Node(tag, a, self.cur)
         self.cur.kids.append(n)
         if tag not in _VOID:
             self.cur = n
+            self._open[tag] = self._open.get(tag, 0) + 1
+
+    def _close_to(self, target: _Node) -> None:
+        """Close open elements up to and including ``target`` (each element closes once, so this is linear overall)."""
+        while self.cur is not self.root:
+            n = self.cur
+            self.cur = n.parent or self.root
+            self._open[n.tag] -= 1
+            if n is target:
+                return
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _VOID:
@@ -185,11 +197,13 @@ class _Tree(HTMLParser):
         if tag == "script" and self._ld is not None:
             self.ld.append("".join(self._ld))
             self._ld = None
+        if self._open.get(tag, 0) <= 0:
+            return
         n: _Node | None = self.cur
         while n is not None and n.tag != tag:
             n = n.parent
         if n is not None and n.parent is not None:
-            self.cur = n.parent
+            self._close_to(n)
 
     def handle_data(self, data: str) -> None:
         if self._ld is not None:
@@ -237,13 +251,34 @@ def _plain(node: _Node) -> str:
 
 
 def _anchors(root: _Node) -> Iterator[tuple[str, str]]:
-    seen = 0
-    for n in _nodes(root):
-        if n.tag == "a" and n.attrs.get("href"):
-            seen += 1
-            if seen > _ANCHOR_CAP:
-                return
-            yield n.attrs["href"], _plain(n)
+    """(href, text) of each <a href> in document order, in one pass: text goes to the innermost open anchor and folds into
+    its parent anchor on close, each buffer capped, so deeply nested anchors cannot make every anchor re-walk its subtree."""
+    out: list[list[Any]] = []
+    stack: list[list[Any]] = []  # [slot in out or -1 for a non-href anchor, text parts, characters held]
+
+    def add(top: list[Any], text: str) -> None:
+        if top[2] < _ANCHOR_TEXT_CAP:
+            text = text[:_ANCHOR_TEXT_CAP]
+            top[1].append(text)
+            top[2] += len(text)
+
+    for ev, x in _walk(root):
+        if ev == "open" and x.tag == "a":
+            slot = -1
+            if x.attrs.get("href") and len(out) < _ANCHOR_CAP:
+                slot = len(out)
+                out.append([x.attrs["href"], ""])
+            stack.append([slot, [], 0])
+        elif ev == "text" and stack:
+            add(stack[-1], x)
+        elif ev == "close" and x.tag == "a" and stack:
+            slot, parts, _ = stack.pop()
+            text = "".join(parts)[:_ANCHOR_TEXT_CAP]
+            if slot >= 0:
+                out[slot][1] = " ".join(text.split())
+            if stack:
+                add(stack[-1], text)
+    return iter([(h, t) for h, t in out])
 
 
 def _ld_posting(tree: _Tree) -> dict[str, Any] | None:
@@ -419,7 +454,7 @@ def _hireology(row: dict[str, Any], http: Http) -> list[Job] | None:
         raw_locs = a.get("locations")
         locs: list[Any] = raw_locs if isinstance(raw_locs, list) else []
         place = ", ".join(str(x).strip() for x in locs if x and str(x).strip())
-        url = _https(a.get("career-site-url")) or f"https://careers.hireology.com/{slug}/{d['id']}/description"
+        url = _https(a.get("career-site-url"), "careers.hireology.com") or f"https://careers.hireology.com/{slug}/{d['id']}/description"
         title = str(a.get("name") or "").strip()
         if title:
             jobs.append(_job(row, "hireology", title=title, url=url, location=place, description=_clean(a.get("job-description")),

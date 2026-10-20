@@ -288,6 +288,28 @@ def test_nested_unclosed_anchors_stay_linear_and_still_read():
     assert list(us._anchors(t.root)) == [("/a", "One"), ("/b", "Two")]
 
 
+def test_stray_end_tags_after_deep_nesting_stay_linear():
+    page = "<div>" * 9000 + "</p>" * 12000
+    _fast(lambda: us._parse(page))
+    t = us._parse("<div><p>a</p></span></p><b>x</b></div>")
+    assert [n.tag for n in us._nodes(t.root)] == ["#root", "div", "p", "b"]
+
+
+def test_deeply_nested_anchors_read_in_linear_time_and_keep_order():
+    page = ('<a href=/jobs/1>x' + "<b>" * 65) * 1500
+    anchors = _fast(lambda: list(us._anchors(us._parse(page).root)))
+    assert anchors[0][0] == "/jobs/1" and anchors[0][1].startswith("x") and len(anchors[0][1]) <= 2000 and len(anchors) == 1500
+    t = us._parse('<a href="/a">One <b>and</b> <a href="/b">Two</a></a>')
+    assert list(us._anchors(t.root)) == [("/a", "One and"), ("/b", "Two")]
+
+
+def test_hireology_url_on_a_foreign_host_falls_back_to_the_board_host():
+    data = {"data": [{"id": "5", "attributes": {"name": "Dev", "status": "Open", "locations": [],
+                                                "career-site-url": "https://evil.example/phish"}}]}
+    jobs, _ = _run("hireology", {"token": "acme"}, _stub({"/v1/careers/acme": (200, data)}))
+    assert [j["url"] for j in jobs] == ["https://careers.hireology.com/acme/5/description"]
+
+
 def test_vendor_own_subdomains_are_not_attributed_to_a_board():
     for u in ("https://www.careerplug.com/pricing", "https://help.careerplug.com/x", "https://app.careerplug.com/",
               "https://www.hiringthing.com/", "https://support.hiringthing.com/a"):
