@@ -713,6 +713,15 @@ size:
   # past ~200-400 changed lines, so aim well under this; past it a change is
   # split into slices or the owner merges it.
   max_lines: 1000
+  # DATA GETS A WIDER CAP (owner, 2026-10-20: "3000 for data, 1000 for code").
+  # A hunt-kit batch of company boards is mostly JSON rows nobody reads line by
+  # line, and splitting it at 1000 turned 8 PRs into 25. Lines in files with one
+  # of `data_extensions` count toward `max_data_lines` only, and the PR's
+  # total may not pass it. Code still counts against `max_lines`. Never data, wherever its
+  # extension: anything under `.github/` (workflows and this policy are code)
+  # and lockfiles (a hand-edited `integrity` line must not ride under a cap).
+  max_data_lines: 3000
+  data_extensions: [".json", ".csv", ".yaml", ".yml", ".txt"]
   # Files a script writes and nobody reads line by line. Their lines are reported
   # in the verdict but not counted against max_lines. EXACT paths only: a glob is
   # a bypass waiting for a file. `frontend/package-lock.json` is NOT here: no
