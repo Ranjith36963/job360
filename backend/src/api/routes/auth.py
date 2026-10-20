@@ -29,6 +29,7 @@ from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_A
 from src.repositories import pg
 from src.repositories.database import JobDatabase
 from src.repositories.db_retry import open_db
+from src.services.auth import email_change_undo as auth_email_change_undo
 from src.services.auth import email_verification as auth_email_verification
 from src.services.auth import magic_link as auth_magic_link
 from src.services.auth import password_reset as auth_password_reset
@@ -108,6 +109,13 @@ class UserResponse(BaseModel):
     # Sentry session replay on it; the backend gates PostHog capture on the
     # column itself. Off by default.
     analytics_consent: bool = False
+
+
+class MeResponse(UserResponse):
+    # Migration 0069 — False for an account only a magic link has ever signed
+    # in (no password the user knows). The account page then deletes without a
+    # password prompt, from a fresh email-link sign-in (``delete_account``).
+    has_password: bool = True
 
 
 class RegisterResponse(BaseModel):
@@ -324,17 +332,21 @@ async def logout(
     return response
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=MeResponse)
 async def me(
     user: CurrentUser = Depends(require_user),  # noqa: B008
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-) -> UserResponse:
-    cur = await db._db.execute("SELECT timezone, analytics_consent_at FROM users WHERE id = ?", (user.id,))
+) -> MeResponse:
+    cur = await db._db.execute(
+        "SELECT timezone, has_password, analytics_consent_at FROM users WHERE id = ?", (user.id,)
+    )
     row = await cur.fetchone()
     data = dict(row) if row else {}
     tz = data.get("timezone") or "UTC"
-    return UserResponse(
-        id=user.id, email=user.email, timezone=tz, analytics_consent=bool(data.get("analytics_consent_at"))
+    return MeResponse(
+        id=user.id, email=user.email, timezone=tz,
+        analytics_consent=bool(data.get("analytics_consent_at")),
+        has_password=data.get("has_password") is not False,
     )
 
 
@@ -412,9 +424,13 @@ async def set_analytics_consent(
 @router.get("/users/me/export", dependencies=AUTH_FIRST)
 async def export_my_data(
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Download everything we hold on the caller as one JSON file (Article 20).
+
+    Web session only (gap roadmap slice 3): a leaked, never-expiring agent token
+    must not be able to download the whole account. An assistant reads history
+    through ``export_history``, which leaves out the account tables.
 
     GET is correct here: it is a pure read, no state changes. Scoped to the
     session's own ``user.id`` (rule #12) — the caller can never name another user.
@@ -459,7 +475,34 @@ async def export_my_data(
 
 
 class AccountDeleteRequest(BaseModel):
-    current_password: str
+    # Optional only for an account with no password (``users.has_password`` is
+    # FALSE); an account WITH one must still send it (hard rule #26).
+    current_password: Optional[str] = None
+
+
+def _fresh_link_required() -> str:
+    """The 403 detail for a passwordless delete from a stale session: what to do next."""
+    minutes = max(1, settings.ACCOUNT_DELETE_FRESH_SESSION_SECONDS // 60)
+    return (
+        "This account has no password. To delete it, sign out, sign in again with a fresh "
+        f"email link, then delete your account within {minutes} minutes."
+    )
+
+
+async def _session_is_fresh(cookie: Optional[str]) -> bool:
+    """True when the caller's session was created inside the fresh-sign-in window.
+
+    The sessions table does not record HOW a session was made, so this reads its
+    ``created_at`` alone. For an account with no password that is enough: the
+    only way such an account gets a session is consuming a magic link.
+    """
+    if not cookie:
+        return False
+    created = await auth_sessions.session_created_at(str(DB_PATH), cookie, secret=_secret())
+    if created is None:
+        return False
+    age = (datetime.now(timezone.utc) - created).total_seconds()
+    return 0 <= age <= settings.ACCOUNT_DELETE_FRESH_SESSION_SECONDS
 
 
 @router.delete("/users/me", status_code=204, dependencies=AUTH_FIRST)
@@ -467,10 +510,16 @@ async def delete_account(
     req: AccountDeleteRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
+    job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> Response:
-    """ERASE the caller's account (GDPR Article 17). Requires current-password
-    verification (hard rule #26), then clears the session cookie.
+    """ERASE the caller's account (GDPR Article 17), then clear the session cookie.
+
+    Web session only: an agent token can never erase the account. An account
+    with a password must send it (hard rule #26). An account with NO password
+    (``has_password`` FALSE: only a magic link ever signed it in) cannot, so it
+    may delete only from a session created by a fresh email link, inside
+    ``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.
 
     Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
@@ -478,13 +527,27 @@ async def delete_account(
     async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = pg.Row
         cursor = await adb.execute(
-            "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
+            "SELECT password_hash, has_password FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
         )
         row = await cursor.fetchone()
-    if not row or not verify_password(row["password_hash"], req.current_password):
+    if not row:
         raise HTTPException(status_code=401, detail="current password is incorrect")
+    if row["has_password"] is False:
+        if not await _session_is_fresh(job360_session):
+            get_audit_logger().info(
+                "auth", extra={"event": "account_delete", "user_id": user.id, "status": "stale_session"}
+            )
+            raise HTTPException(status_code=403, detail=_fresh_link_required())
+        verified_by = "fresh_link"
+    else:
+        if not req.current_password or not verify_password(row["password_hash"], req.current_password):
+            raise HTTPException(status_code=401, detail="current password is incorrect")
+        verified_by = "password"
     await db.hard_delete_user(user.id)
+    get_audit_logger().info(
+        "auth", extra={"event": "account_delete", "user_id": user.id, "status": "ok", "verified_by": verified_by}
+    )
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)
@@ -505,7 +568,7 @@ async def change_password(
     req: PasswordChangeRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Authenticated password change. Requires current password verification,
     then invalidates the session cookie to force re-login (hard rule #26 —
@@ -539,18 +602,63 @@ class EmailChangeRequest(BaseModel):
     new_email: EmailStr
 
 
+async def _safe_send_email_change_mails(
+    *,
+    db_path: str,
+    user_id: str,
+    old_email: str,
+    new_email: str,
+    undo_token: str,
+    frontend_origin: str,
+) -> None:
+    """Background task: verify the NEW address, tell the OLD one (slice 35).
+
+    Each send is attempted on its own and a failure is only logged, never
+    raised: the change already happened and the user already has their 204
+    (same stance as ``_safe_request_email_verification``). Never logs an
+    address in full.
+    """
+    try:
+        await auth_email_verification.request_email_verification(
+            db_path=db_path, user_id=user_id, email=new_email, frontend_origin=frontend_origin
+        )
+    except Exception as exc:  # noqa: BLE001 — intentionally broad
+        logger.warning(
+            "email change: verification mail to new address failed user=%s err=%s",
+            safe_log_value(user_id), type(exc).__name__,
+        )
+    try:
+        sent = await auth_email_change_undo.send_change_notice(
+            old_email=old_email, new_email=new_email, raw_token=undo_token, frontend_origin=frontend_origin
+        )
+        if not sent:
+            logger.warning("email change: notice to old address not sent user=%s", safe_log_value(user_id))
+    except Exception as exc:  # noqa: BLE001 — intentionally broad
+        logger.warning(
+            "email change: notice to old address failed user=%s err=%s", safe_log_value(user_id), type(exc).__name__
+        )
+
+
 @router.patch("/users/me/email", status_code=204, dependencies=AUTH_FIRST)
 async def change_email(
     req: EmailChangeRequest,
+    request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
-    """Change email. Requires current password. Invalidates session → re-login required."""
+    """Change email. Requires current password. Invalidates session → re-login required.
+
+    The new address is unproven, so ``email_verified_at`` is cleared and the
+    verification mail goes to it. The OLD address gets a notice with a 24 h
+    one-time link that undoes the change (``/email-change/undo``). Both mails
+    are background work: a failed send never breaks the request.
+    """
     async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = pg.Row
         cursor = await adb.execute(
-            "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
+            "SELECT password_hash, email, email_verified_at FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
         )
         row = await cursor.fetchone()
@@ -565,12 +673,87 @@ async def change_email(
         )
         if await cursor.fetchone():
             raise HTTPException(status_code=409, detail="email already in use")
+    # The undo token is stored BEFORE the change: if storing it fails nothing
+    # has changed yet, and an orphan row (change failed) was never mailed.
+    undo_token = await auth_email_change_undo.create_undo(
+        db_path=str(DB_PATH),
+        user_id=user.id,
+        previous_email=row["email"],
+        previous_verified_at=row["email_verified_at"],
+    )
     await db.update_user_email(user.id, str(req.new_email))
+    get_audit_logger().info(
+        "auth",
+        extra={"event": "email_changed", "user_id": safe_log_value(user.id), **_client_meta(request)},
+    )
+    background_tasks.add_task(
+        _safe_send_email_change_mails,
+        db_path=str(DB_PATH),
+        user_id=user.id,
+        old_email=row["email"],
+        new_email=str(req.new_email),
+        undo_token=undo_token,
+        frontend_origin=_frontend_origin(),
+    )
     # Terminate all of the user's sessions server-side (rule #26 — same as
     # password change), not just clear this browser's cookie.
     await auth_sessions.revoke_all_for_user(str(DB_PATH), user.id)
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+def _frontend_origin() -> str:
+    """First entry from FRONTEND_ORIGIN (CORS allowlist) — used to build reset links."""
+    raw = os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000")
+    return raw.split(",")[0].strip()
+
+
+class EmailChangeUndoRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/email-change/undo", status_code=status.HTTP_204_NO_CONTENT)
+async def email_change_undo(
+    req: EmailChangeUndoRequest,
+    request: Request,
+    response: Response,
+) -> Response:
+    """Undo an email change from the link mailed to the OLD address.
+
+    Public, authenticated by its one-time token (like password-reset/confirm).
+    On success: 204, the previous email and its previous verified state are
+    back, and every session, agent token and OAuth grant is revoked.
+    Unknown, used, expired or deleted-user token: generic 400. The previous
+    address now belonging to another account: 409, nothing changed.
+
+    Rate-limited per IP (429) like the password-reset request.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
+    if not auth_rate_limit.check_and_record(f"email-change-undo:{ip_hash}", max_in_window=10, window_seconds=60):
+        logger.info("email-change undo rate-limited ip_hash=%s", ip_hash)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many attempts; try again in a minute",
+        )
+    outcome, user_id = await auth_email_change_undo.consume_undo(db_path=str(DB_PATH), raw_token=req.token)
+    if outcome == auth_email_change_undo.CONFLICT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="the previous email address is now used by another account",
+        )
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid or expired undo token",
+        )
+    get_audit_logger().info(
+        "auth",
+        extra={"event": "email_change_undo", "user_id": safe_log_value(user_id), **_client_meta(request)},
+    )
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
@@ -586,12 +769,6 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirmRequest(BaseModel):
     token: str = Field(min_length=20, max_length=200)
     new_password: str = Field(min_length=8, max_length=256)
-
-
-def _frontend_origin() -> str:
-    """First entry from FRONTEND_ORIGIN (CORS allowlist) — used to build reset links."""
-    raw = os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000")
-    return raw.split(",")[0].strip()
 
 
 @router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)

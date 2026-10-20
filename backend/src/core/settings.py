@@ -260,6 +260,10 @@ SESSION_TOUCH_TIMEOUT_SECONDS = float(os.getenv("SESSION_TOUCH_TIMEOUT_SECONDS",
 # connection, and Postgres allows ~100. Extra touches are skipped (informational
 # only) with a rate-limited warning.
 SESSION_TOUCH_MAX_INFLIGHT = int(os.getenv("SESSION_TOUCH_MAX_INFLIGHT", "20"))
+# Account deletion for a magic-link-only account (no password to ask for, GDPR
+# Art. 17): allowed only from a session created at most this many seconds ago,
+# i.e. one the user just made by clicking a fresh email link.
+ACCOUNT_DELETE_FRESH_SESSION_SECONDS = int(os.getenv("ACCOUNT_DELETE_FRESH_SESSION_SECONDS", "600"))
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""

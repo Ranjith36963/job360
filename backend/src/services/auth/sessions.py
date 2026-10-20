@@ -292,6 +292,24 @@ async def resolve_session(
     return cast(Optional[str], row["user_id"])
 
 
+async def session_created_at(db_path: str, cookie: str, *, secret: str) -> Optional[datetime]:
+    """When the session behind ``cookie`` was created (UTC), or None.
+
+    None for a forged or unknown cookie, or an unparseable stored value, so a
+    caller asking "is this sign-in fresh?" reads None as "no". The table does
+    not record HOW the session was made (password or magic link); a caller
+    that needs that reads it off the account (``users.has_password``).
+    """
+    sid = _unsign(cookie, secret)
+    if sid is None:
+        return None
+    async with open_db(db_path) as db:
+        db.row_factory = pg.Row
+        cur = await db.execute("SELECT created_at FROM sessions WHERE id = ?", (sid,))
+        row = await cur.fetchone()
+    return _parse_ts(row["created_at"]) if row else None
+
+
 async def revoke_session(db_path: str, cookie: str, *, secret: str) -> Optional[str]:
     """Delete one session and return the user it belonged to (None if unknown).
 
