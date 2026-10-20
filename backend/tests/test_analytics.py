@@ -35,7 +35,8 @@ async def test_capture_event_is_a_noop_when_disabled(monkeypatch):
         sent.append((a, kw))
 
     monkeypatch.setattr(analytics, "_send", _fake_send)
-    analytics.capture_event("user-1", "first_bring")
+    # The global gate runs before any DB read, so no connection is needed.
+    await analytics.capture_event(None, "user-1", "first_bring")
     await asyncio.sleep(0)
     assert sent == [], "disabled by default — nothing should ever be scheduled"
 
@@ -54,23 +55,43 @@ async def test_capture_event_is_a_noop_with_no_project_key(monkeypatch):
         sent.append((a, kw))
 
     monkeypatch.setattr(analytics, "_send", _fake_send)
-    analytics.capture_event("user-1", "first_bring")
+    # The global gate runs before any DB read, so no connection is needed.
+    await analytics.capture_event(None, "user-1", "first_bring")
     await asyncio.sleep(0)
     assert sent == [], "no key configured — must stay a no-op even if enabled"
 
 
-@pytest.mark.asyncio
-async def test_capture_event_posts_to_the_configured_posthog_project(monkeypatch):
+async def _set_consent(user_id: str, consented: bool):
+    """Write the stored consent straight to the row; returns the connection."""
+    from src.api import dependencies as api_deps
+
+    db = await api_deps.get_db()
+    stamp = "2026-10-20T09:00:00+00:00" if consented else None
+    await db._db.execute("UPDATE users SET analytics_consent_at = ? WHERE id = ?", (stamp, user_id))
+    await db._db.commit()
+    return db._db
+
+
+def _enable(monkeypatch):
     from src.core import settings
-    from src.services import analytics
 
     monkeypatch.setattr(settings, "ANALYTICS_BACKEND_ENABLED", True)
     monkeypatch.setattr(settings, "POSTHOG_PROJECT_API_KEY", "phc_test_key")
     monkeypatch.setattr(settings, "POSTHOG_HOST", "https://mock.posthog.test")
 
+
+@pytest.mark.asyncio
+async def test_capture_event_posts_to_the_configured_posthog_project(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    from src.services import analytics
+
+    _enable(monkeypatch)
+    conn = await _set_consent(fixture_user_id, True)
+
     with aioresponses() as m:
         m.post("https://mock.posthog.test/capture/", status=200, payload={"status": 1})
-        analytics.capture_event("user-1", "first_bring", {"job_id": 7})
+        await analytics.capture_event(conn, fixture_user_id, "first_bring", {"job_id": 7})
         # capture_event returns before any network I/O (fire-and-forget); let
         # the scheduled background task actually run before the mock exits.
         for _ in range(20):
@@ -81,26 +102,47 @@ async def test_capture_event_posts_to_the_configured_posthog_project(monkeypatch
     body = calls[0].kwargs["json"]
     assert body["api_key"] == "phc_test_key"
     assert body["event"] == "first_bring"
-    assert body["distinct_id"] == "user-1"
+    assert body["distinct_id"] == fixture_user_id
     assert body["properties"] == {"job_id": 7}
 
 
 @pytest.mark.asyncio
-async def test_capture_event_failure_never_raises(monkeypatch):
-    """A PostHog outage must never surface to the caller — that is the whole
-    point of fire-and-forget."""
-    from src.core import settings
+async def test_capture_event_sends_nothing_for_a_user_who_never_consented(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    """Gap roadmap slice 4: the owner's global switch is ON, but this user never
+    turned on "Help improve Job360" (`analytics_consent_at` is NULL) — nothing
+    may leave for PostHog."""
     from src.services import analytics
 
-    monkeypatch.setattr(settings, "ANALYTICS_BACKEND_ENABLED", True)
-    monkeypatch.setattr(settings, "POSTHOG_PROJECT_API_KEY", "phc_test_key")
-    monkeypatch.setattr(settings, "POSTHOG_HOST", "https://mock.posthog.test")
+    _enable(monkeypatch)
+    conn = await _set_consent(fixture_user_id, False)
+
+    with aioresponses() as m:
+        m.post("https://mock.posthog.test/capture/", status=200, payload={"status": 1})
+        await analytics.capture_event(conn, fixture_user_id, "first_bring", {"job_id": 7})
+        for _ in range(20):
+            await asyncio.sleep(0)
+
+    assert m.requests == {}, "a non-consenting user must never be sent to PostHog"
+    assert await analytics.has_analytics_consent(conn, fixture_user_id) is False
+
+
+@pytest.mark.asyncio
+async def test_capture_event_failure_never_raises(authenticated_async_context, fixture_user_id, monkeypatch):
+    """A PostHog outage must never surface to the caller — that is the whole
+    point of fire-and-forget."""
+    from src.services import analytics
+
+    _enable(monkeypatch)
+    conn = await _set_consent(fixture_user_id, True)
 
     with aioresponses() as m:
         m.post("https://mock.posthog.test/capture/", exception=ConnectionError("boom"))
-        analytics.capture_event("user-1", "first_bring")  # must not raise
+        await analytics.capture_event(conn, fixture_user_id, "first_bring")  # must not raise
         for _ in range(20):
             await asyncio.sleep(0)
+    assert len(m.requests[("POST", URL("https://mock.posthog.test/capture/"))]) == 1, "the send was attempted"
 
 
 # ---------------------------------------------------------------------------
@@ -209,3 +251,58 @@ async def test_bring_job_survives_a_broken_analytics_claim(
         resp = await client.post("/api/jobs/bring", json=ad)
         assert resp.status_code == 200, resp.text
         assert resp.json()["job"]["title"] == "Platform Engineer"
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/auth/me/analytics-consent — the user's own switch (gap slice 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_consent_route_sets_and_clears_the_stored_flag(authenticated_async_context, fixture_user_id):
+    from src.api import dependencies as api_deps
+
+    async def _stored():
+        db = await api_deps.get_db()
+        cur = await db._db.execute("SELECT analytics_consent_at FROM users WHERE id = ?", (fixture_user_id,))
+        return (await cur.fetchone())[0]
+
+    async with authenticated_async_context() as client:
+        before = await client.get("/api/auth/me")
+        assert before.json()["analytics_consent"] is False, "off by default"
+        assert await _stored() is None
+
+        on = await client.put("/api/auth/me/analytics-consent", json={"consent": True})
+        assert on.status_code == 200, on.text
+        assert on.json() == {"analytics_consent": True}
+        assert (await _stored()).startswith("20"), "an ISO timestamp of when they agreed"
+        assert (await client.get("/api/auth/me")).json()["analytics_consent"] is True
+
+        off = await client.put("/api/auth/me/analytics-consent", json={"consent": False})
+        assert off.status_code == 200, off.text
+        assert off.json() == {"analytics_consent": False}
+        assert await _stored() is None, "withdrawing clears the column"
+        assert (await client.get("/api/auth/me")).json()["analytics_consent"] is False
+
+
+@pytest.mark.asyncio
+async def test_consent_route_refuses_a_bearer_token(authenticated_async_context, fixture_user_id):
+    """Consent is the person's own choice: an assistant's token may not give it."""
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api import dependencies as api_deps
+    from src.api.main import app
+    from src.services import analytics
+
+    async with authenticated_async_context() as client:
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as bearer:
+        resp = await bearer.put("/api/auth/me/analytics-consent", json={"consent": True})
+        assert resp.status_code == 403 and resp.json()["detail"] == "session_required"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
+        assert (await anon.put("/api/auth/me/analytics-consent", json={"consent": True})).status_code == 401
+
+    db = await api_deps.get_db()
+    assert await analytics.has_analytics_consent(db._db, fixture_user_id) is False, "nothing was stored"
