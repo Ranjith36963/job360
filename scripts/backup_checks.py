@@ -18,6 +18,7 @@ timestamps.
 
   python scripts/backup_checks.py compare SOURCE_COUNTS RESTORED_COUNTS
   python scripts/backup_checks.py freshness LISTING [--max-hours 36]
+  python scripts/backup_checks.py drill [--blind]
 
 A counts file has one "table count" pair per line.  A LISTING is the output of
   aws s3api list-objects-v2 --prefix job360- \
@@ -107,6 +108,33 @@ def check_freshness(listing: str, now: datetime, max_hours: float) -> tuple[bool
     return age <= max_hours, msg
 
 
+def run_drill(blind: bool = False) -> int:
+    """Feed known-bad inputs; every one must be refused (drill_registry entry).
+
+    ``blind`` makes both checks pass everything, so the drill MUST fail: that is
+    the negative control proving the drill can still go red.
+    """
+    now = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+    fresh = "job360-20261020T020000Z.sql.gz.gpg\t2026-10-20T02:05:00+00:00\n"
+    stale = "job360-20261017T020000Z.sql.gz.gpg\t2026-10-17T02:05:00+00:00\n"
+    compare = (lambda s, r: ([], True)) if blind else compare_counts
+    fresh_ok = (lambda listing, at, h: (True, "blind")) if blind else check_freshness
+    cases = [
+        ("lost rows are refused", not compare({"users": 5}, {"users": 4})[1]),
+        ("a missing table is refused", not compare({"users": 5, "jobs": 2}, {"users": 5})[1]),
+        ("an empty source list is refused", not compare({}, {})[1]),
+        ("a 58 h old backup is stale", not fresh_ok(stale, now, 36)[0]),
+        ("an empty bucket is stale", not fresh_ok("None\n", now, 36)[0]),
+        ("control: equal counts pass", compare_counts({"users": 5}, {"users": 6})[1]),
+        ("control: a 10 h old backup is fresh", check_freshness(fresh, now, 36)[0]),
+    ]
+    for name, held in cases:
+        print(f"  [{'PASS' if held else 'FAIL'}] {name}")
+    failed = sum(not held for _, held in cases)
+    print(f"DRILL RESULT: {len(cases) - failed}/{len(cases)} passed")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -116,7 +144,12 @@ def main(argv: list[str] | None = None) -> int:
     f = sub.add_parser("freshness")
     f.add_argument("listing")
     f.add_argument("--max-hours", type=float, default=36.0)
+    d = sub.add_parser("drill")
+    d.add_argument("--blind", action="store_true", help="negative control: blind both checks; must exit 1")
     args = ap.parse_args(argv)
+
+    if args.cmd == "drill":
+        return run_drill(args.blind)
 
     if args.cmd == "compare":
         rows, ok = compare_counts(
