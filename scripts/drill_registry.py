@@ -355,6 +355,19 @@ REGISTRY: dict[str, Guard] = {
         no_negative="the drill mutates a copy of the lock inline; blinding it means a flag that skips that "
                       "edit",
     ),
+    "scripts/check_py_lock.py": Guard(
+        status="drilled",
+        # The backend twin (2026-10-20): the prod image and CI install ONLY the
+        # hashed backend/requirements*.lock.txt, so a pyproject edit the locks
+        # do not follow ships without its dependency. Drill breaks copies of
+        # pyproject + locks five ways (hallucinated name added, floor raised,
+        # dependency removed, hashes stripped, dev lock drifted) and demands
+        # each rule fires; the untouched copy must stay green.
+        drill=[sys.executable, "scripts/check_py_lock.py", "--drill"],
+        # NEGATIVE CONTROL: MISSING switched off, so the drill must FAIL.
+        # Verified exit 1 for every rule on the commit that added this line.
+        negative=[sys.executable, "scripts/check_py_lock.py", "--drill", "--break-checker", "MISSING"],
+    ),
     "scripts/check_workflow_slack_wiring.py": Guard(
         status="drilled",
         # Checks the CALLERS, not the sender: every slack step passes a token, a

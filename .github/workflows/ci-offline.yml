@@ -156,12 +156,18 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
+      # FROM THE HASHED LOCK (2026-10-20): the runtime pins the prod image
+      # installs (backend/Dockerfile) plus the dev tools, every file sha256-checked,
+      # then the app with --no-deps so nothing outside the lock can arrive.
+      # `pip check` fails on a lock whose pins do not satisfy each other.
       - name: Install backend (with dev extras)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install --require-hashes -r requirements-dev.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip check
       # The template dump must come from a pg_dump the SERVER can load. The
       # runner image's own client drifts (ubuntu-latest moves to Ubuntu 26 from
       # 2026-10-19, with a newer Postgres client than this pg16 service), so

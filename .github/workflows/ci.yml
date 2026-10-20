@@ -149,14 +149,25 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements*.lock.txt
+
+      # WHAT SHIPS IS WHAT WAS TESTED (2026-10-20). The prod image and both
+      # backend CI jobs install from backend/requirements*.lock.txt with
+      # --require-hashes, so a pyproject edit the locks do not follow would ship
+      # the app without its new dependency (--no-deps) or with a pin outside the
+      # declared range. This names the drift before the install hides it.
+      - name: Backend locks match pyproject (scripts/check_py_lock.py)
+        if: needs.scope.outputs.scope == 'full'
+        run: python scripts/check_py_lock.py
 
       - name: Install backend (with dev extras)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install --require-hashes -r requirements-dev.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip check
 
       - name: Lint (ruff)
         if: needs.scope.outputs.scope == 'full'
@@ -187,6 +198,20 @@ jobs:
         # against the version that produced it.
         working-directory: backend
         run: python scripts/mypy_ratchet.py
+
+      # Build the SAME image Railway builds, as the Frontend job does for its
+      # own (2026-10-20: nothing built backend/Dockerfile before a deploy did).
+      # Both variants: the default, and BROWSER_AGENT_ENABLED=1, whose hashed
+      # browser-lock install is a separate RUN. The default layers are reused,
+      # so the second build pays only for Playwright + Chromium. Then the image
+      # proves its installed set is consistent and the app imports.
+      - name: Docker image builds (backend/Dockerfile)
+        if: needs.scope.outputs.scope == 'full'
+        run: |
+          docker build --quiet -t job360-backend-ci backend
+          docker run --rm job360-backend-ci sh -c 'pip check && python -c "import main"'
+          docker build --quiet --build-arg BROWSER_AGENT_ENABLED=1 -t job360-backend-browser-ci backend
+          docker run --rm job360-backend-browser-ci sh -c 'pip check && python -c "import playwright.async_api"'
 
   # ─── The chain checks itself ───────────────────────────────────────────────
   chain:
