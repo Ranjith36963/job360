@@ -203,6 +203,21 @@ Apify web-fetch tool, before you build. Never cite from memory.
   pinned its own hash, so every merge made the rest stale. **Rule:** after merging main into
   a PR that changes MCP tool names or parameters, recompute the served hash and set the rev
   to main's rev + 1 at that moment, not when the slice was written.
+- 2026-10-20, same session: the "merge through a script" rule above was followed with a
+  script that ran `git merge` and a `--no-verify` regen commit inside `bash update.sh`. The
+  commit-gate hook reads only the top-level command, so a dozen merge commits went up with no
+  gate run (CI still ran the full suite on each push). Caught when a plain `git merge` was
+  blocked. **Rule:** never wrap `git merge` / `git commit` in a script and never pass
+  `--no-verify`: run the gate, `git merge --no-commit --no-ff <base>`, resolve, gate the merged
+  tree, then `git commit --no-edit`. Slower, and the point.
+- 2026-10-20: resolving a merge, `git checkout --ours <file>` took the branch's WHOLE file and
+  silently dropped main's cleanly merged hunks in it (slice 9's code). Caught before the commit.
+  **Rule:** resolve per hunk (`git checkout -m <file>` restores the markers); keep a side only
+  inside the conflict regions, then diff the file against both parents.
+- 2026-10-20: slice 8 (#993) was stacked on slice 7 (#977); its squash merge carried slice 7
+  into main, and #977 sat open, red, with nothing left to ship. **Rule:** when a stacked child
+  merges, merge main into the base (`--no-commit`); if the tree equals main, close the base PR
+  as shipped, naming the merge commit.
 - 2026-10-15: pushes failed CI on the mypy ratchet and, after merging main, on
   the recipe line cap and MCP tool count. **Rule:** run the ratchet
   (`cd backend && python scripts/mypy_ratchet.py`) before every backend push, and
