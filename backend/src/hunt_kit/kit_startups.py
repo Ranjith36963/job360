@@ -1,4 +1,4 @@
-"""Startup boards for the Job360 hunt kit: Wellfound, Work at a Startup, Getro (Built In and WTTJ follow).
+"""Startup boards for the Job360 hunt kit: Wellfound, Work at a Startup, Getro, Built In, Welcome to the Jungle.
 
 Same contract as ``kit_bigboards.FEEDS`` / ``kit_regional.FEEDS``: ``fetch_x(queries, http, stats, *, days,
 countries) -> list[Job]``, never raises, networking only through the ``http`` callable the core passes in. No
@@ -40,7 +40,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 try:
     import kit_feeds as _kf  # type: ignore[import-not-found]  # sibling file, not a package module
@@ -491,10 +491,305 @@ def fetch_getro(queries: list[str], http: HttpFn, stats: Stats, *, days: int, co
     return _keep(_unique(jobs), queries, days, search=False)  # the query went to the API; the age bound is core's
 
 
+# ------------------------------------------------------------------------------------------ Built In
+# Mirrors career-ops providers/builtin.mjs:84 (host builtin.com; the same markup serves the city hosts, :13-17), :465-
+# 469 (search path /jobs?search=<q>), :85 (builtin orders newest-first), :485-487 (URL <host><path>&page=<n>), :85 (3
+# pages by default; the kit uses PAGES), :30-35 and :123 (the spine: the schema.org ItemList JSON blob, one entry
+# {"@type":"ListItem", "position":N,"name":<title>,"url":<url>,"description":<~400 chars>}, keys in that order,
+# captured with the ITEM regex taken from career-ops, MIT), :36-45 and :125-131 (the cards: anchored on
+# data-id="job-card-title", the id is data-builtin-track-job-id; fields follow FontAwesome icons: fa-clock posted
+# badge, fa-house-building workplace mode, fa-location-dot location or "N Locations" with a data-bs-title tooltip,
+# fa-sack-dollar salary band), :306-313 (the company is the LAST /company/ anchor before the card title, within the
+# previous card's title), :193-205 (a field is the next non-empty text node after its icon, within 600 chars), :218-230
+# (posted: "Yesterday", "Reposted 15 Days Ago", "2 Hours Ago", "30+ Days Ago"), :247-255 (salary only for "Annually"
+# bands), :237-239 ("Hourly" bands are a Built In data error), :270-278 (location: mode + places; empty when no place),
+# :346-350 (job id = the number at the end of the url), :515 (stop a search at an empty page or a page with nothing
+# new), :524-530 (drift guard: many rows but no card), :494 (User-Agent only). The ItemList carries the title and a
+# ~400 char description excerpt; the company comes ONLY from the card: a row whose card gave no company is dropped (the
+# kit never writes the board name there). Built In is a US tech board (builtin.mjs:4-5): the reader runs for "US" or
+# "*" only. NOT IN REFERENCE: the other market hosts are not used (one national host); the 400-char excerpt is the
+# whole description (the full ad is on the linked page).
+BI_HOST = "builtin.com"
+BI_SEARCH_URL = "https://" + BI_HOST + "/jobs?search={q}&page={page}"
+BI_MAX_REQUESTS = MAX_SEARCHES * PAGES
+_BI_ITEM = re.compile(
+    r'\{"@type":"ListItem","position":\d+,"name":("(?:[^"\\]|\\.)*"),"url":("(?:[^"\\]|\\.)*")'
+    r'(?:,"description":("(?:[^"\\]|\\.)*"))?\}')
+_BI_CARD = re.compile(r'data-id="job-card-title"')
+_BI_CARD_ID = re.compile(r'data-builtin-track-job-id="(\d+)"')
+_BI_COMPANY = re.compile(r'<a[^>]+href="/company/[^"]*"[^>]*>([\s\S]{0,240}?)</a>')
+_BI_TOOLTIP = re.compile(r'aria-label="Job locations"[^>]*data-bs-title="([^"]*)"')
+_BI_MULTI = re.compile(r"^\d+\s+Locations?$", re.I)
+_BI_SALARY = re.compile(r"^(\d+(?:\.\d+)?)K(?:-(\d+(?:\.\d+)?)K)?\s+Annually$", re.I)
+_BI_MODES = ["Remote or Hybrid", "Remote", "Hybrid", "In-Office"]
+_BI_CARD_CAP = 12_000
+_BI_UNIT_DAYS = {"minute": 0, "hour": 0, "day": 1, "week": 7, "month": 30, "year": 365}
+
+
+def _bi_text(s: str) -> str:
+    return _WS.sub(" ", strip_html(re.sub(r"<[^>]*>", " ", s))).strip()
+
+
+def _bi_after_icon(seg: str, icon: str) -> str:
+    at = seg.find(icon)
+    if at == -1:
+        return ""
+    for m in re.finditer(r">([^<>]+)<", seg[at:at + 600]):
+        t = _bi_text(m.group(1))
+        if t:
+            return t
+    return ""
+
+
+def _bi_posted(text: str) -> str:
+    """"Yesterday", "Reposted 15 Days Ago", "2 Hours Ago" -> YYYY-MM-DD ('' when unknown)."""
+    t = re.sub(r"^reposted\s+", "", text.strip(), flags=re.I)
+    now = datetime.now(timezone.utc)
+    if re.fullmatch(r"today", t, re.I):
+        return now.strftime("%Y-%m-%d")
+    if re.fullmatch(r"yesterday", t, re.I):
+        return (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    m = re.fullmatch(r"(\d+|an?)\+?\s+(minute|hour|day|week|month|year)s?\s+ago", t, re.I)
+    if not m:
+        return ""
+    n = 1 if m.group(1).lower() in ("a", "an") else int(m.group(1))
+    return (now - timedelta(days=n * _BI_UNIT_DAYS[m.group(2).lower()])).strftime("%Y-%m-%d")
+
+
+def parse_builtin_cards(page: str) -> dict[str, dict[str, Any]]:
+    """Job id -> {company, location, posted, salary_min/max} from the rendered cards (builtin.mjs:288-343)."""
+    starts = [m.start() for m in _BI_CARD.finditer(page)]
+    out: dict[str, dict[str, Any]] = {}
+    for i, start in enumerate(starts):
+        seg = page[start:min(starts[i + 1] if i + 1 < len(starts) else len(page), start + _BI_CARD_CAP)]
+        idm = _BI_CARD_ID.search(seg)
+        if not idm:
+            continue
+        pre = page[max(0, start - 2500) if i == 0 else starts[i - 1]:start]
+        company = ""
+        for cm in _BI_COMPANY.finditer(pre):
+            company = _bi_text(cm.group(1))
+        mode_raw = _bi_after_icon(seg, "fa-house-building")
+        mode = next((w for w in _BI_MODES if w.lower() == mode_raw.lower()), "")
+        loc_raw = _bi_after_icon(seg, "fa-location-dot")
+        places: list[str] = []
+        if loc_raw and not _BI_MULTI.match(loc_raw):
+            places = [loc_raw]
+        else:
+            tip = _BI_TOOLTIP.search(seg)
+            if tip:
+                import html as _html
+                places = [p for p in (_bi_text(x) for x in re.split(
+                    r"</div>|<br\s*/?>", _html.unescape(tip.group(1)), flags=re.I)) if p]
+        location = " · ".join(p for p in [mode, *places] if p) if places else (mode if "remote" in mode.lower() else "")
+        rec: dict[str, Any] = {"company": company, "location": location, "mode": mode,
+                               "posted": _bi_posted(_bi_after_icon(seg, "fa-clock"))}
+        sm = _BI_SALARY.match(_bi_after_icon(seg, "fa-sack-dollar"))
+        if sm:
+            rec["salary_min"] = round(float(sm.group(1)) * 1000)
+            rec["salary_max"] = round(float(sm.group(2)) * 1000) if sm.group(2) else rec["salary_min"]
+        out[idm.group(1)] = rec
+    return out
+
+
+def parse_builtin_page(page: Any) -> list[Job]:
+    """One listing page -> Jobs (ItemList spine joined to the cards on the job id); no company = dropped."""
+    html = page if isinstance(page, str) else ""
+    cards = parse_builtin_cards(html)
+    out: list[Job] = []
+    for m in _BI_ITEM.finditer(html):
+        try:
+            title, url = json.loads(m.group(1)), json.loads(m.group(2))
+            desc = json.loads(m.group(3)) if m.group(3) else ""
+        except ValueError:
+            continue  # a malformed item must never abort the page
+        idm = re.search(r"/(\d+)(?:[/?#]|$)", str(url))
+        card = cards.get(idm.group(1) if idm else "", {})
+        company = card.get("company", "")
+        if not (title and url and company):
+            continue
+        extra: dict[str, Any] = {"id": idm.group(1) if idm else ""}
+        for k in ("salary_min", "salary_max"):
+            if k in card:
+                extra[k] = card[k]
+        out.append(_made(
+            "builtin", "Built In", title=title, company=company, url=urljoin("https://" + BI_HOST, str(url)),
+            place=card.get("location", ""), country="", posted=card.get("posted", ""), description=desc,
+            remote=True if card.get("mode") == "Remote" else None, extra=extra))
+    return out
+
+
+@_feed
+def fetch_builtin(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """Built In's US tech job search, low volume. Runs for "US" (or "*") only."""
+    qs = _queries(queries)[:MAX_SEARCHES]
+    if not qs or not _allowed(countries, "US"):
+        return []
+    site = _Site("builtin", http, stats, BI_MAX_REQUESTS)
+    seen: set[str] = set()
+    jobs: list[Job] = []
+    rows = located = 0
+    for q in qs:
+        for page in range(1, PAGES + 1):
+            body = site.get(BI_SEARCH_URL.format(q=quote(q, safe=""), page=page), headers={"User-Agent": _UA})
+            if body is None:
+                break
+            got = parse_builtin_page(body)
+            if not got:
+                if not _BI_ITEM.search(body if isinstance(body, str) else ""):
+                    if _blocked(body):
+                        site.stop("a challenge or login page instead of results")
+                break
+            rows += len(got)
+            located += sum(1 for j in got if j["location"])
+            new = [j for j in got if j["url"] not in seen]
+            seen.update(j["url"] for j in new)
+            jobs += new
+            if not new:
+                break
+        if site.stopped:
+            break
+    if rows >= 5 and located / rows < 0.5:  # drift guard (builtin.mjs:524-530)
+        print(f"warning: builtin resolved a location for only {located}/{rows} cards (markup may have changed)",
+              file=sys.stderr)
+    return _keep(jobs, queries, days, search=False)  # Built In matched the search itself
+
+
+# ------------------------------------------------------------------------------ Welcome to the Jungle
+# Mirrors career-ops providers/wttj.mjs:43 (credentials from https://www.welcometothejungle.com/api/env on every run,
+# the public Algolia id and client key rotate), :78-100 (that payload is ``window.env = {...}``: the JSON between the
+# first "{" and the last "}"; PUBLIC_ALGOLIA_APPLICATION_ID must match [A-Z0-9]{6,16}, PUBLIC_ALGOLIA_API_KEY_CLIENT
+# is 16..500 chars), :6-9 and :231 (the key is referer-locked: every Algolia request sends Referer
+# https://www.welcometothejungle.com/), :45 (index wttj_jobs_production_en), :203-234 (POST https://<appId>-dsn.
+# algolia.net/1/indexes/wttj_jobs_production_en/query, body {"params": "<urlencoded>"} with query, hitsPerPage,
+# attributesToRetrieve = name,slug,organization,offices,remote,published_at_timestamp,salary_yearly_minimum,
+# salary_maximum,salary_period,salary_currency; headers x-algolia-application-id, x-algolia-api-key, referer,
+# content-type), :222 (``filters`` is an Algolia expression, e.g. offices.country_code:FR AND contract_type:full_time,
+# :13-34: filter server-side, a keyword alone cannot narrow a global board), :46 and :183 (100 hits per query), :117-
+# 160 (a hit: name = title, slug and organization.slug build https://www.welcometothejungle.com/en/companies/<org>/
+# jobs/<slug> (slugs limited to [a-z0-9_-]), organization.name = the employer, location = offices[0] city and country
+# + "Remote" when remote == "fulltime", published_at_timestamp = epoch seconds, salary_yearly_minimum / salary_maximum
+# (maximum only for salary_period "yearly") / salary_currency), :206 and :244 (one request per query, deduplicated by
+# url), :237-241 (an answer without ``hits`` is an error = the site stops). Narrowing: the user's country codes become
+# ``offices.country_code:XX`` (joined with OR; NOT IN REFERENCE: the reference shows one code; the OR join is
+# standard Algolia filter syntax); "*" sends no country filter, and then a query is required (wttj.mjs:172-176).
+# NOT IN REFERENCE: a second page (the reference reads one page of 100 hits per query, so the kit does the same).
+WTTJ_ENV_URL = "https://www.welcometothejungle.com/api/env"
+WTTJ_ORIGIN = "https://www.welcometothejungle.com"
+WTTJ_INDEX = "wttj_jobs_production_en"
+WTTJ_HITS = 100
+WTTJ_ATTRS = ("name,slug,organization,offices,remote,published_at_timestamp,salary_yearly_minimum,"
+              "salary_maximum,salary_period,salary_currency")
+WTTJ_MAX_REQUESTS = 1 + MAX_SEARCHES  # the env lookup plus one request per query
+
+
+def parse_wttj_env(text: Any) -> tuple[str, str] | None:
+    """(app id, client key) from the ``window.env = {...}`` payload; None when it is not that (wttj.mjs:78-100)."""
+    if not isinstance(text, str):
+        return None
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        env = json.loads(text[start:end + 1])
+    except ValueError:
+        return None
+    if not isinstance(env, dict):
+        return None
+    app = str(env.get("PUBLIC_ALGOLIA_APPLICATION_ID") or "").strip()
+    key = str(env.get("PUBLIC_ALGOLIA_API_KEY_CLIENT") or "").strip()
+    if not re.fullmatch(r"[A-Z0-9]{6,16}", app, re.I) or not 16 <= len(key) <= 500:
+        return None
+    return app, key
+
+
+def parse_wttj_hits(payload: Any) -> list[Job] | None:
+    """Algolia answer -> Jobs; None when the answer has no ``hits`` list (an error)."""
+    hits = payload.get("hits") if isinstance(payload, dict) else None
+    if not isinstance(hits, list):
+        return None
+    out: list[Job] = []
+    for h in hits:
+        if not isinstance(h, dict):
+            continue
+        title = str(h.get("name") or "").strip()
+        slug = str(h.get("slug") or "").strip()
+        org: dict[str, Any] = h["organization"] if isinstance(h.get("organization"), dict) else {}
+        org_slug = str(org.get("slug") or "").strip()
+        company = str(org.get("name") or "").strip()
+        if not (title and company and _SLUG_OK.match(slug) and _SLUG_OK.match(org_slug)):
+            continue
+        offices = h.get("offices") if isinstance(h.get("offices"), list) else []
+        office = offices[0] if offices and isinstance(offices[0], dict) else {}
+        parts = [str(office.get(k)).strip() for k in ("city", "country") if str(office.get(k) or "").strip()]
+        if h.get("remote") == "fulltime":
+            parts.append("Remote")
+        extra: dict[str, Any] = {"id": slug}
+        lo, hi = h.get("salary_yearly_minimum"), h.get("salary_maximum")
+        lo_v = lo if isinstance(lo, (int, float)) and not isinstance(lo, bool) and lo > 0 else 0
+        hi_v = hi if (h.get("salary_period") == "yearly" and isinstance(hi, (int, float))
+                      and not isinstance(hi, bool) and hi > 0) else 0
+        if lo_v or hi_v:
+            extra.update(salary_min=lo_v or hi_v, salary_max=hi_v or lo_v,
+                         salary_currency=str(h.get("salary_currency") or "").strip().upper())
+        ts = h.get("published_at_timestamp")
+        out.append(_made(
+            "wttj", "Welcome to the Jungle", title=title, company=company,
+            url=f"{WTTJ_ORIGIN}/en/companies/{org_slug}/jobs/{slug}", place=", ".join(parts), country="",
+            posted=_date(ts) if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0 else "",
+            remote=True if h.get("remote") == "fulltime" else None, extra=extra))
+    return out
+
+
+def _wttj_filter(countries: list[str]) -> str | None:
+    """The Algolia filter for the user's codes; "" (no filter) only when "*" is the sole entry; None when nothing valid.
+
+    The core adds "*" next to the user's own countries for --visa-onsite (the default). WTTJ hits carry no ad text,
+    so the visa check can keep none of them: dropping the filter then would only trade the user's countries for a
+    global top-100 sample."""
+    have = [str(c).upper() for c in countries]
+    codes = list(dict.fromkeys(c for c in have if re.fullmatch(r"[A-Z]{2}", c)))
+    if codes:
+        return " OR ".join(f"offices.country_code:{c}" for c in codes)
+    return "" if "*" in have else None
+
+
+@_feed
+def fetch_wttj(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """Welcome to the Jungle's public Algolia index, narrowed to the user's countries, low volume."""
+    flt = _wttj_filter(countries)
+    qs = _queries(queries)[:MAX_SEARCHES]
+    if flt is None or (not qs and not flt):
+        return []
+    site = _Site("wttj", http, stats, WTTJ_MAX_REQUESTS)
+    creds = parse_wttj_env(site.get(WTTJ_ENV_URL, headers={"User-Agent": _UA}))
+    if creds is None:
+        if not site.stopped:
+            site.stop("the /api/env payload held no Algolia id and key")
+        return []
+    app, key = creds
+    url = f"https://{app}-dsn.algolia.net/1/indexes/{WTTJ_INDEX}/query"
+    headers = {"x-algolia-application-id": app, "x-algolia-api-key": key, "referer": WTTJ_ORIGIN + "/"}
+    jobs: list[Job] = []
+    for q in qs or [""]:
+        params: dict[str, Any] = {"query": q, "hitsPerPage": WTTJ_HITS, "attributesToRetrieve": WTTJ_ATTRS}
+        if flt:
+            params["filters"] = f"({flt})" if " OR " in flt else flt
+        body = _algolia(site, url, headers, params)
+        if body is None:
+            break
+        got = parse_wttj_hits(body)
+        if got is None:
+            site.stop("an Algolia answer without hits")
+            break
+        jobs += got
+    return _keep(_unique(jobs), queries, days, search=False)  # Algolia matched the query itself
 
 
 FEEDS: dict[str, Callable[..., list[Job]]] = {
     "wellfound": fetch_wellfound,
     "workatastartup": fetch_workatastartup,
     "getro": fetch_getro,
+    "builtin": fetch_builtin,
+    "wttj": fetch_wttj,
 }
