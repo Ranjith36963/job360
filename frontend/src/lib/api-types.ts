@@ -742,9 +742,10 @@ export interface paths {
          * Approve Send
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
-         *     where=web. A CV edited later makes the yes stop matching; slice 31: so does a newer
-         *     ``email_drafted`` with another recipient or attachment (``fingerprint`` on the event;
-         *     check_submit asks ``approval_stale``). Clears an earlier
+         *     where=web. A CV edited later makes the yes stop matching; slices 8 and 31: so does a new
+         *     letter, fill, form page, assistant profile edit or email draft (recipient / attachments), or
+         *     SUBMIT_APPROVAL_TTL_MINUTES passing (``fingerprint`` on the event; check_submit asks
+         *     ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
          *     nothing is recorded (the yes must name what the user saw).
@@ -796,8 +797,10 @@ export interface paths {
          *     (``unknown_site``). The address is read strictly (``screen_form_url``): a
          *     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
          *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
-         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
-         *     a stored yes clears neither. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078):
+         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
+         *     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
+         *     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
+         *     clears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078):
          *     no form rules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is
          *     recorded. An unconfirmed email answers ``ask`` /
          *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
@@ -2210,6 +2213,11 @@ export interface paths {
          *     value (S3): an edit can carry a name, an email fragment inside `about_me`,
          *     or anything else the agent chose to write, and none of that belongs in a
          *     log line.
+         *
+         *     Gap 4 (slice 26) - two assistants writing one profile: the whole call runs
+         *     under the user's profile-write lock, so `expected_profile_version` (409
+         *     `stale_profile` when another write landed since) and the item ops (applied
+         *     to the CURRENT list) are checked against exactly what gets written.
          */
         patch: operations["update_profile_api_profile_patch"];
         trace?: never;
@@ -5782,6 +5790,14 @@ export interface components {
         };
         /** ProfileEditIn */
         ProfileEditIn: {
+            /** Index */
+            index?: number | null;
+            /**
+             * Op
+             * @default set
+             * @enum {string}
+             */
+            op: "set" | "append" | "upsert" | "remove_at";
             /** Path */
             path: string;
             /** Remember */
@@ -5861,6 +5877,11 @@ export interface components {
             preferences: {
                 [key: string]: unknown;
             };
+            /**
+             * Profile Edit Id
+             * @default 0
+             */
+            profile_edit_id: number;
             /**
              * Skill Esco
              * @default {}
@@ -7780,6 +7801,8 @@ export interface components {
         UpdateProfileRequest: {
             /** Edits */
             edits: components["schemas"]["ProfileEditIn"][];
+            /** Expected Profile Version */
+            expected_profile_version?: number | null;
         };
         /**
          * UpdateProfileResponse

@@ -25,11 +25,13 @@ token, a link, CV text or an answer value.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
 import secrets
 import unicodedata
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit
@@ -41,7 +43,7 @@ from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
-from src.services.profile.edits import is_assistant_actor, is_confirmed
+from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -406,27 +408,75 @@ async def controls_state(
 # ── The yes is bound to what the user saw (gap roadmap slices 8 and 31) ──────
 
 
+async def _assistant_edit_id(db: JobDatabase, user_id: str) -> int:
+    """The newest ``profile_edits`` id an ASSISTANT wrote for this user (0 = none). The user's own
+    web edits are left out: an answer the user edited does not cancel their yes (owner decision
+    2026-10-19, the ``type_first`` answers)."""
+    cur = await db._db.execute(
+        "SELECT MAX(id) FROM profile_edits WHERE user_id = ? AND set_by <> ?", (user_id, WEB_ACTOR)
+    )
+    got = await cur.fetchone()
+    return int(got[0]) if got is not None and got[0] is not None else 0
+
+
 async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: int) -> dict[str, Any]:
-    """What a web Send yes is bound to besides the CV id + hash. Slice 31 (G078): the newest
-    ``email_drafted`` - its event id, ``email_to`` and ``attachments`` (artifact ids + shas). The approve
-    route stores it on ``submit_approved``; :func:`approval_stale` compares it again."""
-    return email_channel.fingerprint(await email_channel.newest_draft(db, user_id, application_id))
+    """What a web Send yes is bound to besides the CV id + hash: the cover letter, the newest
+    ``form_filled``, the form page (:func:`latest_form_url`) and the newest assistant profile edit.
+    Slice 31 (G078): also the newest ``email_drafted`` - its event id, ``email_to`` and ``attachments``
+    (artifact ids + shas). The approve route stores it on ``submit_approved``; :func:`approval_stale`
+    compares it again."""
+    letter = await spine.latest_artifact(db, user_id, application_id, "cover_letter")
+    fills = await _events(db, user_id, application_id, ("form_filled",))
+    return {
+        "cover_letter_id": letter["id"] if letter else None,
+        "cover_letter_sha256": sha256_text(letter["text"]) if letter else None,
+        "form_filled_event_id": int(fills[0]["id"]) if fills else None,
+        "form_url": await latest_form_url(db, user_id, application_id),
+        "profile_edit_id": await _assistant_edit_id(db, user_id),
+        **email_channel.fingerprint(await email_channel.newest_draft(db, user_id, application_id)),
+    }
+
+
+def _approval_age_over(recorded_at: Any, now: datetime) -> bool:
+    at = recorded_at if isinstance(recorded_at, datetime) else datetime.fromisoformat(str(recorded_at))
+    at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    return now - at > timedelta(minutes=settings.SUBMIT_APPROVAL_TTL_MINUTES)
 
 
 async def approval_stale(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
 ) -> Optional[str]:
     """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
-    part that no longer does: ``email`` (the newest ``email_drafted`` has another recipient or another
-    attachment id / sha than the draft the yes was given on, or the yes was given before any draft).
-    A yes without a ``fingerprint`` (a chat yes, or one from before) is bound to the CV only."""
-    del now  # the slice 8 TTL reads it; the email part does not
+    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
+    ``cover_letter``, ``form_fill``, ``form_page``, ``profile`` or ``email`` (slice 31: the newest
+    ``email_drafted`` has another recipient or attachment id / sha than the draft the yes was given on,
+    or the yes was given before any draft). A yes without a ``fingerprint``
+    (a chat yes, or one from before slice 8) is bound to the CV and the time only. A part that was
+    unknown at the yes (no fill, no page yet) is not compared. A newer fill still holds when it differs
+    only by answers that are now the user's own words (:func:`ready.refill_keeps_answers`)."""
+    if _approval_age_over(event["recorded_at"], now):
+        return "expired"
     stamp = event["payload"].get("fingerprint")
     if not isinstance(stamp, dict):
         return None
-    now_fp = await approval_fingerprint(db, user_id, int(app_row["id"]))
+    application_id = int(app_row["id"])
+    now_fp = await approval_fingerprint(db, user_id, application_id)
     if email_channel.draft_changed(stamp, now_fp):
         return "email"
+    for key in ("cover_letter_id", "cover_letter_sha256"):
+        if stamp.get(key) != now_fp[key]:
+            return "cover_letter"
+    was_fill, fill = stamp.get("form_filled_event_id"), now_fp["form_filled_event_id"]
+    if isinstance(was_fill, int) and fill != was_fill:
+        from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+        if fill is None or not await ready.refill_keeps_answers(db, user_id, app_row, was_fill, fill):
+            return "form_fill"
+    was_page, page = stamp.get("form_url"), now_fp["form_url"]
+    if isinstance(was_page, str) and was_page and not (page and settings_rules._same_form_page(page, was_page)):
+        return "form_page"
+    if now_fp["profile_edit_id"] > int(stamp.get("profile_edit_id") or 0):
+        return "profile"
     return None
 
 
@@ -585,6 +635,18 @@ async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) 
     return host if isinstance(host, str) and host else None
 
 
+async def latest_form_url(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
+    """The form PAGE the newest ``form_filled`` / ``form_swept`` that carries one was recorded on
+    (stored cleaned by ``settings_rules.clean_form_url``), or ``None`` (none recorded, or only
+    events from before slice 7). check_submit's ``form_page_mismatch`` and the approval fingerprint
+    read it here, and only here."""
+    for ev in await _events(db, user_id, application_id, ("form_filled", "form_swept")):
+        url = ev["payload"].get("form_url")
+        if isinstance(url, str) and url:
+            return url
+    return None
+
+
 async def gate_facts(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool,
     other_session_hold: Optional[tuple[str, str, str]] = None,
@@ -625,6 +687,7 @@ async def gate_facts(
         new_site=await _new_site(db, user_id, application_id, form_host),
         cv_seen=bool(cv and cv["seen"] is not None),
         approved=bool(approved),
+        approval_stale=stale,
         declined=state["declined"] is not None,
         blocked=state["blocked"] is not None,
         form_filled=await _filled_with_latest_cv(db, user_id, application_id),
@@ -636,12 +699,12 @@ async def gate_facts(
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=form_host,
+        form_url=await latest_form_url(db, user_id, application_id),
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         email_to=draft["to"] if draft else None,
-        approval_stale=stale,
     )
 
 
@@ -683,6 +746,53 @@ async def submit_unconfirmed(db: JobDatabase, user_id: str, application_id: int)
     retracted = {int(dict(r)["corrects_event_id"]) for r in await cur.fetchall()}
     rows = [r for r in rows if not (r["event_type"] == "applied" and int(r["id"]) in retracted)]
     return bool(rows) and rows[0]["event_type"] == "submit_attempted"
+
+
+SUBMIT_CLAIM_REFUSALS = {
+    "unconfirmed": "submit_already_started: a submit was already started on this application and has no outcome "
+    "yet. Do not click Submit: read the page; if nothing confirms it went, record blocked and tell the user.",
+    "receipt": "submit_already_started: this application already has a receipt (it was sent). Do not click Submit.",
+    "status": "submit_already_started: this application is no longer considering. Do not click Submit.",
+}
+
+
+@contextlib.asynccontextmanager
+async def submit_claim(db: JobDatabase, user: CurrentUser, application_id: int) -> AsyncIterator[None]:
+    """G338: recording ``submit_attempted`` is a compare-and-set CLAIM. The application row is
+    locked, then the claim is refused (409) while a submit is unconfirmed (:func:`submit_unconfirmed`,
+    the same rule check_submit stops on), once a receipt exists, or when the status is not
+    ``considering``. The caller appends the event inside this block, so two sessions that both
+    passed check_submit queue on the lock and only the first may click."""
+    async with db._db.transaction():
+        cur = await db._db.execute(
+            "SELECT status FROM applications WHERE id = ? AND user_id = ? FOR UPDATE", (application_id, user.id)
+        )
+        row = await cur.fetchone()
+        if row is None:
+            raise SpineError(404, "application not found")
+        cur = await db._db.execute(
+            "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
+            (application_id, user.id),
+        )
+        has_receipt = await cur.fetchone() is not None
+        reason = ""
+        if await submit_unconfirmed(db, user.id, application_id):
+            reason = "unconfirmed"
+        elif has_receipt:
+            reason = "receipt"
+        elif dict(row)["status"] != "considering":
+            reason = "status"
+        if reason:
+            get_audit_logger().warning(
+                "submit_claim_refused",
+                extra={
+                    "event": "submit_claim_refused", "user_id": safe_log_value(user.id),
+                    "actor": safe_log_value(actor_for(user)), "application_id": int(application_id),
+                    "reason": reason, "status": 409, "result": "refused",
+                },
+            )
+            raise SpineError(409, SUBMIT_CLAIM_REFUSALS[reason])
+        yield
 
 
 async def _new_site(db: JobDatabase, user_id: str, application_id: int, host: Optional[str]) -> bool:
@@ -754,6 +864,7 @@ async def submit_verdict(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
             form_check_missing=False, form_pages_incomplete=False,
             form_host=settings_rules.screen_form_url(form_url),
+            form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
             guessed_unverified=False,
         )
@@ -790,7 +901,9 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
-    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers"}),
+    "form_swept": frozenset({
+        "fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers", "form_url",
+    }),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
@@ -1117,6 +1230,13 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 problems.append(f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
         if "unreadable" in payload:
             _unreadable_list(payload["unreadable"], problems)
+        if "form_url" in payload:
+            url = payload["form_url"]
+            if settings_rules.clean_form_url(url if isinstance(url, str) else None) is None:
+                problems.append(
+                    "form_url must be one plain http(s) address of the form page: no user@ part, "
+                    "no % escapes or backslashes before the path, and an ASCII host name"
+                )
         _pages_problems(payload, problems)
     elif event_type == "form_checked":
         problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
@@ -1234,6 +1354,9 @@ async def _check_kit_event(
                 "or backslashes before the path, and an ASCII host name",
             )
         stored: dict[str, Any] = {"host": host, "fields_count": count, "by": actor}
+        page = settings_rules.clean_form_url(payload["form_url"])  # slice 7: the page, never a token
+        if page:
+            stored["form_url"] = page
         if "answers" in payload:
             stored["answers"] = await _stored_answers(db, user, application_id, event_type, payload["answers"])
         if "fields_skipped" in payload:
@@ -1268,6 +1391,12 @@ async def _check_kit_event(
             swept["answers"] = await _stored_answers(db, user, application_id, event_type, payload["answers"])
         if paged:
             swept["page"], swept["pages_total"] = payload["page"], payload["pages_total"]
+        if "form_url" in payload:  # slice 7: the page swept, cleaned (never a token or session id)
+            raw_url = payload["form_url"]
+            swept_page = settings_rules.clean_form_url(raw_url if isinstance(raw_url, str) else None)
+            if swept_page is None:
+                raise SpineError(422, "form_swept form_url must be one plain http(s) address of the form page")
+            swept["form_url"] = swept_page
         if "notes" in payload:
             raw_notes = payload["notes"]
             if not isinstance(raw_notes, str):

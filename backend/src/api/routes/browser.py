@@ -83,10 +83,20 @@ def _gate_and_files(
             )
 
     async def _mark() -> None:
-        async with _db() as db:
-            await applications_route.record_event(
-                application_id, applications_route.RecordEventRequest(event_type="submit_attempted"), db, user
-            )
+        try:
+            async with _db() as db:
+                await applications_route.record_event(
+                    application_id, applications_route.RecordEventRequest(event_type="submit_attempted"), db, user
+                )
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+            # G338: another session holds the submit claim - refuse, so nothing is clicked
+            # (the route's BrowserError handler writes the audit line).
+            raise browser_agent.BrowserError(
+                "refused", "submit_already_started",
+                "Another session already started submitting this application; nothing was clicked.",
+            ) from None
 
     async def _files(kind: str) -> tuple[str, bytes]:
         from src.services.applications import uploads  # noqa: PLC0415

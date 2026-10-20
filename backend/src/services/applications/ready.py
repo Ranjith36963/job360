@@ -296,6 +296,81 @@ def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
     )
 
 
+def _users_word(profile: Any, saved: dict[str, tuple[Any, Any]], answer: dict[str, Any],
+                company_key: Optional[str]) -> Optional[str]:
+    """The user's OWN answer to ``answer``'s question - their approved answer, else a plain field
+    (equality / email / phone) they saved on the web - the words an Edit on the card writes. None
+    when the user has given none."""
+    word = _approved_for(profile, str(answer["question"]), company_key)
+    if word is not None:
+        return word
+    key = str(answer.get("key") or "")
+    target = _field_target(key)
+    by = saved.get(target[0], (None, None))[0] if target else None
+    return _memory_text(profile, key) if by and not is_assistant_actor(str(by)) else None
+
+
+def _answers_by_question(payload: dict[str, Any]) -> Optional[dict[str, dict[str, Any]]]:
+    typed = payload.get("answers")
+    if not isinstance(typed, list) or not typed:
+        return None
+    rows = [
+        a for a in typed
+        if isinstance(a, dict) and "question" in a and ("answer" in a or isinstance(a.get("value_sha256"), str))
+    ]
+    out = {_norm(a["question"]): a for a in rows}
+    return out if len(out) == len(typed) else None  # a repeated or unreadable question: not comparable
+
+
+def _same_answer(a: dict[str, Any], text: Any) -> bool:
+    """``a`` (a stored form answer) says ``text``. A G023-hashed answer (``kit.redacted_answer``) is
+    compared by the sha256 of the text, never by a value it no longer holds."""
+    if isinstance(a.get("value_sha256"), str):
+        return kit.sha256_text(str(text or "").strip()) == a["value_sha256"]
+    return _norm(a["answer"]) == _norm(text)
+
+
+def _answer_marker(a: dict[str, Any]) -> str:
+    return f"sha256:{a['value_sha256']}" if isinstance(a.get("value_sha256"), str) else _norm(a["answer"])
+
+
+async def refill_keeps_answers(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], was_id: int, now_id: int
+) -> bool:
+    """Gap roadmap slice 8: does the newer ``form_filled`` ``now_id`` still hold the user's yes given on
+    ``was_id``? Only when both list their answers, the field count and the questions are the same,
+    and every answer that differs is now the user's own word (owner decision 2026-10-19: the
+    assistant typing what the user changed - ``type_first`` - never cancels the yes). Any other
+    change is a new form the user has not seen. Scoped by ``user_id`` (rule #12)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT id, payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_filled' AND id IN (?, ?)",
+        (app_row["id"], user_id, was_id, now_id),
+    )
+    fills = {int(r["id"]): _json(r["payload"]) for r in await cur.fetchall()}
+    was, now = fills.get(was_id), fills.get(now_id)
+    if was is None or now is None or was.get("fields_count") != now.get("fields_count"):
+        return False
+    before, after = _answers_by_question(was), _answers_by_question(now)
+    if before is None or after is None or before.keys() != after.keys():
+        return False
+    changed = [a for q, a in after.items() if _answer_marker(a) != _answer_marker(before[q])]
+    if not changed:
+        return True
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    company_key = _company_key(str(app_row.get("job_company") or ""))
+    for a in changed:
+        word = _users_word(profile, saved, a, company_key)
+        if word is None or not _same_answer(a, word):
+            return False
+    return True
+
+
 async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[dict[str, str]]:
     """The answers the user changed on the newest filled form: ``[{question, answer}]``
     with the USER's answer, which the assistant must type before it submits. Read
