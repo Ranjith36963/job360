@@ -890,6 +890,59 @@ async def _settle(page: Any) -> None:
         pass
 
 
+# A link that opens its page in a new tab.
+OPENS_NEW_TAB_JS = "(e) => !!(e.closest && e.closest('a[target=\"_blank\"]'))"
+# How long a click on such a link waits for the new tab to be reported.
+NEW_TAB_WAIT_S = 2.0
+
+
+async def _settle_new_tab(s: Session, page: Any, tabs: int, opens_tab: bool) -> None:
+    """A click that opens a new tab: wait for the tab to be reported, then let it load. Until it
+    commits its first page its address is still blank, so the proxy's refusal could not yet be matched
+    to it (a loaded CI machine read a refused address as a page)."""
+    if opens_tab:
+        for _ in range(int(NEW_TAB_WAIT_S / 0.05)):
+            if len(page.context.pages) > tabs:
+                break
+            await asyncio.sleep(0.05)
+    new_page = s.page
+    if new_page is not None and new_page is not page and not new_page.is_closed():
+        await _settle(new_page)
+
+
+# How long a scroll may take to land before the page is read anyway (the end of the page never moves).
+SCROLL_WAIT_MS = 1000
+# A promise (boxed: evaluate_handle would wait for a bare one) that resolves on the first scroll anywhere
+# in the page (capture: an inner box's scroll does not bubble), or after the wait; then two frames, so
+# the page's own scroll handlers (lazy sections) have run and drawn.
+SCROLL_SEEN_JS = """(ms) => ({seen: new Promise((done) => {
+  const end = () => {
+    removeEventListener('scroll', on, true);
+    requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+  };
+  const on = () => { clearTimeout(t); end(); };
+  const t = setTimeout(end, ms);
+  addEventListener('scroll', on, {capture: true, once: true});
+})})"""
+
+
+async def _wheel(page: Any, dy: float) -> None:
+    """Turn the wheel and wait for the page to move. ``mouse.wheel`` returns before Chromium scrolls
+    (the scroll lands a frame or more later), so a look straight after it read the page as it was:
+    a form that draws its next section on scroll looked like it had nothing below."""
+    seen = await page.evaluate_handle(SCROLL_SEEN_JS, SCROLL_WAIT_MS)
+    try:
+        await page.mouse.wheel(0, dy)
+        await asyncio.wait_for(page.evaluate("(box) => box.seen", seen), SCROLL_WAIT_MS / 1000 + FRAME_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001, S110 - the page navigated or never answers: read it as it is
+        pass
+    finally:
+        try:
+            await seen.dispose()
+        except Exception:  # noqa: BLE001 - its page is already gone
+            logger.debug("browser_agent scroll handle dispose failed", exc_info=True)
+
+
 # The same action this many times in a row gets a warning (browser-use browser_use/agent/views.py:157-178,
 # :211-215 nudges at 5, 8, 12 repeats; a smaller window here because each of our steps is one tool call).
 REPEAT_LIMIT = 3
@@ -929,7 +982,7 @@ async def _save_proof(page: Any, gate: Gate) -> bool:
     if gate.save_proof is None:
         return False
     try:
-        await gate.save_proof(await page.screenshot(type="jpeg", quality=70))
+        await gate.save_proof(await _capture(page, quality=70))
     except Exception:  # noqa: BLE001 - proof is extra: the application still went
         logger.warning("browser proof screenshot not saved", exc_info=True)
         return False
@@ -1064,7 +1117,7 @@ async def _act(
         if text not in ("down", "up"):
             raise BrowserError("refused", "bad_scroll", 'scroll needs text "down" or "up".')
         page = _live_page(s)
-        await page.mouse.wheel(0, 800 if text == "down" else -800)
+        await _wheel(page, 800 if text == "down" else -800)
         await _settle(page)
         return await look(s, after_action=True)
 
@@ -1122,11 +1175,16 @@ async def _act(
         except Exception:  # noqa: BLE001 - unreadable: compared as changed
             before = None
         frames = await _watch(page, frame)
+        try:
+            opens_tab = bool(await loc.evaluate(OPENS_NEW_TAB_JS, timeout=1000))
+        except Exception:  # noqa: BLE001 - unreadable: no wait for a tab
+            opens_tab = False
         if submitted:
             # Set before the click: a click that fails after it reached the page still counts as one.
             s.submitted_on, s.submit_refused = (app_id, url), False
         await loc.click()
         await _settle(page)
+        await _settle_new_tab(s, page, tabs, opens_tab)
         changed = await _changed(page, frames, url, tabs)
         if not changed:
             try:
@@ -1306,11 +1364,32 @@ def live_key(user_id: str) -> str:
 _live_hosts: dict[str, str] = {}
 
 
+SHOT_TRIES = 3
+
+
+async def _capture(page: Any, *, quality: int) -> bytes:
+    """A JPEG of the page. Taken while a navigation commits (a sign-in form that submits and reloads on
+    Enter), Chromium answers "Unable to capture screenshot": wait for the new page's HTML, then try
+    again, a bounded number of times; the last try's failure is raised as it is."""
+    for attempt in range(SHOT_TRIES - 1):
+        try:
+            image: bytes = await page.screenshot(type="jpeg", quality=quality)
+            return image
+        except Exception:  # noqa: BLE001 - mid-navigation: wait for the new page, then the next try
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=ACTION_TIMEOUT_MS)
+            except Exception:  # noqa: BLE001, S110 - still loading: the next try says so
+                pass
+            await asyncio.sleep(0.1 * (attempt + 1))
+    last: bytes = await page.screenshot(type="jpeg", quality=quality)
+    return last
+
+
 async def _shot(s: Session) -> dict[str, Any]:
     import base64  # noqa: PLC0415
 
     page = _live_page(s)
-    png = await page.screenshot(type="jpeg", quality=60)
+    png = await _capture(page, quality=60)
     return {
         "status": "ok", "url": _clip(page.url, MAX_URL), "title": _clip(await page.title(), MAX_TITLE),
         "width": VIEWPORT["width"], "height": VIEWPORT["height"],
