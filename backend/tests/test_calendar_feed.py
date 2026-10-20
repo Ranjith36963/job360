@@ -477,10 +477,17 @@ async def test_duration_round_link_location_come_from_the_payload(authenticated_
             "round": "Technical", "duration_minutes": 90, "link": "https://meet.example/room?id=1,2",
             "location": "HQ; floor 3",
         })
-        await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(5),
-                     payload={"link": "https://meet.example/solo", "duration_minutes": 9999})
-        await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(6), payload={"duration_minutes": 1})
+        solo_ev = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(5),
+                               payload={"link": "https://meet.example/solo", "duration_minutes": 480})
+        tiny_ev = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(6),
+                               payload={"duration_minutes": 5})
         await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(7))
+        # Out-of-range durations are refused at write time now (slice 43); rows from before that
+        # can still hold them, so the feed must keep clamping. Plant such rows directly.
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"link": "https://meet.example/solo", "duration_minutes": 9999}', solo_ev["event_id"]))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"duration_minutes": 1}', tiny_ev["event_id"]))
         body = await _feed_body(client)
     full, solo, tiny, bare = _vevents(body)
     assert _span(full) == timedelta(minutes=90)
@@ -498,10 +505,17 @@ async def test_non_http_link_is_dropped(authenticated_async_context):
     _reset_limits()
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2),
-                     payload={"link": "javascript:alert(1)", "round": "Screen"})
-        await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(3),
-                     payload={"link": "file:///etc/passwd"})
+        refused = await client.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "interview_scheduled", "scheduled_at": _iso(2), "payload": {"link": "javascript:alert(1)"},
+        })
+        assert refused.status_code == 422, "a non-http link is refused at write time (slice 43)"
+        # Rows from before that check can still hold one; the feed must keep dropping it.
+        first = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2), payload={"round": "Screen"})
+        second = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(3))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"link": "javascript:alert(1)", "round": "Screen"}', first["event_id"]))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"link": "file:///etc/passwd"}', second["event_id"]))
         body = await _feed_body(client)
     assert "javascript" not in body and "file:" not in body and "passwd" not in body
     assert "LOCATION" not in body
