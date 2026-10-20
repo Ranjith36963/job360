@@ -131,6 +131,12 @@ FEED_SOURCES = (
     "linkedin",
     "glassdoor",
     "googlejobs",
+    "amazon",
+    "google",
+    "apple",
+    "metacareers",
+    "ibm",
+    "uber",
     "reed",
     "usajobs",
     "whatjobs",
@@ -258,7 +264,7 @@ def _import_kit(name: str) -> Any:
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
 ATS_MODULES = ("kit_ats", "kit_ats_more")
-FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards")
+FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco")
 
 
 def _merged(attr: str, modules: tuple[str, ...]) -> dict[str, Any]:
@@ -2557,6 +2563,11 @@ _FEED_HOSTS = (
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
+    ("amazon", re.compile(r"(?:^|\.)amazon\.jobs$", re.I)),
+    ("apple", re.compile(r"(?:^|\.)jobs\.apple\.com$", re.I)),
+    ("metacareers", re.compile(r"(?:^|\.)metacareers\.com$", re.I)),
+    ("ibm", re.compile(r"(?:^|\.)careers\.ibm\.com$", re.I)),
+    ("uber", re.compile(r"(?:^|\.)jobs\.uber\.com$", re.I)),
     ("adzuna", re.compile(r"(?:^|\.)adzuna\.[a-z.]+$", re.I)),
     ("jooble", re.compile(r"(?:^|\.)jooble\.org$", re.I)),
 )

@@ -183,10 +183,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
           DOCSONLY: ${{ steps.docsonly.outputs.docsonly }}
           AGENT_OUTCOME: ${{ steps.agent.outcome }}
+          EXEC_FILE: ${{ steps.agent.outputs.execution_file }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          # Which tool calls the allowlist refused. The prompt says "a denied call:
+          # do not retry", so ONE refusal can end the review with no verdict (5 of
+          # 6 runs on #913: 5 turns, permission_denials_count 1). The log showed only
+          # the count, so nobody could see which call to allow. Names and the first
+          # 200 characters of each refused input; never the token or the diff.
+          show_denials() {
+            f="${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}"
+            [ -s "$f" ] || { echo "(no execution file to read refused calls from)"; return 0; }
+            jq -r '[.[]? | select(.type == "result") | .permission_denials[]?]
+                   | if length == 0 then "(no refused calls recorded)"
+                     else .[] | "refused: \(.tool_name) \(.tool_input | tostring | .[0:200])" end' "$f" \
+              2>/dev/null || echo "(execution file not in the expected shape)"
+          }
           if [ "$DOCSONLY" = "true" ]; then
             echo "### reviewer-security: skipped (docs-only diff)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -222,6 +236,7 @@ jobs:
           if [ "$((p0 + p1 + p2 + nobugs))" -eq 0 ]; then
             echo "::error::reviewer-security posted NO verdict on head $HEAD_SHA (no finding, no 'no security issues found' comment). No evidence = FAIL; rerun the check."
             echo "### reviewer-security: FAILED — no verdict posted on head $HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
+            show_denials | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "reviewer-security: no P0/P1 findings ($p2 P2)."
