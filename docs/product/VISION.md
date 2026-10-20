@@ -50,7 +50,7 @@ That persistent, agent-accessible record is the product.
 | One **Application** object per job, born the moment the job is brought | Fit judging, CV / cover-letter / answer writing (we store, the agent writes) |
 | **Every version** of every artifact, forever, stamped with who/when/which profile | Gmail OAuth, inbox polling, email classification (the agent's connector reads; we store the event) |
 | A **typed event log**, one door (`record_event`), every event says who wrote it | People databases (Apollo, LinkedIn lookups) — the agent finds, we store the contact |
-| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Browser automation of our own; auto-submit only when the user turns it on (never Indeed/LinkedIn; practice run first; pause switch) |
+| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Auto-submit only when the user turns it on (never Indeed/LinkedIn; practice run first; pause switch). *Our own browser agent: allowed since decision 29 — see `BROWSER_AGENT.md`.* |
 | `whats_new` — pull, not push | Push notifications, WhatsApp, mobile apps (later, on evidence) |
 | OAuth 2.1 so ChatGPT / Grok / any client can connect | Our own LLM, our own general agent |
 | Cheap counts (reply rate per CV version / role) + full `export_history` | Charts-heavy analytics; the agent analyses the export |
@@ -186,6 +186,12 @@ consent-first; everything free; auto-submit only when the user switches it on (o
 | # | Question | Decision |
 |---|---|---|
 | 28 | "Do we need any model of our own?" | **Job360 has no brain of its own.** The user's agent (Claude, ChatGPT, Perplexity, Grok, Gemini — connected over MCP) reads, judges and writes; Job360 stores, versions, renders and remembers. This **replaces the "tailor stays as a web fallback" half of decision 17** — the tailor's LLM is gone; what stays is the part a browser cannot do for itself: version history, per-line provenance, keep/download, DOCX and PDF rendering of text the agent saved with `save_artifact`. Four slices: **A** removes the tailor LLM (this PR), **B** removes the profile LLM passes, **C** teaches the agents, **D** fixes the copy. Market check 2026-09-20 — custom MCP connectors are available on Claude (all plans, including Free), ChatGPT Plus/Pro, Perplexity Pro/Max, Grok paid and Gemini business: a seeker who can use Job360 at all already has an agent, so a second-rate model of ours is cost, not value. |
+
+### Addition, 2026-10-19 (the owner, on a browser of our own)
+
+| # | Question | Decision |
+|---|---|---|
+| 29 | "Claude in Chrome needs my PC on, and only Claude can use it. Can we build one browser that works for every assistant, even with my laptop off?" | **Yes: the Job360 browser agent** (`docs/product/BROWSER_AGENT.md`, which says what is built and what is still off). It replaces "browser automation of our own" on the never-build list. A cloud Chrome that Job360 runs, driven by the user's own agent over MCP, so Claude, ChatGPT, Gemini and others all use the same browser, laptop on or off. The agent still thinks; Job360's browser only does what the agent asks, through the same gates (`check_submit`, never-apply list, limits). The owner also said yes to keeping the user's signed-in session (cookie only, encrypted, never a password) and to Job360 submitting from the cloud. Hard lines stay: never type a password, never solve a CAPTCHA, never disguise the browser to get past a bot check. What the cloud browser cannot do goes to Needs you, and the user's own assistant's browser (Claude in Chrome, Gemini in Chrome, ChatGPT agent, Comet) finishes it when their computer is on. |
 
 ## Older docs this supersedes
 

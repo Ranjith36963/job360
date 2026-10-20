@@ -115,7 +115,10 @@ version: 1
 # waits. Silence is never consent.
 #
 #   ci        every required check on the PR is green         (GitHub check runs)
-#   review    CodeRabbit left no unresolved blocking thread   (GitHub review API)
+#   review    no unresolved review thread, and reviewer-bugs  (GitHub review API)
+#             + reviewer-security really ran green on the head commit. CodeRabbit
+#             is optional since 2026-10-19 (the owner): its threads still count and
+#             a review it has started must finish, but the cage never waits for it.
 #   security  gitleaks + pip-audit + npm audit + CodeQL green (security.yml)
 #             + reviewer-security (review-security.yml, no P0/P1), 2026-10-02
 #   verify    THE APP WAS ACTUALLY RUN AND WATCHED            (verify-live.yml)
@@ -683,7 +686,9 @@ data_exemptions:
 
 # ── WIP limit ──────────────────────────────────────────────────────────────
 # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)"; raised to 5 by the
-# owner on 2026-10-17 ("Make it 5"). `limit: 5` means a 6th open, non-draft, non-dependabot, non-revert PR is PARKED, not refused
+# owner on 2026-10-17 ("Make it 5"); raised to 10 on 2026-10-20, when PRs were
+# arriving at about 10 an hour and 20 of 35 open PRs sat parked. `limit: 10`
+# means an 11th open, non-draft, non-dependabot, non-revert, non-human-only PR is PARKED, not refused
 # outright: `scripts/wip_gate.py` (wired into `.github/workflows/pr-advisor.yml`,
 # job `wip`, on `opened`/`ready_for_review` only -- never `synchronize`, so an
 # already-accepted PR is never parked later by a push) converts it to a DRAFT,
@@ -694,7 +699,7 @@ data_exemptions:
 # `revert/*` branches (emergency undos) never count toward the limit and are
 # never themselves parked -- see scripts/wip_gate.py's module docstring.
 wip:
-  limit: 5
+  limit: 10
 
 # ── Size ceiling ───────────────────────────────────────────────────────────
 # Not a quality judgement — a REVIEWABILITY one. Past this, no reviewer (human
@@ -702,7 +707,21 @@ wip:
 # they just go to a human.
 size:
   max_files: 40
-  max_lines: 1500
+  # The ONE number (2026-10-19). merge_cage.py read 1200 from a constant while
+  # this file said 1500; the cage now reads only this. 1000, the owner's call
+  # (2026-10-19), chosen over 400: review studies find defect-finding falls off
+  # past ~200-400 changed lines, so aim well under this; past it a change is
+  # split into slices or the owner merges it.
+  max_lines: 1000
+  # Files a script writes and nobody reads line by line. Their lines are reported
+  # in the verdict but not counted against max_lines. EXACT paths only: a glob is
+  # a bypass waiting for a file. `frontend/package-lock.json` is NOT here: no
+  # check regenerates it, so a hand-edited `resolved`/`integrity` line would
+  # ride under the cap (CodeRabbit on #912). Its lines count.
+  generated:
+    - frontend/openapi.json
+    - frontend/src/lib/api-types.ts
+    - docs/GENERATED.md
 
 # ── Ratchets ───────────────────────────────────────────────────────────────
 # A ratchet is a number that may HOLD or IMPROVE and may never get worse.

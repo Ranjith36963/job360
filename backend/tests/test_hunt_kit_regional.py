@@ -296,3 +296,10 @@ def test_star_runs_naukri_for_the_visa_onsite_core_filter():
     http = _http({"": (200, NAUKRI)})
     assert kr.fetch_naukri(["dev"], http, {}, days=BIG, countries=["US", "*"])
     assert http.calls  # "*" runs it; keeping only visa-sponsoring ads is the core's job, as for kit_gov
+
+
+def test_naukri_minimum_experience_is_the_stated_floor() -> None:
+    # Owner's PC smoke test 2026-10-20: "12-to-18-years" was kept as years_min=3 (a guess from the snippet).
+    got = kr.parse_naukri({"noOfJobs": 2, "jobDetails": [{**NAUKRI_ROW, "minimumExperience": "12"},
+                                                          {**NAUKRI_ROW, "jobId": "9", "minimumExperience": "0"}]})
+    assert got[0]["extra"]["years_min"] == 12 and "years_min" not in got[1]["extra"]

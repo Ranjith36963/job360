@@ -1,11 +1,12 @@
 """FastAPI application for Job360 backend."""
 
 import asyncio
+import contextlib
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 # psycopg async requires the selector event loop on Windows (the default
 # ProactorEventLoop never signals socket readiness for libpq -> the DB lifespan
@@ -32,8 +33,10 @@ from src.api.routes import (
     applications,
     asks,
     assistant_settings,
+    assistant_trigger,
     auth,
     bring,
+    browser,
     calendar,
     client_log,
     doctor,
@@ -111,6 +114,16 @@ def _init_sentry() -> None:
     init_sentry(component="api")
 
 
+def _start_browser_reaper() -> Optional[asyncio.Task[None]]:
+    """The browser agent's idle sweep: a browser left open is closed after BROWSER_AGENT_IDLE_SECONDS
+    even when no request comes. Only when the agent is on; the import is lazy and starts no Chromium."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        return None
+    from src.services.browser_agent.agent import reap_forever  # noqa: PLC0415
+
+    return asyncio.create_task(reap_forever(), name="browser-idle-sweep")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Sentry init moved to MODULE scope (below, before `app = FastAPI(...)`) —
@@ -155,6 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # LOOP_WATCHDOG_ENABLED (default on); forced OFF under pytest, where the
     # instant-asyncio.sleep fixture would turn the sampler into a busy-spin.
     watchdog = start_loop_watchdog()
+    reaper = _start_browser_reaper()
     # MCP: the SDK session manager needs a running task group for the life of
     # the process (src/api/mcp_server.py). Tests enter mcp_runtime() themselves
     # because the auth fixture replaces this lifespan with a no-op.
@@ -164,10 +178,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if watchdog is not None:
             watchdog.cancel()
+        if reaper is not None:
+            reaper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reaper
         # Background session `last_seen` touches (FC-008): finish or cancel
         # them before the DB closes. Bound: up to 2 s waiting, then up to 1 s
         # more for the cancelled ones to unwind, so at most ~3 s in total.
         await drain_session_touches(timeout=2.0)
+        # The browser agent's Chromium, if one was ever started (a no-op otherwise).
+        from src.services.browser_agent.agent import shutdown_pool  # noqa: PLC0415
+
+        await shutdown_pool()
     await close_db()
     # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).
     await pool.close_pool()
@@ -254,6 +276,8 @@ app.include_router(recipes.router, prefix="/api")
 app.include_router(hunt_kit.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
 app.include_router(doctor.router, prefix="/api")  # agent doctor + report_missing_tool (feature 7)
+app.include_router(browser.router, prefix="/api")  # the Job360 browser agent (decision 29), off by default
+app.include_router(assistant_trigger.router, prefix="/api")  # Send starts my assistant (session only)
 app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
 app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
 app.include_router(ready_to_send.router, prefix="/api")  # approval cards for Ready to send (S5d)

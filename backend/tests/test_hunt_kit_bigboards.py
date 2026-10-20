@@ -37,6 +37,9 @@ JOB_KEYS = {"title", "company", "url", "location", "posted", "description", "sou
 @pytest.fixture(autouse=True)
 def _no_pause(monkeypatch):
     monkeypatch.setattr(kb, "PAUSE_S", 0)
+    # the LinkedIn run budget has its own test below; the other tests check the search/page/detail limits
+    monkeypatch.setattr(kb, "LI_MAX_REQUESTS", 0)
+    monkeypatch.setattr(kb, "LI_PAUSE_S", 0)
 
 
 def _http(handler):
@@ -630,3 +633,32 @@ def test_module_text_keeps_the_rules():
     for needle in ("jobspy/linkedin/__init__.py:", "jobspy/glassdoor/__init__.py:", "jobspy/google/__init__.py:",
                    "NOT IN REFERENCE"):
         assert needle in text
+
+
+
+def test_linkedin_run_budget_is_eight_requests_eight_seconds_apart(monkeypatch):
+    # Owner's PC smoke test 2026-10-20: 429 on the 10th request at 5 s apart.
+    monkeypatch.setattr(kb, "LI_MAX_REQUESTS", 8)
+    monkeypatch.setattr(kb, "LI_PAUSE_S", 8.0)
+    monkeypatch.setattr(kb, "PAUSE_S", 5.0)
+    slept: list = []
+    monkeypatch.setattr(kb.time, "sleep", slept.append)
+    counter = itertools.count(5000)
+    http = _http(_wrap200(_li_handler({o: li_page([next(counter) for _ in range(10)]) for o in (0, 10, 20)})))
+    kb.fetch_linkedin(["a", "b", "c"], http, {}, days=BIG, countries=["GB"])
+    assert len(http.calls) == 8 and set(slept) == {8.0} and len(slept) == 7
+
+
+def test_google_js_challenge_page_is_reported_blocked_not_empty(capsys):
+    # Owner's PC, 2026-10-20: Google answered 200 with its JavaScript challenge (SG_REL, /httpservice/retry/enablejs).
+    page = '<html><script>var SG_REL=1;</script><a href="/httpservice/retry/enablejs?sei=x">retry</a></html>'
+    http = _http(lambda url, obj=None: (200, page))
+    jobs = kb.fetch_googlejobs(["a", "b"], http, {}, days=BIG, countries=["GB"])
+    assert jobs == [] and len(http.calls) == 1
+    assert "googlejobs stopped" in capsys.readouterr().err
+
+
+def test_a_429_says_try_again_tomorrow(capsys):
+    http = _http(lambda url, obj=None: (429, ""))
+    kb.fetch_linkedin(["a"], http, {}, days=BIG, countries=["GB"])
+    assert "try again tomorrow" in capsys.readouterr().err

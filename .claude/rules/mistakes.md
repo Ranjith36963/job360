@@ -24,10 +24,16 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   `docs/GENERATED.md` and frontend types; re-run `test_recipes` (70-line recipe cap)
   and `test_outreach_people` (MCP tool count).
 - Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
-  GitHub merges it when the 13 required checks are green. Never leave finished work unpushed.
+  GitHub merges it when the required checks (13; 14 once `merge-cage` is added) are green. Never leave finished work unpushed.
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
   every `**/CLAUDE.md` is human-only, so a CLAUDE.md fix (even a `last-verified` stamp) goes in its own PR.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
+- One PR per slice, at most 1000 read lines (aim for 400 or fewer) (`size.max_lines` in `.github/merge-policy.yml`;
+  generated files don't count). Never keep pushing new slices onto an open PR: open the next.
+- Auto-merge is always on (owner, 2026-10-19), but the cage HOLDS a refused PR armed only once
+  `merge-cage` is a required check on `main-production-gate` (and never one touching `.github/`);
+  until then it still withdraws, so re-arm after CI is green. Never hand-merge past a red or pending `merge-cage` unless the owner said so for that PR.
+  Only the owner turns it off (repository variable `AUTO_MERGE=off`).
 - Read CI failures from the job summary, not the log tail (Postgres noise).
 - Pull enough of a failing CI log to reach pytest's summary (`get_job_logs` tail_lines ≥ 600;
   the noise is printed after it) before any slower route, like re-running the suite locally.
@@ -36,6 +42,15 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
 - To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,
   `@mcp.tool()`, the decorator) — never X's importers; they cannot show a second doer.
+
+## Probing job sites
+- Call a site "blocked" only after testing the exact endpoint the reader uses, and name it
+  (2026-10-19: Bayt/GulfTalent web pages gave 403; the readers' endpoints worked).
+- A test run gets a NEW folder: check it does not exist (`test -e`) before downloading into it.
+- Rate limits are per SERVICE, not per subdomain: Workable and Recruitee 429 the whole ATS.
+  Worker briefs say "stop that ATS on the first 429", never "per host" (2026-10-20: 90 refusals).
+- A new doc's kind is LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED only; run
+  `python scripts/doc_sync_check.py` before pushing a docs PR (2026-10-20: `SNAPSHOT` blocked #935).
 
 ## Real applications for the owner
 - An answer that is not clearly yes/no gets one clarifying question.

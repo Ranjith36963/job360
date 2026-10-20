@@ -1,5 +1,5 @@
 # Job360 Frontend
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 
 Next.js 16 + React 19 web app for Job360. A thin screen over the FastAPI
 backend's routes. Job360 never sources or ranks jobs — the seeker's own agent

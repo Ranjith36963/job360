@@ -920,6 +920,8 @@ export async function recordApplicationEvent(
     payload?: Record<string, unknown>;
     occurred_at?: string;
     corrects_event_id?: number;
+    // Interview time (ISO-8601 with offset); only on interview_requested/_scheduled.
+    scheduled_at?: string;
     // Owner decision, 2026-09-25 — omit to leave the date alone, "" to
     // clear it, "YYYY-MM-DD" to set it. Works on any event_type.
     follow_up_on?: string;
@@ -1130,4 +1132,80 @@ export type ReadyFlag = _Schemas["ReadyFlag"];
 /** The approval cards. `limit: 0` = counts only; `applicationId` narrows to one. */
 export async function getReadyToSend(params: { applicationId?: number; limit?: number } = {}): Promise<ReadyToSend> {
   return request<ReadyToSend>(`/api/ready-to-send${qs({ application_id: params.applicationId, limit: params.limit })}`);
+}
+
+// ---- The Job360 browser agent, slice 2: sign in once (docs/product/BROWSER_AGENT.md) ----
+export type BrowserSignIn = { site_host: string; cookie_count: number; updated_at: string };
+export type BrowserSignIns = { enabled: boolean; sites: BrowserSignIn[] };
+/** One picture of the cloud browser (status ok), or a refusal: status + reason + detail. */
+export type BrowserLiveShot = {
+  status: string;
+  reason?: string;
+  detail?: string;
+  url?: string;
+  title?: string;
+  width?: number;
+  height?: number;
+  image?: string;
+  kept?: Record<string, number>;
+  closed?: boolean;
+};
+export type BrowserLiveAction =
+  | { action: "start"; url: string }
+  | { action: "shot" | "keep" | "cancel" }
+  | { action: "click"; x: number; y: number }
+  | { action: "type"; text: string }
+  | { action: "key"; key: string }
+  | { action: "scroll"; dy: number };
+
+export async function getBrowserSignIns(): Promise<BrowserSignIns> {
+  return request<BrowserSignIns>("/api/browser/sign-ins");
+}
+
+export async function forgetBrowserSignIn(host: string): Promise<{ forgotten: string }> {
+  return request(`/api/browser/sign-ins/${encodeURIComponent(host)}`, { method: "DELETE" });
+}
+
+/** One step of the user's own sign-in. What is typed goes to the page and is never kept. */
+export async function browserLive(step: BrowserLiveAction): Promise<BrowserLiveShot> {
+  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify(step) });
+}
+
+// ---- Send starts my assistant (browser agent, "Send trigger"; website only, never a token) ----
+export type AssistantTrigger =
+  | { set: false }
+  | {
+      set: true;
+      host: string;
+      kind: "claude_routine" | "webhook";
+      has_token: boolean;
+      updated_at: string;
+      last_fired_at: string | null;
+      last_result: string;
+    };
+export type AssistantFire = {
+  fired: boolean;
+  reason?: string;
+  detail?: string;
+  count?: number;
+  application_ids?: number[];
+  session_url?: string | null;
+  retry_after?: number;
+};
+
+export async function getAssistantTrigger(): Promise<AssistantTrigger> {
+  return request<AssistantTrigger>("/api/assistant-trigger");
+}
+
+export async function saveAssistantTrigger(url: string, token: string): Promise<AssistantTrigger> {
+  return request<AssistantTrigger>("/api/assistant-trigger", { method: "PUT", body: JSON.stringify({ url, token }) });
+}
+
+export async function deleteAssistantTrigger(): Promise<{ deleted: boolean }> {
+  return request("/api/assistant-trigger", { method: "DELETE" });
+}
+
+/** After Send / Send all: start the user's assistant once for every job they said yes to. */
+export async function fireAssistant(): Promise<AssistantFire> {
+  return request<AssistantFire>("/api/assistant-trigger/fire", { method: "POST" });
 }

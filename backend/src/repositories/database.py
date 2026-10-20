@@ -706,8 +706,9 @@ class JobDatabase:
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
         "application_receipts", "application_stage_history", "applications",
-        "application_proof_screenshots", "artifact_links", "assistant_setting_requests", "calendar_feeds",
-        "contact_edits", "contact_outreach", "email_verifications", "missing_tool_reports",
+        "application_proof_screenshots", "artifact_links", "assistant_setting_requests", "assistant_triggers",
+        "browser_sign_ins",
+        "calendar_feeds", "contact_edits", "contact_outreach", "email_verifications", "missing_tool_reports",
         "oauth_grants",
         "password_resets", "proof_upload_links", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
         "user_profile_versions", "user_profiles",
@@ -716,8 +717,10 @@ class JobDatabase:
     # Tables included in a GDPR Article 20 export (docs/fable/05 C7). This is the
     # user's OWN data — what they authored or what we derived about them.
     # Deliberately EXCLUDED from _PER_USER_TABLES: sessions, password_resets,
-    # email_verifications. Those hold short-lived security tokens, not portable
-    # personal data; exporting them would hand out live credentials.
+    # email_verifications, browser_sign_ins (encrypted site cookies, i.e. a live
+    # sign-in), assistant_triggers (an encrypted bearer token). Those hold
+    # short-lived security tokens, not portable personal data; exporting them
+    # would hand out live credentials.
     # (`oauth_states` used to be on that excluded list too — the table itself is
     # gone as of migration 0031.)
     # `api_tokens` IS exported (the user's own names/dates — "which machines did I

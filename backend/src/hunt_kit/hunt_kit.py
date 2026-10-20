@@ -124,12 +124,26 @@ FEED_SOURCES = (
     "tyomarkkinatori",
     "trudvsem",
     "jobstreet",
+    "nav",
     "naukri",
     "bayt",
     "gulftalent",
+    "glints",
+    "kalibrr",
     "linkedin",
     "glassdoor",
     "googlejobs",
+    "amazon",
+    "google",
+    "apple",
+    "metacareers",
+    "ibm",
+    "uber",
+    "wellfound",
+    "getro",
+    "workatastartup",
+    "builtin",
+    "wttj",
     "reed",
     "usajobs",
     "whatjobs",
@@ -257,7 +271,10 @@ def _import_kit(name: str) -> Any:
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
 ATS_MODULES = ("kit_ats", "kit_ats_more")
-FEED_MODULES = ("kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards")
+FEED_MODULES = (
+    "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
+    "kit_asia",
+)
 
 
 def _merged(attr: str, modules: tuple[str, ...]) -> dict[str, Any]:
@@ -1410,6 +1427,7 @@ class Collector:
                 company=job.get("company", ""),
                 board=job.get("board", ""),
                 visa_flag=job.get("visa_flag") is True,
+                years=(job.get("extra") or {}).get("years_min"),
             ),
             rec_source=job.get("source") or label,
         )
@@ -1442,7 +1460,9 @@ class Collector:
         if not row:
             return
         self.bump(source, "location_matches")
-        y = years_min(desc)
+        # A feed field stating the employer's floor (Naukri minimumExperience) beats a guess from the text.
+        stated = raw.get("years")
+        y = stated if isinstance(stated, int) and not isinstance(stated, bool) and stated > 0 else years_min(desc)
         if y is not None and y >= a.max_years:
             return
         if not within_days(raw.get("posted", ""), a.days):
@@ -2550,9 +2570,20 @@ _FEED_HOSTS = (
     ("naukri", re.compile(r"(?:^|\.)naukri\.com$", re.I)),
     ("bayt", re.compile(r"(?:^|\.)bayt\.com$", re.I)),
     ("gulftalent", re.compile(r"(?:^|\.)gulftalent\.com$", re.I)),
+    ("glints", re.compile(r"(?:^|\.)glints\.com$", re.I)),
+    ("kalibrr", re.compile(r"(?:^|\.)kalibrr\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
+    ("amazon", re.compile(r"(?:^|\.)amazon\.jobs$", re.I)),
+    ("apple", re.compile(r"(?:^|\.)jobs\.apple\.com$", re.I)),
+    ("metacareers", re.compile(r"(?:^|\.)metacareers\.com$", re.I)),
+    ("ibm", re.compile(r"(?:^|\.)careers\.ibm\.com$", re.I)),
+    ("uber", re.compile(r"(?:^|\.)jobs\.uber\.com$", re.I)),
+    ("wellfound", re.compile(r"(?:^|\.)wellfound\.com$", re.I)),
+    ("workatastartup", re.compile(r"(?:^|\.)workatastartup\.com$", re.I)),
+    ("builtin", re.compile(r"(?:^|\.)builtin\.com$", re.I)),
+    ("wttj", re.compile(r"(?:^|\.)welcometothejungle\.com$", re.I)),
     ("adzuna", re.compile(r"(?:^|\.)adzuna\.[a-z.]+$", re.I)),
     ("jooble", re.compile(r"(?:^|\.)jooble\.org$", re.I)),
 )

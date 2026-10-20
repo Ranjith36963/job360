@@ -15,6 +15,7 @@ case the feed simply returns nothing.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -432,6 +433,88 @@ def fetch_jobstreet(queries: list[str], http: HttpFn, stats: Stats, *, days: int
     return _keep(_unique(jobs), queries, days, search=False)  # the service matched the query itself
 
 
+# ------------------------------------------------------------------------------------------- NAV
+# NOT FROM A REFERENCE REPO: read off the live service on 2026-10-19 (no key, robots.txt "User-agent: *
+# Disallow:" allows it). GET /stillinger/api/search?q=<title>&size=50&from=<offset>&sort=published answers
+# an Elasticsearch-shaped body: hits.total.value, hits.hits[]._source{title, businessName, employer.name,
+# uuid, published, expires, locationList[]{city, municipal, county, country}, generatedSearchMetadata.
+# shortSummary, properties.workLanguage[]}. Live: the server returns at most 25 rows per request whatever
+# ``size`` says, so paging advances ``from`` by the rows actually received and stops at the total.
+# The summary is a one-sentence AI snippet, not the ad, so ads are marked ``truncated``.
+NAV_SEARCH = "https://arbeidsplassen.nav.no/stillinger/api/search"
+NAV_JOB = "https://arbeidsplassen.nav.no/stillinger/stilling/"
+# Live 2026-10-19: ~25 requests in a few minutes drew HTTP 429 (no Retry-After) that lasted over 100 s,
+# so the reader spaces its requests out and stops at the first refusal.
+NAV_PAUSE_S = 1.5  # pause between two NAV requests
+
+
+def _nav_place(locations: Any) -> tuple[str, str]:
+    """(places, country name) from NAV's ``locationList``: up to three distinct cities, 'NORGE' -> Norway."""
+    places: list[str] = []
+    country = ""
+    for loc in locations if isinstance(locations, list) else []:
+        if not isinstance(loc, dict):
+            continue
+        name = str(loc.get("city") or loc.get("municipal") or loc.get("county") or "").strip().title()
+        if name and name not in places:
+            places.append(name)
+        country = country or str(loc.get("country") or "").strip()
+    return ", ".join(places[:3]), "Norway" if country.upper() in ("", "NORGE", "NORWAY") else country.title()
+
+
+def parse_nav(payload: Any) -> list[Job]:
+    """Parse one NAV arbeidsplassen search page (``hits.hits``): title, employer, place and a one-line snippet."""
+    rows = ((payload or {}).get("hits") or {}).get("hits") if isinstance(payload, dict) else None
+    out: list[Job] = []
+    for h in rows if isinstance(rows, list) else []:
+        s = (h or {}).get("_source") if isinstance(h, dict) else None
+        if not isinstance(s, dict):
+            continue
+        uid = str(s.get("uuid") or h.get("_id") or "").strip()
+        title = str(s.get("title") or "").replace("\\&", "&").strip()
+        if not re.fullmatch(r"[0-9a-fA-F-]{36}", uid):
+            uid = ""  # an ad id is a UUID; anything else ("..") could point the link at another page
+        if not (uid and title):
+            continue
+        place, country = _nav_place(s.get("locationList"))
+        out.append(_made(
+            "nav", "NAV arbeidsplassen (Norwegian Labour and Welfare Administration)", title=title,
+            company=s.get("businessName") or (s.get("employer") or {}).get("name"),
+            url=NAV_JOB + quote(uid, safe=""), place=place, country=country, posted=_date(s.get("published")),
+            description=(s.get("generatedSearchMetadata") or {}).get("shortSummary"),
+            extra={"truncated": True, "work_language": (s.get("properties") or {}).get("workLanguage") or [],
+                   "expires": _date(s.get("expires"))}))
+    return out
+
+
+@_feed
+def fetch_nav(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """Norway's NAV arbeidsplassen job search (newest first), only when NO is one of the user's countries."""
+    if not _wanted(countries, "NO"):
+        return []
+    jobs: list[Job] = []
+    sent = 0
+    for q in _queries(queries):
+        offset = 0
+        for _ in range(NATIONAL_PAGES):
+            if sent:
+                time.sleep(NAV_PAUSE_S)
+            sent += 1
+            qs = urlencode({"q": q, "size": 50, "from": offset, "sort": "published"})
+            body = _get(http, stats, f"{NAV_SEARCH}?{qs}", headers={"Accept": "application/json"})
+            if body is None:  # refused (429 or an outage): stop at once rather than hammer a service that said no
+                print("warning: nav answered with an error (rest of NAV skipped)", file=sys.stderr)
+                return _keep(_unique(jobs), queries, days, search=False)
+            rows = ((body or {}).get("hits") or {}).get("hits") if isinstance(body, dict) else None
+            jobs += parse_nav(body)
+            offset += len(rows) if isinstance(rows, list) else 0
+            total = (((body or {}).get("hits") or {}).get("total") or {}).get("value") if isinstance(body, dict) else 0
+            total_n = int(total) if isinstance(total, (int, float)) else 0  # "29+" must not drop the feed
+            if not rows or offset >= total_n:
+                break
+    return _keep(_unique(jobs), queries, days, search=False)  # the service matched the query itself
+
+
 FEEDS: dict[str, Callable[..., list[Job]]] = {
     "eures": fetch_eures,
     "vdab": fetch_vdab,
@@ -439,4 +522,5 @@ FEEDS: dict[str, Callable[..., list[Job]]] = {
     "tyomarkkinatori": fetch_tyomarkkinatori,
     "trudvsem": fetch_trudvsem,
     "jobstreet": fetch_jobstreet,
+    "nav": fetch_nav,
 }

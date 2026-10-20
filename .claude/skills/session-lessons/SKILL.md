@@ -97,6 +97,26 @@ delete a lesson; if one stops being true, say so on its line and why.
   **Rule:** after a deploy that adds a tool parameter, check `doctor` and tell
   the owner to reconnect the connector before relying on it.
 
+- 2026-10-19: a research worker probed Bayt and GulfTalent's public search WEB PAGES from the
+  owner's PC, got 403, and I passed "both blocked" to the hunt-coverage session as a fact. On
+  2026-10-20 the live smoke test (`docs/product/hunt-kit-smoke-2026-10-20.md`) showed the #918
+  readers, which use other endpoints, answering 21/21 and 28/28 and keeping real Dubai jobs.
+  **Rule:** say "blocked" only for the exact endpoint the reader calls, and name that endpoint.
+- 2026-10-20: for the same smoke test I downloaded the kit into `tmp/smoke`, which already held
+  `backend/` and `kit.tar` from an earlier task, though the brief said a NEW empty folder. Caught
+  before the run and redone in a fresh folder. **Rule:** before downloading a test run, check the
+  folder does not exist (`test -e`), then create it.
+- 2026-10-20: I stamped the smoke doc `<!-- doc: SNAPSHOT -->`, a kind that does not exist, and
+  pushed without running the drift check. CI's `drift-check` failed, the cage withdrew auto-merge,
+  and PR #935 sat unmerged for hours while I reported it as armed. **Rule:** a new doc's kind is one
+  of LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED; run `python scripts/doc_sync_check.py` before
+  pushing any docs PR, and re-read `gh pr checks` before saying a PR will merge.
+- 2026-10-20: my Gulf-boards research brief said "stop on 403/429 for that host". The Sonnet worker
+  treated each `<slug>.recruitee.com` as its own host and guessed slugs in a burst: 90 answers of 429
+  from Recruitee, and Workable 429'd twice (Retry-After 314 s). Both throttle the service as a whole.
+  **Rule:** a brief names the SERVICE as the unit ("stop that ATS on its first 429 for this run") and
+  forbids slug-guessing bursts; verify known slugs only.
+
 ## Real applications for the owner
 
 - 2026-10-15: the owner answered "and upload observe" to "apply or skip?".
@@ -202,6 +222,14 @@ Apify web-fetch tool, before you build. Never cite from memory.
   SECOND time. "This position has been filled." stopped reading as closed; CodeRabbit caught
   it on PR #875. **Rule:** before editing a multi-line expression, print the whole expression
   (sed -n) and diff it against the reference line, then run a test that hits that exact branch.
+
+- 2026-10-19: of 27 PRs merged 17-19 October, 2 merged by auto-merge cleanly. The cage
+  judged each PR a minute after it opened, read "has not finished" as a refusal and turned
+  auto-merge off; nothing woke it when CI went green (no `check_suite` event fires for
+  Actions' own suites), so sessions merged by hand past it, and #906 shipped a red test to
+  main. Meanwhile #902 grew from 1,584 to 3,800+ lines as slices 2-4 were pushed onto it
+  while it was being split. **Rule:** one PR per slice under the cap, arm auto-merge once,
+  and let `merge-cage` hold it; never hand-merge around the gate.
 
 ## Tooling
 

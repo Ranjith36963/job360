@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-10-05 by README rewrite (current product state) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 
 **The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt.**
 
