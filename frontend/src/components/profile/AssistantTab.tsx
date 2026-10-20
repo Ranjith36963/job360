@@ -16,17 +16,12 @@ import {
   HARD_STOPS,
   HISTORY_PATHS,
   INBOX_MODES,
-  LINE_SWITCHES,
   AUTO_EMAILS_HELP,
-  P_ABOVE,
   P_AUTO_EMAILS,
-  P_BELOW,
   P_EVERY,
   P_INBOX,
   P_SCORE,
-  P_SUBMIT,
   PREF_HISTORY_PATHS,
-  SUBMIT_MODES,
   everyText,
   historyWhen,
   inboxKey,
@@ -36,7 +31,15 @@ import {
   settingSwitch,
 } from "@/lib/assistant-tab";
 import type { ChangeRow, HistRow } from "@/lib/assistant-tab";
-import { LINE_SWITCH_LABEL, SUBMIT_MODE_LABEL, quotaText, scoreLineText } from "@/lib/morning-check";
+import {
+  ALWAYS_ASKS,
+  LINE_SWITCH_LABEL,
+  batchEdits,
+  batchOn,
+  belowText,
+  quotaText,
+  scoreLineText,
+} from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 import { BatchRuleRows, LABEL, NUMBOX, Row } from "./BatchRuleRows";
 
@@ -87,45 +90,6 @@ function Option({
         <span className="block text-[12.5px] text-muted-foreground">{sub}</span>
       </span>
     </button>
-  );
-}
-
-function LineSwitch({
-  title,
-  testPrefix,
-  current,
-  busy,
-  onPick,
-}: {
-  title: string;
-  testPrefix: string;
-  current: string;
-  busy: boolean;
-  onPick: (v: "ask" | "auto") => void;
-}) {
-  return (
-    <Row title={title} sub={current === "auto" ? "Your assistant applies on its own." : "Your assistant asks you first."}>
-      <div role="radiogroup" aria-label={title} className="inline-flex overflow-hidden rounded-lg border border-border">
-        {LINE_SWITCHES.map((m, i) => (
-          <button
-            key={m.value}
-            type="button"
-            role="radio"
-            aria-checked={current === m.value}
-            data-testid={`${testPrefix}-${m.value}`}
-            disabled={busy}
-            onClick={() => current !== m.value && onPick(m.value)}
-            className={cn(
-              "min-h-11 px-3.5 text-sm font-medium md:min-h-9",
-              i > 0 && "border-l border-border",
-              current === m.value ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
-            )}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
-    </Row>
   );
 }
 
@@ -238,12 +202,14 @@ export function AssistantTab() {
   if (!view) return <p className="pt-6 text-sm text-muted-foreground">Loading…</p>;
 
   const aboveLine = settingSwitch(view.above_line);
-  const belowLine = settingSwitch(view.below_line);
+  const belowLine = String(eff(view.below_line) || "ask");
   const autoEmails = settingAutoEmails(view.auto_employer_emails);
   const submit_mode = String(eff(view.submit_mode) ?? "confirm");
+  const batch = batchOn(aboveLine, submit_mode);
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
   const savedScore: number | null = settingScore(view.apply_min_score);
+  const liveState = { apply_min_score: savedScore, above_line: aboveLine, below_line: belowLine, submit_mode };
   function commitScore() {
     const t = score.trim();
     if (t === "") {
@@ -303,36 +269,36 @@ export function AssistantTab() {
               </span>
             )}
           </Row>
-          <LineSwitch
-            title="Jobs at or above your line"
-            testPrefix="above-line"
-            current={aboveLine}
-            busy={busy}
-            onPick={(v) => void save(P_ABOVE, v)}
-          />
-          <LineSwitch
-            title="Jobs below your line"
-            testPrefix="below-line"
-            current={belowLine}
-            busy={busy}
-            onPick={(v) => void save(P_BELOW, v)}
-          />
-        </Section>
-
-        <Section title="Submit mode" hint="The last click on the form">
-          <div role="radiogroup" aria-label="Submit mode" className="grid gap-2 md:grid-cols-2">
-            {SUBMIT_MODES.map((m) => (
+          {/* Owner decision 2026-10-19: ONE switch. On = apply on its own to every job at or
+              above the line; off = ask first. Jobs below the line are dropped. */}
+          <div role="radiogroup" aria-label="Batch auto apply" className="grid gap-2 pt-3 md:grid-cols-2">
+            {([false, true] as const).map((on) => (
               <Option
-                key={m.value}
-                id={`submit-mode-${m.value}`}
-                title={SUBMIT_MODE_LABEL[m.value]}
-                sub={m.sub}
-                on={submit_mode === m.value}
+                key={String(on)}
+                id={`batch-${on ? "on" : "off"}`}
+                title={on ? "Batch auto apply: on" : "Batch auto apply: off"}
+                sub={
+                  on
+                    ? "Your assistant applies on its own to every job at or above your score line."
+                    : "Your assistant asks you before each application."
+                }
+                on={batch === on}
                 disabled={busy}
-                onPick={() => submit_mode !== m.value && void save(P_SUBMIT, m.value)}
+                onPick={() => {
+                  const edits = batchEdits(liveState, { scoreValue: savedScore, batch: on });
+                  if (edits.length) void saveMany(edits);
+                }}
               />
             ))}
           </div>
+          <p data-testid="below-line-rule" className="pt-2 text-[12.5px] text-muted-foreground">
+            {belowLine === "skip"
+              ? "Jobs below your score line are dropped — never applied to."
+              : `${belowText(belowLine)}. Choosing either option above drops them from now on.`}
+          </p>
+          <p data-testid="always-asks" className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
+            {ALWAYS_ASKS}
+          </p>
         </Section>
 
         <Section title="Limits & inbox">
@@ -478,9 +444,8 @@ export function AssistantTab() {
             {(
               [
                 ["Score line", scoreLineText(savedScore).replace(/^Score line /, "")],
-                ["At or above", LINE_SWITCH_LABEL[aboveLine] ?? aboveLine],
-                ["Below", LINE_SWITCH_LABEL[belowLine] ?? belowLine],
-                ["Submit", SUBMIT_MODE_LABEL[submit_mode] ?? submit_mode],
+                ["Batch auto apply", batch ? "On" : "Off"],
+                ["Below the line", LINE_SWITCH_LABEL[belowLine] ?? belowLine],
                 ...(today ? [["Today", quotaText(today.state.applied_today, today.state.daily_cap).replace(/ today$/, "")]] : []),
                 ...(inbox ? [["Gmail check", [INBOX_MODES.find((m) => m.value === inbox)?.label, everyText(every)].filter(Boolean).join(", ")]] : []),
               ] as [string, string][]

@@ -35,6 +35,10 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   until then it still withdraws, so re-arm after CI is green. Never hand-merge past a red or pending `merge-cage` unless the owner said so for that PR.
   Only the owner turns it off (repository variable `AUTO_MERGE=off`).
 - Read CI failures from the job summary, not the log tail (Postgres noise).
+- Pull enough of a failing CI log to reach pytest's summary (`get_job_logs` tail_lines ≥ 600;
+  the noise is printed after it) before any slower route, like re-running the suite locally.
+- After editing any MCP tool description or the server instructions, run
+  `python scripts/mcp_text_budget.py` (2,000-character cap); the gate's fast tier skips it.
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
 - To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,
   `@mcp.tool()`, the decorator) — never X's importers; they cannot show a second doer.

@@ -8,6 +8,8 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   2026-10-10).
 * ``above_line`` / ``below_line`` — ``ask`` (default) | ``auto``: two SEPARATE
   per-user switches, one for jobs at or above the line and one for jobs below it.
+  ``below_line`` also takes ``skip`` (owner 2026-10-19: "no more below score line:
+  drop that job") - a job below the line is never applied to (``below_score_line``).
   ``apply_mode`` is RETIRED (the field stays so old stored rows still load).
 * ``submit_mode`` — ``confirm`` (default) | ``auto_when_sure``
 * ``daily_cap`` — most submits per day; ``None`` = no cap (owner: no cap by default)
@@ -73,7 +75,7 @@ HEAD = "assistant_settings"
 APPLY_MODE_PATH = f"{HEAD}.apply_mode"  # RETIRED 2026-10-10: kept only to name it in the refusal
 APPLY_MODE_RETIRED_MESSAGE = (
     "assistant_settings.apply_mode is retired: use assistant_settings.above_line "
-    "and assistant_settings.below_line (ask|auto)"
+    "(ask|auto) and assistant_settings.below_line (ask|auto|skip)"
 )
 APPLY_MIN_SCORE_PATH = f"{HEAD}.apply_min_score"
 ABOVE_LINE_PATH = f"{HEAD}.above_line"
@@ -99,6 +101,11 @@ SETTING_PATHS: tuple[str, ...] = (
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
+# Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
+LINE_SKIP = "skip"
+VALID_BELOW_SWITCHES: frozenset[str] = VALID_LINE_SWITCHES | {LINE_SKIP}
+# How free each below-line switch leaves the assistant (higher = freer).
+_BELOW_RANK = {LINE_SKIP: 0, "ask": 1, "auto": 2}
 # The inbox/Gmail mode stays at its old path (an ALIAS, not a move: assistants
 # cached instructions that write it). "auto" there is a RISKIER change too
 # (owner answer 1, 2026-10-08), so it goes through the same request flow.
@@ -303,8 +310,10 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
     ``ProfileEditError(422)`` naming the PATH. ``None`` (a clear) is handled by
     the caller before this runs, so ``daily_cap: null`` never reaches here."""
     when = now if now is not None else datetime.now(timezone.utc)
-    if path in (ABOVE_LINE_PATH, BELOW_LINE_PATH):
+    if path == ABOVE_LINE_PATH:
         return _closed_set(path, value, VALID_LINE_SWITCHES)
+    if path == BELOW_LINE_PATH:
+        return _closed_set(path, value, VALID_BELOW_SWITCHES)
     if path == SUBMIT_MODE_PATH:
         return _closed_set(path, value, VALID_SUBMIT_MODES)
     if path == APPLY_MIN_SCORE_PATH:
@@ -507,12 +516,13 @@ def classify_change(
     ===================  =============================================  =========================
     path                 riskier                                        safer
     ===================  =============================================  =========================
-    above_line /         ask -> auto                                    auto -> ask
-    below_line
-    apply_min_score      not set -> a number while either switch is     a number -> not set;
-                         auto; a LOWER number when above=auto and       equal; a lower number
-                         below=ask; a HIGHER number when below=auto     otherwise; a higher number
-                         and above=ask                                  otherwise
+    above_line           ask -> auto                                    auto -> ask
+    below_line           freer: skip -> ask -> auto                     toward skip
+    apply_min_score      not set -> a number while either switch is     a number -> not set
+                         auto; a LOWER number when above=auto and       (unless below=skip);
+                         below=ask; a LOWER number or a number ->       equal; a lower number
+                         not set when below=skip; a HIGHER number       otherwise; a higher number
+                         when below=auto and above=ask                  otherwise
     submit_mode          confirm -> auto_when_sure                      -> confirm
     daily_cap            raised, or a number -> none (cap removed)      none -> a number, lowered
     company_cap          raised, or a number -> none (limit removed)    none -> a number, lowered
@@ -532,16 +542,24 @@ def classify_change(
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
     """
-    if path in (ABOVE_LINE_PATH, BELOW_LINE_PATH):
+    if path == ABOVE_LINE_PATH:
         return "riskier" if (after == "auto" and before != "auto") else "safer"
+    if path == BELOW_LINE_PATH:
+        # An unknown stored value ranks as `ask` (the default it reads as).
+        return "riskier" if _BELOW_RANK.get(after, 1) > _BELOW_RANK.get(before, 1) else "safer"
     if path == APPLY_MIN_SCORE_PATH:
         above_auto, below_auto = switches[0] == "auto", switches[1] == "auto"
-        if after is None or before == after:
+        # below=skip is a protection: lowering or clearing the line brings jobs the user
+        # chose to drop back into play (as "ask" or "unknown"), so it waits for the user.
+        below_skip = switches[1] == "skip"
+        if before == after:
             return "safer"
+        if after is None:
+            return "riskier" if (below_skip and before is not None) else "safer"
         if before is None:
             return "riskier" if (above_auto or below_auto) else "safer"
         if after < before:
-            return "riskier" if (above_auto and not below_auto) else "safer"
+            return "riskier" if ((above_auto and not below_auto) or below_skip) else "safer"
         return "riskier" if (below_auto and not above_auto) else "safer"
     if path == SUBMIT_MODE_PATH:
         return "riskier" if (after == AUTO_SUBMIT_MODE and before != AUTO_SUBMIT_MODE) else "safer"
@@ -598,6 +616,7 @@ def line_block(fit_score: Optional[int], cfg: EffectiveSettings) -> dict[str, An
     switch = cfg.above_line if side == "above" else cfg.below_line
     rule = (
         "ask the user before applying." if switch == "ask"
+        else "do not apply - drop this job." if switch == LINE_SKIP
         else "you may apply on your own (still run check_submit before the final submit)."
     )
     return {
@@ -719,6 +738,10 @@ class SubmitFacts:
     # Bulk-apply F2: a multi-page form (``page`` / ``pages_total`` on form_checked / form_swept) has a page
     # 1..N without a sweep newer than its check. STOP ``form_pages_incomplete``; a yes never clears it.
     form_pages_incomplete: bool = False
+    # Owner rule 2026-10-19: the newest ``form_filled`` holds an answer marked ``guessed`` that the
+    # user has not verified (``ready.has_unverified_guess``, the card's ``guessed`` flag). Asks
+    # ``answer_guessed`` in EVERY mode; a yes does NOT clear it - the user verifies or edits the answer.
+    guessed_unverified: bool = False
 
 
 @dataclass(frozen=True)
@@ -739,7 +762,7 @@ REASONS: tuple[str, ...] = (
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
-    "type_first_pending",
+    "type_first_pending", "below_score_line", "answer_guessed",
 )
 
 
@@ -873,6 +896,8 @@ def may_submit(
         (exact normalized match; a yes does NOT clear it; the user edits their list)
     4a3. outside the user's ``apply_hours`` -> stop ``outside_hours``; less than ``min_gap_minutes`` since the
         newest applied -> stop ``pace_wait`` with the exact next allowed time (fixed values, a yes never clears them)
+    4a4. ``below_line`` is ``skip`` and the fit is below the user's score line -> stop
+        ``below_score_line`` (owner 2026-10-19: drop the job; a yes does NOT clear it)
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
@@ -890,6 +915,9 @@ def may_submit(
         yes does NOT clear it; after the stops so a stop is never softened to an ask)
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
+    4e. (after the auto duplicate stop) the newest ``form_filled`` has a ``guessed`` answer the user
+        has not verified, or one the user EDITED that the form still holds -> ask ``answer_guessed`` in
+        every mode (owner 2026-10-19; a yes does NOT clear it - the user verifies or edits the answer)
     5-role. same company + same title applied to inside ``DUPLICATE_ROLE_WINDOW_DAYS`` -> ask
         ``duplicate_role`` (inside ``_first_ask`` after the duplicate_job ask; ``duplicate_cleared`` or a yes clears it)
     5a. another assistant session read this application's kit inside
@@ -920,8 +948,8 @@ def may_submit(
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
     ``user_approved``. Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
-    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (4d)
-    are NEVER cleared by a yes.
+    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e), ``email_not_verified`` (4d),
+    ``below_score_line`` (4a4) and ``answer_guessed`` (4e) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
@@ -955,6 +983,12 @@ def may_submit(
     pace = _pace_stop(cfg, counts, now)
     if pace is not None:
         return pace
+    if cfg.below_line == LINE_SKIP and line_side(application.fit_score, cfg.apply_min_score) == "below":
+        return SubmitDecision(
+            "stop", "below_score_line",
+            f"This job is below your score line ({cfg.apply_min_score}) and you chose to drop those. "
+            "Do not apply; leave this job.",
+        )
     if not application.form_filled:
         return SubmitDecision(
             "stop", "form_not_recorded",
@@ -1012,6 +1046,14 @@ def may_submit(
         return SubmitDecision(
             "stop", "duplicate_job",
             "Needs you: possible duplicate - this job was already applied to. Do not submit; the user decides.",
+        )
+    # 4e, after every stop (the auto duplicate one included) so a stop is never softened to this ask.
+    if application.guessed_unverified:
+        return SubmitDecision(
+            "ask", "answer_guessed",
+            "An answer on this form was guessed and the user has not verified it, or the user changed it "
+            "and the form still holds the guess. Do not submit; ask the user, type their answer, record a "
+            "new form_filled (they can Verify or Edit it on Needs you).",
         )
     if application.other_session_hold is not None:
         held_by, session, since = application.other_session_hold

@@ -1240,7 +1240,13 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
     "security": ("gitleaks (secret scan)", "bandit (python static analysis)",
                  "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL",
                  "reviewer-security"),
-    "verify": ("verify / backend", "verify / frontend"),
+    # The eyes, AND the two ci-offline.yml jobs they defer to. Since 2026-10-19
+    # (CI audit) `verify / backend` and `verify / frontend` do not re-run Q1-Q4
+    # or Playwright when ci_scope.py says offline-suite / frontend-e2e already
+    # run them on this same tree; they record that instead. Naming those two
+    # here keeps `verify` self-contained: it is never earned by a deferral to
+    # a job that did not pass.
+    "verify": ("verify / backend", "verify / frontend", "offline-suite", "frontend-e2e"),
     "drill": ("Chain wires (harness)",),
     # The `reviewer-bugs` check (.github/workflows/review-bugs.yml) — the R3
     # bug-hunting reviewer, wired to CI 2026-09-11. Fails on any P0/P1 finding;

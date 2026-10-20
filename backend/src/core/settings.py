@@ -1031,3 +1031,12 @@ ASKS_CONTEXT_MAX_CHARS = int(os.getenv("ASKS_CONTEXT_MAX_CHARS", "2000"))
 ASKS_ANSWER_MAX_CHARS = int(os.getenv("ASKS_ANSWER_MAX_CHARS", "4000"))
 ASKS_MAX_OPEN_PER_USER = int(os.getenv("ASKS_MAX_OPEN_PER_USER", "50"))
 ASKS_WHATS_NEW_MAX = int(os.getenv("ASKS_WHATS_NEW_MAX", "20"))  # open asks whats_new carries
+
+
+# -- The Job360 browser agent (docs/product/BROWSER_AGENT.md, VISION decision 29).
+# OFF by default: the `browser` MCP tool answers "off" until the owner sets
+# BROWSER_AGENT_ENABLED=1 on Railway (the same variable makes the Docker build
+# install Chromium). One live browser costs ~300 MB of memory, hence the cap.
+BROWSER_AGENT_ENABLED = os.getenv("BROWSER_AGENT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
+BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))

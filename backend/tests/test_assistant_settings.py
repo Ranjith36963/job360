@@ -193,13 +193,19 @@ def test_defaults_are_the_safe_ones_and_empty_is_not_chosen():
         (SCORE, 101), (SCORE, -1), (SCORE, True), (SCORE, "75"), (SCORE, 75.5),
         (CAP, 0), (CAP, -3), (CAP, settings.ASSISTANT_DAILY_CAP_MAX + 1), (CAP, True), (CAP, "5"),
         (PAUSE, "tomorrow"), (PAUSE, "2030-01-01T09:00:00"), (PAUSE, 7),
-        (PAUSE, (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()),
-        (PAUSE, (datetime.now(timezone.utc) + timedelta(days=400)).isoformat()),
+        # A pause time relative to NOW is passed as a timedelta and turned into a
+        # timestamp INSIDE the test: a datetime.now() here would bake the clock
+        # into the test id, so two pytest-xdist workers collect different ids and
+        # xdist refuses to start ("Different tests were collected").
+        pytest.param(PAUSE, timedelta(hours=-1), id="pause-1h-in-the-past"),
+        pytest.param(PAUSE, timedelta(days=400), id="pause-400d-ahead"),
         (REASON, "line one\nline two"), (REASON, "bell\x07"), (REASON, "x" * (settings.PROFILE_EDIT_MAX_ITEM_CHARS + 1)),
         (REASON, 12),
     ],
 )
 def test_bad_values_are_refused_naming_the_path(path, value):
+    if isinstance(value, timedelta):
+        value = (datetime.now(timezone.utc) + value).isoformat()
     detail = _reject(path, value)
     assert detail.startswith(path), detail
     if isinstance(value, str) and 4 <= len(value) < 40:
@@ -512,6 +518,72 @@ def test_rule_5c_a_stored_yes_clears_it_but_paused_and_declined_still_stop():
     d = rules.may_submit(cfg, _facts(approved=True), FORM, _counts(), now=NOW)
     assert (d.decision, d.reason) == ("submit", "user_approved")
     assert rules.may_submit(cfg, _facts(approved=True, declined=True), FORM, _counts(), now=NOW).decision == "stop"
+
+
+def test_below_line_skip_drops_the_job_and_no_yes_clears_it():
+    """Owner 2026-10-19: "no more below score line: drop that job"."""
+    cfg = _eff(submit_mode="auto_when_sure", below_line="skip")
+    d = rules.may_submit(cfg, _facts(fit_score=20), FORM, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "below_score_line")
+    assert "50" in d.detail, "names the user's own line"
+    # a stored yes does NOT turn a dropped job into an application
+    assert rules.may_submit(cfg, _facts(fit_score=20, approved=True), FORM, _counts(), now=NOW).reason == (
+        "below_score_line"
+    )
+    # it fires BEFORE the form checks: no form is filled for a dropped job
+    assert rules.may_submit(cfg, _facts(fit_score=20, form_filled=False), FORM, _counts(), now=NOW).reason == (
+        "below_score_line"
+    )
+    # at or above the line it is not involved; no fit or no line is still score_line_unknown
+    assert rules.may_submit(cfg, _facts(fit_score=50), FORM, _counts(), now=NOW).decision == "submit"
+    assert rules.may_submit(cfg, _facts(fit_score=None), FORM, _counts(), now=NOW).reason == "score_line_unknown"
+    assert {"below_score_line", "answer_guessed"} <= set(rules.REASONS)
+
+
+def test_below_line_accepts_skip_and_above_line_does_not():
+    assert validate_edit(BELOW, "skip") == "skip"
+    assert "must be one of" in _reject(APPLY, "skip")
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [("skip", "ask", "riskier"), ("skip", "auto", "riskier"), ("ask", "auto", "riskier"),
+     ("ask", "skip", "safer"), ("auto", "skip", "safer"), ("auto", "ask", "safer"), ("skip", "skip", "safer")],
+)
+def test_below_line_skip_is_the_safest_side(before, after, expected):
+    assert rules.classify_change(BELOW, before, after) == expected
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "above", "expected"),
+    [(80, 0, "ask", "riskier"), (80, None, "ask", "riskier"), (80, 60, "auto", "riskier"),
+     (80, 90, "ask", "safer"), (80, 80, "ask", "safer"), (None, 70, "ask", "safer")],
+)
+def test_lowering_or_clearing_the_line_under_skip_waits_for_the_user(before, after, above, expected):
+    """below=skip drops the jobs under the line: a lower or cleared line would bring them back
+    (as ask / unknown), so an assistant cannot do that on its own - it waits for the user."""
+    assert rules.classify_change(SCORE, before, after, switches=(above, "skip")) == expected
+
+
+def test_save_fit_line_block_tells_the_assistant_to_drop_a_skipped_job():
+    block = rules.line_block(20, _eff(below_line="skip"))
+    assert (block["side"], block["switch"]) == ("below", "skip")
+    assert "do not apply" in block["next"]
+
+
+def test_a_guessed_answer_asks_in_every_mode_and_no_yes_clears_it():
+    """Owner 2026-10-19: "if you guess you are not verified - you need to ask me"."""
+    for cfg in (AUTO_CFG, _eff()):
+        d = rules.may_submit(cfg, _facts(guessed_unverified=True), FORM, _counts(since=3), now=NOW)
+        assert (d.decision, d.reason) == ("ask", "answer_guessed")
+    approved = rules.may_submit(AUTO_CFG, _facts(guessed_unverified=True, approved=True), FORM, _counts(), now=NOW)
+    assert approved.reason == "answer_guessed", "a yes to the CV is not a yes to a guess"
+    # a stop still wins over it - the auto-mode duplicate stop included
+    assert rules.may_submit(AUTO_CFG, _facts(guessed_unverified=True, declined=True), FORM, _counts(), now=NOW).reason == (
+        "user_declined"
+    )
+    dup = rules.may_submit(AUTO_CFG, _facts(guessed_unverified=True, duplicate_job=True), FORM, _counts(), now=NOW)
+    assert (dup.decision, dup.reason) == ("stop", "duplicate_job")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

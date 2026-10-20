@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { approveSend, clearDuplicate, declineSend, resolveBlocked, setAutofill } from "@/lib/api";
 import type { ApplicationControls, DecisionMark } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -90,6 +91,12 @@ export function ApplicationDecisions({
             <p data-testid="blocked-detail" className={NOTE}>
               {blocked.detail}
             </p>
+          )}
+          {/* Job360's own cloud browser met a sign-in page: one sign-in on Job sites fixes it for next time. */}
+          {blocked.step === "Job360 browser" && blocked.reason === "login_needed" && (
+            <Link data-testid="blocked-sign-in-link" href="/settings/job-sites" className={`${BTN} self-start`}>
+              {`Sign in once${blocked.page_host ? ` to ${blocked.page_host}` : ""} on Job sites`}
+            </Link>
           )}
           <button
             type="button"

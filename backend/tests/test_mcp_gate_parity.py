@@ -109,6 +109,8 @@ TOOL_ROUTES = {
     ),
     "doctor": ("doctor", "doctor", {}),
     "report_missing_tool": ("doctor", "report_missing_tool", {"name": "x"}),
+    # The Job360 browser agent (decision 29) - require_user, no email gate (submit_check owns that).
+    "browser": ("browser", "browser_action", {"action": "look"}),
 }
 
 

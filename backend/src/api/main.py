@@ -34,6 +34,7 @@ from src.api.routes import (
     assistant_settings,
     auth,
     bring,
+    browser,
     calendar,
     client_log,
     doctor,
@@ -168,6 +169,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # them before the DB closes. Bound: up to 2 s waiting, then up to 1 s
         # more for the cancelled ones to unwind, so at most ~3 s in total.
         await drain_session_touches(timeout=2.0)
+        # The browser agent's Chromium, if one was ever started (a no-op otherwise).
+        from src.services.browser_agent.agent import shutdown_pool  # noqa: PLC0415
+
+        await shutdown_pool()
     await close_db()
     # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).
     await pool.close_pool()
@@ -254,6 +259,7 @@ app.include_router(recipes.router, prefix="/api")
 app.include_router(hunt_kit.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
 app.include_router(doctor.router, prefix="/api")  # agent doctor + report_missing_tool (feature 7)
+app.include_router(browser.router, prefix="/api")  # the Job360 browser agent (decision 29), off by default
 app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
 app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
 app.include_router(ready_to_send.router, prefix="/api")  # approval cards for Ready to send (S5d)
