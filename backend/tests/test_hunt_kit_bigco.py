@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -67,10 +66,10 @@ def _shape(jobs):
 
 # ------------------------------------------------------------------------------------------------ common
 def test_feeds_registry():
-    assert set(kc.FEEDS) == {"amazon", "google", "apple", "metacareers", "ibm", "uber"}
+    assert set(kc.FEEDS) == {"amazon", "google", "apple"}
 
 
-@pytest.mark.parametrize("name", sorted(["amazon", "google", "apple", "metacareers", "ibm", "uber"]))
+@pytest.mark.parametrize("name", sorted(["amazon", "google", "apple"]))
 def test_no_country_and_unknown_country_send_nothing(name):
     http = _http(lambda u, d: (200, {}))
     for countries in ([], ["ZZ"], ["xx"]):
@@ -79,7 +78,7 @@ def test_no_country_and_unknown_country_send_nothing(name):
     assert http.calls == []
 
 
-@pytest.mark.parametrize("name", sorted(["amazon", "google", "apple", "metacareers", "ibm", "uber"]))
+@pytest.mark.parametrize("name", sorted(["amazon", "google", "apple"]))
 @pytest.mark.parametrize("garbage", [(200, "<html>nope</html>"), (200, {"x": 1}), (200, [1, 2]), (200, None),
                                      (200, ""), (0, None), (500, None)])
 def test_garbage_never_raises(name, garbage):
@@ -339,208 +338,3 @@ def test_apple_paginates_two_pages():
     assert [c["data"]["page"] for c in http.calls if c["method"] == "POST"] == [1, 2]
 
 
-# ------------------------------------------------------------------------------------------ Meta + Uber
-def _sitemap(*entries):
-    return ('<?xml version="1.0"?><urlset>'
-            + "".join(f"<url><loc>{loc}</loc><lastmod>{mod}</lastmod></url>" for loc, mod in entries)
-            + "</urlset>")
-
-
-def _meta_page(title, names, date="2026-06-01", org=None):
-    locs = ",".join('{"@type":"Place","name":"%s","address":{"addressLocality":"Aiken","addressCountry":'
-                    '{"@type":"Country","name":["USA","USA"]}}}' % n for n in names)
-    org_json = ',"hiringOrganization":{"name":"%s"}' % org if org else ""
-    return ('<html><head><script type="application/ld+json">{"@type":"JobPosting","title":"%s",'
-            '"description":"<h2>Role<\\/h2><p>Build it.<\\/p>","datePosted":"%s",'
-            '"jobLocation":[%s]%s}</script></head></html>' % (title, date, locs, org_json))
-
-
-def _uber_page(title, locality, country, ident="149574", date="2026-06-19"):
-    return ('<html><head><script type="application/ld+json">{"@type":"JobPosting","title":"%s",'
-            '"description":"<p>Move the world.<\\/p>","identifier":{"@type":"PropertyValue","value":"%s"},'
-            '"datePosted":"%s","jobLocation":[{"@type":"Place","name":"%s","address":{"@type":"PostalAddress",'
-            '"addressLocality":"%s","addressRegion":"X","addressCountry":"%s"}}]}</script></head></html>'
-            % (title, ident, date, locality, locality, country))
-
-
-FRESH = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT00:00:00Z")
-
-
-def test_meta_happy_path_title_and_country_filters():
-    base = "https://www.metacareers.com/profile/job_details/"
-    pages = {
-        base + "111": _meta_page("Software Engineer, Infra", ["London, UK"], org="Meta Platforms, Inc."),
-        base + "222": _meta_page("Recruiter", ["London, UK"]),
-        base + "333": _meta_page("Software Engineer, Ads", ["Menlo Park, CA"]),
-        base + "444": _meta_page("Software Engineer, AR", ["Dublin, Ireland"]),
-        base + "555": _meta_page("Software Engineer, Maps", ["Somewhere"]),
-    }
-    sitemap = _sitemap(*[(base + str(i), FRESH) for i in (111, 222, 333, 444, 555)])
-
-    def handler(url, d):
-        return (200, sitemap) if url.endswith("sitemap.xml") else (200, pages[url])
-
-    http = _http(handler)
-    jobs, _ = _run(kc.fetch_metacareers, ["software engineer"], http, ["GB"])
-    assert sorted(j["extra"]["id"] for j in jobs) == ["111", "555"]  # recruiter, US and Irish ads dropped
-    _shape(jobs)
-    j = next(x for x in jobs if x["extra"]["id"] == "111")
-    assert j["company"] == "Meta Platforms, Inc." and j["url"] == base + "111"
-    assert j["location"] == "London, UK" and j["posted"] == "2026-06-01" and "Build it" in j["description"]
-    assert next(x for x in jobs if x["extra"]["id"] == "555")["extra"]["country_unchecked"] is True
-    assert http.calls[0]["url"] == "https://www.metacareers.com/jobsearch/sitemap.xml"
-
-
-def test_meta_detail_cap_and_newest_first_and_stale_skip():
-    base = "https://www.metacareers.com/profile/job_details/"
-    old = "2020-01-01T00:00:00Z"
-    entries = [(base + str(i), FRESH) for i in range(1, 13)] + [(base + "999", old)]
-    page = _meta_page("Software Engineer", ["London, UK"], date=FRESH[:10])
-
-    def handler(url, d):
-        return (200, _sitemap(*entries)) if url.endswith("sitemap.xml") else (200, page)
-
-    http = _http(handler)
-    jobs, _ = _run(kc.fetch_metacareers, ["software engineer"], http, ["GB"], days=30)
-    assert len(http.calls) == 1 + 10  # sitemap + DETAIL_CAP
-    assert len(jobs) == 10
-    http2 = _http(handler)
-    _run(kc.fetch_metacareers, ["software engineer"], http2, ["GB"], days=30)
-    assert not any(c["url"].endswith("/999") for c in http2.calls)
-
-
-def test_meta_non_200_empty_and_login_page():
-    assert _run(kc.fetch_metacareers, ["x"], _http(lambda u, d: (403, None)), ["US"])[0] == []
-    http = _http(lambda u, d: (200, _sitemap()))
-    assert _run(kc.fetch_metacareers, ["x"], http, ["US"])[0] == [] and len(http.calls) == 1
-    base = "https://www.metacareers.com/profile/job_details/"
-    sm = _sitemap((base + "1", FRESH), (base + "2", FRESH))
-
-    def handler(url, d):
-        return (200, sm) if url.endswith("sitemap.xml") else (200, "<html>Please verify you are human</html>")
-
-    http2 = _http(handler)
-    assert _run(kc.fetch_metacareers, ["x"], http2, ["US"])[0] == []
-    assert len(http2.calls) == 2  # sitemap + the one page that was a security page
-
-
-def test_uber_happy_path_identifier_and_country():
-    sm = _sitemap(("https://jobs.uber.com/en/jobs/149574/", FRESH), ("https://jobs.uber.com/en/jobs/149575/", FRESH),
-                  ("https://jobs.uber.com/en/careers/", FRESH))
-    pages = {"https://jobs.uber.com/en/jobs/149574/": _uber_page("Sr Staff Engineer", "Sao Paulo", "Brazil"),
-             "https://jobs.uber.com/en/jobs/149575/": _uber_page("Staff Engineer", "London", "United Kingdom", "2")}
-
-    def handler(url, d):
-        return (200, sm) if url.endswith("sitemap.xml") else (200, pages[url])
-
-    http = _http(handler)
-    jobs, _ = _run(kc.fetch_uber, ["staff engineer"], http, ["BR"])
-    assert [j["extra"]["id"] for j in jobs] == ["149574"]
-    _shape(jobs)
-    assert jobs[0]["company"] == "Uber" and jobs[0]["url"] == "https://jobs.uber.com/en/jobs/149574/"
-    assert "Sao Paulo" in jobs[0]["location"] and jobs[0]["posted"] == "2026-06-19"
-    assert len(http.calls) == 3  # the /careers/ URL carries no job id and is not fetched
-
-
-def test_uber_requires_identifier_and_stops_on_non_200_detail():
-    sm = _sitemap(("https://jobs.uber.com/en/jobs/1/", FRESH), ("https://jobs.uber.com/en/jobs/2/", FRESH))
-    no_id = _uber_page("Engineer", "Paris", "France", ident="")
-
-    def handler(url, d):
-        return (200, sm) if url.endswith("sitemap.xml") else (200, no_id)
-
-    assert _run(kc.fetch_uber, ["engineer"], _http(handler), ["FR"])[0] == []
-
-    def handler2(url, d):
-        return (200, sm) if url.endswith("sitemap.xml") else (403, None)
-
-    http = _http(handler2)
-    assert _run(kc.fetch_uber, ["engineer"], http, ["FR"])[0] == [] and len(http.calls) == 2
-
-
-def test_sitemap_parser_sorts_newest_first_and_ignores_other_urls():
-    xml = _sitemap(("https://x/job_details/1", "2026-01-01"), ("https://x/job_details/2", "2026-03-01"),
-                   ("https://x/about", "2026-05-01"))
-    rows = kc.parse_sitemap(xml, kc._META_ID)
-    assert [r[1] for r in rows] == ["2", "1"]
-    assert kc.parse_sitemap(None, kc._META_ID) == []
-
-
-# --------------------------------------------------------------------------------------------------- IBM
-def _ibm_hit(jid, title="Software Engineer", city="BUDAPEST, HU", country="Hungary", mode="Hybrid",
-             level="Professional", body=None):
-    area, entity = "Software Engineering", "(0096) IBM Hungary Kft."
-    text = body or "Youâ€™ll build things. • item one • item two"
-    suffix = " ".join([country, area, mode, level, city, entity])
-    return {"_source": {"field_text_01": jid, "title": title, "body": text + " " + suffix, "dcdate": "2026-10-13",
-                        "field_keyword_05": country, "field_keyword_08": area, "field_keyword_17": mode,
-                        "field_keyword_18": level, "field_keyword_19": city, "field_keyword_20": entity}}
-
-
-def _ibm_page(*hits):
-    return {"hits": {"total": {"value": len(hits), "relation": "eq"}, "hits": list(hits)}}
-
-
-def test_ibm_happy_path_body_filter_and_description_cleanup():
-    http = _http(lambda u, d: (200, _ibm_page(_ibm_hit(136943), _ibm_hit(136944, "Sales Rep", mode="Remote"))))
-    jobs, _ = _run(kc.fetch_ibm, ["software engineer"], http, ["HU"])
-    assert [j["extra"]["id"] for j in jobs] == ["136943"]  # the ad that does not match the title is dropped
-    _shape(jobs)
-    j = jobs[0]
-    assert j["company"] == "IBM" and j["url"] == "https://careers.ibm.com/careers/JobDetail?jobId=136943"
-    assert j["posted"] == "2026-10-13" and j["location"] == "BUDAPEST, HU"
-    assert j["extra"]["entity"] == "(0096) IBM Hungary Kft." and "_codes" not in j["extra"]
-    assert "You’ll build things." in j["description"] and "Software Engineering" not in j["description"]
-    assert "- item one" in j["description"] and "- item two" in j["description"]
-    body = http.calls[0]["data"]
-    assert http.calls[0]["url"] == "https://www-api.ibm.com/search/api/v2"
-    assert body["post_filter"] == {"bool": {"must": [{"term": {"field_keyword_05": "Hungary"}}]}}
-    assert body["size"] == 100 and body["from"] == 0 and body["sm"] == {"query": "software engineer", "lang": "zz"}
-    assert body["appId"] == "careers" and body["scopes"] == ["careers2"] and "field_text_01" in body["_source"]
-    assert http.calls[0]["headers"]["content-type"] == "application/json"
-
-
-def test_ibm_multiple_cities_uses_country_and_remote_flag():
-    hit = _ibm_hit(1, city="Multiple Cities", country="Italy", mode="Remote")
-    http = _http(lambda u, d: (200, _ibm_page(hit)))
-    jobs, _ = _run(kc.fetch_ibm, ["software engineer"], http, ["IT"])
-    assert jobs[0]["location"] == "Italy" and jobs[0]["remote"] is True
-
-
-def test_ibm_drops_other_country_and_two_pages_max(monkeypatch):
-    monkeypatch.setattr(kc, "IBM_PAGE", 2)
-    pages = {0: _ibm_page(_ibm_hit(1), _ibm_hit(2)), 2: _ibm_page(_ibm_hit(3, city="PARIS, FR", country="France"),
-                                                                  _ibm_hit(4)), 4: _ibm_page(_ibm_hit(5))}
-    http = _http(lambda u, d: (200, pages.get(d["from"], _ibm_page())))
-    jobs, _ = _run(kc.fetch_ibm, ["software engineer"], http, ["HU"])
-    assert sorted(j["extra"]["id"] for j in jobs) == ["1", "2", "4"]  # id 3 is French; page 3 never asked for
-    assert [c["data"]["from"] for c in http.calls] == [0, 2]
-
-
-def test_ibm_star_empty_filter_empty_result_and_refusal():
-    http = _http(lambda u, d: (200, _ibm_page(_ibm_hit(1))))
-    jobs, _ = _run(kc.fetch_ibm, ["software engineer"], http, ["*"])
-    assert len(jobs) == 1 and http.calls[0]["data"]["post_filter"] == {"bool": {"must": []}}
-    empty = _http(lambda u, d: (200, _ibm_page()))
-    assert _run(kc.fetch_ibm, ["x"], empty, ["HU"])[0] == []
-    refused = _http(lambda u, d: (403, None))
-    assert _run(kc.fetch_ibm, ["a", "b"], refused, ["HU", "IT"])[0] == [] and len(refused.calls) == 1
-    odd = _http(lambda u, d: (200, {"hits": {"total": 5}}))
-    assert _run(kc.fetch_ibm, ["a", "b"], odd, ["HU", "IT"])[0] == [] and len(odd.calls) == 1
-
-
-def test_ibm_korea_uses_the_facet_spelling():
-    http = _http(lambda u, d: (200, _ibm_page()))
-    _run(kc.fetch_ibm, ["engineer"], http, ["KR"])
-    assert http.calls[0]["data"]["post_filter"]["bool"]["must"][0]["term"]["field_keyword_05"] == "Korea, Republic of"
-
-
-@pytest.mark.parametrize("city,country", [("Bangalore, IN", "India"), ("Berlin, DE", "Germany"),
-                                          ("Toronto, CA", "Canada"), ("Bangalore, IN", "")])
-def test_ibm_city_alpha2_is_never_read_as_a_us_state(city, country):
-    """'Bangalore, IN' is India (not Indiana): a US-only user must not be sent it."""
-    http = _http(lambda u, d: (200, _ibm_page(_ibm_hit(1, city=city, country=country))))
-    jobs, _ = _run(kc.fetch_ibm, ["software engineer"], http, ["US"])
-    assert jobs == []
-    jobs, _ = _run(kc.fetch_ibm, ["software engineer"], http, ["*"])
-    assert len(jobs) == 1
