@@ -159,6 +159,7 @@ async def browser_action(
         result = await browser_agent.run(
             browser_agent.get_pool(), user.id, body.action, url=body.url, ref=body.ref, text=body.text,
             on=body.on, doc_kind=body.doc_kind, gate=gate, files=files, load_state=_loader(user),
+            owner=body.session,
         )
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
