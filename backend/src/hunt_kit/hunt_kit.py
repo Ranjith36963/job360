@@ -99,6 +99,10 @@ BOARD_SOURCES = (
     "jibe",
     "keka",
     "zohorecruit",
+    "opencats",
+    "odoo",
+    "recruitingsolutions",
+    "teamex",
 )
 FEED_SOURCES = (
     "freehire",
@@ -270,7 +274,7 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more")
+ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_misc2")
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
     "kit_asia",
@@ -1686,7 +1690,8 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
-_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0}  # ats -> token part used as the name
+# ats -> index of the token part used as the name
+_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0}
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:

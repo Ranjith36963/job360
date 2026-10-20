@@ -6305,5 +6305,12 @@
 {"name":"Headway Group","ats":"zohorecruit","board":"headwayms","source":"gulf-research","country":"AE"},
 {"name":"Nationwide Middle East Properties","ats":"zohorecruit","board":"nwmea","source":"gulf-research","country":"AE"},
 {"name":"Premier Inn Middle East","ats":"zohorecruit","board":"global","source":"gulf-research","country":"AE"},
-{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"}
+{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"},
+{"name":"Gorgany","ats":"opencats","board":"opencats.gorgany.com/careers","source":"freehire"},
+{"name":"Crewlogix Technologies","ats":"opencats","board":"careers.crewlogix.com/careers","source":"freehire"},
+{"name":"Boomit","ats":"opencats","board":"careers.boomit.pt/careers","source":"freehire"},
+{"name":"G4S","ats":"opencats","board":"atscareers.g4s.com","source":"freehire"},
+{"name":"Ameware","ats":"odoo","board":"jobs.amewaregroup.com","source":"freehire"},
+{"name":"Riverty","ats":"recruitingsolutions","board":"riv-prod","source":"freehire"},
+{"name":"TeamEx","ats":"teamex","board":"global","source":"freehire"}
 ]
