@@ -1156,6 +1156,39 @@ export async function updateContact(
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
+// ---- People across every job (GET /api/people; feature 3) ----
+export type Person = _Schemas["PersonOut"];
+export type PersonFull = _Schemas["PersonFullOut"];
+export type ListPeopleResult = _Schemas["ListPeopleResponse"];
+
+/** Everyone the user (or the assistant) has added, one row per person
+ *  across jobs, plus cold contacts. `truncated` = older contacts not listed. */
+export async function listPeople(): Promise<ListPeopleResult> {
+  return request<ListPeopleResult>("/api/people");
+}
+
+/** One contact row's full record, including `edit_history` (every value each
+ *  field has held, oldest first). null if the backend returned no person. */
+export async function getPerson(contactId: number): Promise<PersonFull | null> {
+  const res = await request<ListPeopleResult>(`/api/people${qs({ contact_id: contactId })}`);
+  return res.person ?? null;
+}
+
+/** Add a person with no job (a cold contact) through POST /api/contacts.
+ *  Hand-typed rather than `_Schemas["AddPersonRequest"]`: that schema marks
+ *  `email` / `linkedin_url` as required-with-"" and carries `application_id`,
+ *  which this page must never send. The backend accepts their omission. */
+export async function addPerson(body: {
+  name: string;
+  role?: string;
+  email?: string;
+  linkedin_url?: string;
+  notes?: string;
+  found_via?: string;
+}): Promise<AddContactResult> {
+  return request<AddContactResult>("/api/contacts", { method: "POST", body: JSON.stringify(body) });
+}
+
 // ---- Morning check (S5b) ----
 export type MorningCheck = _Schemas["MorningCheckOut"];
 

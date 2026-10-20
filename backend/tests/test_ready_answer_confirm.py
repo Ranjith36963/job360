@@ -197,6 +197,38 @@ async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_
         assert check.json()["type_first"] == []
 
 
+@pytest.mark.asyncio
+async def test_a_filled_topic_wins_over_a_same_worded_answer_saved_for_another_country(
+    authenticated_async_context, fixture_user_id
+):
+    """Found by the 2026-10-20 simulation (application 107): the user saved "Current location"
+    = Bangalore on an India form and the international topic = London. A UK fill that typed the
+    topic's London is not "changed" to Bangalore; with no topic named, the wording still matches."""
+    from src.api import dependencies as api_deps
+    from src.services.applications import ready, spine
+
+    answers = [
+        {"question": "Current location", "answer": "Bangalore, India", "approved": True},
+        {"question": "Current location / city on international (non-India) job forms",
+         "answer": "London, United Kingdom", "approved": True, "topic": "location.current.intl"},
+    ]
+    async with authenticated_async_context() as client:
+        resp = await client.patch("/api/profile", json={"edits": [_e("user_info.answers", answers)]})
+        assert resp.status_code == 200, resp.text
+        app_id = await _bring(client)
+        db = await api_deps.get_db()
+        row = await spine.get_owned_application(db, fixture_user_id, app_id)
+        typed = {"question": "Current location", "answer": "London, United Kingdom", "source": "approved",
+                 "key": "location.current.intl"}
+        await _fill(client, app_id, [typed])
+        assert await ready.changed_answers(db, fixture_user_id, row) == []
+        # No topic named: the same-worded saved answer is the user's word, as before.
+        await _fill(client, app_id, [{k: v for k, v in typed.items() if k != "key"}])
+        assert await ready.changed_answers(db, fixture_user_id, row) == [
+            {"question": "Current location", "answer": "Bangalore, India"}
+        ]
+
+
 def test_the_lock_turns_submit_and_ask_into_stop_and_keeps_an_earlier_stop():
     from src.services.applications.ready import type_first_lock
     from src.services.profile.assistant_settings import REASONS, SubmitDecision
@@ -283,3 +315,25 @@ async def test_refusals_write_nothing(authenticated_async_context, fixture_user_
         assert (await _confirm(client, app_id, 0, fill, "   ")).status_code == 422
         assert (await _confirm(client, 999999, 0, fill)).status_code == 404
         assert _approved(fixture_user_id) == []
+
+
+def test_verify_keeps_a_same_worded_answer_saved_for_another_topic():
+    """Verifying "Notice period?" on an India form must not delete the UK answer the user saved
+    under the same wording; only the answer on the same topic (or an untopiced one) is replaced."""
+    from types import SimpleNamespace
+
+    from src.services.applications.ready import _with_approved
+
+    uk = {"question": "Notice period?", "answer": "Immediately", "approved": True, "topic": "notice_period.GB.text"}
+    old = {"question": "Notice period?", "answer": "1 month", "approved": True, "topic": "notice_period.IN.text"}
+    plain = {"question": "Notice period?", "answer": "2 weeks", "approved": True}
+    profile = SimpleNamespace(user_info=SimpleNamespace(answers=[uk, old, plain]))
+
+    out = _with_approved(profile, "Notice period?", "30 days", None, "notice_period.IN.text")
+    assert uk in out and old not in out and plain in out
+    assert out[-1] == {"question": "Notice period?", "answer": "30 days", "approved": True,
+                       "topic": "notice_period.IN.text"}
+    # An answer with no topic replaces only the untopiced one, never a topic'd answer.
+    out = _with_approved(profile, "Notice period?", "30 days", None)
+    assert uk in out and old in out and plain not in out
+    assert out[-1] == {"question": "Notice period?", "answer": "30 days", "approved": True}

@@ -236,7 +236,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
         with:
           node-version: "22"
@@ -278,7 +278,7 @@ jobs:
 
       - name: Keep the evidence
         if: always() && (github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend'))
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: verify-frontend-evidence-${{ github.event.pull_request.number || github.run_id }}
           path: |
@@ -330,6 +330,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$be" != "success" ] || [ "$fe" != "success" ]; then
+            # A CANCELLED eye judged nothing (a newer push cancelled this run):
+            # say so instead of "did not behave", but still exit 1, since a
+            # required check must never pass unjudged. Any real `failure` keeps
+            # the RED message below.
+            if [ "$be" != "failure" ] && [ "$fe" != "failure" ] && { [ "$be" = "cancelled" ] || [ "$fe" = "cancelled" ]; }; then
+              echo "::error::verify: not judged — the run was cancelled (a newer push superseded it)."
+              exit 1
+            fi
             echo "::error::verify is RED — the app was run and it did not behave."
             exit 1
           fi

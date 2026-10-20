@@ -1,7 +1,5 @@
 """South-East Asian job boards for the Job360 hunt kit (fourth national-services module).
 
-Glints and Kalibrr are read here; Tech in Asia and ITviec follow.
-
 Same contract as ``kit_gov.FEEDS``: ``fetch_x(queries, http, stats, *, days, countries) -> list[Job]``,
 never raises, networking only through the ``http`` callable the core passes in. Each fetcher runs ONLY when
 one of its countries is in the user's ``countries`` (or "*", which the core passes for ``--visa-onsite``: then
@@ -309,7 +307,252 @@ def fetch_kalibrr(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
     return _keep(_unique(jobs), queries, days, search=False)
 
 
+# -------------------------------------------------------------------------------------- Tech in Asia
+# Borrowed from freehire internal/ingest/sources/techinasia.go:40 (search page https://www.techinasia.com/jobs/search),
+# :55 (the page names the bundle /assets/v5/app.<8 hex>.js), :43 (bundle host https://static.techinasia.com/assets/v5/),
+# :56 (credentials apiKey:"...", appId:"..." in the bundle: they rotate with each deploy, so they are read every
+# run), :212 (query URL https://<appid lower-case>-dsn.algolia.net/1/indexes/job_postings/query), :206-219
+# (POST body {"params": "query=&hitsPerPage=1000&page=N&analytics=false&attributesToHighlight=[]"}, headers
+# X-Algolia-Application-Id, X-Algolia-API-Key, Referer https://www.techinasia.com/), :195 (stop at nbPages),
+# :108-133 (hit: id, title, description, external_link, published_at, company.name, city.name / country_name,
+# work_arrangement, is_remote, experience_min), :248-258 and :267 (external_link used as the URL only when it
+# is plain http(s), not a redirector, and not shared by several postings; else
+# https://www.techinasia.com/jobs/<id>), :296-299 (experience_min > 0 is the stated years floor), :319-322
+# (published_at is a zone-less "2006-01-02 15:04:05", read as UTC), :324-337 (work_arrangement on-site / hybrid /
+# remote, else is_remote == 1). From career-ops providers/techinasia.mjs:9-10 (markets Indonesia, Singapore,
+# Malaysia, Vietnam, Philippines, Japan), :23-28 (the whole board is read unfiltered), :122-139 (bundle and
+# credential regexes). NOT IN REFERENCE: a country or keyword filter on the index (both are applied locally
+# to the 1000-hit page); India (IN), which neither reference names, so it is not run; the Content-Type of the
+# POST (career-ops :376 sends application/x-www-form-urlencoded, freehire's helper JSON; the core's http sets
+# no Content-Type, so urllib sends application/x-www-form-urlencoded, as career-ops does).
+TIA_SEARCH = "https://www.techinasia.com/jobs/search"
+TIA_ASSETS = "https://static.techinasia.com/assets/v5/"
+TIA_POSTING = "https://www.techinasia.com/jobs/"
+TIA_REFERER = "https://www.techinasia.com/"
+TIA_HITS = 1000
+TIA_PAGES = 2
+TIA_MARKETS = {"ID": "Indonesia", "SG": "Singapore", "MY": "Malaysia", "VN": "Vietnam", "PH": "Philippines",
+               "JP": "Japan"}
+_TIA_ASSET = re.compile(r"/assets/v5/(app\.[0-9a-f]{8}\.js)")
+_TIA_CREDS = re.compile(r"""apiKey:\s*"([A-Za-z0-9]{16,64})"\s*,\s*appId:\s*"([A-Za-z0-9]{6,16})\"""")
+
+
+def _tia_date(v: Any) -> str:
+    s = _s(v)
+    return s[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", s) else ""
+
+
+def _tia_rows(payload: Any) -> list[dict[str, Any]]:
+    hits = payload.get("hits") if isinstance(payload, dict) else None
+    return [h for h in hits or [] if isinstance(h, dict)]
+
+
+def _tia_shared(payloads: list[Any]) -> dict[str, int]:
+    """How many hits, over every page read, carry each apply link (a link used twice is not one posting's own)."""
+    shared: dict[str, int] = {}
+    for payload in payloads:
+        for h in _tia_rows(payload):
+            link = _own_link(h.get("external_link"))
+            if link:
+                shared[link] = shared.get(link, 0) + 1
+    return shared
+
+
+def parse_techinasia(payload: Any, wanted: set[str], shared: dict[str, int] | None = None) -> list[Job]:
+    """Parse one Algolia result page; only hits whose country name is in ``wanted`` (lower-case names).
+
+    ``shared`` counts apply links over all pages (default: this page only)."""
+    rows = _tia_rows(payload)
+    if shared is None:
+        shared = _tia_shared([payload])
+    out: list[Job] = []
+    for h in rows:
+        comp = _d(h.get("company"))
+        city = _d(h.get("city"))
+        country = _s(city.get("country_name"))
+        hid, title, company = _s(h.get("id")), _s(h.get("title")), _s(comp.get("name"))
+        if not (hid and title and company) or country.lower() not in wanted:
+            continue
+        page_url = TIA_POSTING + quote(hid, safe="")
+        link = _own_link(h.get("external_link"))
+        arrangement = _s(h.get("work_arrangement"))
+        remote = True if arrangement == "remote" or (not arrangement and h.get("is_remote") == 1) else None
+        extra: dict[str, Any] = {"id": hid, "board_url": page_url}
+        years = h.get("experience_min")
+        if isinstance(years, int) and not isinstance(years, bool) and years > 0:
+            extra["years_min"] = years
+        out.append(_made(
+            "techinasia", "Tech in Asia", title=title, company=company,
+            url=link if link and shared[link] == 1 else page_url, place=_s(city.get("name")), country=country,
+            posted=_tia_date(h.get("published_at")), description=h.get("description"), remote=remote, extra=extra))
+    return out
+
+
+@_feed
+def fetch_techinasia(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
+                     countries: list[str]) -> list[Job]:
+    """Tech in Asia's job index (SG, ID, MY, PH, VN, JP) for the user's matching countries."""
+    markets = _wanted(countries, *TIA_MARKETS)
+    if not markets:
+        return []
+    wanted = {TIA_MARKETS[c].lower() for c in markets}
+    site = _Site(http, stats, "techinasia")
+    page = site.get(TIA_SEARCH, headers={"User-Agent": BROWSER_UA, "Accept": "text/html"}, as_json=False,
+                    marker="/assets/v5/app.")
+    asset = _TIA_ASSET.search(page) if isinstance(page, str) else None
+    bundle = site.get(TIA_ASSETS + asset.group(1), headers={"User-Agent": BROWSER_UA, "Referer": TIA_REFERER},
+                      as_json=False) if asset else None
+    creds = _TIA_CREDS.search(bundle) if isinstance(bundle, str) else None
+    if not creds:
+        return []
+    api_key, app_id = creds.group(1), creds.group(2)
+    bodies: list[Any] = []
+    for n in range(TIA_PAGES):
+        params = urlencode({"query": "", "hitsPerPage": TIA_HITS, "page": n, "analytics": "false",
+                            "attributesToHighlight": "[]"})
+        body = site.get(f"https://{app_id.lower()}-dsn.algolia.net/1/indexes/job_postings/query",
+                        headers={"X-Algolia-Application-Id": app_id, "X-Algolia-API-Key": api_key,
+                                 "Referer": TIA_REFERER, "Accept": "application/json"},
+                        as_json=True, data={"params": params})
+        bodies.append(body)
+        pages = body.get("nbPages") if isinstance(body, dict) else None
+        if not site.open or not isinstance(pages, int) or n + 1 >= pages:
+            break
+    shared = _tia_shared(bodies)
+    jobs = [j for body in bodies for j in parse_techinasia(body, wanted, shared)]
+    return _keep(_unique(jobs), queries, days)  # the index is read whole: the user's titles are matched here
+
+
+# ------------------------------------------------------------------------------------------ ITviec
+# Borrowed from freehire internal/ingest/sources/itviec.go:38 (listing https://itviec.com/it-jobs), :104-109
+# (page N is ?page=N), :113-128 (a card is an element with BOTH data-job-key and
+# data-search--job-selection-job-slug-value; the posting URL is /it-jobs/<slug>), :76-78 (the page also links
+# "company spotlight" postings that are not cards and must not be read), :199-236 (the posting page's
+# schema.org JobPosting gives the description, datePosted, hiringOrganization.name (an ad without an employer
+# or description is dropped), jobLocation address; the h1 keeps the title's punctuation that the JobPosting
+# strips), :267-312 (jobLocation is one Place or a list; the city is addressRegion, addressLocality
+# "Not Available" is ignored), :314-341 (the work-mode badge text in .preview-header-item: At office / Hybrid /
+# Remote), :42-49 (the site refused sequential sweeps with 429: one request a second). From career-ops
+# providers/itviec.mjs:137-144 (a keyword search is /it-jobs/<keywords joined by "-">, page N is ?page=N),
+# :140 (the encoded keyword loses any "/", %2F), :51 (a pause between pages), :242-250 (a page that still links
+# jobs but yields no cards is a markup change).
+# Tests follow freehire's testdata itviec_list_page1.html and itviec_detail_salary.html shapes. NOT IN REFERENCE:
+# a years-of-experience field (ITviec states none), the effect of `days` (applied locally on datePosted), any
+# country other than Vietnam, and the per-query slot cap with posting pages picked round-robin across queries.
+ITVIEC_LIST = "https://itviec.com/it-jobs"
+ITVIEC_PAGES = 2
+ITVIEC_DETAILS = 12
+ITVIEC_PER_QUERY = 6
+_TAG = re.compile(r"<[a-zA-Z][^<>]*>")
+_KEY = re.compile(r"""\sdata-job-key=['"]([^'"]+)['"]""")
+_SLUG = re.compile(r"""\sdata-search--job-selection-job-slug-value=['"]([^'"]+)['"]""")
+_LD = re.compile(r"""<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script\b[^>]*>""", re.I | re.S)
+_H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.I | re.S)
+_BADGE = re.compile(r"""preview-header-item[^>]*>(.*?)</div>\s*</div>""", re.I | re.S)
+
+
+def parse_itviec_cards(page: Any) -> list[tuple[str, str]]:
+    """(card key, posting slug) for every real job card of a listing page; spotlight links are ignored."""
+    out: list[tuple[str, str]] = []
+    for tag in _TAG.findall(page if isinstance(page, str) else ""):
+        key, slug = _KEY.search(tag), _SLUG.search(tag)
+        if key and slug and key.group(1).strip() and slug.group(1).strip():
+            out.append((key.group(1).strip(), slug.group(1).strip()))
+    return out
+
+
+def _ld_posting(page: str) -> dict[str, Any]:
+    for m in _LD.finditer(page):
+        try:
+            data = json.loads(m.group(1), strict=False)
+        except ValueError:
+            continue
+        for n in data if isinstance(data, list) else [data]:
+            if isinstance(n, dict) and n.get("@type") == "JobPosting":
+                return n
+    return {}
+
+
+def _itviec_description(raw: Any) -> str:
+    """The JobPosting description is newline-separated lines: bare headings/text or employer HTML."""
+    lines = [ln.strip() for ln in str(raw or "").splitlines() if ln.strip()]
+    return "\n".join(lines)
+
+
+def parse_itviec_posting(page: Any, url: str, key: str) -> Job | None:
+    """Parse one ITviec posting page; None without a JobPosting, an employer, a title or a description."""
+    text = page if isinstance(page, str) else ""
+    p = _ld_posting(text)
+    org = p.get("hiringOrganization")
+    company = _s(org.get("name")) if isinstance(org, dict) else ""
+    h1 = _H1.search(text)
+    title = strip_html(h1.group(1)) if h1 else ""
+    title = title or _s(p.get("title"))
+    description = strip_html(_itviec_description(p.get("description")))
+    if not (p and company and title and description):
+        return None
+    locs = p.get("jobLocation")
+    locs = locs if isinstance(locs, list) else [locs]
+    cities: list[str] = []
+    for loc in locs:
+        addr = loc.get("address") if isinstance(loc, dict) else None
+        if not isinstance(addr, dict):
+            continue
+        city = _s(addr.get("addressRegion"))
+        if not city and _s(addr.get("addressLocality")).lower() != "not available":
+            city = _s(addr.get("addressLocality"))
+        if city and city not in cities:
+            cities.append(city)
+    modes = {m for m in (strip_html(b) for b in _BADGE.findall(text)) if m in ("At office", "Hybrid", "Remote")}
+    return _made("itviec", "ITviec", title=title, company=company, url=url, place=", ".join(cities),
+                 country="Vietnam", posted=_date(p.get("datePosted")), description=description,
+                 remote=True if modes == {"Remote"} else None, extra={"id": key})
+
+
+def _itviec_list_url(q: str, page: int) -> str:
+    path = ITVIEC_LIST
+    slug = "-".join(q.lower().split()).replace("/", "")  # itviec.mjs:140 strips the encoded slash
+    if slug:
+        path += "/" + quote(slug, safe="")
+    return path if page <= 1 else f"{path}?page={page}"
+
+
+@_feed
+def fetch_itviec(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """ITviec (Vietnam, IT jobs): keyword listing pages, then the newest cards' posting pages."""
+    if not _wanted(countries, "VN"):
+        return []
+    site = _Site(http, stats, "itviec")
+    headers = {"User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml"}
+    seen: set[str] = set()
+    per_query: list[list[tuple[str, str]]] = []  # each query's (slug, key) picks, newest first
+    for q in _queries(queries):
+        picks: list[tuple[str, str]] = []
+        per_query.append(picks)
+        for page in range(1, ITVIEC_PAGES + 1):
+            body = site.get(_itviec_list_url(q, page), headers=headers, as_json=False, marker="data-job-key")
+            got = parse_itviec_cards(body)
+            for key, slug in got:
+                if slug not in seen and len(picks) < ITVIEC_PER_QUERY:
+                    seen.add(slug)
+                    picks.append((slug, key))
+            if not site.open or not got or len(picks) >= ITVIEC_PER_QUERY:
+                break
+    order = [p[i] for i in range(ITVIEC_PER_QUERY) for p in per_query if i < len(p)]  # round-robin by query
+    jobs: list[Job] = []
+    for slug, key in order[:ITVIEC_DETAILS]:
+        if not site.open:
+            break
+        url = f"{ITVIEC_LIST}/{quote(slug, safe='')}"
+        job = parse_itviec_posting(site.get(url, headers=headers, as_json=False, marker="ld+json"), url, key)
+        if job:
+            jobs.append(job)
+    return _keep(_unique(jobs), queries, days, search=False)  # the site matched the keyword itself
+
+
 FEEDS: dict[str, Callable[..., list[Job]]] = {
     "glints": fetch_glints,
     "kalibrr": fetch_kalibrr,
+    "techinasia": fetch_techinasia,
+    "itviec": fetch_itviec,
 }

@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 11
-TOOLS_REV_FOR_HASH = "a02f65cb0e2f"
+TOOLS_REV = 12
+TOOLS_REV_FOR_HASH = "d148cb6fe1a2"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1190,6 +1190,7 @@ def build_server(version: str = "") -> MCPServer:
         in_flight: bool = False,
         queued: bool = False,
         priority: Optional[str] = None,
+        agenda: Optional[str] = None,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1210,13 +1211,14 @@ def build_server(version: str = "") -> MCPServer:
         `queued=true` - the batch queue in order (`queue_position`); work it top-down.
         Rows carry `preflight`; the reply a
         `queue_summary`. `priority` (highest|high|medium|low|off|not_set) - only jobs
-        in places with that level of the user's own job priority; rows carry `priority`."""
+        in places with that level of the user's own job priority; rows carry `priority`.
+        `agenda` (today|tomorrow|week, in the user's timezone) - only applications with an interview or follow-up."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
                     due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued,
-                    priority=priority, db=db, user=_user(),
+                    priority=priority, agenda=agenda, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)
@@ -1272,6 +1274,8 @@ def build_server(version: str = "") -> MCPServer:
         For a cv or cover_letter, the reply's `checks` lists claims not found in the profile and PDF problems
         (each `{code, severity, detail}`); fix them and save a new version, or tell
         the user. They warn only - the save always succeeds.
+        Outreach with channel `linkedin` also gets linkedin_note_too_long over 200
+        characters (300 if preferences.linkedin_premium is true).
 
         Give `contact_id` (a person from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and
@@ -1552,7 +1556,8 @@ def build_server(version: str = "") -> MCPServer:
         when Job360 recorded each event, never by when it happened in the
         world, so a backdated event can never be silently skipped. Always carries
         `open_asks` — the user's unanswered questions — whatever `since` says. Also
-        `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6)."""
+        `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6) and
+        `interviews` {upcoming (next 7 days: prep), just_passed (last 3 days, no outcome recorded: ask how it went)}."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.whats_new(since, after_id, limit, db, _user())
@@ -1817,7 +1822,7 @@ def build_server(version: str = "") -> MCPServer:
         `apply_min_score` is the user's OWN score line (0-100, no default; ask,
         never guess); `above_line` ask|auto, `below_line` ask|auto|skip (skip = drop the job).
         More freedom (an `auto` switch, a line move making a side auto, auto_when_sure, a higher or
-        removed daily_cap, ending a pause, `preferences.daily_check` = "auto") is NOT applied: it returns
+        removed daily_cap, ending a pause, `daily_check`/`outreach_send` = "auto") is NOT applied: it returns
         in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
@@ -1958,7 +1963,7 @@ def build_server(version: str = "") -> MCPServer:
         not_latest_draft, not_email_channel (LinkedIn/other: the user sends),
         no_email, already_sent, replied, application_closed,
         daily_outreach_cap_reached, company_cap_reached. Ask reasons:
-        mode_not_auto, no_found_via, unlinked_contact. Send: auto_mode.
+        mode_not_auto (outreach_send is not auto), no_found_via, unlinked_contact. Send: auto_mode.
         `sent_today` / `daily_max` = recorded sends today vs the cap."""
         try:
             async with _request_db() as db:
@@ -2000,7 +2005,8 @@ def build_server(version: str = "") -> MCPServer:
         `auto_emails` (on, sent_today, last sends, due, violations: if violations
         is not empty, send no automatic email and tell the owner),
         `silent_after_interview` (interview-stage jobs with no word for over 30 days
-        since the last interview_done; confirm with the user before any nudge) and
+        since the last interview_done; confirm with the user before any nudge),
+        `interviews` {upcoming, just_passed} (same as whats_new) and
         when the last event was recorded - then whats_new(since=<your last
         check>) for what changed. Writes only one thing: a `ghosted` mark on
         applications silent 45 days after applying and only after your inbox was checked
