@@ -5,7 +5,8 @@ Three layers, each pinned here:
 1. The hard lines as pure rules (``safety.py``) — no browser, no network.
 2. The switch: OFF by default, the route and the MCP tool both answer ``off``.
 3. A real Chromium run against a local test site (skipped when Playwright or
-   its Chromium is not installed, as on CI). The site is served on loopback.
+   its Chromium is not installed; CI installs both and fails if they skip).
+   The site is served on loopback.
    Chromium reaches it only through the egress proxy: a fake resolver gives
    ``jobs.example`` a public address and the proxy's injected connector maps
    that address to the loopback site, so nothing leaves the machine (rule #4).

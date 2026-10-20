@@ -231,6 +231,13 @@ Apify web-fetch tool, before you build. Never cite from memory.
   while it was being split. **Rule:** one PR per slice under the cap, arm auto-merge once,
   and let `merge-cage` hold it; never hand-merge around the gate.
 
+- 2026-10-20: checking the live ruleset for PR #952, the lead ran `scripts/ruleset_gate.py
+  --live` inside the PR's worktree. That mode REWRITES `.github/rulesets/main-gate-snapshot.json`
+  from the live API, and the next `git add -A` committed the rewritten file (an 8,495-line
+  diff). Chain wires went red with merge-cage DEAD_CONTEXT; fixed by restoring the file from
+  origin/main. **Rule:** never run `ruleset_gate.py --live` on a branch (read the ruleset with
+  the API instead), and run `git status` before every `git add -A`.
+
 ## Tooling
 
 - `scripts/gen-api-types.sh` calls plain `python`. **Rule:** run it with the

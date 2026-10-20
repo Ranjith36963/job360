@@ -156,12 +156,42 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
-      - name: Install backend (with dev extras)
+      # `browser` too (2026-10-20): the browser-agent tests (tests/test_browser_*.py,
+      # the code that fills and submits real job forms) are `@needs_chromium` and
+      # skipped on every CI run until now, because only `.[dev]` was installed.
+      - name: Install backend (with dev + browser extras)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,browser]"
+          python -m pip show playwright | grep -E '^Version:'
+      # The Chromium build that the installed Python playwright expects, plus
+      # its system libraries. Not cached: the download is the small part; the
+      # apt step (--with-deps) is most of the time and an actions/cache entry
+      # would not cover it.
+      - name: Install Chromium for the browser-agent tests
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: python -m playwright install --with-deps chromium
+      # Fail in seconds, not after the suite: the tests' own helper must now
+      # see Chromium. If it ever does not, the suite would skip ~66 tests and
+      # the skip ratchet below goes red too ("Playwright + Chromium not
+      # installed" has a baseline of 0), so this only makes it fast and plain.
+      - name: The browser-agent tests can run (Chromium is visible to them)
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import sys
+          from tests.test_browser_agent import _chromium_available
+          if not _chromium_available():
+              print("::error title=chromium::Playwright + Chromium not visible to "
+                    "tests/test_browser_agent.py::_chromium_available; every "
+                    "@needs_chromium test would skip")
+              sys.exit(1)
+          print("Chromium visible: @needs_chromium tests will run")
+          PY
       # The template dump must come from a pg_dump the SERVER can load. The
       # runner image's own client drifts (ubuntu-latest moves to Ubuntu 26 from
       # 2026-10-19, with a newer Postgres client than this pg16 service), so
@@ -193,8 +223,10 @@ jobs:
           python -m pytest -q -p no:randomly -n auto --junitxml=/tmp/junit.xml | tee /tmp/pytest.out
       # SKIP RATCHET (2026-10-20). A skipped test is a test that did not run, and
       # the count only ever grew without anyone deciding it should. This fails
-      # when the report's skips exceed SKIP_BASELINE in scripts/test_integrity.py
-      # and prints each reason that is new or grew. Raising the baseline is an
+      # when the report's skips exceed SKIP_BASELINE in scripts/test_integrity.py,
+      # in total or for any one reason, and prints each reason that is new or
+      # grew. "Playwright + Chromium not installed" has no allowance: Chromium is
+      # installed above, so one such skip is red. Raising the baseline is an
       # edit to that file, which the `test-integrity` check (ci.yml) flags.
       # `!cancelled()`: it still reports after a red suite; no report is red.
       - name: Skipped tests do not grow (skip ratchet)

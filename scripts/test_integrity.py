@@ -13,7 +13,7 @@ This reads `git diff BASE...HEAD` and names three kinds of change:
 
   SKIP     an ADDED line that switches a test off or hides code from coverage:
            backend/tests: pytest skip / skipif / xfail markers (or a name bound
-           to one, like `needs_chromium`), pytest.skip( / xfail( / importorskip(,
+           to one, like `needs_gpu`), pytest.skip( / xfail( / importorskip(,
            unittest.skip, SkipTest; backend/src: `# pragma: no cover`;
            frontend tests: .skip( / .only( / .todo( / .fixme, xit / xdescribe /
            fit / fdescribe; frontend src: istanbul / v8 / c8 ignore comments.
@@ -29,6 +29,11 @@ This reads `git diff BASE...HEAD` and names three kinds of change:
            configs, the "test*" scripts in frontend/package.json, and this file
            once it exists on the base (its baseline is a config).
 
+One skip is NOT a finding: `@needs_chromium` (bound exactly to `skipif(not
+_chromium_available(), reason="Playwright + Chromium not installed")`) and that
+exact skipif. offline-suite installs Chromium, so it never skips on CI, and the
+ratchet below holds its reason at 0 (see CHROMIUM_MARKER).
+
 Not seen (2026-10-20): a gutted assertion or an early `return` inside a test that
 still runs, and frontend renames-in-place to a trivial body. The floor test
 (backend/tests/test_suite_floor.py) and review are the backstop there.
@@ -38,8 +43,8 @@ merge_cage.py requires that check, so a machine cannot merge such a PR; the owne
 can read the report and merge by hand.
 
 The second mode is the skip ratchet: `--skips junit.xml` counts the skipped
-tests in the offline-suite report and fails if the total exceeds SKIP_BASELINE,
-printing every reason that is new or grew.
+tests in the offline-suite report and fails if the total exceeds SKIP_BASELINE
+or any one reason exceeds its own count, printing every reason that is new or grew.
 
 USAGE
 -----
@@ -66,15 +71,16 @@ from typing import Callable, Sequence
 SELF = "scripts/test_integrity.py"
 
 # ── The skip ratchet ─────────────────────────────────────────────────────────
-# Skipped tests in offline-suite's junit report, by skip message. 33 is what
-# CI's log showed on 78c20af1 ("4055 passed, 33 skipped"), and running every
-# skip-bearing test file locally (no playwright, no numpy, as on CI) gave
-# exactly 33 there too. Re-measured the same way on c0cef280 (main, 2026-10-20):
-# 64. Every one of the 31 extra is a `@needs_chromium` browser test, and none
-# of them runs on CI. main keeps adding them: re-measure right before merging.
+# Skipped tests in offline-suite's junit report, by skip message. History: 33
+# on CI at 78c20af1, 64 on c0cef280 -- all the growth `@needs_chromium` browser
+# tests, which never ran on CI because offline-suite installed only `.[dev]`.
+# Since 2026-10-20 offline-suite installs `.[dev,browser]` + Chromium, so those
+# run, and their reason ("Playwright + Chromium not installed") has NO allowance:
+# one such skip is red. Measured on ci/integrity (origin/main efdfcf6c merged),
+# full suite, real Chromium, no numpy, `-n 4`: "4434 passed, 2 skipped".
+# The ratchet holds each reason to its own count as well as the total.
 # Raising a number here is an edit to this file, which the CONFIG check flags.
 SKIP_BASELINE: dict[str, int] = {
-    "Playwright + Chromium not installed": 62,
     "collection skipped": 1,                        # test_skill_normalizer: numpy
     "owner's real CV is not on this machine": 1,    # test_cv_style
 }
@@ -113,8 +119,20 @@ _PY_SKIP = re.compile(
     r"\bmark\.(?:skip|skipif|xfail)\b|\b\w+\.(?:skip|xfail|importorskip)\s*\("
     r"|unittest\.skip|\bSkipTest\b|\bskipTest\s*\("
     r"|from\s+pytest\s+import\s+.*\b(?:skip|xfail|importorskip)\b")
-# A name bound to a skip marker (`needs_chromium = pytest.mark.skipif(...)`).
+# A name bound to a skip marker (`needs_gpu = pytest.mark.skipif(...)`).
 _PY_SKIP_ALIAS_DEF = re.compile(r"^\s*(\w+)\s*=\s*(?:\w+\.)?mark\.(?:skip|skipif|xfail)\b")
+# THE ONE SKIP CI NOW SATISFIES (2026-10-20). offline-suite installs the browser
+# extra and Chromium, so the browser-agent tests' marker never skips there; if
+# it ever does, the junit ratchet goes red (this reason's baseline is 0). An
+# added `@needs_chromium`, or this exact skipif, is therefore not a finding.
+# Narrow on purpose: only this exact condition AND reason, and the alias only
+# while every binding of `needs_chromium` in backend/tests is exactly it. Any
+# other condition, reason or name, or that name rebound, is still a SKIP.
+CHROMIUM_MARKER = "needs_chromium"
+_CHROMIUM_SKIPIF = re.compile(
+    r"\b(?:\w+\.)?mark\.skipif\(\s*not\s+_chromium_available\(\)\s*,\s*"
+    r"reason\s*=\s*([\"'])Playwright \+ Chromium not installed\1\s*\)")
+_CHROMIUM_BINDING = re.compile(rf"^\s*{CHROMIUM_MARKER}\s*=\s*{_CHROMIUM_SKIPIF.pattern}\s*$")
 # A test body that proves nothing: `pass`, `...`, `assert True`, a docstring.
 _TRIVIAL_STMT = re.compile(r"""^(?:pass|\.\.\.|assert\s+(?:True|1|not\s+False)|(?:r?["']).*)?$""")
 _PRAGMA = re.compile(r"#\s*pragma:\s*no\s*cover", re.I)
@@ -130,7 +148,8 @@ _PY_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(")
 _FE_DEF = re.compile(r"^\s*(?:it|test)(?:\.\w+)*\s*\(\s*(['\"`])(.+?)\1")
 
 # `--break-checker X` blinds one check so the drill can be watched going red.
-CHECKS = ("SKIP", "DELETE", "CONFIG", "RATCHET")
+# TRUST blinds the narrowness of the Chromium exemption (every skip alias trusted).
+CHECKS = ("SKIP", "DELETE", "CONFIG", "RATCHET", "TRUST")
 _BLIND: set[str] = set()
 
 
@@ -237,6 +256,8 @@ def judge(files: list[FileDiff], skip_aliases: set[str],
             for no, text in f.added:
                 code = _code(text)
                 if _PY_TESTS_DIR.match(p):
+                    # The ratcheted Chromium skipif is not a skip (see CHROMIUM_MARKER).
+                    code = _CHROMIUM_SKIPIF.sub("", code)
                     if _PY_SKIP.search(code):
                         out.append(f"{p}:{no}  SKIP  adds a skip / xfail: {text.strip()[:120]}")
                     elif alias_re and alias_re.search(code):
@@ -361,13 +382,19 @@ def _show(rev: str, path: str) -> str | None:
 
 
 def aliases_in(texts: Sequence[str]) -> set[str]:
-    """Names bound to a pytest skip/skipif/xfail marker anywhere in these files."""
+    """Names bound to a pytest skip/skipif/xfail marker anywhere in these files,
+    less `needs_chromium` while every binding of it is the ratcheted Chromium
+    skipif (CHROMIUM_MARKER). One other binding of that name anywhere -- a
+    different condition, reason, or a line this cannot read whole -- and it is
+    an alias like any other."""
     found: set[str] = set()
     for t in texts:
         for line in t.splitlines():
             m = _PY_SKIP_ALIAS_DEF.match(line)
-            if m and m.group(1) != "pytestmark":
+            if m and m.group(1) != "pytestmark" and not _CHROMIUM_BINDING.match(_code(line)):
                 found.add(m.group(1))
+    if "TRUST" in _BLIND:   # negative control: every alias trusted
+        return set()
     return found
 
 
@@ -419,7 +446,9 @@ def judge_skips(got: Counter[str], baseline: dict[str, int]) -> tuple[bool, list
         lines.append(f"  NEW/GREW  {n - was:+d}  ({was} -> {n})  {r}")
     for r, n in sorted(got.items()):
         lines.append(f"  {n:4d}  {r}")
-    over = total > allowed and "RATCHET" not in _BLIND
+    # Per reason, not only in total: a new Chromium skip must not hide behind
+    # an owner's-CV skip that went away.
+    over = (total > allowed or bool(grew)) and "RATCHET" not in _BLIND
     if total < allowed:
         lines.append(f"  {allowed - total} fewer than the baseline: lower SKIP_BASELINE in {SELF}.")
     return (not over), lines
@@ -461,9 +490,19 @@ _PYPROJECT_BASE = ('[project]\nname = "x"\n\n[tool.pytest.ini_options]\naddopts 
                    '\n[tool.ruff]\nline-length = 120\n')
 
 
+# The skip-marker bindings already on the head, as in backend/tests today: the
+# real Chromium marker, and one arbitrary skipif bound to a name.
+_CHROMIUM_LINE = ('needs_chromium = pytest.mark.skipif(not _chromium_available(), '
+                  'reason="Playwright + Chromium not installed")')
+_HEAD_BINDINGS = _CHROMIUM_LINE + '\nneeds_gpu = pytest.mark.skipif(not _gpu(), reason="no GPU")\n'
+
+
 def _judge_text(diff: str, self_on_base: bool = True, pyproject_head: str | None = None) -> list[str]:
     texts = {"base": _PYPROJECT_BASE, "head": pyproject_head or _PYPROJECT_BASE}
-    return judge(parse_diff(diff), {"needs_chromium"}, lambda side, p: texts[side], self_on_base)
+    files = parse_diff(diff)
+    # As run_diff: aliases are read off the whole head, the diff's own added lines included.
+    aliases = aliases_in([_HEAD_BINDINGS] + ["\n".join(t for _, t in f.added) for f in files])
+    return judge(files, aliases, lambda side, p: texts[side], self_on_base)
 
 
 def self_drill() -> int:
@@ -475,7 +514,20 @@ def self_drill() -> int:
         ("SKIP", "pytest.skip( call", _diff((T, T, [], ["    pytest.skip('later')"]))),
         ("SKIP", "pytest.importorskip(", _diff((T, T, [], ["np = pytest.importorskip('numpy')"]))),
         ("SKIP", "module pytestmark", _diff((T, T, [], ["pytestmark = pytest.mark.skip"]))),
-        ("SKIP", "a skip-marker alias on a test", _diff((T, T, [], ["@needs_chromium"]))),
+        ("SKIP", "a skip-marker alias on a test", _diff((T, T, [], ["@needs_gpu"]))),
+        ("SKIP", "a new marker bound to an arbitrary skipif, then used",
+         _diff(("backend/tests/test_n.py", "backend/tests/test_n.py", [],
+                ["needs_net = pytest.mark.skipif(True, reason='no network')", "", "@needs_net",
+                 "def test_n():", "    assert f()"]))),
+        ("SKIP", "needs_chromium rebound to an arbitrary skipif, then used",
+         _diff(("backend/tests/test_n.py", "backend/tests/test_n.py", [],
+                ['needs_chromium = pytest.mark.skipif(True, reason="Playwright + Chromium not installed")']),
+               (T, T, [], ["@needs_chromium"]))),
+        ("SKIP", "the Chromium condition with another reason",
+         _diff((T, T, [], ['@pytest.mark.skipif(not _chromium_available(), reason="later")']))),
+        ("SKIP", "the Chromium skipif with a skip on the same line",
+         _diff((T, T, [], ['pytestmark = [pytest.mark.skipif(not _chromium_available(), '
+                           'reason="Playwright + Chromium not installed"), pytest.mark.skip]']))),
         ("SKIP", "pragma: no cover in src",
          _diff(("backend/src/a.py", "backend/src/a.py", [], ["    if x:  # pragma: no cover"]))),
         ("SKIP", "frontend it.skip", _diff(("frontend/src/a.test.ts", "frontend/src/a.test.ts", [],
@@ -544,6 +596,15 @@ def self_drill() -> int:
         ("a frontend test added", _diff(("frontend/src/a.test.ts", "frontend/src/a.test.ts", [],
                                          ["  it('works', () => {"]))),
         ("the guard created (not on base yet)", _diff((None, SELF, [], ["x = 1"]))),
+        # CI installs Chromium (ci-offline.yml) and the ratchet holds its reason at 0.
+        ("a new @needs_chromium browser test",
+         _diff((T, T, [], ["@needs_chromium", "async def test_fills_the_form(site):",
+                           "    assert (await run(site)).status == 'filled'"]))),
+        ("a module marked `pytestmark = needs_chromium`",
+         _diff(("backend/tests/test_browser_new.py", "backend/tests/test_browser_new.py", [],
+                ["from tests.test_browser_agent import needs_chromium", "pytestmark = needs_chromium"]))),
+        ("the exact Chromium skipif as a decorator", _diff((T, T, [], ["@" + _CHROMIUM_LINE.split(" = ", 1)[1]]))),
+        ("the needs_chromium binding copied as is", _diff((T, T, [], [_CHROMIUM_LINE]))),
     ]
     misses: list[str] = []
     pyproject_head_ruff = _PYPROJECT_BASE.replace("line-length = 120", "line-length = 100")
@@ -558,6 +619,8 @@ def self_drill() -> int:
         hit = [g for g in got if f"  {cat}  " in g]
         if name == "a test file deleted":   # the file itself must be named, not only its tests
             hit = [g for g in hit if "deletes the test file" in g]
+        if "then used" in name:             # the USE must be flagged, not only the binding
+            hit = [g for g in hit if "skip-marker alias" in g]
         print(f"  [{'RED ' if hit else 'MISS'}] {cat:6s} {name}" + (f"  -> {hit[0]}" if hit else ""))
         if not hit:
             misses.append(f"{cat}: {name} was not flagged")
@@ -587,12 +650,26 @@ def self_drill() -> int:
         misses.append("RATCHET: a skip over the baseline passed, or its reason was not printed")
     if not ok_at:
         misses.append("RATCHET: skips at the baseline were refused")
+    # Per reason: one skip swapped for another keeps the total and is still red.
+    ok_swap, _ = judge_skips(Counter({"flaky, will fix": 1}), {"owner's real CV is not on this machine": 1})
+    print(f"  [{'RED ' if not ok_swap else 'MISS'}] RATCHET a skip swapped for a new reason (same total)")
+    if ok_swap:
+        misses.append("RATCHET: a new skip reason hid behind one that went away")
+    # The committed baseline: ONE Chromium skip on CI is red (the browser tests
+    # must run there), with every other reason at its baseline.
+    chr_reason = "Playwright + Chromium not installed"
+    ok_chr, lines_chr = judge_skips(Counter({**SKIP_BASELINE, chr_reason: 1}), SKIP_BASELINE)
+    chr_named = any("NEW/GREW" in x and chr_reason in x for x in lines_chr)
+    print(f"  [{'RED ' if not ok_chr and chr_named else 'MISS'}] RATCHET one Chromium skip on CI "
+          f"(SKIP_BASELINE holds that reason at {SKIP_BASELINE.get(chr_reason, 0)})")
+    if ok_chr or not chr_named:
+        misses.append("RATCHET: skipped Chromium tests passed the committed SKIP_BASELINE")
     if misses:
         print(f"DRILL FAILED: {len(misses)} case(s) wrong:")
         for m in misses:
             print(f"  {m}")
         return 1
-    print(f"DRILL PASS: {len(red_cases) + 1} breaks went red, {len(green_cases) + 1} harmless shapes stayed green.")
+    print(f"DRILL PASS: {len(red_cases) + 3} breaks went red, {len(green_cases) + 1} harmless shapes stayed green.")
     return 0
 
 

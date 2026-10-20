@@ -132,7 +132,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   - One assistant session at a time per browser: a call with another `session` label gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
   - A frame that never answers is skipped after 3 s, and one action is stopped after 60 s (`error`, `timeout`), so a hung page never holds the browser.
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
-- **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
+- **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise. CI's offline-suite installs both (since 2026-10-20), so they run on every PR, and the skip ratchet (`scripts/test_integrity.py`) is red if they ever skip there.
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.
 
 **Slice 2 (built 2026-10-19, off by default): sign in once.**
@@ -314,4 +314,3 @@ browser or kit hold.
 - A cloud routine needs a way to start from Job360's Needs you page; check what Claude routines allow.
 - Hosting cost per active user once it's on.
 - Slice 4 needs the open internet: run it from production once the switch is on.
-- CI does not install Chromium, so the real-browser tests skip there; adding it is a `.github/` (owner-lane) change.
