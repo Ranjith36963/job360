@@ -611,6 +611,10 @@ lanes:
       # map said fast-lane -- two systems, two answers, and the drill agreeing
       # with neither because it only derived membership from imports.
       - "backend/scripts/mypy_ratchet.py"
+      # 2026-10-20: the test-integrity judge and its skip baseline. ci.yml runs
+      # the BASE copy, so a PR cannot blind it for itself; this stops a machine
+      # merging a weakened copy that every later PR would then be judged by.
+      - "scripts/test_integrity.py"
       - ".github/workflows/auto-merge.yml"
       - ".github/workflows/verify-live.yml"
       # THE WORKFLOW THAT RUNS THE UNDO, not just the script it runs. I locked

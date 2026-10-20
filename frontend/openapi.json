@@ -17208,7 +17208,7 @@
         ]
       },
       "put": {
-        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.",
+        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.\n\nAn unexpected error must not carry the plaintext token into an error report: the body is emptied of\nit, the error is logged without its traceback or message, and a plain 500 replaces it (from None).",
         "operationId": "put_trigger_api_assistant_trigger_put",
         "parameters": [
           {
@@ -21447,7 +21447,7 @@
     },
     "/api/readyz": {
       "get": {
-        "description": "Readiness probe \u2014 checks real dependencies before accepting traffic.\n\nChecks:\n  * db   \u2014 trivial ``SELECT 1`` through the pg connection layer.\n  * redis \u2014 ping via redis-py. Skipped (not failed) when REDIS_URL unset.\n\nReturns 200 ``{status:\"ready\", ...}`` when all checks pass,\n503 ``{status:\"not ready\", ...}`` when any required check fails.",
+        "description": "Readiness probe: can the request path get a DB connection right now?\n\nProduction borrows a connection from the SAME pool ``get_request_db`` uses\n(``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and\nruns ``SELECT 1`` under the same bound. A pinned pool (every connection\nheld) or an unreachable database answers 503, which is what Railway's deploy\nhealthcheck (``backend/railway.json``) and the uptime probe need to see.\n\n200 ``{\"status\": \"ready\", \"pool\": {size, idle, used, waiting, max}}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}``\n\nTest mode has no request-path pool (``get_request_db`` opens a fresh\nconnection per request there), so the probe opens one the same way and\n``pool`` is null. Redis is no longer checked: the service was deleted\n2026-09-02 and the auth rate limiter falls back without it.",
         "operationId": "readyz_api_readyz_get",
         "responses": {
           "200": {
