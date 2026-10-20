@@ -111,7 +111,10 @@ jobs:
           overwrite: true
   offline-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # STOPGAP (2026-10-19): the serial suite reached 24-30+ min and was killed
+    # at 30. 45 is headroom while the suite runs in parallel (pytest-xdist,
+    # below); bring it back down once the parallel run's wall time is known.
+    timeout-minutes: 45
     needs: [scope]
     # The backend is Postgres-backed now (pg shim); tests need a DB + Redis.
     # Mirrors ci.yml's service setup — without it, tests hit the dev-default
@@ -159,14 +162,35 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      # The template dump must come from a pg_dump the SERVER can load. The
+      # runner image's own client drifts (ubuntu-latest moves to Ubuntu 26 from
+      # 2026-10-19, with a newer Postgres client than this pg16 service), so
+      # `pg_dump` here is the service container's own, the server's exact version.
+      - name: Use the Postgres service's own pg_dump
+        if: needs.scope.outputs.scope == 'full'
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pgbin"
+          printf '#!/bin/sh\nexec docker exec -i %s pg_dump "$@"\n' "$PG_CONTAINER" > "$RUNNER_TEMP/pgbin/pg_dump"
+          chmod +x "$RUNNER_TEMP/pgbin/pg_dump"
+          echo "$RUNNER_TEMP/pgbin" >> "$GITHUB_PATH"
       # THE FULL SUITE, UNFILTERED. `--junitxml` only adds a report file; it
       # selects and deselects nothing.
+      # In parallel: pytest-xdist (a dev extra) runs one worker per vCPU
+      # (`-n auto`, 4 on ubuntu-latest); the controller still writes ONE junit
+      # report and the same `FAILED tests/...` lines. Every test owns its Postgres
+      # schema, so workers never share tables. Each worker migrates ONE template
+      # schema and copies it per test with pg_dump (tests/conftest.py
+      # `_template_sql`; identity proved by tests/test_schema_template.py), so the
+      # step prints the pg_dump it found.
       - name: Run offline suite (full backend + automated Loop 2 E2E)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           set -o pipefail
-          python -m pytest -q -p no:randomly --junitxml=/tmp/junit.xml | tee /tmp/pytest.out
+          pg_dump --version
+          python -m pytest -q -p no:randomly -n auto --junitxml=/tmp/junit.xml | tee /tmp/pytest.out
       # Per-file verdict for tests/test_e2e_lifecycle.py, read from the report
       # of the run above. `absent` (no report, or no lifecycle test in it) is
       # NOT a pass: loop2-e2e-spotlight goes red on anything but `passed`.
@@ -346,3 +370,31 @@ jobs:
 
   # Failures on main / on the schedule are reported as an issue by loop-red.yml
   # (one workflow_run watcher, so PRs no longer show a 'skipping' row for it).
+
+  # WAKE THE MERGE CAGE (2026-10-19). GitHub does not fire `check_suite` for
+  # Actions' own suites, so the arm in auto-merge.yml never heard that this
+  # workflow finished, and a green PR sat waiting for a hand merge. This job
+  # tells it. A `workflow_dispatch` is the one event GITHUB_TOKEN may start, and
+  # the arm never waits on this job's own check run (merge_cage.WAKE_JOB).
+  # ONE wake per push, here: `offline-suite` is the required check that finishes
+  # last (measured on #908, 2026-10-19). A wake in every workflow queued six cage
+  # runs per push onto a runner queue that already held 140. The 20-minute sweep
+  # and the CodeRabbit status event cover a check that finishes later.
+  wake-cage:
+    name: Wake the merge cage
+    needs: [scope, offline-suite, frontend-e2e, loop2-e2e-spotlight]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A fork PR's token cannot dispatch, and that must not read as red CI. A
+    # same-repository dispatch that fails DOES go red: nobody else would see it.
+    continue-on-error: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+    permissions:
+      actions: write
+    steps:
+      - name: Ask the arm to judge this PR again
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh workflow run auto-merge.yml --ref main -f pr="$PR"
