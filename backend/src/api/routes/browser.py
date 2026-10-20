@@ -162,7 +162,13 @@ async def browser_action(
         )
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
-        return exc.as_dict()
+        refused = exc.as_dict()
+        # A CAPTCHA that came up after the last look stops this action: the job still goes to Needs you.
+        if exc.status == "needs_you" and body.application_id is not None:
+            refused["blocked_recorded"] = await _hand_off(
+                user, body.application_id, {**refused, "url": exc.url},
+            )
+        return refused
     if result.get("status") == "needs_you" and body.application_id is not None:
         result["blocked_recorded"] = await _hand_off(user, body.application_id, result)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))

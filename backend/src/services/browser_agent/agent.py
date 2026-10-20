@@ -76,6 +76,8 @@ class BrowserError(Exception):
         self.status = status
         self.reason = reason
         self.detail = detail
+        # The page it happened on, for a needs_you stop: the route records ``blocked`` with its host.
+        self.url = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {"status": self.status, "reason": self.reason, "detail": self.detail}
@@ -281,18 +283,24 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
             raise BrowserError(
                 "refused", "enter_may_submit",
                 "Enter is only pressed on a highlighted option of a suggestion list (type, then ArrowDown). "
-                "Anywhere else it can submit the form: click the form's submit button instead, so check_submit runs.",
+                "If the list still refuses it, use action choose with the option's text. Anywhere else Enter can "
+                "submit the form: click the form's submit button instead, so check_submit runs.",
             )
         # Defence in depth: a site that lets Enter through to its form would submit it. Stop that submit.
         await frame.evaluate(SUBMIT_GUARD_START_JS)
         guarded = frame
-    await page.keyboard.press(key)
-    await _settle(page)
+    submitted = False
+    try:
+        await page.keyboard.press(key)
+        await _settle(page)
+    finally:
+        # The guard always comes off: left on, it would silently cancel the real, gated submit later.
+        if guarded is not None:
+            try:
+                submitted = await guarded.evaluate(SUBMIT_GUARD_READ_JS)
+            except Exception:  # noqa: BLE001 - the frame navigated: no submit got past the guard to do it
+                submitted = False
     if guarded is not None:
-        try:
-            submitted = await guarded.evaluate(SUBMIT_GUARD_READ_JS)
-        except Exception:  # noqa: BLE001 - the frame navigated: no submit got past the guard to do it
-            submitted = False
         if submitted:
             raise BrowserError(
                 "refused", "enter_may_submit",
@@ -775,7 +783,12 @@ async def run(
         try:
             result = await _act(pool, s, action, url=url, ref=ref, text=text, on=on, doc_kind=doc_kind,
                                 gate=gate, files=files)
-        except BrowserError:
+        except BrowserError as exc:
+            if exc.status == "needs_you" and not exc.url:
+                try:
+                    exc.url = _live_page(s).url
+                except BrowserError:
+                    pass
             raise
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
             if getattr(exc, "status_code", None) is not None:
