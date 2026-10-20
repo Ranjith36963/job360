@@ -36,7 +36,7 @@ VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"1h", "3h", "6h", "12h", "
 # Preference fields the web preferences form does not own: written only through
 # the agent-edit overlay, carried forward by a web save, kept by a "Clear
 # preferences" (only "Clear all" resets them).
-OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset({"daily_check", "check_every"})
+OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset({"daily_check", "check_every", "linkedin_premium"})
 VALID_WORK_AUTH_STATUSES: frozenset[str] = frozenset(
     {"citizen", "permanent_resident", "visa", "needs_sponsorship"}
 )
@@ -48,6 +48,7 @@ VALID_LANGUAGE_LEVELS: frozenset[str] = frozenset({"native", "fluent", "professi
 # kept so old tests and stored rows still import.
 VALID_APPLY_MODES: frozenset[str] = frozenset({"ask_each", "apply_all", "selective_above_score"})
 VALID_SUBMIT_MODES: frozenset[str] = frozenset({"confirm", "auto_when_sure"})
+VALID_OUTREACH_SEND_VALUES: frozenset[str] = frozenset({"draft_only", "auto"})
 
 
 @dataclass
@@ -621,6 +622,13 @@ class UserPreferences:
     # "12h" or "24h"; "" = not set = once a day. Same write/carry-forward rules as
     # `daily_check` (overlay only; kept on a "preferences" clear).
     check_every: str = ""
+    # S16 (2026-10-20) - the user's LinkedIn account tier, told to the assistant in
+    # chat: True = Premium / Sales Navigator (a connection note may run to
+    # LINKEDIN_NOTE_MAX_CHARS_PREMIUM), False = not told / assume the free limit, the
+    # safer budget (career-ops modes/contacto.md:168). Only a warn-only save check
+    # reads it; never a penalty (hard rule #29). Same write/carry-forward rules as
+    # daily_check: overlay only, kept on a "preferences" clear, reset only by "clear all".
+    linkedin_premium: bool = False
     # Owner decision 2026-10-08 — the salary the user wants, one record per
     # HIRING country: {country (ISO2), amount, currency (ISO 4217), period
     # ("year" | "month")}. A normal web-owned preference (partial-save shape like
@@ -728,6 +736,10 @@ class AssistantSettings:
     # Feedback loop slice 2: may the assistant send the check-in / feedback emails on its own?
     # False (default) = it may only draft. Turning it ON is a riskier change.
     auto_employer_emails: bool = False
+    # Owner 2026-10-20 (G087): may the assistant press Send on an outreach email? "draft_only" (default; "" = not
+    # chosen) | "auto". Separate from preferences.daily_check (reading Gmail never grants sending). Turning it to
+    # auto is a riskier change.
+    outreach_send: str = ""
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

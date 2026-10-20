@@ -56,7 +56,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────
   # RUN EACH TEST ONCE (CI audit, 2026-10-19).
   #
-  # Q1-Q4 below are four files of the backend suite, and the frontend eye is
+  # Q1-Q3 below are four files of the backend suite, and the frontend eye is
   # `npx playwright test`. ci-offline.yml already runs BOTH, on this same PR,
   # on this same merge tree, as REQUIRED checks: `offline-suite` (the whole
   # pytest suite, nothing deselected) and `frontend-e2e` (every spec). Running
@@ -144,15 +144,15 @@ jobs:
     steps:
       # Deferred: offline-suite runs these four files inside the full suite on
       # this same tree. Say so, loudly, instead of a silent green.
-      - name: "Q1-Q4 ran in offline-suite (ci-offline.yml) on this same tree"
+      - name: "Q1-Q3 ran in offline-suite (ci-offline.yml) on this same tree"
         if: ${{ !(github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full') }}
         run: |
           {
             echo "### verify / backend — deferred to \`offline-suite\`"
             echo ""
             echo "Scope \`${{ needs.scope.outputs.scope }}\`: ci-offline.yml \`offline-suite\` runs the FULL pytest"
-            echo "suite on this PR's merge tree, which contains Q1-Q4 (route auth, IDOR + tenancy,"
-            echo "design rules, the e2e lifecycle). They are not run a second time here."
+            echo "suite on this PR's merge tree, which contains Q1-Q3 (route auth, IDOR + tenancy,"
+            echo "the e2e lifecycle). They are not run a second time here."
             echo "The merge cage's \`verify\` tag requires \`offline-suite\` green by name."
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -172,9 +172,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      # ── The four questions a path cage cannot ask ────────────────────────
+      # ── The three questions a path cage cannot ask ───────────────────────
       # Each one is an EXISTING test file. Nothing is invented here; the whole
       # point is that the answers were already sitting in the repo unread.
+      # (A fourth, "do the owner's product rules still hold?", ran
+      # tests/test_design_rules.py, deleted in #499; its rule #29 guard now
+      # lives in test_slice5_fixes.py, inside offline-suite. The step only
+      # printed a notice on every run, so it was removed 2026-10-20.)
 
       - name: "Q1 — is every route still auth-classified on purpose?"
         if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
@@ -186,17 +190,7 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/test_api_idor.py tests/test_tenancy_isolation.py -q -p no:randomly
 
-      - name: "Q3 — do the owner's product rules still hold?"
-        if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
-        working-directory: backend
-        run: |
-          if [ -f tests/test_design_rules.py ]; then
-            python -m pytest tests/test_design_rules.py -q -p no:randomly
-          else
-            echo "::notice::test_design_rules.py absent on this branch — rules #29-31 unenforced here"
-          fi
-
-      - name: "Q4 — does a whole user journey still work end to end?"
+      - name: "Q3 — does a whole user journey still work end to end?"
         if: github.event_name != 'pull_request' || needs.scope.outputs.scope != 'full'
         working-directory: backend
         run: python -m pytest tests/test_e2e_lifecycle.py -q -p no:randomly
@@ -242,7 +236,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend')
         with:
           node-version: "22"
@@ -284,7 +278,7 @@ jobs:
 
       - name: Keep the evidence
         if: always() && (github.event_name != 'pull_request' || (needs.scope.outputs.scope != 'full' && needs.scope.outputs.scope != 'frontend'))
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: verify-frontend-evidence-${{ github.event.pull_request.number || github.run_id }}
           path: |
@@ -328,7 +322,7 @@ jobs:
             echo ""
             echo "| eye | result | where the tests ran |"
             echo "|---|---|---|"
-            echo "| backend (routes, IDOR, product rules, journey) | \`$be\` | $be_where |"
+            echo "| backend (routes, IDOR, journey) | \`$be\` | $be_where |"
             echo "| frontend (14 specs, real Chromium) | \`$fe\` | $fe_where |"
             echo ""
             echo "A deferred eye is green only as a record; the merge cage's \`verify\` tag"
@@ -336,7 +330,25 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$be" != "success" ] || [ "$fe" != "success" ]; then
+            # A CANCELLED eye judged nothing (a newer push cancelled this run):
+            # say so instead of "did not behave", but still exit 1, since a
+            # required check must never pass unjudged. Any real `failure` keeps
+            # the RED message below.
+            if [ "$be" != "failure" ] && [ "$fe" != "failure" ] && { [ "$be" = "cancelled" ] || [ "$fe" = "cancelled" ]; }; then
+              echo "::error::verify: not judged — the run was cancelled (a newer push superseded it)."
+              exit 1
+            fi
             echo "::error::verify is RED — the app was run and it did not behave."
             exit 1
           fi
-          echo "verify is GREEN — the app was actually run."
+          # Say only what happened: a deferred eye ran nothing here (CI audit:
+          # this line once claimed "the app was actually run" 10 minutes before
+          # offline-suite had a result). The backend eye defers only on `full`,
+          # where the frontend eye defers too.
+          if [ "$be_where" != "ran here" ] && [ "$fe_where" != "ran here" ]; then
+            echo "verify deferred: offline-suite and frontend-e2e cover this diff (neither eye ran the app here)."
+          elif [ "$fe_where" != "ran here" ]; then
+            echo "verify is GREEN — the backend eye actually ran the app; the frontend eye deferred to frontend-e2e."
+          else
+            echo "verify is GREEN — the app was actually run."
+          fi

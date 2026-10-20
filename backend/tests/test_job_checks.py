@@ -697,6 +697,50 @@ def test_pay_word_must_be_whole_word():
     assert _pay("Pay $50k")["value"] is True
 
 
+_HEADER = "TEST Job360 Simulation Ltd - London, United Kingdom (hybrid) - Full time - "
+
+
+def test_currency_before_amount_is_pay_without_a_pay_word():
+    r = _run(desc=_HEADER + "GBP 40,000 - 45,000")["pay_advertised"]  # the live header line
+    assert r["value"] is True and r["ok"] is True
+    assert (r["min"], r["max"], r["currency"]) == (40000, 45000, "GBP")
+    assert r["amount"] == "GBP 40,000 - 45,000" and "GBP 40,000 - 45,000" in r["evidence"]
+    for text, lo, hi, cur in (("Full time - £40,000 - £45,000", 40000, 45000, "GBP"),
+                              ("Full time - EUR 60000", 60000, 60000, "EUR"),
+                              ("Remote - USD 90k", 90000, 90000, "USD"),
+                              ("Mumbai - INR 1,200,000", 1200000, 1200000, "INR")):
+        got = _run(desc=text)["pay_advertised"]
+        assert (got["value"], got["min"], got["max"], got["currency"]) == (True, lo, hi, cur), text
+
+
+def test_bare_numbers_and_small_or_scaled_amounts_are_not_pay():
+    for text in ("Trusted by 40,000 users", "A 45,000 sq ft office", "Founded in 2026", "Since 2026 - 2027",
+                 "40,000 - 45,000 people", "GBP 20 fee", "£50 voucher", "$5M budget",
+                 "We raised GBP 40,000,000 in funding", "Our revenue is USD 45,000,000"):
+        assert _pay(text)["value"] is False, text
+
+
+def test_currency_amount_inside_a_sentence_is_not_pay():
+    # only a whole header-line segment counts; every one of these was pay in the first draft
+    for text in ("£1,000,000 contract value", "Projects worth USD 1,000,000", "Signing bonus £5,000",
+                 "Relocation allowance of £3,000", "Laptop budget £1,500", "$100,000 grant", "Price: €2,500",
+                 "Fee: GBP 1,000", "Deal sizes $50,000-$200,000", "We donated £25,000 to charity", "EUR 2026",
+                 "Bonus - £5,000", "Relocation - £3,000 - one-off", "London - Sign-on - £5,000",
+                 "Contract value: - £1,000,000", "Award - $100,000", "Prize pool | $50,000 | Hackathon",
+                 "| Signing bonus | £5,000 |", "Perks:\n• £5,000", "Learning budget:\n- £1,500",
+                 "Acme Ltd - London - Founded - EUR 2026 - Remote", "Acme Ltd - London - EUR 2026 - Remote"):
+        assert _run(desc=text)["pay_advertised"]["value"] is False, text
+
+
+def test_stated_salary_beats_a_bare_header_amount():
+    perks = _run(desc="Perks\n- £2,000 sign-on bonus\n- Salary: £40,000 - £45,000 per year")["pay_advertised"]
+    assert (perks["min"], perks["max"]) == (40000, 45000)
+    saved = _run(desc="We have helped clients save £10,000,000 to date.\nThe role\nSalary £45,000 per year.")
+    assert (saved["pay_advertised"]["min"], saved["pay_advertised"]["max"]) == (45000, 45000)
+    both = _run(desc=_HEADER + "GBP 30,000 - 35,000\nSalary: £40,000 - £45,000 per year")["pay_advertised"]
+    assert (both["min"], both["max"]) == (40000, 45000)
+
+
 def test_pay_advertised_code_name_and_shape():
     checks = _run(desc="Salary £45,000 per year")
     assert "pay_advertised" in checks and "pay_stated" not in checks
