@@ -99,6 +99,10 @@ BOARD_SOURCES = (
     "jibe",
     "keka",
     "zohorecruit",
+    "betterteam",
+    "catsone",
+    "clinch",
+    "crelate",
     "avature",
     "comeet",
     "hibob",
@@ -277,7 +281,7 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra")
+ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1")
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
     "kit_asia",
