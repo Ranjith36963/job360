@@ -77,6 +77,26 @@ SNAPSHOT_JS = r"""
     for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
   };
   walk(document, 0);
+  // What the page held when first read (a cookie switch, a pre-ticked box, a picked option) is not
+  // an answer. Stamp it once per page; the gate counts only what changed since.
+  if (!window.__j360stamped) {
+    window.__j360stamped = true;
+    const stamp = (root, depth) => {
+      for (const f of root.querySelectorAll('input[type=checkbox], input[type=radio], select, '
+          + '[aria-checked], [aria-pressed]')) {
+        if (f.hasAttribute('aria-checked') || f.hasAttribute('aria-pressed')) {
+          const on = f.getAttribute('aria-checked') === 'true' || f.getAttribute('aria-pressed') === 'true';
+          f.setAttribute('data-j360-aria0', String(on));
+        }
+        if (f.tagName === 'SELECT') {
+          f.setAttribute('data-j360-sel0', Array.from(f.selectedOptions).map((o) => o.index).join(','));
+        } else if (f.tagName === 'INPUT') f.setAttribute('data-j360-checked0', String(f.checked));
+      }
+      if (depth > 6) return;
+      for (const host of root.querySelectorAll('*')) if (host.shadowRoot) stamp(host.shadowRoot, depth + 1);
+    };
+    stamp(document, 0);
+  }
   // A section the site copies (cloneNode) copies our ref too: the copy loses it and gets its own below,
   // or typing into the copy would land in the original.
   const seenRefs = new Set();
@@ -191,14 +211,19 @@ ELEMENT_FACTS_JS = r"""
     }
     return found;
   };
-  // A typed answer, a chosen file or option, a ticked box, a pressed choice: what the page held at
-  // load (defaultSelected / defaultChecked) is not an answer.
+  // A typed answer, a chosen file or option, a ticked box, a pressed choice: what the page held when
+  // the look first read it (its data-j360-*0 stamp) is not an answer. Unstamped, any counts (safe side).
+  // Not defaultChecked: a framework that ticks by setting the attribute moves it too.
   const answered = (f) => {
-    if (f.getAttribute('aria-checked') === 'true' || f.getAttribute('aria-pressed') === 'true') return true;
-    if (f.tagName === 'SELECT') return Array.from(f.selectedOptions).some((o) => o.index > 0 && !o.defaultSelected);
+    const on = f.getAttribute('aria-checked') === 'true' || f.getAttribute('aria-pressed') === 'true';
+    if (on && f.getAttribute('data-j360-aria0') !== 'true') return true;
+    if (f.tagName === 'SELECT') {
+      const held = (f.getAttribute('data-j360-sel0') || '').split(',');
+      return Array.from(f.selectedOptions).some((o) => o.index > 0 && !held.includes(String(o.index)));
+    }
     if (f.tagName === 'INPUT' || f.tagName === 'TEXTAREA') {
       const t = (f.type || '').toLowerCase();
-      if (t === 'checkbox' || t === 'radio') return f.checked && !f.defaultChecked;
+      if (t === 'checkbox' || t === 'radio') return f.checked && f.getAttribute('data-j360-checked0') !== 'true';
       if (['hidden', 'submit', 'button', 'image', 'password', 'search'].includes(t)) return false;
       if (t === 'file') return !!(f.files && f.files.length);
       return !!(f.value || '').trim();
@@ -209,6 +234,8 @@ ELEMENT_FACTS_JS = r"""
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
     in_form: inForm(el), role: el.getAttribute('role') || '',
+    // Whether it can submit a form itself: a button in a shadow root has no form owner.
+    owns_form: !!el.form, toggle: el.hasAttribute('aria-pressed'),
     // Any answer anywhere on the page, shadow roots included: the form is being filled.
     page_has_answers: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
       + '[aria-checked=true], [aria-pressed=true]', 0).some(answered),
