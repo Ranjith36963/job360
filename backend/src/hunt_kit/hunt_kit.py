@@ -99,6 +99,7 @@ BOARD_SOURCES = (
     "jibe",
     "keka",
     "zohorecruit",
+    "ripplehire",
 )
 FEED_SOURCES = (
     "freehire",
@@ -2610,6 +2611,8 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
     ("keka", re.compile(r"^([a-z0-9-]+)\.keka\.com$")),
     ("zohorecruit", re.compile(r"^([a-z0-9-]+)\.zohorecruit\.(?:in|com)$")),
+    # app.ripplehire.com is a shared sandbox host (it answers any token with another company's jobs)
+    ("ripplehire", re.compile(r"^((?!(?:app|www)\.)[a-z0-9-]+)\.ripplehire\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
@@ -2672,10 +2675,13 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
         elif ats == "join":  # https://join.com/companies/<slug>/...
             tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
+        elif ats == "ripplehire":  # https://<tenant>.ripplehire.com/candidate/?token=<20 chars>&source=CAREERSITE
+            ctok = (q.get("token") or [""])[0]
+            tok = "%s/%s" % (m.group(1), ctok) if re.fullmatch(r"[A-Za-z0-9]{20}", ctok) else ""
         else:
             tok = m.group(1)
         # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.
-        keep = ats in ("ultipro", "adp", "cornerstone")
+        keep = ats in ("ultipro", "adp", "cornerstone", "ripplehire")
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}

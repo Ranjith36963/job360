@@ -74,13 +74,17 @@ SuccessFactors, Taleo, Jobvite, Eightfold. iCIMS reads the date and description
 from the first 20 ads of each board only; the rest come back undated.
 `kit_ats_more.py` adds Rippling, Breezy, Pinpoint, Phenom (branded career host), UKG
 UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN,
-Jibe, Keka Hire (`keka`) and Zoho Recruit (`zohorecruit`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
+Jibe, Keka Hire (`keka`), Zoho Recruit (`zohorecruit`) and RippleHire (`ripplehire`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
 some Zoho Recruit sites list no description either, so open the link to read the ad.
 
 India: many Indian employers post on Keka Hire and Zoho Recruit, not on the boards above. The
 `keka` and `zohorecruit` rows in `companies.json` (`source` `commoncrawl`, `country` `IN` when most
 of a board's jobs are in India) cover a few hundred of them. Use `--work-countries IN` to keep
 Indian jobs. Keka is read with exactly two requests per board (the careers page, then its public jobs list).
+RippleHire (`source` `ripplehire-research`) covers large Indian employers (HDFC Bank, Axis Bank, LTIMindtree,
+Mphasis, Tata companies, Paytm): a paged list, then up to 25 detail requests per board for titles that match.
+Its career-site token can expire; a board that starts answering nothing needs a fresh token from
+`https://<tenant>.ripplehire.com/candidate/careers` (it redirects to `...?token=<20 chars>`).
 
 Open feeds (no key): freehire.me, Himalayas, Remotive, Arbeitnow (uses its
 remote and visa fields), RemoteOK, Jobicy, Working Nomads, We Work Remotely,
@@ -140,7 +144,8 @@ Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT
 (the branded career host). One slug each: `rippling:slug` (`ats.rippling.com/slug/jobs`), `breezy:tenant`,
 `pinpoint:tenant`, `jazzhr:tenant` (`tenant.applytojob.com`), `softgarden:tenant`, `jibe:slug`,
 `keka:tenant` (`tenant.keka.com/careers`), `zohorecruit:tenant` (`tenant.zohorecruit.in`, then `.com` is tried;
-a `companies.json` row may set `"tld": "com"`), `gem:id`
+a `companies.json` row may set `"tld": "com"`), `ripplehire:tenant/token` (from
+`tenant.ripplehire.com/candidate/?token=<20 chars>`), `gem:id`
 (`jobs.gem.com/id`), `join:slug` (`join.com/companies/slug`). Cornerstone sites that need a session cookie return no ads.
 Maintainers grow the list with `python scripts/harvest_hunt_boards.py` (from `backend/`;
 see its docstring). Its Workday rows share the daily Workday slice.

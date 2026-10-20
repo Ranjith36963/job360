@@ -1,5 +1,5 @@
 """More ATS board fetchers for the hunt kit: Rippling, Breezy, Pinpoint, Phenom, UKG (UltiPro), ADP Workforce Now,
-Cornerstone, Gem, JazzHR, Softgarden, JOIN, Jibe, Keka, Zoho Recruit. Same contract as kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only
+Cornerstone, Gem, JazzHR, Softgarden, JOIN, Jibe, Keka, Zoho Recruit, RippleHire. Same contract as kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only
 through the ``http`` callable, no file IO at import, standard library only. Nothing here ranks or scores a job.
 
 Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
@@ -15,9 +15,10 @@ Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
   paylocity  company GUID from recruiting.paylocity.com/Recruiting/Jobs/All/<guid>
   keka       tenant from <tenant>.keka.com/careers (India)
   zohorecruit  tenant from <tenant>.zohorecruit.in or .com/jobs/Careers (row may add tld "in" or "com")
+  ripplehire tenant/token from <tenant>.ripplehire.com/candidate/?token=<20-char career-site token> (India)
 
 Endpoints and field names are adapted from the MIT-licensed career-ops providers and freehire adapters (see NOTICE.md);
-the Keka and Zoho Recruit readers come from our own read of their public career pages.
+the Keka, Zoho Recruit and RippleHire readers come from our own read of their public career pages.
 """
 # ruff: noqa: E501
 from __future__ import annotations
@@ -784,6 +785,107 @@ def _zohorecruit(row: dict[str, Any], http: Http) -> list[Job] | None:
     return None
 
 
+# --------------------------------------------------------------------------- RippleHire (India)
+# Source: own read of live RippleHire career sites (2026-10-20), no third-party code. One host per tenant,
+# https://<tenant>.ripplehire.com (app.ripplehire.com is a shared sandbox that answers any tenant's token with
+# another company's jobs, so it is refused). The career-site token (20 letters/digits) is public: GET
+# /candidate/careers redirects to /candidate/?token=<token>&source=CAREERSITE. The list is POST
+# /candidate/candidatejobsearch, form careerSiteUrlParams={"page","search":"*:*","token","pagesize"} -> totalJobCount
+# and jobVoList[] (jobSeq, jobTitle, locations, jobReqExp, jobMinExp in YEARS; no description, no date, no remote
+# flag). Detail: GET /candidate/candidatejobdetail?token=&jobSeq= -> jobVO.jobDesc (HTML), publishDetails.CAREER_SITE
+# (ISO) or jobPostingDate (DD-Mon-YYYY). A bad or expired token answers 500. robots.txt redirects to a login page.
+RIPPLEHIRE_PAGE = 100
+RIPPLEHIRE_DETAIL_CAP = 25  # detail requests per board (the rest keep the list fields, no description)
+_RIPPLEHIRE_TOKEN = re.compile(r"[A-Za-z0-9]{20}")
+_RIPPLEHIRE_SHARED = frozenset({"app", "www"})
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def ripplehire_board(token: Any) -> tuple[str, str] | None:
+    """(tenant, career-site token) from a board 'tenant/token', or None when either part is malformed."""
+    tenant, _, tok = str(token or "").strip().partition("/")
+    tenant = tenant.lower()
+    if not _label(tenant) or tenant in _RIPPLEHIRE_SHARED or not _RIPPLEHIRE_TOKEN.fullmatch(tok):
+        return None
+    return tenant, tok
+
+
+def _ripplehire_posted(vo: dict[str, Any]) -> str:
+    """The career-site publish date (ISO), else jobPostingDate '19-Oct-2026'; '' when neither reads."""
+    pub = vo.get("publishDetails")
+    if isinstance(pub, str):
+        try:
+            pub = json.loads(pub)
+        except ValueError:
+            pub = None
+    iso = _iso_date(pub.get("CAREER_SITE")) if isinstance(pub, dict) else ""
+    if iso:
+        return iso
+    try:
+        return datetime.strptime(str(vo.get("jobPostingDate") or "").strip(), "%d-%b-%Y").date().isoformat()
+    except ValueError:
+        return ""
+
+
+def ripplehire_jobs(row: dict[str, Any], tenant: str, tok: str, items: list[dict[str, Any]],
+                    details: dict[str, dict[str, Any]]) -> list[Job]:
+    """Jobs from RippleHire list items, with description and date from ``details`` (jobSeq -> jobVO) when fetched."""
+    jobs: list[Job] = []
+    seen: set[str] = set()
+    for j in items:
+        title, seq = str(j.get("jobTitle") or "").strip(), str(j.get("jobSeq") or "").strip()
+        if not title or not seq.isdigit() or seq in seen:
+            continue
+        seen.add(seq)
+        place = str(j.get("locations") or "").strip()
+        vo = details.get(seq) or {}
+        years = j.get("jobMinExp")
+        extra: dict[str, Any] = {"experience": str(j.get("jobReqExp") or "")}
+        if isinstance(years, (int, float)) and not isinstance(years, bool) and 0 <= years <= 40:
+            extra["years_min"] = int(years)
+        jobs.append(_job(row, "ripplehire", title=title, location=place,
+                         url=f"https://{tenant}.ripplehire.com/candidate/?token={tok}&source=CAREERSITE#detail/job/{seq}",
+                         posted=_ripplehire_posted(vo), description=_CTRL.sub("", _text(vo.get("jobDesc"))),
+                         remote=_remote_from(place, title), extra=extra))
+    return jobs
+
+
+def _ripplehire(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """RippleHire career site (token = 'tenant/careerSiteToken'): paged list, then details for title matches."""
+    parsed = ripplehire_board(row.get("token"))
+    if parsed is None:
+        return None
+    tenant, tok = parsed
+    origin = f"https://{tenant}.ripplehire.com"
+    hdr = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Accept": "application/json",
+           "X-Requested-With": "XMLHttpRequest", "Referer": f"{origin}/candidate/?token={tok}&source=CAREERSITE"}
+    items: list[dict[str, Any]] = []
+    for page in range(MAX_PAGES):
+        params = json.dumps({"page": page, "search": "*:*", "token": tok, "pagesize": RIPPLEHIRE_PAGE})
+        body = f"careerSiteUrlParams={quote(params, safe='')}&lang=en".encode()
+        st, data = _get(http, f"{origin}/candidate/candidatejobsearch", method="POST", data=body, headers=hdr)
+        if st != 200 or not isinstance(data, dict) or not isinstance(data.get("jobVoList"), list):
+            if page == 0:
+                return None
+            break
+        batch = [j for j in data["jobVoList"] if isinstance(j, dict)]
+        items += batch
+        total = data.get("totalJobCount")
+        if len(batch) < RIPPLEHIRE_PAGE or (isinstance(total, int) and len(items) >= total):
+            break
+    details: dict[str, dict[str, Any]] = {}
+    for j in items:
+        if len(details) >= RIPPLEHIRE_DETAIL_CAP:
+            break
+        seq = str(j.get("jobSeq") or "").strip()
+        if not seq.isdigit() or seq in details or not _title_ok(row, str(j.get("jobTitle") or "")):
+            continue
+        st, d = _get(http, f"{origin}/candidate/candidatejobdetail?token={tok}&jobSeq={seq}", headers=_JSON)
+        vo = d.get("jobVO") if st == 200 and isinstance(d, dict) else None
+        details[seq] = vo if isinstance(vo, dict) else {}
+    return ripplehire_jobs(row, tenant, tok, items, details)
+
+
 # --------------------------------------------------------------------------- Paylocity
 # Borrowed from freehire internal/ingest/sources/paylocity.go (MIT): board = company GUID (:13-14); listing GET
 # https://recruiting.paylocity.com/Recruiting/Jobs/All/<guid> (:45), whose window.pageData embeds the whole Jobs array,
@@ -915,5 +1017,6 @@ ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Jo
     "jibe": _wrap(_jibe),
     "keka": _wrap(_keka),
     "zohorecruit": _wrap(_zohorecruit),
+    "ripplehire": _wrap(_ripplehire),
     "paylocity": fetch_paylocity,
 }

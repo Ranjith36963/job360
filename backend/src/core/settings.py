@@ -454,7 +454,7 @@ OFFICIAL_ATS_HOSTS = (
     "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "smartrecruiters.com",
     "workable.com", "bamboohr.com", "recruitee.com", "teamtailor.com", "personio.de", "personio.com",
     "applytojob.com", "jazzhr.com", "gem.com", "dayforcehcm.com", "freshteam.com",
-    "zohorecruit.com", "zohorecruit.in", "rippling.com", "icims.com", "taleo.net",
+    "zohorecruit.com", "zohorecruit.in", "ripplehire.com", "rippling.com", "icims.com", "taleo.net",
     "ultipro.com", "careers-page.com",
 )
 # Gmail check slice (owner decision 2026-10-15): an employer's ATS sends its

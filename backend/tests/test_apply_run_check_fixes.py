@@ -93,7 +93,7 @@ def test_current_role_still_missing_when_company_absent():
 @pytest.mark.parametrize(
     "host",
     ["jobs.gem.com", "gem.com", "ats.rippling.com", "x.applytojob.com", "a.jazzhr.com", "x.dayforcehcm.com",
-     "x.freshteam.com", "x.zohorecruit.com", "x.zohorecruit.in", "x.icims.com", "x.taleo.net",
+     "x.freshteam.com", "x.zohorecruit.com", "x.zohorecruit.in", "x.ripplehire.com", "x.icims.com", "x.taleo.net",
      "x.ultipro.com", "x.careers-page.com"],
 )
 def test_new_ats_hosts_are_official(host):
