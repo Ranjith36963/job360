@@ -99,6 +99,10 @@ BOARD_SOURCES = (
     "jibe",
     "keka",
     "zohorecruit",
+    "bullhorn",
+    "careerplug",
+    "hireology",
+    "hiringthing",
 )
 FEED_SOURCES = (
     "freehire",
@@ -270,7 +274,7 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more")
+ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_us")
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
     "kit_asia",
@@ -1707,6 +1711,8 @@ def parse_extra(value: str | None) -> list[dict[str, str]]:
             parts = tok.split("/")  # successfactors host[/brand], ultipro host/tenant/id, adp cid/ccId
             name = parts[min(_PATH_TOKEN[ats], len(parts) - 1)]
             out.append({"name": name, "ats": ats, "token": tok, "source": "user"})
+        elif ats == "bullhorn" and re.fullmatch(r"\d{1,4}:[A-Za-z0-9]{1,64}", tok):  # "<cluster>:<corpToken>"
+            out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
         elif ats in BOARD_SOURCES and ats not in _TWO_PART and ats != "workday" \
                 and re.fullmatch(r"[A-Za-z0-9_.-]+", tok):
             out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
@@ -2595,6 +2601,8 @@ _AGGREGATOR_HOSTS = re.compile(
 _SLUG = r"([A-Za-z0-9_.-]+)"
 _SLUG_BLOCK = {"embed", "jobs", "job", "j", "o", "share", "api", "widget", "www", "app", "v1", "careers",
                "en-us", "en-gb"}
+_NON_TENANT_SUB = {"www", "app", "help", "support", "api", "blog", "status", "docs", "admin", "login", "mail",
+                   "cdn", "static"}
 # (ats, host regex); ordered, the first host match wins. Group 1 of the host regex is the token where it is in the host.
 _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("greenhouse", re.compile(r"(?:^|\.)greenhouse\.io$")),
@@ -2626,6 +2634,9 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
     ("keka", re.compile(r"^([a-z0-9-]+)\.keka\.com$")),
     ("zohorecruit", re.compile(r"^([a-z0-9-]+)\.zohorecruit\.(?:in|com)$")),
+    ("careerplug", re.compile(r"^([a-z0-9-]+)\.careerplug\.com$")),
+    ("hireology", re.compile(r"^careers\.hireology\.com$")),
+    ("hiringthing", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+)*\.hiringthing\.com)$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
@@ -2688,6 +2699,10 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
         elif ats == "join":  # https://join.com/companies/<slug>/...
             tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
+        elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
+        elif ats in ("careerplug", "hiringthing") and m.group(1).split(".")[0] in _NON_TENANT_SUB:
+            continue  # www/help/app.<vendor>.com is the vendor's own site, not a tenant board
         else:
             tok = m.group(1)
         # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.

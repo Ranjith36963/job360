@@ -6305,5 +6305,10 @@
 {"name":"Headway Group","ats":"zohorecruit","board":"headwayms","source":"gulf-research","country":"AE"},
 {"name":"Nationwide Middle East Properties","ats":"zohorecruit","board":"nwmea","source":"gulf-research","country":"AE"},
 {"name":"Premier Inn Middle East","ats":"zohorecruit","board":"global","source":"gulf-research","country":"AE"},
-{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"}
+{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"},
+{"name":"Golden Corral","ats":"careerplug","board":"golden-corral-careers","source":"freehire"},
+{"name":"10 Federal","ats":"hiringthing","board":"10federal-partners-inc.prismhr-hire.com","source":"freehire"},
+{"name":"BASH","ats":"hiringthing","board":"1235-keystone-way-llc.gnahiring.com","source":"freehire"},
+{"name":"Integral Senior Living","ats":"hiringthing","board":"1440-by-the-bay.oasisrecruit.com","source":"freehire"},
+{"name":"4Minds","ats":"hiringthing","board":"4mindsai.hiringthing.com","source":"freehire"}
 ]
