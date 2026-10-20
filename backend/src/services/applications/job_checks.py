@@ -103,11 +103,16 @@ def word_count(text: str) -> int:
     return len(text.split()) if text and text.strip() else 0
 
 
-def canonical_url(url: str) -> str:
+def canonical_url(url: str, *, only_keys: Optional[frozenset[str]] = None) -> str:
     """One stable key for "the same ad link": lower-case host (``www.`` folded),
     ``utm_*`` / gclid / fbclid / ref / trackingId / refId and the fragment dropped,
     remaining query sorted, trailing slash dropped. ``''`` for a blank or
-    unparseable link. Compared on read - nothing is stored."""
+    unparseable link. Compared on read - nothing is stored.
+
+    ``only_keys`` turns the query rule into an ALLOW-list (a form page address that IS
+    stored, ``assistant_settings.clean_form_url``): only those keys (lower-cased) with a
+    value are kept, and path parameters (``;jsessionid=...``) are dropped too, so a
+    token, ``code=`` or session id can never be stored."""
     raw = (url or "").strip()
     if not raw:
         return ""
@@ -120,13 +125,15 @@ def canonical_url(url: str) -> str:
     if not host or parts.scheme.lower() not in ("http", "https"):
         return ""
     host = host.removeprefix("www.")
-    kept = sorted(
-        (k, v)
-        for k, v in parse_qsl(parts.query, keep_blank_values=True)
-        if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_KEYS
-    )
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    path = parts.path
+    if only_keys is not None:
+        kept = sorted((k, v) for k, v in pairs if k.lower() in only_keys and v.strip())
+        path = re.sub(r";[^/]*", "", path)
+    else:
+        kept = sorted((k, v) for k, v in pairs if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_KEYS)
     netloc = host + (f":{port}" if port and port not in (80, 443) else "")
-    return urlunsplit(("https", netloc, parts.path.rstrip("/"), urlencode(kept), ""))
+    return urlunsplit(("https", netloc, path.rstrip("/"), urlencode(kept), ""))
 
 
 # A link names ONE job when it carries a job id: a long number, a UUID-like
