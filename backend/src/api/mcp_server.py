@@ -1440,11 +1440,11 @@ def build_server(version: str = "") -> MCPServer:
         Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`,
         or the user says so) or outreach_replied; no application_id if cold.
 
-        Kit events (these keys only):
+        Kit events:
         form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|
         approved|written|guessed (key = kit key);
-        form_checked {questions_count, answered, missing, answers?, page, pages_total};
+        form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
@@ -1861,11 +1861,12 @@ def build_server(version: str = "") -> MCPServer:
         form_not_recorded (`stop`: record `form_filled`),
         form_not_swept (`stop`: re-read every field, record `form_swept`),
         form_count_mismatch, unreadable_fields (`stop`: sweep again), form_check_missing (`stop`: call
-        check_form), submit_unconfirmed (`stop`: `submit_attempted` has no outcome: never submit again),
+        check_form), required_unanswered (`stop`: ask for the answer),
+        submit_unconfirmed (`stop`: `submit_attempted` has no outcome: never submit again),
         duplicate_job (same job already applied to: `stop`
         in auto mode, else `ask`), duplicate_role (`ask`: same company+title before),
-        new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
-        profile), held_by_other_session (another session holds it),
+        new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims,
+        held_by_other_session,
         unknown_site (not one plain http(s) address),
         form_host_mismatch / form_page_mismatch (not the site / page you filled),
         email_not_verified, ask_always_site, job_override_confirm,
