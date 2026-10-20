@@ -5,7 +5,8 @@ Three layers, each pinned here:
 1. The hard lines as pure rules (``safety.py``) — no browser, no network.
 2. The switch: OFF by default, the route and the MCP tool both answer ``off``.
 3. A real Chromium run against a local test site (skipped when Playwright or
-   its Chromium is not installed, as on CI). The site is served on loopback.
+   its Chromium is not installed; CI installs both and fails if they skip).
+   The site is served on loopback.
    Chromium reaches it only through the egress proxy: a fake resolver gives
    ``jobs.example`` a public address and the proxy's injected connector maps
    that address to the loopback site, so nothing leaves the machine (rule #4).
@@ -240,15 +241,93 @@ def _site_resolver():
     return resolve
 
 
-def _to_site(port: int):
-    """The proxy's connector: the public test address is really the loopback test site."""
+def _to_site(port: int, tls_port: int = 0):
+    """The proxy's connector: the public test address is really the loopback test site.
+    With ``tls_port``, a connection to port 443 goes to the site's HTTPS listener (``_serve``)."""
     import asyncio
 
     async def open_connection(host, p):
         assert host == "93.184.216.34", f"the proxy tried to connect to {host}"
-        return await asyncio.open_connection("127.0.0.1", port)
+        return await asyncio.open_connection("127.0.0.1", tls_port if (tls_port and p == 443) else port)
 
     return open_connection
+
+
+# Real applicant-system hosts the tests open (sites.py names a site by its real host). Chromium forces
+# HTTPS for every host on its HSTS preload list (ashbyhq.com and icims.com are, with subdomains), but
+# only while the build is under 10 weeks old (net/http/transport_security_state.cc IsBuildTimely), so
+# plain http to these hosts passed on an old Chromium and failed with ERR_SSL_PROTOCOL_ERROR on a fresh
+# one. These hosts are therefore opened over https, as the real sites are, from a throwaway certificate.
+ATS_HOSTS = ("jobs.lever.co", "jobs.ashbyhq.com", "acme.wd3.myworkdayjobs.com", "careers-acme.icims.com")
+_TLS: list[tuple] = []
+
+
+def _test_tls():
+    """(server SSL context, Chromium flag trusting only this certificate's key), made once per process."""
+    if not _TLS:
+        import base64
+        import datetime
+        import hashlib
+        import os
+        import ssl
+        import tempfile
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "job360 browser test site")])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = (
+            x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(days=1)).not_valid_after(now + datetime.timedelta(days=7))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(h) for h in ATS_HOSTS]), critical=False)
+            .sign(key, hashes.SHA256())
+        )
+        pem = cert.public_bytes(serialization.Encoding.PEM) + key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+        with tempfile.NamedTemporaryFile("wb", suffix=".pem", delete=False) as f:
+            f.write(pem)
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        try:
+            ctx.load_cert_chain(f.name)
+        finally:
+            os.unlink(f.name)
+        spki = cert.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        flag = "--ignore-certificate-errors-spki-list=" + base64.b64encode(hashlib.sha256(spki).digest()).decode()
+        _TLS.append((ctx, flag))
+    ctx, flag = _TLS[0]
+    return ctx, [flag]
+
+
+async def _serve(app):
+    """Start ``app`` on loopback over http and https: (runner, http port, https port)."""
+    from aiohttp import web
+
+    ctx, _ = _test_tls()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    plain = web.TCPSite(runner, "127.0.0.1", 0)
+    await plain.start()
+    tls = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=ctx)
+    await tls.start()
+    ports = [s._server.sockets[0].getsockname()[1] for s in (plain, tls)]  # noqa: SLF001 - the site's own ports
+    return runner, ports[0], ports[1]
+
+
+def _ats_pool(resolve, ports):
+    """A pool whose Chromium reaches the test site's https listener and trusts its certificate only."""
+    from src.services.browser_agent.agent import BrowserPool
+
+    return BrowserPool(
+        max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(*ports), launch_args=_test_tls()[1]
+    )
 
 
 def _ref(page: dict, name: str) -> str:
@@ -1204,11 +1283,8 @@ async def ats_site():
     app.router.add_post("/acme/123/apply", lever_post)
     app.router.add_get("/acme/123/thanks", thanks)
     app.router.add_get("/acme/456/application", ashby)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    tcp = web.TCPSite(runner, "127.0.0.1", 0)
-    await tcp.start()
-    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    runner, port, tls_port = await _serve(app)
+    yield port, tls_port
     await runner.cleanup()
 
 
@@ -1216,11 +1292,11 @@ async def ats_site():
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site):
-    from src.services.browser_agent.agent import BrowserPool, Gate, run
+    from src.services.browser_agent.agent import Gate, run
 
     table = {"jobs.lever.co": "93.184.216.34", "jobs.ashbyhq.com": "93.184.216.34"}
     resolve, _ = _resolver(table)
-    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(ats_site))
+    pool = _ats_pool(resolve, ats_site)
 
     async def mark():
         return None
@@ -1230,7 +1306,7 @@ async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site
 
     gate = Gate(check=go, mark_attempt=mark)
     try:
-        page = await run(pool, "u1", "open", url="http://jobs.lever.co/acme/123/apply")
+        page = await run(pool, "u1", "open", url="https://jobs.lever.co/acme/123/apply")
         assert page["site"]["name"] == "lever" and any("suggestion" in t for t in page["site"]["tips"])
         assert any("cookie banner" in w for w in page["site_warnings"])
         page = await run(pool, "u1", "click", ref=_ref(page, "Allow cookies"))
@@ -1245,7 +1321,7 @@ async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site
         assert out["url"].endswith("/acme/123/thanks") and out["confirmation_seen"] is True
         assert out["next"] == "The site shows a confirmation: call record_application."
 
-        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme/456/application")
+        page = await run(pool, "u1", "open", url="https://jobs.ashbyhq.com/acme/456/application")
         assert page["site"]["name"] == "ashby" and "confirmation_seen" not in page
         yes = next(e for e in page["elements"] if e["name"] == "Yes")
         no = next(e for e in page["elements"] if e["name"] == "No")
@@ -1288,7 +1364,7 @@ WORKDAY = """<!doctype html><html><head><title>My Information - Workday</title><
 </script></body></html>"""
 ICIMS_HOST_PAGE = """<!doctype html><html><head><title>Careers - Acme</title></head><body>
 <h1>Careers at Acme</h1>
-<iframe id="icims_content_iframe" src="http://careers-acme.icims.com/jobs/1/apply?in_iframe=1"
+<iframe id="icims_content_iframe" src="https://careers-acme.icims.com/jobs/1/apply?in_iframe=1"
   style="width:800px;height:400px"></iframe></body></html>"""
 ICIMS_FORM = """<!doctype html><html><body><form>
 <label for="email">Email Address</label><input id="email" type="email">
@@ -1310,11 +1386,8 @@ async def wizard_site():
     app.router.add_get("/en-US/External/job/1/apply", page(WORKDAY))
     app.router.add_get("/careers", page(ICIMS_HOST_PAGE))
     app.router.add_get("/jobs/1/apply", page(ICIMS_FORM))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    tcp = web.TCPSite(runner, "127.0.0.1", 0)
-    await tcp.start()
-    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    runner, port, tls_port = await _serve(app)
+    yield port, tls_port
     await runner.cleanup()
 
 
@@ -1322,14 +1395,14 @@ async def wizard_site():
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_workday_steps_invalid_marks_keyed_typing_and_an_icims_frame(wizard_site):
-    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+    from src.services.browser_agent.agent import BrowserError, run
 
     public = "93.184.216.34"
     table = {"acme.wd3.myworkdayjobs.com": public, "jobs.example": public, "careers-acme.icims.com": public}
     resolve, _ = _resolver(table)
-    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(wizard_site))
+    pool = _ats_pool(resolve, wizard_site)
     try:
-        page = await run(pool, "u1", "open", url="http://acme.wd3.myworkdayjobs.com/en-US/External/job/1/apply")
+        page = await run(pool, "u1", "open", url="https://acme.wd3.myworkdayjobs.com/en-US/External/job/1/apply")
         assert page["site"]["name"] == "workday" and page["form_step"] == {"current": 2, "total": 3}
         assert any("Month and Year" in t for t in page["site"]["tips"])
         page = await run(pool, "u1", "click", ref=_ref(page, "Save and Continue"))   # a step, not the submit
@@ -1453,11 +1526,11 @@ async def test_a_dead_click_is_named_never_repeated_blind_and_a_submit_never_twi
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_a_confirmation_is_kept_as_a_proof_screenshot_and_a_refused_submit_may_be_retried(ats_site):
-    from src.services.browser_agent.agent import BrowserPool, Gate, run
+    from src.services.browser_agent.agent import Gate, run
 
     table = {"jobs.lever.co": "93.184.216.34", "jobs.ashbyhq.com": "93.184.216.34"}
     resolve, _ = _resolver(table)
-    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(ats_site))
+    pool = _ats_pool(resolve, ats_site)
     proofs: list[bytes] = []
 
     async def mark():
@@ -1471,13 +1544,13 @@ async def test_a_confirmation_is_kept_as_a_proof_screenshot_and_a_refused_submit
 
     gate = Gate(check=go, mark_attempt=mark, save_proof=keep)
     try:
-        page = await run(pool, "u1", "open", url="http://jobs.lever.co/acme/123/apply")
+        page = await run(pool, "u1", "open", url="https://jobs.lever.co/acme/123/apply")
         page = await run(pool, "u1", "click", ref=_ref(page, "Allow cookies"))   # the banner covers the button
         out = await run(pool, "u1", "click", ref=_ref(page, "Submit application"), gate=gate)
         assert out["confirmation_seen"] is True and out["proof_saved"] is True
         assert len(proofs) == 1 and proofs[0].startswith(b"\xff\xd8\xff")   # a JPEG of the thank-you page
 
-        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme/456/application")
+        page = await run(pool, "u1", "open", url="https://jobs.ashbyhq.com/acme/456/application")
         submit = _ref(page, "Submit Application")
         out = await run(pool, "u1", "click", ref=submit, gate=gate)
         assert out["site_refused"] and "proof_saved" not in out and len(proofs) == 1

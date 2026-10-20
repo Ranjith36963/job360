@@ -79,6 +79,9 @@ some Zoho Recruit sites list no description either, so open the link to read the
 `kit_ats_eu.py` adds Emply (`emply`), Manatal (`manatal`), TalentAdore (`talentadore`), Traffit (`traffit`)
 and Trakstar (`trakstar`), mostly European employers (rows with `source` `freehire`). Each is read with a few
 requests per board; the first refusal ends that board.
+`kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), Comeet (`comeet`, `slug/companyUID`)
+and HiBob (`hibob`, the tenant of `tenant.careers.hibob.com`). These boards are unofficial public endpoints: a board that
+refuses scripts is skipped, and the first refusal ends that board.
 
 India: many Indian employers post on Keka Hire and Zoho Recruit, not on the boards above. The
 `keka` and `zohorecruit` rows in `companies.json` (`source` `commoncrawl`, `country` `IN` when most
@@ -251,7 +254,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py`, `kit_ats_more.py` and `kit_ats_eu.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py` and `kit_ats_eu.py` and `kit_ats_extra.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
