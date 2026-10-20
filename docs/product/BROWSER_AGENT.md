@@ -122,6 +122,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Final submit:**
   - The tool runs `check_submit` itself and records `submit_attempted` first.
   - It clicks only on `submit`. An `ask` becomes a `submit` once the user clicks Send on Needs you.
+  - What counts as the final submit (`safety.control_kind`): any button that submits its form (type submit or image, or a `<button>` with no type) unless its name is a step ("Next", "Save and continue"), so a name in another language ("Bewerbung absenden") or one we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named "Submit"; and "Apply" / "Send" on a button once the page holds an answer. An answer is a typed value, a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too, and a button in a shadow root sits in the `<form>` around its host.
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the tool turns on.
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).

@@ -35,6 +35,10 @@ _STEP_WORDS = re.compile(
     re.IGNORECASE,
 )
 _PASSWORD_NAME = re.compile(r"pass(word|code|phrase)|\bpwd\b", re.IGNORECASE)
+# "Save and send application": the step word does not make it a step.
+_APPLICATION = re.compile(r"\bapplication", re.IGNORECASE)
+# Roles the look lists that are clicked like a link: named the way a link is.
+_LINK_ROLES = ("link", "tab", "switch", "option")
 
 
 def control_kind(
@@ -71,17 +75,22 @@ def control_kind(
     )
     if tag in ("input", "textarea") and not is_button:
         return "password" if _PASSWORD_NAME.search(name) else "field"
-    if not is_button and tag != "a":
+    is_link = not is_button and (tag == "a" or role in _LINK_ROLES)
+    if not is_button and not is_link:
         return "field"
-    if _STEP_WORDS.search(name) and not _STRONG_SUBMIT.search(name):
+    sends_application = bool(_SUBMIT_WORDS.search(name) and _APPLICATION.search(name))
+    if _STEP_WORDS.search(name) and not _STRONG_SUBMIT.search(name) and not sends_application:
         return "field"
     if _STRONG_SUBMIT.search(name):
         return "submit"
-    if tag == "a" and role != "button":
+    if is_link:
         return "field"
     if (in_form or page_has_answers) and _SUBMIT_WORDS.search(name):
         return "submit"
-    # A real submit button of a form with no clear name: the safe side.
+    # A button that submits its form, whatever its name ("Bewerbung absenden", "Done"): the safe side.
+    if in_form and ((tag == "button" and input_type in ("submit", "")) or input_type in ("submit", "image")):
+        return "submit"
+    # Any other button of a form with no clear name: the safe side.
     if in_form and input_type in ("submit", "image", "") and not name.strip():
         return "submit"
     return "field"

@@ -52,7 +52,11 @@ _LABEL_OF_JS = r"""
     return el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
   };
   // A button can belong to a form it sits outside of (form="id"): el.form knows, closest() does not.
-  const inForm = (el) => !!(el.form || el.closest('form'));
+  // Inside an open shadow root the <form> is around the host, so climb out host by host.
+  const inForm = (el) => {
+    for (let n = el, i = 0; n && i < 8; n = n.getRootNode().host, i++) if (n.form || n.closest('form')) return true;
+    return false;
+  };
 """
 
 SNAPSHOT_JS = r"""
@@ -146,18 +150,36 @@ ELEMENT_FACTS_JS = r"""
 (el) => {
 """ + _LABEL_OF_JS + r"""
   const name = labelOf(el) || '';
+  // Every match in the document and in its open shadow roots, as deep as the look reads them.
+  const deepAll = (root, sel, depth) => {
+    const found = Array.from(root.querySelectorAll(sel));
+    if (depth > 6) return found;
+    for (const host of root.querySelectorAll('*')) {
+      if (host.shadowRoot) found.push(...deepAll(host.shadowRoot, sel, depth + 1));
+    }
+    return found;
+  };
+  // A typed answer, a chosen file or option, a ticked box, a pressed choice: what the page held at
+  // load (defaultSelected / defaultChecked) is not an answer.
+  const answered = (f) => {
+    if (f.getAttribute('aria-checked') === 'true' || f.getAttribute('aria-pressed') === 'true') return true;
+    if (f.tagName === 'SELECT') return Array.from(f.selectedOptions).some((o) => o.index > 0 && !o.defaultSelected);
+    if (f.tagName === 'INPUT' || f.tagName === 'TEXTAREA') {
+      const t = (f.type || '').toLowerCase();
+      if (t === 'checkbox' || t === 'radio') return f.checked && !f.defaultChecked;
+      if (['hidden', 'submit', 'button', 'image', 'password', 'search'].includes(t)) return false;
+      if (t === 'file') return !!(f.files && f.files.length);
+      return !!(f.value || '').trim();
+    }
+    return f.isContentEditable && !!(f.innerText || '').trim();
+  };
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
     in_form: inForm(el), role: el.getAttribute('role') || '',
-    // Any typed answer or chosen file anywhere on the page: the form is being filled.
-    page_has_answers: Array.from(el.ownerDocument.querySelectorAll('input, textarea')).some((f) => {
-      const t = (f.type || '').toLowerCase();
-      if (['hidden', 'submit', 'button', 'image', 'checkbox', 'radio', 'password', 'search'].includes(t)) return false;
-      if (t === 'file') return !!(f.files && f.files.length);
-      return !!(f.value || '').trim();
-    }) || Array.from(el.ownerDocument.querySelectorAll('[contenteditable]')).some(
-      (f) => f.isContentEditable && !!(f.innerText || '').trim()),
+    // Any answer anywhere on the page, shadow roots included: the form is being filled.
+    page_has_answers: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
+      + '[aria-checked=true], [aria-pressed=true]', 0).some(answered),
   };
 }
 """
