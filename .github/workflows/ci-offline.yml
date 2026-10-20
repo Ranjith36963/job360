@@ -191,6 +191,15 @@ jobs:
           set -o pipefail
           pg_dump --version
           python -m pytest -q -p no:randomly -n auto --junitxml=/tmp/junit.xml | tee /tmp/pytest.out
+      # SKIP RATCHET (2026-10-20). A skipped test is a test that did not run, and
+      # the count only ever grew without anyone deciding it should. This fails
+      # when the report's skips exceed SKIP_BASELINE in scripts/test_integrity.py
+      # and prints each reason that is new or grew. Raising the baseline is an
+      # edit to that file, which the `test-integrity` check (ci.yml) flags.
+      # `!cancelled()`: it still reports after a red suite; no report is red.
+      - name: Skipped tests do not grow (skip ratchet)
+        if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
+        run: python scripts/test_integrity.py --skips /tmp/junit.xml
       # Per-file verdict for tests/test_e2e_lifecycle.py, read from the report
       # of the run above. `absent` (no report, or no lifecycle test in it) is
       # NOT a pass: loop2-e2e-spotlight goes red on anything but `passed`.
