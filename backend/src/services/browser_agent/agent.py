@@ -48,7 +48,13 @@ from src.services.browser_agent.page_js import (
     WATCH_START_JS,
 )
 from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
-from src.services.browser_agent.sites import is_honeypot, looks_like_application, outcome_for, site_for
+from src.services.browser_agent.sites import (
+    account_step,
+    is_honeypot,
+    looks_like_application,
+    outcome_for,
+    site_for,
+)
 from src.services.fetch.guard import ResolveFn
 
 logger = logging.getLogger("job360.services.browser_agent")
@@ -574,7 +580,7 @@ async def look(s: Session) -> dict[str, Any]:
             "above": above, "below": below,
             "hint": "Only the controls nearest the screen are listed. scroll up or down, then look, to see the rest.",
         }
-    blocker = blocker_for(frame_urls, text, has_password)
+    blocker = blocker_for(frame_urls, text, has_password, account_step(site, out["title"], text))
     if blocker is not None:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
     return out
