@@ -1427,11 +1427,16 @@ async def test_the_route_keeps_the_proof_screenshot_on_the_callers_application(a
 
 
 @pytest.mark.asyncio
-async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(authenticated_async_context):
+async def test_a_refused_submit_claim_is_a_refusal_and_nothing_is_clicked(authenticated_async_context, monkeypatch):
+    """G338: another session already recorded submit_attempted, so the route's mark_attempt gets
+    a 409; the browser answers refused / submit_already_started and never clicks."""
+    import dataclasses
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
     from src.api.auth_deps import CurrentUser
     from src.api.routes import browser as browser_route
-    from src.services.profile.models import CVData, UserInfo, UserProfile
-    from src.services.profile.storage import save_profile, save_user_info
+    from src.services.browser_agent import agent
 
     async with authenticated_async_context() as client:
         brought = await client.post("/api/jobs/bring", json={
@@ -1439,28 +1444,42 @@ async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(auth
             "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/9",
         })
         app_id = brought.json()["application_id"]
-        for kind in ("cv", "cover_letter"):
-            saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": kind, "text": "Hello"})
-            assert saved.status_code in (200, 201)
-        user_id = authenticated_async_context.fixture_user_id
-        user = CurrentUser(id=user_id, email="ada@example.com", auth_via="token", actor_name="claude")
-        _, files = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
-        # No name known yet: the plain defaults.
-        assert [(await files(k))[0] for k in ("cv", "cover_letter")] == ["CV.pdf", "Cover_letter.pdf"]
-        save_profile(
-            UserProfile(cv_data=CVData(raw_text="Data engineer.", name="Ranjith Maliga-Guruprakash")),
-            user_id, source_action="cv_upload",
+        first = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "submit_attempted"})
+        assert first.status_code == 201, first.text
+        user = CurrentUser(
+            id=authenticated_async_context.fixture_user_id, email="ada@example.com", auth_via="token",
+            actor_name="claude",
         )
-        name, pdf = await files("cv")
-        assert name == "Ranjith_Maliga-Guruprakash_CV.pdf" and pdf.startswith(b"%PDF")
-        assert (await files("cover_letter"))[0] == "Ranjith_Maliga-Guruprakash_Cover_Letter.pdf"
-        # Two 200-character legal names must not make a file name the disk refuses.
-        save_user_info(
-            user_id, UserInfo(contact={"legal_first_name": "A" * 200, "legal_last_name": "B" * 200}), "test"
-        )
-        for kind, tail in (("cv", "_CV.pdf"), ("cover_letter", "_Cover_Letter.pdf")):
-            long_name = (await files(kind))[0]
-            assert len(long_name.encode()) <= 150 and long_name.startswith("AAAA") and long_name.endswith(tail)
+        gate, _ = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        with pytest.raises(agent.BrowserError) as exc:
+            await gate.mark_attempt()
+        assert exc.value.as_dict() == {
+            "status": "refused", "reason": "submit_already_started",
+            "detail": "Another session already started submitting this application; nothing was clicked.",
+        }
+
+        # The same refusal inside the browser's click: check_submit said submit, the claim is refused,
+        # and the control is never clicked.
+        loc = MagicMock(click=AsyncMock(), evaluate=AsyncMock(return_value={}))
+        page = MagicMock(url="https://jobs.acme.com/apply/9")
+        monkeypatch.setattr(agent, "_page_captcha", AsyncMock(return_value=False))
+        monkeypatch.setattr(agent, "_live_page", lambda s: page)
+        monkeypatch.setattr(agent, "_find", AsyncMock(return_value=(MagicMock(), loc)))
+        monkeypatch.setattr(agent, "_refuse_captcha_frame", lambda frame: None)
+        monkeypatch.setattr(agent, "_kind", AsyncMock(return_value="submit"))
+        go = AsyncMock(return_value={"decision": "submit", "reason": "auto_when_sure", "detail": ""})
+        session = SimpleNamespace(dead_clicks={}, submitted_on=(None, ""), submit_refused=False)
+        with pytest.raises(agent.BrowserError) as exc:
+            await agent._act(  # noqa: SLF001
+                MagicMock(), session, "click", url="", ref="e1", text="", on=True, doc_kind="",
+                gate=dataclasses.replace(gate, check=go), files=None,
+            )
+        assert (exc.value.status, exc.value.reason) == ("refused", "submit_already_started")
+        go.assert_awaited_once()
+        loc.click.assert_not_called()
+        assert session.submitted_on == (None, "")
+        events = await client.get(f"/api/applications/{app_id}")
+        assert [e["event_type"] for e in events.json()["events"]].count("submit_attempted") == 1
 
 
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
@@ -1726,3 +1745,46 @@ async def test_opening_three_different_pages_is_no_repeat(pool):
     for _ in range(2):
         await run(pool, "u1", "open", url="http://jobs.example/form?job=1")
     assert "3 times in a row" in (await run(pool, "u1", "open", url="http://jobs.example/form?job=1"))["repeat_warning"]
+
+
+@pytest.mark.asyncio
+async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(authenticated_async_context):
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_route
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+    from src.services.profile.storage import save_profile, save_user_info
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/9",
+        })
+        app_id = brought.json()["application_id"]
+        for kind in ("cv", "cover_letter"):
+            saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": kind, "text": "Hello"})
+            assert saved.status_code in (200, 201)
+        user_id = authenticated_async_context.fixture_user_id
+        user = CurrentUser(id=user_id, email="ada@example.com", auth_via="token", actor_name="claude")
+        _, files = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        # No name known yet: the plain defaults.
+        assert [(await files(k))[0] for k in ("cv", "cover_letter")] == ["CV.pdf", "Cover_letter.pdf"]
+        save_profile(
+            UserProfile(cv_data=CVData(raw_text="Data engineer.", name="Ranjith Maliga-Guruprakash")),
+            user_id, source_action="cv_upload",
+        )
+        name, pdf = await files("cv")
+        assert name == "Ranjith_Maliga-Guruprakash_CV.pdf" and pdf.startswith(b"%PDF")
+        assert (await files("cover_letter"))[0] == "Ranjith_Maliga-Guruprakash_Cover_Letter.pdf"
+        # Two 200-character legal names must not make a file name the disk refuses.
+        save_user_info(
+            user_id, UserInfo(contact={"legal_first_name": "A" * 200, "legal_last_name": "B" * 200}), "test"
+        )
+        for kind, tail in (("cv", "_CV.pdf"), ("cover_letter", "_Cover_Letter.pdf")):
+            long_name = (await files(kind))[0]
+            assert len(long_name.encode()) <= 150 and long_name.startswith("AAAA") and long_name.endswith(tail)
+
+
+FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
+""" + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
+<iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
+</body></html>"""
