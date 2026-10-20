@@ -22,6 +22,7 @@ an annotation cannot describe, so their closed key set is ``RECORD_SCHEMAS``.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
@@ -29,7 +30,7 @@ import typing
 import unicodedata
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from src.core import settings
 from src.core.settings import DB_PATH
@@ -714,6 +715,128 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
     return out
 
 
+# ── Two assistants, one profile (gap 4, slice 26) ───────────────────────────
+# Every profile_edits writer takes this per-user lock inside its transaction, so
+# a guarded write's check ("nothing moved since I read it") and its insert are one
+# step. int32 class id for pg_advisory_xact_lock(class, hashtext(user_id)), the
+# same two-key form as proof.PROOF_LOCK_CLASS (360_007) with its own class.
+EDIT_LOCK_CLASS = 360_026
+
+
+def _take_edit_lock(conn: pgsync.Connection, user_id: str) -> None:
+    conn.execute("SELECT pg_advisory_xact_lock(?, hashtext(?))", (EDIT_LOCK_CLASS, user_id))
+
+
+@contextlib.contextmanager
+def user_edit_lock(user_id: str) -> Iterator[None]:
+    """Hold ``user_id``'s profile-write lock for the block, on a connection of its own.
+
+    The block's reads and its :func:`record_edits` (called with ``lock_held=True``,
+    or it would wait on this very lock) run on other connections, so what they
+    commit is visible at once; nothing is written on this one. Keep the block
+    SYNCHRONOUS: an ``await`` inside it would let a second request for the same
+    user, on the same event loop, block that loop on a lock only the suspended
+    first one can release.
+    """
+    with pgsync.connect(str(DB_PATH)) as conn, conn._raw.transaction():
+        _take_edit_lock(conn, user_id)
+        yield
+
+
+def current_edit_id(user_id: str) -> int:
+    """``MAX(profile_edits.id)`` for ``user_id`` (0 = no edit yet): get_profile's ``profile_edit_id``.
+
+    It moves on EVERY accepted write - each is a new append-only row - which is
+    why ``update_profile``'s ``expected_profile_version`` is checked against it.
+    ``profile_version`` (``MAX(user_profile_versions.id)``, the artifact stamp)
+    does not move on an overlay write: no snapshot is taken.
+    """
+    try:
+        with pgsync.connect(str(DB_PATH)) as conn:
+            row = conn.execute("SELECT MAX(id) FROM profile_edits WHERE user_id = ?", (user_id,)).fetchone()
+    except pgsync.OperationalError as exc:
+        if _is_missing_table(exc):
+            return 0
+        raise
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+EDIT_OPS = ("set", "append", "upsert", "remove_at")
+
+
+def is_list_path(path: str) -> bool:
+    """True for an editable path whose value is a list (the paths an item op works on)."""
+    return path in editable_paths() and typing.get_origin(_field_type(path)) is list
+
+
+def _apply_op(path: str, op: str, value: Any, index: Any, items: list[Any]) -> list[Any]:
+    from src.services.profile import user_info  # noqa: PLC0415 — imports this module
+
+    if not is_list_path(path):
+        raise ProfileEditError(422, f"{path}: op {op!r} works only on a list path; send the whole value", "bad_value")
+    if op == "remove_at":
+        if value is not None:
+            raise ProfileEditError(422, f"{path}: remove_at takes an index, not a value", "bad_value")
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(items):
+            raise ProfileEditError(
+                422, f"{path}: remove_at index must be from 0 to {len(items) - 1} (the list has {len(items)})",
+                "out_of_range",
+            )
+        return items[:index] + items[index + 1:]
+    if value is None:
+        raise ProfileEditError(422, f"{path}: {op} needs a value (one item, not the list)", "bad_value")
+    if op == "upsert":
+        if path != user_info.USER_INFO_ANSWERS_PATH:
+            raise ProfileEditError(
+                422, f"{path}: upsert works only on {user_info.USER_INFO_ANSWERS_PATH}", "bad_value"
+            )
+        at = user_info.answer_upsert_index(items, value)
+        if at is not None:
+            return items[:at] + [value] + items[at + 1:]
+    return items + [value]
+
+
+def resolve_ops(edits: list[tuple[str, str, Any, Any]], current: dict[str, Any]) -> list[tuple[str, Any]]:
+    """Turn ``(path, op, value, index)`` edits into ``(path, whole value)`` pairs.
+
+    ``set`` (the default) passes through untouched. Every edit on a path that
+    carries an item op (``append`` one item, ``upsert`` one saved answer,
+    ``remove_at`` one index) is applied IN ORDER to that path's value in
+    ``current`` (what get_profile's ``fields`` shows) and collapses into ONE
+    pair holding the RESULTING list, at the path's first position - so the
+    append-only ``profile_edits`` row stores the full value, like any write,
+    and the usual validator then checks it whole (caps included). A refused op
+    is a 422 naming the path; nothing is written.
+    """
+    paths = editable_paths()
+    op_paths = {path for path, op, _, _ in edits if op != "set"}
+    running: dict[str, list[Any] | None] = {}
+    order: list[tuple[str, Any]] = []
+    for path, op, value, index in edits:
+        if op not in EDIT_OPS:  # the request model already refuses it; kept for direct callers
+            raise ProfileEditError(422, f"{path}: op must be one of {', '.join(EDIT_OPS)}", "bad_value")
+        if index is not None and op != "remove_at":
+            raise ProfileEditError(422, f"{path}: index is only for op remove_at", "bad_value")
+        if path not in op_paths:
+            order.append((path, value))
+            continue
+        if path not in paths:
+            raise ProfileEditError(
+                422, f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}", "unknown_key"
+            )
+        if path not in running:
+            order.append((path, None))
+            base = current.get(path)
+            running[path] = list(base) if isinstance(base, list) else []
+        if op != "set":
+            running[path] = _apply_op(path, op, value, index, running[path] or [])
+        elif value is None or isinstance(value, list):
+            running[path] = value  # null still clears, unless a later op in this call adds to it
+        else:
+            raise ProfileEditError(422, f"{path} must be a list, got {type(value).__name__}", "bad_type")
+    return [(path, running[path]) if path in running else (path, value) for path, value in order]
+
+
 # The actor ``authorship.actor_for`` gives a signed-in human at the browser.
 # Rows by this author are the human's own changes: they are history, never an
 # "assistant changed this" mark.
@@ -823,6 +946,7 @@ def record_edits(
     store_as_given: bool = False,
     source: str | dict[str, str] = "",
     consent_paths: Iterable[str] = (),
+    lock_held: bool = False,
 ) -> list[dict[str, Any]]:
     """Validate every edit, then insert them append-only in ONE transaction.
 
@@ -861,6 +985,10 @@ def record_edits(
     clock - a caller can never supply the time (mirrors job-apply-store.py L541-544:
     ``record["rememberedWithConsentAt"] = utc_now()``, set by the helper, not the input).
 
+    ``lock_held`` (gap 4): the caller already holds :func:`user_edit_lock`.
+    Otherwise the transaction takes that per-user lock itself, so no write
+    can land between a guarded caller's version check and its insert.
+
     Returns the applied rows in the same ``{"path", "value", "set_by",
     "set_at", "source"}`` shape as :func:`current_overlay`.
     """
@@ -890,6 +1018,8 @@ def record_edits(
     consent = frozenset(consent_paths)
     applied: list[dict[str, Any]] = []
     with pgsync.connect(str(DB_PATH)) as conn, conn._raw.transaction():
+        if not lock_held:
+            _take_edit_lock(conn, user_id)
         for path, value in normalised:
             encoded = None if value is None else json.dumps(value)
             row_source = source.get(path, "") if isinstance(source, dict) else source
@@ -905,6 +1035,39 @@ def record_edits(
                 {"path": path, "value": value, "set_by": actor, "set_at": now, "source": row_source}
             )
     return applied
+
+
+def record_snapshot_then_clear(
+    user_id: str, actor: str, snapshot: list[tuple[str, Any]], clear_paths: Iterable[str]
+) -> int:
+    """Append each ``snapshot`` value, then a clearing row (``value = NULL``) for
+    every snapshot path and every ``clear_paths`` path, in ONE transaction.
+
+    For a clear that wipes a BASE column no version snapshot covers (the
+    user-info memory): the values about to be wiped land in this append-only
+    history first, so the clear is recoverable (``path_history``, the export).
+    The clearing row follows in the same transaction, so a snapshot row is
+    never the newest row for its path and never becomes overlay.
+
+    Not validated, on purpose: the values are copied from what is already
+    stored, not taken from a caller, and a legacy shape refused by today's
+    validators would turn a clear into a 500. No rate limit (a person's own
+    clear). Returns the number of rows written.
+    """
+    snapshot_rows = [(path, json.dumps(value, default=str)) for path, value in snapshot]
+    cleared = list(dict.fromkeys([path for path, _ in snapshot] + list(clear_paths)))
+    rows = snapshot_rows + [(path, None) for path in cleared]
+    if not rows:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    row_source = SOURCE_USER_SAID if actor == WEB_ACTOR else ""
+    with pgsync.connect(str(DB_PATH)) as conn, conn._raw.transaction():
+        for path, encoded in rows:
+            conn.execute(
+                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at, source) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, path, encoded, actor, now, row_source),
+            )
+    return len(rows)
 
 
 def field_values(profile: UserProfile, paths: Iterable[str]) -> dict[str, Any]:

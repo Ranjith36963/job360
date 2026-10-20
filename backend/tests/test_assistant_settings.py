@@ -1202,9 +1202,10 @@ async def test_clear_all_resets_and_cancels_waiting_but_other_scopes_leave_setti
 
 @pytest.mark.asyncio
 async def test_a_token_clear_all_cannot_end_a_pause_or_remove_a_cap(authenticated_async_context, fixture_user_id):
-    """Injection guard: POST /api/profile/clear takes a bearer token too. "all"
-    resets the settings, but a reset that LOOSENS one (ends a pause, drops a cap)
-    is riskier - from a token those rows stay; the user's own web clear-all still resets."""
+    """Injection guard: POST /api/profile/clear "all" resets the settings. It is
+    web-session only (gap roadmap slice 3), so a token's clear-all is refused
+    outright (403 session_required) and every setting stands; the user's own web
+    clear-all still resets them."""
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
@@ -1213,13 +1214,14 @@ async def test_a_token_clear_all_cannot_end_a_pause_or_remove_a_cap(authenticate
         )
         assert resp.status_code == 200, resp.text
     async with _bearer_client(token) as agent:
-        assert (await agent.post("/api/profile/clear", data={"section": "all"})).status_code == 200
+        refused = await agent.post("/api/profile/clear", data={"section": "all"})
+        assert refused.status_code == 403 and refused.json()["detail"] == "session_required", refused.text
     async with authenticated_async_context() as client:
         view = await _view(client)
         assert view["paused"] is True and view["paused_until"]["effective"] == rules.UNTIL_RESUMED
         assert view["daily_cap"]["effective"] == 3
-        # Resetting the looser ones to the safe default is safer, so those reset.
-        assert view["above_line"]["effective"] == "ask" and view["submit_mode"]["effective"] == "confirm"
+        # Nothing was reset, not even the looser settings.
+        assert view["above_line"]["effective"] == "auto" and view["submit_mode"]["effective"] == "auto_when_sure"
         assert (await client.post("/api/profile/clear", data={"section": "all"})).status_code == 200
         view = await _view(client)
         assert view["paused"] is False and view["daily_cap"]["effective"] is None

@@ -4,13 +4,17 @@
       "AccountDeleteRequest": {
         "properties": {
           "current_password": {
-            "title": "Current Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
           }
         },
-        "required": [
-          "current_password"
-        ],
         "title": "AccountDeleteRequest",
         "type": "object"
       },
@@ -6493,6 +6497,39 @@
         "title": "MagicLinkRequest",
         "type": "object"
       },
+      "MeResponse": {
+        "properties": {
+          "analytics_consent": {
+            "default": false,
+            "title": "Analytics Consent",
+            "type": "boolean"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "has_password": {
+            "default": true,
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "UTC",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "MeResponse",
+        "type": "object"
+      },
       "MissingToolRequest": {
         "additionalProperties": false,
         "description": "``POST /api/missing-tools`` body. ``name`` must match\n``^[a-z][a-z0-9_]{1,59}$``; ``why`` is at most 280 characters.",
@@ -7289,6 +7326,28 @@
       "ProfileEditIn": {
         "additionalProperties": false,
         "properties": {
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index"
+          },
+          "op": {
+            "default": "set",
+            "enum": [
+              "set",
+              "append",
+              "upsert",
+              "remove_at"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -7436,6 +7495,11 @@
             "additionalProperties": true,
             "title": "Preferences",
             "type": "object"
+          },
+          "profile_edit_id": {
+            "default": 0,
+            "title": "Profile Edit Id",
+            "type": "integer"
           },
           "skill_esco": {
             "additionalProperties": {
@@ -12834,6 +12898,17 @@
             "minItems": 1,
             "title": "Edits",
             "type": "array"
+          },
+          "expected_profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Profile Version"
           }
         },
         "required": [
@@ -16124,7 +16199,7 @@
     },
     "/api/applications/{application_id}/send/approve": {
       "post": {
-        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching. Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
+        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing\n(``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
         "operationId": "approve_send_api_applications__application_id__send_approve_post",
         "parameters": [
           {
@@ -16308,7 +16383,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -\na stored yes clears neither. An unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {
@@ -17813,7 +17888,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/MeResponse"
                 }
               }
             },
@@ -18171,7 +18246,7 @@
     },
     "/api/auth/users/me": {
       "delete": {
-        "description": "ERASE the caller's account (GDPR Article 17). Requires current-password\nverification (hard rule #26), then clears the session cookie.\n\nUses hard_delete_user (docs/fable/05) \u2014 actually erases all per-user data\n(CV, profile, channels, feed, actions, \u2026), not a soft `deleted_at` flag that\nleft the data in place and could be resurrected on a later magic-link consume.",
+        "description": "ERASE the caller's account (GDPR Article 17), then clear the session cookie.\n\nWeb session only: an agent token can never erase the account. An account\nwith a password must send it (hard rule #26). An account with NO password\n(``has_password`` FALSE: only a magic link ever signed it in) cannot, so it\nmay delete only from a session created by a fresh email link, inside\n``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.\n\nUses hard_delete_user (docs/fable/05) \u2014 actually erases all per-user data\n(CV, profile, channels, feed, actions, \u2026), not a soft `deleted_at` flag that\nleft the data in place and could be resurrected on a later magic-link consume.",
         "operationId": "delete_account_api_auth_users_me_delete",
         "parameters": [
           {
@@ -18309,7 +18384,7 @@
     },
     "/api/auth/users/me/export": {
       "get": {
-        "description": "Download everything we hold on the caller as one JSON file (Article 20).\n\nGET is correct here: it is a pure read, no state changes. Scoped to the\nsession's own ``user.id`` (rule #12) \u2014 the caller can never name another user.\nSecrets (password hash, encrypted channel creds) are redacted and the\nsecurity-token tables are omitted entirely; see ``export_user_data``.",
+        "description": "Download everything we hold on the caller as one JSON file (Article 20).\n\nWeb session only (gap roadmap slice 3): a leaked, never-expiring agent token\nmust not be able to download the whole account. An assistant reads history\nthrough ``export_history``, which leaves out the account tables.\n\nGET is correct here: it is a pure read, no state changes. Scoped to the\nsession's own ``user.id`` (rule #12) \u2014 the caller can never name another user.\nSecrets (password hash, encrypted channel creds) are redacted and the\nsecurity-token tables are omitted entirely; see ``export_user_data``.",
         "operationId": "export_my_data_api_auth_users_me_export_get",
         "parameters": [
           {
@@ -20563,7 +20638,7 @@
         ]
       },
       "patch": {
-        "description": "Apply 1..N agent edits to the caller's profile as one atomic overlay write.\n\nR12 \u2014 the same function REST and MCP call: the MCP `update_profile` tool\ninvokes this route function directly with the resolved user (the pattern\nevery other MCP tool in `mcp_server.py` already uses), so there is\nexactly one place this logic can drift.\n\nAll-or-nothing (S12): every edit is validated before anything is\nwritten \u2014 one bad path or value means the whole call 422s and NOTHING\nchanges. A user with no profile row yet gets an empty base created first\n(R8) so the overlay has something to sit on. The response carries the\nfull merged profile (`GET /profile`'s own shape) so the caller sees the\neffect without a second round trip.\n\nThe audit line for this action names PATHS and the actor only \u2014 never a\nvalue (S3): an edit can carry a name, an email fragment inside `about_me`,\nor anything else the agent chose to write, and none of that belongs in a\nlog line.",
+        "description": "Apply 1..N agent edits to the caller's profile as one atomic overlay write.\n\nR12 \u2014 the same function REST and MCP call: the MCP `update_profile` tool\ninvokes this route function directly with the resolved user (the pattern\nevery other MCP tool in `mcp_server.py` already uses), so there is\nexactly one place this logic can drift.\n\nAll-or-nothing (S12): every edit is validated before anything is\nwritten \u2014 one bad path or value means the whole call 422s and NOTHING\nchanges. A user with no profile row yet gets an empty base created first\n(R8) so the overlay has something to sit on. The response carries the\nfull merged profile (`GET /profile`'s own shape) so the caller sees the\neffect without a second round trip.\n\nThe audit line for this action names PATHS and the actor only \u2014 never a\nvalue (S3): an edit can carry a name, an email fragment inside `about_me`,\nor anything else the agent chose to write, and none of that belongs in a\nlog line.\n\nGap 4 (slice 26) - two assistants writing one profile: the whole call runs\nunder the user's profile-write lock, so `expected_profile_version` (409\n`stale_profile` when another write landed since) and the item ops (applied\nto the CURRENT list) are checked against exactly what gets written.",
         "operationId": "update_profile_api_profile_patch",
         "parameters": [
           {
@@ -20712,7 +20787,7 @@
     },
     "/api/profile/clear": {
       "post": {
-        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot and leaves the CV, the preferences and\n``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\nWEB SESSION ONLY (gap roadmap slice 3): \"all\" wipes the CV, preferences,\nmemory and assistant settings at once, so a leaked agent token must not\nreach it. An assistant clears one field with ``update_profile(null)``.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot (it copies the memory into ``profile_edits``\nfirst instead, ``_snapshot_memory_then_clear``) and leaves the CV, the\npreferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
         "operationId": "clear_profile_section_api_profile_clear_post",
         "parameters": [
           {

@@ -221,11 +221,14 @@ async def consume_magic_link(
         # it. The schema requires a password_hash, so store an argon2 hash of a
         # random secret (unguessable; the user can set a real one later via reset).
         # Clicking the emailed link proves ownership, so a new row starts verified.
+        # has_password=FALSE (migration 0069): nobody knows that random secret, so
+        # account deletion asks for a fresh link instead of a password. Only the
+        # row this INSERT creates gets it; an existing account keeps its value.
         new_id = uuid.uuid4().hex
         random_pw = secrets.token_urlsafe(32)
         await db.execute(
-            "INSERT OR IGNORE INTO users(id, email, password_hash, email_verified_at) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO users(id, email, password_hash, email_verified_at, has_password) "
+            "VALUES (?, ?, ?, ?, FALSE)",
             (new_id, email, hash_password(random_pw), now),
         )
         # Read back the real id: the row we just inserted, or the existing owner.

@@ -743,7 +743,9 @@ export interface paths {
          * Approve Send
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
-         *     where=web. A CV edited later makes the yes stop matching. Clears an earlier
+         *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
+         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
+         *     (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
          *     nothing is recorded (the yes must name what the user saw).
@@ -795,8 +797,10 @@ export interface paths {
          *     (``unknown_site``). The address is read strictly (``screen_form_url``): a
          *     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
          *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
-         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
-         *     a stored yes clears neither. An unconfirmed email answers ``ask`` /
+         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
+         *     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
+         *     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
+         *     clears none of them. An unconfirmed email answers ``ask`` /
          *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
          *     ``get_application_kit``; 422 when malformed): another session's live kit hold
          *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -1349,8 +1353,13 @@ export interface paths {
         post?: never;
         /**
          * Delete Account
-         * @description ERASE the caller's account (GDPR Article 17). Requires current-password
-         *     verification (hard rule #26), then clears the session cookie.
+         * @description ERASE the caller's account (GDPR Article 17), then clear the session cookie.
+         *
+         *     Web session only: an agent token can never erase the account. An account
+         *     with a password must send it (hard rule #26). An account with NO password
+         *     (``has_password`` FALSE: only a magic link ever signed it in) cannot, so it
+         *     may delete only from a session created by a fresh email link, inside
+         *     ``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.
          *
          *     Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
          *     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
@@ -1392,6 +1401,10 @@ export interface paths {
         /**
          * Export My Data
          * @description Download everything we hold on the caller as one JSON file (Article 20).
+         *
+         *     Web session only (gap roadmap slice 3): a leaked, never-expiring agent token
+         *     must not be able to download the whole account. An assistant reads history
+         *     through ``export_history``, which leaves out the account tables.
          *
          *     GET is correct here: it is a pure read, no state changes. Scoped to the
          *     session's own ``user.id`` (rule #12) — the caller can never name another user.
@@ -2167,6 +2180,11 @@ export interface paths {
          *     value (S3): an edit can carry a name, an email fragment inside `about_me`,
          *     or anything else the agent chose to write, and none of that belongs in a
          *     log line.
+         *
+         *     Gap 4 (slice 26) - two assistants writing one profile: the whole call runs
+         *     under the user's profile-write lock, so `expected_profile_version` (409
+         *     `stale_profile` when another write landed since) and the item ops (applied
+         *     to the CURRENT list) are checked against exactly what gets written.
          */
         patch: operations["update_profile_api_profile_patch"];
         trace?: never;
@@ -2184,13 +2202,18 @@ export interface paths {
          * Clear Profile Section
          * @description Empty ONE input (or the whole profile), so the next upload starts clean.
          *
+         *     WEB SESSION ONLY (gap roadmap slice 3): "all" wipes the CV, preferences,
+         *     memory and assistant settings at once, so a leaked agent token must not
+         *     reach it. An assistant clears one field with ``update_profile(null)``.
+         *
          *     ``section``: cv | linkedin | github | preferences | memory | all.
          *
          *     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
          *     (``user_info.*``: contact, right to work, logistics, languages, equality
          *     answers, saved answers): the base column and the assistant's overlay rows.
-         *     It takes no version snapshot and leaves the CV, the preferences and
-         *     ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
+         *     It takes no version snapshot (it copies the memory into ``profile_edits``
+         *     first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+         *     preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
          *     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
          *     ``github`` leave it alone; only ``all`` resets it.
          *
@@ -2901,7 +2924,7 @@ export interface components {
         /** AccountDeleteRequest */
         AccountDeleteRequest: {
             /** Current Password */
-            current_password: string;
+            current_password?: string | null;
         };
         /**
          * AddContactRequest
@@ -5459,6 +5482,28 @@ export interface components {
             /** Next */
             next?: string | null;
         };
+        /** MeResponse */
+        MeResponse: {
+            /**
+             * Analytics Consent
+             * @default false
+             */
+            analytics_consent: boolean;
+            /** Email */
+            email: string;
+            /**
+             * Has Password
+             * @default true
+             */
+            has_password: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
+        };
         /**
          * MissingToolRequest
          * @description ``POST /api/missing-tools`` body. ``name`` must match
@@ -5774,6 +5819,14 @@ export interface components {
         };
         /** ProfileEditIn */
         ProfileEditIn: {
+            /** Index */
+            index?: number | null;
+            /**
+             * Op
+             * @default set
+             * @enum {string}
+             */
+            op: "set" | "append" | "upsert" | "remove_at";
             /** Path */
             path: string;
             /** Remember */
@@ -5853,6 +5906,11 @@ export interface components {
             preferences: {
                 [key: string]: unknown;
             };
+            /**
+             * Profile Edit Id
+             * @default 0
+             */
+            profile_edit_id: number;
             /**
              * Skill Esco
              * @default {}
@@ -7712,6 +7770,8 @@ export interface components {
         UpdateProfileRequest: {
             /** Edits */
             edits: components["schemas"]["ProfileEditIn"][];
+            /** Expected Profile Version */
+            expected_profile_version?: number | null;
         };
         /**
          * UpdateProfileResponse
@@ -9982,7 +10042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserResponse"];
+                    "application/json": components["schemas"]["MeResponse"];
                 };
             };
             /** @description Validation Error */
