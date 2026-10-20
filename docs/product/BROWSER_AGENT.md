@@ -1,12 +1,12 @@
 # The Job360 browser agent
-<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) | slices 1-3 built, OFF until the owner turns it on -->
+<!-- doc: LIVING | decided 2026-10-19 with the owner (VISION.md decision 29) -->
 
 What the owner and Claude discussed and agreed on 2026-10-19, in plain words.
-**Slices 1-3 are built and OFF** until the owner sets `BROWSER_AGENT_ENABLED=1` on Railway (section 9). Slice 4 (testing real sites) is not done.
+Which slices are built, and the switch that turns them on, is section 9 — the one place.
 
 ## 1. Where we started: bulk apply (already live)
 
-Built and merged: #882, #891, #895 (production runs MCP rev 8).
+Built and merged: #882, #891, #895.
 - **The batch** = a waiting line your AI works through, one job at a time.
 - **In it:** AI hunts and your links both go straight in. Tags: AI hunt, Your link, Pasted ad.
 - **Modes (pick one):** Straight away, Hours to apply, Auto for a while (all send on their own); Ask me each time = off.
@@ -194,10 +194,9 @@ form; the test fails when the wait is removed.
   only into a multi-line box, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
 
 **Step 4, site playbooks for Greenhouse, Lever and Ashby (2026-10-19, `sites.py`):**
-- **`site`:** every read names the job site from the page's own address, or its frames (Greenhouse and iCIMS forms
-  often sit in a frame on a company page). It matches the end of the host name, never a piece of the URL, so
-  `evilgreenhouse.io.example.com` is not Greenhouse. Known: Greenhouse, Lever, Ashby, Workday, SmartRecruiters,
-  iCIMS. Each comes with 1 to 4 short tips for the assistant.
+- **`site`:** every read names the job site from the page's own address, or its frames (Greenhouse and iCIMS
+  forms often sit in a frame on a company page), matching the end of the host name and never a piece of the
+  URL, so `evilgreenhouse.io.example.com` is not Greenhouse. The sites and their tips: `browser_agent/sites.SITES`.
 - **`site_warnings` (Lever):** a location typed but not picked from Lever's list (the site refuses those), and a
   cookie banner over the form. `choose` now also picks from Lever's location list.
 - **Ashby Yes/No buttons:** the chosen one reads `pressed: true`.
