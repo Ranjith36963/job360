@@ -1724,6 +1724,7 @@ def build_server(version: str = "") -> MCPServer:
         After the click follow `next`: confirmation_seen = record_application (proof_saved true = screenshot kept);
         site_refused = fix the fields; neither = never click again. `site` = that site's tips;
         page_changed false = do not repeat. Follow get_recipe("forms") and get_recipe("ats") for the rest.
+        Pass your `session` on every call: another session gets busy (browser_in_use).
         Close when done: one browser per user, closed after 10 idle minutes."""
         try:
             body = browser_route.BrowserActionRequest.model_validate(

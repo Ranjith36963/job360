@@ -70,7 +70,7 @@ async def test_enter_in_a_closed_combobox_is_refused_because_it_would_submit(clo
 
 # A form drawn in open shadow roots (SmartRecruiters' spl-* widgets) with no <form>, and a page
 # answered only by picks: the gate must still see the answers, and a button inside a shadow root
-# still sits in the <form> around its host.
+# named to send still counts as in the <form> around its host.
 SHADOW_FORM = """<!doctype html><html><head><title>Shadow - Acme</title></head><body>
 <spl-form id="host"></spl-form>
 <script>
@@ -133,7 +133,7 @@ async def test_a_shadow_dom_form_and_a_picks_only_page_still_reach_the_gate(gate
         tab = pool._sessions["u1"].page  # noqa: SLF001
         assert await tab.title() == "Shadow - Acme"   # never submitted
 
-        # A native button in a shadow root whose host sits in a <form> submits that form.
+        # A button in a shadow root has no form owner, but its host sits in a <form> and it says "send".
         page = await run(pool, "u1", "open", url="http://jobs.example/shadow-form")
         with pytest.raises(BrowserError) as exc:
             await run(pool, "u1", "click", ref=_ref(page, "Envoyer ma candidature"))
