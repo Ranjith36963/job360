@@ -331,3 +331,16 @@ def test_opencats_keeps_the_path_case_and_lowercases_only_the_host():
     jobs, _ = _run("opencats", {"token": "Careers.Boomit.PT/Careers"}, http)
     assert http.calls[0][0] == "https://careers.boomit.pt/Careers/index.php?m=careers&p=showAll"
     assert jobs[0]["url"] == "https://careers.boomit.pt/Careers/index.php?m=careers&p=showJob&ID=5"
+
+
+def test_hostile_pages_stay_fast_for_dom_build_odoo_listing_and_detail_reads():
+    # an end tag with no open element must not rescan the stack
+    _fast(lambda: m2._dom("<b>" * 20000 + "</i>" * 20000), 2.0)
+    # Odoo listing: the same href repeated inside nested unclosed anchors
+    http = _stub({"/jobs": (200, "<html>" + '<a href="/jobs/detail/x-1">t' * 8000)})
+    _fast(lambda: _run("odoo", {"token": "a.example.com"}, http, check=False), 2.0)
+    # OpenCATS detail: nested unclosed td labels; Odoo detail: nested description elements
+    _fast(lambda: m2._oc_location(m2._dom("<table>" + "<td>location" * 8000)), 2.0)
+    page = "<html>" + '<div itemprop="description">x' * 8000
+    http = _stub({"/jobs/detail/y-2": (200, page), "/jobs": (200, '<a href="/jobs/detail/y-2">Engineer</a>')})
+    _fast(lambda: _run("odoo", {"token": "a.example.com"}, http, check=False), 2.0)

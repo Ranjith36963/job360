@@ -75,19 +75,25 @@ class _Builder(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.root = _N("#root", {}, None)
         self._stack: list[_N] = [self.root]
+        self._open: dict[str, int] = {}  # open elements per tag: an end tag with none open returns at once (no stack scan)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         n = _N(tag, {k: v or "" for k, v in attrs}, self._stack[-1])
         self._stack[-1].kids.append(n)
         if tag not in _VOID:
             self._stack.append(n)
+            self._open[tag] = self._open.get(tag, 0) + 1
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._stack[-1].kids.append(_N(tag, {k: v or "" for k, v in attrs}, self._stack[-1]))
 
     def handle_endtag(self, tag: str) -> None:
+        if not self._open.get(tag):
+            return
         for i in range(len(self._stack) - 1, 0, -1):
             if self._stack[i].tag == tag:
+                for gone in self._stack[i:]:
+                    self._open[gone.tag] -= 1
                 del self._stack[i:]
                 return
 
@@ -118,14 +124,19 @@ def _classes(n: _N) -> set[str]:
     return set(n.attrs.get("class", "").split())
 
 
-def _node_text(root: _N) -> str:
-    """Plain text of a subtree: block tags break lines, script/style are dropped (the references sanitise the body)."""
+def _node_text(root: _N, limit: int = 0) -> str:
+    """Plain text of a subtree: block tags break lines, script/style are dropped (the references sanitise the body).
+    ``limit`` > 0 stops reading once that many characters are collected (labels and titles need only the start)."""
     out: list[str] = []
     stack: list[Any] = [root]
+    size = 0
     while stack:
         x = stack.pop()
         if isinstance(x, str):
             out.append(x)
+            size += len(x)
+            if limit and size > limit:
+                break
             continue
         if x.tag in ("script", "style"):
             continue
@@ -138,9 +149,9 @@ def _node_text(root: _N) -> str:
     return re.sub(r"\n\s*\n+", "\n", s).strip()
 
 
-def _inline(n: _N | None) -> str:
+def _inline(n: _N | None, limit: int = 0) -> str:
     """The text of an element with every run of whitespace collapsed to one space."""
-    return " ".join(_node_text(n).split()) if n is not None else ""
+    return " ".join(_node_text(n, limit).split()) if n is not None else ""
 
 
 def _first_el(n: _N) -> _N | None:
@@ -260,7 +271,7 @@ _OC_BOARD = re.compile(r"([a-z0-9][a-z0-9.-]{1,120}\.[a-z]{2,24})((?:/[A-Za-z0-9
 
 def _oc_location(root: _N) -> str:
     for n in _walk(root):
-        if n.tag in ("td", "th") and "location" in _inline(n).lower():
+        if n.tag in ("td", "th") and "location" in _inline(n, 200).lower():
             nxt = _next_el(n)
             if nxt is not None:
                 v = _inline(nxt)
@@ -353,8 +364,8 @@ def _odoo(row: dict[str, Any], http: Http) -> list[Job] | None:
         href = n.attrs.get("href", "") if n.tag == "a" else ""
         if href and len(href) <= 300 and _ODOO_ID.search(href):
             url = _https(urljoin(base, href), host)
-            if url:
-                links.setdefault(url, _inline(n))
+            if url and url not in links and len(links) < _LIST_CAP:
+                links[url] = _inline(n, 300)
     jobs: list[Job] = []
     details = 0
     for url, anchor in list(links.items())[:_LIST_CAP]:
@@ -370,7 +381,7 @@ def _odoo(row: dict[str, Any], http: Http) -> list[Job] | None:
         bodies = _itemprops(root, "description")
         if not bodies:
             continue  # not a JobPosting page
-        best = max(bodies, key=lambda b: len(_node_text(b)))
+        best = max(bodies[:10], key=lambda b: len(_node_text(b)))
         desc = _node_text(best)
         if not desc:
             continue
