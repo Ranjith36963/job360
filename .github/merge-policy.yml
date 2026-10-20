@@ -411,7 +411,6 @@ lanes:
     description: "The product's sharp end — merged by a machine only under the watcher."
     paths:
       # irreversible against live data
-      - "backend/migrations/**"
       - "backend/src/models.py"          # normalized_key -> dedup -> lost rows
       # secrets and infrastructure
       - "**/*.env*"
@@ -451,14 +450,32 @@ lanes:
       - "backend/src/services/uk_gate.py"
       - "backend/src/services/visa_signal.py"
       - "backend/src/services/profile/**"
-      - "backend/src/api/routes/auth.py"
-      - "backend/src/services/auth/**"
-      - "backend/src/api/routes/account*.py"
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
     requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true           # FLIPPED 2026-09-17 — the watcher below is the argument
     watch_minutes: 15          # ...and it is not optional; this is what buys the speed
+    rollback: railway
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT_HUMAN — reaches users AND waits for your hand (owner, 2026-10-20).
+  #
+  # "Only migration, auth ... for those things harness owner should come, not
+  # for everything." A schema change cannot be undone by a Railway rollback (it
+  # restores the image, not the tables), and the login path can lock every user
+  # out. So these two wait for a person -- and, because they still reach live
+  # users, they keep product_owner's full gate, the 15-minute watcher and the
+  # Railway rollback after he merges. Everything else stays machine-merged.
+  # ─────────────────────────────────────────────────────────────────────────
+  product_human:
+    paths:
+      - "backend/migrations/**"
+      - "backend/src/api/routes/auth.py"
+      - "backend/src/services/auth/**"
+      - "backend/src/api/routes/account*.py"
+    requires: [ci, review, security, verify, ratchets, bugs]
+    auto_merge: false          # your hand -- migrations and auth only
+    watch_minutes: 15          # still reaches users, so still watched
     rollback: railway
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -687,23 +704,6 @@ data_exemptions:
       REGISTRY is the list of guards and their drills — appending to it is how a
       guard gets registered, which is the workflow this repo wants to be fast.
       Everything else in that file is the enforcement law and stays owner-lane.
-
-# ── WIP limit ──────────────────────────────────────────────────────────────
-# OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)"; raised to 5 by the
-# owner on 2026-10-17 ("Make it 5"); raised to 10 on 2026-10-20, when PRs were
-# arriving at about 10 an hour and 20 of 35 open PRs sat parked. `limit: 10`
-# means an 11th open, non-draft, non-dependabot, non-revert, non-human-only PR is PARKED, not refused
-# outright: `scripts/wip_gate.py` (wired into `.github/workflows/pr-advisor.yml`,
-# job `wip`, on `opened`/`ready_for_review` only -- never `synchronize`, so an
-# already-accepted PR is never parked later by a push) converts it to a DRAFT,
-# comments why, and Slacks the owner once to `needs-your-decision`. Drafts are
-# already invisible to `auto-merge.yml`'s filter, so parking IS the refusal --
-# there is no second "block merge" switch. Nothing is lost: `gh pr ready N`
-# un-parks it the moment a slot frees. Dependabot (its own loop) and
-# `revert/*` branches (emergency undos) never count toward the limit and are
-# never themselves parked -- see scripts/wip_gate.py's module docstring.
-wip:
-  limit: 10
 
 # ── Size ceiling ───────────────────────────────────────────────────────────
 # Not a quality judgement — a REVIEWABILITY one. Past this, no reviewer (human

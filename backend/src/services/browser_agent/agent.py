@@ -890,6 +890,26 @@ async def _settle(page: Any) -> None:
         pass
 
 
+# A link that opens its page in a new tab.
+OPENS_NEW_TAB_JS = "(e) => !!(e.closest && e.closest('a[target=\"_blank\"]'))"
+# How long a click on such a link waits for the new tab to be reported.
+NEW_TAB_WAIT_S = 2.0
+
+
+async def _settle_new_tab(s: Session, page: Any, tabs: int, opens_tab: bool) -> None:
+    """A click that opens a new tab: wait for the tab to be reported, then let it load. Until it
+    commits its first page its address is still blank, so the proxy's refusal could not yet be matched
+    to it (a loaded CI machine read a refused address as a page)."""
+    if opens_tab:
+        for _ in range(int(NEW_TAB_WAIT_S / 0.05)):
+            if len(page.context.pages) > tabs:
+                break
+            await asyncio.sleep(0.05)
+    new_page = s.page
+    if new_page is not None and new_page is not page and not new_page.is_closed():
+        await _settle(new_page)
+
+
 # How long a scroll may take to land before the page is read anyway (the end of the page never moves).
 SCROLL_WAIT_MS = 1000
 # A promise (boxed: evaluate_handle would wait for a bare one) that resolves on the first scroll anywhere
@@ -1155,11 +1175,16 @@ async def _act(
         except Exception:  # noqa: BLE001 - unreadable: compared as changed
             before = None
         frames = await _watch(page, frame)
+        try:
+            opens_tab = bool(await loc.evaluate(OPENS_NEW_TAB_JS, timeout=1000))
+        except Exception:  # noqa: BLE001 - unreadable: no wait for a tab
+            opens_tab = False
         if submitted:
             # Set before the click: a click that fails after it reached the page still counts as one.
             s.submitted_on, s.submit_refused = (app_id, url), False
         await loc.click()
         await _settle(page)
+        await _settle_new_tab(s, page, tabs, opens_tab)
         changed = await _changed(page, frames, url, tabs)
         if not changed:
             try:

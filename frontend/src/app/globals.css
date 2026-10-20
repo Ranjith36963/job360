@@ -253,7 +253,7 @@
     min-width: 44px;
   }
 
-  /* The footer's Privacy / Terms / Contact / GitHub links are plain inline
+  /* The footer's Privacy / Trust / Terms / Contact links are plain inline
      anchors, so the rule above skipped them and they stayed 16px tall.
      inline-flex keeps them flowing on one line while giving them a real
      height to aim at. */
