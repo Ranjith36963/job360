@@ -647,3 +647,18 @@ def test_linkedin_run_budget_is_eight_requests_eight_seconds_apart(monkeypatch):
     http = _http(_wrap200(_li_handler({o: li_page([next(counter) for _ in range(10)]) for o in (0, 10, 20)})))
     kb.fetch_linkedin(["a", "b", "c"], http, {}, days=BIG, countries=["GB"])
     assert len(http.calls) == 8 and set(slept) == {8.0} and len(slept) == 7
+
+
+def test_google_js_challenge_page_is_reported_blocked_not_empty(capsys):
+    # Owner's PC, 2026-10-20: Google answered 200 with its JavaScript challenge (SG_REL, /httpservice/retry/enablejs).
+    page = '<html><script>var SG_REL=1;</script><a href="/httpservice/retry/enablejs?sei=x">retry</a></html>'
+    http = _http(lambda url, obj=None: (200, page))
+    jobs = kb.fetch_googlejobs(["a", "b"], http, {}, days=BIG, countries=["GB"])
+    assert jobs == [] and len(http.calls) == 1
+    assert "googlejobs stopped" in capsys.readouterr().err
+
+
+def test_a_429_says_try_again_tomorrow(capsys):
+    http = _http(lambda url, obj=None: (429, ""))
+    kb.fetch_linkedin(["a"], http, {}, days=BIG, countries=["GB"])
+    assert "try again tomorrow" in capsys.readouterr().err

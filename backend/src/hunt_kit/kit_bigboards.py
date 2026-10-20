@@ -77,7 +77,9 @@ _WS = re.compile(r"\s+")
 _BLOCK = re.compile(
     r"authwall|/uas/login|checkpoint/challenge|captcha|security (?:check|verification)|unusual traffic|/sorry/|"
     r"consent\.google\.com|verify you are (?:a )?human|access denied|just a moment|px-captcha|"
-    r"sign in to (?:continue|view)", re.I)
+    r"sign in to (?:continue|view)|"
+    # Google's JavaScript challenge page (owner's PC, 2026-10-20: 200, 93 KB, no results markup)
+    r"/httpservice/retry/enablejs|\bSG_REL\b|\bsg_trbl\b", re.I)
 
 # ISO code -> the place name sent as the location (LinkedIn location=, Glassdoor autocomplete term, Google "near").
 # NOT IN REFERENCE: JobSpy takes a free-text location; these country names are the kit's own choice.
@@ -158,7 +160,8 @@ class _Site:
         if status == 200 and body is not None:
             self.stats["ok"] = self.stats.get("ok", 0) + 1
             return body
-        self.stop(f"HTTP {status} (nothing read)")
+        later = " (rate limit per connection; try again tomorrow)" if status == 429 else ""
+        self.stop(f"HTTP {status} (nothing read){later}")
         return None
 
 
@@ -809,7 +812,7 @@ def fetch_googlejobs(queries: list[str], http: HttpFn, stats: Stats, *, days: in
         got, cursor = parse_google_first_page(body)
         if not got and not cursor:
             if _blocked(body):
-                site.stop("a consent or security page instead of results")
+                site.stop("a consent, security or JavaScript-challenge page instead of results")
                 break
             continue  # a plain empty result: this search only
         page = 1
