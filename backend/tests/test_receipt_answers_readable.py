@@ -23,7 +23,8 @@ _AD = {
 
 _ANSWERS = [
     {"question": "Why Contoso?", "answer": "Because the data team ships weekly."},
-    {"question": "Notice period?", "answer": "Four weeks."},
+    # Not a sensitive topic: slice 11 hashes a sensitive answer the user has not remembered (G023).
+    {"question": "Which team interests you most?", "answer": "Platform."},
 ]
 _FIELDS: dict[str, Any] = {"salary_expectation": 65000, "phone": "+44 7700 900123", "remote_ok": True}
 
