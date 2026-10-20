@@ -1055,6 +1055,9 @@ export interface paths {
         /**
          * Put Trigger
          * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         *
+         *     An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+         *     it, the error is logged without its traceback or message, and a plain 500 replaces it (from None).
          */
         put: operations["put_trigger_api_assistant_trigger_put"];
         post?: never;
@@ -2550,14 +2553,21 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Readiness probe — checks real dependencies before accepting traffic.
+         * @description Readiness probe: can the request path get a DB connection right now?
          *
-         *     Checks:
-         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
-         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *     Production borrows a connection from the SAME pool ``get_request_db`` uses
+         *     (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+         *     runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+         *     held) or an unreachable database answers 503, which is what Railway's deploy
+         *     healthcheck (``backend/railway.json``) and the uptime probe need to see.
          *
-         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
-         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         *     200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+         *
+         *     Test mode has no request-path pool (``get_request_db`` opens a fresh
+         *     connection per request there), so the probe opens one the same way and
+         *     ``pool`` is null. Redis is no longer checked: the service was deleted
+         *     2026-09-02 and the auth rate limiter falls back without it.
          */
         get: operations["readyz_api_readyz_get"];
         put?: never;
@@ -3658,6 +3668,17 @@ export interface components {
             apply_min_score: components["schemas"]["SettingFieldOut"];
             auto_employer_emails: components["schemas"]["SettingFieldOut"];
             auto_grant_count: components["schemas"]["SettingFieldOut"];
+            /**
+             * @default {
+             *       "queue": {
+             *         "count": 0,
+             *         "hosts": [],
+             *         "no_host": 0
+             *       },
+             *       "unscoped": false
+             *     }
+             */
+            auto_grant_scope: components["schemas"]["GrantScopeOut"];
             auto_grant_until: components["schemas"]["SettingFieldOut"];
             below_line: components["schemas"]["SettingFieldOut"];
             /**
@@ -4857,6 +4878,50 @@ export interface components {
         GrantListResponse: {
             /** Grants */
             grants: components["schemas"]["OAuthGrantOut"][];
+        };
+        /**
+         * GrantScopeCount
+         * @description How many applications, their distinct form hosts, and how many have no host yet.
+         */
+        GrantScopeCount: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Hosts
+             * @default []
+             */
+            hosts: string[];
+            /**
+             * No Host
+             * @default 0
+             */
+            no_host: number;
+        };
+        /**
+         * GrantScopeOut
+         * @description Gap roadmap slice 30 - what an "Auto for a while" grant covers. ``queue``: what a grant
+         *     confirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the
+         *     grant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from
+         *     before snapshots, covering every application until it ends.
+         */
+        GrantScopeOut: {
+            granted?: components["schemas"]["GrantScopeCount"] | null;
+            /**
+             * @default {
+             *       "count": 0,
+             *       "hosts": [],
+             *       "no_host": 0
+             *     }
+             */
+            queue: components["schemas"]["GrantScopeCount"];
+            /**
+             * Unscoped
+             * @default false
+             */
+            unscoped: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

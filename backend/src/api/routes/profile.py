@@ -44,7 +44,7 @@ from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import edits as profile_edits
-from src.services.profile import forgiving, refusals, setting_requests, user_info
+from src.services.profile import forgiving, grant_scope, refusals, setting_requests, user_info
 from src.services.profile.cv_parser import extract_text
 from src.services.profile.cv_style import extract_cv_style
 from src.services.profile.github_enricher import (
@@ -397,8 +397,10 @@ def _recent_lessons(user_id: str) -> list[LessonOut]:
 def settings_view(profile: UserProfile, user_id: str) -> dict[str, Any]:
     """The assistant-settings read model for ``profile`` (already overlaid): the
     waiting requests and the derived practice-run state are the two reads."""
+    now = datetime.now(timezone.utc)
     return settings_rules.build_settings_view(
-        profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id)
+        profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id), now,
+        grant_scope=grant_scope.scope_view(user_id, settings_rules.effective(profile.assistant_settings), now),
     )
 
 

@@ -393,12 +393,19 @@ describe("AssistantTab", () => {
   });
 
   it("auto for my next N applications: asks to confirm, then saves count and time together", async () => {
+    const queue = { count: 2, hosts: ["boards.greenhouse.io", "jobs.lever.co"], no_host: 0 };
+    getAssistantSettings.mockResolvedValue(view({ auto_grant_scope: { queue, granted: null, unscoped: false } }));
     await ready();
     fireEvent.click(screen.getByTestId("mode-while"));
     fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "5" } });
     fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: "2099-01-02T18:00" } });
     fireEvent.click(screen.getByTestId("auto-grant-save"));
     expect(updateProfileFields).not.toHaveBeenCalled();
+    // Slice 30: the confirm names exactly what the grant will cover.
+    expect(screen.getByTestId("auto-grant-scope")).toHaveTextContent(
+      "Auto-submit the 2 applications (sites: boards.greenhouse.io, jobs.lever.co) in your queue now, at most 5, until",
+    );
+    expect(screen.getByTestId("auto-grant-scope")).toHaveTextContent("Jobs you queue later");
     fireEvent.click(screen.getByTestId("auto-grant-confirm"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
     const sent = updateProfileFields.mock.calls[0][0] as { path: string; value: unknown }[];
@@ -411,11 +418,30 @@ describe("AssistantTab", () => {
     ]);
   });
 
+  it("an empty queue cannot be granted: nothing would be sent on its own", async () => {
+    const queue = { count: 0, hosts: [], no_host: 0 };
+    getAssistantSettings.mockResolvedValue(view({ auto_grant_scope: { queue, granted: null, unscoped: false } }));
+    await ready();
+    fireEvent.click(screen.getByTestId("mode-while"));
+    fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "5" } });
+    fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: "2099-01-02T18:00" } });
+    fireEvent.click(screen.getByTestId("auto-grant-save"));
+    expect(screen.getByTestId("auto-grant-scope")).toHaveTextContent("Your queue is empty");
+    expect(screen.getByTestId("auto-grant-confirm")).toBeDisabled();
+  });
+
   it("a running grant is shown in words and can be stopped", async () => {
     const until = new Date(Date.now() + 3_600_000).toISOString();
-    getAssistantSettings.mockResolvedValue(view({ auto_grant_count: field(5, 5), auto_grant_until: field(until, until) }));
+    const granted = { count: 1, hosts: ["jobs.lever.co"], no_host: 1 };
+    getAssistantSettings.mockResolvedValue(view({
+      auto_grant_count: field(5, 5), auto_grant_until: field(until, until),
+      auto_grant_scope: { queue: granted, granted, unscoped: false },
+    }));
     await ready();
     expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Auto for my next 5 applications until");
+    expect(screen.getByTestId("auto-grant-on")).toHaveTextContent(
+      "It covers the 1 application (sites: jobs.lever.co), 1 with no site yet that were in your queue when you said yes.",
+    );
     fireEvent.click(screen.getByTestId("auto-grant-stop"));
     await waitFor(() =>
       expect(updateProfileFields).toHaveBeenCalledWith([

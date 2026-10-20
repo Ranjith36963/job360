@@ -1656,16 +1656,16 @@ def build_server(version: str = "") -> MCPServer:
         form_not_recorded (`stop`: record `form_filled`),
         form_not_swept (`stop`: re-read every field, record `form_swept`),
         form_count_mismatch, unreadable_fields (`stop`: sweep again), form_check_missing (`stop`: call
-        check_form), submit_unconfirmed (`stop`: `submit_attempted` has no outcome: never submit again),
-        duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), duplicate_role (`ask`: same company+title before),
-        new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
+        check_form), submit_unconfirmed (`stop`: a submit_attempted has no outcome; never resubmit),
+        duplicate_job (same job applied to: `stop`
+        in auto mode, else `ask`), duplicate_role (`ask`: same company+title),
+        new_site_first_time (`ask`: auto, first time on this site), cv_unsupported_claims (CV claims not in
         profile), held_by_other_session (another session holds it),
-        unknown_site (not one plain http(s) address),
+        unknown_site (not a plain http(s) address),
         form_host_mismatch / form_page_mismatch (not the site / page you filled),
         email_not_verified, ask_always_site, job_override_confirm,
-        submit_mode_confirm, cv_not_seen (auto mode, latest CV unseen), practice_run,
-        user_approved (the user's yes: `submit`), approval_stale (`ask`: the yes expired or what it
+        submit_mode_confirm, grant_scope (auto grant does not cover it), cv_not_seen (latest CV unseen),
+        practice_run, user_approved (user's yes: `submit`), approval_stale (`ask`: the yes expired or what it
         named changed), auto_when_sure, blocked (you recorded `blocked`, no `unblocked`: `ask`).
         A yes NEVER clears unknown_site, form_*_mismatch, email_not_verified, blocked or
         held_by_other_session: tell the user.

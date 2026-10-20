@@ -52,6 +52,8 @@ than to = overnight) - the user's own FIXED pace, never randomized, `check_submi
 (1-100) with `assistant_settings.auto_grant_until` (ISO time with an offset, at most 7 days ahead): while now is before
 the end and fewer than the count of applications were recorded since the grant began, `check_submit` treats the mode as
 auto (the practice run, every stop and the per-job confirm still apply); afterwards the user's own `submit_mode` is back.
+A grant covers only the applications in the user's queue when they confirmed it, on the form site they had then
+(`settings.auto_grant_scope.granted`); any other one asks `grant_scope` - never queue more to widen it.
 `assistant_settings.paused_until` ("" for not paused,
 "until_resumed", or an ISO-8601 time with an offset, in the future, at most
 365 days ahead) and `assistant_settings.pause_reason` (one plain line).

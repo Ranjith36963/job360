@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { NeedsYou } from "./NeedsYou";
-import { SettingRequestCard, describeSettingRequest } from "./SettingRequestCard";
+import { SettingRequestCard, describeSettingRequest, grantScopeLine } from "./SettingRequestCard";
 
 const confirmSettingRequest = vi.fn();
 const declineSettingRequest = vi.fn();
@@ -192,5 +192,18 @@ describe("describeSettingRequest - pace and auto run", () => {
     expect(describeSettingRequest("assistant_settings.min_gap_minutes", 20).change).toBe("Wait at least 20 minutes between applications");
     expect(describeSettingRequest("assistant_settings.apply_hours", { from: "09:00", to: "17:00" }).change).toBe("Only apply between 09:00 and 17:00");
     expect(describeSettingRequest("assistant_settings.auto_grant_count", 5).change).toBe("Apply on its own for my next 5 applications");
+  });
+});
+
+describe("grantScopeLine (slice 30)", () => {
+  it("says a confirmed grant covers only the queue as it is now", () => {
+    const queue = { count: 2, hosts: ["jobs.lever.co"], no_host: 0 };
+    expect(grantScopeLine("assistant_settings.auto_grant_count", 5, queue)).toBe(
+      "Covers only the 2 applications (sites: jobs.lever.co) in your queue now; anything queued later still asks you.",
+    );
+    expect(grantScopeLine("assistant_settings.auto_grant_until", "2099-01-01T00:00:00Z", { count: 0, hosts: [], no_host: 0 }))
+      .toBe("Your queue is empty, so nothing would be sent on its own.");
+    expect(grantScopeLine("assistant_settings.auto_grant_count", null, queue)).toBe("");
+    expect(grantScopeLine("assistant_settings.daily_cap", 5, queue)).toBe("");
   });
 });

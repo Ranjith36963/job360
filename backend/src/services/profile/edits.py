@@ -814,6 +814,10 @@ def apply_overlay_rows(profile: UserProfile, rows: list[dict[str, Any]]) -> User
     return profile
 
 
+# The counted auto grant's two paths (``assistant_settings.AUTO_GRANT_*_PATH``; that module imports this one).
+_GRANT_PATHS = frozenset({"assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until"})
+
+
 def record_edits(
     user_id: str,
     actor: str,
@@ -904,6 +908,15 @@ def record_edits(
             applied.append(
                 {"path": path, "value": value, "set_by": actor, "set_at": now, "source": row_source}
             )
+        if actor == WEB_ACTOR and any(
+            path in _GRANT_PATHS and value is not None for path, value in normalised
+        ):
+            # Gap roadmap slice 30: the user's own web write that sets an auto grant snapshots what
+            # it covers (their queue now) in this same transaction. This is the one writer, so every
+            # web door (PATCH /profile, Confirm on Needs you, Take back) does it.
+            from src.services.profile import grant_scope  # noqa: PLC0415 - grant_scope imports this module
+
+            grant_scope.record_snapshot(conn, user_id, now)
     return applied
 
 
