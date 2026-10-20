@@ -85,28 +85,31 @@ async def send_security_notice(db_path: str, user_id: str, kind: str, **facts: A
     Never raises: a missing SMTP config, an outage or a bad template must not
     change the status of the request that triggered it. Logs ids only.
     """
+    # Ids are logged only as read back from the users row: a caller's user_id can
+    # come off the password-reset path, which CodeQL rightly treats as sensitive.
+    logged_id: str | None = None
     try:
         subject, text, html_body = _build(kind, **facts)
         async with open_db(db_path) as db:
             db.row_factory = pg.Row
             cur = await db.execute(
-                "SELECT email FROM users WHERE id = ? AND deleted_at IS NULL", (user_id,)
+                "SELECT id, email FROM users WHERE id = ? AND deleted_at IS NULL", (user_id,)
             )
             row = await cur.fetchone()
         if row is None:
-            logger.warning("security_notice_failed: user=%s kind=%s reason=no_account", safe_log_value(user_id), kind)
+            logger.warning("security_notice_failed: kind=%s reason=no_account", safe_log_value(kind))
             return False
+        logged_id = safe_log_value(row["id"])
         sent = await send_system_email(
             to_email=row["email"], subject=subject, body_text=text, body_html=html_body
         )
     except Exception as exc:  # noqa: BLE001 — a notice must never break the request
         logger.warning(
-            "security_notice_failed: user=%s kind=%s err=%s",
-            safe_log_value(user_id), safe_log_value(kind), type(exc).__name__,
+            "security_notice_failed: user=%s kind=%s err=%s", logged_id, safe_log_value(kind), type(exc).__name__,
         )
         return False
     if not sent:
-        logger.warning("security_notice_failed: user=%s kind=%s reason=not_sent", safe_log_value(user_id), kind)
+        logger.warning("security_notice_failed: user=%s kind=%s reason=not_sent", logged_id, safe_log_value(kind))
         return False
-    logger.info("security_notice_sent: user=%s kind=%s", safe_log_value(user_id), kind)
+    logger.info("security_notice_sent: user=%s kind=%s", logged_id, safe_log_value(kind))
     return True
