@@ -13,6 +13,7 @@ import importlib.util
 import json
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -306,12 +307,203 @@ def test_getro_empty_non_200_and_no_countries():
     assert _run(ks.fetch_getro, http, countries=[])[0] == [] and http.calls == []
 
 
+# ----------------------------------------------------------------------------------------- Built In
+def _bi_item(name, url, desc=None):
+    s = f'{{"@type":"ListItem","position":1,"name":{json.dumps(name)},"url":{json.dumps(url)}'
+    if desc is not None:
+        s += f',"description":{json.dumps(desc)}'
+    return s + "}"
+
+
+def _bi_card(id, title, company, posted, mode, location, tooltip=None, pay=None):
+    slug = "/company/" + company.lower().replace(" ", "-")
+    tip = f'aria-label="Job locations" data-bs-title="{tooltip}"' if tooltip else 'class="font-barlow"'
+    sal = (f'<div><div><i class="fa-regular fa-sack-dollar fs-xs"></i></div> <span>{pay}</span></div>'
+           if pay else "")
+    return f"""
+    <div><a href="{slug}" class="z-1"><span>{company}</span></a></div>
+    <h2><a href="/job/x/{id}" data-id="job-card-title" data-builtin-track-job-id="{id}">{title}</a></h2>
+    <div><i class="fa-regular fa-clock fs-xs"></i>{posted}</span></div>
+    <div><div><i class="fa-regular fa-house-building fs-xs"></i></div> <span>{mode}</span></div>
+    <div><div><i class="fa-regular fa-location-dot fs-xs"></i></div> <div><span {tip}>{location}</span></div></div>
+    {sal}"""
+
+
+def _bi_html(ids=(101, 102, 103, 104)):
+    cards = {
+        101: _bi_card(101, "Backend Engineer", "Acme Corp", "Yesterday", "Hybrid", "Seattle, WA, USA",
+                      pay="170K-230K Annually"),
+        102: _bi_card(102, "Platform Engineer", "Globex", "Reposted 3 Days Ago", "Remote", "United States",
+                      pay="115K-130K Hourly"),
+        103: _bi_card(103, "Staff Engineer", "Initech", "2 Hours Ago", "In-Office", "2 Locations",
+                      tooltip="&lt;div&gt;Denver, CO, USA&lt;/div&gt;&lt;div&gt;Long Beach, CA, USA&lt;/div&gt;"),
+        104: _bi_card(104, "Data Engineer", "Umbrella", "5 Days Ago", "Hybrid", "3 Locations"),
+    }
+    items = {
+        101: _bi_item("Backend Engineer", "https://builtin.com/job/backend-engineer/101", "Build the API."),
+        102: _bi_item("Platform Engineer", "/job/platform-engineer/102", "Run the platform."),
+        103: _bi_item("Staff Engineer", "https://builtin.com/job/staff-engineer/103"),
+        104: _bi_item("Data Engineer", "https://builtin.com/job/data-engineer/104", "Data."),
+    }
+    return ("<html><body>" + "".join(cards[i] for i in ids) + "<script>{\"itemListElement\":["
+            + ",".join(items[i] for i in ids) + "]}</script></body></html>")
+
+
+def test_builtin_happy_path():
+    http = _http(lambda url, d: (200, _bi_html()))
+    jobs, stats = _run(ks.fetch_builtin, http, queries=["platform engineer"])
+    _check([j for j in jobs if j["description"]] or jobs, "builtin")
+    by = {j["extra"]["id"]: j for j in jobs}
+    assert set(by) == {"101", "102", "103", "104"}
+    assert by["101"]["company"] == "Acme Corp" and by["101"]["location"] == "Hybrid · Seattle, WA, USA"
+    assert by["101"]["extra"]["salary_min"] == 170000 and by["101"]["extra"]["salary_max"] == 230000
+    assert by["102"]["url"] == "https://builtin.com/job/platform-engineer/102"  # relative url made absolute
+    assert "salary_min" not in by["102"]["extra"] and by["102"]["remote"] is True  # Hourly band ignored
+    assert by["103"]["location"] == "In-Office · Denver, CO, USA · Long Beach, CA, USA"
+    assert by["104"]["location"] == "" and by["103"]["extra"]["title_only"] is True  # no excerpt in the ItemList
+    assert by["101"]["posted"] == (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    assert by["101"]["description"] == "Build the API."
+    c = http.calls[0]
+    assert c["url"] == "https://builtin.com/jobs?search=platform%20engineer&page=1" and c["once"] is True
+    assert stats["jobs"] == 4
+
+
+def test_builtin_row_without_card_company_is_dropped():
+    html = _bi_html((101,)).replace("</script></body>", ',' + _bi_item("Orphan", "https://builtin.com/job/o/999")
+                                    + "</script></body>")
+    http = _http(lambda url, d: (200, html))
+    jobs, _ = _run(ks.fetch_builtin, http)
+    assert [j["extra"]["id"] for j in jobs] == ["101"]
+
+
+def test_builtin_stops_when_nothing_new_and_caps_pages():
+    http = _http(lambda url, d: (200, _bi_html()))
+    _run(ks.fetch_builtin, http, queries=["a", "b", "c", "d"])
+    # query a: page 1 new, page 2 repeats it (stop); b and c: page 1 repeats it (stop); a 4th query is never sent
+    assert len(http.calls) == 4
+
+
+def test_builtin_second_page_when_new_rows():
+    pages = {1: _bi_html((101, 102)), 2: _bi_html((103, 104))}
+    http = _http(lambda url, d: (200, pages[int(url.rsplit("page=", 1)[1])]))
+    jobs, _ = _run(ks.fetch_builtin, http, queries=["a"])
+    assert len(jobs) == 4 and len(http.calls) == ks.PAGES
+
+
+def test_builtin_countries_gate():
+    http = _http(lambda url, d: (200, _bi_html()))
+    for c in ([], ["GB"], ["DE", "IN"]):
+        assert _run(ks.fetch_builtin, http, countries=c)[0] == []
+    assert http.calls == []
+    assert _run(ks.fetch_builtin, http, countries=["us"])[0] and _run(ks.fetch_builtin, http, countries=["*"])[0]
+
+
+def test_builtin_empty_non_200_and_challenge():
+    http = _http(lambda url, d: (200, "<html><body>no results</body></html>"))
+    assert _run(ks.fetch_builtin, http, queries=["a", "b"])[0] == [] and len(http.calls) == 2
+    http = _http(lambda url, d: (429, None))
+    assert _run(ks.fetch_builtin, http, queries=["a", "b"])[0] == [] and len(http.calls) == 1
+    http = _http(lambda url, d: (200, "<html><title>Just a moment...</title></html>"))
+    assert _run(ks.fetch_builtin, http, queries=["a", "b"])[0] == [] and len(http.calls) == 1
+
+
+# ------------------------------------------------------------------------------------------- WTTJ
+_WTTJ_FIXTURE_VALUE = "not-a-real-search-value-wttj-fixture"  # plainly fake, low entropy: secret scanners pass it
+ENV_TEXT = 'window.env = ' + json.dumps({"PUBLIC_ALGOLIA_APPLICATION_ID": "AB12CD34",
+                                         "PUBLIC_ALGOLIA_API_KEY_CLIENT": _WTTJ_FIXTURE_VALUE}) + ";"
+
+
+def _wttj_hit(slug, org="acme", **kw):
+    h = {"name": f"Data Engineer {slug}", "slug": slug, "organization": {"name": "Acme SAS", "slug": org},
+         "offices": [{"city": "Paris", "country": "France"}], "remote": "fulltime",
+         "published_at_timestamp": NOW - 86400, "salary_yearly_minimum": 55000, "salary_maximum": 70000,
+         "salary_period": "yearly", "salary_currency": "eur"}
+    h.update(kw)
+    return h
+
+
+def _wttj_handler(hits):
+    def handler(url, d):
+        if url == "https://www.welcometothejungle.com/api/env":
+            return 200, ENV_TEXT
+        return 200, {"hits": hits}
+    return handler
+
+
+def test_wttj_happy_path_filters_by_country():
+    http = _http(_wttj_handler([_wttj_hit("de-1"), _wttj_hit("de-2", remote="no", salary_period="monthly"),
+                                _wttj_hit("bad slug"), _wttj_hit("x", org=""), "junk",
+                                _wttj_hit("y", organization={"slug": "z"})]))
+    jobs, stats = _run(ks.fetch_wttj, http, queries=["data engineer"], countries=["FR", "gb"])
+    _check(jobs, "wttj")
+    assert [j["extra"]["id"] for j in jobs] == ["de-1", "de-2"]
+    j = jobs[0]
+    assert j["company"] == "Acme SAS" and j["url"] == "https://www.welcometothejungle.com/en/companies/acme/jobs/de-1"
+    assert j["location"] == "Paris, France, Remote" and j["remote"] is True
+    assert j["extra"]["salary_min"] == 55000 and j["extra"]["salary_max"] == 70000
+    assert j["extra"]["salary_currency"] == "EUR" and jobs[1]["extra"]["salary_max"] == 55000
+    assert j["posted"] == (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    assert http.calls[0]["url"] == "https://www.welcometothejungle.com/api/env"
+    c = http.calls[1]
+    assert c["url"] == "https://AB12CD34-dsn.algolia.net/1/indexes/wttj_jobs_production_en/query"
+    assert c["headers"]["x-algolia-api-key"] == _WTTJ_FIXTURE_VALUE and c["headers"]["x-algolia-application-id"] == "AB12CD34"
+    assert c["headers"]["referer"] == "https://www.welcometothejungle.com/"
+    p = parse_qs(c["data"]["params"])
+    assert p["filters"] == ["(offices.country_code:FR OR offices.country_code:GB)"]
+    assert p["hitsPerPage"] == ["100"] and p["query"] == ["data engineer"] and stats["jobs"] == 2
+
+
+def test_wttj_one_request_per_query_after_env_and_capped():
+    http = _http(_wttj_handler([_wttj_hit("a-1")]))
+    jobs, _ = _run(ks.fetch_wttj, http, queries=["a", "b", "c", "d"], countries=["FR"])
+    assert len(http.calls) == 1 + ks.MAX_SEARCHES and len(jobs) == 1  # same url across queries: deduplicated
+    p = parse_qs(http.calls[1]["data"]["params"])
+    assert p["filters"] == ["offices.country_code:FR"]
+
+
+def test_wttj_star_has_no_country_filter_and_needs_a_query():
+    http = _http(_wttj_handler([_wttj_hit("a-1")]))
+    assert _run(ks.fetch_wttj, http, queries=["dev"], countries=["*"])[0]
+    assert "filters" not in parse_qs(http.calls[1]["data"]["params"])
+    http = _http(_wttj_handler([_wttj_hit("a-1")]))
+    assert _run(ks.fetch_wttj, http, queries=[], countries=["*"])[0] == [] and http.calls == []
+
+
+def test_wttj_bad_countries_send_nothing_and_no_query_still_filters():
+    http = _http(_wttj_handler([_wttj_hit("a-1")]))
+    assert _run(ks.fetch_wttj, http, countries=[])[0] == []
+    assert _run(ks.fetch_wttj, http, countries=["USA", "1"])[0] == [] and http.calls == []
+    jobs, _ = _run(ks.fetch_wttj, http, queries=[], countries=["FR"])
+    assert jobs and parse_qs(http.calls[1]["data"]["params"], keep_blank_values=True)["query"] == [""]
+
+
+def test_wttj_env_failures_and_empty_and_bad_answer():
+    http = _http(lambda url, d: (403, None))
+    assert _run(ks.fetch_wttj, http, countries=["FR"])[0] == [] and len(http.calls) == 1
+    http = _http(lambda url, d: (200, "window.env = {}"))
+    assert _run(ks.fetch_wttj, http, countries=["FR"])[0] == [] and len(http.calls) == 1
+    http = _http(_wttj_handler([]))
+    assert _run(ks.fetch_wttj, http, queries=["a", "b"], countries=["FR"])[0] == []
+    assert len(http.calls) == 3
+    http = _http(lambda url, d: (200, ENV_TEXT) if url.endswith("/api/env") else (200, {"error": "x"}))
+    assert _run(ks.fetch_wttj, http, queries=["a", "b"], countries=["FR"])[0] == [] and len(http.calls) == 2
+    http = _http(lambda url, d: (200, ENV_TEXT) if url.endswith("/api/env") else (500, None))
+    assert _run(ks.fetch_wttj, http, queries=["a", "b"], countries=["FR"])[0] == [] and len(http.calls) == 2
+
+
+def test_parse_wttj_env_rejects_odd_payloads():
+    assert ks.parse_wttj_env(ENV_TEXT) == ("AB12CD34", _WTTJ_FIXTURE_VALUE)
+    bad_app = ENV_TEXT.replace("AB12CD34", "x/../evil")
+    for bad in (bad_app, "no json", "{bad}", None, 5, "[1]", ENV_TEXT.replace(_WTTJ_FIXTURE_VALUE, "s")):
+        assert ks.parse_wttj_env(bad) is None
+
+
 # ------------------------------------------------------------------------------- shared behaviour
 def test_feeds_registry():
-    assert set(ks.FEEDS) == {"wellfound", "workatastartup", "getro"}
+    assert set(ks.FEEDS) == {"wellfound", "workatastartup", "getro", "builtin", "wttj"}
 
 
-@pytest.mark.parametrize("name", ["wellfound", "workatastartup", "getro"])
+@pytest.mark.parametrize("name", ["wellfound", "workatastartup", "getro", "builtin", "wttj"])
 @pytest.mark.parametrize("garbage", [None, "", "<html>", "{}", [], 42, {"hits": "x"}, {"results": 5}, b"\xff"])
 def test_never_raises_on_garbage(name, garbage, monkeypatch):
     monkeypatch.setenv("WAAS_ALGOLIA_KEY", "k")
@@ -320,7 +512,7 @@ def test_never_raises_on_garbage(name, garbage, monkeypatch):
     assert isinstance(jobs, list) and stats["jobs"] == len(jobs)
 
 
-@pytest.mark.parametrize("name", ["wellfound", "workatastartup", "getro"])
+@pytest.mark.parametrize("name", ["wellfound", "workatastartup", "getro", "builtin", "wttj"])
 def test_never_raises_when_http_raises(name, monkeypatch):
     monkeypatch.setenv("WAAS_ALGOLIA_KEY", "k")
 
@@ -330,7 +522,7 @@ def test_never_raises_when_http_raises(name, monkeypatch):
     assert ks.FEEDS[name](["x"], boom, {}, days=30, countries=["US", "FR"]) == []
 
 
-@pytest.mark.parametrize("name", ["wellfound", "workatastartup", "getro"])
+@pytest.mark.parametrize("name", ["wellfound", "workatastartup", "getro", "builtin", "wttj"])
 def test_empty_countries_never_send_a_request(name, monkeypatch):
     monkeypatch.setenv("WAAS_ALGOLIA_KEY", "k")
     http = _http(lambda url, d: (200, {}))
@@ -372,3 +564,17 @@ def test_every_feed_is_a_selectable_default_source():
     spec.loader.exec_module(hk)  # type: ignore[union-attr]
     assert set(ks.FEEDS) <= set(hk.FEED_SOURCES) and "kit_startups" in hk.FEED_MODULES
     assert set(ks.FEEDS) <= set(hk.select_sources("default"))  # workatastartup sends nothing without a key
+
+
+def test_wttj_visa_star_next_to_real_countries_keeps_the_country_filter():
+    http = _http(_wttj_handler([_wttj_hit("a-1")]))
+    _run(ks.fetch_wttj, http, queries=["dev"], countries=["GB", "*"])  # the core's default (--visa-onsite)
+    assert parse_qs(http.calls[1]["data"]["params"])["filters"] == ["offices.country_code:GB"]
+
+
+def test_builtin_location_without_a_workplace_mode_has_no_leading_separator():
+    page = ("<html><body>" + _bi_card(555, "Dev", "Acme", "2 Days Ago", "", "Seattle, WA, USA")
+            + '<script>{"itemListElement":[' + _bi_item("Dev", "https://builtin.com/job/dev/555", "Dev.")
+            + "]}</script></body></html>")
+    jobs = ks.parse_builtin_page(page)
+    assert jobs and jobs[0]["location"] == "Seattle, WA, USA"
