@@ -1,4 +1,4 @@
-<!-- doc: SNAPSHOT | written: 2026-10-20 by the "apply hunt potential" session (live smoke test, owner's yes in chat) -->
+<!-- doc: LOG | append-only | written: 2026-10-20 by the "apply hunt potential" session (live smoke test, owner's yes in chat) -->
 # Hunt kit live smoke test (2026-10-20)
 
 **What ran:** the kit exactly as served by `https://job360.uk/api/hunt-kit` (15 files, every sha256 matched;
@@ -141,3 +141,47 @@ not offer sponsorship, so the rules worked as designed. Keka saw 85 jobs on 5 bo
 title, which is expected for 5 boards. Dead boards (taleo 1 of 5, workable 3 of 5, lever/icims/workday 4 of 5
 answered) are normal for an open list. freehire gave 82% of the kept jobs because `--limit-boards 5` keeps
 the company boards small on purpose.
+
+## Rerun after #936 (same day, same PC, fresh folder `smoke2-20261020`)
+
+Same command, kit downloaded fresh from production after #936 (Naukri years, LinkedIn budget, HN links)
+went live. Exit 0, **280 lines** kept (309 the first time). Warnings, verbatim:
+
+```
+warning: eures answered HTTP 307 on page 1 (nothing read)
+warning: glassdoor stopped for this run: HTTP 403 (nothing read)
+warning: linkedin stopped for this run: HTTP 429 (nothing read)
+```
+
+Rows that changed against the first run (`source tried ok seen title loc years kept`):
+
+```
+linkedin      2   1    10    1   1   1    1     (first run: 10 tried, 9 ok, 28 kept)
+naukri        2   2   200    6   6   2    2
+hn            2   2   198    5   3   3    3
+googlejobs    4   4     0    0   0   0    0
+workable      5   0     0    0   0   0    0     (first run: 3 of 5 answered)
+bayt         21  21    44    3   2   2    2
+gulftalent   28  28    25    3   2   2    2
+nav           2   2    50    3   0   0    0
+keka          5   5    85    0   0   0    0
+freehire     53  53  4942  350 299 254  254
+```
+
+**Fixed and seen working:**
+
+| # | fix | proof from the rerun |
+|---|---|---|
+| 5 | Naukri years | `DS STREAM AI Engineer` years_min=4, URL `…-4-to-9-years-…`; `Everestek AI Engineer` years_min=3, URL `…-3-to-6-years-…`. The `6-to-11` and `12-to-18` jobs are now dropped by `--max-years 5`. |
+| 6 | HN links | `Mastra` → `https://jobs.ashbyhq.com/mastra/531a3fe8-…`; `Axmed` → `https://axmed.teamtailor.com/jobs/8175859-ai-engineer`; `Metcor` (no posting link) → `https://news.ycombinator.com/item?id=49930470`. |
+
+**Still open, and new:**
+
+| # | source | what happened (verbatim) | likely cause | proposed fix |
+|---|---|---|---|---|
+| 9 | linkedin | 2 tried, 1 ok, 429 on the 2nd request | The guest limit is per IP and lasts hours: this PC used 10 requests that morning. #936's 8-request budget cannot help a second run on the same day. | Treat the 429 as "come back later" in the warning text, and note in the README that one run a day from one IP is the safe budget. |
+| 10 | googlejobs | 200, 93,476 bytes, 0 jobs. Saved page has `SG_REL` ×1, `sg_trbl` ×1, `/httpservice/retry/enablejs` ×2; the parser's markers `data-async-fc` and `520084652` ×0 | Google answers a script request with its JavaScript challenge page ("SearchGuard"), not results. The block check (`_BLOCK` in `kit_bigboards.py`) does not know this page, so the run says "0 jobs" instead of "blocked". | Add `SG_REL\|sg_trbl\|/httpservice/retry/enablejs` to `_BLOCK` and stop the source with "Google JS challenge"; add this page as a negative fixture. Google Jobs then belongs in the browser path, not the script. |
+| 11 | eures | Kit: 307 again. One plain `curl` POST with the kit's body: status `000` (connection dropped, no headers) | EURES drops or redirects scripted POSTs; not a parser bug. | Same as #1; do not retry in a loop. |
+| 12 | workable | 5 tried, 0 answered (first run 3 of 5) | Unknown from one run: either rate limiting on the widget API or the 5 sampled boards are dead. | Capture one response before changing code. |
+
+Glassdoor (#2) is unchanged: 403.

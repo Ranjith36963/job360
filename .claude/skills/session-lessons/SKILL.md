@@ -106,6 +106,11 @@ delete a lesson; if one stops being true, say so on its line and why.
   `backend/` and `kit.tar` from an earlier task, though the brief said a NEW empty folder. Caught
   before the run and redone in a fresh folder. **Rule:** before downloading a test run, check the
   folder does not exist (`test -e`), then create it.
+- 2026-10-20: I stamped the smoke doc `<!-- doc: SNAPSHOT -->`, a kind that does not exist, and
+  pushed without running the drift check. CI's `drift-check` failed, the cage withdrew auto-merge,
+  and PR #935 sat unmerged for hours while I reported it as armed. **Rule:** a new doc's kind is one
+  of LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED; run `python scripts/doc_sync_check.py` before
+  pushing any docs PR, and re-read `gh pr checks` before saying a PR will merge.
 
 ## Real applications for the owner
 

@@ -47,6 +47,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Call a site "blocked" only after testing the exact endpoint the reader uses, and name it
   (2026-10-19: Bayt/GulfTalent web pages gave 403; the readers' endpoints worked).
 - A test run gets a NEW folder: check it does not exist (`test -e`) before downloading into it.
+- A new doc's kind is LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED only; run
+  `python scripts/doc_sync_check.py` before pushing a docs PR (2026-10-20: `SNAPSHOT` blocked #935).
 
 ## Real applications for the owner
 - An answer that is not clearly yes/no gets one clarifying question.
