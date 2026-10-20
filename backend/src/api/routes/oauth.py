@@ -27,7 +27,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from starlette.datastructures import FormData
 
-from src.api.auth_deps import CurrentUser, _client_ip, require_session_user
+from src.api.auth_deps import CurrentUser, require_session_user
+from src.api.client_ip import throttle_client_ip
 from src.core import settings
 from src.core.settings import DB_PATH
 from src.services.auth import oauth_clients, oauth_flow
@@ -60,7 +61,7 @@ def _error_json(
 
 @router.post("/register", status_code=201)
 async def register_client(request: Request) -> Response:
-    ip = _client_ip(request)
+    ip = throttle_client_ip(request)
     per_ip = settings.OAUTH_REGISTER_MAX_PER_HOUR
     if per_ip > 0 and not auth_rate_limit.check_and_record(
         f"oauth_register:{ip}", max_in_window=per_ip, window_seconds=3600
@@ -151,7 +152,7 @@ def _step2_redirect(redirect_uri: str, error: str, description: str, state: Opti
 
 @router.get("/authorize")
 async def authorize(request: Request) -> Response:
-    ip = _client_ip(request)
+    ip = throttle_client_ip(request)
     limit = settings.OAUTH_AUTHORIZE_MAX_PER_MIN
     if limit > 0 and not auth_rate_limit.check_and_record(
         f"oauth_authorize:{ip}", max_in_window=limit, window_seconds=60
@@ -329,7 +330,7 @@ async def token(request: Request, background_tasks: BackgroundTasks) -> Response
     form = await request.form()
     grant_type = _form_str(form, "grant_type") or ""
     client_id = _form_str(form, "client_id") or ""
-    ip = _client_ip(request)
+    ip = throttle_client_ip(request)
 
     # client_id is caller-supplied text: audit it only in log-safe form.
     safe_client_id = oauth_clients.log_safe(client_id)

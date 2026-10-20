@@ -102,7 +102,8 @@ def _client_from_ip(host: str) -> TestClient:
     """A TestClient whose requests present ``host`` as ``request.client.host``.
 
     ``password_reset_request`` derives its per-IP throttle bucket from
-    ``request.client.host`` directly (it does not read X-Forwarded-For), so to
+    ``src.api.client_ip``, which is ``request.client.host`` while no trusted
+    proxy hops are configured (the test default), so to
     prove the per-EMAIL throttle bites across DIFFERENT source IPs we need each
     request to actually arrive from a different client host."""
     from src.api.main import app
@@ -228,3 +229,244 @@ def test_password_reset_email_throttle_is_per_email(temp_db, monkeypatch):
     )
     assert r.status_code == 204, r.text
     assert "b@example.com" in calls
+
+
+# ─── Gap-audit fix #6: forged X-Forwarded-For + per-email login cap ──────────
+
+_LOGIN_EMAIL = "victim@example.com"
+_LOGIN_PW = "correct-horse-battery"
+
+
+def _register_victim(c: TestClient) -> None:
+    r = c.post("/api/auth/register", json={"email": _LOGIN_EMAIL, "password": _LOGIN_PW})
+    assert r.status_code == 201, r.text
+    c.cookies.clear()
+
+
+def _login(c: TestClient, password: str, xff: str | None = None):
+    headers = {"x-forwarded-for": xff} if xff is not None else {}
+    return c.post(
+        "/api/auth/login", json={"email": _LOGIN_EMAIL, "password": password}, headers=headers
+    )
+
+
+def test_login_lockout_survives_rotating_forged_forwarded_for(client, monkeypatch):
+    """One proxy hop trusted: the attacker forges a NEW leftmost entry on every
+    try, but the proxy-written rightmost entry is the key, so the email+IP
+    lockout still bites after LOGIN_MAX_ATTEMPTS. (With the old leftmost read
+    every attempt was a fresh bucket and this never locked.)"""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 1)
+    _register_victim(client)
+    for i in range(settings.LOGIN_MAX_ATTEMPTS):
+        r = _login(client, "wrong", xff=f"6.6.6.{i}, 203.0.113.9")
+        assert r.status_code == 401, r.text
+    r = _login(client, "wrong", xff="6.6.6.250, 203.0.113.9")
+    assert r.status_code == 429, r.text
+    # The real owner, behind the same proxy from a different address, is unaffected.
+    r = _login(client, _LOGIN_PW, xff="198.51.100.20")
+    assert r.status_code == 200, r.text
+
+
+def test_login_lockout_ignores_forwarded_for_when_untrusted(client, monkeypatch):
+    """Hops 0 (the default): the header is ignored outright, so forging it
+    changes nothing and the socket peer is the key."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    _register_victim(client)
+    for i in range(settings.LOGIN_MAX_ATTEMPTS):
+        assert _login(client, "wrong", xff=f"6.6.6.{i}").status_code == 401
+    assert _login(client, "wrong", xff="7.7.7.7").status_code == 429
+
+
+def test_login_per_email_cap_trips_across_addresses(temp_db, monkeypatch):
+    """Distributed stuffing: every address stays under its own email+IP lock,
+    but the per-email cap (LOGIN_EMAIL_MAX_ATTEMPTS) stops the account taking
+    more guesses — even the correct password then gets 429."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    per_ip = settings.LOGIN_MAX_ATTEMPTS
+    cap = settings.LOGIN_EMAIL_MAX_ATTEMPTS
+    assert cap == 50 and cap > per_ip  # the documented default, larger than per-IP
+    _register_victim(_client_from_ip("192.0.2.1"))
+
+    n_addresses = cap // per_ip  # 10 distinct addresses at the defaults
+    for a in range(n_addresses):
+        c = _client_from_ip(f"10.1.{a}.1")
+        for _ in range(per_ip):
+            assert _login(c, "wrong").status_code == 401
+
+    fresh = _client_from_ip("10.9.9.9")
+    r = _login(fresh, "wrong")
+    assert r.status_code == 429, r.text
+    assert "Retry-After" in r.headers
+    assert _login(fresh, _LOGIN_PW).status_code == 429
+
+
+def test_login_per_email_cap_needs_many_addresses(temp_db, monkeypatch):
+    """One attacker address cannot push the account toward the cap past its own
+    email+IP lock: once locked it records nothing more, and the owner on
+    another address still signs in."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    monkeypatch.setattr(settings, "LOGIN_EMAIL_MAX_ATTEMPTS", 2 * settings.LOGIN_MAX_ATTEMPTS)
+    _register_victim(_client_from_ip("192.0.2.1"))
+    attacker = _client_from_ip("10.6.6.6")
+    for _ in range(settings.LOGIN_MAX_ATTEMPTS):
+        assert _login(attacker, "wrong").status_code == 401
+    for _ in range(20):  # hammering while locked adds no failures
+        assert _login(attacker, "wrong").status_code == 429
+    assert _login(_client_from_ip("198.51.100.20"), _LOGIN_PW).status_code == 200
+
+
+def test_login_per_email_cap_zero_disables(temp_db, monkeypatch):
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    monkeypatch.setattr(settings, "LOGIN_EMAIL_MAX_ATTEMPTS", 0)
+    _register_victim(_client_from_ip("192.0.2.1"))
+    for a in range(12):
+        c = _client_from_ip(f"10.2.{a}.1")
+        for _ in range(settings.LOGIN_MAX_ATTEMPTS):
+            assert _login(c, "wrong").status_code == 401
+    assert _login(_client_from_ip("10.9.9.9"), _LOGIN_PW).status_code == 200
+
+
+def test_register_throttle_ignores_forged_leftmost_entry(client, monkeypatch):
+    """The register per-IP bucket is keyed on the trusted hop too."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 1)
+    for i in range(10):
+        r = client.post(
+            "/api/auth/register",
+            json={"email": f"spoof{i}@example.com", "password": "s3cretpassword"},
+            headers={"x-forwarded-for": f"6.6.6.{i}, 203.0.113.9"},
+        )
+        assert r.status_code == 201, r.text
+        client.cookies.clear()
+    r = client.post(
+        "/api/auth/register",
+        json={"email": "spoof10@example.com", "password": "s3cretpassword"},
+        headers={"x-forwarded-for": "6.6.6.99, 203.0.113.9"},
+    )
+    assert r.status_code == 429, r.text
+
+
+# ─── Security review P1: concurrent bursts + IPv6 /64 ────────────────────────
+
+
+def test_concurrent_burst_from_one_peer_is_capped(temp_db, monkeypatch):
+    """60 wrong passwords fired CONCURRENTLY from one peer. Checking the lock
+    before the awaited DB read and recording after it let every one pass the
+    check (60 x 401, no 429) and then trip the per-email cap, locking the owner
+    out everywhere. Admission is now atomic: at most LOGIN_MAX_ATTEMPTS get a
+    401, the rest 429, and the owner on another peer still signs in."""
+    import httpx
+
+    from src.api.main import app
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    app.router.lifespan_context = _noop_lifespan  # type: ignore[assignment]
+    _register_victim(_client_from_ip("192.0.2.1"))
+
+    async def _burst() -> list[int]:
+        transport = httpx.ASGITransport(app=app, client=("10.6.6.6", 40000))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as ac:
+            responses = await asyncio.gather(*[
+                ac.post("/api/auth/login", json={"email": _LOGIN_EMAIL, "password": "wrong"})
+                for _ in range(60)
+            ])
+        return [r.status_code for r in responses]
+
+    codes = asyncio.run(_burst())
+    assert set(codes) <= {401, 429}, codes
+    assert codes.count(401) <= settings.LOGIN_MAX_ATTEMPTS, codes
+    assert codes.count(429) == 60 - codes.count(401)
+    assert _login(_client_from_ip("198.51.100.20"), _LOGIN_PW).status_code == 200
+
+
+def test_ipv6_addresses_in_one_slash64_share_a_bucket(temp_db, monkeypatch):
+    """One IPv6 host owns a whole /64: rotating through it buys no fresh
+    email+IP buckets. A different /64 is a different bucket."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    _register_victim(_client_from_ip("192.0.2.1"))
+    codes = [
+        _login(_client_from_ip(f"2001:db8:1:2::{i + 1:x}"), "wrong").status_code
+        for i in range(10)
+    ]
+    n = settings.LOGIN_MAX_ATTEMPTS
+    assert codes == [401] * n + [429] * (10 - n), codes
+    assert _login(_client_from_ip("2001:db8:1:3::1"), _LOGIN_PW).status_code == 200
+
+
+def test_successful_logins_do_not_count_toward_the_email_cap(temp_db, monkeypatch):
+    """Every attempt is pre-counted; a successful one refunds its own count."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    monkeypatch.setattr(settings, "LOGIN_EMAIL_MAX_ATTEMPTS", 2)
+    _register_victim(_client_from_ip("192.0.2.1"))
+    for a in range(4):
+        assert _login(_client_from_ip(f"10.3.{a}.1"), _LOGIN_PW).status_code == 200
+    assert _login(_client_from_ip("10.3.9.1"), "wrong").status_code == 401
+
+
+def test_both_locks_return_the_same_429(temp_db, monkeypatch):
+    """Which bucket refused is never revealed: email+IP and per-email locks
+    give an identical status, body and Retry-After."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    monkeypatch.setattr(settings, "LOGIN_EMAIL_MAX_ATTEMPTS", 2 * settings.LOGIN_MAX_ATTEMPTS)
+    _register_victim(_client_from_ip("192.0.2.1"))
+    a, b = _client_from_ip("10.4.0.1"), _client_from_ip("10.4.0.2")
+    for c in (a, b):
+        for _ in range(settings.LOGIN_MAX_ATTEMPTS):
+            assert _login(c, "wrong").status_code == 401
+    ip_lock = _login(a, "wrong")  # a's email+IP bucket is full
+    email_lock = _login(_client_from_ip("10.4.0.3"), "wrong")  # fresh address, email cap full
+    assert ip_lock.status_code == email_lock.status_code == 429
+    assert ip_lock.json() == email_lock.json()
+    assert ip_lock.headers["Retry-After"] == email_lock.headers["Retry-After"]
+
+
+# ─── admit_login_attempt / refund_login_attempt (in-memory) ──────────────────
+
+
+def test_admit_counts_both_buckets_and_refused_counts_neither():
+    for _ in range(3):
+        assert rate_limit.admit_login_attempt(
+            "ip", "em", ip_max=3, email_max=10, window_seconds=900
+        ).admitted
+    refused = rate_limit.admit_login_attempt("ip", "em", ip_max=3, email_max=10, window_seconds=900)
+    assert (refused.admitted, refused.lock) == (False, rate_limit.LOCK_EMAIL_IP)
+    # The refused attempt was not added to the per-email bucket.
+    assert not rate_limit.is_locked("em", max_failures=4, window_seconds=900)
+    assert rate_limit.is_locked("em", max_failures=3, window_seconds=900)
+
+
+def test_admit_refuses_on_email_cap_without_counting_ip():
+    for i in range(2):
+        rate_limit.admit_login_attempt(f"ip{i}", "em", ip_max=5, email_max=2, window_seconds=900)
+    refused = rate_limit.admit_login_attempt("ip9", "em", ip_max=5, email_max=2, window_seconds=900)
+    assert (refused.admitted, refused.lock) == (False, rate_limit.LOCK_EMAIL)
+    assert not rate_limit.is_locked("ip9", max_failures=1, window_seconds=900)
+
+
+def test_refund_removes_only_its_own_count():
+    first = rate_limit.admit_login_attempt("ip", "em", ip_max=5, email_max=5, window_seconds=900)
+    second = rate_limit.admit_login_attempt("ip2", "em", ip_max=5, email_max=5, window_seconds=900)
+    rate_limit.refund_login_attempt("em", second)
+    assert rate_limit.is_locked("em", max_failures=1, window_seconds=900)
+    assert not rate_limit.is_locked("em", max_failures=2, window_seconds=900)
+    rate_limit.refund_login_attempt("em", first)
+    rate_limit.refund_login_attempt("em", first)  # second refund is a no-op
+    assert not rate_limit.is_locked("em", max_failures=1, window_seconds=900)

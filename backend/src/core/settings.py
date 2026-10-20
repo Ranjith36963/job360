@@ -128,6 +128,41 @@ USER_BROUGHT_SOURCE = "user_brought"
 # is Phase 3.
 LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
 LOGIN_LOCKOUT_WINDOW_SECONDS = int(os.getenv("LOGIN_LOCKOUT_WINDOW_SECONDS", "900"))
+# Per-EMAIL cap across ALL source addresses, beside the email+IP lockout above
+# (same window). The email+IP key exists so one attacker cannot lock a victim
+# out; this cap only slows DISTRIBUTED stuffing against one account. Each
+# address can add at most LOGIN_MAX_ATTEMPTS failures before its own email+IP
+# bucket locks (and a locked bucket records nothing more), so tripping this cap
+# takes at least LOGIN_EMAIL_MAX_ATTEMPTS / LOGIN_MAX_ATTEMPTS distinct real
+# addresses (10 at the defaults) inside one window: never a user's own typos,
+# never one attacker on one connection. It bounds guesses on one account to 50
+# per 15 minutes instead of 5 per address per 15 minutes. ``0`` disables it.
+LOGIN_EMAIL_MAX_ATTEMPTS = int(os.getenv("LOGIN_EMAIL_MAX_ATTEMPTS", "50"))
+
+# Client address behind proxies (src/api/client_ip.py is the only reader of
+# X-Forwarded-For). JOB360_TRUSTED_PROXY_HOPS = how many trusted proxies in
+# front of the backend each APPEND one X-Forwarded-For entry (or set it). The
+# client address is the entry that many positions from the RIGHT; everything
+# left of it was written by the caller and is ignored. Never the leftmost.
+# Interaction with the older flag:
+#   * HOPS set (any integer) -> it wins; 0 means "never trust X-Forwarded-For"
+#     even when JOB360_TRUST_PROXY=1. A negative value counts as 0.
+#   * HOPS unset, JOB360_TRUST_PROXY=1 -> 1 hop: the rightmost entry, the one
+#     the nearest proxy wrote, which a caller cannot forge.
+#   * both unset -> 0: X-Forwarded-For ignored, the socket peer is the address.
+# Set it ONLY when every path to the backend crosses that many proxies; a
+# backend the public can reach without them lets the caller write the entry.
+def resolve_trusted_proxy_hops(trust_proxy_raw: str, hops_raw: str) -> int:
+    """The effective hop count from the two env values (rules above)."""
+    hops = hops_raw.strip()
+    if hops:
+        return max(0, int(hops))
+    return 1 if trust_proxy_raw.strip() == "1" else 0
+
+
+TRUSTED_PROXY_HOPS = resolve_trusted_proxy_hops(
+    os.getenv("JOB360_TRUST_PROXY", ""), os.getenv("JOB360_TRUSTED_PROXY_HOPS", "")
+)
 
 # docs/fable/01 — cross-instance rate limiting. The default limiter (services/
 # auth/rate_limit.py) keeps its sliding windows in-process, so on a multi-replica
