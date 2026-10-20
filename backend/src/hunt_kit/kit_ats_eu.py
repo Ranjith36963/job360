@@ -23,8 +23,21 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterator, cast
+from typing import Any, Callable
 from urllib.parse import quote, urlsplit
+
+try:  # shared safe-XML helper (same folder)
+    from kit_xml import safe_fromstring  # type: ignore[import-not-found]  # sibling file, not a package module
+except ImportError:  # loaded by file path: find the sibling file
+    import importlib.util as _xilu
+    from pathlib import Path as _XPath
+
+    _xspec = _xilu.spec_from_file_location("kit_xml", _XPath(__file__).with_name("kit_xml.py"))
+    if _xspec is None or _xspec.loader is None:
+        raise ImportError("kit_xml.py not found next to this file")
+    _xmod = _xilu.module_from_spec(_xspec)
+    _xspec.loader.exec_module(_xmod)
+    safe_fromstring = _xmod.safe_fromstring
 
 try:  # shared helpers live in the sibling kit_ats.py
     from kit_ats import (  # type: ignore[import-not-found]
@@ -95,32 +108,26 @@ def _wrap(body: Callable[[dict[str, Any], Http], list[Job] | None]) -> Callable[
     return fetch
 
 
-_BODY_CAP = 200_000  # characters of a description read at all: a longer one is cut before any scan
+_BODY_CAP = 50_000  # characters of a description read at all: a longer one is cut before any scan
+_OPEN_BLOCK = re.compile(r"<(script|style)(?=[\s/>])", re.I)  # a tag name only counts when the next character ends it
+_CLOSE_BLOCK = {"script": re.compile(r"</script", re.I), "style": re.compile(r"</style", re.I)}
 
 
 def _strip_blocks(html: str) -> str:
-    """Drop every <script>/<style> element in ONE linear pass (str.find on a lower-cased copy, no regex backtracking).
-    A tag that never closes drops the rest of the text; a tag name only counts when the next character ends it."""
-    low = html.lower()
+    """Drop every <script>/<style> element in ONE linear pass: each search resumes where the last one stopped,
+    so no stretch of text is scanned twice. A tag that never closes drops the rest of the text."""
     out: list[str] = []
     pos = 0
     while True:
-        starts = [i for i in (low.find("<script", pos), low.find("<style", pos)) if i >= 0]
-        if not starts:
+        m = _OPEN_BLOCK.search(html, pos)
+        if m is None:
             out.append(html[pos:])
             break
-        a = min(starts)
-        name = "script" if low.startswith("<script", a) else "style"
-        end = a + len(name) + 1
-        if end < len(low) and not (low[end].isspace() or low[end] in "/>"):
-            out.append(html[pos:end])  # <scripts> or <styled>: some other tag, keep it
-            pos = end
-            continue
-        out.append(html[pos:a])
-        close = low.find("</" + name, end)
-        if close < 0:
+        out.append(html[pos:m.start()])
+        close = _CLOSE_BLOCK[m.group(1).lower()].search(html, m.end())
+        if close is None:
             break  # never closed: the tail is script/style text
-        gt = low.find(">", close)
+        gt = html.find(">", close.end())
         if gt < 0:
             break
         pos = gt + 1
@@ -129,7 +136,12 @@ def _strip_blocks(html: str) -> str:
 
 def _body(value: Any) -> str:
     """Plain text of an HTML description with script and style blocks dropped first (freehire runs sanitizeHTML)."""
-    return _text(_strip_blocks(str(value)[:_BODY_CAP])) if value else ""
+    if not value:
+        return ""
+    s = _strip_blocks(str(value)[:_BODY_CAP])
+    gt = s.rfind(">") + 1
+    s = s[:gt] + s[gt:].split("<", 1)[0]  # cut at the first '<' that has no '>' after it, so none is left for _text's tag regexes to rescan
+    return str(_text(s))
 
 
 def _epoch_date(value: Any) -> str:
@@ -140,24 +152,6 @@ def _epoch_date(value: Any) -> str:
         except (OverflowError, OSError, ValueError):
             return ""
     return ""
-
-
-def _xml(text: Any) -> ET.Element | None:
-    """Parse XML text; None when empty, malformed, or it declares a DOCTYPE/ENTITY (no entity expansion, ever)."""
-    if not isinstance(text, str) or not text.strip() or re.search(r"<!\s*(DOCTYPE|ENTITY)", text, re.I):
-        return None
-    parser: ET.XMLPullParser[ET.Element] = ET.XMLPullParser(events=("start",))  # fed only text that declares no DOCTYPE/ENTITY
-    root: ET.Element | None = None
-    try:
-        parser.feed(text)
-        events = cast("Iterator[tuple[str, Any]]", parser.read_events())
-        for _event, el in events:
-            if root is None and isinstance(el, ET.Element):
-                root = el
-        parser.close()
-    except ET.ParseError:
-        return None
-    return root
 
 
 def _local(tag: Any) -> str:
@@ -292,7 +286,7 @@ def _talentadore(row: dict[str, Any], http: Http) -> list[Job] | None:
     jobs: list[Job] = []
     for j in items:
         jt = str((j or {}).get("job_token") or "").strip() if isinstance(j, dict) else ""
-        title, url = str(j.get("name") or "").strip() if jt else "", _https(j.get("link")) if jt else ""
+        title, url = str(j.get("name") or "").strip() if jt else "", _https(j.get("link"), "ats.talentadore.com") if jt else ""
         if not jt or not title or not url:
             continue
         place = _join(j.get("city"), j.get("county"), j.get("country"))
@@ -331,7 +325,7 @@ def _traffit(row: dict[str, Any], http: Http) -> list[Job] | None:
                 continue
             aid = it.get("advertId") or it.get("advertPublishId")
             title = str(it.get("title") or "").strip() or str(it.get("name") or "").strip()
-            url = _https(it.get("url"))
+            url = _https(it.get("url"), f"{tenant}.traffit.com")
             if not aid or isinstance(aid, bool) or not title or not url:
                 continue
             place = ""
@@ -366,7 +360,7 @@ def _trakstar(row: dict[str, Any], http: Http) -> list[Job] | None:
     if not _label(tenant):
         return None
     st, feed = _get(http, f"https://{tenant}.hire.trakstar.com/jobfeeds/{tenant}", as_json=False, headers=_XML)
-    root = _xml(feed) if st == 200 else None
+    root = safe_fromstring(feed) if st == 200 else None
     if root is None or _local(root.tag) != "rss":
         return None
     jobs: list[Job] = []
@@ -374,7 +368,7 @@ def _trakstar(row: dict[str, Any], http: Http) -> list[Job] | None:
         def f(name: str, _it: ET.Element = item) -> str:
             el = _it.find(name)
             return (el.text or "").strip() if el is not None else ""
-        link = _https(f("link").replace("http://", "https://", 1))
+        link = _https(f("link").replace("http://", "https://", 1), f"{tenant}.hire.trakstar.com")
         title = f("title")
         if not link or not title:
             continue

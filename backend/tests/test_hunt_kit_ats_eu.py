@@ -345,3 +345,34 @@ def test_body_strip_is_linear_and_still_strips_pairs():
     assert eu._body("<style>p{}</style>Keep<SCRIPT>bad()</SCRIPT >me<scripts>kept</scripts>").split() == ["Keepmekept"]
     assert eu._body("Before<script>never closed " + "a" * 50) == "Before"
     assert eu._body("") == "" and eu._body(None) == ""
+
+
+def test_body_strip_is_linear_on_fake_tags_and_bare_angle_brackets():
+    import time
+    t0 = time.perf_counter()
+    for evil in ("<styles" * 28_000, "<scripts" * 25_000, "<" * 200_000, "<script " * 8_000 + "</script" * 8_000):
+        eu._body(evil)
+    assert time.perf_counter() - t0 < 1.5
+    assert eu._body("a<styles>b</styles>c<b") == "abc"
+    assert eu._body("keep<scripts>x</scripts>") == "keepx"
+
+
+def test_trakstar_uses_the_shared_safe_xml_parser():
+    assert eu.safe_fromstring.__module__.endswith("kit_xml") and not hasattr(eu, "_xml")
+
+
+def test_manatal_host_is_read_not_unsupported():
+    assert hk.board_from_job_url("https://careers-page.com/acme/job/X")["kind"] == "ats"
+
+
+def test_feed_job_links_must_sit_on_the_boards_own_host():
+    foreign = "https://evil.example/apply"
+    page = {"count": 1, "items": [{"advertId": 7, "title": "T", "url": foreign}]}
+    jobs, _ = _run("traffit", _row("traffit", "acme"), _stub({"traffit": (200, page)}))
+    assert jobs == []
+    ta = {"company": "A", "jobs": [{"job_token": "t1", "name": "N", "link": foreign}]}
+    jobs, _ = _run("talentadore", _row("talentadore", "tok"), _stub({"positions": (200, ta)}))
+    assert jobs == []
+    rss = f"<rss><channel><item><title>T</title><link>{foreign}</link></item></channel></rss>"
+    jobs, _ = _run("trakstar", _row("trakstar", "acme"), _stub({"jobfeeds": (200, rss)}))
+    assert jobs == []

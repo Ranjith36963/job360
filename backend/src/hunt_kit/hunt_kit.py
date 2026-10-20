@@ -2640,7 +2640,7 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|comeet\.com|join\.com|rippling\.com|dover\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|avature\.net|csod\.com|"
-    r"trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
+    r"trakstar\.com|homerun\.co|factorialhr\.com|paycomonline\.net)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
