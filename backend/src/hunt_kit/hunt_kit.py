@@ -128,6 +128,8 @@ BOARD_SOURCES = (
     "paycor",
     "jobscore",
     "recruiterflow",
+    "deel",
+    "dover",
 )
 FEED_SOURCES = (
     "freehire",
@@ -165,6 +167,9 @@ FEED_SOURCES = (
     "instaffo",
     "techinasia",
     "itviec",
+    "jobdanmark",
+    "remotedotcom",
+    "work180",
     "linkedin",
     "glassdoor",
     "googlejobs",
@@ -305,7 +310,9 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us")
+ATS_MODULES = (
+    "kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us", "kit_sites_a",
+)
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
     "kit_asia", "kit_sites_a",
@@ -2617,6 +2624,9 @@ _FEED_HOSTS = (
     ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
     ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
     ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
+    ("jobdanmark", re.compile(r"(?:^|\.)jobdanmark\.dk$", re.I)),
+    ("remotedotcom", re.compile(r"(?:^|\.)remote\.com$", re.I)),
+    ("work180", re.compile(r"(?:^|\.)work180\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
@@ -2691,10 +2701,12 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("paycor", re.compile(r"^recruitingbypaycor\.com$")),
     ("jobscore", re.compile(r"^careers\.jobscore\.com$")),
     ("recruiterflow", re.compile(r"^recruiterflow\.com$")),
+    ("deel", re.compile(r"^jobs\.deel\.com$")),
+    ("dover", re.compile(r"^app\.dover\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
-    r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|dover\.com|"
+    r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
     r"dayforcehcm\.com|trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com)$", re.I)
 
@@ -2779,6 +2791,10 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             if not seg or seg[0].lower() in _RECRUITERFLOW_NON_BOARD:
                 continue  # the vendor's own pages (/pricing, /blog, /login ...) are not a board
             tok = seg[0] if re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
+        elif ats == "deel":  # https://jobs.deel.com/<org slug>/job-details/<id>/overview
+            tok = seg[0] if seg and re.fullmatch(_SLUG, seg[0]) else ""
+        elif ats == "dover":  # https://app.dover.com/jobs/<slug> or /apply/<slug>/<job id>
+            tok = seg[1] if len(seg) > 1 and seg[0] in ("jobs", "apply") and re.fullmatch(_SLUG, seg[1]) else ""
         else:
             tok = m.group(1)
         # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.

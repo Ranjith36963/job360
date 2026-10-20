@@ -2836,7 +2836,8 @@ export interface paths {
         /**
          * Provenance
          * @description Per-line provenance for the newest saved version: which lines are the
-         *     user's OWN facts (grounded in their CV + the job ad) and which were added.
+         *     user's OWN facts (grounded in their profile), which only echo the job ad
+         *     (``source="ad"``: employer context, never a candidate fact) and which were added.
          *     Deterministic, no LLM — shown before download so the user can verify what is
          *     real (guardrail #2).
          */
@@ -3699,6 +3700,17 @@ export interface components {
             apply_min_score: components["schemas"]["SettingFieldOut"];
             auto_employer_emails: components["schemas"]["SettingFieldOut"];
             auto_grant_count: components["schemas"]["SettingFieldOut"];
+            /**
+             * @default {
+             *       "queue": {
+             *         "count": 0,
+             *         "hosts": [],
+             *         "no_host": 0
+             *       },
+             *       "unscoped": false
+             *     }
+             */
+            auto_grant_scope: components["schemas"]["GrantScopeOut"];
             auto_grant_until: components["schemas"]["SettingFieldOut"];
             below_line: components["schemas"]["SettingFieldOut"];
             /**
@@ -4924,6 +4936,50 @@ export interface components {
             /** Grants */
             grants: components["schemas"]["OAuthGrantOut"][];
         };
+        /**
+         * GrantScopeCount
+         * @description How many applications, their distinct form hosts, and how many have no host yet.
+         */
+        GrantScopeCount: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Hosts
+             * @default []
+             */
+            hosts: string[];
+            /**
+             * No Host
+             * @default 0
+             */
+            no_host: number;
+        };
+        /**
+         * GrantScopeOut
+         * @description Gap roadmap slice 30 - what an "Auto for a while" grant covers. ``queue``: what a grant
+         *     confirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the
+         *     grant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from
+         *     before snapshots, covering every application until it ends.
+         */
+        GrantScopeOut: {
+            granted?: components["schemas"]["GrantScopeCount"] | null;
+            /**
+             * @default {
+             *       "count": 0,
+             *       "hosts": [],
+             *       "no_host": 0
+             *     }
+             */
+            queue: components["schemas"]["GrantScopeCount"];
+            /**
+             * Unscoped
+             * @default false
+             */
+            unscoped: boolean;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -6126,6 +6182,12 @@ export interface components {
         ProvenanceSegment: {
             /** Grounded */
             grounded: boolean;
+            /**
+             * Source
+             * @default none
+             * @enum {string}
+             */
+            source: "profile" | "ad" | "none";
             /** Text */
             text: string;
         };
