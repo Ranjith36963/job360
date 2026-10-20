@@ -15,10 +15,10 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0071** | `backend/migrations/` |
-| Migration files | **72** | `backend/migrations/*.up.sql` |
+| Migration head | **0072** | `backend/migrations/` |
+| Migration files | **73** | `backend/migrations/*.up.sql` |
 | FastAPI surface | 23 route modules (138 endpoints) | `backend/src/api/routes/` |
-| Test files | across 258 `test_*.py` files | `backend/tests/` |
+| Test files | across 259 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 30 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->

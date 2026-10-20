@@ -280,6 +280,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "application_id": r.application_id,
         "answers": [a.model_dump() for a in r.answers],
         "answers_from": r.answers_from,
+        "files": [f.model_dump() for f in r.files],
         "fields_filled": r.fields_filled,
         "confirmation": r.confirmation,
         "cv_version_no": r.cv_version_no,
@@ -861,7 +862,8 @@ def build_server(version: str = "") -> MCPServer:
         employer's confirmation email in their Gmail proves it (name it in `note`). Pass
         `application_id` (the same id every other tool takes); `job_id` still works
         but is the older form — if you give both they must belong together. Freezes
-        the named CV version (the newest saved one, with a warning, if none named), the
+        the named CV version (none named: the one Job360 uploaded or served, listed in `files`;
+        else the newest, with a warning), the
         named cover letter and any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere. `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
@@ -878,7 +880,8 @@ def build_server(version: str = "") -> MCPServer:
         are exactly spec R8/S4's tool contract.
 
         cover_letter_artifact_id: pass it ONLY if a letter was actually sent; leave it out
-        and the receipt records no letter (`cover_letter_sent` false, plus a warning).
+        and the receipt records no letter (`cover_letter_sent` false, plus a warning) unless
+        Job360's browser uploaded one. A named id that is not the uploaded file gets a `*_mismatch` warning.
         `applied_at` is ISO-8601 with a timezone. `request_id` (your own id for this submit)
         makes a retry safe: the same one returns the first receipt (`already_existed` true).
         """

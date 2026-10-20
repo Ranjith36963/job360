@@ -109,6 +109,8 @@ export const EVENT_LABEL: Record<string, string> = {
   submit_resolved: "Submit marked as not sent",
   // Bulk-apply F4 (2026-10-18).
   answer_corrected: "Answer corrected by you",
+  // Gap roadmap slice 29: the exact file sent (server-written).
+  document_uploaded: "Document file sent",
 };
 
 function relayedWords(payload: unknown): boolean {

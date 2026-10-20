@@ -6266,6 +6266,8 @@ export interface components {
             fields_skipped: number;
             /** Fields Total */
             fields_total?: number | null;
+            /** Files */
+            files?: components["schemas"]["ReceiptFileOut"][];
             /**
              * Form Host
              * @default
@@ -6350,6 +6352,22 @@ export interface components {
             source?: string | null;
             /** Value Sha256 */
             value_sha256?: string | null;
+        };
+        /**
+         * ReceiptFileOut
+         * @description Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+         */
+        ReceiptFileOut: {
+            /** Artifact Id */
+            artifact_id: number;
+            /** Event Id */
+            event_id: number;
+            /** Fmt */
+            fmt: string;
+            /** Kind */
+            kind: string;
+            /** Sha256 */
+            sha256: string;
         };
         /** ReceiptListResponse */
         ReceiptListResponse: {
@@ -6496,6 +6514,8 @@ export interface components {
             cv_version_no: number | null;
             /** Event Id */
             event_id: number;
+            /** Files */
+            files?: components["schemas"]["ReceiptFileOut"][];
             /**
              * Possible Duplicate
              * @default

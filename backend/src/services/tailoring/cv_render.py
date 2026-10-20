@@ -20,6 +20,11 @@ from typing import Any, Callable, Optional
 from src.services.tailoring.pdf import _TRANSLIT, _to_latin1
 from src.utils.loop_guard import cpu_bound
 
+# Gap roadmap slice 29: stamped on every `document_uploaded` event next to the sha256 of the
+# bytes served, so a changed hash for the same CV text can be told apart from a changed CV.
+# Bump it whenever a change here can change the PDF bytes for the same text and style.
+RENDERER_VERSION = "cv_render-1"
+
 # Built-in fallback so this module works even when the style dict is partial.
 # Mirrors services/profile/cv_style.DEFAULT_STYLE (the owner's 1-page CV).
 _FALLBACK: dict[str, Any] = {

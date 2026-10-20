@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from src.utils.loop_guard import cpu_bound
 
+# Gap roadmap slice 29: stamped on `document_uploaded` for a .docx download (see cv_render.RENDERER_VERSION).
+RENDERER_VERSION = "docx-1"
+
 
 @cpu_bound
 def render_docx(text: str, title: str = "") -> bytes:

@@ -346,6 +346,11 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # guessed; payload {key | question, was_source}. A note: saving it to memory is a separate,
     # user-approved update_profile. Checked in the record_event ROUTE (_check_answer_corrected).
     "answer_corrected",
+    # Gap roadmap slice 29: the exact file a form was sent. SERVER-WRITTEN only (the browser's
+    # upload and the kit's /api/files/{token} link): {kind, artifact_id, version, sha256 of the
+    # bytes served, fmt, renderer_version, host}. A hash, never bytes or text. Refused from
+    # record_event (services/applications/uploads.py); record_application freezes it as `files`.
+    "document_uploaded",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
