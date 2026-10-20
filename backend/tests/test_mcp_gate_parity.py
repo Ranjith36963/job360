@@ -68,6 +68,9 @@ TOOL_ROUTES = {
     "list_applications": ("applications", "list_applications", {}),
     "mark_inbox_checked": ("applications", "mark_inbox_checked", {"application_ids": [987654321]}),
     "match_email": ("applications", "match_email", {"sender": "recruiter@acme.example"}),  # feature 8 - require_user, read-only, no email gate.
+    "record_events": (
+        "applications", "record_events", {"events": [{"application_id": 987654321, "event_type": "note"}]}
+    ),  # feature 10 - require_user, no email gate.
     "save_artifact": (
         "applications", "save_artifact", {"application_id": 987654321, "kind": "cv", "text": "x"}
     ),

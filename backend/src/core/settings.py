@@ -371,6 +371,13 @@ APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_
 # first; `truncated` says more existed.
 MATCH_EMAIL_MAX_CANDIDATES = int(os.getenv("MATCH_EMAIL_MAX_CANDIDATES", "20"))
 
+# record_events + inbox_items (feature 10): every cap a parameter, a breach names it.
+RECORD_EVENTS_MAX_ITEMS = int(os.getenv("RECORD_EVENTS_MAX_ITEMS", "50"))  # events + unmatched per call
+INBOX_ITEMS_MAX_OPEN_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_OPEN_PER_USER", "200"))
+INBOX_ITEMS_MAX_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_PER_USER", "2000"))  # open + resolved + dismissed
+INBOX_ITEMS_RECENT_DAYS = int(os.getenv("INBOX_ITEMS_RECENT_DAYS", "30"))  # resolved items whats_new still lists
+INBOX_ITEMS_WHATS_NEW_MAX = int(os.getenv("INBOX_ITEMS_WHATS_NEW_MAX", "100"))
+
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)
 # is, so a vocabulary rename cannot leave a stale name behind here.

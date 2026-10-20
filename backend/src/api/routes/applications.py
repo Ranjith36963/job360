@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_serializer
 
 from src.api.auth_deps import (
     AUTH_FIRST,
@@ -44,6 +44,7 @@ from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
+from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications import interview_payloads, queue_preflight, spine
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
@@ -611,6 +612,27 @@ class NextStepOut(BaseModel):
     label: str
 
 
+class InboxItemOut(BaseModel):
+    """Feature 10 - one unmatched email the assistant stored (services/applications/inbox_items.py)."""
+
+    id: int
+    kind: str
+    message_id: str
+    thread_id: Optional[str]
+    sender: str
+    subject: str
+    received_at: Optional[str]
+    recorded_by: str
+    created_at: str
+    resolution: str  # "" open | "matched" | "dismissed"
+    application_id: Optional[int]
+    job_title: Optional[str]
+    job_company: Optional[str]
+    resolved_by: Optional[str]
+    resolved_at: Optional[str]
+    event_id: Optional[int]  # the event recorded with this message id on application_id (None = not yet)
+
+
 class AskOut(BaseModel):
     """One "Needs you" ask (see ``services/applications/asks.py``)."""
 
@@ -897,6 +919,58 @@ class RecordEventResponse(BaseModel):
     follow_up_on: Optional[str]
 
 
+class RecordEventsItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    application_id: Optional[int] = None
+    event_type: str
+    detail: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    occurred_at: Optional[str] = None
+    corrects_event_id: Optional[int] = None
+    source: Optional[EventSource] = None
+    scheduled_at: Optional[str] = None
+    follow_up_on: Optional[str] = None
+    contact_id: Optional[int] = None
+    channel: Optional[str] = None
+
+
+class InboxItemIn(EventSource):
+    """An email the assistant could not tie to one application (EventSource's fields + dismissed)."""
+
+    dismissed: bool = False  # true ONLY when the user said it is about no job
+
+
+class RecordEventsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    events: list[RecordEventsItem] = Field(default_factory=list)
+    unmatched: list[InboxItemIn] = Field(default_factory=list)
+
+
+class RecordEventsItemOut(BaseModel):
+    index: int
+    ok: bool
+    event: Optional[RecordEventResponse] = None
+    error: Optional[str] = None  # "<status>: <detail>", the same text record_event's tool error carries
+
+
+class UnmatchedItemOut(BaseModel):
+    index: int
+    ok: bool
+    inbox_item_id: Optional[int] = None
+    already_existed: bool = False
+    already_recorded: bool = False  # already an event's source: nothing stored
+    resolution: str = ""
+    application_id: Optional[int] = None
+    error: Optional[str] = None
+
+
+class RecordEventsResponse(BaseModel):
+    events: list[RecordEventsItemOut]
+    unmatched: list[UnmatchedItemOut]
+
+
 class RecordApplicationReceiptResponse(BaseModel):
     receipt_id: int
     sent_at: str
@@ -955,6 +1029,8 @@ class WhatsNewResponse(BaseModel):
     open_asks: list[AskOut]
     # S7 - applied jobs with no proof after PROOF_NO_PROOF_AFTER_DAYS and no ask yet.
     proof_missing: list[ProofMissingOut]
+    # Feature 10 - unmatched mail: every open item + items resolved in the last INBOX_ITEMS_RECENT_DAYS.
+    inbox_items: list[InboxItemOut] = Field(default_factory=list)
 
 
 class ExportArtifactOut(BaseModel):
@@ -1933,6 +2009,69 @@ async def match_email(
         },
     )
     return result
+
+
+@router.post("/applications/record-events", response_model=RecordEventsResponse, dependencies=AUTH_FIRST)
+async def record_events(
+    body: RecordEventsRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Feature 10 (G289): record several emails in one call. `events` run through the SAME route
+    function as record_event (every validator, one result per item); `unmatched` mail is stored once
+    per message id as a Needs-you inbox item. One refused item never stops the others."""
+    n = len(body.events) + len(body.unmatched)
+    cap = settings.RECORD_EVENTS_MAX_ITEMS
+    if n == 0:
+        raise HTTPException(status_code=422, detail="give at least one item in events or unmatched")
+    if n > cap:
+        raise HTTPException(
+            status_code=422,
+            detail=f"at most RECORD_EVENTS_MAX_ITEMS ({cap}) items per call (events + unmatched): split the batch",
+        )
+    actor = actor_for(user)
+    event_results: list[dict[str, Any]] = []
+    for i, item in enumerate(body.events):
+        res: dict[str, Any] = {"index": i, "ok": False, "event": None, "error": None}
+        try:
+            if item.contact_id is not None and item.application_id is None:
+                res["error"] = (
+                    "422: a cold contact's outreach (contact_id, no application_id) goes through record_event, "
+                    "one call each"
+                )
+            elif item.application_id is None:
+                res["error"] = (
+                    "422: application_id is required (an email you cannot tie to one application goes in unmatched)"
+                )
+            else:
+                req = RecordEventRequest(**item.model_dump(exclude={"application_id"}, exclude_none=False))
+                res["event"] = await record_event(item.application_id, req, db, user)
+                res["ok"] = True
+        except HTTPException as exc:
+            res["error"] = f"{exc.status_code}: {exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)}"
+        except ValidationError as exc:
+            problems = "; ".join(f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('msg')}" for e in exc.errors())
+            res["error"] = f"422: {problems}"
+        event_results.append(res)
+    unmatched_results: list[dict[str, Any]] = []
+    for i, entry in enumerate(body.unmatched):
+        try:
+            r = await inbox_items_service.store_unmatched(
+                db, user.id, entry.model_dump(exclude={"dismissed"}), actor, dismissed=entry.dismissed
+            )
+            unmatched_results.append({"index": i, "ok": True, "error": None, **r})
+        except SpineError as exc:
+            unmatched_results.append({"index": i, "ok": False, "error": f"{exc.status_code}: {exc.detail}"})
+    get_audit_logger().info(
+        "record_events",
+        extra={
+            "event": "record_events", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor),
+            "events_count": len(event_results), "ok_count": sum(1 for r in event_results if r["ok"]),
+            "unmatched_count": len(unmatched_results),
+            "inbox_item_ids": [r["inbox_item_id"] for r in unmatched_results if r.get("inbox_item_id")],
+        },
+    )
+    return {"events": event_results, "unmatched": unmatched_results}
 
 
 @router.get("/applications/job/{job_id}", response_model=JobResponse, dependencies=AUTH_FIRST)
@@ -2969,6 +3108,11 @@ async def record_event(
             app_row = await spine.get_owned_application(db, user.id, application_id)
             if app_row is None:  # pragma: no cover — record_outreach already 422s a mismatch
                 raise SpineError(404, "application not found")
+            if source and result.get("event_id"):
+                # Feature 10: a linked contact's reply/sent mark is an event on this application too.
+                await inbox_items_service.resolve_by_event(
+                    db, user.id, source["message_id"], application_id, int(result["event_id"]), actor_for(user)
+                )
             return {
                 "event_id": result["event_id"], "event_type": body.event_type,
                 "occurred_at": result["outreach"]["occurred_at"], "recorded_at": result["outreach"]["recorded_at"],
@@ -3045,6 +3189,11 @@ async def record_event(
             # stored as the submission-confirmation note, never a second applied.
             repeat_applied_as_confirmation=True,
         )
+        if source:
+            # Feature 10: this message was waiting as an unmatched inbox item - it now has its application.
+            await inbox_items_service.resolve_by_event(
+                db, user.id, source["message_id"], application_id, int(result["event_id"]), actor_for(user)
+            )
         if body.event_type == "replied" and source and source.get("sender"):
             # The sender is a person we sent outreach to on this job: mark them
             # replied too (a new outreach_replied entry; old events untouched).

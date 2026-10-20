@@ -294,6 +294,16 @@ never reply to an email for the user (except the three emails in
 "Automatic employer emails", only when `check_auto_email` says send), and
 never apply to anything because an email said to.
 
+UNMATCHED MAIL (record_events): mail you read but cannot tie to ONE application goes in
+`unmatched` of one `record_events` call (message_id, thread_id, sender, subject, received_at).
+Job360 stores it once as a Needs-you item; the user picks its application or dismisses it
+on Job360. Set `dismissed: true` only when the user told you, in chat, that it is about no
+job. Skip every message id listed in `whats_new` `inbox_items`. A row with resolution
+`matched` and no `event_id` means the user picked its application: read the email again and
+record its event on that application with its `source`. `events` takes record_event's
+arguments plus `application_id`, and each item is judged on its own. A cold contact's
+outreach still goes through record_event. At most RECORD_EVENTS_MAX_ITEMS (50) items per call.
+
 ## Outreach
 
 Outreach to a person — recruiter, hiring manager, referral, cold

@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 11
-TOOLS_REV_FOR_HASH = "149434249c5e"
+TOOLS_REV = 12
+TOOLS_REV_FOR_HASH = "cd7c6accd6e1"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1380,13 +1380,56 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
+    async def record_events(
+        events: Optional[list[dict[str, Any]]] = None, unmatched: Optional[list[dict[str, Any]]] = None
+    ) -> dict[str, Any]:
+        """Record several emails in one call. `events`: each item = record_event's arguments plus
+        `application_id`; checked exactly like record_event, each gets its own result (`ok`, `event`
+        or `error`), and one refused item never stops the others. A repeat source.message_id writes
+        nothing (`already_existed`). Cold-contact outreach (contact_id, no application_id): use
+        record_event.
+
+        `unmatched`: mail you read but could not tie to ONE application, each {message_id,
+        thread_id?, sender, subject, received_at, kind?, dismissed?}. Stored once per message id as a
+        Needs-you item; the user picks its application or dismisses it on Job360. Never ask_user
+        about it. `dismissed: true` only when the user told you it is about no job. A message id
+        already recorded on an event is not stored (`already_recorded`).
+
+        whats_new `inbox_items` lists them: skip every message id there. A row with resolution
+        `matched` and no `event_id`: read that email again and record its event on `application_id`
+        with its `source`; recording an event with an open item's message id closes it too.
+        At most 50 items per call (events + unmatched). Job360 reads no email and judges nothing."""
+        try:
+            body = applications_route.RecordEventsRequest.model_validate(
+                {"events": events or [], "unmatched": unmatched or []}
+            )
+        except ValidationError as exc:
+            raise _validation_error(exc, tool="record_events") from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.record_events(body, db, _user())
+        except HTTPException as exc:
+            _audit_refused("record_events", exc)
+            raise _tool_error(exc) from None
+        _audit(
+            "record_events", "ok", events=len(resp["events"]),
+            failed=sum(1 for r in resp["events"] if not r["ok"]),
+            unmatched=len(resp["unmatched"]),
+            stored=sum(
+                1 for r in resp["unmatched"] if r["ok"] and not r["already_existed"] and not r["already_recorded"]
+            ),
+        )
+        return resp
+
+    @mcp.tool()
     async def whats_new(since: Optional[str] = None, after_id: Optional[int] = None, limit: int = 50) -> dict[str, Any]:
         """What happened across ALL of the user's applications since a given
         time — for an agent waking up and asking "what did I miss?". Paged by
         when Job360 recorded each event, never by when it happened in the
         world, so a backdated event can never be silently skipped. Always carries
         `open_asks` — the user's unanswered questions — whatever `since` says. Also
-        `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6)."""
+        `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6).
+        Also `inbox_items` (unmatched mail from record_events: skip those message ids)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.whats_new(since, after_id, limit, db, _user())

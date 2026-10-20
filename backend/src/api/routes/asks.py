@@ -15,9 +15,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.routes.applications import AskOut
+from src.api.routes.applications import AskOut, InboxItemOut
 from src.repositories.database import JobDatabase
 from src.services.applications import asks as asks_service
+from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 
@@ -119,6 +120,52 @@ async def withdraw_ask(
     """Take an open ask back. Web only - there is deliberately no MCP tool."""
     try:
         return await asks_service.withdraw_ask(db, user.id, ask_id, actor_for(user))
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+class ListInboxItemsResponse(BaseModel):
+    items: list[InboxItemOut]
+    open_count: int
+
+
+class ResolveInboxItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    application_id: Optional[int] = None
+    dismiss: bool = False
+
+
+@router.get("/inbox-items", response_model=ListInboxItemsResponse, dependencies=AUTH_FIRST)
+async def list_inbox_items(
+    status: str = Query("open"),
+    limit: int = Query(50, ge=1, le=200),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Feature 10: unmatched mail the assistant stored (open, or all)."""
+    try:
+        items = await inbox_items_service.list_items(db, user.id, status, limit)
+        return {"items": items, "open_count": await inbox_items_service.count_open(db, user.id)}
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post("/inbox-items/{item_id}/resolve", response_model=InboxItemOut, dependencies=AUTH_FIRST)
+async def resolve_inbox_item(
+    item_id: int,
+    body: ResolveInboxItemRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The user's pick: match the email to one of their applications, or dismiss it. Stores the pick
+    and writes no event (only the assistant read the mail). No MCP tool: the assistant records the event."""
+    try:
+        return await inbox_items_service.resolve(
+            db, user.id, item_id, application_id=body.application_id, dismiss=body.dismiss, actor=actor_for(user)
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

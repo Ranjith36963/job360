@@ -2604,10 +2604,14 @@ async def whats_new(
 
     missing_proof = await proof_missing(db, user_id, datetime.now(timezone.utc))
 
+    # Feature 10 - unmatched mail, likewise carried whatever `since` says.
+    from src.services.applications.inbox_items import for_whats_new  # noqa: PLC0415
+
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
         "open_asks": open_asks, "proof_missing": missing_proof,
+        "inbox_items": await for_whats_new(db, user_id),
     }
 
 
