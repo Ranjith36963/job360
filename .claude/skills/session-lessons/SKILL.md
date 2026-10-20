@@ -37,8 +37,7 @@ delete a lesson; if one stops being true, say so on its line and why.
   (`check-runs` for the head SHA until nothing is pending) and read the
   reviewer-bugs / reviewer-security verdicts once. Do not subscribe four PRs at
   once.
-- The WIP limit is 5 open PRs (owner raised it from 2 on 2026-10-17; `.github/merge-policy.yml` `wip.limit`). Extras get `wip:parked`. **Rule:** merge one at a
-  time, then remove the label from the next PR.
+- (Retired 2026-10-20.) There was a WIP limit that parked extra PRs with `wip:parked`. The owner had it deleted: parked PRs were never unparked, because the sweep that unparked them ran hours late. **Rule:** never bring back a gate whose undo runs only on a schedule.
 - 2026-10-15: a backend CI failure was unreadable: the log tail is Postgres
   service-container noise and the full-log download host is blocked from the
   cloud container, so the owner had to paste the failure. **Rule:** read the job
