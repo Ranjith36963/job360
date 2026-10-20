@@ -932,6 +932,8 @@ _REQUIRED_PROD_VARS = ["SESSION_SECRET", "DATABASE_URL"]
 # ---------------------------------------------------------------------------
 BRING_MAX_TEXT = int(os.getenv("BRING_MAX_TEXT", "40000"))
 BRING_MAX_FIELD = int(os.getenv("BRING_MAX_FIELD", "300"))
+# Outreach pack #15 — at most this many people a job ad names (bring_job `listed_people`) per call.
+BRING_LISTED_PEOPLE_MAX = int(os.getenv("BRING_LISTED_PEOPLE_MAX", "10"))
 
 # ---------------------------------------------------------------------------
 # URL fetch on the web (docs/plans/2026-09-04-url-fetch/spec.md) — every cap

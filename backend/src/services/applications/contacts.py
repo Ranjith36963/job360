@@ -673,6 +673,65 @@ async def add_contact(
     return {"contact": view, "already_existed": False, "event_id": event_id, "matched_on": None}
 
 
+def validate_listed_people(people: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Outreach pack #15 — the people a job ad names, checked BEFORE bring_job
+    writes anything (a bad item must not leave a half-brought job). Same rules
+    as add_contact: name 1-CONTACT_NAME_MAX_CHARS, role, http(s) linkedin_url;
+    at most BRING_LISTED_PEOPLE_MAX. A 422 names the item."""
+    if len(people) > settings.BRING_LISTED_PEOPLE_MAX:
+        raise SpineError(
+            422, f"listed_people takes at most {settings.BRING_LISTED_PEOPLE_MAX} people (BRING_LISTED_PEOPLE_MAX)"
+        )
+    clean: list[dict[str, str]] = []
+    for i, p in enumerate(people):
+        try:
+            clean.append({
+                "name": _validate_name(p.get("name") or ""),
+                "role": _validate_role(p.get("role") or ""),
+                "linkedin_url": _validate_linkedin_url(p.get("linkedin_url") or ""),
+            })
+        except SpineError as exc:
+            raise SpineError(422, f"listed_people[{i}]: {exc.detail}") from None
+    return clean
+
+
+async def add_listed_people(
+    db: JobDatabase, user_id: str, application_id: int, actor: str,
+    people: list[dict[str, str]], *, source_url: Optional[str],
+) -> list[dict[str, Any]]:
+    """Outreach pack #15 — store each person the ad names as a contact on this
+    application with found_via='job_ad', through add_contact (so the slice-2
+    identity dedupe applies: a re-bring, or someone already added, answers
+    already_existed and changes nothing). ``people`` is validate_listed_people's
+    output. A cap (409) or rate-limit (429) refusal is reported per person,
+    never fails the bring (the job is already stored). ``source_url`` = the
+    ad link; dropped when it is not a valid contact source_url."""
+    try:
+        src = _validate_source_url(source_url)
+    except SpineError:
+        src = None
+    out: list[dict[str, Any]] = []
+    for p in people:
+        try:
+            r = await add_contact(
+                db, user_id, application_id, actor, name=p["name"], role=p["role"],
+                linkedin_url=p["linkedin_url"], found_via="job_ad", source_url=src,
+            )
+        except SpineError as exc:
+            if exc.status_code not in (409, 429):
+                raise
+            out.append({
+                "name": p["name"], "contact_id": None, "already_existed": False, "matched_on": None,
+                "error": "contact_cap" if exc.status_code == 409 else "rate_limited",
+            })
+            continue
+        out.append({
+            "name": p["name"], "contact_id": int(r["contact"]["id"]), "already_existed": bool(r["already_existed"]),
+            "matched_on": r["matched_on"], "error": None,
+        })
+    return out
+
+
 async def get_owned_contact(db: JobDatabase, user_id: str, contact_id: int) -> Optional[dict[str, Any]]:
     """S2 — the only lookup every contact-scoped function below builds on. A
     foreign or unknown id reads as None (the route turns that into 404 —
