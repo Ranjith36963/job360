@@ -152,12 +152,13 @@ async def test_corrected_interview_is_excluded(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         first = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2))
+        later = _iso(4)  # read the clock once: two calls can straddle a second
         moved = await _event(
-            client, app_id, "interview_scheduled", scheduled_at=_iso(4), corrects_event_id=first["event_id"]
+            client, app_id, "interview_scheduled", scheduled_at=later, corrects_event_id=first["event_id"]
         )
         got = await _interviews(client)
     assert len(got["upcoming"]) == 1
-    assert datetime.fromisoformat(got["upcoming"][0]["scheduled_at"]) == datetime.fromisoformat(_iso(4))
+    assert datetime.fromisoformat(got["upcoming"][0]["scheduled_at"]) == datetime.fromisoformat(later)
     assert moved["event_id"] != first["event_id"]
 
 
