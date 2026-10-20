@@ -112,17 +112,18 @@ def control_kind(
     native_submit = owns and (
         (tag == "button" and input_type in ("submit", "")) or (tag == "input" and input_type in ("submit", "image"))
     )
-    # A <button role="tab"> (the ARIA tab pattern) is a tab, unless clicking it submits its form anyway.
-    link_role = role in _LINK_ROLES and not native_submit
-    is_button = not link_role and (
+    is_button = (
         tag == "button" or role == "button" or (tag == "input" and input_type in ("submit", "button", "image"))
     )
-    if tag == "textarea" or (tag == "input" and input_type not in ("submit", "button", "image")):
+    if tag in ("input", "textarea") and not is_button:
         return "password" if _password_name(name) else "field"
-    is_link = not is_button and (tag == "a" or link_role)
+    is_link = not is_button and (tag == "a" or role in _LINK_ROLES)
     if not is_button and not is_link:
         return "field"
-    strong = (_STRONG_SUBMIT_WORD if is_link else _STRONG_SUBMIT).search(name)
+    # A <button role="tab"> (the ARIA tab pattern) that cannot submit its form needs the whole word "submit"
+    # ("Submitted applications" is a tab); every other button rule still holds ("Finish", "Send application").
+    tab_button = is_button and role in _LINK_ROLES and not native_submit
+    strong = (_STRONG_SUBMIT_WORD if is_link or tab_button else _STRONG_SUBMIT).search(name)
     sends_application = bool(_SUBMIT_WORDS.search(name) and _APPLICATION.search(name))
     if _STEP_WORDS.search(name) and not strong and not sends_application:
         return "field"
