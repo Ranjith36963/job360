@@ -1693,7 +1693,8 @@ export interface paths {
          * Outreach Check
          * @description THE one gate before pressing Send on an outreach email (feature 10).
          *
-         *     Reads the user's settings, this contact's facts and the saved message
+         *     Reads the user's settings (``assistant_settings.outreach_send`` decides send vs
+         *     ask; the Gmail mode never does), this contact's facts and the saved message
          *     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
          *     kind="outreach"`` created), plus today's recorded sends, then answers
          *     through ``settings_rules.may_send_outreach`` - the same function for this
@@ -3694,6 +3695,7 @@ export interface components {
              * @default []
              */
             notes: string[];
+            outreach_send: components["schemas"]["SettingFieldOut"];
             pause_reason: components["schemas"]["SettingFieldOut"];
             /** Paused */
             paused: boolean;
@@ -4348,6 +4350,13 @@ export interface components {
              * @default []
              */
             ghosted_now: number[];
+            /**
+             * @default {
+             *       "just_passed": [],
+             *       "upcoming": []
+             *     }
+             */
+            interviews: components["schemas"]["InterviewAgenda"];
             /** Latest Event Recorded At */
             latest_event_recorded_at?: string | null;
             /** Missing */
@@ -4904,6 +4913,52 @@ export interface components {
             application_ids: number[];
             /** Inbox Checked At */
             inbox_checked_at: string;
+        };
+        /**
+         * InterviewAgenda
+         * @description ``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose
+         *     application has no outcome event yet (ask the user how it went).
+         */
+        InterviewAgenda: {
+            /**
+             * Just Passed
+             * @default []
+             */
+            just_passed: components["schemas"]["InterviewAgendaItem"][];
+            /**
+             * Upcoming
+             * @default []
+             */
+            upcoming: components["schemas"]["InterviewAgendaItem"][];
+        };
+        /**
+         * InterviewAgendaItem
+         * @description One live interview in the agenda read (services/applications/agenda.py).
+         */
+        InterviewAgendaItem: {
+            /** Application Id */
+            application_id: number;
+            /** Company */
+            company: string;
+            /**
+             * Duration Minutes
+             * @default 60
+             */
+            duration_minutes: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /**
+             * Round
+             * @default
+             */
+            round: string;
+            /** Scheduled At */
+            scheduled_at: string;
+            /** Title */
+            title: string;
         };
         /** JobFactsOut */
         JobFactsOut: {
@@ -7718,6 +7773,13 @@ export interface components {
             applications: components["schemas"]["WhatsNewApplicationOut"][];
             /** Events */
             events: components["schemas"]["WhatsNewEventOut"][];
+            /**
+             * @default {
+             *       "just_passed": [],
+             *       "upcoming": []
+             *     }
+             */
+            interviews: components["schemas"]["InterviewAgenda"];
             /** Next After Id */
             next_after_id: number | null;
             /** Next Since */
@@ -7814,6 +7876,7 @@ export interface operations {
                 in_flight?: boolean;
                 queued?: boolean;
                 priority?: string | null;
+                agenda?: string | null;
             };
             header?: {
                 authorization?: string | null;
