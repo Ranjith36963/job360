@@ -564,7 +564,7 @@ def test_clinch_sitemap_with_doctype_or_entity_returns_no_rows():
 # ----------------------------------------------------------------------------- wiring
 def test_misc1_is_wired_into_the_kit():
     hk = _load("hunt_kit_misc1_wiring", "hunt_kit.py")
-    assert hk.ATS_MODULES == ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2")
+    assert hk.ATS_MODULES == ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us")
     assert set(ALL) <= set(F) and set(ALL) <= set(hk.BOARD_SOURCES)
     from src.api.routes.hunt_kit import KIT_FILES
     assert "kit_ats_misc1.py" in KIT_FILES
