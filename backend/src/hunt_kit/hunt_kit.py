@@ -103,6 +103,10 @@ BOARD_SOURCES = (
     "catsone",
     "clinch",
     "crelate",
+    "bullhorn",
+    "careerplug",
+    "hireology",
+    "hiringthing",
     "opencats",
     "odoo",
     "recruitingsolutions",
@@ -118,6 +122,8 @@ BOARD_SOURCES = (
     "mindsight",
     "pageup",
     "freshteam",
+    "deel",
+    "dover",
 )
 FEED_SOURCES = (
     "freehire",
@@ -155,6 +161,9 @@ FEED_SOURCES = (
     "instaffo",
     "techinasia",
     "itviec",
+    "jobdanmark",
+    "remotedotcom",
+    "work180",
     "linkedin",
     "glassdoor",
     "googlejobs",
@@ -295,7 +304,9 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2")
+ATS_MODULES = (
+    "kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us", "kit_sites_a",
+)
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
     "kit_asia", "kit_sites_a",
@@ -1734,6 +1745,8 @@ def parse_extra(value: str | None) -> list[dict[str, str]]:
             parts = tok.split("/")  # successfactors host[/brand], ultipro host/tenant/id, adp cid/ccId
             name = parts[min(_PATH_TOKEN[ats], len(parts) - 1)]
             out.append({"name": name, "ats": ats, "token": tok, "source": "user"})
+        elif ats == "bullhorn" and re.fullmatch(r"\d{1,4}:[A-Za-z0-9]{1,64}", tok):  # "<cluster>:<corpToken>"
+            out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
         elif ats in BOARD_SOURCES and ats not in _TWO_PART and ats != "workday" \
                 and re.fullmatch(r"[A-Za-z0-9_.-]+", tok):
             out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
@@ -2605,6 +2618,9 @@ _FEED_HOSTS = (
     ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
     ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
     ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
+    ("jobdanmark", re.compile(r"(?:^|\.)jobdanmark\.dk$", re.I)),
+    ("remotedotcom", re.compile(r"(?:^|\.)remote\.com$", re.I)),
+    ("work180", re.compile(r"(?:^|\.)work180\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
@@ -2628,6 +2644,8 @@ _AGGREGATOR_HOSTS = re.compile(
 _SLUG = r"([A-Za-z0-9_.-]+)"
 _SLUG_BLOCK = {"embed", "jobs", "job", "j", "o", "share", "api", "widget", "www", "app", "v1", "careers",
                "en-us", "en-gb"}
+_NON_TENANT_SUB = {"www", "app", "help", "support", "api", "blog", "status", "docs", "admin", "login", "mail",
+                   "cdn", "static"}
 # (ats, host regex); ordered, the first host match wins. Group 1 of the host regex is the token where it is in the host.
 _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("greenhouse", re.compile(r"(?:^|\.)greenhouse\.io$")),
@@ -2659,15 +2677,20 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
     ("keka", re.compile(r"^([a-z0-9-]+)\.keka\.com$")),
     ("zohorecruit", re.compile(r"^([a-z0-9-]+)\.zohorecruit\.(?:in|com)$")),
+    ("careerplug", re.compile(r"^([a-z0-9-]+)\.careerplug\.com$")),
+    ("hireology", re.compile(r"^careers\.hireology\.com$")),
+    ("hiringthing", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+)*\.hiringthing\.com)$")),
     ("hibob", re.compile(r"^([a-z0-9-]+)\.careers\.hibob\.com$")),
     ("freshteam", re.compile(r"^([a-z0-9-]+)\.freshteam\.com$")),
     ("avature", re.compile(r"^((?!www\.)[a-z0-9-]+\.avature\.net)$")),
     ("comeet", re.compile(r"^www\.comeet\.com$")),
     ("pageup", re.compile(r"^careers\.pageuppeople\.com$")),
+    ("deel", re.compile(r"^jobs\.deel\.com$")),
+    ("dover", re.compile(r"^app\.dover\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
-    r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|dover\.com|"
+    r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
     r"dayforcehcm\.com|trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
 
@@ -2726,6 +2749,10 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
         elif ats == "join":  # https://join.com/companies/<slug>/...
             tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
+        elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
+        elif ats in ("careerplug", "hiringthing") and m.group(1).split(".")[0] in _NON_TENANT_SUB:
+            continue  # www/help/app.<vendor>.com is the vendor's own site, not a tenant board
         elif ats == "comeet":  # https://www.comeet.com/jobs/<slug>/<companyUID>/...
             ids = seg[1:3] if seg[:1] == ["jobs"] and len(seg) >= 3 else []
             tok = "/".join(ids) if ids and all(re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", x) for x in ids) else ""
@@ -2734,6 +2761,10 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             ok_lang = bool(re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?", lang))
             keep_lang = "/" + lang if ok_lang and lang.lower() != "en" else ""  # "en" is the reader's default
             tok = seg[0] + keep_lang if seg and re.fullmatch(r"\d{1,8}", seg[0]) else ""
+        elif ats == "deel":  # https://jobs.deel.com/<org slug>/job-details/<id>/overview
+            tok = seg[0] if seg and re.fullmatch(_SLUG, seg[0]) else ""
+        elif ats == "dover":  # https://app.dover.com/jobs/<slug> or /apply/<slug>/<job id>
+            tok = seg[1] if len(seg) > 1 and seg[0] in ("jobs", "apply") and re.fullmatch(_SLUG, seg[1]) else ""
         else:
             tok = m.group(1)
         # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.
