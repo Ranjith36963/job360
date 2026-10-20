@@ -126,6 +126,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the tool turns on.
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
+  - `BROWSER_AGENT_MAX_LIVE` (default 2): the live sign-in views' own cap, so they never take an assistant's browser.
   - Each live browser uses about 300 MB of memory.
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
 - **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
@@ -141,7 +142,14 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   your password goes straight to the site and is not logged, stored or sent back. Table `browser_sign_ins`
   (migration 0065), one row per (user, site); **Forget** deletes it; deleting the account deletes them all.
 - **Who can use it:** only you, in a signed-in browser session. An assistant's token is refused (403), so no AI can
-  drive the live view or type into it. The assistant's own `browser` tool simply starts already signed in.
+  drive the live view or type into it. The live view is its own browser, not the one the assistant's `browser` tool
+  drives: the assistant cannot see your sign-in, and Start or Cancel never touches its half-filled form. Live views
+  count toward their own `BROWSER_AGENT_MAX_LIVE`, never toward `BROWSER_AGENT_MAX_SESSIONS`. The assistant's own
+  `browser` tool starts already signed in, and Keep hands the new sign-in's cookies to its browser if it is already
+  open, so "sign in, then try again" works at once.
+- **How long it stays open:** the picture refreshes every 1.5 s while the tab is shown, and stops after Keep. The
+  refresh does not keep the browser open: it closes after `BROWSER_AGENT_IDLE_SECONDS` without a click, key or typing
+  of yours, and 15 minutes after the last Start at the latest.
 - **Changing `SESSION_SECRET`** signs everyone out of every saved site (they sign in again). Nothing breaks.
 - **Checked end to end** in a real browser against a local test site: the page signs in, keeps the site, lists it,
   the password is in neither the logs nor the database, and an assistant's new browser opens already signed in.
@@ -157,11 +165,18 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 
 **`key` action (2026-10-19):** ArrowDown, ArrowUp, Tab, Escape and Enter, for the suggestion lists real forms use
 (Greenhouse location and school, Workday dropdowns): type, ArrowDown, Enter. Enter is refused outside a suggestion
-list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. The list
-must be OPEN (`aria-expanded` true, or an option highlighted): a closed suggestion box in a form submits on Enter too.
+list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. An option
+must be highlighted (focus on an option, or `aria-activedescendant` naming one): a closed suggestion box, or an open
+list that shows "No options", submits on Enter too. And if a site lets an allowed Enter through to its form anyway,
+the submit is stopped before the page sees it and the key is refused (`enter_may_submit`).
 
 **CAPTCHA vs. invisible reCAPTCHA:** every Greenhouse posting loads an invisible reCAPTCHA that asks nothing, so it
 is not a stop. A reCAPTCHA image challenge or a tick-box widget is (freehire `atsapply/browser.go:167-234`).
+Only a challenge frame the user can see counts: Ashby and Lever load theirs on every form, full size but hidden
+off the page until it asks something, and that waiting frame is no stop.
+Once a page shows a CAPTCHA, every action but `look`, `back`, `open` and `close` is refused (`needs_you`, reason
+`captcha`), and nothing inside a CAPTCHA's own frame is ever clicked, typed or keyed: the cloud browser never ticks
+"I'm not a robot" itself.
 
 **Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
 the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.
@@ -176,7 +191,12 @@ form; the test fails when the wait is removed.
 - **Shadow DOM:** inputs inside open shadow roots are read (SmartRecruiters builds its whole form this way).
 - **Frames:** invisible frames are skipped, at most 20 are read, and each read has 3 seconds.
 - **Untrusted text:** the page text sits inside a marker with a random code per read. A site that plants a fake end
-  marker gets it removed, so its text cannot pose as instructions.
+  marker gets it removed, so its text cannot pose as instructions. Everything else the page sets is bounded too: the
+  title (200 characters), the address (2,000), each control's tag, type, role and autocomplete (40), and the whole
+  element list (60,000 characters as JSON; the rest count in `more_elements`). A `data-j360-ref` the page wrote itself
+  (not Job360's shape, or shared by two controls) is replaced, and a ref found on two elements is refused, never guessed.
+- **A page that did not load:** `look` on Chromium's own error page (`chrome-error://`) answers `load_failed`, never an
+  empty `ok`.
 
 **Step 3, typing and dropdowns that hold (2026-10-19):**
 - **`type`** reads the value back. A suggestion box (combobox, autocomplete) is typed key by key so the site's
@@ -261,6 +281,9 @@ sends every job still waiting on your yes.
   applies with Job360's `browser` tool and your saved sign-ins, running `check_submit` (your yes shows as
   `user_approved`) before every final click.
 - **Any other assistant:** any https webhook gets the same `{"text": ...}` and bearer token.
+- **The ad's words are not instructions:** each job title and company in the text is one line of at most 120
+  characters, inside a job-list marker with a random code per start, under a line saying they are ad text. The card's
+  routine instructions say only Job360's fixed text is the instruction, and only the `application_id` is used.
 - **No cloud:** the card also gives a `/loop 5m ...` command to leave running in Claude Code on your own computer;
   it applies with your own Chrome and sign-ins (computer on).
 - **Safety:** set, changed and fired only from the website (an assistant's token gets 403, and no MCP tool reaches
