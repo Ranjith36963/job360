@@ -106,6 +106,12 @@ BOARD_SOURCES = (
     "avature",
     "comeet",
     "hibob",
+    "erecruiter",
+    "gr8people",
+    "hrmanager",
+    "ismartrecruit",
+    "loxo",
+    "mindsight",
     "pageup",
     "freshteam",
 )
@@ -139,6 +145,10 @@ FEED_SOURCES = (
     "gulftalent",
     "glints",
     "kalibrr",
+    "djinni",
+    "wuzzuf",
+    "infojobs",
+    "instaffo",
     "airswift",
     "briefhq",
     "functionalworks",
@@ -287,7 +297,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1")
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
-    "kit_asia", "kit_sites_b",
+    "kit_asia", "kit_sites_a", "kit_sites_b",
 )
 
 
@@ -2590,6 +2600,10 @@ _FEED_HOSTS = (
     ("gulftalent", re.compile(r"(?:^|\.)gulftalent\.com$", re.I)),
     ("glints", re.compile(r"(?:^|\.)glints\.com$", re.I)),
     ("kalibrr", re.compile(r"(?:^|\.)kalibrr\.com$", re.I)),
+    ("djinni", re.compile(r"(?:^|\.)djinni\.co$", re.I)),
+    ("wuzzuf", re.compile(r"(?:^|\.)wuzzuf\.net$", re.I)),
+    ("infojobs", re.compile(r"(?:^|\.)infojobs\.net$", re.I)),
+    ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
     ("airswift", re.compile(r"^(?:www\.)?airswift\.com$", re.I)),
     ("briefhq", re.compile(r"^(?:www\.)?briefhq\.ai$", re.I)),
     ("functionalworks", re.compile(r"^functional\.works-hub\.com$", re.I)),
