@@ -80,10 +80,10 @@ def throttle_ip(ip: str) -> str:
     if isinstance(addr, ipaddress.IPv6Address):
         if addr.ipv4_mapped is not None:
             return str(addr.ipv4_mapped)
-        try:
-            return str(ipaddress.IPv6Network((addr, IPV6_THROTTLE_PREFIX), strict=False))
-        except ValueError:  # pragma: no cover — defensive (e.g. a scoped address)
-            return str(addr)
+        # Mask to the /64 as an integer: no host bits are left, so building the network cannot fail
+        # (and a scope id such as ``%eth0`` is dropped on the way).
+        masked = (int(addr) >> (128 - IPV6_THROTTLE_PREFIX)) << (128 - IPV6_THROTTLE_PREFIX)
+        return str(ipaddress.IPv6Network((masked, IPV6_THROTTLE_PREFIX)))
     return str(addr)
 
 

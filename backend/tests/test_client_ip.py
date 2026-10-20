@@ -194,3 +194,8 @@ def test_no_other_module_reads_forwarded_for():
         if path.name != "settings.py" and flag.search(text):
             offenders.append(str(path))
     assert not offenders, f"read client address via src.api.client_ip only: {offenders}"
+
+
+def test_throttle_ip_drops_an_ipv6_scope_id():
+    """A link-local address with a zone (``fe80::1%eth0``) still collapses to its /64."""
+    assert throttle_ip("fe80::1%eth0") == "fe80::/64"
