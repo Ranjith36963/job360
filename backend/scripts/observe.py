@@ -84,6 +84,8 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("contact_edits", "user_id"),
     # The browser agent's saved job-site sign-ins (migration 0065, encrypted cookies only).
     ("browser_sign_ins", "user_id"),
+    # "Send starts my assistant": the user's start link, token encrypted (migration 0066).
+    ("assistant_triggers", "user_id"),
 )
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here

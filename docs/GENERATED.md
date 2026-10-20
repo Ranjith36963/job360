@@ -15,10 +15,10 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0065** | `backend/migrations/` |
-| Migration files | **66** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 22 route modules (132 endpoints) | `backend/src/api/routes/` |
-| Test files | across 243 `test_*.py` files | `backend/tests/` |
+| Migration head | **0066** | `backend/migrations/` |
+| Migration files | **67** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 23 route modules (136 endpoints) | `backend/src/api/routes/` |
+| Test files | across 244 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 30 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -80,6 +80,10 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/assistant-settings/requests/{request_id}/confirm` | `assistant_settings.py` |
 | `POST` | `/api/assistant-settings/requests/{request_id}/decline` | `assistant_settings.py` |
 | `POST` | `/api/assistant-settings/take-back` | `assistant_settings.py` |
+| `DELETE` | `/api/assistant-trigger` | `assistant_trigger.py` |
+| `GET` | `/api/assistant-trigger` | `assistant_trigger.py` |
+| `PUT` | `/api/assistant-trigger` | `assistant_trigger.py` |
+| `POST` | `/api/assistant-trigger/fire` | `assistant_trigger.py` |
 | `POST` | `/api/auth/login` | `auth.py` |
 | `POST` | `/api/auth/logout` | `auth.py` |
 | `POST` | `/api/auth/magic-link/consume` | `auth.py` |
@@ -166,5 +170,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**132 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**136 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
