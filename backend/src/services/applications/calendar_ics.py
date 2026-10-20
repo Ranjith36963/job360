@@ -1,9 +1,11 @@
 """The calendar feed's content: a hand-written iCalendar (RFC 5545) writer plus the
 query that decides what goes in it. No dependency.
 
-What leaves the building is deliberately small: a title ("Interview: <job> - <company>"),
-the time, and a link to the application page. NEVER notes, contact names or emails -
-the feed URL is a bearer credential that lives inside third-party calendars.
+What leaves the building is deliberately small: a title ("Interview: <job> - <company>",
+plus the round when the event names one), the time and length, the http(s) meeting link and
+location the owner gave, reminders, and a link to the application page. NEVER notes, contact
+names or emails - the feed URL is a bearer credential that lives inside third-party calendars.
+Every interview is its own VEVENT (multi-round hunts); each gets two VALARM reminders.
 
 Writer rules (RFC 5545 section 3.1 and 3.3.11):
 
@@ -15,10 +17,13 @@ Writer rules (RFC 5545 section 3.1 and 3.3.11):
 """
 from __future__ import annotations
 
+import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -26,6 +31,8 @@ from src.repositories.database import JobDatabase
 PRODID = "-//Job360//Calendar feed//EN"
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u0085\u2028\u2029]")  # all but TAB; \n handled first
 _INTERVIEW_MINUTES = 60
+_MIN_MINUTES, _MAX_MINUTES = 5, 480
+_ROUND_MAX, _LOCATION_MAX, _LINK_MAX = 60, 200, 1000
 
 
 @dataclass(frozen=True)
@@ -36,6 +43,10 @@ class CalEvent:
     stamp: datetime
     start: Optional[datetime] = None   # timed event (UTC)
     day: Optional[date] = None         # all-day event
+    duration_minutes: int = _INTERVIEW_MINUTES
+    description: str = ""
+    location: str = ""
+    alarms: tuple[str, ...] = ()       # TRIGGER values, one VALARM each
 
 
 def escape_text(value: str) -> str:
@@ -49,6 +60,15 @@ def escape_text(value: str) -> str:
 def _clean_uri(value: str) -> str:
     """A URI value: no whitespace, no control characters (so it cannot break the line)."""
     return re.sub(r"[\s\x00-\x1f\x7f\u0085\u2028\u2029]", "", str(value))
+
+
+def _trigger_before(minutes: int) -> str:
+    """An RFC 5545 negative DURATION: whole days as ``-P1D``, whole hours as ``-PT1H``, else ``-PT90M``."""
+    if minutes % 1440 == 0:
+        return f"-P{minutes // 1440}D"
+    if minutes % 60 == 0:
+        return f"-PT{minutes // 60}H"
+    return f"-PT{minutes}M"
 
 
 def fold(line: str) -> str:
@@ -84,13 +104,23 @@ def render_calendar(events: list[CalEvent], name: str = "Job360") -> str:
     for ev in events:
         lines += ["BEGIN:VEVENT", f"UID:{_clean_uri(ev.uid)}", f"DTSTAMP:{_utc(ev.stamp)}"]
         if ev.start is not None:
-            lines += [f"DTSTART:{_utc(ev.start)}", f"DTEND:{_utc(ev.start + timedelta(minutes=_INTERVIEW_MINUTES))}"]
+            lines += [f"DTSTART:{_utc(ev.start)}", f"DTEND:{_utc(ev.start + timedelta(minutes=ev.duration_minutes))}"]
         elif ev.day is not None:
             lines += [
                 f"DTSTART;VALUE=DATE:{ev.day.strftime('%Y%m%d')}",
                 f"DTEND;VALUE=DATE:{(ev.day + timedelta(days=1)).strftime('%Y%m%d')}",
             ]
-        lines += [f"SUMMARY:{escape_text(ev.summary)}", f"URL:{_clean_uri(ev.url)}", "END:VEVENT"]
+        lines += [f"SUMMARY:{escape_text(ev.summary)}", f"URL:{_clean_uri(ev.url)}"]
+        if ev.description:
+            lines.append(f"DESCRIPTION:{escape_text(ev.description)}")
+        if ev.location:
+            lines.append(f"LOCATION:{escape_text(ev.location)}")
+        for trigger in ev.alarms:
+            lines += [
+                "BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{escape_text(ev.summary)}",
+                f"TRIGGER:{_clean_uri(trigger)}", "END:VALARM",
+            ]
+        lines.append("END:VEVENT")
     lines.append("END:VCALENDAR")
     return "".join(fold(line) + "\r\n" for line in lines)
 
@@ -101,6 +131,52 @@ def _parse_dt(raw: Any) -> Optional[datetime]:
     except (TypeError, ValueError):
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _payload(raw: Any) -> dict[str, Any]:
+    """An event's payload as a dict; anything unreadable is ``{}`` (a bad row never breaks the feed)."""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(raw) if isinstance(raw, (str, bytes)) else {}
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _text(value: Any, cap: int) -> str:
+    return " ".join(value.split())[:cap] if isinstance(value, str) else ""
+
+
+def _duration(value: Any) -> int:
+    """``duration_minutes`` clamped to 5..480; anything that is not a number gives the default 60."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return _INTERVIEW_MINUTES
+    try:
+        number = float(value)
+        if not math.isfinite(number):
+            return _INTERVIEW_MINUTES
+        minutes = int(number)
+    except (ValueError, OverflowError):
+        return _INTERVIEW_MINUTES
+    return max(_MIN_MINUTES, min(_MAX_MINUTES, minutes))
+
+
+def _http_link(value: Any) -> str:
+    """The link when it is an http(s) URL, else '' (``javascript:`` and friends are dropped)."""
+    if not isinstance(value, str):
+        return ""
+    link = _clean_uri(value)[:_LINK_MAX]
+    try:
+        parts = urlsplit(link)
+    except ValueError:
+        return ""
+    return link if parts.scheme.lower() in ("http", "https") and parts.netloc else ""
+
+
+def _interview_alarms() -> tuple[str, ...]:
+    mins = (settings.CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES, settings.CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES)
+    return tuple(_trigger_before(m) for m in mins if m > 0)
 
 
 def _title(app_row: dict[str, Any]) -> str:
@@ -127,29 +203,41 @@ async def collect_events(
     by_id = {int(a["id"]): a for a in apps}
     marks = ",".join("?" for _ in by_id)
     cur = await db._db.execute(
-        "SELECT id, application_id, event_type, scheduled_at, recorded_at, corrects_event_id "  # noqa: S608 - marks are '?'
+        "SELECT id, application_id, event_type, scheduled_at, recorded_at, corrects_event_id, payload "  # noqa: S608 - marks are '?'
         f"FROM application_events WHERE application_id IN ({marks}) "
         "AND (event_type = 'interview_scheduled' OR corrects_event_id IS NOT NULL) ORDER BY id ASC",
         tuple(by_id),
     )
     rows = [dict(r) for r in await cur.fetchall()]
     superseded = {r["corrects_event_id"] for r in rows if r["corrects_event_id"] is not None}
-    latest: dict[int, dict[str, Any]] = {}
-    for r in rows:
-        if r["event_type"] == "interview_scheduled" and r["scheduled_at"] and r["id"] not in superseded:
-            latest[int(r["application_id"])] = r  # ascending id: the last one wins
+    interviews = [
+        r for r in rows
+        if r["event_type"] == "interview_scheduled" and r["scheduled_at"] and r["id"] not in superseded
+    ]  # every live interview is its own event (multi-round); a correction supersedes only its target
     lo = now - timedelta(days=settings.CALENDAR_FEED_LOOKBACK_DAYS)
     hi = now + timedelta(seconds=settings.APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS)
     base = settings.SITE_BASE_URL
     out: list[CalEvent] = []
-    for app_id, r in latest.items():
+    alarms = _interview_alarms()
+    for r in interviews:
+        app_id = int(r["application_id"])
         start = _parse_dt(r["scheduled_at"])
         if start is None or not (lo <= start <= hi):
             continue
+        p = _payload(r.get("payload"))
+        round_ = _text(p.get("round"), _ROUND_MAX).replace("-", " ").replace("_", " ")
+        round_ = round_[:1].upper() + round_[1:]  # "hiring-manager" reads "Hiring manager"
+        link = _http_link(p.get("link"))
+        location = _text(p.get("location"), _LOCATION_MAX) or link
+        summary = f"Interview: {_title(by_id[app_id])}" + (f" ({round_})" if round_ else "")
         out.append(CalEvent(
-            uid=f"app-{app_id}-ev-{r['id']}@job360.uk", summary=f"Interview: {_title(by_id[app_id])}",
+            uid=f"app-{app_id}-ev-{r['id']}@job360.uk", summary=summary,
             url=f"{base}/applications/{app_id}", stamp=_parse_dt(r["recorded_at"]) or now, start=start,
+            duration_minutes=_duration(p.get("duration_minutes")), description=link, location=location,
+            alarms=alarms,
         ))
+    hour = settings.CALENDAR_ALARM_FOLLOW_UP_HOUR
+    follow_up_alarms = (f"PT{hour}H",) if 0 <= hour <= 23 else ()
     for app_id, a in by_id.items():
         raw = a.get("follow_up_on")
         if not raw:
@@ -162,7 +250,7 @@ async def collect_events(
             continue
         out.append(CalEvent(
             uid=f"app-{app_id}-followup@job360.uk", summary=f"Follow up: {_title(a)}",
-            url=f"{base}/applications/{app_id}", stamp=now, day=day,
+            url=f"{base}/applications/{app_id}", stamp=now, day=day, alarms=follow_up_alarms,
         ))
     def _when(e: CalEvent) -> datetime:
         if e.start is not None:
