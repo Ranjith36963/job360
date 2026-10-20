@@ -2208,6 +2208,9 @@
             "title": "Notes",
             "type": "array"
           },
+          "outreach_send": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "pause_reason": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2261,6 +2264,7 @@
           "paused_until",
           "pause_reason",
           "auto_employer_emails",
+          "outreach_send",
           "paused",
           "practice_run"
         ],
@@ -3731,6 +3735,13 @@
             "title": "Ghosted Now",
             "type": "array"
           },
+          "interviews": {
+            "$ref": "#/components/schemas/InterviewAgenda",
+            "default": {
+              "just_passed": [],
+              "upcoming": []
+            }
+          },
           "latest_event_recorded_at": {
             "anyOf": [
               {
@@ -5053,6 +5064,73 @@
           "inbox_checked_at"
         ],
         "title": "InboxCheckedOut",
+        "type": "object"
+      },
+      "InterviewAgenda": {
+        "description": "``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose\napplication has no outcome event yet (ask the user how it went).",
+        "properties": {
+          "just_passed": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InterviewAgendaItem"
+            },
+            "title": "Just Passed",
+            "type": "array"
+          },
+          "upcoming": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InterviewAgendaItem"
+            },
+            "title": "Upcoming",
+            "type": "array"
+          }
+        },
+        "title": "InterviewAgenda",
+        "type": "object"
+      },
+      "InterviewAgendaItem": {
+        "description": "One live interview in the agenda read (services/applications/agenda.py).",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "duration_minutes": {
+            "default": 60,
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "link": {
+            "default": "",
+            "title": "Link",
+            "type": "string"
+          },
+          "round": {
+            "default": "",
+            "title": "Round",
+            "type": "string"
+          },
+          "scheduled_at": {
+            "title": "Scheduled At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "company",
+          "title",
+          "scheduled_at"
+        ],
+        "title": "InterviewAgendaItem",
         "type": "object"
       },
       "JobFactsOut": {
@@ -12868,6 +12946,13 @@
             "title": "Events",
             "type": "array"
           },
+          "interviews": {
+            "$ref": "#/components/schemas/InterviewAgenda",
+            "default": {
+              "just_passed": [],
+              "upcoming": []
+            }
+          },
           "next_after_id": {
             "anyOf": [
               {
@@ -13111,6 +13196,23 @@
                 }
               ],
               "title": "Priority"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agenda",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agenda"
             }
           },
           {
@@ -19179,7 +19281,7 @@
     },
     "/api/contacts/{contact_id}/outreach-check": {
       "get": {
-        "description": "THE one gate before pressing Send on an outreach email (feature 10).\n\nReads the user's settings, this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
+        "description": "THE one gate before pressing Send on an outreach email (feature 10).\n\nReads the user's settings (``assistant_settings.outreach_send`` decides send vs\nask; the Gmail mode never does), this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
         "operationId": "outreach_check_api_contacts__contact_id__outreach_check_get",
         "parameters": [
           {
