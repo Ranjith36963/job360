@@ -322,3 +322,25 @@ def test_every_part_one_reader_survives_hostile_pages():
     page = '<a href="/jobs/1">x</a>' * 8000
     for name in ("careerplug", "hiringthing"):
         _fast(lambda n=name: _run(n, {"token": TOKEN[n]}, _stub({"": (200, page)})))
+
+
+# --------------------------------------------------------------------------- ship-rule blockers
+@pytest.mark.parametrize("bad", ["https://[::1/jobs/1", "http://[/x", "https://a]b/jobs/2"])
+def test_one_malformed_href_does_not_lose_a_careerplug_or_hiringthing_board(bad):
+    cp = f'<html><body><a href="{bad}">Broken</a><a href="/jobs/100">Cook</a></body></html>'
+    jobs, stats = _run("careerplug", {"token": "acme"}, _stub({"/jobs/100": (200, CP_A), "/jobs": (200, cp)}))
+    assert [j["url"] for j in jobs] == ["https://acme.careerplug.com/jobs/100"] and stats["ok"] == 1
+    host = "acme.hiringthing.com"
+    ht = f'<html><body><a href="{bad}">Broken</a><a href="/job/7/cook">Cook</a></body></html>'
+    jobs, stats = _run("hiringthing", {"token": host}, _stub({"/job/7": (200, _ht_detail(HT_REC)), f"https://{host}/": (200, ht)}))
+    assert [j["url"] for j in jobs] == [f"https://{host}/job/7/cook"] and stats["ok"] == 1
+
+
+def test_descriptions_keep_a_literal_less_than_in_bullhorn_hireology_and_hiringthing():
+    text = "<p>Requires &lt;5 years of experience, salary &gt; $50k</p><p>Benefits: health</p>"
+    assert us._clean(text) == "Requires <5 years of experience, salary > $50k\nBenefits: health"
+    assert us._clean("&lt;p&gt;Serve guests.&lt;/p&gt;", escaped=True) == "Serve guests."
+    host = "acme.hiringthing.com"
+    http = _stub({"/job/1": (200, _ht_detail(dict(HT_REC, html_description=text))), f"https://{host}/": (200, _ht_listing(f"https://{host}/job/1/x"))})
+    jobs = F["hiringthing"]({"name": "Acme", "ats": "hiringthing", "token": host}, http, {})  # not _run: it forbids "<"
+    assert "<5 years" in jobs[0]["description"] and "Benefits: health" in jobs[0]["description"]

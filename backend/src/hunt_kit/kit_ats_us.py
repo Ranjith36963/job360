@@ -101,9 +101,22 @@ def _drop_blocks(text: str) -> str:
         pos = k + 1
 
 
-def _clean(raw: Any) -> str:
-    """Plain text of an HTML description: entities decoded once, script/style dropped, tags removed."""
-    return str(_text(_drop_blocks(html.unescape(str(raw or "")[:_CLEAN_CAP]))))
+def _clean(raw: Any, escaped: bool = False) -> str:
+    """Plain text of an HTML description: entities decoded once, script/style dropped, tags removed.
+
+    ``escaped`` is for a description whose markup itself arrives entity-encoded (CareerPlug ld+json); only then is it
+    unescaped before the tags are stripped. Otherwise a literal ``&lt;5 years`` must survive the tag stripper.
+    """
+    text = str(raw or "")[:_CLEAN_CAP]
+    return str(_text(_drop_blocks(html.unescape(text) if escaped else text)))
+
+
+def _split(host: str, href: str) -> Any:
+    """urlsplit of ``href`` resolved against the board host, or None when the href is malformed (e.g. ``https://[::1/x``)."""
+    try:
+        return urlsplit(urljoin(f"https://{host}/", href))
+    except ValueError:
+        return None
 
 
 def _page(http: Http, url: str) -> str | None:
@@ -398,9 +411,9 @@ def _careerplug(row: dict[str, Any], http: Http) -> list[Job] | None:
             return None
         new = 0
         for href, text in _anchors(_parse(body).root):
-            u = urlsplit(urljoin(f"https://{host}/", href))
-            m = _CP_ID.search(u.path)
-            if not m or (u.hostname or "").lower() != host:
+            u = _split(host, href)
+            m = _CP_ID.search(u.path) if u else None
+            if u is None or not m or (u.hostname or "").lower() != host:
                 continue
             if m.group(1) not in titles:
                 titles[m.group(1)] = []
@@ -422,7 +435,7 @@ def _careerplug(row: dict[str, Any], http: Http) -> list[Job] | None:
                 title = str(ld.get("title") or title)
                 org = ld.get("hiringOrganization")
                 company = str(org.get("name") or "") if isinstance(org, dict) else ""
-                place, posted, desc = _ld_place(ld), _day(ld.get("datePosted")), _clean(ld.get("description"))
+                place, posted, desc = _ld_place(ld), _day(ld.get("datePosted")), _clean(ld.get("description"), escaped=True)
         if title:
             j = _job(row, "careerplug", title=title, url=url, location=place, posted=posted, description=desc, remote=_remote_from(place))
             if company:
@@ -498,9 +511,9 @@ def _hiringthing(row: dict[str, Any], http: Http) -> list[Job] | None:
     titles: dict[str, list[str]] = {}
     urls: dict[str, str] = {}
     for href, text in _anchors(_parse(body).root):
-        u = urlsplit(urljoin(f"https://{host}/", href))
-        m = _HT_ID.match(u.path)
-        if not m or (u.hostname or "").lower() != host:
+        u = _split(host, href)
+        m = _HT_ID.match(u.path) if u else None
+        if u is None or not m or (u.hostname or "").lower() != host:
             continue
         jid = m.group(1)
         if jid not in titles:
