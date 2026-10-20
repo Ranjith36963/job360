@@ -499,3 +499,40 @@ async def test_mcp_matches_http_for_preflight_summary_and_check_submit(
             summary = _payload(await mcp.call_tool("list_applications", {"queued": True}))["queue_summary"]
             assert summary["removed_today"] == {"user_removed": 1} and summary["queued"] == 1
 
+
+@pytest.mark.asyncio
+async def test_an_earlier_application_found_in_gmail_is_recorded_then_unqueued_as_duplicate(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        a = await _bring(client, _ad(1, company="Contoso"))
+        b = await _bring(client, _ad(2, company="Fabrikam"))
+        await _queue(client, a)
+        await _queue(client, b)
+        receipt = await client.post(f"/api/applications/{a}/receipt", json={
+            "channel": "company_site", "applied_at": "2026-08-14T09:30:00+00:00",
+            "note": "earlier application found in Gmail: no-reply@contoso.example | Contoso: application received",
+        })
+        assert receipt.status_code == 201, receipt.text
+        repeat = await _event(client, a, "applied", source={
+            "message_id": "<contoso-0814@mail.example>", "sender": "no-reply@contoso.example",
+            "subject": "Contoso: application received", "received_at": "2026-08-14T09:31:00+00:00",
+        })
+        assert repeat.status_code == 201, repeat.text
+        assert repeat.json()["event_type"] == "note"
+        assert any("submission confirmation" in w for w in repeat.json()["warnings"])
+        closed = await _event(client, a, "unqueued", payload={"reason": "duplicate"})
+        assert closed.status_code == 201, closed.text
+        detail = (await client.get(f"/api/applications/{a}")).json()
+        assert detail["status"] == "applied"
+        assert detail["proof"]["level"] == "email"
+        applied = [e for e in detail["events"] if e["event_type"] == "applied"]
+        assert applied and applied[0]["occurred_at"].startswith("2026-08-14T09:30")
+        body = await _queued(client)
+        s = body["queue_summary"]
+        assert s["queued"] == 1 and [r["id"] for r in body["applications"]] == [b]
+        assert s["removed_today"] == {"duplicate": 1}
+        assert s["submitted_today"] == 1
+        again = await _event(client, a, "unqueued", payload={"reason": "duplicate"})
+        assert again.status_code == 409
