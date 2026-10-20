@@ -30,6 +30,14 @@ DATABASE_URL = os.getenv(
 from src.repositories import pg as _pg  # noqa: E402
 
 _pg.configure(DATABASE_URL)
+# Every connection the request-path pool opens gets this Postgres
+# ``statement_timeout`` (repositories/pool.py), so one runaway query cannot pin
+# a pooled connection forever. Pool only: migrations and boot DDL open their own
+# connections through ``pg.connect`` and never see it. ``0`` = no timeout.
+DB_STATEMENT_TIMEOUT_MS = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000"))
+# How long /api/readyz waits to borrow a pooled connection (and then for its
+# ``SELECT 1``) before answering 503. Railway's deploy healthcheck calls it.
+READYZ_POOL_TIMEOUT_S = float(os.getenv("READYZ_POOL_TIMEOUT_S", "2"))
 LOGS_DIR = DATA_DIR / "logs"
 
 

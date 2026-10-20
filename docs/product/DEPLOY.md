@@ -30,9 +30,11 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 > - **Frontend:** https://frontend-production-c608f.up.railway.app
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
 >
-> `/readyz` is `api.routes.health.readyz`: it checks Postgres, and reports Redis as
-> `skipped` — never `ok` — whenever `REDIS_URL` is unset, which it is now that the
-> Redis service is gone.
+> `/readyz` is `api.routes.health.readyz`, and it is Railway's deploy healthcheck
+> (`backend/railway.json` `healthcheckPath`). It borrows a connection from the
+> request-path pool within `READYZ_POOL_TIMEOUT_S` (default 2) and runs `SELECT 1`:
+> 200 `{"status":"ready","pool":{size,idle,used,waiting,max}}`, else 503
+> `{"status":"not_ready","reason":"pool_timeout"|"db_error"}`. It no longer checks Redis.
 
 ## 🟢 What's already done (no action needed)
 - Backend + frontend **Dockerfiles** and **`docker-compose.prod.yml`** — read the
@@ -75,6 +77,6 @@ railway domain --service frontend    # → public site URL
 ```
 
 ## Verify after deploy
-- `curl https://<backend-url>/livez` → 200; `/readyz` → 200 with `db: ok`.
+- `curl https://<backend-url>/livez` → 200; `/api/readyz` → 200 with `"status":"ready"` and the pool numbers.
 - Register + upload CV on the live frontend; confirm a row in the managed Postgres.
 - Sentry receives a test error; PostHog receives a pageview.
