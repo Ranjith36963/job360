@@ -8561,6 +8561,17 @@
             "maxLength": 2000,
             "title": "Note",
             "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
           }
         },
         "title": "RecordApplicationReceiptRequest",
@@ -8568,6 +8579,11 @@
       },
       "RecordApplicationReceiptResponse": {
         "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"

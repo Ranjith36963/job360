@@ -6323,9 +6323,16 @@ export interface components {
              * @default
              */
             note: string;
+            /** Request Id */
+            request_id?: string | null;
         };
         /** RecordApplicationReceiptResponse */
         RecordApplicationReceiptResponse: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
             /** Channel */
             channel: string;
             /**

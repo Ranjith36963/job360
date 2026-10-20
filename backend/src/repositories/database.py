@@ -708,7 +708,8 @@ class JobDatabase:
         "application_receipts", "application_stage_history", "applications",
         "application_proof_screenshots", "artifact_links", "assistant_setting_requests", "assistant_triggers",
         "browser_sign_ins",
-        "calendar_feeds", "contact_edits", "contact_outreach", "email_verifications", "missing_tool_reports",
+        "calendar_feeds", "contact_edits", "contact_outreach", "email_verifications", "idempotency_keys",
+        "missing_tool_reports",
         "oauth_grants",
         "password_resets", "proof_upload_links", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
         "user_profile_versions", "user_profiles",
@@ -731,7 +732,7 @@ class JobDatabase:
         "application_events",
         "application_proof_screenshots", "application_receipts", "applications", "application_stage_history",
         "assistant_setting_requests", "audit_log", "contact_edits", "contact_outreach",
-        "missing_tool_reports", "oauth_grants", "profile_edits", "tailored_documents",
+        "idempotency_keys", "missing_tool_reports", "oauth_grants", "profile_edits", "tailored_documents",
         "tailored_usage",
         "user_profile_versions", "user_profiles",
     )
