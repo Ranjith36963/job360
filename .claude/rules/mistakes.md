@@ -21,10 +21,10 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   only; CI runs the full suite.
 - Before every backend push: `ruff check .` and `python scripts/mypy_ratchet.py`.
 - After merging main into a PR: never chain past a conflict; regenerate
-  `docs/GENERATED.md` and frontend types; re-run `test_recipes` (70-line recipe cap)
+  frontend types; re-run `test_recipes` (70-line recipe cap)
   and `test_outreach_people` (MCP tool count).
-- Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict
-  but GENERATED.md, gate the merged tree, commit. A script hides the merge from the commit-gate hook.
+- Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict,
+  gate the merged tree, commit. A script hides the merge from the commit-gate hook.
 - Resolve a conflict per hunk; `git checkout --ours/--theirs <file>` also drops the other side's clean hunks.
 - A child PR's squash merge ships its stacked base too: diff the base against main, close it as shipped.
 - A stacked worker's first step merges its base branch: worktree agents start from origin/main.
