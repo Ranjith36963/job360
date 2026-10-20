@@ -203,6 +203,14 @@ Apify web-fetch tool, before you build. Never cite from memory.
   it on PR #875. **Rule:** before editing a multi-line expression, print the whole expression
   (sed -n) and diff it against the reference line, then run a test that hits that exact branch.
 
+- 2026-10-19: of 27 PRs merged 17-19 October, 2 merged by auto-merge cleanly. The cage
+  judged each PR a minute after it opened, read "has not finished" as a refusal and turned
+  auto-merge off; nothing woke it when CI went green (no `check_suite` event fires for
+  Actions' own suites), so sessions merged by hand past it, and #906 shipped a red test to
+  main. Meanwhile #902 grew from 1,584 to 3,800+ lines as slices 2-4 were pushed onto it
+  while it was being split. **Rule:** one PR per slice under the cap, arm auto-merge once,
+  and let `merge-cage` hold it; never hand-merge around the gate.
+
 ## Tooling
 
 - `scripts/gen-api-types.sh` calls plain `python`. **Rule:** run it with the

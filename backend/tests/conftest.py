@@ -6,7 +6,13 @@
 
 import asyncio
 import contextlib
+import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import warnings
 
 # --- Windows selector event loop (psycopg async requires it) ---------------
 if sys.platform == "win32":
@@ -366,6 +372,120 @@ def fixture_user_id(authenticated_async_context):
 
 
 def _bootstrap_async_db(db_path: str) -> None:
+    """Give ``db_path`` the full schema: init_db + ALL migrations (0000..latest).
+
+    Fast path: copy this process's migrated TEMPLATE schema (built once, see
+    ``_template_sql``) into the test's own fresh schema. Slow path (no
+    ``pg_dump``, or ``J360_TEST_SCHEMA_TEMPLATE=0``): migrate from scratch.
+    Both end in the same schema, proved by
+    ``tests/test_schema_template.py::test_template_copy_matches_a_fresh_migration``.
+    """
+    sql = _template_sql()
+    if sql is None:
+        _migrate_from_scratch(db_path)
+        return
+    _restore_template(db_path, sql)
+
+
+# --- Template schema: migrate ONCE per process, copy it per test -------------
+# Every test that asks for ``migrated_db_path`` / ``authenticated_async_context``
+# used to run init_db + all ~130 migration files (~0.8 s, the biggest share of
+# the suite's wall time). Each pytest process (each xdist worker) now migrates
+# ONE throwaway template schema, ``pg_dump``s it once, and replays that dump —
+# the FINAL schema, not 130 steps — into each test's own fresh schema in one
+# transaction (~0.1-0.3 s). Schema-per-test isolation is unchanged: every test
+# still gets a schema of its own; only the way it is filled changed.
+_TEMPLATE_SCHEMA_TOKEN = "__J360_TEMPLATE_SCHEMA__"
+_TEMPLATE_STATE: dict = {}
+
+
+def _template_sql():
+    """The template dump with its schema name replaced by a token, or ``None``.
+
+    ``None`` means "migrate from scratch": ``J360_TEST_SCHEMA_TEMPLATE=0``, no
+    ``pg_dump`` on PATH, or the dump failed (e.g. a client older than the
+    server). The fallback is the old, slower path, never a weaker schema.
+
+    On CI a missing or failing template is an ERROR, raised in every test that
+    asks for it: each xdist worker builds its own template, so one worker could
+    otherwise fall back unseen while the guard test passes in another.
+    """
+    if "error" in _TEMPLATE_STATE:
+        raise RuntimeError(_TEMPLATE_STATE["error"])
+    if "sql" in _TEMPLATE_STATE:
+        return _TEMPLATE_STATE["sql"]
+    if os.environ.get("J360_TEST_SCHEMA_TEMPLATE", "1") == "0":
+        _TEMPLATE_STATE["sql"] = None
+        return None
+    pg_dump = shutil.which("pg_dump")
+    if pg_dump is None:
+        return _template_unavailable("pg_dump not on PATH")
+    template_path = os.path.join(tempfile.mkdtemp(prefix="j360-schema-template-"), "template.db")
+    schema = _pg.schema_for_path(template_path)
+    _migrate_from_scratch(template_path)
+    try:
+        dump = subprocess.run(
+            [pg_dump, "--dbname", _pg.DEFAULT_DSN, "--schema", schema, "--no-owner", "--no-privileges", "--inserts"],
+            capture_output=True, text=True, check=True, timeout=300,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        detail = getattr(exc, "stderr", "") or exc
+        return _template_unavailable(f"pg_dump failed ({str(detail)[:300]})")
+    finally:
+        asyncio.run(_pg.drop_schema(template_path))
+    # pg_dump >= 16.10 wraps the script in psql meta-commands (``\restrict`` /
+    # ``\unrestrict``, CVE-2025-8714). They are not SQL; the server would refuse them.
+    # pg_dump >= 17 also writes ``SET transaction_timeout``, a setting a 16 server
+    # does not know: a newer client than the server is the normal case on a dev box.
+    body = "\n".join(
+        line for line in dump.splitlines()
+        if not line.startswith("\\") and not line.startswith("SET transaction_timeout")
+    )
+    # The template's name is ``t_`` + 16 hex digits: unique, so a whole-word
+    # replace touches nothing but the schema qualifier pg_dump writes everywhere.
+    sql = re.sub(rf"\b{re.escape(schema)}\b", _TEMPLATE_SCHEMA_TOKEN, body)
+    # Replay it ONCE before trusting it. A dump the server cannot load (any other
+    # client/server version gap) must fall back here, loudly, not error every test.
+    probe_path = os.path.join(os.path.dirname(template_path), "probe.db")
+    try:
+        _restore_template(probe_path, sql)
+    except Exception as exc:  # noqa: BLE001 -- any failure means "do not use the fast path"
+        return _template_unavailable(f"the template dump does not load ({str(exc)[:300]})")
+    finally:
+        asyncio.run(_pg.drop_schema(probe_path))
+    _TEMPLATE_STATE["sql"] = sql
+    return sql
+
+
+def _template_unavailable(reason: str) -> None:
+    """No template: raise on CI (and keep raising), warn and fall back elsewhere."""
+    msg = f"conftest: no schema template: {reason}; every test migrates from scratch (slow)"
+    if os.environ.get("CI") == "true":
+        _TEMPLATE_STATE["error"] = msg
+        raise RuntimeError(msg)
+    warnings.warn(msg, stacklevel=3)
+    _TEMPLATE_STATE["sql"] = None
+    return None
+
+
+def _restore_template(db_path: str, sql: str) -> None:
+    """Replay the template dump into ``db_path``'s own (new) schema, atomically.
+
+    The dump's ``CREATE SCHEMA`` fails loudly if the schema already exists, so a
+    test can never silently land on top of someone else's tables.
+    """
+    import psycopg
+
+    schema = _pg.schema_for_path(db_path)
+    if not schema.startswith("t_"):  # ":memory:" is a fresh schema per connect; it cannot be pre-filled
+        _migrate_from_scratch(db_path)
+        return
+    _pg.register_created_schema(schema)  # swept by pytest_sessionfinish even if the test never drops it
+    with psycopg.connect(_pg.DEFAULT_DSN) as conn:  # one transaction: all or nothing
+        conn.execute(sql.replace(_TEMPLATE_SCHEMA_TOKEN, schema))
+
+
+def _migrate_from_scratch(db_path: str) -> None:
     """Initialize the full JobDatabase schema + apply ALL migrations (0000..latest).
 
     Uses ``JobDatabase.init_db()`` rather than a hand-written executescript

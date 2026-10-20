@@ -37,6 +37,7 @@ CLI::
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,6 +106,32 @@ async def _resync_identity_sequences(db: pg.Connection) -> int:
         )
         fixed += 1
     return fixed
+
+
+# Advisory-lock key for ``up()``: a fixed constant so every concurrent booter of
+# the production schema (``public``) serializes on the same lock.
+MIGRATION_LOCK_KEY = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
+
+
+async def _migration_lock_key(db: pg.Connection) -> int:
+    """The advisory-lock key that serializes booters of THIS connection's schema.
+
+    Production always runs in ``public`` and always gets ``MIGRATION_LOCK_KEY``,
+    exactly as before. Test mode gives every test its own schema (``t_*`` /
+    ``mem_*``, ``pg.schema_for_path``); an advisory lock is database-wide, so
+    one shared key made every pytest-xdist worker queue behind every other
+    worker's full migration run although they never touch the same schema
+    (measured 2026-10-19: three of four workers parked on ``pg_advisory_lock``).
+    Two booters of the SAME schema still get the same key, so the race the lock
+    exists to close is still closed.
+    """
+    cur = await db.execute("SELECT current_schema()")
+    row = await cur.fetchone()
+    schema = row[0] if row else "public"
+    if schema == "public":
+        return MIGRATION_LOCK_KEY
+    digest = hashlib.md5(f"migrations:{schema}".encode(), usedforsecurity=False).digest()
+    return int.from_bytes(digest[:7], "big")  # 56 bits: positive, fits a bigint
 
 
 async def _applied_ids(db: pg.Connection) -> list[str]:
@@ -217,16 +244,16 @@ async def up(
     """
     mdir = migrations_dir or MIGRATIONS_DIR
     applied_now: list[str] = []
-    # Advisory-lock key: a fixed constant so all concurrent booters (FastAPI
-    # lifespan + ARQ worker) serialize on the same lock. Postgres has no
+    # Advisory-lock key (``_migration_lock_key``): one per schema, so all
+    # concurrent booters of a schema serialize on the same lock. Postgres has no
     # "database is locked" — this just prevents two processes running the same
     # migration body at once. Each migration now runs in its OWN BEGIN/COMMIT
     # (transactional migrations, docs/fable/02) so it applies atomically; the
     # session-level advisory lock is held across those transactions. Idempotency
     # comes from ON CONFLICT DO NOTHING on the _schema_migrations INSERT plus the
     # re-read under the lock.
-    lock_key = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
     async with pg.connect(db_path) as db:
+        lock_key = await _migration_lock_key(db)
         # Acquire the lock BEFORE creating the migrations table so concurrent
         # booters don't race on CREATE TABLE (also non-atomic in Postgres).
         await db.execute("SELECT pg_advisory_lock(?)", (lock_key,))
