@@ -46,8 +46,9 @@ _PASSWORD_NAME = re.compile(
 
 
 def _spaced(*words: str) -> str:
-    # One word with any gap or mark between its letters ("Pass word", "P a s s w o r d", "PASS-WORD").
-    return "|".join(r"[\W_]*".join(w) for w in words)
+    # One word with one gap or mark between its letters ("Pass word", "P a s s w o r d", "PASS-WORD"), but
+    # never sentence punctuation: "Did the build pass? Word limit" is two words, not a password.
+    return "|".join(r"(?:[^\w.,;:!?]|_)?".join(w) for w in words)
 
 
 # The same words with odd spacing, each matched as ONE word: "Bypass word filter" and "pass code
@@ -181,7 +182,7 @@ _CAPTCHA_TEXT = re.compile(
     r"verify (that )?you are (a )?human|are you a robot|i'?m not a robot|press (&|and) hold|"
     r"checking your browser|unusual traffic|complete the security check|prove you'?re not a robot|"
     # An image-text box: a picture of letters to copy.
-    r"(type|enter) the characters (you see|shown|in the image)|enter the code (shown|in the image)",
+    r"(type|enter) the characters (you see|shown|in the image)|enter the code (?:shown )?in the image",
     re.IGNORECASE,
 )
 

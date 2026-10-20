@@ -58,6 +58,9 @@ from tests.test_browser_agent import _ref, _site_resolver, _to_site, needs_chrom
         ("Bypass word filter", "", "field"),
         ("Did your last PR pass code review?", "", "field"),
         ("Describe a project where you had to pass. Words: 200 max", "", "field"),
+        ("Did the build pass? Word limit: 300", "", "field"),
+        ("Describe a time a release did not pass. Word count: 250", "", "field"),
+        ("What made it pass - word it briefly", "", "field"),
         # "Pass code" as two words is a field ("pass code review"); "Passcode" as one word is a password.
         ("Pass code review experience", "", "field"),
         ("Pass code", "", "field"),
@@ -120,7 +123,7 @@ def test_a_vendor_word_in_an_employer_address_is_not_a_captcha(url):
         "Type the characters you see in the picture",
         "Please enter the characters shown",
         "Enter the characters in the image",
-        "Enter the code shown",
+        "Enter the code shown in the image",
         "Enter the code in the image below",
     ],
 )
@@ -137,6 +140,8 @@ def test_ordinary_code_wording_is_not_a_captcha():
         "Enter the characters' names",
         # The page text holds the job ad too: an email code and an ad line are not a CAPTCHA.
         "We sent a 6-digit code. Enter the code above to verify your email",
+        "Enter the code shown in the email we sent you",
+        "Enter the code shown in your authenticator app",
         "Can you solve this puzzle? Apply below",
     ):
         assert blocker_for(["https://jobs.example/apply"], text, False) is None, text
