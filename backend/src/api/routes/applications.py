@@ -21,6 +21,7 @@ module's code ever runs (S3).
 """
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional, Union
@@ -2351,7 +2352,7 @@ async def save_artifact(
                 "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
                 "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": body.model,
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": result["event_id"],
-                "contact_id": body.contact_id,
+                "contact_id": body.contact_id, "checks": outreach.get("checks", []),
             }
         return await spine.save_artifact(
             db, user_id=user.id, application_id=application_id, kind=body.kind, text=body.text,
@@ -2572,7 +2573,7 @@ async def get_application_controls(
 
 async def _web_decision(
     db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any],
-    *, once_per_version: bool = False,
+    *, once_per_version: bool = False, fingerprint: Optional[dict[str, Any]] = None,
 ) -> None:
     """One button click: prove the application is the caller's, then write the
     event through the same rules the chat path uses."""
@@ -2580,7 +2581,8 @@ async def _web_decision(
         raise HTTPException(status_code=404, detail="application not found")
     try:
         await kit_service.record_decision(
-            db, user, application_id, event_type, payload, once_per_version=once_per_version
+            db, user, application_id, event_type, payload, once_per_version=once_per_version,
+            fingerprint=fingerprint,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2650,7 +2652,9 @@ async def approve_send(
 ) -> dict[str, Any]:
     """"Send this one" - the user says yes to sending this application with the
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
-    where=web. A CV edited later makes the yes stop matching. Clears an earlier
+    where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
+    letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
+    (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
     nothing is recorded (the yes must name what the user saw)."""
@@ -2664,8 +2668,11 @@ async def approve_send(
     # Owner decision 2026-10-19: an answer the user edited does not block the yes - submit-check hands
     # the assistant those answers (`type_first`) to type into the form before it submits.
     payload = {"artifact_id": cv["id"], "sha256": kit_service.sha256_text(cv["text"]), "where": "web"}
+    # Gap roadmap slice 8: the yes is bound to what the card showed (letter, fill, page, the
+    # assistant's profile edits) and to time; check_submit asks `approval_stale` once any of it moves.
+    stamp = await kit_service.approval_fingerprint(db, user.id, application_id)
     await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
-    await _web_decision(db, user, application_id, "submit_approved", payload)
+    await _web_decision(db, user, application_id, "submit_approved", payload, fingerprint=stamp)
     return await _controls(db, user, application_id)
 
 
@@ -2776,8 +2783,10 @@ async def submit_check(
     (``unknown_site``). The address is read strictly (``screen_form_url``): a
     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
-    than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
-    a stored yes clears neither. An unconfirmed email answers ``ask`` /
+    than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
+    host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
+    (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
+    clears none of them. An unconfirmed email answers ``ask`` /
     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
     ``get_application_kit``; 422 when malformed): another session's live kit hold
     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -2970,15 +2979,22 @@ async def record_event(
         # cleared, auto-cleared (an overdue date + a status event), replay-
         # derived (a correction), or unchanged — so there is nothing left to
         # patch here (coordinator review, 2026-09-25).
-        result = await spine.append_event(
-            db, user_id=user.id, application_id=application_id, event_type=body.event_type,
-            detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
-            corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
-            follow_up_on=follow_up_on_arg,
-            # Weak spot #4: a repeat `applied` (e.g. the confirmation email) is
-            # stored as the submission-confirmation note, never a second applied.
-            repeat_applied_as_confirmation=True,
+        # G338: `submit_attempted` is a claim - the row lock, the 409 checks and the append are
+        # one transaction, so of two sessions that both passed check_submit only one may click.
+        claim: contextlib.AbstractAsyncContextManager[Any] = (
+            kit_service.submit_claim(db, user, application_id)
+            if body.event_type == "submit_attempted" else contextlib.nullcontext()
         )
+        async with claim:
+            result = await spine.append_event(
+                db, user_id=user.id, application_id=application_id, event_type=body.event_type,
+                detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
+                corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
+                follow_up_on=follow_up_on_arg,
+                # Weak spot #4: a repeat `applied` (e.g. the confirmation email) is
+                # stored as the submission-confirmation note, never a second applied.
+                repeat_applied_as_confirmation=True,
+            )
         if body.event_type == "replied" and source and source.get("sender"):
             # The sender is a person we sent outreach to on this job: mark them
             # replied too (a new outreach_replied entry; old events untouched).
