@@ -6305,5 +6305,9 @@
 {"name":"Headway Group","ats":"zohorecruit","board":"headwayms","source":"gulf-research","country":"AE"},
 {"name":"Nationwide Middle East Properties","ats":"zohorecruit","board":"nwmea","source":"gulf-research","country":"AE"},
 {"name":"Premier Inn Middle East","ats":"zohorecruit","board":"global","source":"gulf-research","country":"AE"},
-{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"}
+{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"},
+{"name":"110 Grill","ats":"betterteam","board":"110grill","source":"freehire"},
+{"name":"Sphere","ats":"catsone","board":"sphereinc.catsone.com","source":"freehire"},
+{"name":"Waymo","ats":"clinch","board":"careers.withwaymo.com","source":"freehire"},
+{"name":"Career Tree Network","ats":"crelate","board":"careertree:ec546cba-84d5-4d8a-97e5-52e8ef47db08","source":"freehire"}
 ]
