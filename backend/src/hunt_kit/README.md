@@ -88,9 +88,13 @@ refusal ends that board. Dayforce is not read: its listing needs a cookie-based 
 send, so a `jobs.dayforcehcm.com` link is reported as unsupported.
 
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
-company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`) and HiringThing
-(`hiringthing:host`, the full careers host, e.g. `acme.hiringthing.com`, because the product is white-labelled).
-These read at most 25 posting pages per board; a posting past that keeps its listing title without a description.
+company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
+(`hiringthing:host`, the full careers host, e.g. `acme.hiringthing.com`, because the product is white-labelled),
+HRM Direct (`hrmdirect:subdomain`), iSolved Hire (`isolvedhire:subdomain`), Paycom (`paycom:key`, the 32-character key in
+`paycomonline.net/v4/ats/web.php/portal/<key>/`), Paycor (`paycor:clientId`, 32 characters), JobScore (`jobscore:slug`) and
+RecruiterFlow (`recruiterflow:board`, a recruiting agency's board). Where a site lists only ids or posting links, the kit reads
+at most 25 posting pages per board (a posting past that keeps its listing title without a description); iSolved Hire and
+Paycom list ids only, so they stop at 40 postings per board.
 
 India: many Indian employers post on Keka Hire and Zoho Recruit, not on the boards above. The
 `keka` and `zohorecruit` rows in `companies.json` (`source` `commoncrawl`, `country` `IN` when most

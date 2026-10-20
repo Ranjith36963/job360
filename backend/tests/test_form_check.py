@@ -658,3 +658,91 @@ async def test_new_application_needs_form_checked_old_one_does_not(
         checked = {"questions_count": 9, "answered": 9, "missing": 0}
         assert (await _post_event(client, app_id, "form_checked", checked)).status_code == 201
         assert (await verdict())["reason"] != "form_check_missing"
+
+
+# ── Owner rule 2026-10-20 (strict): every REQUIRED question is answered, only optional ones may stay blank ──
+
+
+@pytest.mark.asyncio
+async def test_a_required_question_left_unanswered_stops_the_submit_until_it_is_answered(
+    authenticated_async_context, fixture_user_id, form_check_gate
+):
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+
+        async def verdict() -> dict[str, Any]:
+            resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+        async def fill_and_sweep() -> None:
+            assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
+            assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 9, "fixed": 0})).status_code == 201
+
+        # 2 questions have no saved answer and one of them is required
+        one_required = {"questions_count": 9, "answered": 7, "missing": 2, "missing_required": 1}
+        assert (await _post_event(client, app_id, "form_checked", one_required)).status_code == 201
+        await fill_and_sweep()
+        stop = await verdict()
+        assert (stop["decision"], stop["reason"]) == ("stop", "required_unanswered")
+        assert "ask_user" in stop["detail"] and "Optional questions may stay blank" in stop["detail"]
+
+        # the user answered it; check_form is run again and now only an OPTIONAL question is missing
+        only_optional = {"questions_count": 9, "answered": 8, "missing": 1, "missing_required": 0}
+        assert (await _post_event(client, app_id, "form_checked", only_optional)).status_code == 201
+        await fill_and_sweep()
+        assert (await verdict())["reason"] != "required_unanswered"
+
+
+@pytest.mark.asyncio
+async def test_missing_questions_without_saying_how_many_are_required_count_as_required(
+    authenticated_async_context, fixture_user_id, form_check_gate
+):
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        vague = {"questions_count": 9, "answered": 8, "missing": 1}  # no missing_required: it must say
+        assert (await _post_event(client, app_id, "form_checked", vague)).status_code == 201
+        assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
+        assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 9, "fixed": 0})).status_code == 201
+        resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
+        assert resp.json()["reason"] == "required_unanswered"
+        # more required than missing is nonsense: refused
+        bad = await _post_event(client, app_id, "form_checked", {
+            "questions_count": 9, "answered": 8, "missing": 1, "missing_required": 2,
+        })
+        assert bad.status_code == 422 and "missing_required" in bad.text
+
+
+@pytest.mark.asyncio
+async def test_each_page_of_a_multi_page_form_is_judged_by_its_newest_check(
+    authenticated_async_context, fixture_user_id, form_check_gate
+):
+    form = "https://careers.northwind.example/apply/7"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+
+        async def check(page: int, missing_required: int) -> None:
+            body = {
+                "questions_count": 4, "answered": 4 - missing_required, "missing": missing_required,
+                "missing_required": missing_required, "page": page, "pages_total": 2,
+            }
+            assert (await _post_event(client, app_id, "form_checked", body)).status_code == 201
+
+        await check(1, 0)
+        await check(2, 1)  # page 2 has a required question with no answer; page 1 is fine
+        assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 8})).status_code == 201
+        for page in (1, 2):
+            sweep = {"fields_checked": 4, "fixed": 0, "page": page, "pages_total": 2}
+            assert (await _post_event(client, app_id, "form_swept", sweep)).status_code == 201
+        resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
+        assert resp.json()["reason"] == "required_unanswered"
+        await check(2, 0)  # page 2 checked again after the user answered
+        sweep = {"fields_checked": 4, "fixed": 0, "page": 2, "pages_total": 2}
+        assert (await _post_event(client, app_id, "form_swept", sweep)).status_code == 201
+        resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
+        assert resp.json()["reason"] != "required_unanswered"
