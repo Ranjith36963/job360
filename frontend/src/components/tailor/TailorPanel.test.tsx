@@ -162,6 +162,34 @@ describe("TailorPanel", () => {
     expect(screen.getByText(/added on top/i)).toBeInTheDocument(); // legend present
   });
 
+  it("shows a line copied from the ad as 'from the ad, not yours', distinct from grounded and added", async () => {
+    mockGetProvenance.mockResolvedValue([
+      { text: "Senior ML Engineer at Monzo", grounded: true, source: "profile" },
+      { text: "5+ years of Kubernetes in production", grounded: false, source: "ad" },
+      { text: "Led a team of fifty across three continents", grounded: false, source: "none" },
+    ]);
+    render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
+
+    await screen.findByDisplayValue("The CV my agent wrote");
+    await userEvent.click(
+      screen.getByRole("button", { name: /highlight my facts/i })
+    );
+
+    const adLine = (await screen.findByText(/5\+ years of kubernetes/i)).closest(
+      "[data-provenance]"
+    );
+    expect(adLine).toHaveAttribute("data-provenance", "ad");
+    // The label is text, not colour alone: once on the line, once in the legend.
+    expect(adLine).toHaveTextContent(/from the ad, not yours/i);
+    expect(screen.getAllByText(/from the ad, not yours/i)).toHaveLength(2);
+    expect(
+      screen.getByText(/senior ml engineer at monzo/i).closest("[data-provenance]")
+    ).toHaveAttribute("data-provenance", "profile");
+    expect(
+      screen.getByText(/led a team of fifty/i).closest("[data-provenance]")
+    ).toHaveAttribute("data-provenance", "none");
+  });
+
   it("surfaces a load failure instead of an empty panel", async () => {
     mockGetTailored.mockRejectedValue(new Error("boom"));
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);

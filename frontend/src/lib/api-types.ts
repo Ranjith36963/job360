@@ -388,6 +388,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/blocked/submitted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submitted Blocked
+         * @description "I submitted it" - the user got past the block and pressed Submit themselves:
+         *     records ``unblocked`` {resolution: user_did_it} (as "Mark resolved" does) and the
+         *     receipt (``recorded_by`` web, the pasted confirmation), in ONE transaction. 409 when
+         *     nothing is blocked, or when the application already has a receipt or is no longer
+         *     ``considering`` (check_submit's ``already_applied``); nothing is written then.
+         *     Session only; assistants use ``record_event`` + ``record_application``.
+         */
+        post: operations["submitted_blocked_api_applications__application_id__blocked_submitted_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/calendar.ics": {
         parameters: {
             query?: never;
@@ -2811,7 +2836,8 @@ export interface paths {
         /**
          * Provenance
          * @description Per-line provenance for the newest saved version: which lines are the
-         *     user's OWN facts (grounded in their CV + the job ad) and which were added.
+         *     user's OWN facts (grounded in their profile), which only echo the job ad
+         *     (``source="ad"``: employer context, never a candidate fact) and which were added.
          *     Deterministic, no LLM — shown before download so the user can verify what is
          *     real (guardrail #2).
          */
@@ -3674,6 +3700,17 @@ export interface components {
             apply_min_score: components["schemas"]["SettingFieldOut"];
             auto_employer_emails: components["schemas"]["SettingFieldOut"];
             auto_grant_count: components["schemas"]["SettingFieldOut"];
+            /**
+             * @default {
+             *       "queue": {
+             *         "count": 0,
+             *         "hosts": [],
+             *         "no_host": 0
+             *       },
+             *       "unscoped": false
+             *     }
+             */
+            auto_grant_scope: components["schemas"]["GrantScopeOut"];
             auto_grant_until: components["schemas"]["SettingFieldOut"];
             below_line: components["schemas"]["SettingFieldOut"];
             /**
@@ -3747,6 +3784,23 @@ export interface components {
              * @enum {string}
              */
             mode: "allow" | "deny";
+        };
+        /**
+         * BlockedSubmittedOut
+         * @description "I submitted it": the new receipt's id plus the refreshed decision state.
+         */
+        BlockedSubmittedOut: {
+            controls: components["schemas"]["ApplicationControlsOut"];
+            /** Receipt Id */
+            receipt_id: number;
+        };
+        /** BlockedSubmittedRequest */
+        BlockedSubmittedRequest: {
+            /**
+             * Confirmation
+             * @default
+             */
+            confirmation: string;
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -4881,6 +4935,50 @@ export interface components {
         GrantListResponse: {
             /** Grants */
             grants: components["schemas"]["OAuthGrantOut"][];
+        };
+        /**
+         * GrantScopeCount
+         * @description How many applications, their distinct form hosts, and how many have no host yet.
+         */
+        GrantScopeCount: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Hosts
+             * @default []
+             */
+            hosts: string[];
+            /**
+             * No Host
+             * @default 0
+             */
+            no_host: number;
+        };
+        /**
+         * GrantScopeOut
+         * @description Gap roadmap slice 30 - what an "Auto for a while" grant covers. ``queue``: what a grant
+         *     confirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the
+         *     grant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from
+         *     before snapshots, covering every application until it ends.
+         */
+        GrantScopeOut: {
+            granted?: components["schemas"]["GrantScopeCount"] | null;
+            /**
+             * @default {
+             *       "count": 0,
+             *       "hosts": [],
+             *       "no_host": 0
+             *     }
+             */
+            queue: components["schemas"]["GrantScopeCount"];
+            /**
+             * Unscoped
+             * @default false
+             */
+            unscoped: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -6084,6 +6182,12 @@ export interface components {
         ProvenanceSegment: {
             /** Grounded */
             grounded: boolean;
+            /**
+             * Source
+             * @default none
+             * @enum {string}
+             */
+            source: "profile" | "ad" | "none";
             /** Text */
             text: string;
         };
@@ -8454,6 +8558,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submitted_blocked_api_applications__application_id__blocked_submitted_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockedSubmittedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedSubmittedOut"];
                 };
             };
             /** @description Validation Error */
