@@ -35,6 +35,7 @@ from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
+from src.services.auth.security_notices import send_security_notice
 from src.utils.logger import get_audit_logger, mask_email, safe_log_value
 
 logger = logging.getLogger("job360.api.auth")
@@ -524,6 +525,7 @@ async def change_password(
     # Terminate ALL of the user's sessions server-side (other devices / stolen
     # cookies), not just clear this browser's cookie — full intent of rule #26.
     await auth_sessions.revoke_all_for_user(str(DB_PATH), user.id)
+    await send_security_notice(str(DB_PATH), user.id, "password_changed")
     # Mutate + return the injected response (returning a fresh Response would
     # drop the Set-Cookie, the latent bug this fix also corrects for email/delete).
     response.delete_cookie(SESSION_COOKIE_NAME)
@@ -668,6 +670,7 @@ async def password_reset_confirm(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="invalid or expired reset token",
         )
+    await send_security_notice(str(DB_PATH), user_id, "password_changed")
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

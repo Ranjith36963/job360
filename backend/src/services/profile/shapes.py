@@ -25,6 +25,7 @@ from src.services.profile.models import (
     VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
     VALID_LANGUAGE_LEVELS,
+    VALID_OUTREACH_SEND_VALUES,
     VALID_WORK_ARRANGEMENTS,
     VALID_WORK_AUTH_STATUSES,
 )
@@ -171,6 +172,10 @@ SHAPES: dict[str, dict[str, Any]] = {
     _settings.APPLY_MIN_SCORE_PATH: {"example": 70, "note": "the user's OWN score line, 0-100"},
     _settings.ABOVE_LINE_PATH: {"example": "ask", "allowed_values": _sorted(_settings.VALID_LINE_SWITCHES)},
     _settings.BELOW_LINE_PATH: {"example": "ask", "allowed_values": _sorted(_settings.VALID_BELOW_SWITCHES)},
+    _settings.OUTREACH_SEND_PATH: {
+        "example": "draft_only", "allowed_values": _sorted(VALID_OUTREACH_SEND_VALUES),
+        "note": "auto = you may send outreach after check_outreach says send; the user's OK needed",
+    },
 }
 
 
