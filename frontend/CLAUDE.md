@@ -1,7 +1,7 @@
 @AGENTS.md
 
 # frontend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by the gap-fix session (middleware, scripts, settings redirect, versions re-checked) -->
 
 > **Thin pointer, not the source of truth.** The hard rules (a skill the root
 > file points at), DB schema, and phase history live in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
