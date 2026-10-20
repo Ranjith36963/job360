@@ -490,12 +490,13 @@ jobs:
             product)       want="lane:product" ;;
             harness)       want="lane:harness" ;;
             product_owner) want="lane:product-owner" ;;
+            product_human) want="lane:product-human" ;;   # migrations + auth (owner, 2026-10-20)
             harness_owner) want="lane:harness-owner" ;;
             *)
               echo "::warning::lane.py returned '$lane' — no label stamped"
               exit 0 ;;
           esac
-          for l in lane:product lane:harness lane:product-owner lane:harness-owner lane:owner; do
+          for l in lane:product lane:harness lane:product-owner lane:product-human lane:harness-owner lane:owner; do
             [ "$l" = "$want" ] && continue
             gh pr edit "$PR" --remove-label "$l" 2>/dev/null || true
           done

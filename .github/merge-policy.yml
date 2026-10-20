@@ -411,7 +411,6 @@ lanes:
     description: "The product's sharp end — merged by a machine only under the watcher."
     paths:
       # irreversible against live data
-      - "backend/migrations/**"
       - "backend/src/models.py"          # normalized_key -> dedup -> lost rows
       # secrets and infrastructure
       - "**/*.env*"
@@ -451,14 +450,32 @@ lanes:
       - "backend/src/services/uk_gate.py"
       - "backend/src/services/visa_signal.py"
       - "backend/src/services/profile/**"
-      - "backend/src/api/routes/auth.py"
-      - "backend/src/services/auth/**"
-      - "backend/src/api/routes/account*.py"
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
     requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true           # FLIPPED 2026-09-17 — the watcher below is the argument
     watch_minutes: 15          # ...and it is not optional; this is what buys the speed
+    rollback: railway
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT_HUMAN — reaches users AND waits for your hand (owner, 2026-10-20).
+  #
+  # "Only migration, auth ... for those things harness owner should come, not
+  # for everything." A schema change cannot be undone by a Railway rollback (it
+  # restores the image, not the tables), and the login path can lock every user
+  # out. So these two wait for a person -- and, because they still reach live
+  # users, they keep product_owner's full gate, the 15-minute watcher and the
+  # Railway rollback after he merges. Everything else stays machine-merged.
+  # ─────────────────────────────────────────────────────────────────────────
+  product_human:
+    paths:
+      - "backend/migrations/**"
+      - "backend/src/api/routes/auth.py"
+      - "backend/src/services/auth/**"
+      - "backend/src/api/routes/account*.py"
+    requires: [ci, review, security, verify, ratchets, bugs]
+    auto_merge: false          # your hand -- migrations and auth only
+    watch_minutes: 15          # still reaches users, so still watched
     rollback: railway
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -700,6 +717,21 @@ size:
   # past ~200-400 changed lines, so aim well under this; past it a change is
   # split into slices or the owner merges it.
   max_lines: 1000
+  # DATA GETS A WIDER CAP (owner, 2026-10-20: "3000 for data, 1000 for code").
+  # A hunt-kit batch of company boards is mostly JSON rows nobody reads line by
+  # line, and splitting it at 1000 turned 8 PRs into 25. Lines in files with one
+  # of `data_extensions` count toward `max_data_lines` only, and the PR's
+  # total may not pass it. Code still counts against `max_lines`. A data file has a data
+  # extension AND lives under `data_paths`. Never data, wherever it sits: anything under
+  # `.github/` (workflows and this policy are code) and lockfiles (a hand-edited
+  # `integrity` line must not ride under a cap).
+  max_data_lines: 3000
+  data_extensions: [".json", ".csv", ".yaml", ".yml", ".txt"]
+  # AND the file must sit in one of these folders (reviewer-security P2 on #1014).
+  # An extension alone let `package.json`, `requirements.txt` or a compose file
+  # carry dependency and config changes past the 1000-line code cap. A path
+  # prefix, never a glob; add a folder here when real data lives somewhere new.
+  data_paths: ["backend/src/hunt_kit/", "backend/src/data/", "backend/data/"]
   # Files a script writes and nobody reads line by line. Their lines are reported
   # in the verdict but not counted against max_lines. EXACT paths only: a glob is
   # a bypass waiting for a file. `frontend/package-lock.json` is NOT here: no
