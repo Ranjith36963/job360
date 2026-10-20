@@ -23,6 +23,9 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - After merging main into a PR: never chain past a conflict; regenerate
   `docs/GENERATED.md` and frontend types; re-run `test_recipes` (70-line recipe cap)
   and `test_outreach_people` (MCP tool count).
+- Merge main through a script that stops on a conflict (GENERATED.md alone may be auto-resolved).
+- A stacked worker's first step merges its base branch: worktree agents start from origin/main.
+- After merging main into a PR that changes MCP tool parameters, re-pin TOOLS_REV to main's + 1.
 - Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
   GitHub merges it when the required checks (13; 14 once `merge-cage` is added) are green. Never leave finished work unpushed.
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
