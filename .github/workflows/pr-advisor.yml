@@ -629,7 +629,7 @@ jobs:
   # WIP LIMIT — refuse a 3rd open PR by PARKING it, never by losing it.
   #
   # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)"; the owner raised
-  # `wip.limit` to 5 on 2026-10-17 (.github/merge-policy.yml). Refuse does
+  # `wip.limit` to 5 on 2026-10-17 and to 10 on 2026-10-20 (.github/merge-policy.yml). Refuse does
   # NOT mean discard. A PR opened while `wip.limit` other real PRs are
   # already open gets PARKED, a comment says why and how to undo it, and the
   # owner is told in Slack once. `scripts/wip_gate.py` carries the exemptions
