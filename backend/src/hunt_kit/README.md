@@ -76,7 +76,7 @@ from the first 20 ads of each board only; the rest come back undated.
 UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN,
 Jibe, Keka Hire (`keka`) and Zoho Recruit (`zohorecruit`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
 some Zoho Recruit sites list no description either, so open the link to read the ad.
-`kit_ats_misc1.py` adds Betterteam (`betterteam:tenant`), CATS (`catsone:host`, e.g. `sphereinc.catsone.com`), ClinchTalent (`clinch:host`, a career-site host) and Crelate (`crelate:slug:orgId` in `companies.json`). They read public career pages; a handful of ads per board get a detail page for the description.
+`kit_ats_misc1.py` adds ten more board types: Betterteam (`betterteam:tenant`), CATS (`catsone:host`, e.g. `sphereinc.catsone.com`), ClinchTalent (`clinch:host`, a career-site host), Crelate (`crelate:slug:orgId` in `companies.json`), eRecruiter (the 32-hex cfg of its widget), gr8people (`gr8people:host`), HR-Manager (`hrmanager:alias`), iSmartRecruit (`ismartrecruit:domain_code`), Loxo (`loxo:host/slug`) and Mindsight (`mindsight:slug`). They read public career pages; a handful of ads per board get a detail page for the description.
 `kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), Comeet (`comeet`, `slug/companyUID`)
 and HiBob (`hibob`, the tenant of `tenant.careers.hibob.com`). These boards are unofficial public endpoints: a board that
 refuses scripts is skipped, and the first refusal ends that board.
