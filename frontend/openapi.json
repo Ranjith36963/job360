@@ -3700,6 +3700,13 @@
             "title": "Ghosted Now",
             "type": "array"
           },
+          "interviews": {
+            "$ref": "#/components/schemas/InterviewAgenda",
+            "default": {
+              "just_passed": [],
+              "upcoming": []
+            }
+          },
           "latest_event_recorded_at": {
             "anyOf": [
               {
@@ -5022,6 +5029,73 @@
           "inbox_checked_at"
         ],
         "title": "InboxCheckedOut",
+        "type": "object"
+      },
+      "InterviewAgenda": {
+        "description": "``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose\napplication has no outcome event yet (ask the user how it went).",
+        "properties": {
+          "just_passed": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InterviewAgendaItem"
+            },
+            "title": "Just Passed",
+            "type": "array"
+          },
+          "upcoming": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InterviewAgendaItem"
+            },
+            "title": "Upcoming",
+            "type": "array"
+          }
+        },
+        "title": "InterviewAgenda",
+        "type": "object"
+      },
+      "InterviewAgendaItem": {
+        "description": "One live interview in the agenda read (services/applications/agenda.py).",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "duration_minutes": {
+            "default": 60,
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "link": {
+            "default": "",
+            "title": "Link",
+            "type": "string"
+          },
+          "round": {
+            "default": "",
+            "title": "Round",
+            "type": "string"
+          },
+          "scheduled_at": {
+            "title": "Scheduled At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "company",
+          "title",
+          "scheduled_at"
+        ],
+        "title": "InterviewAgendaItem",
         "type": "object"
       },
       "JobFactsOut": {
@@ -12799,6 +12873,13 @@
             "title": "Events",
             "type": "array"
           },
+          "interviews": {
+            "$ref": "#/components/schemas/InterviewAgenda",
+            "default": {
+              "just_passed": [],
+              "upcoming": []
+            }
+          },
           "next_after_id": {
             "anyOf": [
               {
@@ -13042,6 +13123,23 @@
                 }
               ],
               "title": "Priority"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agenda",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agenda"
             }
           },
           {

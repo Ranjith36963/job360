@@ -36,7 +36,14 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_request_db
-from src.api.models import AutoEmailCheckResponse, FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
+from src.api.models import (
+    AutoEmailCheckResponse,
+    FormCheckOut,
+    FormCheckRequest,
+    InterviewAgenda,
+    JobResponse,
+    LessonsResponse,
+)
 from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -924,6 +931,8 @@ class WhatsNewResponse(BaseModel):
     open_asks: list[AskOut]
     # S7 - applied jobs with no proof after PROOF_NO_PROOF_AFTER_DAYS and no ask yet.
     proof_missing: list[ProofMissingOut]
+    # Gap 10 - interviews in the next 7 days, and the last 3 days' with no outcome recorded yet.
+    interviews: InterviewAgenda = InterviewAgenda()
 
 
 class ExportArtifactOut(BaseModel):
@@ -1832,6 +1841,8 @@ async def list_applications(
     queued: bool = Query(False),
     # Owner decision 2026-10-19 - the user's own job priority of the job's place.
     priority: Optional[str] = Query(None, max_length=20),
+    # Gap 10 - only applications with an interview or follow-up in the range, in the user's timezone.
+    agenda: Optional[str] = Query(None, max_length=20),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -1839,6 +1850,7 @@ async def list_applications(
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
             due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, priority=priority,
+            agenda=agenda,
         )
     except SpineError as exc:
         _raise(exc)
