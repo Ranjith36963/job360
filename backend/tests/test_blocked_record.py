@@ -382,3 +382,124 @@ async def test_a_full_needs_you_queue_still_records_the_block(authenticated_asyn
         assert (await client.get(f"/api/applications/{app_id}/controls")).json()["blocked"]["ask_id"] is None
         assert (await _check(client, app_id))["reason"] == "blocked"
 
+
+# ── the web "I submitted it" (G426) ───────────────────────────────────────────
+
+
+def test_submitted_route_is_session_only_with_auth_first():
+    from src.api.auth_deps import require_session_user, require_user
+    from src.api.routes.applications import router
+
+    route = next(
+        r for r in router.routes if getattr(r, "path", "") == "/applications/{application_id}/blocked/submitted"
+    )
+    assert [d.dependency for d in route.dependencies] == [require_user]
+    assert any(d.call is require_session_user for d in route.dependant.dependencies)
+
+
+async def _counts(client: AsyncClient, app_id: int) -> tuple[int, int, int]:
+    """(receipts, applied events, unblocked events) for this application."""
+    detail = (await client.get(f"/api/applications/{app_id}")).json()
+    events = detail.get("events") or []
+    return (
+        len(detail["receipts"]),
+        sum(1 for e in events if e["event_type"] == "applied"),
+        sum(1 for e in events if e["event_type"] == "unblocked"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_i_submitted_it_records_unblocked_and_one_web_receipt(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _event(agent, app_id, "blocked", _blocked(page_host="jobs.ashbyhq.com"))).status_code == 201
+        # An assistant's bearer token can never press the user's button.
+        refused = await agent.post(f"/api/applications/{app_id}/blocked/submitted", json={})
+        assert refused.status_code in (401, 403)
+    async with authenticated_async_context() as client:
+        assert await _counts(client, app_id) == (0, 0, 0)
+        resp = await client.post(
+            f"/api/applications/{app_id}/blocked/submitted", json={"confirmation": "  APP-48213  "}
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["controls"]["blocked"] is None
+        assert await _open_asks(client, app_id) == []
+        detail = (await client.get(f"/api/applications/{app_id}")).json()
+        assert detail["status"] == "applied"
+        events = detail.get("events") or []
+        unblocked = [e for e in events if e["event_type"] == "unblocked"]
+        assert [e["payload"] for e in unblocked] == [{"resolution": "user_did_it", "assistant": "web"}]
+        applied = [e for e in events if e["event_type"] == "applied"]
+        assert len(applied) == 1 and applied[0]["payload"]["receipt_id"] == body["receipt_id"]
+        receipt = (await client.get(f"/api/receipts/{body['receipt_id']}")).json()
+        assert receipt["recorded_by"] == "web"
+        assert receipt["confirmation"] == "APP-48213"
+        assert receipt["channel"] == "company_site"
+        assert receipt["application_id"] == app_id
+        assert "a CAPTCHA" in receipt["note"]
+
+        # A second click: 409 in plain words, and nothing new is written.
+        again = await client.post(f"/api/applications/{app_id}/blocked/submitted", json={"confirmation": "x"})
+        assert again.status_code == 409
+        assert again.json()["detail"] == "This application is already recorded as applied. Nothing new was written."
+        assert await _counts(client, app_id) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_i_submitted_it_keeps_pasted_text_and_leaves_a_board_channel_unsaid(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        # Nothing blocked: 409 and nothing written.
+        idle = await client.post(f"/api/applications/{app_id}/blocked/submitted", json={})
+        assert idle.status_code == 409
+        assert await _counts(client, app_id) == (0, 0, 0)
+        assert (await _event(client, app_id, "blocked", _blocked(page_host="uk.indeed.com"))).status_code == 201
+        too_long = await client.post(
+            f"/api/applications/{app_id}/blocked/submitted", json={"confirmation": "x" * 201}
+        )
+        assert too_long.status_code == 422
+        resp = await client.post(
+            f"/api/applications/{app_id}/blocked/submitted",
+            json={"confirmation": "Thanks for applying, we will be in touch soon"},
+        )
+        assert resp.status_code == 201, resp.text
+        receipt = (await client.get(f"/api/receipts/{resp.json()['receipt_id']}")).json()
+        # Prose is not an application ID: the receipt keeps it in the note (record_receipt's rule).
+        listed = (await client.get(f"/api/applications/{app_id}")).json()["receipts"]
+        assert [r["confirmation"] for r in listed] == [""]
+        assert "Thanks for applying, we will be in touch soon" in receipt["note"]
+        # A job-board brand's form: where it was sent is left unsaid, never guessed.
+        assert receipt["channel"] == ""
+
+
+@pytest.mark.asyncio
+async def test_i_submitted_it_on_another_users_application_is_404(authenticated_async_context):
+    async with authenticated_async_context() as owner:
+        app_id = await _bring(owner)
+        assert (await _event(owner, app_id, "blocked", _blocked())).status_code == 201
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.core import settings
+    from src.repositories import pgsync
+
+    sync = TestClient(app)
+    email = "intruder-g426@example.com"
+    assert sync.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"}).status_code == 201
+    conn = pgsync.connect(str(settings.DB_PATH))
+    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
+    conn.commit()
+    conn.close()
+    login = sync.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
+    cookie = str(login.cookies.get("job360_session"))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           cookies={"job360_session": cookie}) as intruder:
+        resp = await intruder.post(f"/api/applications/{app_id}/blocked/submitted", json={"confirmation": "1234"})
+        assert resp.status_code == 404
+    async with authenticated_async_context() as owner:
+        assert await _counts(owner, app_id) == (0, 0, 0)
+        assert (await owner.get(f"/api/applications/{app_id}/controls")).json()["blocked"] is not None
+

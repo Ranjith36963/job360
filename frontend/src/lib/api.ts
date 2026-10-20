@@ -1057,6 +1057,18 @@ export async function resolveBlocked(applicationId: number): Promise<Application
   return request(`/api/applications/${applicationId}/blocked/resolve`, { method: "POST" });
 }
 
+/** "I submitted it" - the user pressed Submit themselves after the block: records `unblocked`
+ * {resolution: user_did_it} and a receipt (recorded_by web, the pasted confirmation). 409 once a receipt exists. */
+export async function submittedBlocked(
+  applicationId: number,
+  confirmation: string
+): Promise<_Schemas["BlockedSubmittedOut"]> {
+  return request(`/api/applications/${applicationId}/blocked/submitted`, {
+    method: "POST",
+    body: JSON.stringify({ confirmation }),
+  });
+}
+
 export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
 export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
 export type StatsResponse = _Schemas["StatsResponse"];
