@@ -226,7 +226,6 @@ jobs:
         env:
           HAS_BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE != '' }}
           HAS_CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
-          HAS_CODERABBIT_TRIGGER_TOKEN: ${{ secrets.CODERABBIT_TRIGGER_TOKEN != '' }}
           HAS_MERGE_TOKEN: ${{ secrets.MERGE_TOKEN != '' }}
           HAS_OWNER_ALERT_EMAIL: ${{ secrets.OWNER_ALERT_EMAIL != '' }}
           HAS_PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL != '' }}
@@ -303,9 +302,6 @@ jobs:
               (["MERGE_TOKEN"], "OPTIONAL",
                "falls back to GITHUB_TOKEN and warns loudly each run",
                "a queued merge starts no workflow on main"),
-              (["CODERABBIT_TRIGGER_TOKEN"], "OPTIONAL",
-               "pr-advisor skips quietly; reviews are triggered by hand",
-               "CodeRabbit is not auto-triggered"),
               (["OWNER_ALERT_EMAIL"], "OPTIONAL",
                "the alert action never fails the caller; it warns",
                "the owner gets no direct email when triage cannot be woken"),

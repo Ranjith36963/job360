@@ -583,8 +583,16 @@ BLOCKERS: list[Blocker] = [
         "reviewer looked: a `CodeRabbit` result must exist on the head commit, be completed, "
         "and must not say \"Review skipped\". Read from check runs AND commit statuses, "
         "because the two endpoints are separate and GitHub only merges them in the UI.",
-        drill="THE VACUOUS PASS: a SKIPPED review is refused, not read as 'nothing found'",
+        drill="THE VACUOUS PASS: no reviewer result is refused, even beside a SKIPPED CodeRabbit",
         severity="too-permissive",
+        note="2026-10-19: the owner made CodeRabbit OPTIONAL (\"Option 1 and 2\"). Its free "
+        "tier reviews this repository about once an hour, shared by every PR, and never on "
+        "its own, so as the evidence it held every push for hours. The RULE stands — "
+        "absence of findings is still not a review — but the evidence is now our own "
+        "`reviewer-bugs` and `reviewer-security` check runs (required on main, no hourly "
+        "limit, red when they cannot run). CodeRabbit's threads still block, and a review "
+        "it has started must finish. The old drill pinned CodeRabbit as the evidence; the "
+        "new one pins the same hole with our reviewers absent beside a skipped CodeRabbit.",
     ),
     Blocker(
         id="B27",
