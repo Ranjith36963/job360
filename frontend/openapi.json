@@ -7078,6 +7078,28 @@
       "ProfileEditIn": {
         "additionalProperties": false,
         "properties": {
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index"
+          },
+          "op": {
+            "default": "set",
+            "enum": [
+              "set",
+              "append",
+              "upsert",
+              "remove_at"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -7225,6 +7247,11 @@
             "additionalProperties": true,
             "title": "Preferences",
             "type": "object"
+          },
+          "profile_edit_id": {
+            "default": 0,
+            "title": "Profile Edit Id",
+            "type": "integer"
           },
           "skill_esco": {
             "additionalProperties": {
@@ -12569,6 +12596,17 @@
             "minItems": 1,
             "title": "Edits",
             "type": "array"
+          },
+          "expected_profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Profile Version"
           }
         },
         "required": [
@@ -15859,7 +15897,7 @@
     },
     "/api/applications/{application_id}/send/approve": {
       "post": {
-        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching. Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
+        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing\n(``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
         "operationId": "approve_send_api_applications__application_id__send_approve_post",
         "parameters": [
           {
@@ -16043,7 +16081,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -\na stored yes clears neither. An unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {
@@ -17202,7 +17240,7 @@
         ]
       },
       "put": {
-        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.",
+        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.\n\nAn unexpected error must not carry the plaintext token into an error report: the body is emptied of\nit, the error is logged without its traceback or message, and a plain 500 replaces it (from None).",
         "operationId": "put_trigger_api_assistant_trigger_put",
         "parameters": [
           {
@@ -17795,7 +17833,7 @@
     },
     "/api/auth/password-reset/confirm": {
       "post": {
-        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session for that user is revoked\n(forces re-login on all devices \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
+        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session, agent token and OAuth grant\nfor that user is revoked (forces re-login on all devices and reconnection\nof every assistant \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
         "operationId": "password_reset_confirm_api_auth_password_reset_confirm_post",
         "requestBody": {
           "content": {
@@ -20298,7 +20336,7 @@
         ]
       },
       "patch": {
-        "description": "Apply 1..N agent edits to the caller's profile as one atomic overlay write.\n\nR12 \u2014 the same function REST and MCP call: the MCP `update_profile` tool\ninvokes this route function directly with the resolved user (the pattern\nevery other MCP tool in `mcp_server.py` already uses), so there is\nexactly one place this logic can drift.\n\nAll-or-nothing (S12): every edit is validated before anything is\nwritten \u2014 one bad path or value means the whole call 422s and NOTHING\nchanges. A user with no profile row yet gets an empty base created first\n(R8) so the overlay has something to sit on. The response carries the\nfull merged profile (`GET /profile`'s own shape) so the caller sees the\neffect without a second round trip.\n\nThe audit line for this action names PATHS and the actor only \u2014 never a\nvalue (S3): an edit can carry a name, an email fragment inside `about_me`,\nor anything else the agent chose to write, and none of that belongs in a\nlog line.",
+        "description": "Apply 1..N agent edits to the caller's profile as one atomic overlay write.\n\nR12 \u2014 the same function REST and MCP call: the MCP `update_profile` tool\ninvokes this route function directly with the resolved user (the pattern\nevery other MCP tool in `mcp_server.py` already uses), so there is\nexactly one place this logic can drift.\n\nAll-or-nothing (S12): every edit is validated before anything is\nwritten \u2014 one bad path or value means the whole call 422s and NOTHING\nchanges. A user with no profile row yet gets an empty base created first\n(R8) so the overlay has something to sit on. The response carries the\nfull merged profile (`GET /profile`'s own shape) so the caller sees the\neffect without a second round trip.\n\nThe audit line for this action names PATHS and the actor only \u2014 never a\nvalue (S3): an edit can carry a name, an email fragment inside `about_me`,\nor anything else the agent chose to write, and none of that belongs in a\nlog line.\n\nGap 4 (slice 26) - two assistants writing one profile: the whole call runs\nunder the user's profile-write lock, so `expected_profile_version` (409\n`stale_profile` when another write landed since) and the item ops (applied\nto the CURRENT list) are checked against exactly what gets written.",
         "operationId": "update_profile_api_profile_patch",
         "parameters": [
           {
@@ -21517,7 +21555,7 @@
     },
     "/api/readyz": {
       "get": {
-        "description": "Readiness probe \u2014 checks real dependencies before accepting traffic.\n\nChecks:\n  * db   \u2014 trivial ``SELECT 1`` through the pg connection layer.\n  * redis \u2014 ping via redis-py. Skipped (not failed) when REDIS_URL unset.\n\nReturns 200 ``{status:\"ready\", ...}`` when all checks pass,\n503 ``{status:\"not ready\", ...}`` when any required check fails.",
+        "description": "Readiness probe: can the request path get a DB connection right now?\n\nProduction borrows a connection from the SAME pool ``get_request_db`` uses\n(``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and\nruns ``SELECT 1`` under the same bound. A pinned pool (every connection\nheld) or an unreachable database answers 503, which is what Railway's deploy\nhealthcheck (``backend/railway.json``) and the uptime probe need to see.\n\n200 ``{\"status\": \"ready\", \"pool\": {size, idle, used, waiting, max}}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}``\n\nTest mode has no request-path pool (``get_request_db`` opens a fresh\nconnection per request there), so the probe opens one the same way and\n``pool`` is null. Redis is no longer checked: the service was deleted\n2026-09-02 and the auth rate limiter falls back without it.",
         "operationId": "readyz_api_readyz_get",
         "responses": {
           "200": {
