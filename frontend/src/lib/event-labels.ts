@@ -109,6 +109,8 @@ export const EVENT_LABEL: Record<string, string> = {
   submit_resolved: "Submit marked as not sent",
   // Bulk-apply F4 (2026-10-18).
   answer_corrected: "Answer corrected by you",
+  outcome_suggested: "Outcome suggested (waiting for your OK)",
+  outcome_dismissed: "Suggested outcome ignored",
 };
 
 function relayedWords(payload: unknown): boolean {

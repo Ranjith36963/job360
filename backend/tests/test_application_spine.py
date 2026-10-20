@@ -464,6 +464,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         # Bulk-apply D1 (2026-10-18).
         "submit_attempted", "submit_resolved",
         "answer_corrected",
+        # Feature 9 (2026-10-20).
+        "outcome_suggested", "outcome_dismissed",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types
@@ -823,7 +825,7 @@ async def test_event_with_email_source_is_stored_and_shown(authenticated_async_c
         detail = await _get_application(client, app_id)
         whats_new = await client.get("/api/whats-new")
 
-    expected_source = {**source, "thread_id": None, "received_at": "2026-09-01T07:30:00+00:00"}  # feature 8: thread_id is emitted (null when none)
+    expected_source = {**source, "thread_id": None, "quote": None, "received_at": "2026-09-01T07:30:00+00:00"}  # feature 8: thread_id is emitted (null when none)
     replied = next(e for e in detail.json()["events"] if e["event_type"] == "replied")
     assert replied["source"] == expected_source, replied
 

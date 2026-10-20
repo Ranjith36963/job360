@@ -419,6 +419,8 @@ that has already arrived; a future one is left alone, and passing `follow_up_on`
 yourself always wins). list_applications(due=true) is how the user (or your next
 daily-check run) finds what's arrived.
 
+Optional `source.quote` = the one deciding sentence, verbatim (whitespace collapsed, <= 500, shown on the Timeline; refused on outreach). Not sure what an email means: record `outcome_suggested` {event_type: replied|interview_requested|interview_scheduled|offer|rejected, quote, why} with `source`; it is stored in its payload, never moves status, and a repeat for the same message_id returns the first one. The user's Accept on Needs you records the real event with that `source` and `quote`; Ignore is `outcome_dismissed` {suggestion_event_id}, which you may record when the user says "ignore it" in chat. Never record the real event yourself unless the user says so in chat.
+
 A test or simulated application: `record_event` `simulation` FIRST, before any other event; it is never counted
 in stats. Undo it with a `note` whose `corrects_event_id` is that event (never another `simulation`).
 

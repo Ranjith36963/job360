@@ -1270,13 +1270,13 @@ def build_server(version: str = "") -> MCPServer:
     ) -> dict[str, Any]:
         """Append one event to an application's history.
 
-        `source` ({kind, message_id, thread_id?, sender, subject, received_at}) = the email; a repeat
-        message_id writes nothing.
+        `source` ({kind, message_id, thread_id?, sender, subject, received_at, quote?}) = the email; a repeat
+        message_id writes nothing; quote = the deciding line, verbatim. Unsure: outcome_suggested
+        {event_type, quote, why}.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is submission proof, not a 2nd one. Wrong
-        date: `applied` + occurred_at + corrects_event_id=<old id>.
+        the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source` =
+        submission proof.
         `scheduled_at` (ISO-8601 + timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
 
@@ -1297,7 +1297,7 @@ def build_server(version: str = "") -> MCPServer:
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped}.
-        proof_text {text, page_host}; simulation {} = test app, never counted.
+        proof_text {text, page_host}; simulation {} = test app.
         unqueued {reason?}; answer_corrected {key|question, was_source}.
         Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:

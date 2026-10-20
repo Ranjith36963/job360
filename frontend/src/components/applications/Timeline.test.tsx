@@ -25,6 +25,22 @@ function makeEvent(overrides: Partial<ApplicationEvent> = {}): ApplicationEvent 
 }
 
 describe("Timeline", () => {
+  it("shows the verbatim email quote under the source line", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({
+            source: {
+              kind: "email", message_id: "<a>", thread_id: null, sender: "hr@x.example",
+              subject: "Update", received_at: null, quote: "We will not be moving forward.",
+            },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("event-source-quote")).toHaveTextContent("We will not be moving forward.");
+  });
+
   it("shows who recorded each event in plain words", () => {
     render(
       <Timeline

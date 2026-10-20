@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
+import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
 import { BatchApplyPanel } from "./BatchApplyPanel";
 import { SettingRequestCard } from "./SettingRequestCard";
@@ -353,6 +354,7 @@ export function NeedsYou() {
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
       <MorningCheck />
       <ReadyToSend onTotal={setReadyTotal} />
+      <OutcomeSuggestions />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>

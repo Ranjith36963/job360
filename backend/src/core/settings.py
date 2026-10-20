@@ -342,6 +342,11 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # guessed; payload {key | question, was_source}. A note: saving it to memory is a separate,
     # user-approved update_profile. Checked in the record_event ROUTE (_check_answer_corrected).
     "answer_corrected",
+    # Feature 9 (G073, 2026-10-20): the assistant is not sure what an email means.
+    # `outcome_suggested` {event_type, quote, why} (+ the email, stored as payload.email) waits
+    # on Needs you; `outcome_dismissed` {suggestion_event_id} is the user's Ignore. Note-family:
+    # neither moves the status. Checked in services/applications/outcome_suggestions.py.
+    "outcome_suggested", "outcome_dismissed",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -370,6 +375,26 @@ APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_
 # match_email (feature 8): at most this many candidate applications per call, newest
 # first; `truncated` says more existed.
 MATCH_EMAIL_MAX_CANDIDATES = int(os.getenv("MATCH_EMAIL_MAX_CANDIDATES", "20"))
+# Feature 9 (G073): the verbatim sentence an email-sourced event may carry (source.quote),
+# also the cap on outcome_suggested's payload.quote. A breach is 422 naming this setting.
+APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS", "500"))
+# Which status outcomes an assistant may SUGGEST instead of recording. Derived from the
+# status tuple (like APPLICATION_SCHEDULABLE_EVENT_TYPES) so a rename cannot leave a stale name.
+# Not applied (a repeat is already a confirmation note), withdrawn / offer_declined (the user's
+# own decisions), ghosted (Job360 sets it) or hired.
+_SUGGESTABLE_NAMES = {"replied", "interview_requested", "interview_scheduled", "offer", "rejected"}
+APPLICATION_OUTCOME_SUGGESTION_EVENT_TYPES = tuple(
+    t for t in APPLICATION_STATUS_EVENT_TYPES if t in _SUGGESTABLE_NAMES
+)
+if set(APPLICATION_OUTCOME_SUGGESTION_EVENT_TYPES) != _SUGGESTABLE_NAMES:  # pragma: no cover
+    raise RuntimeError(
+        f"APPLICATION_OUTCOME_SUGGESTION_EVENT_TYPES expected {sorted(_SUGGESTABLE_NAMES)} inside "
+        f"APPLICATION_STATUS_EVENT_TYPES {APPLICATION_STATUS_EVENT_TYPES}, "
+        f"got {APPLICATION_OUTCOME_SUGGESTION_EVENT_TYPES}"
+    )
+APPLICATION_OUTCOME_SUGGESTION_WHY_MAX_CHARS = int(os.getenv("APPLICATION_OUTCOME_SUGGESTION_WHY_MAX_CHARS", "300"))
+# GET /api/applications/outcome-suggestions: at most this many open ones, newest first.
+OUTCOME_SUGGESTIONS_LIST_MAX = int(os.getenv("OUTCOME_SUGGESTIONS_LIST_MAX", "50"))
 
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)

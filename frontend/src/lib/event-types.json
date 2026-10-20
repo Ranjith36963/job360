@@ -54,6 +54,8 @@
     "unqueued",
     "submit_attempted",
     "submit_resolved",
-    "answer_corrected"
+    "answer_corrected",
+    "outcome_suggested",
+    "outcome_dismissed"
   ]
 }

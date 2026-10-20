@@ -20,6 +20,7 @@ vi.mock("@/lib/api", () => ({
 }));
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
+vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
 // Ready to send has its own tests; this stand-in only reports its total for the badge.
 const readyMock = vi.hoisted(() => ({ total: 0 }));
 vi.mock("./ReadyToSend", async () => {

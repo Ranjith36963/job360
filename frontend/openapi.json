@@ -4010,6 +4010,11 @@
             "title": "Message Id",
             "type": "string"
           },
+          "quote": {
+            "default": "",
+            "title": "Quote",
+            "type": "string"
+          },
           "received_at": {
             "anyOf": [
               {
@@ -4053,6 +4058,17 @@
           "message_id": {
             "title": "Message Id",
             "type": "string"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote"
           },
           "received_at": {
             "anyOf": [
@@ -6687,6 +6703,94 @@
           "last_used_at"
         ],
         "title": "OAuthGrantOut",
+        "type": "object"
+      },
+      "OutcomeSuggestionOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "email": {
+            "$ref": "#/components/schemas/EventSourceOut"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "status",
+          "event_type",
+          "quote",
+          "why",
+          "occurred_at",
+          "recorded_at",
+          "recorded_by",
+          "email"
+        ],
+        "title": "OutcomeSuggestionOut",
+        "type": "object"
+      },
+      "OutcomeSuggestionsOut": {
+        "properties": {
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeSuggestionOut"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "suggestions",
+          "truncated"
+        ],
+        "title": "OutcomeSuggestionsOut",
         "type": "object"
       },
       "OutreachCheckResponse": {
@@ -13749,6 +13853,72 @@
           }
         },
         "summary": "Match Email",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/outcome-suggestions": {
+      "get": {
+        "description": "Feature 9: open outcome_suggested events (not ignored, and their email not yet recorded\non the application), newest first. Read-only; web only (an assistant reads them on\nget_application / whats_new).",
+        "operationId": "list_outcome_suggestions_api_applications_outcome_suggestions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeSuggestionsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Outcome Suggestions",
         "tags": [
           "applications"
         ]
