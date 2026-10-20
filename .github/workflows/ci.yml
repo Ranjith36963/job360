@@ -391,6 +391,8 @@ jobs:
   # Steps run on an explicit list of scopes, never `!= 'docs'`: a negation
   # would also admit `tested` (and any scope word added later).
   frontend:
+    # 2026-10-20: this job runs Node 22 (setup-node below). The name stays "Node 20":
+    # renaming a required check is an owner ruleset action.
     name: Frontend (Node 20)
     runs-on: ubuntu-latest
     timeout-minutes: 15
