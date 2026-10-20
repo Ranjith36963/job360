@@ -36,7 +36,8 @@ def _http(routes):
     calls: list = []
 
     def http(url, *, method="GET", data=None, headers=None, as_json=True, once=False):
-        calls.append({"url": url, "method": method, "data": data, "headers": headers or {}, "as_json": as_json})
+        calls.append({"url": url, "method": method, "data": data, "headers": headers or {}, "as_json": as_json,
+                      "once": once})
         for needle, resp in routes.items():
             if needle in url:
                 return resp(url) if callable(resp) else resp
@@ -361,3 +362,30 @@ def test_script_scan_is_linear_on_unclosed_tags_and_keeps_case_and_space_variant
     late = '<script type="application/ld+json">{"@type":"JobPosting","title":"Z"}</script>'
     assert sb._ld_postings("x" * (sb.SCAN_MAX + 10) + late) == []  # past the scan cap
     assert [p["title"] for p in sb._ld_postings("x" * 1000 + late)] == ["Z"]
+
+
+def test_every_request_is_sent_once_so_a_429_is_not_retried():
+    http = _http({"sitemap.xml": (429, None), "briefhq": (429, None), "functionalworks": (429, None)})
+    for fn in (sb.fetch_airswift, sb.fetch_briefhq, sb.fetch_functionalworks):
+        fn(["engineer"], http, {}, days=BIG, countries=["*"])
+    assert http.calls and all(c["once"] is True for c in http.calls)
+
+
+def test_brief_job_link_must_be_https_on_briefhq():
+    def one(u):
+        return sb.parse_briefhq(_ld(title="Engineer", url=u, hiringOrganization={"name": "Brief"}))[0]["url"]
+    assert one("http://evil.example/phish") == sb.BRIEFHQ_URL
+    assert one("https://evil.example/x") == sb.BRIEFHQ_URL
+    assert one("http://briefhq.ai/careers/x") == sb.BRIEFHQ_URL
+    assert one("https://www.briefhq.ai/careers/x") == "https://www.briefhq.ai/careers/x"
+
+
+def test_airswift_sitemap_http_locs_are_not_matched():
+    assert not sb._AS_JOB.match("http://www.airswift.com/jobs/engineer-123")
+    assert sb._AS_JOB.match("https://www.airswift.com/jobs/engineer-123")
+
+
+def test_new_south_wales_is_not_the_uk():
+    assert sb._iso_hits("Sydney, New South Wales, Australia") == {"AU"}
+    assert not sb._place_ok("Sydney, New South Wales, Australia", ["GB"])
+    assert sb._place_ok("Cardiff, Wales", ["GB"])

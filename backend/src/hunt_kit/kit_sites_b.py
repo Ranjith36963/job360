@@ -33,6 +33,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
+from urllib.parse import urlsplit
 
 try:
     import kit_feeds as _kf  # type: ignore[import-not-found]  # sibling file, not a package module
@@ -155,7 +156,7 @@ _NAMES = _build_names()
 def _iso_hits(text: str, *, codes: bool = True) -> set[str]:
     """ISO codes of the countries a place text names. A bare two-letter code counts only as the LAST
     comma-separated part ("Atlanta, US"), so "San Francisco, CA, US" is the United States, not Canada."""
-    norm = _norm(text or "")
+    norm = _norm(text or "").replace(" new south wales ", " ")  # Australia, not the "wales" alias of GB
     hits = {iso for iso, names in _NAMES.items() if any(n in norm for n in names)}
     if codes:
         last = re.split(r"[,;|]", text or "")[-1].strip()
@@ -282,7 +283,7 @@ def _fetch(http: HttpFn, stats: Stats, name: str, budget: Any, url: str, *, ad: 
         return None
     budget.left -= 1
     stats["tried"] = stats.get("tried", 0) + 1
-    status, body = http(url, **kw)
+    status, body = http(url, once=True, **kw)  # once: the first 429 must end the site, not be retried twice
     if status == 200 and body is not None:
         if check_block and _blocked(body):
             print(f"warning: {name} answered a login or security page (run stopped)", file=sys.stderr)
@@ -322,7 +323,7 @@ def _read(http: HttpFn, stats: Stats, name: str, budget: Any, urls: list[str], c
 # shapes: airswift_test.go:9-33 and :36-76. NOT IN REFERENCE: the title match on the URL slug before
 # a page is read, and that the highest id is the newest.
 AIRSWIFT_SITEMAP = "https://www.airswift.com/sitemap.xml"
-_AS_JOB = re.compile(r"^https?://(?:www\.)?airswift\.com/jobs/([a-z0-9-]+)-(\d+)/?$")
+_AS_JOB = re.compile(r"^https://(?:www\.)?airswift\.com/jobs/([a-z0-9-]+)-(\d+)/?$")
 _AS_EXPIRED = re.compile(r"""class\s*=\s*["'][^"']*c-jobs-article-expired""", re.I)
 
 
@@ -368,6 +369,16 @@ def fetch_airswift(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
 BRIEFHQ_URL = "https://briefhq.ai/careers/"
 
 
+def _brief_url(url: Any) -> str:
+    """The posting's own link when it is https on briefhq.ai, else the careers page."""
+    try:
+        u = urlsplit(str(url or "").strip())
+        host = (u.hostname or "").lower()
+    except ValueError:
+        return BRIEFHQ_URL
+    return u.geturl() if u.scheme == "https" and host in ("briefhq.ai", "www.briefhq.ai") else BRIEFHQ_URL
+
+
 def parse_briefhq(page: Any, page_url: str = BRIEFHQ_URL) -> list[Job]:
     out: list[Job] = []
     for p in _ld_postings(page if isinstance(page, str) else ""):
@@ -384,7 +395,7 @@ def parse_briefhq(page: Any, page_url: str = BRIEFHQ_URL) -> list[Job]:
                           if x and str(x).strip())
         remote = True if str(p.get("jobLocationType") or "").upper() == "TELECOMMUTE" else _remote(place)
         out.append(_made("briefhq", "Brief careers page", title=title, company=_posting_company(p) or "Brief",
-                         url=p.get("url") or page_url, place=place, country="",
+                         url=_brief_url(p.get("url")), place=place, country="",
                          posted=_date(p.get("datePosted")), description=_unescaped(p.get("description")),
                          remote=remote))
     return out
