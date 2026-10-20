@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlsplit
 
 from src.services.fetch.guard import ResolveFn, screen_host, screen_url
 
@@ -41,7 +43,30 @@ _STEP_WORDS = re.compile(
     r"\b(next|continue|back|previous|save|search|sign in|log in|login|upload|add|edit|remove|cancel|close)\b",
     re.IGNORECASE,
 )
-_PASSWORD_NAME = re.compile(r"pass(word|code|phrase)|\bpwd\b", re.IGNORECASE)
+_PASSWORD_NAME = re.compile(
+    r"pass(word|code|phrase)|\bpwd\b"
+    # German, Dutch, Swedish, Danish, Finnish: from a word's start, so compounds count too.
+    r"|\b(?:passwort|kennwort|wachtwoord|l[oö]senord|adgangskode|salasana)"
+    r"|\b(?:mot de passe|contrase[nñ]a|senha|palavra-passe|has[lł]o|heslo|passord|jelsz[oó]|пароль)\b",
+    re.IGNORECASE,
+)
+
+
+def _spaced(*words: str) -> str:
+    # One word with one gap or mark between its letters ("Pass word", "P a s s w o r d", "PASS-WORD"), but
+    # never sentence punctuation: "Did the build pass? Word limit" is two words, not a password.
+    return "|".join(r"(?:[^\w.,;:!?]|_)?".join(w) for w in words)
+
+
+# The same words with odd spacing, each matched as ONE word: "Bypass word filter" and "pass code
+# review" are ordinary questions. Two-word "pass code" stays a field; "Passcode" is caught above.
+_PASSWORD_SPACED = re.compile(
+    rf"\b(?:{_spaced('password', 'passphrase', 'passwort', 'kennwort', 'wachtwoord', 'motdepasse')})\b",
+    re.IGNORECASE,
+)
+_INVISIBLE_CHARS = re.compile(r"[\u00ad\u200b-\u200d\u2060\ufeff]")
+# Autocomplete tokens that name a sign-in secret.
+_PASSWORD_AUTOCOMPLETE = frozenset({"current-password", "new-password", "one-time-code"})
 # "Save and send application": the step word does not make it a step.
 _APPLICATION = re.compile(r"\b(application|bewerbung|candidature|candidatura|solicitud|sollicitatie)", re.IGNORECASE)
 # Roles the look lists that are clicked like a link: named the way a link is.
@@ -81,13 +106,13 @@ def control_kind(
     autocomplete = (autocomplete or "").lower()
     name = name or ""
     role = (role or "").lower()
-    if input_type == "password" or "password" in autocomplete:
+    if input_type == "password" or "password" in autocomplete or _PASSWORD_AUTOCOMPLETE & set(autocomplete.split()):
         return "password"
     is_button = (
         tag == "button" or role == "button" or (tag == "input" and input_type in ("submit", "button", "image"))
     )
     if tag in ("input", "textarea") and not is_button:
-        return "password" if _PASSWORD_NAME.search(name) else "field"
+        return "password" if _password_name(name) else "field"
     is_link = not is_button and (tag == "a" or role in _LINK_ROLES)
     if not is_button and not is_link:
         return "field"
@@ -114,6 +139,12 @@ def control_kind(
     return "field"
 
 
+def _password_name(name: str) -> bool:
+    name = _INVISIBLE_CHARS.sub("", unicodedata.normalize("NFKC", name))
+    name = " ".join(name.split())
+    return bool(_PASSWORD_NAME.search(name) or _PASSWORD_SPACED.search(name))
+
+
 # Frame addresses of the CAPTCHA and bot-check vendors we know. A page that
 # loads one of these is asking a human to prove they are human. Turnstile is
 # matched by Cloudflare's host, not the word: jobs.ashbyhq.com/turnstile is an employer.
@@ -134,13 +165,43 @@ _RECAPTCHA_WIDGET = re.compile(r"recaptcha/(?:api2|enterprise)/anchor", re.IGNOR
 _INVISIBLE = re.compile(r"[?&]size=invisible\b", re.IGNORECASE)
 
 
+# More vendors, matched on the frame's HOST only (the host or a subdomain of it): a bare word anywhere
+# in the address matches an employer's own board path ("jobs.ashbyhq.com/geetest-careers").
+_CAPTCHA_HOSTS = (
+    "geetest.com",  # GeeTest: static., gcaptcha4., api.
+    "captcha.awswaf.com",  # AWS WAF CAPTCHA
+    "friendlycaptcha.com", "frcapi.com",  # Friendly Captcha
+    "mtcaptcha.com",
+    "smartcaptcha.yandexcloud.net",  # Yandex SmartCaptcha
+)
+# AWS WAF's token host also runs the silent check, which asks nothing: only its captcha paths count.
+_AWS_CHECK_HOST = "token.awswaf.com"
+
+
+def _on_host(host: str, domain: str) -> bool:
+    return host == domain or host.endswith("." + domain)
+
+
+def _captcha_host(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").rstrip(".")
+    except ValueError:
+        return False
+    if any(_on_host(host, d) for d in _CAPTCHA_HOSTS):
+        return True
+    return _on_host(host, _AWS_CHECK_HOST) and "captcha" in parts.path.lower()
+
+
 def _captcha_frame(url: str) -> bool:
-    if _CAPTCHA_FRAME.search(url) or _RECAPTCHA_CHALLENGE.search(url):
+    if _CAPTCHA_FRAME.search(url) or _RECAPTCHA_CHALLENGE.search(url) or _captcha_host(url):
         return True
     return bool(_RECAPTCHA_WIDGET.search(url)) and not _INVISIBLE.search(url)
 _CAPTCHA_TEXT = re.compile(
     r"verify (that )?you are (a )?human|are you a robot|i'?m not a robot|press (&|and) hold|"
-    r"checking your browser|unusual traffic|complete the security check|prove you'?re not a robot",
+    r"checking your browser|unusual traffic|complete the security check|prove you'?re not a robot|"
+    # An image-text box: a picture of letters to copy.
+    r"(type|enter) the characters (you see|shown|in the image)|enter the code (?:shown )?in the image",
     re.IGNORECASE,
 )
 
@@ -151,7 +212,9 @@ class Blocker:
     detail: str
 
 
-def blocker_for(frame_urls: list[str], page_text: str, has_password_box: bool) -> Optional[Blocker]:
+def blocker_for(
+    frame_urls: list[str], page_text: str, has_password_box: bool, account_step: bool = False,
+) -> Optional[Blocker]:
     """The first reason this page needs the user, or None.
 
     A CAPTCHA wins over a sign-in wall: both need the user, the CAPTCHA is the
@@ -168,6 +231,13 @@ def blocker_for(frame_urls: list[str], page_text: str, has_password_box: bool) -
             "login_required",
             "This page asks for a sign-in. Job360's browser never types a password: the user signs in once "
             "themselves on the Job360 website (Browser page, 'Keep me signed in'), then try again.",
+        )
+    if account_step:
+        return Blocker(
+            "login_required",
+            "This page asks the user to sign in or create an account. Job360's browser never types a password "
+            "and never makes an account: the user signs in once themselves on the Job360 website (Browser page, "
+            "'Keep me signed in'), then try again.",
         )
     return None
 

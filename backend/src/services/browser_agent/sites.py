@@ -154,7 +154,25 @@ def looks_like_application(elements: Sequence[dict[str, Any]]) -> bool:
         e for e in elements
         if e.get("tag") in _FIELD_TAGS and e.get("type") not in _NOT_FIELD_TYPES and str(e.get("name") or "").strip()
     ]
-    return any(e.get("type") == "file" for e in fields) or len(fields) >= MIN_LABELLED_FIELDS
+    if any(e.get("type") == "file" for e in fields):
+        return True
+    # Dropdowns alone are a job list's filters (Ashby: Department, Employment Type, Location), not a form.
+    return len(fields) >= MIN_LABELLED_FIELDS and any(e.get("tag") != "select" for e in fields)
+
+
+# Workday's first apply step: sign in or create an account, with no password box until the user picks
+# "Sign in with email" (seen live 2026-10-20). Its progress bar names it as the current step.
+_WORKDAY_ACCOUNT_STEP = re.compile(
+    r"current\s+step\s+\d+\s+of\s+\d+\s*create\s+account\s*/\s*sign\s+in", re.IGNORECASE,
+)
+
+
+def account_step(site: Optional[Site], title: str, text: str) -> bool:
+    """A Workday create-account / sign-in step: the page title "Sign In", or that step is the current one.
+    A "Sign In" button in the header of an ordinary Workday page is neither."""
+    if site is None or site.name != "workday":
+        return False
+    return (title or "").strip().lower() == "sign in" or bool(_WORKDAY_ACCOUNT_STEP.search(text or ""))
 
 
 def is_honeypot(name: str) -> bool:
