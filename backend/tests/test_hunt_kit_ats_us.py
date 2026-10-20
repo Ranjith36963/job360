@@ -265,10 +265,12 @@ def test_deeply_nested_markup_does_not_blow_the_stack():
 
 # --------------------------------------------------------------------------- hostile input (review fixes)
 def _fast(fn):
+    # 5 s, not 1 s: a shared CI runner took 1.05 s on the linear code. Every input here is sized so the old
+    # quadratic code takes well over 15 s, so the budget still tells linear from quadratic.
     import time
     t = time.perf_counter()
     out = fn()
-    assert time.perf_counter() - t < 1.0
+    assert time.perf_counter() - t < 5.0
     return out
 
 
