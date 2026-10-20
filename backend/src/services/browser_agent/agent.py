@@ -890,6 +890,39 @@ async def _settle(page: Any) -> None:
         pass
 
 
+# How long a scroll may take to land before the page is read anyway (the end of the page never moves).
+SCROLL_WAIT_MS = 1000
+# A promise (boxed: evaluate_handle would wait for a bare one) that resolves on the first scroll anywhere
+# in the page (capture: an inner box's scroll does not bubble), or after the wait; then two frames, so
+# the page's own scroll handlers (lazy sections) have run and drawn.
+SCROLL_SEEN_JS = """(ms) => ({seen: new Promise((done) => {
+  const end = () => {
+    removeEventListener('scroll', on, true);
+    requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+  };
+  const on = () => { clearTimeout(t); end(); };
+  const t = setTimeout(end, ms);
+  addEventListener('scroll', on, {capture: true, once: true});
+})})"""
+
+
+async def _wheel(page: Any, dy: float) -> None:
+    """Turn the wheel and wait for the page to move. ``mouse.wheel`` returns before Chromium scrolls
+    (the scroll lands a frame or more later), so a look straight after it read the page as it was:
+    a form that draws its next section on scroll looked like it had nothing below."""
+    seen = await page.evaluate_handle(SCROLL_SEEN_JS, SCROLL_WAIT_MS)
+    try:
+        await page.mouse.wheel(0, dy)
+        await asyncio.wait_for(page.evaluate("(box) => box.seen", seen), SCROLL_WAIT_MS / 1000 + FRAME_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001, S110 - the page navigated or never answers: read it as it is
+        pass
+    finally:
+        try:
+            await seen.dispose()
+        except Exception:  # noqa: BLE001 - its page is already gone
+            logger.debug("browser_agent scroll handle dispose failed", exc_info=True)
+
+
 # The same action this many times in a row gets a warning (browser-use browser_use/agent/views.py:157-178,
 # :211-215 nudges at 5, 8, 12 repeats; a smaller window here because each of our steps is one tool call).
 REPEAT_LIMIT = 3
@@ -929,7 +962,7 @@ async def _save_proof(page: Any, gate: Gate) -> bool:
     if gate.save_proof is None:
         return False
     try:
-        await gate.save_proof(await page.screenshot(type="jpeg", quality=70))
+        await gate.save_proof(await _capture(page, quality=70))
     except Exception:  # noqa: BLE001 - proof is extra: the application still went
         logger.warning("browser proof screenshot not saved", exc_info=True)
         return False
@@ -1064,7 +1097,7 @@ async def _act(
         if text not in ("down", "up"):
             raise BrowserError("refused", "bad_scroll", 'scroll needs text "down" or "up".')
         page = _live_page(s)
-        await page.mouse.wheel(0, 800 if text == "down" else -800)
+        await _wheel(page, 800 if text == "down" else -800)
         await _settle(page)
         return await look(s, after_action=True)
 
@@ -1306,11 +1339,32 @@ def live_key(user_id: str) -> str:
 _live_hosts: dict[str, str] = {}
 
 
+SHOT_TRIES = 3
+
+
+async def _capture(page: Any, *, quality: int) -> bytes:
+    """A JPEG of the page. Taken while a navigation commits (a sign-in form that submits and reloads on
+    Enter), Chromium answers "Unable to capture screenshot": wait for the new page's HTML, then try
+    again, a bounded number of times; the last try's failure is raised as it is."""
+    for attempt in range(SHOT_TRIES - 1):
+        try:
+            image: bytes = await page.screenshot(type="jpeg", quality=quality)
+            return image
+        except Exception:  # noqa: BLE001 - mid-navigation: wait for the new page, then the next try
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=ACTION_TIMEOUT_MS)
+            except Exception:  # noqa: BLE001, S110 - still loading: the next try says so
+                pass
+            await asyncio.sleep(0.1 * (attempt + 1))
+    last: bytes = await page.screenshot(type="jpeg", quality=quality)
+    return last
+
+
 async def _shot(s: Session) -> dict[str, Any]:
     import base64  # noqa: PLC0415
 
     page = _live_page(s)
-    png = await page.screenshot(type="jpeg", quality=60)
+    png = await _capture(page, quality=60)
     return {
         "status": "ok", "url": _clip(page.url, MAX_URL), "title": _clip(await page.title(), MAX_TITLE),
         "width": VIEWPORT["width"], "height": VIEWPORT["height"],

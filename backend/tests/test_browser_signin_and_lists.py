@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.test_browser_agent import _resolver, _to_site, needs_chromium
+from tests.test_browser_agent import _ats_pool, _resolver, _serve, needs_chromium
 
 
 def _field(name, type_="text", tag="input"):
@@ -96,11 +96,8 @@ async def pages_site():
     app.router.add_get("/en-US/External", page(WORKDAY_SEARCH))
     app.router.add_get("/acme", page(ASHBY_LIST))
     app.router.add_get("/acme/1/application", page(ASHBY_FORM))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    tcp = web.TCPSite(runner, "127.0.0.1", 0)
-    await tcp.start()
-    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    runner, port, tls_port = await _serve(app)
+    yield port, tls_port
     await runner.cleanup()
 
 
@@ -108,23 +105,23 @@ async def pages_site():
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_workday_sign_in_step_needs_you_and_an_ashby_list_is_not_the_form(pages_site):
-    from src.services.browser_agent.agent import BrowserPool, run
+    from src.services.browser_agent.agent import run
 
     public = "93.184.216.34"
     resolve, _ = _resolver({"acme.wd3.myworkdayjobs.com": public, "jobs.ashbyhq.com": public})
-    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(pages_site))
+    pool = _ats_pool(resolve, pages_site)
     try:
-        wd = "http://acme.wd3.myworkdayjobs.com/en-US/External"
+        wd = "https://acme.wd3.myworkdayjobs.com/en-US/External"
         page = await run(pool, "u1", "open", url=wd + "/job/1/apply/applyManually")
         assert page["status"] == "needs_you" and page["reason"] == "login_required"
         assert "never makes an account" in page["detail"]
         page = await run(pool, "u1", "open", url=wd)
         assert page["status"] == "ok" and page["site"]["name"] == "workday"
 
-        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme")
+        page = await run(pool, "u1", "open", url="https://jobs.ashbyhq.com/acme")
         assert page["status"] == "ok" and page["site"]["name"] == "ashby"
         assert page["application_form"] is False
-        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme/1/application")
+        page = await run(pool, "u1", "open", url="https://jobs.ashbyhq.com/acme/1/application")
         assert page["application_form"] is True
     finally:
         await pool.shutdown()
