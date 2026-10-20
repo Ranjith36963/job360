@@ -6306,6 +6306,10 @@
 {"name":"Nationwide Middle East Properties","ats":"zohorecruit","board":"nwmea","source":"gulf-research","country":"AE"},
 {"name":"Premier Inn Middle East","ats":"zohorecruit","board":"global","source":"gulf-research","country":"AE"},
 {"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"},
+{"name":"110 Grill","ats":"betterteam","board":"110grill","source":"freehire"},
+{"name":"Sphere","ats":"catsone","board":"sphereinc.catsone.com","source":"freehire"},
+{"name":"Waymo","ats":"clinch","board":"careers.withwaymo.com","source":"freehire"},
+{"name":"Career Tree Network","ats":"crelate","board":"careertree:ec546cba-84d5-4d8a-97e5-52e8ef47db08","source":"freehire"},
 {"name":"Electronic Arts","ats":"avature","board":"jobs.ea.com","source":"freehire"},
 {"name":"Koch","ats":"avature","board":"koch.avature.net","source":"freehire"},
 {"name":"Deloitte","ats":"avature","board":"deloittecm.avature.net","source":"freehire"},
@@ -6315,5 +6319,13 @@
 {"name":"Capslock","ats":"comeet","board":"capslock/59.001","source":"freehire"},
 {"name":"Spark Hire","ats":"comeet","board":"spark-hire/30.005","source":"career-ops"},
 {"name":"Qogita","ats":"hibob","board":"qogita","source":"freehire"},
-{"name":"Unique","ats":"hibob","board":"unique","source":"freehire"}
+{"name":"Unique","ats":"hibob","board":"unique","source":"freehire"},
+{"name":"Monash University","ats":"pageup","board":"513","source":"freehire"},
+{"name":"Flight Centre","ats":"pageup","board":"889","source":"freehire"},
+{"name":"Melbourne Water","ats":"pageup","board":"391","source":"freehire"},
+{"name":"Leighton Contractors","ats":"pageup","board":"709","source":"freehire"},
+{"name":"The University of Hong Kong","ats":"pageup","board":"932","source":"career-ops"},
+{"name":"Bank of China (Hong Kong)","ats":"pageup","board":"798","source":"career-ops"},
+{"name":"Oklahoma State University","ats":"pageup","board":"1216/en-us","source":"career-ops"},
+{"name":"Simera","ats":"freshteam","board":"simera-talent","source":"freehire"}
 ]

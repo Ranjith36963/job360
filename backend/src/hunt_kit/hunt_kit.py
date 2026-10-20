@@ -99,9 +99,15 @@ BOARD_SOURCES = (
     "jibe",
     "keka",
     "zohorecruit",
+    "betterteam",
+    "catsone",
+    "clinch",
+    "crelate",
     "avature",
     "comeet",
     "hibob",
+    "pageup",
+    "freshteam",
 )
 FEED_SOURCES = (
     "freehire",
@@ -279,7 +285,7 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra")
+ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1")
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
     "kit_asia", "kit_sites_a",
@@ -1695,8 +1701,8 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
-# ats -> token part used as the name (comeet: slug/uid)
-_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "comeet": 0}
+# ats -> token part used as the name (comeet slug/uid, pageup id[/locale])
+_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "comeet": 0, "pageup": 0}
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:
@@ -1704,7 +1710,7 @@ def parse_extra(value: str | None) -> list[dict[str, str]]:
 
     Most boards are ``ats:slug``. Taleo is ``taleo:tenant/section``, Oracle is
     ``oraclecloud:host/siteNumber`` and SuccessFactors is ``successfactors:host[/brand]``. Comeet is
-    ``comeet:slug/uid``.
+    ``comeet:slug/uid``, PageUp ``pageup:id[/locale]``.
     """
     out: list[dict[str, str]] = []
     for item in split_csv(value):
@@ -2644,14 +2650,16 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("keka", re.compile(r"^([a-z0-9-]+)\.keka\.com$")),
     ("zohorecruit", re.compile(r"^([a-z0-9-]+)\.zohorecruit\.(?:in|com)$")),
     ("hibob", re.compile(r"^([a-z0-9-]+)\.careers\.hibob\.com$")),
+    ("freshteam", re.compile(r"^([a-z0-9-]+)\.freshteam\.com$")),
     ("avature", re.compile(r"^((?!www\.)[a-z0-9-]+\.avature\.net)$")),
     ("comeet", re.compile(r"^www\.comeet\.com$")),
+    ("pageup", re.compile(r"^careers\.pageuppeople\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|dover\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
+    r"dayforcehcm\.com|trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2711,10 +2719,15 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         elif ats == "comeet":  # https://www.comeet.com/jobs/<slug>/<companyUID>/...
             ids = seg[1:3] if seg[:1] == ["jobs"] and len(seg) >= 3 else []
             tok = "/".join(ids) if ids and all(re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", x) for x in ids) else ""
+        elif ats == "pageup":  # https://careers.pageuppeople.com/<id>[/cw/<lang>]/...
+            lang = seg[2] if len(seg) > 2 and seg[1] == "cw" else ""
+            ok_lang = bool(re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?", lang))
+            keep_lang = "/" + lang if ok_lang and lang.lower() != "en" else ""  # "en" is the reader's default
+            tok = seg[0] + keep_lang if seg and re.fullmatch(r"\d{1,8}", seg[0]) else ""
         else:
             tok = m.group(1)
         # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.
-        keep = ats in ("ultipro", "adp", "cornerstone", "comeet")
+        keep = ats in ("ultipro", "adp", "cornerstone", "comeet", "pageup")
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}

@@ -9,6 +9,7 @@ imported from another test module (schema isolation).
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -19,10 +20,12 @@ from httpx import ASGITransport, AsyncClient
 
 from src.core import settings
 from src.services.profile import assistant_settings as rules
+from src.services.profile import edits
 from src.services.profile.models import AssistantSettings, UserPreferences
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
 INBOX = "preferences.daily_check"
+SEND = "assistant_settings.outreach_send"
 PAUSE = "assistant_settings.paused_until"
 _AD = {
     "title": "Data Engineer",
@@ -39,6 +42,7 @@ _AD = {
 
 
 def _cfg(**kw: Any) -> rules.EffectiveSettings:
+    kw.setdefault("outreach_send", "auto")
     return rules.effective(AssistantSettings(**kw))
 
 
@@ -58,10 +62,8 @@ def _counts(today: int = 0, company: int = 0) -> rules.OutreachCounts:
     return rules.OutreachCounts(sent_today=today, company_sent_in_window=company)
 
 
-def _gate(cfg=None, facts=None, counts=None, mode: str = "auto") -> rules.OutreachDecision:
-    return rules.may_send_outreach(
-        cfg or _cfg(), facts or _ok_facts(), counts or _counts(), NOW, inbox_mode=mode
-    )
+def _gate(cfg=None, facts=None, counts=None) -> rules.OutreachDecision:
+    return rules.may_send_outreach(cfg or _cfg(), facts or _ok_facts(), counts or _counts(), NOW)
 
 
 # One way to trip each reason, in the order the gate checks them. Each case
@@ -78,7 +80,7 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "application_closed", {"facts": {"application_closed": True}}),
     ("stop", "daily_outreach_cap_reached", {"counts": {"today": 10}}),
     ("stop", "company_cap_reached", {"counts": {"company": 2}}),
-    ("ask", "mode_not_auto", {"mode": "ask"}),
+    ("ask", "mode_not_auto", {"cfg": {"outreach_send": "draft_only"}}),
     ("ask", "no_found_via", {"facts": {"found_via": None}}),
     ("ask", "unlinked_contact", {"facts": {"linked": False}}),
     ("send", "auto_mode", {}),
@@ -89,13 +91,11 @@ def _run(trips: list[dict[str, Any]]) -> rules.OutreachDecision:
     cfg: dict[str, Any] = {}
     facts: dict[str, Any] = {}
     counts: dict[str, Any] = {}
-    mode = "auto"
     for t in trips:
         cfg.update(t.get("cfg", {}))
         facts.update(t.get("facts", {}))
         counts.update(t.get("counts", {}))
-        mode = t.get("mode", mode)
-    return _gate(_cfg(**cfg), _ok_facts(**facts), _counts(**counts), mode)
+    return _gate(_cfg(**cfg), _ok_facts(**facts), _counts(**counts))
 
 
 def test_the_reason_table_is_the_gates_own_order():
@@ -124,10 +124,29 @@ def test_outreach_check_stop_paused_pure_until_a_time_and_expired():
     assert _gate(_cfg(paused_until=earlier)).reason == "auto_mode"
 
 
-@pytest.mark.parametrize("mode", ["", "ask", "paused", "declined"])
-def test_only_auto_or_scheduled_sends(mode):
-    assert _gate(mode=mode).reason == "mode_not_auto"
-    assert _gate(mode="scheduled").decision == "send"
+@pytest.mark.parametrize("value", ["", "draft_only", "DRAFT", "scheduled", "yes"])
+def test_only_outreach_send_auto_sends(value):
+    assert rules.effective(AssistantSettings(outreach_send=value)).outreach_send == "draft_only"
+    assert _gate(_cfg(outreach_send=value)).reason == "mode_not_auto"
+    assert _gate(_cfg(outreach_send="auto")).decision == "send"
+
+
+def test_the_gmail_mode_no_longer_grants_sending():
+    assert "inbox_mode" not in inspect.signature(rules.may_send_outreach).parameters
+
+
+def test_outreach_send_is_a_gated_riskier_setting():
+    assert SEND in rules.SETTING_PATHS and SEND in rules.GATED_PATHS
+    assert rules.classify_change(SEND, "draft_only", "auto") == "riskier"
+    assert rules.classify_change(SEND, "auto", "draft_only") == "safer"
+    assert rules.classify_change(SEND, "auto", "auto") == "safer"
+    assert rules.effective_path_value(SEND, "") == "draft_only"
+    assert rules.effective_path_value(SEND, "bogus") == "draft_only"
+    assert edits.validate_edit(SEND, "AUTO") == "auto"
+    for bad in ("yes", True):
+        with pytest.raises(edits.ProfileEditError) as info:
+            edits.validate_edit(SEND, bad)
+        assert info.value.status_code == 422 and SEND in str(info.value.detail)
 
 
 def test_caps_are_operator_settings(monkeypatch):
@@ -208,6 +227,7 @@ async def _auto_ready(client: AsyncClient, user_id: str) -> tuple[int, int, int]
     """A user in auto mode with one job, one linked contact and one email draft."""
     _seed_profile(user_id)
     await _patch(client, INBOX, "auto")
+    await _patch(client, SEND, "auto")  # the web user's own click applies at once
     app_id = await _bring(client)
     cid = await _contact(client, app_id)
     mid = await _draft(client, app_id, cid)
@@ -290,14 +310,71 @@ async def test_outreach_check_send_in_auto_mode(authenticated_async_context, fix
 
 
 @pytest.mark.asyncio
+async def test_daily_check_auto_alone_never_sends(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        await _patch(client, INBOX, "auto")
+        app_id = await _bring(client)
+        cid = await _contact(client, app_id)
+        mid = await _draft(client, app_id, cid)
+        verdict = await _check(client, cid, mid)
+        assert (verdict["decision"], verdict["reason"]) == ("ask", "mode_not_auto")
+        view = (await client.get("/api/assistant-settings")).json()
+        assert view["outreach_send"] == {"value": "", "effective": "draft_only"}
+        await _patch(client, SEND, "draft_only")
+        verdict = await _check(client, cid, mid)
+        assert (verdict["decision"], verdict["reason"]) == ("ask", "mode_not_auto")
+        await _patch(client, SEND, "auto")
+        verdict = await _check(client, cid, mid)
+        assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
+        view = (await client.get("/api/assistant-settings")).json()
+        assert view["outreach_send"] == {"value": "auto", "effective": "auto"}
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_cannot_turn_outreach_send_on_until_the_user_confirms(
+    authenticated_async_context, fixture_user_id
+):
+    from src.api.main import app
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = (await client.post("/api/tokens", json={"name": "claude-code"})).json()["token"]
+        app_id = await _bring(client)
+        cid = await _contact(client, app_id)
+        mid = await _draft(client, app_id, cid)
+        agent_headers = {"Authorization": f"Bearer {token}"}
+
+        async def agent_set(value: str) -> dict[str, Any]:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test", headers=agent_headers
+            ) as agent:
+                resp = await agent.patch("/api/profile", json={"edits": [{"path": SEND, "value": value}]})
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+        body = await agent_set("auto")
+        assert body["applied"] == [] and [w["path"] for w in body["waiting"]] == [SEND]
+        assert body["profile"]["assistant_settings"]["outreach_send"]["effective"] == "draft_only"
+        assert (await _check(client, cid, mid))["reason"] == "mode_not_auto"
+        confirmed = await client.post(f"/api/assistant-settings/requests/{body['waiting'][0]['id']}/confirm")
+        assert confirmed.status_code == 200, confirmed.text
+        verdict = await _check(client, cid, mid)
+        assert (verdict["decision"], verdict["reason"]) == ("send", "auto_mode")
+        off = await agent_set("draft_only")
+        assert off["waiting"] == [] and [a["path"] for a in off["applied"]] == [SEND]
+        assert (await _check(client, cid, mid))["reason"] == "mode_not_auto"
+
+
+@pytest.mark.asyncio
 async def test_outreach_check_ask_when_mode_not_auto(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _app, cid, mid = await _auto_ready(client, fixture_user_id)
-        await _patch(client, INBOX, "ask")
+        await _patch(client, SEND, "draft_only")
         verdict = await _check(client, cid, mid)
         assert (verdict["decision"], verdict["reason"]) == ("ask", "mode_not_auto")
         # no found_via -> ask; a cold (unlinked) contact -> ask
-        await _patch(client, INBOX, "auto")
+        await _patch(client, SEND, "auto")
         app2 = await _bring(client, {**_AD, "title": "Platform Engineer", "apply_url": "https://n.example/2"})
         bare = await _contact(client, app2, email="ann@northwind.example", found_via=None, name="Ann")
         assert (await _check(client, bare, await _draft(client, app2, bare)))["reason"] == "no_found_via"
@@ -356,6 +433,7 @@ async def test_stop_no_email(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         await _patch(client, INBOX, "auto")
+        await _patch(client, SEND, "auto")
         app_id = await _bring(client)
         cid = await _contact(client, app_id, email="")
         mid = await _draft(client, app_id, cid)
@@ -467,6 +545,14 @@ async def test_mcp_check_outreach_parity(authenticated_async_context, fixture_us
             with pytest.raises(ToolError) as info:
                 await tool.fn(contact_id=987654321, message_id=mid)
             assert str(info.value).startswith("404")
+            # Turning the send switch off through the tool applies at once and closes the gate on both doors.
+            await mcp_server.build_server()._tool_manager.get_tool("update_profile").fn(
+                edits=[{"path": SEND, "value": "draft_only"}]
+            )
+            latest = await _draft(client, app_id, cid)  # the linkedin draft above superseded `mid`
+            route_ask = await _check(client, cid, latest)
+            assert await tool.fn(contact_id=cid, message_id=latest) == route_ask
+            assert route_ask["reason"] == "mode_not_auto"
         finally:
             mcp_server._current_user.reset(token)
     assert (route_send["decision"], route_send["reason"]) == ("send", "auto_mode")
@@ -482,7 +568,9 @@ def test_instructions_and_recipes_carry_the_outreach_gate():
     assert "never send outreach unless check_outreach says send" in hard
     reach = " ".join(load_recipe("reach").text.lower().split())
     assert "check_outreach(contact_id, message_id)" in reach
+    assert "settings.outreach_send" in reach
     assert "`send`: press send in gmail" in reach and "`ask`: save a gmail draft and `ask_user`" in reach
     assert "`stop`: do not send" in reach and "record `outreach_sent`" in reach
     rules_text = " ".join(load_recipe("rules").text.lower().split())
     assert "check_outreach(contact_id, message_id)" in rules_text
+    assert "never on the gmail mode" in rules_text
