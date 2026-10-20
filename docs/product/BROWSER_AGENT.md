@@ -128,6 +128,9 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
   - `BROWSER_AGENT_MAX_LIVE` (default 2): the live sign-in views' own cap, so they never take an assistant's browser.
   - Each live browser uses about 300 MB of memory.
+  - An idle browser is closed by a sweep the app runs every 60 s while the switch is on, not only on the next request.
+  - One assistant session at a time per browser: a call with another `session` label gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
+  - A frame that never answers is skipped after 3 s, and one action is stopped after 60 s (`error`, `timeout`), so a hung page never holds the browser.
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
 - **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.
@@ -190,7 +193,12 @@ form; the test fails when the wait is removed.
 - **Hidden checkboxes and radios:** custom-styled ones (the real input is invisible, the label is the card the user
   clicks) are read and ticked through their label.
 - **Shadow DOM:** inputs inside open shadow roots are read (SmartRecruiters builds its whole form this way).
-- **Frames:** invisible frames are skipped, at most 20 are read, and each read has 3 seconds.
+- **Frames:** invisible frames are skipped, at most 20 are read, and each read has 3 seconds. Inside a frame,
+  "nearest the screen" means nearest the part the user sees after the OUTER page scrolls, so a tall auto-sized
+  frame (it never scrolls itself) shows its later questions as you scroll; its submit button is always listed.
+- **One ref, one control:** a form section the site copies copies the ref too; each read gives the copy its own
+  ref, and an action on a ref that matches two controls is refused (`ref_not_found`: look again), never sent to
+  the first one.
 - **Untrusted text:** the page text sits inside a marker with a random code per read. A site that plants a fake end
   marker gets it removed, so its text cannot pose as instructions. Everything else the page sets is bounded too: the
   title (200 characters), the address (2,000), each control's tag, type, role and autocomplete (40), and the whole
@@ -210,7 +218,9 @@ form; the test fails when the wait is removed.
   (`aria-controls`); two open lists with no owner named are refused (`two_lists_open`), never guessed between.
   A contenteditable box keeps what was typed: the React value setter is used only on inputs and text boxes.
 - **`upload`** also works from an "Attach" button by catching the file picker. `upload_confirmed` says whether the
-  file name shows on the page, because Greenhouse can take the file and still show an error (ApplYourself).
+  site newly drew the file name on the page (not just the file box holding it, and not a name already on the page),
+  because Greenhouse can take the file and still show an error (ApplYourself). A new "failed / error / try again /
+  too large / not supported" line next to the field makes it false and comes back as `upload_error` (page text).
 - **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
   `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); line breaks go
   only into a multi-line box, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
@@ -272,7 +282,9 @@ website calls `POST /api/assistant-trigger/fire` once after Send (or after all o
 assistant with the list of every job whose newest decision is your yes. **One start per click, never one per job**.
 A 60-second cool-down, claimed in the database before the call, means two presses at once start one session. A yes
 given inside that minute is not in the session that just started: the page says so, and **Start now** on the card
-sends every job still waiting on your yes.
+sends every job still waiting on your yes. Each start names its own session label (`send-` and 8 random hex
+characters) for the kit, `check_submit` and every browser call, so a second start never shares the first one's
+browser or kit hold.
 - **Claude routine (recommended, PC off):** make a routine on claude.ai/code/routines with the Job360 connector and
   the instructions the card gives you; add an **API trigger**, copy its URL and token into the card. Job360 calls
   `POST https://api.anthropic.com/v1/claude_code/routines/<trig_id>/fire` (`anthropic-version: 2023-06-01`,
@@ -288,7 +300,9 @@ sends every job still waiting on your yes.
 - **Safety:** set, changed and fired only from the website (an assistant's token gets 403, and no MCP tool reaches
   it); the token is encrypted (table `assistant_triggers`, migration 0066) and never shown again; https only,
   screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
-  yes stays saved.
+  yes stays saved. An unexpected error while saving answers a plain 500 with the token already cleared from the
+  request, Sentry scrubs every depth of a frame's variables, and FastAPI's and Starlette's own frames (one holds
+  the raw request body) lose their variables, so the token cannot reach an error report.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 
