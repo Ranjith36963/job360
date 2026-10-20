@@ -6356,5 +6356,11 @@
 {"name":"Wantapply","ats":"wantapply","board":"global","source":"freehire"},
 {"name":"FineCasual","ats":"workstream","board":"965a796b","source":"freehire"},
 {"name":"Sarku Japan","ats":"workstream","board":"a8f9405b","source":"freehire"},
-{"name":"Chick-fil-A","ats":"workstream","board":"004a7767","source":"freehire"}
+{"name":"Chick-fil-A","ats":"workstream","board":"004a7767","source":"freehire"},
+{"name":"123Loadboard","ats":"hrmdirect","board":"123loadboard","source":"freehire"},
+{"name":"1A Auto","ats":"hrmdirect","board":"1aautoinc","source":"freehire"},
+{"name":"IERUS Technologies","ats":"jobscore","board":"ierustechnologiesinc","source":"freehire"},
+{"name":"Day Kimball Health","ats":"paycor","board":"4028f88b24c330a20124eb33b4ad1653","source":"freehire"},
+{"name":"Clark Hill","ats":"paycor","board":"8a29a018478a87e70147a7588a6343cf","source":"freehire"},
+{"name":"Rad Hires","ats":"recruiterflow","board":"radhires","source":"freehire"}
 ]

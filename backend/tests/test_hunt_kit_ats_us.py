@@ -58,16 +58,42 @@ def _run(name: str, row: dict, http):
 
 
 # A good token per ATS (what the reader accepts), and a board response that is empty but valid.
-TOKEN = {"bullhorn": "91:abc123def", "careerplug": "acme", "hireology": "acme", "hiringthing": "acme.hiringthing.com"}
+TOKEN = {"bullhorn": "91:abc123def", "careerplug": "acme", "hireology": "acme", "hiringthing": "acme.hiringthing.com",
+         "hrmdirect": "acme", "isolvedhire": "acme", "paycom": "notarealpaycomkeynotarealpaycom0",
+         "paycor": "notarealpaycorclientidnotareal00", "jobscore": "acme", "recruiterflow": "radhires"}
 
 
 def test_registry_and_citations():
-    assert set(F) == {"bullhorn", "careerplug", "hireology", "hiringthing"}
+    assert set(F) == {"bullhorn", "careerplug", "hireology", "hiringthing", "hrmdirect", "isolvedhire", "paycom", "paycor",
+                      "jobscore", "recruiterflow"}
     assert set(TOKEN) == set(F)
     src = (KIT_DIR / "kit_ats_us.py").read_text(encoding="utf-8")
     assert src.count("Borrowed from freehire") >= len(F)
     for n in F:  # every reader names its reference file
         assert f"sources/{n}.go" in src
+
+
+def test_job_links_and_extra_boards_map_to_these_readers():
+    k = "notarealpaycomkeynotarealpaycom0"
+    links = {
+        "https://golden-corral-careers.careerplug.com/jobs/123": ("careerplug", "golden-corral-careers"),
+        "https://careers.hireology.com/Acme-Co/456/description": ("hireology", "acme-co"),
+        "https://4mindsai.hiringthing.com/job/789/engineer": ("hiringthing", "4mindsai.hiringthing.com"),
+        "https://1aautoinc.hrmdirect.com/employment/job-opening.php?req=1": ("hrmdirect", "1aautoinc"),
+        "https://acme.isolvedhire.com/jobs/1": ("isolvedhire", "acme"),
+        f"https://www.paycomonline.net/v4/ats/web.php/portal/{k}/jobs/5": ("paycom", k),
+        "https://recruitingbypaycor.com/career/CareerHome.action?clientId=notarealpaycorclientidnotareal00": (
+            "paycor", "notarealpaycorclientidnotareal00"),
+        "https://careers.jobscore.com/careers/ierustechnologiesinc/jobs/x": ("jobscore", "ierustechnologiesinc"),
+        "https://recruiterflow.com/radhires/jobs/9": ("recruiterflow", "radhires"),
+    }
+    for url, (ats, tok) in links.items():
+        info = hk.board_from_job_url(url)
+        assert (info["kind"], info["ats"], info["token"]) == ("ats", ats, tok), url
+    # a link that does not show the board key gives no token rather than a guess
+    assert hk.board_from_job_url("https://www.paycomonline.net/v4/ats/web.php/portal/short/jobs/5")["token"] == ""
+    rows = hk.parse_extra("bullhorn:91:abc123def,bullhorn:x:y,careerplug:acme,hiringthing:acme.hiringthing.com")
+    assert [r["token"] for r in rows] == ["91:abc123def", "acme", "acme.hiringthing.com"]
 
 
 def test_wiring_into_hunt_kit():
@@ -248,6 +274,244 @@ def test_hiringthing_failed_detail_keeps_listing_title_and_empty_board_is_ok():
     assert _run("hiringthing", {"token": "nodot"}, _stub({}))[1] == {"tried": 1, "jobs": 0}  # a board is a host
 
 
+# --------------------------------------------------------------------------- HRM Direct (hrmdirect_test.go:11-66)
+HRM_LIST = ('<html><body><div class="reqResult"><table class="reqResultTable">'
+            '<tr><td class="posTitle"><a href="job-opening.php?req=100&amp;req_loc=11&amp;&amp;#job">Senior Platform Engineer</a></td></tr>'
+            '<tr><td class="posTitle"><a href="job-opening.php?req=100&amp;req_loc=12&amp;&amp;#job">Senior Platform Engineer</a></td></tr>'
+            '<tr><td class="posTitle"><a href="job-opening.php?req=200&amp;req_loc=21&amp;&amp;#job">Support Lead</a></td></tr>'
+            '<tr><td class="posTitle"><a href="job-opening.php?req=200&amp;req_loc=21&amp;&amp;#job">Support Lead</a></td></tr>'
+            '<tr><td><a href="job-opening.php?req=300">filter form link, no req_loc</a></td></tr>'
+            '</table><a href="job-openings.php?search=true&amp;dept=7">Engineering</a></div></body></html>')
+HRM_A = ('<html><body><div class="hrmWelcomeContent"><h2>Welcome to Acme</h2></div><div class="reqResult"><h2>Senior Platform Engineer</h2>'
+         '<table class="viewFields"><tr><td class="viewFieldName"><b>Department:</b></td><td class="viewFieldValue">Engineering</td></tr>'
+         '<tr><td class="viewFieldName"><b>Location:</b></td><td class="viewFieldValue">Austin, TX<br></td></tr></table>'
+         '<div class="jobDesc"><p>Own the platform’s roadmap.</p><script>x()</script></div></div></body></html>')
+HRM_B = ('<html><body><div class="reqResult"><h2>Senior Platform Engineer</h2><table class="viewFields">'
+         '<tr><td class="viewFieldName"><b>Department:</b></td><td class="viewFieldValue">Engineering</td></tr>'
+         '<tr><td class="viewFieldName"><b>Office:</b></td><td class="viewFieldValue">HQ</td></tr>'
+         '<tr><td class="viewFieldName"><b>Location:</b></td><td class="viewFieldValue">, Remote<br></td></tr></table>'
+         '<div class="jobDesc"><p>Same role, second location.</p></div></div></body></html>')
+HRM_C = ('<html><body><div class="reqResult"><h2>Support Lead</h2><table class="viewFields">'
+         '<tr><td class="viewFieldName"><b>Location:</b></td><td class="viewFieldValue"><br></td></tr></table>'
+         '<div class="jobDesc"><p>Lead the desk.</p></div></div></body></html>')
+
+
+def test_hrmdirect_one_posting_per_req_and_location_with_fields_from_the_detail_page():
+    http = _stub({"req=100&req_loc=11": (200, HRM_A), "req=100&req_loc=12": (200, HRM_B), "req=200&req_loc=21": (200, HRM_C),
+                  "job-openings.php": (200, HRM_LIST)})
+    jobs, stats = _run("hrmdirect", {"token": "acme", "name": "Acme"}, http)
+    assert [(j["title"], j["location"]) for j in jobs] == [("Senior Platform Engineer", "Austin, TX"),
+                                                           ("Senior Platform Engineer", "Remote"), ("Support Lead", "")]
+    assert jobs[0]["url"] == "https://acme.hrmdirect.com/employment/job-opening.php?req=100&req_loc=11"
+    assert jobs[0]["description"] == "Own the platform’s roadmap." and jobs[1]["remote"] is True and jobs[2]["remote"] is None
+    assert jobs[0]["extra"] == {"req": "100", "req_loc": "11"} and stats["jobs"] == 3
+    assert len(http.calls) == 4 and "search=true" in http.calls[0][0]
+
+
+def test_hrmdirect_keeps_listing_title_when_detail_is_missing_and_empty_board_is_ok():
+    http = _stub({"req=100": (200, "<html><body>no posting block</body></html>"), "job-openings.php": (200, HRM_LIST)})
+    jobs, _ = _run("hrmdirect", {"token": "acme"}, http)
+    assert [j["title"] for j in jobs] == ["Senior Platform Engineer", "Senior Platform Engineer", "Support Lead"]
+    empty = '<html><body>Select options from the menus above and click Search</body></html>'
+    assert _run("hrmdirect", {"token": "acme"}, _stub({"": (200, empty)}))[1] == {"tried": 1, "ok": 1, "jobs": 0}
+    # raw windows-1252 bytes were decoded by the kit's http; a lone \x92 character never breaks parsing
+    assert _run("hrmdirect", {"token": "acme"}, _stub({"": (200, "<html>\x92</html>")}))[1]["ok"] == 1
+
+
+# --------------------------------------------------------------------------- iSolved Hire (isolvedhire_test.go:12-27)
+ISO_SM = ('<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://acme.isolvedhire.com/jobs/1792515</loc></url>'
+          '<url><loc>https://acme.isolvedhire.com/jobs/1792515.html</loc></url>'
+          '<url><loc>https://acme.isolvedhire.com/jobsandemployment/classifications/Finance/286423/</loc></url>'
+          '<url><loc>https://acme.isolvedhire.com/jobs/</loc></url></urlset>')
+ISO_D = _ld({"@type": "JobPosting", "title": "Post-Harvest Technician", "description": "<p>Trim plants.</p><script>x()</script>",
+             "datePosted": "2026-06-11 00:00:00", "hiringOrganization": {"name": "Crisp Community LLC"},
+             "jobLocation": {"address": {"addressLocality": "Norwich", "addressRegion": "CT", "addressCountry": "US"}}})
+
+
+def test_isolvedhire_dedups_the_sitemap_and_reads_the_posting_ld_json():
+    http = _stub({"/jobs/1792515": (200, ISO_D), "sitemap.xml": (200, ISO_SM)})
+    jobs, stats = _run("isolvedhire", {"token": "acme", "name": "Crisp Community"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1} and len(http.calls) == 2
+    j = jobs[0]
+    assert (j["title"], j["company"], j["location"], j["posted"]) == ("Post-Harvest Technician", "Crisp Community", "Norwich, CT, US", "2026-06-11")
+    assert j["url"] == "https://acme.isolvedhire.com/jobs/1792515" and j["description"] == "Trim plants."
+
+
+@pytest.mark.parametrize("notice", ["<html>You typed the URL for this website incorrectly.</html>",
+                                    "<html><p>This career site has been disabled</p></html>"])
+def test_isolvedhire_a_platform_notice_is_a_dead_board_not_an_empty_one(notice):
+    assert _run("isolvedhire", {"token": "acme"}, _stub({"sitemap.xml": (200, notice)}))[1] == {"tried": 1, "jobs": 0}
+    # the same words deep inside a real sitemap are not a notice
+    deep = "<urlset>" + " " * 600 + "<!-- career site has been disabled --></urlset>"
+    assert _run("isolvedhire", {"token": "acme"}, _stub({"sitemap.xml": (200, deep)}))[1] == {"tried": 1, "ok": 1, "jobs": 0}
+
+
+def test_isolvedhire_detail_cap_and_pages_without_a_posting_are_skipped():
+    sm = "<urlset>" + "".join(f"<url><loc>https://acme.isolvedhire.com/jobs/{i}</loc></url>" for i in range(1, 200)) + "</urlset>"
+    http = _stub({"/jobs/": (200, "<html>no ld+json</html>"), "sitemap.xml": (200, sm)})
+    jobs, stats = _run("isolvedhire", {"token": "acme"}, http)
+    assert jobs == [] and stats["ok"] == 1 and len(http.calls) == 1 + us.ID_ONLY_CAP
+
+
+# --------------------------------------------------------------------------- Paycom (paycom_test.go:73-110)
+PC_SHELL = ('<html><head><script>var configsFromHost = {"sessionJWT":"JWT123",'
+            '"atsPortalMantleServiceUrl":"https:\\/\\/portal-applicant-tracking.us-cent.paycomonline.net\\/"};</script></head><body>Loading...</body></html>')
+PC_KEY = "notarealpaycomkeynotarealpaycom0"
+
+
+def _paycom_http(previews=None, count=2):
+    previews = previews if previews is not None else [{"jobId": 546849}, {"jobId": 537487}]
+    return _stub({
+        "/jobs/1": (200, PC_SHELL),
+        "/api/ats/company-name": (200, {"companyName": "City Electric Supply"}),
+        "/api/ats/job-posting-previews/search": (200, {"jobPostingPreviewsCount": count, "jobPostingPreviews": previews}),
+        "/api/ats/job-postings/546849": (200, {"jobPosting": {"jobId": 546849, "jobTitle": "Van Driver", "location": "Centennial, CO",
+                                              "remoteType": "", "description": "&lt;p&gt;Drive a van.&lt;/p&gt;", "startDate": "2026-06-20T00:00:00+00:00"}}),
+        "/api/ats/job-postings/537487": (200, {"jobPosting": {"jobId": 537487, "jobTitle": "Gear Specialist", "location": "Maitland, FL",
+                                              "remoteType": "Remote", "description": "<p>Quote gears.</p><script>x()</script>", "startDate": "2026-06-19"}}),
+    })
+
+
+def test_paycom_bootstraps_the_session_jwt_lists_previews_and_maps_postings():
+    http = _paycom_http()
+    jobs, stats = _run("paycom", {"token": PC_KEY, "name": "fallback"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 2}
+    a, b = jobs
+    assert (a["title"], a["company"], a["location"], a["posted"], a["remote"]) == ("Van Driver", "City Electric Supply", "Centennial, CO", "2026-06-20", None)
+    assert a["description"] == "Drive a van." and b["remote"] is True and b["description"] == "Quote gears."
+    assert a["url"] == f"https://www.paycomonline.net/v4/ats/web.php/portal/{PC_KEY}/jobs/546849"
+    api = [c for c in http.calls if "portal-applicant-tracking" in c[0]]
+    assert api and all(c[3].get("Authorization") == "JWT123" and c[3].get("Locale") == "en-US" for c in api)
+    hosts = {urlsplit(c[0]).hostname for c in http.calls}
+    assert hosts == {"www.paycomonline.net", "portal-applicant-tracking.us-cent.paycomonline.net"}  # JWT stays on Paycom
+    post = next(c for c in http.calls if c[1] == "POST")
+    assert post[2]["take"] == 50 and post[2]["skip"] == 0 and post[2]["filtersForQuery"]["keywordSearchText"] == ""
+
+
+def test_paycom_retired_key_missing_token_and_empty_board():
+    assert _run("paycom", {"token": PC_KEY}, _stub({"/jobs/1": (200, "<p>Job board does not exist.</p>")}))[1] == {"tried": 1, "jobs": 0}
+    assert _run("paycom", {"token": PC_KEY}, _stub({"/jobs/1": (200, "<html>no jwt</html>")}))[1] == {"tried": 1, "jobs": 0}
+    jobs, stats = _run("paycom", {"token": PC_KEY}, _paycom_http(previews=[], count=0))
+    assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
+
+
+def test_paycom_pages_by_skip_and_caps_detail_requests():
+    pages: list[int] = []
+
+    def search(url, method, body):
+        pages.append(body["skip"])
+        return 200, {"jobPostingPreviewsCount": 500, "jobPostingPreviews": [{"jobId": body["skip"] + i + 1} for i in range(50)]}
+    http = _paycom_http()
+    routes = {"/jobs/1": (200, PC_SHELL), "job-posting-previews/search": search,
+              "/api/ats/job-postings/": (200, {"jobPosting": {"jobId": 5, "jobTitle": "T"}}), "company-name": (404, None)}
+    http = _stub(routes)
+    jobs, _ = _run("paycom", {"token": PC_KEY}, http)
+    assert pages == [0] and len(jobs) == us.ID_ONLY_CAP and jobs[0]["company"] == "Acme"  # one page covers the cap; name falls back to the row
+
+
+# --------------------------------------------------------------------------- Paycor (paycor_test.go:11-47)
+CID = "notarealpaycorclientidnotareal00"
+PCR_LIST = ('<html><body>'
+            f'<a href="https://recruitingbypaycor.com/career/JobIntroduction.action?clientId={CID}&amp;id=notarealpostingid1&amp;source=&amp;lang=en">Line Cook</a>'
+            f'<a href="https://recruitingbypaycor.com/career/JobIntroduction.action?clientId={CID}&amp;id=notarealpostingid1">Apply</a>'
+            f'<a href="https://recruitingbypaycor.com/career/JobIntroduction.action?clientId={CID}">Submit Resume</a>'
+            '<a href="https://recruitingbypaycor.com/career/JobIntroduction.action?clientId=notarealotherclientidnotareal000&amp;id=notarealpostingid2">Other employer</a>'
+            '<a href="https://example.com/about">About us</a></body></html>')
+PCR_DETAIL = ('<html><body><div id="gnewtonCareerBody"><table><tr><td id="gnewtonJobPosition">\n\t<b>Position:</b>&nbsp;\n\tLine Cook, <b>Grill</b>\n</td></tr>'
+              '<tr><td><table><tr><td id="gnewtonJobLocation"><b>Location:</b>&nbsp;</td><td id="gnewtonJobLocationInfo">\n\tRemote - Dublin, Ireland<br/>\n</td></tr></table></td></tr>'
+              '<tr><td id="gnewtonJobID"><b>Job Id:</b>&nbsp; 2414</td></tr>'
+              '<tr><td id="gnewtonJobDescriptionText"><div><p>Cook the food.</p><script>alert(1)</script></div></td></tr></table></div></body></html>')
+PCR_GONE = '<html><body><div id="gnewtonConfirmation">Sorry, this job is no longer active.</div></body></html>'
+
+
+def test_paycor_dedups_the_listing_skips_foreign_boards_and_reads_labelled_cells():
+    http = _stub({"JobIntroduction.action?clientId=" + CID + "&id=": (200, PCR_DETAIL), "CareerHome.action": (200, PCR_LIST)})
+    jobs, stats = _run("paycor", {"token": CID, "name": "Afiniti"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1} and len(http.calls) == 2
+    j = jobs[0]
+    assert (j["title"], j["location"], j["description"], j["remote"]) == ("Line Cook, Grill", "Remote - Dublin, Ireland", "Cook the food.", True)
+    assert j["url"] == f"https://recruitingbypaycor.com/career/JobIntroduction.action?clientId={CID}&id=notarealpostingid1"
+    assert j["company"] == "Afiniti" and j["posted"] == ""
+
+
+def test_paycor_inactive_posting_is_dropped_and_a_failed_listing_fails_the_board():
+    http = _stub({"JobIntroduction.action?clientId=" + CID + "&id=": (200, PCR_GONE), "CareerHome.action": (200, PCR_LIST)})
+    jobs, stats = _run("paycor", {"token": CID}, http)
+    assert jobs == [] and stats["ok"] == 1
+    assert _run("paycor", {"token": CID}, _stub({"CareerHome.action": (500, None)}))[1] == {"tried": 1, "jobs": 0}
+    assert _run("paycor", {"token": CID.upper()}, _stub({"CareerHome.action": (200, PCR_LIST)}))[1]["ok"] == 1  # the client id is case-insensitive
+
+
+# --------------------------------------------------------------------------- JobScore (jobscore_test.go:12-43)
+JS_FEED = {"company_name": "IERUS Technologies, Inc.", "jobs": [
+    {"id": "dgLTVq3fbbbkS61af48PpK", "title": "Systems and Network Administrator",
+     "detail_url": "https://careers.jobscore.com/careers/ierustechnologiesinc/jobs/systems-and-network-administrator-dgLTVq3fbbbkS61af48PpK?ref=rss&sid=68",
+     "description": "<p>IERUS specializes in RF.</p><script>alert(1)</script>", "city": "Huntsville", "state": "AL", "country": "US",
+     "location": "Huntsville, AL, US", "remote": "No | Must be able to work onsite all of the time", "job_type": "Full Time",
+     "experience_level": "Mid-Level", "opened_date": "2026-03-31T17:04:28.293Z"},
+    {"id": "remote42", "title": "Senior Front-End Engineer", "detail_url": "https://careers.jobscore.com/careers/x/jobs/fe-remote42",
+     "description": "<p>Build UI.</p>", "location": "Remote in Joinville, Santa Catarina, Brazil",
+     "remote": "Yes | Can work remotely all of the time", "job_type": "Contractor", "experience_level": "Experienced (Non-Manager)", "opened_date": "2026-05-01"},
+    {"id": "hyb", "title": "Hybrid Role", "detail_url": "https://careers.jobscore.com/careers/x/jobs/hyb", "remote": "Yes | Can work remotely some of the time"},
+    {"id": "", "title": "No id", "detail_url": "https://careers.jobscore.com/careers/x/jobs/none"},
+    {"id": "nolink", "title": "No link", "detail_url": "javascript:alert(1)"},
+    {"id": "foreign", "title": "Foreign host", "detail_url": "https://other.example/x"}]}
+
+
+def test_jobscore_maps_the_feed_and_the_remote_string():
+    http = _stub({"/jobs/ierustechnologiesinc/feed.json": (200, JS_FEED)})
+    jobs, stats = _run("jobscore", {"token": "ierustechnologiesinc", "name": "IERUS Technologies"}, http)
+    assert [j["title"] for j in jobs] == ["Systems and Network Administrator", "Senior Front-End Engineer", "Hybrid Role"]
+    a, b, c = jobs
+    assert (a["location"], a["posted"], a["remote"], a["company"]) == ("Huntsville, AL", "2026-03-31", False, "IERUS Technologies")
+    assert a["extra"] == {"work_mode": "onsite", "employment_type": "Full Time", "experience_level": "Mid-Level"}
+    assert b["location"] == "Remote in Joinville, Santa Catarina, Brazil" and b["remote"] is True and b["posted"] == "2026-05-01"
+    assert c["extra"]["work_mode"] == "hybrid" and c["remote"] is None
+    assert a["url"].startswith("https://careers.jobscore.com/careers/ierustechnologiesinc/jobs/") and len(http.calls) == 1
+    assert "limit=1000" in http.calls[0][0] and stats == {"tried": 1, "ok": 1, "jobs": 3}
+
+
+def test_jobscore_company_falls_back_to_the_feed_name_and_empty_feed_is_ok():
+    jobs, _ = _run("jobscore", {"token": "x", "name": ""}, _stub({"feed.json": (200, JS_FEED)}))
+    assert jobs[0]["company"] == "IERUS Technologies, Inc."
+    assert _run("jobscore", {"token": "x"}, _stub({"feed.json": (200, {"company_name": "X", "jobs": []})}))[1] == {"tried": 1, "ok": 1, "jobs": 0}
+
+
+# --------------------------------------------------------------------------- RecruiterFlow (recruiterflow_test.go:14-35)
+RF_LIST = ('<html><body><script>window.jobsList = {"department": [\n'
+           '["Administration", [{"apply_link": "radhires/jobs/431", "details": "LATAM", "employment_type": "Full time", "job_id": 431, "job_name": "Executive Assistant", "last_opened": "2026-09-03T19:43:26+0000", "remote_type": "Remote"}]],\n'
+           '["Engineering", [{"apply_link": "radhires/jobs/369", "details": "LATAM - Buenos Aires, LATAM - Sao Paulo", "employment_type": "Contract", "job_id": 369, "job_name": "AI Engineer - LATAM {x}", "last_opened": "2026-03-02T14:48:07+0000", "remote_type": null}]]\n'
+           '], "group": [], "location": []};</script></body></html>')
+RF_EMPTY = '<html><body><script>window.jobsList = {"department": [], "group": [], "location": []};</script></body></html>'
+
+
+def _rf_detail(title: str, desc: str) -> str:
+    return _ld({"@type": "JobPosting", "title": title, "description": desc, "hiringOrganization": {"name": "Rad Hires"}})
+
+
+def test_recruiterflow_flattens_departments_and_reads_each_description():
+    http = _stub({"radhires/jobs/431": (200, _rf_detail("Executive Assistant", "<p>Assist.</p><script>x()</script>")),
+                  "radhires/jobs/369": (200, _rf_detail("AI Engineer", "<p>Build models.</p>")), "/radhires/jobs": (200, RF_LIST)})
+    jobs, stats = _run("recruiterflow", {"token": "radhires", "name": "Rad Hires"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 2} and len(http.calls) == 3
+    a, b = jobs
+    assert (a["title"], a["url"], a["location"], a["posted"], a["remote"], a["company"]) == (
+        "Executive Assistant", "https://recruiterflow.com/radhires/jobs/431", "LATAM", "2026-09-03", True, "Rad Hires")
+    assert a["description"] == "Assist." and a["extra"] == {"employment_type": "Full time", "job_id": 431}
+    assert b["title"] == "AI Engineer - LATAM {x}" and b["remote"] is None and b["location"].startswith("LATAM - Buenos Aires")
+
+
+def test_recruiterflow_empty_board_missing_list_and_failed_detail():
+    assert _run("recruiterflow", {"token": "radhires"}, _stub({"": (200, RF_EMPTY)}))[1] == {"tried": 1, "ok": 1, "jobs": 0}
+    assert _run("recruiterflow", {"token": "radhires"}, _stub({"": (200, "<html>no list</html>")}))[1] == {"tried": 1, "jobs": 0}
+    assert _run("recruiterflow", {"token": "radhires"}, _stub({"": (200, "<script>window.jobsList = {broken</script>")}))[1] == {"tried": 1, "jobs": 0}
+    jobs, _ = _run("recruiterflow", {"token": "radhires"}, _stub({"jobs/431": (500, None), "jobs/369": (500, None), "/radhires/jobs": (200, RF_LIST)}))
+    assert [j["description"] for j in jobs] == ["", ""]  # a failing detail only costs the description
+    evil = RF_LIST.replace("radhires/jobs/431", "https://evil.example/x")
+    jobs, _ = _run("recruiterflow", {"token": "radhires"}, _stub({"": lambda u, m, b: (200, evil) if u.endswith("/radhires/jobs") else (404, None)}))
+    assert [j["title"] for j in jobs] == ["AI Engineer - LATAM {x}"]  # a link off recruiterflow.com is dropped
+
+
 # --------------------------------------------------------------------------- shared
 @pytest.mark.parametrize("name", sorted(F))
 def test_every_reader_is_wired_through_wrap_and_counts_once(name):
@@ -313,6 +577,12 @@ def test_hireology_url_on_a_foreign_host_falls_back_to_the_board_host():
     assert [j["url"] for j in jobs] == ["https://careers.hireology.com/acme/5/description"]
 
 
+def test_hrmdirect_and_isolvedhire_vendor_hosts_are_not_boards():
+    for u in ("https://www.hrmdirect.com/pricing", "https://apply.hrmdirect.com/employment/x.html", "https://www.isolvedhire.com/"):
+        assert hk.board_from_job_url(u)["kind"] != "ats", u
+    assert hk.board_from_job_url("https://acme.hrmdirect.com/employment/x.html")["token"] == "acme"
+
+
 def test_vendor_own_subdomains_are_not_attributed_to_a_board():
     for u in ("https://www.careerplug.com/pricing", "https://help.careerplug.com/x", "https://app.careerplug.com/",
               "https://www.hiringthing.com/", "https://support.hiringthing.com/a"):
@@ -347,3 +617,44 @@ def test_descriptions_keep_a_literal_less_than_in_bullhorn_hireology_and_hiringt
     http = _stub({"/job/1": (200, _ht_detail(dict(HT_REC, html_description=text))), f"https://{host}/": (200, _ht_listing(f"https://{host}/job/1/x"))})
     jobs = F["hiringthing"]({"name": "Acme", "ats": "hiringthing", "token": host}, http, {})  # not _run: it forbids "<"
     assert "<5 years" in jobs[0]["description"] and "Benefits: health" in jobs[0]["description"]
+
+@pytest.mark.parametrize("name", sorted(F))
+def test_every_reader_survives_hostile_pages(name):
+    for page in ('<a href="/jobs/1">x</a>' * 8000, "<script>" * 40000, '<td class="viewFieldName">' * 20000):
+        _fast(lambda p=page: _run(name, {"token": TOKEN[name]}, _stub({"": (200, p)})))
+
+
+def test_isolvedhire_sitemap_is_linear_on_whitespace_runs_and_big_lists():
+    host = "acme.isolvedhire.com"
+    hostile = "<loc>" + " " * 60000
+    _fast(lambda: _run("isolvedhire", {"token": "acme"}, _stub({"sitemap.xml": (200, hostile)})))
+    big = "<urlset>" + "".join(f"<loc>https://{host}/jobs/{i}</loc>" for i in range(20000)) + "</urlset>"
+    _fast(lambda: _run("isolvedhire", {"token": "acme"}, _stub({"sitemap.xml": (200, big)})))
+    padded = "<urlset><loc>\n https://acme.isolvedhire.com/jobs/7 \n</loc></urlset>"
+    http = _stub({"sitemap.xml": (200, padded), "/jobs/7": (404, None)})
+    _run("isolvedhire", {"token": "acme"}, http)
+    assert any(c[0].endswith("/jobs/7") for c in http.calls)
+
+
+def test_recruiterflow_vendor_pages_are_not_a_board():
+    for path in ("pricing", "blog/post", "login", "jobs", "about", "contact", "demo", "privacy", "terms", ""):
+        assert hk.board_from_job_url("https://recruiterflow.com/" + path)["kind"] != "ats", path
+    assert hk.board_from_job_url("https://recruiterflow.com/acme/jobs/12")["token"] == "acme"
+
+
+# --------------------------------------------------------------------------- malformed hrefs never lose a board
+def test_hrmdirect_malformed_href_next_to_a_good_one_keeps_the_good_job():
+    page = ('<html><body><div class="reqResult"><a href="http://[bad/x">broken</a>'
+            '<a href="job-opening.php?req=100&amp;req_loc=11">Senior Platform Engineer</a></div></body></html>')
+    http = _stub({"req=100&req_loc=11": (200, HRM_A), "job-openings.php": (200, page)})
+    jobs, stats = _run("hrmdirect", {"token": "acme", "name": "Acme"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1} and len(jobs) == 1
+
+
+def test_paycor_malformed_href_next_to_a_good_one_keeps_the_good_job():
+    page = ('<html><body><a href="http://[bad/x">broken</a>'
+            f'<a href="https://recruitingbypaycor.com/career/JobIntroduction.action?clientId={CID}&amp;id=notarealpostingid1">Line Cook</a>'
+            '</body></html>')
+    http = _stub({"JobIntroduction.action?clientId=" + CID + "&id=": (200, PCR_DETAIL), "CareerHome.action": (200, page)})
+    jobs, stats = _run("paycor", {"token": CID, "name": "Afiniti"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1} and len(jobs) == 1
