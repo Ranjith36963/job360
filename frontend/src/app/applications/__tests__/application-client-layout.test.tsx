@@ -348,8 +348,8 @@ describe("ApplicationClient — status menu asks first (decision 1)", () => {
     recordApplicationEvent.mockResolvedValue({
       event_id: 11,
       application_id: 42,
-      event_type: "rejected",
-      status: "rejected",
+      event_type: "withdrawn",
+      status: "withdrawn",
       status_changed: true,
     });
   });
@@ -358,16 +358,16 @@ describe("ApplicationClient — status menu asks first (decision 1)", () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");
 
-    fireEvent.change(screen.getByTestId("status-menu"), { target: { value: "rejected" } });
+    fireEvent.change(screen.getByTestId("status-menu"), { target: { value: "withdrawn" } });
     expect(recordApplicationEvent).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/record "rejected"\? this is added to the history/i)
+      screen.getByText(/record "withdrawn"\? this is added to the history/i)
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("status-confirm"));
 
     await waitFor(() =>
-      expect(recordApplicationEvent).toHaveBeenCalledWith(42, { event_type: "rejected" })
+      expect(recordApplicationEvent).toHaveBeenCalledWith(42, { event_type: "withdrawn" })
     );
   });
 

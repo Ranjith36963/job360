@@ -104,6 +104,12 @@ class TestItSaysWhichStateItIsIn:
             "sentry_sdk.integrations.logging",
             type("_M", (), {"ignore_logger": staticmethod(lambda name: None)})(),
         )
+        # init_sentry also imports EventScrubber (#962); the fake package needs that submodule too.
+        monkeypatch.setitem(
+            sys.modules,
+            "sentry_sdk.scrubber",
+            type("_S", (), {"EventScrubber": staticmethod(lambda **kw: None)})(),
+        )
 
         with caplog.at_level(logging.INFO, logger="job360"):
             assert init_sentry(component="api") is True
@@ -140,6 +146,12 @@ class TestItSaysWhichStateItIsIn:
             sys.modules,
             "sentry_sdk.integrations.logging",
             type("_M", (), {"ignore_logger": staticmethod(lambda name: None)})(),
+        )
+        # init_sentry also imports EventScrubber (#962); the fake package needs that submodule too.
+        monkeypatch.setitem(
+            sys.modules,
+            "sentry_sdk.scrubber",
+            type("_S", (), {"EventScrubber": staticmethod(lambda **kw: None)})(),
         )
 
         with caplog.at_level(logging.INFO, logger="job360"):

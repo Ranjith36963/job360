@@ -81,4 +81,37 @@ describe("Timeline", () => {
 
     expect(screen.getByText(/scheduled for/i)).toBeInTheDocument();
   });
+
+  it("shows an offer's stored figures in plain words", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({
+            event_type: "offer",
+            payload: { offer_amount: 85000, offer_currency: "GBP", offer_period: "year" },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("event-offer").textContent).toBe("Offer: 85,000 GBP per year");
+  });
+
+  it("shows an interview's round, length and place, and nothing for a bare offer", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({
+            id: 1,
+            event_type: "interview_scheduled",
+            payload: { round: "system-design", duration_minutes: 45, location: "Leeds office" },
+          }),
+          makeEvent({ id: 2, event_type: "offer", payload: {} }),
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("event-interview").textContent).toBe("System design · 45 min · Leeds office");
+    expect(screen.queryByTestId("event-offer")).toBeNull();
+  });
 });
