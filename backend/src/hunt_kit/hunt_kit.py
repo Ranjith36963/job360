@@ -134,6 +134,8 @@ FEED_SOURCES = (
     "wuzzuf",
     "infojobs",
     "instaffo",
+    "techinasia",
+    "itviec",
     "linkedin",
     "glassdoor",
     "googlejobs",
@@ -2580,6 +2582,8 @@ _FEED_HOSTS = (
     ("wuzzuf", re.compile(r"(?:^|\.)wuzzuf\.net$", re.I)),
     ("infojobs", re.compile(r"(?:^|\.)infojobs\.net$", re.I)),
     ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
+    ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
+    ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),

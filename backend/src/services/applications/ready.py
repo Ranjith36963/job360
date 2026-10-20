@@ -154,22 +154,29 @@ def _company_key(company: str) -> Optional[str]:
     return kit.normalized_company_key(company) if company.strip() else None
 
 
-def _approved_for(profile: Any, question: str, company_key: Optional[str]) -> Optional[str]:
+def _approved_for(
+    profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None
+) -> Optional[str]:
     """The user's approved answer to ``question`` (or one of its other wordings), for this
-    company or any company; the last one in the list wins. None when there is none."""
+    company or any company; the last one in the list wins. None when there is none.
+    ``topic`` (the key the fill named) wins over the wording, as check_form matches it: a
+    "Current location" saved on an India form is not the answer on a UK form that typed the
+    international topic (application 107, 2026-10-20)."""
     q = _norm(question)
+    by_topic: Optional[str] = None
     hit: Optional[str] = None
     for rec in kit._records(profile.user_info.answers):
         if rec.get("approved") is not True or not kit._present(rec.get("answer")):
             continue
-        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
-        if q not in {_norm(w) for w in wordings if isinstance(w, str)}:
-            continue
         scoped = str(rec.get("company") or "").strip()
         if scoped and kit.normalized_company_key(scoped) != company_key:
             continue
-        hit = str(rec["answer"])
-    return hit
+        if topic and str(rec.get("topic") or "") == topic:
+            by_topic = str(rec["answer"])
+        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
+        if q in {_norm(w) for w in wordings if isinstance(w, str)}:
+            hit = str(rec["answer"])
+    return by_topic if by_topic is not None else hit
 
 
 def _memory_text(profile: Any, key: str) -> Optional[str]:
@@ -191,7 +198,7 @@ def _user_check(
     that still holds this key. ``changed_to`` = the user's word when it differs from
     what the assistant typed."""
     typed = _norm(a["answer"])
-    word = _approved_for(profile, a["question"], company_key)
+    word = _approved_for(profile, a["question"], company_key, str(a.get("key") or "") or None)
     if word is not None:
         return (True, None) if _norm(word) == typed else (False, word)
     key = str(a.get("key") or "")
@@ -284,6 +291,66 @@ def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
         f"Type the {len(type_first)} answer(s) the user changed (type_first) into their fields, "
         "then record_event form_swept with `answers` (what the form now holds). Then check again.",
     )
+
+
+def _users_word(profile: Any, saved: dict[str, tuple[Any, Any]], answer: dict[str, Any],
+                company_key: Optional[str]) -> Optional[str]:
+    """The user's OWN answer to ``answer``'s question - their approved answer, else a plain field
+    (equality / email / phone) they saved on the web - the words an Edit on the card writes. None
+    when the user has given none."""
+    word = _approved_for(profile, str(answer["question"]), company_key)
+    if word is not None:
+        return word
+    key = str(answer.get("key") or "")
+    target = _field_target(key)
+    by = saved.get(target[0], (None, None))[0] if target else None
+    return _memory_text(profile, key) if by and not is_assistant_actor(str(by)) else None
+
+
+def _answers_by_question(payload: dict[str, Any]) -> Optional[dict[str, dict[str, Any]]]:
+    typed = payload.get("answers")
+    if not isinstance(typed, list) or not typed:
+        return None
+    rows = [a for a in typed if isinstance(a, dict) and "question" in a and "answer" in a]
+    out = {_norm(a["question"]): a for a in rows}
+    return out if len(out) == len(typed) else None  # a repeated or unreadable question: not comparable
+
+
+async def refill_keeps_answers(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], was_id: int, now_id: int
+) -> bool:
+    """Gap roadmap slice 8: does the newer ``form_filled`` ``now_id`` still hold the user's yes given on
+    ``was_id``? Only when both list their answers, the field count and the questions are the same,
+    and every answer that differs is now the user's own word (owner decision 2026-10-19: the
+    assistant typing what the user changed - ``type_first`` - never cancels the yes). Any other
+    change is a new form the user has not seen. Scoped by ``user_id`` (rule #12)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT id, payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'form_filled' AND id IN (?, ?)",
+        (app_row["id"], user_id, was_id, now_id),
+    )
+    fills = {int(r["id"]): _json(r["payload"]) for r in await cur.fetchall()}
+    was, now = fills.get(was_id), fills.get(now_id)
+    if was is None or now is None or was.get("fields_count") != now.get("fields_count"):
+        return False
+    before, after = _answers_by_question(was), _answers_by_question(now)
+    if before is None or after is None or before.keys() != after.keys():
+        return False
+    changed = [a for q, a in after.items() if _norm(a["answer"]) != _norm(before[q]["answer"])]
+    if not changed:
+        return True
+    loaded, overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
+    company_key = _company_key(str(app_row.get("job_company") or ""))
+    for a in changed:
+        word = _users_word(profile, saved, a, company_key)
+        if word is None or _norm(word) != _norm(a["answer"]):
+            return False
+    return True
 
 
 async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[dict[str, str]]:
@@ -406,17 +473,21 @@ def _path_value(profile: Any, path: str) -> Any:
     return getattr(profile.user_info if head == "user_info" else profile.preferences, name, None)
 
 
-def _with_approved(profile: Any, question: str, text: str, company_key: Optional[str]) -> list[dict[str, Any]]:
+def _with_approved(
+    profile: Any, question: str, text: str, company_key: Optional[str], topic: str = "",
+) -> list[dict[str, Any]]:
     """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
-    to the same question (unscoped, or scoped to this company)."""
+    to the same question (unscoped, or scoped to this company) on the same topic. A same-worded
+    answer saved for another topic (another country's right to work) is kept."""
     q = _norm(question)
     keep = [
         dict(r) for r in kit._records(profile.user_info.answers)
-        if not (_norm(r.get("question") or "") == q and (
-            not str(r.get("company") or "").strip()
-            or kit.normalized_company_key(str(r["company"])) == company_key))
+        if not (_norm(r.get("question") or "") == q
+                and str(r.get("topic") or "").strip() == topic
+                and (not str(r.get("company") or "").strip()
+                     or kit.normalized_company_key(str(r["company"])) == company_key))
     ]
-    return [*keep, {"question": question, "answer": text, "approved": True}]
+    return [*keep, {"question": question, "answer": text, "approved": True, **({"topic": topic} if topic else {})}]
 
 
 def answer_edits(
@@ -437,7 +508,8 @@ def answer_edits(
         if kit._present(value):
             out.append((path, value))  # the same value, now saved by the user
     if not sensitive or not out:
-        out.append((user_info.USER_INFO_ANSWERS_PATH, _with_approved(profile, answer["question"], text, company_key)))
+        approved = _with_approved(profile, answer["question"], text, company_key, key)
+        out.append((user_info.USER_INFO_ANSWERS_PATH, approved))
     return out
 
 

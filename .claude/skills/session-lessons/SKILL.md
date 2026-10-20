@@ -187,6 +187,37 @@ Apify web-fetch tool, before you build. Never cite from memory.
   after the merge CONFLICTED and pushed a commit full of conflict markers
   (caught and fixed one commit later). **Rule:** never chain past a merge.
   Check its exit code (or `set -e`), resolve, run the tests, then commit.
+- 2026-10-20: the lesson above repeated. Merging main into a stacked slice, a chained
+  `git merge ...; git add -A; git commit` ran on past a CONFLICT (no markers landed, by luck:
+  the conflicted file was one we kept whole). **Rule:** merge through a script that exits on
+  a non-zero merge (`set -e`, or `if ! git merge ...; then exit 2; fi`), auto-resolves only
+  `docs/GENERATED.md` (take main's, regenerate) and stops on anything else.
+- 2026-10-20: `isolation: "worktree"` agents start from origin/main, not from the lead's
+  checkout, so a slice meant to stack on an open PR was built without its base; one worker
+  halted (right), its empty worktree vanished, and it had to be re-dispatched. **Rule:** a
+  stacked worker's prompt names the base branch and its first step,
+  `git fetch origin <base> && git merge --no-edit origin/<base>` (a merge commit, never
+  `--ff-only` or rebase), and tells it to stop on any conflict but GENERATED.md.
+- 2026-10-20: six PRs that each added an MCP tool parameter went red on
+  `test_mcp_tools_rev` one after another: each bumped `TOOLS_REV` from the same main and
+  pinned its own hash, so every merge made the rest stale. **Rule:** after merging main into
+  a PR that changes MCP tool names or parameters, recompute the served hash and set the rev
+  to main's rev + 1 at that moment, not when the slice was written.
+- 2026-10-20, same session: the "merge through a script" rule above was followed with a
+  script that ran `git merge` and a `--no-verify` regen commit inside `bash update.sh`. The
+  commit-gate hook reads only the top-level command, so a dozen merge commits went up with no
+  gate run (CI still ran the full suite on each push). Caught when a plain `git merge` was
+  blocked. **Rule:** never wrap `git merge` / `git commit` in a script and never pass
+  `--no-verify`: run the gate, `git merge --no-commit --no-ff <base>`, resolve, gate the merged
+  tree, then `git commit --no-edit`. Slower, and the point.
+- 2026-10-20: resolving a merge, `git checkout --ours <file>` took the branch's WHOLE file and
+  silently dropped main's cleanly merged hunks in it (slice 9's code). Caught before the commit.
+  **Rule:** resolve per hunk (`git checkout -m <file>` restores the markers); keep a side only
+  inside the conflict regions, then diff the file against both parents.
+- 2026-10-20: slice 8 (#993) was stacked on slice 7 (#977); its squash merge carried slice 7
+  into main, and #977 sat open, red, with nothing left to ship. **Rule:** when a stacked child
+  merges, merge main into the base (`--no-commit`); if the tree equals main, close the base PR
+  as shipped, naming the merge commit.
 - 2026-10-15: pushes failed CI on the mypy ratchet and, after merging main, on
   the recipe line cap and MCP tool count. **Rule:** run the ratchet
   (`cd backend && python scripts/mypy_ratchet.py`) before every backend push, and

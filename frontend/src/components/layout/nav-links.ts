@@ -7,6 +7,7 @@ import {
   BarChart3,
   Plug,
   MessageCircleQuestion,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ export const NAV_LINKS: readonly { href: string; label: string; icon: LucideIcon
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Jobs in", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
+  { href: "/people", label: "People", icon: Users },
   { href: "/stats", label: "Stats", icon: BarChart3 },
   { href: "/receipts", label: "Receipts", icon: Receipt },
   { href: "/settings/connect", label: "Connect your assistant", icon: Plug },
@@ -42,6 +44,7 @@ const PROTECTED_PREFIXES = [
   "/bring",
   "/receipts",
   "/applications",
+  "/people",
   "/stats",
   "/needs-you",
   "/settings",
