@@ -59,7 +59,11 @@ export default function JobSitesPage() {
     try {
       const res = await browserLive(s);
       if (res.status === "ok" && res.image) setShot(res);
-      else if (res.status !== "ok" && !quiet) toast.error(res.detail || "The browser did not answer.");
+      else if (quiet && res.reason === "no_browser") {
+        // The view closed (idle or past its lifetime): stop refreshing a picture that is gone.
+        setShot(null);
+        toast.error("The sign-in window closed; press Start again.");
+      } else if (res.status !== "ok" && !quiet) toast.error(res.detail || "The browser did not answer.");
       return res;
     } catch (err) {
       if (!quiet) toast.error(apiErrorMessage(err, "The browser did not answer."));

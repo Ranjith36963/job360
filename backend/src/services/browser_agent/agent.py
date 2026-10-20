@@ -13,7 +13,7 @@ click. This module only carries the action out, inside the hard lines in
 * every request the page makes is screened by the SSRF guard;
 * no downloads, no service workers, one browser per user (and a separate one
   for the user's own sign-in view), closed when idle, and at most
-  ``max_sessions`` at once.
+  ``max_sessions`` assistant browsers and ``max_live`` sign-in views at once.
 
 Playwright is imported lazily (rule #16) and is an optional dependency
 (``pip install .[browser]``); without it every action answers ``off``.
@@ -105,6 +105,8 @@ FileFn = Callable[[str], Awaitable[tuple[str, bytes]]]
 # Loads the user's saved sign-ins as one Playwright storage state (slice 2), injected by the route.
 StateFn = Callable[[], Awaitable[dict[str, Any]]]
 VIEWPORT = {"width": 1280, "height": 900}
+# The pool key prefix of a live sign-in view (live_key): those count against max_live, not max_sessions.
+LIVE_PREFIX = "live:"
 
 
 @dataclass
@@ -132,11 +134,13 @@ class BrowserPool:
         *,
         max_sessions: int,
         idle_s: float,
+        max_live: int = 2,
         resolve: ResolveFn,
         launch_args: Optional[list[str]] = None,
         open_connection: Optional[OpenFn] = None,
     ) -> None:
         self.max_sessions = max_sessions
+        self.max_live = max_live
         self.idle_s = idle_s
         self.screen = RequestScreen(resolve)
         # The one way out for Chromium's traffic (egress.py): screens and pins every connection.
@@ -206,7 +210,10 @@ class BrowserPool:
 
     async def _create(self, user_id: str, load_state: Optional[StateFn]) -> Session:
         """Build one user's browser. Called with ``_create_lock`` held."""
-        if len(self._sessions) >= self.max_sessions:
+        # Live sign-in views have their own small cap: they never take an assistant's browser.
+        is_live = user_id.startswith(LIVE_PREFIX)
+        same_kind = sum(1 for k in self._sessions if k.startswith(LIVE_PREFIX) == is_live)
+        if same_kind >= (self.max_live if is_live else self.max_sessions):
             raise BrowserError(
                 "busy", "all_browsers_busy",
                 "Every Job360 browser is in use right now. Try again in a few minutes, or use your own browser.",
@@ -1041,8 +1048,8 @@ LIVE_MAX_SECONDS = 15 * 60
 
 
 def live_key(user_id: str) -> str:
-    """The pool slot of a user's live sign-in view (it counts against ``max_sessions`` like any browser)."""
-    return f"live:{user_id}"
+    """The pool slot of a user's live sign-in view (it counts against ``max_live``, not ``max_sessions``)."""
+    return f"{LIVE_PREFIX}{user_id}"
 # The site the user started signing in on, per user: Keep saves it (and where the sign-in ended up).
 _live_hosts: dict[str, str] = {}
 
@@ -1082,7 +1089,7 @@ async def live(
     s = await pool.get(live_key(user_id), create=action == "start", load_state=load_state)
     if s is None:
         raise BrowserError("refused", "no_browser", "Start again: type the job site's address and press Start.")
-    if s.closes_at is None:
+    if s.closes_at is None or action == "start":  # each Start is a new sign-in: its full time
         s.closes_at = time.monotonic() + LIVE_MAX_SECONDS
     # The page refreshes its picture every 1.5 s: only the user's own steps keep the view open.
     by_user = action != "shot"
@@ -1164,6 +1171,7 @@ def get_pool() -> BrowserPool:
 
         _pool = BrowserPool(
             max_sessions=settings.BROWSER_AGENT_MAX_SESSIONS,
+            max_live=settings.BROWSER_AGENT_MAX_LIVE,
             idle_s=settings.BROWSER_AGENT_IDLE_SECONDS,
             resolve=DEFAULT_RESOLVE,
         )

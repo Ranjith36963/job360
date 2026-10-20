@@ -65,7 +65,7 @@ async def test_the_live_view_is_its_own_browser_not_the_assistants(two_page_site
         assert seen["title"] == "Job - Acme"  # start did not take over the assistant's page
         assert next(e for e in seen["elements"] if e["name"].startswith("First name"))["value"] == "Grace"
         assert "ada@example.com" not in str(seen)  # what the user typed is not the assistant's to read
-        assert len(pool._sessions) == 2  # noqa: SLF001 - two browsers, each counted against the cap
+        assert len(pool._sessions) == 2  # noqa: SLF001 - two browsers, each counted against its own cap
 
         assert (await live(pool, "u1", "cancel"))["closed"] is True
         after = await run(pool, "u1", "look")  # Cancel closed the live view only

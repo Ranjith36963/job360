@@ -101,6 +101,28 @@ describe("Job sites", () => {
     }
   });
 
+  it("stops refreshing and says so once when the sign-in window has closed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<JobSitesPage />);
+      fireEvent.change(await screen.findByLabelText(/sign-in page/i), { target: { value: "https://jobs.acme.com" } });
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+      await screen.findByTestId("live-view");
+      const shots = () => browserLive.mock.calls.filter(([a]) => a.action === "shot").length;
+
+      browserLive.mockResolvedValue({ status: "refused", reason: "no_browser", detail: "Start again." });
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(shots()).toBe(1);
+      await waitFor(() => expect(screen.queryByTestId("live-view")).toBeNull());
+      await vi.advanceTimersByTimeAsync(4600);
+      expect(shots()).toBe(1); // the polling stopped
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledWith("The sign-in window closed; press Start again.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("forgets a saved site", async () => {
     getBrowserSignIns.mockResolvedValue({
       enabled: true, sites: [{ site_host: "jobs.acme.com", cookie_count: 2, updated_at: "2026-10-19T10:00:00Z" }],

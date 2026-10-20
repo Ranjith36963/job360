@@ -126,6 +126,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the tool turns on.
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
+  - `BROWSER_AGENT_MAX_LIVE` (default 2): the live sign-in views' own cap, so they never take an assistant's browser.
   - Each live browser uses about 300 MB of memory.
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
 - **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
@@ -142,12 +143,13 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   (migration 0065), one row per (user, site); **Forget** deletes it; deleting the account deletes them all.
 - **Who can use it:** only you, in a signed-in browser session. An assistant's token is refused (403), so no AI can
   drive the live view or type into it. The live view is its own browser, not the one the assistant's `browser` tool
-  drives: the assistant cannot see your sign-in, and Start or Cancel never touches its half-filled form. Both count
-  toward `BROWSER_AGENT_MAX_SESSIONS`. The assistant's own `browser` tool starts already signed in, and Keep
-  hands the new sign-in's cookies to its browser if it is already open, so "sign in, then try again" works at once.
+  drives: the assistant cannot see your sign-in, and Start or Cancel never touches its half-filled form. Live views
+  count toward their own `BROWSER_AGENT_MAX_LIVE`, never toward `BROWSER_AGENT_MAX_SESSIONS`. The assistant's own
+  `browser` tool starts already signed in, and Keep hands the new sign-in's cookies to its browser if it is already
+  open, so "sign in, then try again" works at once.
 - **How long it stays open:** the picture refreshes every 1.5 s while the tab is shown, and stops after Keep. The
   refresh does not keep the browser open: it closes after `BROWSER_AGENT_IDLE_SECONDS` without a click, key or typing
-  of yours, and 15 minutes after Start at the latest.
+  of yours, and 15 minutes after the last Start at the latest.
 - **Changing `SESSION_SECRET`** signs everyone out of every saved site (they sign in again). Nothing breaks.
 - **Checked end to end** in a real browser against a local test site: the page signs in, keeps the site, lists it,
   the password is in neither the logs nor the database, and an assistant's new browser opens already signed in.
