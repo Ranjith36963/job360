@@ -111,6 +111,11 @@ delete a lesson; if one stops being true, say so on its line and why.
   and PR #935 sat unmerged for hours while I reported it as armed. **Rule:** a new doc's kind is one
   of LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED; run `python scripts/doc_sync_check.py` before
   pushing any docs PR, and re-read `gh pr checks` before saying a PR will merge.
+- 2026-10-20: my Gulf-boards research brief said "stop on 403/429 for that host". The Sonnet worker
+  treated each `<slug>.recruitee.com` as its own host and guessed slugs in a burst: 90 answers of 429
+  from Recruitee, and Workable 429'd twice (Retry-After 314 s). Both throttle the service as a whole.
+  **Rule:** a brief names the SERVICE as the unit ("stop that ATS on its first 429 for this run") and
+  forbids slug-guessing bursts; verify known slugs only.
 
 ## Real applications for the owner
 
