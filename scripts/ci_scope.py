@@ -38,7 +38,9 @@ but only on PROOF, never on a guess. Each workflow proves its own steps:
   push to main   the pushed commit is the merge commit of exactly one merged PR
                  into main; the pushed tree == that PR head's tree; every
                  required status check of the live branch rules is `success` on
-                 that head; AND a run of THIS workflow on that head concluded
+                 that head (a check run, or -- for a context no check run
+                 carries, e.g. `merge-cage` -- a commit status); AND a run of
+                 THIS workflow on that head concluded
                  `success` and carries the artifact `ci-tested-tree-<tree>`.
   schedule       a `push` run of THIS workflow on the same sha, under 24 h old,
                  concluded `success` and carries `ci-tested-tree-<tree>`.
@@ -103,6 +105,33 @@ _DEPLOY_SHAPED_FRONTEND: frozenset[str] = frozenset({
 })
 _DEPLOY_SHAPED_PREFIXES: tuple[str, ...] = ("Dockerfile", "next.config.")
 
+# MARKDOWN THAT IS NOT PROSE (CI audit, 2026-10-20). `*.md` used to be `docs`
+# at any depth, so a PR touching only backend/src/recipes/*.md -- served to
+# users' agents by MCP `get_recipe`, guarded by tests/test_recipes.py -- ran no
+# test at all, and the first run was on main, after the deploy. Under these
+# trees a `.md` is product, agent instructions or harness: it takes the lane of
+# its tree (backend/.claude/.github -> full, frontend/src -> frontend).
+_MD_IS_CODE_PREFIXES: tuple[str, ...] = ("backend/", "frontend/src/", ".claude/", ".github/")
+
+# Files OUTSIDE backend/ that backend/tests read by exact path, so an edit to
+# one can turn offline-suite red although the diff looks like docs or frontend.
+# Found by grepping backend/tests for reads (2026-10-20); a new such read must
+# be added here. Broad scans (test_sourcing_era_deleted over frontend/src and
+# frontend/tests, test_conflict_marker_guard over frontend/) are NOT listed:
+# listing them would make every frontend diff `full`.
+_READ_BY_BACKEND_TESTS: frozenset[str] = frozenset({
+    "ARCHITECTURE.md",                          # test_sourcing_era_deleted
+    "CLAUDE.md",                                # test_sourcing_era_deleted
+    "STATUS.md",                                # test_sourcing_era_deleted
+    "CONTRIBUTING.md",                          # test_suite_floor
+    "frontend/README.md",                       # test_sourcing_era_deleted
+    "frontend/src/lib/event-types.json",        # test_event_types_json_matches_settings
+    "frontend/src/lib/event-labels.ts",         # test_bulk_queue_preflight
+    "frontend/src/app/trust/page.tsx",          # test_trust_page
+    "frontend/src/instrumentation-client.ts",   # test_trust_page
+    "frontend/tests/synthetic/live-smoke.mjs",  # test_slice5_fixes
+})
+
 
 def kind_of(path: str) -> str:
     """Return `docs`, `frontend` or `full` for ONE path. Pure."""
@@ -111,7 +140,11 @@ def kind_of(path: str) -> str:
     p = PurePosixPath(path)
     if p.name.startswith(".env"):
         return "full"  # an env file anywhere is configuration, never prose
-    if p.suffix == ".md" or path.startswith("docs/"):
+    if path in _READ_BY_BACKEND_TESTS:
+        return "full"  # a backend test reads it: only offline-suite can judge it
+    if path.startswith("docs/"):
+        return "docs"
+    if p.suffix == ".md" and not path.startswith(_MD_IS_CODE_PREFIXES):
         return "docs"
     if path.startswith("frontend/"):
         rel = path[len("frontend/"):]
@@ -202,6 +235,24 @@ def _latest_check_runs(repo: str, sha: str, gh) -> dict[str, dict]:
     raise ProofError(f"more than 500 check runs on {sha[:12]} -- refusing to read a partial list")
 
 
+def _commit_statuses(repo: str, sha: str, gh) -> dict[str, dict]:
+    """Commit STATUSES by context. A required context can be a status, not a
+    check run: the ruleset added `merge-cage` (posted by auto-merge.yml) on
+    2026-10-20, and reading check runs alone called it `missing` on every head,
+    so every push to main ran `full`. The combined status already holds only
+    the newest status per context."""
+    latest: dict[str, dict] = {}
+    for page in range(1, 6):
+        data = gh(f"repos/{repo}/commits/{sha}/status?per_page=100&page={page}")
+        statuses = (data or {}).get("statuses") or []
+        for s in statuses:
+            if s.get("context"):
+                latest.setdefault(s["context"], s)
+        if len(statuses) < 100:
+            return latest
+    raise ProofError(f"more than 500 statuses on {sha[:12]} -- refusing to read a partial list")
+
+
 def _evidence_run(repo: str, workflow: str, sha: str, event: str, tree: str, gh,
                   *, now: float | None = None) -> dict | None:
     """A completed, successful run of `workflow` on `sha` (by `event`) that
@@ -280,11 +331,18 @@ def _prove(*, event, sha, ref, repo, workflow, git, gh, now) -> dict:
         return _full("the branch rules name no required status checks -- nothing to prove "
                      "green against", pr=number, head=head, sha=sha)
     latest = _latest_check_runs(repo, head, gh)
+    # Statuses are read only when a required context is not a check run.
+    statuses = (_commit_statuses(repo, head, gh)
+                if any(name not in latest for name in required) else {})
     bad = []
     for name in required:
         r = latest.get(name)
         if r is None:
-            bad.append(f"{name}=missing")
+            s = statuses.get(name)
+            if s is None:
+                bad.append(f"{name}=missing")
+            elif s.get("state") != "success":
+                bad.append(f"{name}={s.get('state') or 'unknown'}")
         elif r.get("status") != "completed" or r.get("conclusion") != "success":
             bad.append(f"{name}={r.get('conclusion') or r.get('status')}")
     if bad:
@@ -398,13 +456,34 @@ def _drill() -> int:
     check("a NESTED package.json is still frontend (only the top-level one ships)",
           classify(["frontend/src/fixtures/package.json"])["scope"], "frontend")
 
-    # DOCS SHAPE -- markdown anywhere, anything under docs/.
-    check("root README is docs", classify(["README.md"])["scope"], "docs")
+    # DOCS SHAPE -- anything under docs/, markdown outside the code trees.
+    check("root README is docs (no backend test reads it)", classify(["README.md"])["scope"], "docs")
+    check("markdown under docs/ is docs", classify(["docs/product/x.md"])["scope"], "docs")
     check("a non-markdown file under docs/ is docs",
           classify(["docs/harness/wires.yml"])["scope"], "docs")
-    check("markdown inside frontend/ is docs (cannot affect the build)",
-          classify(["frontend/README.md"])["scope"], "docs")
-    check("backend CLAUDE.md is docs", classify(["backend/CLAUDE.md"])["scope"], "docs")
+    check("markdown at the top of frontend/ is docs (cannot affect the build)",
+          classify(["frontend/CLAUDE.md"])["scope"], "docs")
+
+    # MARKDOWN THAT IS CODE -- recipes are served to agents; skills, agents and
+    # workflow templates are instructions. Never the docs lane.
+    for code_md in ("backend/src/recipes/rules.md", "backend/src/recipes/apply.md",
+                    "backend/CLAUDE.md", ".claude/skills/hard-rules/SKILL.md",
+                    ".claude/agents/reviewer-bugs.md", ".github/pull_request_template.md"):
+        check(f"markdown in a code tree is FULL: {code_md}", classify([code_md])["scope"], "full")
+    check("markdown under frontend/src/ takes the frontend lane, not docs",
+          classify(["frontend/src/content/help.md"])["scope"], "frontend")
+    check("40 docs + 1 recipe is FULL",
+          classify([*many_docs, "backend/src/recipes/daily.md"])["scope"], "full")
+
+    # FILES A BACKEND TEST READS -- full, so offline-suite runs on them.
+    for read in sorted(_READ_BY_BACKEND_TESTS):
+        check(f"read by a backend test is FULL: {read}", classify([read])["scope"], "full")
+    check("a neighbour of a test-read file is still frontend",
+          classify(["frontend/src/lib/other.json"])["scope"], "frontend")
+    import pathlib
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    missing = sorted(f for f in _READ_BY_BACKEND_TESTS if not (repo_root / f).exists())
+    check("every test-read path still exists (a stale entry goes red here)", missing, [])
 
     # UNKNOWN IS NOT SAFE.
     check("an unlisted root file is FULL", classify(["foo.txt"])["scope"], "full")
@@ -517,6 +596,32 @@ def _drill_tested(check) -> None:
     w = world()
     w[f"repos/{repo}/rules/branches/main"] = [{"type": "deletion"}]
     check("tested refused: the branch rules name no required checks", run(w)["scope"], "full")
+
+    # A REQUIRED CONTEXT THAT IS A COMMIT STATUS, NOT A CHECK RUN (`merge-cage`).
+    def with_status(state: str | None, *, pages: int = 0) -> dict:
+        w = world()
+        w[f"repos/{repo}/rules/branches/main"][1]["parameters"]["required_status_checks"].append(
+            {"context": "merge-cage"})
+        filler = [{"context": f"other-{i}", "state": "success"} for i in range(100)]
+        for page in range(1, pages + 1):
+            w[f"repos/{repo}/commits/{head}/status?per_page=100&page={page}"] = {"statuses": filler}
+        mine = [] if state is None else [{"context": "merge-cage", "state": state}]
+        w[f"repos/{repo}/commits/{head}/status?per_page=100&page={pages + 1}"] = {"statuses": mine}
+        return w
+    v = run(with_status("success"))
+    check("tested: a required context present only as a SUCCESS status -> TESTED",
+          v["scope"], TESTED)
+    for state in ("pending", "failure", "error"):
+        check(f"tested refused: the required status is {state}",
+              run(with_status(state))["scope"], "full")
+    v = run(with_status(None))
+    check("tested refused: a required context that is neither a check run nor a status",
+          v["scope"], "full")
+    check("...and the refusal names it missing", "merge-cage=missing" in v["why"][0], True)
+    check("tested: the success status found on page 2 of the statuses -> TESTED",
+          run(with_status("success", pages=1))["scope"], TESTED)
+    check("tested refused: more than 500 statuses (a partial list is never read)",
+          run(with_status("success", pages=5))["scope"], "full")
 
     # THE PR.
     w = world()
