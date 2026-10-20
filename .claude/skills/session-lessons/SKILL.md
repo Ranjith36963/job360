@@ -97,6 +97,21 @@ delete a lesson; if one stops being true, say so on its line and why.
   **Rule:** after a deploy that adds a tool parameter, check `doctor` and tell
   the owner to reconnect the connector before relying on it.
 
+- 2026-10-19: a research worker probed Bayt and GulfTalent's public search WEB PAGES from the
+  owner's PC, got 403, and I passed "both blocked" to the hunt-coverage session as a fact. On
+  2026-10-20 the live smoke test (`docs/product/hunt-kit-smoke-2026-10-20.md`) showed the #918
+  readers, which use other endpoints, answering 21/21 and 28/28 and keeping real Dubai jobs.
+  **Rule:** say "blocked" only for the exact endpoint the reader calls, and name that endpoint.
+- 2026-10-20: for the same smoke test I downloaded the kit into `tmp/smoke`, which already held
+  `backend/` and `kit.tar` from an earlier task, though the brief said a NEW empty folder. Caught
+  before the run and redone in a fresh folder. **Rule:** before downloading a test run, check the
+  folder does not exist (`test -e`), then create it.
+- 2026-10-20: I stamped the smoke doc `<!-- doc: SNAPSHOT -->`, a kind that does not exist, and
+  pushed without running the drift check. CI's `drift-check` failed, the cage withdrew auto-merge,
+  and PR #935 sat unmerged for hours while I reported it as armed. **Rule:** a new doc's kind is one
+  of LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED; run `python scripts/doc_sync_check.py` before
+  pushing any docs PR, and re-read `gh pr checks` before saying a PR will merge.
+
 ## Real applications for the owner
 
 - 2026-10-15: the owner answered "and upload observe" to "apply or skip?".
