@@ -457,7 +457,18 @@ jobs:
           # the data exemptions, which is its own documented STRICT default. An
           # exemption can only ever LOOSEN a lane, so the safe direction when
           # this job cannot verify one is to withhold it.
-          python scripts/lane.py --json verdict.json $(tr '\n' ' ' < changed.txt)
+          #
+          # THE CONTENT PINS DO GET REVISIONS (2026-10-20). A pin only TIGHTENS
+          # (a new package, an edit to the MCP auth shim -> product_human), and
+          # without revisions it fires on every manifest bump. `_pr` is the
+          # merge ref with full history, so HEAD^1 is the base it was built on.
+          # Feature-detected: a main whose lane.py predates the flags is asked
+          # the old question rather than handed a flag it would reject.
+          pins=()
+          if grep -q -- '--pin-base' scripts/lane.py; then
+            pins=(--pin-repo _pr --pin-base HEAD^1 --pin-head HEAD)
+          fi
+          python scripts/lane.py --json verdict.json "${pins[@]}" $(tr '\n' ' ' < changed.txt)
 
       # ── THE LANE, WHERE THE OWNER CAN SEE IT (2026-08-27) ─────────────────
       # The lane decided everything and appeared nowhere he looks. It was
@@ -490,15 +501,22 @@ jobs:
             product)       want="lane:product" ;;
             harness)       want="lane:harness" ;;
             product_owner) want="lane:product-owner" ;;
+            product_human) want="lane:product-human" ;;   # 2026-10-20, owner-merged
             harness_owner) want="lane:harness-owner" ;;
             *)
               echo "::warning::lane.py returned '$lane' — no label stamped"
               exit 0 ;;
           esac
-          for l in lane:product lane:harness lane:product-owner lane:harness-owner lane:owner; do
+          for l in lane:product lane:harness lane:product-owner lane:product-human lane:harness-owner lane:owner; do
             [ "$l" = "$want" ] && continue
             gh pr edit "$PR" --remove-label "$l" 2>/dev/null || true
           done
+          # `lane:product-human` is new (2026-10-20); create it once if missing,
+          # or `--add-label` below fails on the first PR in that lane.
+          if [ "$want" = "lane:product-human" ]; then
+            gh label create "$want" --color B60205 \
+              --description "Merge by hand: schema, auth, settings or a new dependency" 2>/dev/null || true
+          fi
           if gh pr edit "$PR" --add-label "$want"; then
             echo "lane label: \`$want\` (lane.py said \`$lane\`)" >> "$GITHUB_STEP_SUMMARY"
           else

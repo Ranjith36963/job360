@@ -43,6 +43,14 @@ classified `product_owner`, reported `auto_merge: true`, and the human-only file
 would have ridden along. `harness_owner` is first now because it is the only
 `auto_merge: false` lane left. The tuple itself lives in `merge_cage.LANES`.
 
+A FIFTH LANE, 2026-10-20. The owner took migrations, auth and the settings
+loader back ("merge-by-hand only"): a Railway rollback restores the image, not
+the schema. They are `product_human` -- the old product_owner cell, user
+downstream AND owner merges -- second in precedence, ahead of every machine
+lane. Two CONTENT pins (`content_pins()` below) send a file there by what
+changed: a manifest that adds a new package name, and an edit to the MCP
+bearer shim inside `mcp_server.py`.
+
 THE OTHER RULE: AN UNKNOWN PATH IS NOT A SAFE PATH
 --------------------------------------------------
 A file matching no lane does not fall through to the fast lane. It escalates to
@@ -59,8 +67,10 @@ it was not actually asking. `else: allow` is that bug in one word.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -179,13 +189,208 @@ def apply_data_exemptions(
     return kept, exempted
 
 
-def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
+# ── CONTENT PINS (owner decision 2026-10-20) ────────────────────────────────
+# The mirror of the data exemption above: that one can only LOOSEN a lane, a
+# pin can only TIGHTEN one. A path cannot say "this manifest adds a package" or
+# "this edit touched the bearer check", so the policy's `content_pins:` names
+# what to look at and this compares the file at base and head.
+#
+# THE STRICT DEFAULT IS THE OPPOSITE OF THE EXEMPTION'S, ON PURPOSE. With no
+# revisions, an unreadable revision or an unparseable file, an exemption is
+# withheld -- and a pin FIRES. Both are the safe direction for what they do.
+PIN_KINDS = ("new_dependency", "guarded_code")
+MANIFEST_KINDS = ("pyproject", "package_json")
+_PACKAGE_JSON_TABLES = ("dependencies", "devDependencies", "optionalDependencies",
+                        "peerDependencies")
+_REQ_NAME = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+# `--break-checker pins` sets this, so the drill can be watched going red.
+_PINS_BLINDED = False
+
+
+class PinUnreadableError(RuntimeError):
+    """git could not answer for a revision -- the pin fires rather than guess."""
+
+
+def _pins_config(policy: dict[str, Any]) -> dict[str, Any]:
+    """`content_pins:` from the policy, shape-checked. Absent means no pins."""
+    cfg = policy.get("content_pins")
+    if cfg is None:
+        return {}
+    if not isinstance(cfg, dict) or set(cfg) - set(PIN_KINDS):
+        raise PolicyError(f"`content_pins:` must be a mapping of {', '.join(PIN_KINDS)}")
+    for kind, block in cfg.items():
+        lane = (block or {}).get("lane") if isinstance(block, dict) else None
+        if lane not in policy["lanes"]:
+            raise PolicyError(f"content_pins.{kind}.lane `{lane}` is not a lane in the policy")
+        # A pin into a lane a machine may merge is a pin that changes nothing.
+        if policy["lanes"][lane].get("auto_merge") is not False:
+            raise PolicyError(f"content_pins.{kind} pins to `{lane}`, which a machine may merge")
+    for pattern, kind in ((cfg.get("new_dependency") or {}).get("manifests") or {}).items():
+        if kind not in MANIFEST_KINDS:
+            raise PolicyError(f"content_pins manifest `{pattern}` has unknown kind `{kind}`")
+    for path, names in ((cfg.get("guarded_code") or {}).get("files") or {}).items():
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+            raise PolicyError(f"content_pins guarded file `{path}` must list names")
+    return cfg
+
+
+def _norm_package(name: str, kind: str) -> str:
+    # PEP 503 for Python, so `Foo_Bar` -> `foo-bar` is a bump, not a new name.
+    return re.sub(r"[-_.]+", "-", name).lower() if kind == "pyproject" else name.lower()
+
+
+def dependency_names(text: str, kind: str) -> set[str]:
+    """Every package NAME a manifest declares. Raises ValueError if unreadable."""
+    names: list[str] = []
+    if kind == "package_json":
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("package.json is not an object")
+        for table in _PACKAGE_JSON_TABLES:
+            deps = data.get(table) or {}
+            if not isinstance(deps, dict):
+                raise ValueError(f"`{table}` is not an object")
+            names.extend(deps)
+    elif kind == "pyproject":
+        try:
+            import tomllib  # noqa: PLC0415 - 3.11+, and only this path needs it
+        except ImportError as exc:  # pragma: no cover - CI runs 3.12
+            raise ValueError("no TOML parser on this Python") from exc
+        data = tomllib.loads(text)
+        project = data.get("project") or {}
+        reqs: list[object] = list(project.get("dependencies") or [])
+        for group in (project.get("optional-dependencies") or {}).values():
+            reqs.extend(group)
+        for group in (data.get("dependency-groups") or {}).values():
+            reqs.extend(r for r in group if not isinstance(r, dict))  # skip {include-group}
+        reqs.extend((data.get("build-system") or {}).get("requires") or [])
+        for req in reqs:
+            m = _REQ_NAME.match(req) if isinstance(req, str) else None
+            if not m:
+                raise ValueError(f"cannot read a package name from {req!r}")
+            names.append(m.group(1))
+    else:
+        raise ValueError(f"unknown manifest kind {kind!r}")
+    return {_norm_package(n, kind) for n in names}
+
+
+def guarded_bodies(text: str, names: list[str]) -> dict[str, str]:
+    """name -> AST dump of each named top-level def/class. Comments are invisible."""
+    out: dict[str, str] = {}
+    for node in ast.parse(text).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names:
+            out[node.name] = out.get(node.name, "") + ast.dump(node)
+    return out
+
+
+def _git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+
+
+def _read_side(repo: str, rev: str, path: str) -> str | None:
+    """The file at `rev`, or None when it is absent there. Raises if git cannot say."""
+    listed = _git(repo, "ls-tree", rev, "--", path)
+    if listed.returncode != 0:
+        raise PinUnreadableError(f"git ls-tree {rev} failed: {listed.stderr.strip()[:120]}")
+    if not listed.stdout.strip():
+        return None
+    shown = _git(repo, "show", f"{rev}:{path}")
+    if shown.returncode != 0:
+        raise PinUnreadableError(f"git show {rev}:{path} failed: {shown.stderr.strip()[:120]}")
+    return shown.stdout
+
+
+def content_pins(
+    files: list[str],
+    policy: dict[str, Any],
+    base: str | None,
+    head: str | None,
+    repo: str = ".",
+) -> dict[str, tuple[str, str]]:
+    """file -> (lane, reason) for every file a content pin fires on."""
+    cfg = _pins_config(policy)
+    if _PINS_BLINDED or not cfg:
+        return {}
+    dep = cfg.get("new_dependency") or {}
+    code = cfg.get("guarded_code") or {}
+    todo: list[tuple[str, str, str, Any]] = []   # (file, pin kind, lane, detail)
+    for f in files:
+        kind = next((k for pat, k in (dep.get("manifests") or {}).items()
+                     if path_matches(f, pat)), None)
+        if kind:
+            todo.append((f, "new_dependency", dep["lane"], kind))
+        if f in (code.get("files") or {}):
+            todo.append((f, "guarded_code", code["lane"], code["files"][f]))
+    if not todo:
+        return {}
+
+    pins: dict[str, tuple[str, str]] = {}
+
+    def fire(f: str, lane: str, reason: str) -> None:
+        if f not in pins:
+            pins[f] = (lane, reason)
+
+    if not base or not head:
+        for f, _k, lane, _d in todo:
+            fire(f, lane, "no base/head revisions to compare, so this change cannot be shown "
+                          "to add no package and leave the auth code alone -- the owner's")
+        return pins
+    for rev in (base, head):
+        if _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").returncode != 0:
+            for f, _k, lane, _d in todo:
+                fire(f, lane, f"revision `{rev}` is unreadable, so nothing could be compared")
+            return pins
+
+    for f, pin, lane, detail in todo:
+        try:
+            before = _read_side(repo, base, f)
+            after = _read_side(repo, head, f)
+        except PinUnreadableError as exc:
+            fire(f, lane, f"could not read it to compare ({exc})")
+            continue
+        if pin == "new_dependency":
+            if after is None:
+                continue                      # a deleted manifest adds nothing
+            try:
+                was = dependency_names(before, detail) if before is not None else set()
+                now = dependency_names(after, detail)
+            except ValueError as exc:         # json/toml errors are ValueErrors too
+                fire(f, lane, f"could not read its dependency tables ({exc})")
+                continue
+            added = sorted(now - was)
+            if added:
+                fire(f, lane, f"adds a NEW package ({', '.join(added[:5])}) -- a name nobody "
+                              f"has installed here before is the owner's call (slopsquatting)")
+        else:
+            try:
+                was_b = guarded_bodies(before, detail) if before is not None else {}
+                now_b = guarded_bodies(after, detail) if after is not None else {}
+            except SyntaxError as exc:
+                fire(f, lane, f"could not parse it to compare the guarded code ({exc.msg})")
+                continue
+            changed = [n for n in detail if was_b.get(n) != now_b.get(n)]
+            if changed:
+                fire(f, lane, f"changes guarded auth code ({', '.join(changed)})")
+    return pins
+
+
+def classify(
+    files: list[str],
+    policy: dict[str, Any],
+    pins: dict[str, tuple[str, str]] | None = None,
+) -> dict[str, Any]:
     """Classify a whole changeset.
 
     Returns the lane, the requirements that lane demands, and -- always -- the
     specific files that caused the answer. A verdict you cannot trace to a file
     is a verdict nobody can argue with, which sounds good and is not.
+
+    `pins` (from `content_pins()`) can only move a file to a STRICTER lane: the
+    stricter of its own lane and the pin's wins, and an unknown file still
+    escalates.
     """
+    pins = pins or {}
     # THE ESCALATION TARGET, NAMED ONCE. Both fall-throughs below send a
     # changeset nobody has classified to this lane, and the property that has to
     # hold is `auto_merge: false`, not the lane's name. It was `product_owner`
@@ -225,7 +430,10 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
 
     by_lane: dict[str, list[str]] = {}
     for f in files:
-        by_lane.setdefault(lane_of_file(f, policy), []).append(f)
+        own = lane_of_file(f, policy)
+        if f in pins and own != "unknown":
+            own = min(own, pins[f][0], key=PRECEDENCE.index)
+        by_lane.setdefault(own, []).append(f)
 
     # An unknown path takes the lane no machine may merge, and says which file
     # made it so.
@@ -248,6 +456,7 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
         if by_lane.get(lane):
             cfg = policy["lanes"][lane]
             hits = sorted(by_lane[lane])
+            pinned = {f: pins[f][1] for f in hits if f in pins and pins[f][0] == lane}
             return {
                 "lane": lane,
                 "requires": cfg.get("requires") or [],
@@ -258,8 +467,10 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
                     f"lane `{lane}` -- {cfg.get('description', '')}".rstrip(" -"),
                     f"decided by {len(hits)} file(s), e.g. {', '.join(hits[:4])}"
                     + (" ..." if len(hits) > 4 else ""),
+                    *(f"`{f}` is pinned here: {why}" for f, why in sorted(pinned.items())),
                 ],
                 "by_lane": by_lane,
+                "pinned": pinned,
             }
 
     raise PolicyError("unreachable: every file classified but no lane matched")
@@ -329,8 +540,12 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # `docs/harness/**` is a real fast lane, so the safe files are now genuinely
     # safe and the migration is genuinely the thing doing the work.
     many_docs = [f"docs/harness/note{i}.md" for i in range(40)]
-    check("precedence: 40 docs + 1 migration is a PRODUCT_OWNER pr",
-          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_owner")
+    # The witness was a migration until 2026-10-20, when migrations moved to
+    # `product_human`; a Dockerfile is still `product_owner`.
+    check("precedence: 40 docs + 1 Dockerfile is a PRODUCT_OWNER pr",
+          classify([*many_docs, "backend/Dockerfile"], policy)["lane"], "product_owner")
+    check("precedence: 40 docs + 1 migration is a PRODUCT_HUMAN pr",
+          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_human")
     check("precedence: product + harness is PRODUCT",
           classify(["docs/harness/a.md", "backend/src/main.py"], policy)["lane"], "product")
 
@@ -357,11 +572,11 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
           ".github/workflows/ci.yml" in (mixed.get("by_lane") or {}).get("harness_owner", []),
           True)
     # ...and the negative control, or the case above is bought by refusing
-    # everything: the migration ALONE is the watched lane and a machine may merge
-    # it (owner decision 2026-09-17).
-    mig_only = classify(["backend/migrations/0042_x.up.sql"], policy)
-    check("NEGATIVE CONTROL: a migration alone is product_owner and machine-mergeable",
-          (mig_only["lane"], mig_only["auto_merge"]), ("product_owner", True))
+    # everything: a Dockerfile ALONE is the watched lane and a machine may merge
+    # it (owner decision 2026-09-17). It was a migration until 2026-10-20.
+    df_only = classify(["backend/Dockerfile"], policy)
+    check("NEGATIVE CONTROL: a Dockerfile alone is product_owner and machine-mergeable",
+          (df_only["lane"], df_only["auto_merge"]), ("product_owner", True))
 
     # 4. The cage may not edit the cage.
     check("recursion: editing the policy file is owner-only",
@@ -479,7 +694,8 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     identical treatment the split is decoration, so pin the difference:
     #     a hand-merged migration still reaches users and must still be watched;
     #     a hand-merged cage edit has nobody downstream and must not be.
-    mig = classify(["backend/migrations/007_x.sql"], policy)
+    # `mig` is a Dockerfile since 2026-10-20: migrations left product_owner.
+    mig = classify(["backend/Dockerfile"], policy)
     cage = classify(["scripts/merge_cage.py"], policy)
     check("product_owner is WATCHED even though you merge it by hand",
           bool(mig.get("watch_minutes")), True)
@@ -741,6 +957,147 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
           classify([".claude/skills/debug/SKILL.md",
                     ".claude/hooks/commit-gate.sh"], policy)["lane"], "harness_owner")
 
+    # 13. MERGE-BY-HAND FOR WHAT A ROLLBACK CANNOT UNDO (owner, 2026-10-20).
+    #     Migrations, auth and the settings loader are `product_human`, and two
+    #     content pins send a file there by what changed. Every category has a
+    #     neighbour that must NOT move, or the rule was bought by refusing all.
+    def lane_auto(paths: list[str], pins: dict[str, tuple[str, str]] | None = None) -> tuple:
+        v = classify(paths, policy, pins)
+        return v["lane"], v["auto_merge"]
+
+    human = ("product_human", False)
+    for owner_path in ("backend/migrations/0099_x.up.sql", "backend/migrations/0099_x.down.sql",
+                       "backend/src/core/settings.py",
+                       "backend/src/api/auth_deps.py", "backend/src/api/routes/auth.py",
+                       "backend/src/api/routes/oauth.py", "backend/src/api/routes/tokens.py",
+                       "backend/src/api/routes/well_known.py", "backend/src/api/middleware.py",
+                       "backend/src/services/auth/passwords.py",
+                       "backend/src/services/auth/sessions.py", "frontend/src/middleware.ts"):
+        check(f"merge-by-hand (2026-10-20): {owner_path}", lane_auto([owner_path]), human)
+        check(f"...by the RULE, not escalation: {owner_path}",
+              owner_path in (classify([owner_path], policy).get("by_lane") or {}).get("product_human", []),
+              True)
+    for neighbour, want in (("backend/src/core/tenancy.py", "product"),
+                            ("backend/src/api/routes/assistant_settings.py", "product"),
+                            ("backend/src/api/routes/bring.py", "product"),  # USES require_user
+                            ("backend/src/api/mcp_server.py", "product"),
+                            ("frontend/src/middleware.test.ts", "product"),
+                            ("backend/src/models.py", "product_owner"),
+                            ("backend/Dockerfile", "product_owner"),
+                            (".env.example", "product_owner")):
+        check(f"NEGATIVE CONTROL: a neighbour keeps its lane: {neighbour}",
+              lane_auto([neighbour]), (want, True))
+    hv = classify(["backend/migrations/0099_x.up.sql"], policy)
+    check("product_human is still WATCHED and rolled back on Railway -- users are downstream",
+          (hv.get("watch_minutes"), hv.get("rollback")), (15, "railway"))
+    check("product_human outranks product_owner: a migration beside a Dockerfile",
+          lane_auto(["backend/migrations/0099_x.up.sql", "backend/Dockerfile"]), human)
+    check("harness_owner still outranks product_human: a migration beside ci.yml",
+          lane_auto(["backend/migrations/0099_x.up.sql", ".github/workflows/ci.yml"]),
+          ("harness_owner", False))
+    for kind in PIN_KINDS:
+        pin_lane = (policy.get("content_pins") or {}).get(kind, {}).get("lane")
+        check(f"content pin `{kind}` exists and pins to a lane a machine may not merge",
+              pin_lane is not None and policy["lanes"][pin_lane].get("auto_merge") is False, True)
+    check("a pin never LOOSENS: a cage file pinned to product_human stays harness_owner",
+          lane_auto([".github/workflows/ci.yml"],
+                    {".github/workflows/ci.yml": ("product_human", "drill")}), ("harness_owner", False))
+
+    def pin_repo(before: dict[str, str], after: dict[str, str | None]) -> tuple[str, str, str]:
+        tmp = tempfile.mkdtemp(prefix="lane-pin-drill-")
+        run = lambda *a: subprocess.run(  # noqa: E731
+            a, cwd=tmp, capture_output=True, text=True, check=True,
+            encoding="utf-8", errors="replace",
+        )
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "drill@local")
+        run("git", "config", "user.name", "drill")
+
+        def put(files: dict[str, str | None]) -> str:
+            for rel, text in files.items():
+                path = Path(tmp) / rel
+                if text is None:
+                    path.unlink(missing_ok=True)
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            run("git", "add", "-A")
+            run("git", "commit", "-qm", "x", "--allow-empty")
+            return run("git", "rev-parse", "HEAD").stdout.strip()
+
+        return tmp, put(before), put(after)
+
+    def pinned_lane(rel: str, before: dict[str, str], after: dict[str, str | None]) -> tuple:
+        repo_, b, h = pin_repo(before, after)
+        return lane_auto([rel], content_pins([rel], policy, b, h, repo_))
+
+    pkg = "frontend/package.json"
+    pj = lambda deps, dev: json.dumps({"name": "x", "dependencies": deps,  # noqa: E731
+                                       "devDependencies": dev})
+    base_pj = pj({"next": "16.0.0"}, {"vitest": "3.0.0"})
+    check("package.json: a version BUMP stays product_owner (as today)",
+          pinned_lane(pkg, {pkg: base_pj}, {pkg: pj({"next": "16.1.0"}, {"vitest": "3.0.0"})}),
+          ("product_owner", True))
+    check("package.json: a NEW dependency is the owner's",
+          pinned_lane(pkg, {pkg: base_pj},
+                      {pkg: pj({"next": "16.0.0", "reqeusts": "1.0.0"}, {"vitest": "3.0.0"})}), human)
+    check("package.json: a NEW devDependency is the owner's",
+          pinned_lane(pkg, {pkg: base_pj},
+                      {pkg: pj({"next": "16.0.0"}, {"vitest": "3.0.0", "left-pad": "1"})}), human)
+    check("package.json: a REMOVED dependency is not a new one",
+          pinned_lane(pkg, {pkg: base_pj}, {pkg: pj({}, {"vitest": "3.0.0"})}), ("product_owner", True))
+    check("package.json: unparseable after the change -> the owner's (strict)",
+          pinned_lane(pkg, {pkg: base_pj}, {pkg: "{ not json"}), human)
+
+    pyp = "backend/pyproject.toml"
+    tm = lambda deps, dev: (  # noqa: E731
+        "[project]\nname = \"x\"\ndependencies = [" + ", ".join(f'"{d}"' for d in deps) + "]\n"
+        "[project.optional-dependencies]\ndev = [" + ", ".join(f'"{d}"' for d in dev) + "]\n")
+    base_tm = tm(["fastapi>=0.115", "psycopg[binary,pool]>=3.2", "Python_Dotenv>=1"], ["pytest>=8"])
+    check("pyproject: a version BUMP (and a PEP 503 respelling) stays product_owner",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: tm(["fastapi>=0.120", "psycopg[binary,pool]>=3.3", "python-dotenv>=1.1"],
+                               ["pytest>=9"])}), ("product_owner", True))
+    check("pyproject: a NEW runtime dependency is the owner's",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: tm(["fastapi>=0.115", "psycopg[binary,pool]>=3.2", "Python_Dotenv>=1",
+                                "fastapi-helpers-pro>=1"], ["pytest>=8"])}), human)
+    check("pyproject: a NEW optional (dev) dependency is the owner's",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: tm(["fastapi>=0.115", "psycopg[binary,pool]>=3.2", "Python_Dotenv>=1"],
+                               ["pytest>=8", "pytest-magic"])}), human)
+    check("pyproject: a brand-new manifest that declares packages is the owner's",
+          pinned_lane("tools/x/pyproject.toml", {"README.md": "x"},
+                      {"tools/x/pyproject.toml": tm(["httpx"], [])}), human)
+
+    mcp = "backend/src/api/mcp_server.py"
+    shim = ("async def _mcp_asgi(scope, receive, send):\n    if scope['type'] != 'http':\n"
+            "        return\n    await check_bearer(scope)\n\n\n"
+            "async def _verified_user():\n    return await gate(_user())\n\n\n"
+            "def get_job(job_id):\n    return job_id\n")
+    check("mcp_server.py: an ordinary TOOL edit keeps the product lane",
+          pinned_lane(mcp, {mcp: shim}, {mcp: shim.replace("return job_id", "return str(job_id)")}),
+          ("product", True))
+    check("mcp_server.py: a COMMENT inside the shim is not a code change",
+          pinned_lane(mcp, {mcp: shim},
+                      {mcp: shim.replace("    await check_bearer", "    # why\n    await check_bearer")}),
+          ("product", True))
+    check("mcp_server.py: an edit to the bearer shim is the owner's",
+          pinned_lane(mcp, {mcp: shim}, {mcp: shim.replace("    await check_bearer(scope)\n", "")}),
+          human)
+    check("mcp_server.py: deleting the email gate is the owner's",
+          pinned_lane(mcp, {mcp: shim},
+                      {mcp: shim.replace("async def _verified_user():\n    return await gate(_user())\n",
+                                         "")}), human)
+    no_rev = classify([pkg, mcp], policy, content_pins([pkg, mcp], policy, None, None))
+    check("no revisions -> both pins FIRE (strict, the opposite of the exemption)",
+          (no_rev["lane"], no_rev["auto_merge"], sorted(no_rev.get("pinned") or {})),
+          ("product_human", False, sorted([pkg, mcp])))
+    check("an unreadable revision -> the pin fires",
+          lane_auto([pkg], content_pins([pkg], policy, "no-such-rev", "HEAD")), human)
+    check("the verdict NAMES the pin, so the owner knows what to read",
+          any("NEW package" in w for w in classify(
+              [pkg], policy, {pkg: ("product_human", "adds a NEW package (x)")})["why"]), True)
 
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n{passed}/{len(cases)}")
@@ -755,16 +1112,32 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", help="revision before the change (enables data exemptions)")
     ap.add_argument("--head", help="revision after the change (enables data exemptions)")
     ap.add_argument("--repo", default=".", help="repository root")
+    # SEPARATE FROM --base/--head ON PURPOSE (2026-10-20). Those also switch on
+    # the data exemptions, which only LOOSEN; pr-advisor and the arm withhold
+    # them. A pin only tightens, so a caller can hand it revisions without
+    # granting an exemption. Defaults to --base/--head when those are given.
+    ap.add_argument("--pin-base", help="revision before the change, for the content pins")
+    ap.add_argument("--pin-head", help="revision after the change, for the content pins")
+    ap.add_argument("--pin-repo", help="repository the pin revisions live in (default --repo)")
+    ap.add_argument("--break-checker", choices=["pins"],
+                    help="drill only: blind the content pins, so the drill must go red")
     args = ap.parse_args(argv)
 
+    if args.break_checker and not args.drill:
+        ap.error("--break-checker is a drill flag")
     if args.drill:
+        if args.break_checker == "pins":
+            global _PINS_BLINDED
+            _PINS_BLINDED = True
         return _drill()
 
     policy = load_policy()
     files, exempted = apply_data_exemptions(
         args.files, policy, args.base, args.head, args.repo
     )
-    verdict = classify(files, policy)
+    pins = content_pins(files, policy, args.pin_base or args.base, args.pin_head or args.head,
+                        args.pin_repo or args.repo)
+    verdict = classify(files, policy, pins)
     if exempted:
         verdict["data_exempted"] = exempted
         verdict["why"].append(

@@ -368,10 +368,13 @@ jobs:
 
       # THE TREE UNDER JUDGEMENT — the PR merged into its base, i.e. what would
       # actually ship, not the head, which has never been combined with anything.
+      # `fetch-depth: 2` (2026-10-20): the merge commit AND its parents, so the
+      # lane step can read the base as HEAD^1 for the content pins.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: refs/pull/${{ matrix.pr }}/merge
           path: _pr
+          fetch-depth: 2
 
       # WHICH BASE THIS PR IS ACTUALLY ON.
       # Read per PR from the API, NOT from the event payload. `check_suite` and
@@ -447,10 +450,17 @@ jobs:
             --jq '.[].filename' > changed.txt
           echo "$(wc -l < changed.txt) changed file(s)" >> "$GITHUB_STEP_SUMMARY"
 
+      # THE CONTENT PINS (2026-10-20, owner): a manifest that adds a NEW
+      # package, or an edit to the MCP bearer shim, is `product_human` and is
+      # never queued here. They compare the merge ref's base (HEAD^1) to it;
+      # with no revisions they would fire on every manifest bump instead.
+      # Still no --base/--head: the data exemptions stay withheld, as before.
       - name: Which lane is this PR in
         run: |
           set -euo pipefail
-          python scripts/lane.py --json lane.json $(tr '\n' ' ' < changed.txt)
+          python scripts/lane.py --json lane.json \
+            --pin-repo _pr --pin-base HEAD^1 --pin-head HEAD \
+            $(tr '\n' ' ' < changed.txt)
           {
             echo "### PR #${{ matrix.pr }} — lane \`$(jq -r .lane lane.json)\`"
             echo "auto_merge: \`$(jq -r .auto_merge lane.json)\` · requires: \`$(jq -r '.requires|join(", ")' lane.json)\`"

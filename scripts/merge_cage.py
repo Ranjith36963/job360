@@ -330,7 +330,13 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 # lane. Drilled in `scripts/lane.py`: "a migration AND a workflow file is
 # harness_owner, never machine-merged" — put this tuple back the old way and that
 # case goes red.
-LANES: tuple[str, ...] = ("harness_owner", "product_owner", "product", "harness")
+#
+# A FIFTH LANE, 2026-10-20 (owner: "make migration, auth and settings changes
+# merge-by-hand only"). `product_human` is `auto_merge: false`, so it sits with
+# `harness_owner` ahead of every machine lane (drill B28 asserts the rule, not
+# the order). Second, not first: a PR holding a cage file AND a migration is
+# still the cage's PR, exactly as before.
+LANES: tuple[str, ...] = ("harness_owner", "product_human", "product_owner", "product", "harness")
 
 # pattern -> the sentence printed when it refuses. Keys MUST exist in the policy
 # as the path of an `auto_merge: false` lane, and `check_lists()` refuses a key
@@ -420,6 +426,26 @@ DENY_REASONS: dict[str, str] = {
         f"judge is how a cage is escaped. {_OWNER_MERGES}",
     "**/CLAUDE.md": "the rules agents read; changing them unsupervised is circular. "
                     + _OWNER_MERGES,
+    # ── `product_human` (owner, 2026-10-20) ──────────────────────────────────
+    # Back from WATCHED_RISKS: these were refusals until 2026-09-17, watched
+    # merges until 2026-10-20, and are refusals again.
+    "backend/migrations/**":
+        "schema change — a Railway rollback restores the previous IMAGE, not the previous "
+        f"SCHEMA, and migrations auto-apply on boot. {_OWNER_MERGES}",
+    "backend/src/core/settings.py":
+        "the settings loader — one edit changes production behaviour for every user at "
+        f"once. {_OWNER_MERGES}",
+    **{p: f"authentication — sign-in, sessions, tokens or OAuth for every user. {_OWNER_MERGES}"
+       for p in (
+        "backend/src/api/auth_deps.py",
+        "backend/src/api/routes/auth.py",
+        "backend/src/api/routes/oauth.py",
+        "backend/src/api/routes/tokens.py",
+        "backend/src/api/routes/well_known.py",
+        "backend/src/api/middleware.py",
+        "backend/src/services/auth/**",
+        "frontend/src/middleware.ts",
+    )},
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -467,8 +493,8 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/models.py":
         f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_WATCHED}",
     # ── users: identity, sessions, anything that can lock someone out ────────
-    "backend/src/api/routes/auth.py": f"authentication — a user decision. {_WATCHED}",
-    "backend/src/services/auth/**": f"authentication — a user decision. {_WATCHED}",
+    # `routes/auth.py` and `services/auth/**` went back to DENY_REASONS
+    # 2026-10-20 (`product_human`, owner-merged).
     "backend/src/api/routes/account*.py":
         f"account management — a user decision. {_WATCHED}",
     "backend/src/services/notifications/**":
@@ -482,17 +508,13 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/api/routes/profile.py":
         f"a per-user API route — rules #12/#25. {_WATCHED}",
     # ── infrastructure ───────────────────────────────────────────────────────
-    "backend/migrations/**":
-        f"schema change — irreversible against live data. {_WATCHED} "
-        "NOTE: a Railway rollback restores the previous IMAGE, not the previous "
-        "SCHEMA. The watcher can undo the deploy; only a down-migration undoes the "
-        "table. Hard rule: every migration ships with its `.down.sql`.",
+    # `backend/migrations/**` and `core/settings.py` went back to DENY_REASONS
+    # 2026-10-20: this note said a rollback restores the IMAGE, not the
+    # SCHEMA, and the owner took that as the reason to put a hand back on it.
     "**/*docker-compose*": f"infrastructure decision. {_WATCHED}",
     "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
     "**/railway.json": f"infrastructure decision. {_WATCHED}",
     "**/*.env*": f"secrets and configuration. {_WATCHED}",
-    "backend/src/core/settings.py":
-        f"flags here change production behaviour globally. {_WATCHED}",
     # ── dependency manifests ─────────────────────────────────────────────────
     # The cage has no semver awareness, and a manifest runs postinstall scripts
     # on the build host. `dependabot-auto.yml` still owns the bump decision and
@@ -2271,19 +2293,44 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # `product_owner` back to `auto_merge: false` without rewriting these, they
     # go red — which is correct: the policy and its drill have to say the same
     # thing, and that is the whole reason both lists come from one file.
+    #
+    # 2026-10-20: auth.py, the migration and settings.py LEFT this list. The
+    # owner took them back ("merge-by-hand only"), so they are refusals again
+    # and are asserted as refusals right below, by their own sentences.
     flipped = ["backend/src/services/skill_matcher.py",
-               "backend/src/api/routes/auth.py",
                "backend/src/api/routes/profile.py",
                "docker-compose.prod.yml",
                "frontend/package.json",
-               "backend/migrations/0042_x.up.sql",
-               "docs/product/product_design_rules.md",
-               "backend/src/core/settings.py"]
+               "docs/product/product_design_rules.md"]
     still_denied = [f for f in flipped if check_paths([f]).status != "pass"]
     ok("the product's sharp end is machine-mergeable now, under the watcher",
        not still_denied,
        f"`product_owner` is flipped in the policy but the cage still refuses: {still_denied}",
        P)
+    # ── `product_human` (owner, 2026-10-20) — refused BY ITS OWN SENTENCE ────
+    # Asserting the reason, not just the refusal: a dropped pattern would fall
+    # through to "no rule covers this path", still a refusal, wrong reason.
+    for f, needle in (("backend/migrations/0042_x.up.sql", "not the previous SCHEMA"),
+                      ("backend/migrations/0042_x.down.sql", "not the previous SCHEMA"),
+                      ("backend/src/core/settings.py", "settings loader"),
+                      ("backend/src/api/routes/auth.py", "authentication"),
+                      ("backend/src/api/routes/oauth.py", "authentication"),
+                      ("backend/src/api/routes/tokens.py", "authentication"),
+                      ("backend/src/api/auth_deps.py", "authentication"),
+                      ("backend/src/services/auth/passwords.py", "authentication"),
+                      ("frontend/src/middleware.ts", "authentication")):
+        red(f"merge-by-hand since 2026-10-20: {f}", check_paths([f]), needle, P)
+    # ...and the neighbours did NOT move with them, or the decision was bought
+    # by refusing the whole product.
+    neighbours = [f for f in ("backend/src/api/routes/assistant_settings.py",
+                              "backend/src/api/mcp_server.py",
+                              "backend/src/api/routes/bring.py",
+                              "backend/src/core/tenancy.py",
+                              "frontend/src/middleware.test.ts",
+                              "backend/Dockerfile")
+                  if check_paths([f]).status != "pass"]
+    ok("NEGATIVE CONTROL (the paths beside the 2026-10-20 ones still pass the path cage)",
+       not neighbours, f"a neighbour of an owner path is refused too: {neighbours}", P)
     # The witness moved on 2026-08-26 and the invariant did not. It used to be
     # `backend/src/some_new_module.py`, which was only "unrecognised" because
     # the cage's hand-typed ALLOW list had never heard of `backend/src/**` —
@@ -3341,7 +3388,8 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         allowed_watched, v_watched, _ = decide(
             1, {"drill": 3},
             {"lane": "product_owner", "auto_merge": True, "requires": po_requires,
-             "why": ["`backend/migrations/0007.sql` — watched for 15 minutes after merge."]})
+             # A Dockerfile, not a migration: migrations left this lane 2026-10-20.
+             "why": ["`backend/Dockerfile` — watched for 15 minutes after merge."]})
         globals()["gh"] = perfect_gh
         ok("NEGATIVE CONTROL (a product_owner verdict with every cage green is ALLOWED)",
            allowed_watched,

@@ -51,7 +51,8 @@
 #      back in `harness_owner`, named explicitly. See the entry there.
 #
 # WHAT DID NOT CHANGE, AND MUST NOT
-#   `harness_owner` is still human-only, and it is now the ONLY human-only lane:
+#   `harness_owner` is still human-only, and it is now the ONLY human-only lane
+#   (until 2026-10-20, when `product_human` joined it -- see the next block):
 #   the robot's own rulebook -- `.claude/hooks/**`, `.claude/settings*.json`,
 #   `.claude/agents/**`, every `**/CLAUDE.md`, the cage files named below, and
 #   the six workflows that produce the required checks -- is never merged by a
@@ -61,11 +62,12 @@
 #   own guards is how a cage is escaped, and no amount of post-merge watching
 #   detects it, because the watcher is one of the things it could have edited.
 #
-# THE FOUR LANES AND WHAT EACH DEMANDS (kept in step with `requires:` below)
+# THE FIVE LANES AND WHAT EACH DEMANDS (kept in step with `requires:` below)
 #
 #   harness        ci, review, security, drill, bugs             auto_merge true
 #   product        ci, review, security, verify, ratchets, bugs  auto_merge true
 #   product_owner  ci, review, security, verify, ratchets, bugs  auto_merge true
+#   product_human  ci, review, security, verify, ratchets, bugs  auto_merge FALSE  (2026-10-20)
 #   harness_owner  ci, review, drill, bugs                       auto_merge FALSE
 #
 #   `security` joined `harness` on 2026-09-17 (reviewer-bugs, #582). Its checks
@@ -104,6 +106,27 @@
 #   are still WATCHED and still separated from ordinary prose) but no longer
 #   stop for a hand. If that one is unwanted, move those two lines to
 #   `harness_owner` -- a two-line edit, and the drills will tell you.
+# ═══════════════════════════════════════════════════════════════════════════
+# OWNER DECISION, 2026-10-20: "Make migration, auth and settings changes
+# merge-by-hand only." This takes back PART of the 2026-09-17 flip.
+#
+#   WHY: the flip's argument was UNDO, and a Railway rollback restores the old
+#   image, NOT the old schema (migrations auto-apply on boot). Auth and the
+#   global settings loader can lock every user out on one bad merge. The
+#   watcher can see that; it cannot take it back.
+#
+#   WHAT MOVED: migrations, `backend/src/core/settings.py` and the auth code
+#   left `product_owner` for a new lane, `product_human` -- `auto_merge:
+#   false`, still watched, still rollback: railway. Two CONTENT pins send a
+#   file there by what changed, not where it lives (see `content_pins:` at
+#   the bottom): a dependency manifest that adds a NEW package name, and an
+#   edit to the MCP bearer-auth shim inside `mcp_server.py`. A version bump
+#   of an existing package, and an ordinary MCP tool edit, ride as before.
+#
+#   WHAT DID NOT MOVE: everything else in `product_owner` (Dockerfiles,
+#   railway.json, env examples, models.py, version bumps, the two decision
+#   docs, the scoring and profile code) still auto-merges under the watcher.
+#   Drilled in lane.py, section 13.
 # ═══════════════════════════════════════════════════════════════════════════
 
 version: 1
@@ -383,9 +406,10 @@ lanes:
   #
   # ── FLIPPED 2026-09-17: `auto_merge: false` -> `true` ─────────────────────
   # The name stays, and it still means something: this lane is the product's
-  # sharp end (schema, secrets, auth, dependency manifests, the two documents
-  # that ARE decisions), separated from ordinary product code so it can be
-  # seen, labelled and reasoned about on its own. What changed is who presses
+  # sharp end (secrets, dependency manifests, the two documents that ARE
+  # decisions; schema and auth left for `product_human` 2026-10-20),
+  # separated from ordinary product code so it can be seen, labelled and
+  # reasoned about on its own. What changed is who presses
   # the button.
   #
   # THE SAFETY NET IS THE SAME ONE THE `product` LANE ALREADY RUNS ON, and it
@@ -404,23 +428,26 @@ lanes:
   #
   # WHAT THIS LANE IS NOT: a hiding place for the harness. `.github/**`,
   # `scripts/**`, `.claude/hooks/**` and `**/CLAUDE.md` are in `harness_owner`,
-  # which is now the only human-only lane — and it OUTRANKS this one, so a PR
-  # carrying one file from each is a harness_owner PR and stops.
+  # which (with `product_human` since 2026-10-20) is human-only — and it
+  # OUTRANKS this one, so a PR carrying one file from each is a harness_owner PR and stops.
   # ─────────────────────────────────────────────────────────────────────────
   product_owner:
     description: "The product's sharp end — merged by a machine only under the watcher."
     paths:
-      # irreversible against live data
-      - "backend/migrations/**"
+      # `backend/migrations/**` and `backend/src/core/settings.py` were here.
+      # MOVED to `product_human` 2026-10-20 (owner): a rollback does not undo a
+      # schema, and the settings loader changes prod for everyone at once.
       - "backend/src/models.py"          # normalized_key -> dedup -> lost rows
-      # secrets and infrastructure
+      # secrets and infrastructure. `**/*.env*` stays: both .dockerignore files
+      # drop `.env*`, so no env file reaches a prod image; settings.py is the loader.
       - "**/*.env*"
       - "**/railway.json"
       - "**/*docker-compose*"
       - "**/*Dockerfile*"
-      - "backend/src/core/settings.py"   # flags change prod behaviour globally
       # dependency manifests run postinstall scripts on the build host;
-      # dependabot-auto.yml already owns the safe subset of this decision
+      # dependabot-auto.yml already owns the safe subset of this decision.
+      # A manifest that ADDS a package name is pinned to `product_human` by
+      # `content_pins.new_dependency` (2026-10-20); a bump stays here.
       - "**/package.json"
       - "**/package-lock.json"
       - "**/pyproject.toml"
@@ -451,8 +478,8 @@ lanes:
       - "backend/src/services/uk_gate.py"
       - "backend/src/services/visa_signal.py"
       - "backend/src/services/profile/**"
-      - "backend/src/api/routes/auth.py"
-      - "backend/src/services/auth/**"
+      # `routes/auth.py` and `services/auth/**` MOVED to `product_human`
+      # 2026-10-20. `account*.py` matches no file today and stays as it was.
       - "backend/src/api/routes/account*.py"
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
@@ -462,13 +489,59 @@ lanes:
     rollback: railway
 
   # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT_HUMAN — the product paths a rollback cannot take back. (2026-10-20)
+  #
+  # Owner: "Make migration, auth and settings changes merge-by-hand only."
+  # This is the cell `product_owner` was before the 2026-09-17 flip: a user is
+  # downstream AND only the owner merges. Still watched and still rollback:
+  # railway, because a hand-merged migration reaches users all the same -- the
+  # watcher runs on every push to main, whoever merged it.
+  #
+  # It sits SECOND in `merge_cage.LANES`, after `harness_owner` and before every
+  # machine lane, so one file here stops the whole PR.
+  #
+  # WHAT IS IN IT, AND WHY EACH (2026-10-20):
+  #   migrations    auto-apply on boot; a rollback restores the image, not the
+  #                 schema, so a bad one stays in the database.
+  #   settings.py   the one env loader (load_dotenv + every flag); one edit
+  #                 changes prod behaviour for every user at once.
+  #   auth          every module that IMPLEMENTS sign-in, sessions, passwords,
+  #                 OAuth, bearer tokens or `require_user` -- not the routes
+  #                 that merely USE `Depends(require_user)`. The MCP bearer
+  #                 shim lives inside `mcp_server.py` beside ~50 tools, so it
+  #                 is pinned by function, not by file (`content_pins` below).
+  #   NOT INCLUDED  `routes/assistant_settings.py`: per-user preferences
+  #                 stored as rows; a rollback restores the code fully, and
+  #                 the audit's gap 4 names only the global loader.
+  #                 `api/main.py`: wires every router, so a path pin would make
+  #                 every new route a hand-merge; reviewer-security reads it.
+  # ─────────────────────────────────────────────────────────────────────────
+  product_human:
+    description: "The product's irreversible edge — schema, auth, the settings loader. Only the owner merges."
+    paths:
+      - "backend/migrations/**"
+      - "backend/src/core/settings.py"
+      - "backend/src/api/auth_deps.py"         # require_user, session + bearer resolution
+      - "backend/src/api/routes/auth.py"       # sign-in, sign-up, password, sessions
+      - "backend/src/api/routes/oauth.py"      # the OAuth 2.1 authorisation server
+      - "backend/src/api/routes/tokens.py"     # mints and revokes `j360_` bearer tokens
+      - "backend/src/api/routes/well_known.py" # OAuth discovery an MCP client trusts
+      - "backend/src/api/middleware.py"        # the CSRF Origin check on the session cookie
+      - "backend/src/services/auth/**"         # passwords, sessions, tokens, OAuth flow
+      - "frontend/src/middleware.ts"           # the frontend's session-cookie gate
+    requires: [ci, review, security, verify, ratchets, bugs]
+    auto_merge: false          # the owner's hand, always (2026-10-20)
+    watch_minutes: 15          # a hand-merge still reaches users
+    rollback: railway          # ...but only the IMAGE comes back, never the schema
+
+  # ─────────────────────────────────────────────────────────────────────────
   # HARNESS_OWNER — you decide, and only you are exposed.
   #
   # The cage, and the words agents read. No user is downstream of these, so no
   # watcher and no rollback rehearsal: merge it and walk away.
   #
-  # SINCE 2026-09-17 THIS IS THE ONLY HUMAN-ONLY LANE, and it OUTRANKS every
-  # other — it is first in `merge_cage.LANES`, so one file here makes the whole
+  # FROM 2026-09-17 TO 2026-10-20 THIS WAS THE ONLY HUMAN-ONLY LANE (`product_human`
+  # joined it), and it OUTRANKS every other — it is first in `merge_cage.LANES`, so one file here makes the whole
   # PR stop, however much product_owner or product sits beside it. That is the
   # precedence reorder the product_owner flip forced: see the decision block at
   # the top of this file.
@@ -683,6 +756,37 @@ data_exemptions:
       REGISTRY is the list of guards and their drills — appending to it is how a
       guard gets registered, which is the workflow this repo wants to be fast.
       Everything else in that file is the enforcement law and stays owner-lane.
+
+# ── Content pins (2026-10-20) ──────────────────────────────────────────────
+# The mirror of `data_exemptions`: an exemption can only LOOSEN a lane, a pin
+# can only TIGHTEN one. A pin sends a file to `lane:` because of WHAT CHANGED
+# in it, which a path pattern cannot see. `scripts/lane.py` compares the file
+# at the PR's base and head (`--pin-base/--pin-head`); with no revisions, or a
+# file it cannot parse, the pin FIRES -- unmeasurable reads as "the owner's".
+#
+#   new_dependency  a manifest whose dependency tables gain a package NAME
+#                   (slopsquatting tripwire: an agent can invent a name, and
+#                   a typo-squat installs with postinstall scripts on the build
+#                   host). A version bump of a name already there does not fire.
+#   guarded_code    a named top-level function/class whose body changed, was
+#                   added or was removed. The MCP bearer shim shares
+#                   `mcp_server.py` with ~50 tools; pinning the file would make
+#                   every tool edit a hand-merge, so the shim is pinned by name.
+content_pins:
+  new_dependency:
+    lane: product_human
+    manifests:
+      "**/pyproject.toml": pyproject   # [project] dependencies + optional-dependencies, [dependency-groups], [build-system] requires
+      "**/package.json": package_json  # dependencies, devDependencies, optionalDependencies, peerDependencies
+  guarded_code:
+    lane: product_human
+    files:
+      "backend/src/api/mcp_server.py":
+        - _mcp_asgi               # bearer check -> audience check -> contextvar
+        - _mcp_challenge_headers  # the 401 challenge an OAuth client follows
+        - _McpEndpoint            # the raw-ASGI wrapper app.add_route mounts
+        - _user                   # the authenticated user every tool reads
+        - _verified_user          # the email gate tools re-apply by hand
 
 # ── WIP limit ──────────────────────────────────────────────────────────────
 # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)"; raised to 5 by the

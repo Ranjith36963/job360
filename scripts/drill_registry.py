@@ -229,7 +229,9 @@ REGISTRY: dict[str, Guard] = {
         # restoring the basename fallback, un-protecting the undo gears, and
         # adding the tempting `**/README.md` one-liner all turn it red.
         drill=[sys.executable, "scripts/lane.py", "--drill"],
-        no_negative="the lane cases are inline assertions over a pure classifier",
+        # NEGATIVE CONTROL (2026-10-20): blinds the content pins (new package,
+        # MCP auth shim), so the drill must FAIL. Verified exit 1, 10 cases red.
+        negative=[sys.executable, "scripts/lane.py", "--drill", "--break-checker", "pins"],
     ),
     "scripts/repairable.py": Guard(
         status="drilled",
