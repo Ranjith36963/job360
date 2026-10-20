@@ -163,6 +163,8 @@ the submit is stopped before the page sees it and the key is refused (`enter_may
 
 **CAPTCHA vs. invisible reCAPTCHA:** every Greenhouse posting loads an invisible reCAPTCHA that asks nothing, so it
 is not a stop. A reCAPTCHA image challenge or a tick-box widget is (freehire `atsapply/browser.go:167-234`).
+Only a challenge frame the user can see counts: Ashby and Lever load theirs on every form, full size but hidden
+off the page until it asks something, and that waiting frame is no stop.
 Once a page shows a CAPTCHA, every action but `look`, `back`, `open` and `close` is refused (`needs_you`, reason
 `captcha`), and nothing inside a CAPTCHA's own frame is ever clicked, typed or keyed: the cloud browser never ticks
 "I'm not a robot" itself.

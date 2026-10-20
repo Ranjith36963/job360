@@ -500,14 +500,34 @@ def _wrap_untrusted(text: str) -> str:
     return f"<<page-text {nonce}>>\n{clean}\n<<end page-text {nonce}>>"
 
 
+# Can the user see this frame's element: a real size, not hidden or see-through, and not parked off the
+# document? An invisible reCAPTCHA or hCaptcha keeps its challenge frame at full size inside a
+# `visibility: hidden` box at `top: -10000px` until it asks something (seen on Ashby and Lever, 2026-10-20).
+_FRAME_ELEMENT_SHOWN_JS = r"""
+(el) => {
+  const r = el.getBoundingClientRect();
+  if (r.width <= 1 || r.height <= 1) return false;
+  if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) return false;
+  const win = el.ownerDocument.defaultView;
+  return r.right + win.scrollX > 0 && r.bottom + win.scrollY > 0;
+}
+"""
+
+
 async def _frame_shown(frame: Any) -> bool:
-    """A child frame the user cannot see (0x0, hidden) holds no form worth reading."""
-    try:
-        handle = await frame.frame_element()
-        box = await handle.bounding_box()
-    except Exception:  # noqa: BLE001 - detached or cross-process mid-read
-        return False
-    return bool(box) and box["width"] > 1 and box["height"] > 1
+    """A child frame the user cannot see (0x0, hidden, off the page) holds no form worth reading and
+    asks nothing: a challenge frame counts as a CAPTCHA only once it is shown. Every frame up to the
+    page must be shown."""
+    while frame is not None and frame.parent_frame is not None:
+        try:
+            handle = await frame.frame_element()
+            shown = await asyncio.wait_for(handle.evaluate(_FRAME_ELEMENT_SHOWN_JS), FRAME_READ_TIMEOUT_S)
+        except Exception:  # noqa: BLE001 - detached or cross-process mid-read
+            return False
+        if not shown:
+            return False
+        frame = frame.parent_frame
+    return True
 
 
 async def _site_warnings(page: Any, site: str) -> list[str]:
@@ -541,8 +561,11 @@ async def look(s: Session) -> dict[str, Any]:
     # the budget for it: 150 links on the page itself must not crowd the form out.
     shown = [True] + [await _frame_shown(f) for f in frames[1:]]
     embeds = any(shown[1:])
+    captcha_urls: list[str] = []
     for i, frame in enumerate(frames):
         frame_urls.append(frame.url)
+        if shown[i]:
+            captcha_urls.append(frame.url)
         # The cap counts frames READ: hidden ones (ads, trackers) before the form do not use it up.
         if read >= MAX_FRAMES or not shown[i]:
             continue
@@ -557,8 +580,9 @@ async def look(s: Session) -> dict[str, Any]:
         has_password = has_password or bool(snap.get("has_password_box"))
         above += int(snap.get("omitted_above") or 0)
         below += int(snap.get("omitted_below") or 0)
-    # Every frame's URL counts for the CAPTCHA check, including the frames past the cap and hidden ones.
-    frame_urls.extend(f.url for f in page.frames[MAX_FRAMES_CHECKED:])
+    # Every SHOWN frame's URL counts for the CAPTCHA check, the frames past the cap included. A hidden
+    # challenge frame (the invisible kind, waiting) asks nothing; once it asks, it is shown.
+    captcha_urls.extend([f.url for f in page.frames[MAX_FRAMES_CHECKED:] if await _frame_shown(f)])
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
@@ -594,7 +618,7 @@ async def look(s: Session) -> dict[str, Any]:
             "above": above, "below": below,
             "hint": "Only the controls nearest the screen are listed. scroll up or down, then look, to see the rest.",
         }
-    blocker = blocker_for(frame_urls, text, has_password)
+    blocker = blocker_for(captcha_urls, text, has_password)
     if blocker is not None:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
     return out
@@ -624,8 +648,10 @@ async def _page_captcha(page: Any) -> bool:
     texts: list[str] = []
     read = 0
     for i, f in enumerate(page.frames):
+        if i and not await _frame_shown(f):
+            continue
         urls.append(f.url)
-        if i >= MAX_FRAMES_CHECKED or read >= MAX_FRAMES or (i and not await _frame_shown(f)):
+        if i >= MAX_FRAMES_CHECKED or read >= MAX_FRAMES:
             continue
         try:
             texts.append(await asyncio.wait_for(f.evaluate(_BODY_TEXT_JS, MAX_TEXT), FRAME_READ_TIMEOUT_S))

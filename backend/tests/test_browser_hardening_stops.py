@@ -35,8 +35,22 @@ ANCHOR = """<!doctype html><html><body>
   onclick="this.setAttribute('aria-checked', 'true')"
   onkeydown="if (event.key===' ' || event.key==='Enter') this.setAttribute('aria-checked', 'true')"></div>
 </body></html>"""
+# The invisible kind, waiting (Ashby, Lever): the challenge frames are full size but parked in a hidden
+# box off the page until they ask something. Nothing is asked yet, so the form is filled as usual.
+WAITING_CHALLENGE = """<!doctype html><html><head><title>Apply - Waiting</title></head><body>
+<form><label for="nm2">Full name</label><input id="nm2"></form>
+<div style="visibility:hidden;position:absolute;top:-10000px;left:0;width:100%">
+  <iframe style="width:400px;height:580px" src="/recaptcha/api2/bframe?hl=en&k=abc"></iframe></div>
+<div style="visibility:hidden;position:absolute;top:-10000px">
+  <iframe style="width:400px;height:600px" src="/hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=challenge"></iframe>
+</div>
+<button type="button" onclick="document.querySelectorAll('div[style]').forEach((d) => d.removeAttribute('style'))">
+  Show the challenge</button>
+</body></html>"""
+CHALLENGE = "<!doctype html><html><body><p>Select all images with a bus</p></body></html>"
 PAGES = {"/no-options": NO_OPTIONS, "/submits-anyway": SUBMITS_ANYWAY, "/apply": CAPTCHA_PAGE,
-         "/recaptcha/api2/anchor": ANCHOR}
+         "/recaptcha/api2/anchor": ANCHOR, "/waiting": WAITING_CHALLENGE, "/recaptcha/api2/bframe": CHALLENGE,
+         "/hcaptcha.com/captcha/v1/x/static/hcaptcha.html": CHALLENGE}
 
 
 def _html(text):
@@ -140,3 +154,23 @@ async def test_the_captcha_frame_itself_is_never_acted_on(stops_pool, monkeypatc
         await run(stops_pool, "u1", "click", ref=_ref(page, "Robot check"))
     assert exc.value.reason == "captcha"
     assert await _robot_box_ticked(stops_pool) == "false"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_hidden_challenge_frame_asks_nothing_until_it_is_shown(stops_pool):
+    """Live on Ashby and Lever: every form loads its invisible CAPTCHA's challenge frame, hidden. Read as a
+    CAPTCHA, it stopped every application on those sites before a field was typed."""
+    from src.services.browser_agent.agent import BrowserError, run
+
+    page = await run(stops_pool, "u1", "open", url="http://jobs.example/waiting")
+    assert page["status"] == "ok", page.get("reason")
+    assert not [e for e in page["elements"] if "bus" in (e.get("name") or "")]  # hidden frame: not read
+    page = await run(stops_pool, "u1", "type", ref=_ref(page, "Full name"), text="Ada")
+    assert page["status"] == "ok"
+    page = await run(stops_pool, "u1", "click", ref=_ref(page, "Show the challenge"))
+    assert page["status"] == "needs_you" and page["reason"] == "captcha"  # now it asks: the user's
+    with pytest.raises(BrowserError) as exc:
+        await run(stops_pool, "u1", "type", ref=_ref(page, "Full name"), text="Ada Lovelace")
+    assert exc.value.reason == "captcha"
