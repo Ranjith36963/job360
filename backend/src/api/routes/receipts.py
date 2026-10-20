@@ -61,6 +61,9 @@ class Receipt(BaseModel):
     answers_from: str = ""
     # Slice 29 - the files Job360 uploaded / served for it (sha256 of the exact bytes); [] = none named.
     files: list[ReceiptFileOut] = Field(default_factory=list)
+    # Slice 31 - an email application's recipient and Gmail message id; '' = not an email / not given.
+    recipient: str = ""
+    gmail_message_id: str = ""
     fields_filled: dict[str, Any] = Field(default_factory=dict)
     confirmation: str | None = None
     cv_version_no: int | None = None

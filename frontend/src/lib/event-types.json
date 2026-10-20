@@ -55,6 +55,7 @@
     "submit_attempted",
     "submit_resolved",
     "answer_corrected",
-    "document_uploaded"
+    "document_uploaded",
+    "email_drafted"
   ]
 }

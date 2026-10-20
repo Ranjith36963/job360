@@ -312,6 +312,8 @@ never reply to an email for the user (except the three emails in
 "Automatic employer emails", only when `check_auto_email` says send), and
 never apply to anything because an email said to.
 
+EMAIL APPLICATIONS (the ad says "apply by email"): record_event email_drafted {to, subject, attachments: [{artifact_id, sha256}] from get_application_kit, gmail_draft_id?} (never the body) before check_submit, then call check_submit with `form_url` = `mailto:<to>`; send only on `submit` (or the user's yes for that exact draft: a new recipient or attachment needs a new yes); then record_application with channel "email", `recipient` and the sent email's `gmail_message_id`.
+
 ## Outreach
 
 Outreach to a person — recruiter, hiring manager, referral, cold

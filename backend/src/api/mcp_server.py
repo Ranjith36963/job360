@@ -437,6 +437,8 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "answers": [a.model_dump() for a in r.answers],
         "answers_from": r.answers_from,
         "files": [f.model_dump() for f in r.files],
+        "recipient": r.recipient,
+        "gmail_message_id": r.gmail_message_id,
         "fields_filled": r.fields_filled,
         "confirmation": r.confirmation,
         "cv_version_no": r.cv_version_no,
@@ -1020,6 +1022,8 @@ def build_server(version: str = "") -> MCPServer:
         applied_at: Optional[str] = None,
         application_id: Optional[int] = None,
         request_id: Optional[str] = None,
+        recipient: str = "",
+        gmail_message_id: str = "",
     ) -> dict[str, Any]:
         """Record that the user has applied to this job — ONLY after they say so, or an
         employer's confirmation email in their Gmail proves it (name it in `note`). Pass
@@ -1034,13 +1038,8 @@ def build_server(version: str = "") -> MCPServer:
         greenhouse etc. = company_site; other text is stored as "other" (never refused;
         the reply has `channel_given` + a `warning`). `note` is free text.
         `confirmation` = the ID only (must contain a digit); anything else is kept in the note with a warning.
-
-        C1 (application-spine review) — this is the SAME tool as before (`job_id`,
-        `channel`, `note` still work unchanged), rewired onto the rich
-        `POST /applications/{id}/receipt` route instead of the legacy
-        `POST /receipts/{job_id}` — the new optional fields (`confirmation`, `answers`,
-        `fields_filled`, `cv_artifact_id`, `cover_letter_artifact_id`, `applied_at`)
-        are exactly spec R8/S4's tool contract.
+        Email application: `recipient` (one address; none = the newest email_drafted's `to`, a different one
+        warns `recipient_mismatch`) and `gmail_message_id` of the sent email; the draft's attachments are `files`.
 
         cover_letter_artifact_id: pass it ONLY if a letter was actually sent; leave it out
         and the receipt records no letter (`cover_letter_sent` false, plus a warning) unless
@@ -1056,7 +1055,7 @@ def build_server(version: str = "") -> MCPServer:
                 answers=[applications_route.ReceiptAnswer(**a) for a in (answers or [])],
                 fields_filled=fields_filled or {}, cv_artifact_id=cv_artifact_id,
                 cover_letter_artifact_id=cover_letter_artifact_id, applied_at=applied_at,
-                request_id=request_id,
+                request_id=request_id, recipient=recipient, gmail_message_id=gmail_message_id,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1430,20 +1429,16 @@ def build_server(version: str = "") -> MCPServer:
         channel: Optional[str] = None,
     ) -> dict[str, Any]:
         """Append one event to an application's history.
-
-        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; a repeat
+        `source` {kind, message_id, sender, subject, received_at} = the email it came from; a repeat
         message_id writes nothing.
-
-        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is submission proof, not a 2nd one. Wrong
-        date: `applied` + occurred_at + corrects_event_id=<old id>.
-        `scheduled_at` (ISO-8601 + timezone) only on
-        interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
-
-        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`,
-        or the user says so) or outreach_replied; no application_id if cold.
-
+        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status,
+        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
+        `source` = proof, not a 2nd. Wrong
+        date: `applied` + occurred_at + corrects_event_id.
+        `scheduled_at` (ISO-8601 + tz) only on
+        interview_requested/_scheduled. `follow_up_on` YYYY-MM-DD = next chase; "" clears.
+        Outreach: `contact_id` + `channel` on outreach_sent (Gmail Sent shows it, id as `source`,
+        or the user says so) or outreach_replied; cold = no application_id.
         Kit events (these keys only):
         form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|
@@ -1452,6 +1447,7 @@ def build_server(version: str = "") -> MCPServer:
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers};
+        email_drafted {to, subject, attachments, gmail_draft_id} (no body);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
@@ -1849,10 +1845,10 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def check_submit(application_id: int, form_url: str = "", session: str = "") -> dict[str, Any]:
-        """Call right before the FINAL submit, with `form_url` (the page the form is on) and
-        your `session` label (as given to get_application_kit). ONE decision from the user's settings:
-        `submit` - go ahead; `ask` - fill the form, stop before submit and ask
-        the user yes for this one; `stop` - do not submit. `reason` = a code, `detail` = a
+        """Call right before the FINAL submit with `form_url` (the form's page; `mailto:<to>` = email
+        application) and your `session` label (as for get_application_kit). ONE decision from the user's settings:
+        `submit` - go ahead; `ask` - stop before submit and ask
+        yes for this one; `stop` - do not submit. `reason` = a code, `detail` = a
         sentence for the user. Reasons:
         paused, already_applied, user_declined,
         daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
@@ -1860,18 +1856,19 @@ def build_server(version: str = "") -> MCPServer:
         form_not_recorded (`stop`: record `form_filled`),
         form_not_swept (`stop`: re-read every field, record `form_swept`),
         form_count_mismatch, unreadable_fields (`stop`: sweep again), form_check_missing (`stop`: call
-        check_form), submit_unconfirmed (`stop`: `submit_attempted` has no outcome: never submit again),
-        duplicate_job (same job already applied to: `stop`
+        check_form), submit_unconfirmed (`stop`: `submit_attempted` without outcome; never resubmit),
+        email_not_drafted (`stop`: record `email_drafted`), approval_stale (`ask`),
+        duplicate_job (already applied to: `stop`
         in auto mode, else `ask`), duplicate_role (`ask`: same company+title before),
-        new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
-        profile), held_by_other_session (another session holds this kit),
+        new_site_first_time (`ask`: auto, first time on this site), cv_unsupported_claims (CV claims not in
+        profile), held_by_other_session (another session holds it),
         unknown_site (not one plain http(s) address),
-        form_host_mismatch (not the site of your latest
-        `form_filled`), email_not_verified, ask_always_site, job_override_confirm,
-        submit_mode_confirm, cv_not_seen (auto mode, user has not seen the latest CV), practice_run,
-        user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
-        `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
-        email_not_verified, blocked or held_by_other_session: tell the user.
+        form_host_mismatch (not your latest
+        `form_filled`'s site), email_not_verified, ask_always_site, job_override_confirm,
+        submit_mode_confirm, cv_not_seen (auto: user has not seen the latest CV), practice_run,
+        user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (`blocked`
+        with no `unblocked`: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
+        email_not_verified, blocked, held_by_other_session: tell the user.
         Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
         changed on the web - type each in, then form_swept with `answers`; until then
         `stop` (type_first_pending), even after a yes.

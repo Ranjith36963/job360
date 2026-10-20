@@ -742,7 +742,9 @@ export interface paths {
          * Approve Send
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
-         *     where=web. A CV edited later makes the yes stop matching. Clears an earlier
+         *     where=web. A CV edited later makes the yes stop matching; slice 31: so does a newer
+         *     ``email_drafted`` with another recipient or attachment (``fingerprint`` on the event;
+         *     check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
          *     nothing is recorded (the yes must name what the user saw).
@@ -795,7 +797,9 @@ export interface paths {
          *     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
          *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
          *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
-         *     a stored yes clears neither. An unconfirmed email answers ``ask`` /
+         *     a stored yes clears neither. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078):
+         *     no form rules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is
+         *     recorded. An unconfirmed email answers ``ask`` /
          *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
          *     ``get_application_kit``; 422 when malformed): another session's live kit hold
          *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -6274,6 +6278,11 @@ export interface components {
              */
             form_host: string;
             /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
+            /**
              * Guessed Count
              * @default 0
              */
@@ -6311,6 +6320,11 @@ export interface components {
             /** Profile Version */
             profile_version: number | null;
             proof?: components["schemas"]["ProofOut"];
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Recorded By */
             recorded_by?: string | null;
             /** Sent At */
@@ -6356,6 +6370,8 @@ export interface components {
         /**
          * ReceiptFileOut
          * @description Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+         *     Slice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is
+         *     of the artifact's TEXT and ``fmt`` is '' (the email's file format is not known).
          */
         ReceiptFileOut: {
             /** Artifact Id */
@@ -6471,10 +6487,20 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
+            /**
              * Note
              * @default
              */
             note: string;
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Request Id */
             request_id?: string | null;
         };
@@ -6517,12 +6543,22 @@ export interface components {
             /** Files */
             files?: components["schemas"]["ReceiptFileOut"][];
             /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
+            /**
              * Possible Duplicate
              * @default
              */
             possible_duplicate: string;
             /** Receipt Id */
             receipt_id: number;
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Sent At */
             sent_at: string;
             /** Url */

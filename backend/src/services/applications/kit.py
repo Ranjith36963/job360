@@ -36,7 +36,7 @@ from urllib.parse import urlsplit
 
 from src.core import settings
 from src.services.applications import blocked as blocked_service
-from src.services.applications import event_examples, spine
+from src.services.applications import email_channel, event_examples, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
@@ -53,6 +53,8 @@ KIT_EVENT_TYPES = frozenset({
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
     "form_filled", "form_swept", "hold_released", "site_account", "account_needed", "form_checked",
     "submit_attempted", "submit_resolved",
+    # Gap roadmap slice 31 (G078): the exact email an EMAIL application sends (services/applications/email_channel).
+    "email_drafted",
 })
 # `blocked` is NOT here (review 2026-10-18): a block recorded after the click cannot prove the click sent
 # nothing, and the user's later `unblocked` would let the same application be submitted twice.
@@ -356,6 +358,7 @@ async def controls_state(
         ("cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared"),
     )
     seen = approved = None
+    stale: Optional[str] = None
     cv_id = cv["id"] if cv else None
     cv_sha = sha256_text(cv["text"]) if cv else ""
     for ev in events:
@@ -365,8 +368,9 @@ async def controls_state(
         ):
             if seen is None:
                 seen = _who(ev)
-            if approved is None and ev["event_type"] == "submit_approved":
-                approved = _who(ev)
+            if approved is None and stale is None and ev["event_type"] == "submit_approved":
+                stale = await approval_stale(db, user_id, app_row, ev, now)
+                approved = None if stale else _who(ev)
     newest_approval = next((e for e in events if e["event_type"] == "submit_approved"), None)
     newest_decline = next((e for e in events if e["event_type"] == "submit_declined"), None)
     declined = (
@@ -393,7 +397,37 @@ async def controls_state(
         },
         "duplicate": {**dup, "cleared": _who(cleared_ev) if cleared_ev else None},
         "blocked": await blocked_service.open_block(db, user_id, application_id),
+        # Slice 8 / 31: the part of the newest yes for this CV that no longer holds (None = it holds,
+        # or there is none). Read by gate_facts; the web response model does not carry it.
+        "approval_stale": stale,
     }
+
+
+# ── The yes is bound to what the user saw (gap roadmap slices 8 and 31) ──────
+
+
+async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: int) -> dict[str, Any]:
+    """What a web Send yes is bound to besides the CV id + hash. Slice 31 (G078): the newest
+    ``email_drafted`` - its event id, ``email_to`` and ``attachments`` (artifact ids + shas). The approve
+    route stores it on ``submit_approved``; :func:`approval_stale` compares it again."""
+    return email_channel.fingerprint(await email_channel.newest_draft(db, user_id, application_id))
+
+
+async def approval_stale(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
+) -> Optional[str]:
+    """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
+    part that no longer does: ``email`` (the newest ``email_drafted`` has another recipient or another
+    attachment id / sha than the draft the yes was given on, or the yes was given before any draft).
+    A yes without a ``fingerprint`` (a chat yes, or one from before) is bound to the CV only."""
+    del now  # the slice 8 TTL reads it; the email part does not
+    stamp = event["payload"].get("fingerprint")
+    if not isinstance(stamp, dict):
+        return None
+    now_fp = await approval_fingerprint(db, user_id, int(app_row["id"]))
+    if email_channel.draft_changed(stamp, now_fp):
+        return "email"
+    return None
 
 
 async def _filled_with_latest_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
@@ -570,9 +604,16 @@ async def gate_facts(
     state = await controls_state(db, user_id, app_row, now)
     shortfalls = await _sweep_shortfalls(db, user_id, application_id)
     cv = state["cv"]
-    approved = state["cv"]["approved"] is not None if cv else await _approved_without_cv(db, user_id, application_id)
+    stale = state["approval_stale"]
+    if cv:
+        approved = cv["approved"] is not None
+    else:
+        no_cv_yes = await _approved_without_cv(db, user_id, application_id)
+        stale = await approval_stale(db, user_id, app_row, no_cv_yes, now) if no_cv_yes else None
+        approved = no_cv_yes is not None and stale is None
     dup = state["duplicate"]
     form_host = await _newest_form_host(db, user_id, application_id)
+    draft = await email_channel.newest_draft(db, user_id, application_id)
     return settings_rules.SubmitFacts(
         status=str(app_row["status"]),
         has_receipt=has_receipt,
@@ -599,6 +640,8 @@ async def gate_facts(
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
+        email_to=draft["to"] if draft else None,
+        approval_stale=stale,
     )
 
 
@@ -674,12 +717,12 @@ async def _cv_unsupported(db: JobDatabase, user_id: str, artifact_id: int) -> bo
     return any(c.get("code") in _UNSUPPORTED_CODES for c in _stored_checks(got[0] if got else None))
 
 
-async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
-    """No CV saved: a yes recorded with ``artifact_id`` null still counts."""
+async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
+    """No CV saved: the newest yes recorded with ``artifact_id`` null (it still counts), or ``None``."""
     for ev in await _events(db, user_id, application_id, ("submit_approved",)):
         if ev["payload"].get("artifact_id") is None:
-            return True
-    return False
+            return ev
+    return None
 
 
 async def submit_verdict(
@@ -751,6 +794,7 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
+    "email_drafted": email_channel.REQUIRED | email_channel.OPTIONAL,
 }
 FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
 FORM_FILLED_OPTIONAL = frozenset({"answers", "fields_skipped"})
@@ -1082,6 +1126,8 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 _count_problem(name, payload[name], problems)
         if "answers" in payload:
             _checked_answers(payload["answers"], problems)
+    elif event_type == email_channel.EVENT_TYPE:
+        problems += email_channel.payload_problems(payload)
     return problems
 
 
@@ -1259,6 +1305,10 @@ async def _check_kit_event(
     if event_type in ("site_account", "account_needed"):
         _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])  # a password key can never fit here
         return {"host": _host(event_type, payload.get("host")), "by": actor}
+    if event_type == email_channel.EVENT_TYPE:
+        # Slice 31: recipient, subject and the attached versions (never the body); attachments must be
+        # this application's CV / letter with the kit's text hash.
+        return await email_channel.check(db, user.id, application_id, payload, actor)
     raise SpineError(422, f"{event_type} is not a kit event")  # pragma: no cover
 
 
@@ -1275,19 +1325,27 @@ def log_kit_event(
             extra[key] = safe_log_value(stored[key], max_len=80)
     if isinstance(stored.get("answers"), list):
         extra["answers_count"] = len(stored["answers"])  # a count, never the answers
+    if event_type == email_channel.EVENT_TYPE:
+        # Slice 31: the recipient's domain and the attachment count - never the address or the subject.
+        audit = email_channel.audit_fields(stored)
+        extra["to_domain"] = safe_log_value(audit["to_domain"], max_len=80)
+        extra["attachments_count"] = int(audit["attachments_count"])
     get_audit_logger().info(event_type, extra=extra)
 
 
 async def record_decision(
     db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any],
-    *, once_per_version: bool = False,
+    *, once_per_version: bool = False, fingerprint: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Validate + append one S3 event (the web buttons and the download wiring use
     this; ``record_event`` runs :func:`check_kit_event` and its own append).
     ``once_per_version``: an identical event for the same artifact + hash + where
-    is returned instead of written again. The caller has proven the application
-    is the user's."""
+    is returned instead of written again. ``fingerprint`` (:func:`approval_fingerprint`,
+    server-computed by the web Send route only) is stored beside the checked payload.
+    The caller has proven the application is the user's."""
     stored = await check_kit_event(db, user, application_id, event_type, payload)
+    if fingerprint is not None:
+        stored = {**stored, "fingerprint": fingerprint}
     if once_per_version:
         for ev in await _events(db, user.id, application_id, (event_type,)):
             p = ev["payload"]
