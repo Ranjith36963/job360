@@ -164,6 +164,8 @@ class BrowserPool:
                     # Every connection, loopback included, leaves through the screening proxy.
                     f"--proxy-server=http://127.0.0.1:{self.egress.port}",
                     "--proxy-bypass-list=<-loopback>",
+                    # WebRTC sends UDP straight out, around the proxy and its address screen.
+                    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                     *self._launch_args,
                 ],
             )
@@ -180,6 +182,11 @@ class BrowserPool:
         self, user_id: str, *, create: bool, load_state: Optional[StateFn] = None
     ) -> Optional[Session]:
         await self.reap()
+        if self._browser is not None and not self._browser.is_connected():
+            # Chromium died: every session was bound to it. Free them, or each one errors and
+            # still counts against max_sessions until it idles out.
+            for uid in list(self._sessions):
+                await self.close(uid)
         s = self._sessions.get(user_id)
         if s is not None or not create:
             return s
@@ -721,7 +728,11 @@ async def _act(
             raise BrowserError(
                 "refused", "blocked_address", f"Job360's browser only opens public web pages ({verdict.reason})."
             )
-        page = _live_page(s)
+        try:
+            page = _live_page(s)
+        except BrowserError:
+            # Every tab was closed: open a fresh one, or "call open" would be a dead end.
+            page = s.page = await s.context.new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line

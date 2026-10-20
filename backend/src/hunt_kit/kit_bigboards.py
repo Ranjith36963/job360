@@ -126,10 +126,13 @@ def _blocked(text: Any) -> bool:
 class _Site:
     """One site's run: counted requests, a pause between them, and the stop rule (first non-200 ends the site)."""
 
-    def __init__(self, name: str, http: HttpFn, stats: Stats) -> None:
+    def __init__(self, name: str, http: HttpFn, stats: Stats, max_requests: int = 0,
+                 pause: float | None = None) -> None:
         self.name, self.http, self.stats = name, http, stats
         self.stopped = False
         self.sent = 0
+        self.max_requests = max_requests  # 0 = no cap beyond the search/page/detail limits
+        self.pause = pause
 
     def stop(self, why: str) -> None:
         if not self.stopped:
@@ -140,8 +143,12 @@ class _Site:
         """The body on HTTP 200, else None and the whole site stops. Never retries."""
         if self.stopped:
             return None
-        if self.sent and PAUSE_S > 0:
-            time.sleep(PAUSE_S)
+        if self.max_requests and self.sent >= self.max_requests:
+            self.stopped = True  # the site's own budget, not a refusal: no warning
+            return None
+        wait = PAUSE_S if self.pause is None or PAUSE_S <= 0 else max(PAUSE_S, self.pause)
+        if self.sent and wait > 0:
+            time.sleep(wait)
         self.sent += 1
         self.stats["tried"] = self.stats.get("tried", 0) + 1
         kw: dict[str, Any] = {"headers": headers, "as_json": as_json, "once": True}
@@ -181,6 +188,10 @@ def _remote_word(*parts: str) -> bool | None:
 LI_BASE = "https://www.linkedin.com"
 LI_SEARCH = LI_BASE + "/jobs-guest/jobs/api/seeMoreJobPostings/search"
 LI_PER_PAGE = 10
+# Owner's home PC smoke test 2026-10-20 (docs/product/hunt-kit-smoke-2026-10-20.md): LinkedIn answered 429 on the
+# 10th request at 5 s apart, so a run sends at most 8, at least 8 s apart (the kit's own numbers, NOT IN REFERENCE).
+LI_MAX_REQUESTS = 8
+LI_PAUSE_S = 8.0
 LI_EMPTY = "<!DOCTYPE html>\n\n<!---->"
 LI_HEADERS = {
     "accept": (
@@ -271,7 +282,7 @@ def fetch_linkedin(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
     searches = _searches(queries, _slots(countries))
     if not searches:
         return []
-    site = _Site("linkedin", http, stats)
+    site = _Site("linkedin", http, stats, max_requests=LI_MAX_REQUESTS, pause=LI_PAUSE_S)
     seen: set[str] = set()
     jobs: list[Job] = []
     for q, iso in searches:

@@ -205,12 +205,22 @@ _VISA_YES = re.compile(r"visa\W+sponsor|sponsor\w*\W+(\w+\W+){0,2}visa|will spon
                        r"relocation\W+(and|&)\W+visa|visa support|we sponsor", re.I)
 
 
+_HN_JOB_LINK = re.compile(
+    r"(?:greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|recruitee\.com|smartrecruiters\.com|bamboohr\.com|"
+    r"myworkdayjobs\.com|breezy\.hr|teamtailor\.com|personio\.|pinpointhq\.com|rippling\.com|jobs\.gem\.com|"
+    r"wellfound\.com/jobs|ycombinator\.com/companies/[^/]+/jobs)|/(?:jobs?|careers?|apply|positions?|openings?|vacancies)\b",
+    re.I)
+
+
 def parse_hn_comment(raw_html: str, comment_id: Any, created_at: str = "") -> Job | None:
     """Parse one top-level "Who is hiring" comment into a Job (None if it has no text)."""
     if not raw_html:
         return None
-    url_m = re.search(r'href="([^"]+)"', raw_html)
-    link = _html.unescape(url_m.group(1)) if url_m and url_m.group(1).lower().startswith("http") else ""
+    links = [_html.unescape(u) for u in re.findall(r'href="([^"]+)"', raw_html) if u.lower().startswith("http")]
+    # Owner's PC smoke test 2026-10-20: the first link is often a homepage or a repo, not the posting. Use a link
+    # that points at a job (an ATS host or a jobs/careers/apply path); else the HN comment itself is the ad.
+    jobish = [u for u in links if _HN_JOB_LINK.search(u)]
+    link = jobish[0] if jobish else ""
     hn_url = f"https://news.ycombinator.com/item?id={comment_id}"
     text = strip_html(raw_html)
     if not text:
@@ -252,7 +262,9 @@ def parse_hn_comment(raw_html: str, comment_id: Any, created_at: str = "") -> Jo
     return _job(
         title=title, company=company, url=link or hn_url, location=location,
         posted=_date(created_at), description=raw_html, source="feed:hn", board="hn",
-        remote=remote, visa_flag=visa, extra={"hn_id": str(comment_id), "hn_url": hn_url},
+        remote=remote, visa_flag=visa,
+        extra={"hn_id": str(comment_id), "hn_url": hn_url,
+               **({"company_site": links[0]} if links and not jobish else {})},
     )
 
 
