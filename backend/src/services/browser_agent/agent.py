@@ -118,8 +118,8 @@ class Session:
     # The (application, page) a final submit was clicked on, and whether the site then refused it.
     submitted_on: tuple[Optional[int], str] = (None, "")
     submit_refused: bool = False
-    # The last few (action, ref, text), for the repeat warning.
-    recent: list[tuple[str, str, str]] = field(default_factory=list)
+    # The last few (action, ref, text, url), for the repeat warning: three opens of three pages are no repeat.
+    recent: list[tuple[str, str, str, str]] = field(default_factory=list)
 
 
 class BrowserPool:
@@ -735,7 +735,7 @@ async def run(
             # The form changed (an answer typed, a box ticked, a new page): a control that did nothing
             # before may work now, so it gets its tries back.
             s.dead_clicks.clear()
-        s.recent = ([*s.recent, (action, ref, text)])[-REPEAT_LIMIT:]
+        s.recent = ([*s.recent, (action, ref, text, url)])[-REPEAT_LIMIT:]
         if len(s.recent) == REPEAT_LIMIT and len(set(s.recent)) == 1 and action not in ("look", "scroll"):
             result["repeat_warning"] = (
                 f"The same {action} {REPEAT_LIMIT} times in a row. Stop repeating it: look again, try another "
