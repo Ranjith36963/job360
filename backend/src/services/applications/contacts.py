@@ -816,8 +816,9 @@ async def _linkedin_premium(user_id: str, contact_id: int) -> bool:
 
         profile = await asyncio.to_thread(load_profile, user_id)
     except Exception:  # noqa: BLE001 - advisory; a profile read must not break a save
+        # CodeQL py/log-injection: contact_id is a route int, sanitized like every other id here.
         logging.getLogger("job360.contacts").exception(
-            "linkedin_premium_unavailable", extra={"contact_id": contact_id},
+            "linkedin_premium_unavailable", extra={"contact_id": safe_log_value(contact_id)},
         )
         return False
     prefs = getattr(profile, "preferences", None)
