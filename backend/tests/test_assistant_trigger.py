@@ -317,3 +317,56 @@ async def test_an_error_while_firing_leaves_no_decrypted_token_dict_for_an_error
                                resolve=None)
     assert TOKEN not in _reported(exc.value)
     assert _locals_holding_token(exc.value) == []   # not even past the report's 10-variable cut
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_save_error_through_the_app_reaches_no_error_report_with_the_token(monkeypatch):
+    """The real path: the PUT goes through FastAPI with the production Sentry init. FastAPI's request
+    handler frame holds the raw body (``body_bytes``), which the 5xx report would carry."""
+    import contextlib
+
+    import sentry_sdk
+    from fastapi import FastAPI
+    from sentry_sdk.transport import Transport
+
+    from src.api import auth_deps
+    from src.api.routes import assistant_trigger as route
+    from src.core import observability, settings
+    from src.services.browser_agent import trigger
+
+    sent: list[str] = []
+
+    class Capture(Transport):
+        def capture_envelope(self, envelope):
+            sent.extend(item.get_bytes().decode("utf-8", "replace") for item in envelope.items)
+
+    real_init = sentry_sdk.init
+    monkeypatch.setattr(sentry_sdk, "init", lambda **kw: real_init(transport=Capture(), **kw))
+    monkeypatch.setattr(settings, "SENTRY_DSN", "https://k@example.invalid/1", raising=False)
+    monkeypatch.setenv("APP_ENV", "production")
+
+    @contextlib.asynccontextmanager
+    async def no_db():
+        yield None
+
+    async def save(db, user_id, url, token):   # a database error that echoes its parameters
+        raise RuntimeError(f"insert failed with parameters ({user_id}, {url}, {token})")
+
+    monkeypatch.setattr(route, "_db", no_db)
+    monkeypatch.setattr(trigger, "save", save)
+    try:
+        assert observability.init_sentry() is True
+        app = FastAPI()   # built after init, as in production, so the integrations wrap it
+        app.include_router(route.router, prefix="/api")
+        user = auth_deps.CurrentUser(id="u1", email="u1@example.com")
+        app.dependency_overrides[auth_deps.require_user] = lambda: user
+        app.dependency_overrides[auth_deps.require_session_user] = lambda: user
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            resp = await client.put("/api/assistant-trigger", json={"url": FIRE, "token": TOKEN})
+        sentry_sdk.flush()
+    finally:
+        sentry_sdk.get_client().close()
+        sentry_sdk.get_global_scope().set_client(None)
+    assert resp.status_code == 500 and TOKEN not in resp.text
+    assert any('"exception"' in s for s in sent), "no error report was made, so this test proves nothing"
+    assert [s for s in sent if TOKEN in s] == []

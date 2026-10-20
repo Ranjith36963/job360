@@ -114,6 +114,21 @@ def test_sentry_with_dsn_in_prod_calls_init(monkeypatch):
     assert "sk-ant-oat01-x" not in str(event)
 
 
+def test_sentry_drops_the_framework_frames_variables_that_hold_the_raw_body():
+    """FastAPI's request handler keeps the raw body as ``body_bytes``; no key-name scrubber knows it."""
+    from src.core.observability import _scrub_pii
+
+    raw = b'{"email":"a@b.c","password":"hunter2-secret"}'
+    event = {"exception": {"values": [{"stacktrace": {"frames": [
+        {"module": "starlette.routing", "vars": {"scope": "{...}"}},
+        {"module": "fastapi.routing", "vars": {"body_bytes": repr(raw)}},
+        {"module": "src.api.routes.auth", "vars": {"attempt": 2}},
+    ]}}]}}
+    frames = _scrub_pii(event, None)["exception"]["values"][0]["stacktrace"]["frames"]
+    assert "hunter2-secret" not in str(event)
+    assert [f.get("vars") for f in frames] == [None, None, {"attempt": 2}]   # our own frames keep theirs
+
+
 # ---------------------------------------------------------------------------
 # 3. Auth logging — failed login emits WARNING on audit logger
 # ---------------------------------------------------------------------------

@@ -271,7 +271,8 @@ sends every job still waiting on your yes.
   it); the token is encrypted (table `assistant_triggers`, migration 0066) and never shown again; https only,
   screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
   yes stays saved. An unexpected error while saving answers a plain 500 with the token already cleared from the
-  request, and Sentry scrubs every depth of a frame's variables, so the token cannot reach an error report.
+  request, Sentry scrubs every depth of a frame's variables, and FastAPI's and Starlette's own frames (one holds
+  the raw request body) lose their variables, so the token cannot reach an error report.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 
