@@ -742,7 +742,9 @@ export interface paths {
          * Approve Send
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
-         *     where=web. A CV edited later makes the yes stop matching. Clears an earlier
+         *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
+         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
+         *     (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
          *     nothing is recorded (the yes must name what the user saw).
@@ -794,8 +796,10 @@ export interface paths {
          *     (``unknown_site``). The address is read strictly (``screen_form_url``): a
          *     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
          *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
-         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
-         *     a stored yes clears neither. An unconfirmed email answers ``ask`` /
+         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
+         *     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
+         *     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
+         *     clears none of them. An unconfirmed email answers ``ask`` /
          *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
          *     ``get_application_kit``; 422 when malformed): another session's live kit hold
          *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -1244,8 +1248,9 @@ export interface paths {
          * Password Reset Confirm
          * @description Validate the token and set the new password.
          *
-         *     On success: 204, and every existing session for that user is revoked
-         *     (forces re-login on all devices — security best practice after reset).
+         *     On success: 204, and every existing session, agent token and OAuth grant
+         *     for that user is revoked (forces re-login on all devices and reconnection
+         *     of every assistant — security best practice after reset).
          *     The caller's session cookie is cleared too so the API response itself
          *     can't accidentally land the caller into the just-reset account.
          *

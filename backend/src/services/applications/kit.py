@@ -41,7 +41,7 @@ from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
-from src.services.profile.edits import is_assistant_actor, is_confirmed
+from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -356,6 +356,7 @@ async def controls_state(
         ("cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared"),
     )
     seen = approved = None
+    stale: Optional[str] = None
     cv_id = cv["id"] if cv else None
     cv_sha = sha256_text(cv["text"]) if cv else ""
     for ev in events:
@@ -365,8 +366,9 @@ async def controls_state(
         ):
             if seen is None:
                 seen = _who(ev)
-            if approved is None and ev["event_type"] == "submit_approved":
-                approved = _who(ev)
+            if approved is None and stale is None and ev["event_type"] == "submit_approved":
+                stale = await approval_stale(db, user_id, app_row, ev, now)
+                approved = None if stale else _who(ev)
     newest_approval = next((e for e in events if e["event_type"] == "submit_approved"), None)
     newest_decline = next((e for e in events if e["event_type"] == "submit_declined"), None)
     declined = (
@@ -393,7 +395,78 @@ async def controls_state(
         },
         "duplicate": {**dup, "cleared": _who(cleared_ev) if cleared_ev else None},
         "blocked": await blocked_service.open_block(db, user_id, application_id),
+        # Slice 8: the part of the newest yes for this CV that no longer holds (None = it holds,
+        # or there is none). Read by gate_facts; the web response model does not carry it.
+        "approval_stale": stale,
     }
+
+
+# ── The yes is bound to what the user saw (gap roadmap slice 8) ──────────────
+
+
+async def _assistant_edit_id(db: JobDatabase, user_id: str) -> int:
+    """The newest ``profile_edits`` id an ASSISTANT wrote for this user (0 = none). The user's own
+    web edits are left out: an answer the user edited does not cancel their yes (owner decision
+    2026-10-19, the ``type_first`` answers)."""
+    cur = await db._db.execute(
+        "SELECT MAX(id) FROM profile_edits WHERE user_id = ? AND set_by <> ?", (user_id, WEB_ACTOR)
+    )
+    got = await cur.fetchone()
+    return int(got[0]) if got is not None and got[0] is not None else 0
+
+
+async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: int) -> dict[str, Any]:
+    """What a web Send yes is bound to besides the CV id + hash: the cover letter, the newest
+    ``form_filled``, the form page (:func:`latest_form_url`) and the newest assistant profile edit.
+    The approve route stores it on ``submit_approved``; :func:`approval_stale` compares it again."""
+    letter = await spine.latest_artifact(db, user_id, application_id, "cover_letter")
+    fills = await _events(db, user_id, application_id, ("form_filled",))
+    return {
+        "cover_letter_id": letter["id"] if letter else None,
+        "cover_letter_sha256": sha256_text(letter["text"]) if letter else None,
+        "form_filled_event_id": int(fills[0]["id"]) if fills else None,
+        "form_url": await latest_form_url(db, user_id, application_id),
+        "profile_edit_id": await _assistant_edit_id(db, user_id),
+    }
+
+
+def _approval_age_over(recorded_at: Any, now: datetime) -> bool:
+    at = recorded_at if isinstance(recorded_at, datetime) else datetime.fromisoformat(str(recorded_at))
+    at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    return now - at > timedelta(minutes=settings.SUBMIT_APPROVAL_TTL_MINUTES)
+
+
+async def approval_stale(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
+) -> Optional[str]:
+    """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
+    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
+    ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``. A yes without a ``fingerprint``
+    (a chat yes, or one from before slice 8) is bound to the CV and the time only. A part that was
+    unknown at the yes (no fill, no page yet) is not compared. A newer fill still holds when it differs
+    only by answers that are now the user's own words (:func:`ready.refill_keeps_answers`)."""
+    if _approval_age_over(event["recorded_at"], now):
+        return "expired"
+    stamp = event["payload"].get("fingerprint")
+    if not isinstance(stamp, dict):
+        return None
+    application_id = int(app_row["id"])
+    now_fp = await approval_fingerprint(db, user_id, application_id)
+    for key in ("cover_letter_id", "cover_letter_sha256"):
+        if stamp.get(key) != now_fp[key]:
+            return "cover_letter"
+    was_fill, fill = stamp.get("form_filled_event_id"), now_fp["form_filled_event_id"]
+    if isinstance(was_fill, int) and fill != was_fill:
+        from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+        if fill is None or not await ready.refill_keeps_answers(db, user_id, app_row, was_fill, fill):
+            return "form_fill"
+    was_page, page = stamp.get("form_url"), now_fp["form_url"]
+    if isinstance(was_page, str) and was_page and not (page and settings_rules._same_form_page(page, was_page)):
+        return "form_page"
+    if now_fp["profile_edit_id"] > int(stamp.get("profile_edit_id") or 0):
+        return "profile"
+    return None
 
 
 async def _filled_with_latest_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
@@ -551,6 +624,18 @@ async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) 
     return host if isinstance(host, str) and host else None
 
 
+async def latest_form_url(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
+    """The form PAGE the newest ``form_filled`` / ``form_swept`` that carries one was recorded on
+    (stored cleaned by ``settings_rules.clean_form_url``), or ``None`` (none recorded, or only
+    events from before slice 7). check_submit's ``form_page_mismatch`` and the approval fingerprint
+    read it here, and only here."""
+    for ev in await _events(db, user_id, application_id, ("form_filled", "form_swept")):
+        url = ev["payload"].get("form_url")
+        if isinstance(url, str) and url:
+            return url
+    return None
+
+
 async def gate_facts(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool,
     other_session_hold: Optional[tuple[str, str, str]] = None,
@@ -570,7 +655,10 @@ async def gate_facts(
     state = await controls_state(db, user_id, app_row, now)
     shortfalls = await _sweep_shortfalls(db, user_id, application_id)
     cv = state["cv"]
-    approved = state["cv"]["approved"] is not None if cv else await _approved_without_cv(db, user_id, application_id)
+    stale = state["approval_stale"]
+    approved = cv["approved"] is not None if cv else stale is None and await _approved_without_cv(
+        db, user_id, application_id
+    )
     dup = state["duplicate"]
     form_host = await _newest_form_host(db, user_id, application_id)
     return settings_rules.SubmitFacts(
@@ -584,6 +672,7 @@ async def gate_facts(
         new_site=await _new_site(db, user_id, application_id, form_host),
         cv_seen=bool(cv and cv["seen"] is not None),
         approved=bool(approved),
+        approval_stale=stale,
         declined=state["declined"] is not None,
         blocked=state["blocked"] is not None,
         form_filled=await _filled_with_latest_cv(db, user_id, application_id),
@@ -595,6 +684,7 @@ async def gate_facts(
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=form_host,
+        form_url=await latest_form_url(db, user_id, application_id),
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
@@ -711,6 +801,7 @@ async def submit_verdict(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
             form_check_missing=False, form_pages_incomplete=False,
             form_host=settings_rules.screen_form_url(form_url),
+            form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
             guessed_unverified=False,
         )
@@ -747,7 +838,9 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
-    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers"}),
+    "form_swept": frozenset({
+        "fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers", "form_url",
+    }),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
@@ -1002,6 +1095,13 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 problems.append(f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
         if "unreadable" in payload:
             _unreadable_list(payload["unreadable"], problems)
+        if "form_url" in payload:
+            url = payload["form_url"]
+            if settings_rules.clean_form_url(url if isinstance(url, str) else None) is None:
+                problems.append(
+                    "form_url must be one plain http(s) address of the form page: no user@ part, "
+                    "no % escapes or backslashes before the path, and an ASCII host name"
+                )
         _pages_problems(payload, problems)
     elif event_type == "form_checked":
         problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
@@ -1117,6 +1217,9 @@ async def _check_kit_event(
                 "or backslashes before the path, and an ASCII host name",
             )
         stored: dict[str, Any] = {"host": host, "fields_count": count, "by": actor}
+        page = settings_rules.clean_form_url(payload["form_url"])  # slice 7: the page, never a token
+        if page:
+            stored["form_url"] = page
         if "answers" in payload:
             stored["answers"] = clean_answers(payload["answers"])
         if "fields_skipped" in payload:
@@ -1151,6 +1254,12 @@ async def _check_kit_event(
             swept["answers"] = clean_answers(payload["answers"])
         if paged:
             swept["page"], swept["pages_total"] = payload["page"], payload["pages_total"]
+        if "form_url" in payload:  # slice 7: the page swept, cleaned (never a token or session id)
+            raw_url = payload["form_url"]
+            swept_page = settings_rules.clean_form_url(raw_url if isinstance(raw_url, str) else None)
+            if swept_page is None:
+                raise SpineError(422, "form_swept form_url must be one plain http(s) address of the form page")
+            swept["form_url"] = swept_page
         if "notes" in payload:
             raw_notes = payload["notes"]
             if not isinstance(raw_notes, str):
@@ -1209,14 +1318,17 @@ def log_kit_event(
 
 async def record_decision(
     db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any],
-    *, once_per_version: bool = False,
+    *, once_per_version: bool = False, fingerprint: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Validate + append one S3 event (the web buttons and the download wiring use
     this; ``record_event`` runs :func:`check_kit_event` and its own append).
     ``once_per_version``: an identical event for the same artifact + hash + where
-    is returned instead of written again. The caller has proven the application
-    is the user's."""
+    is returned instead of written again. ``fingerprint`` (:func:`approval_fingerprint`,
+    server-computed by the web Send route only) is stored beside the checked payload.
+    The caller has proven the application is the user's."""
     stored = await check_kit_event(db, user, application_id, event_type, payload)
+    if fingerprint is not None:
+        stored = {**stored, "fingerprint": fingerprint}
     if once_per_version:
         for ev in await _events(db, user.id, application_id, (event_type,)):
             p = ev["payload"]
