@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 10
-TOOLS_REV_FOR_HASH = "80f9e55a4bcb"
+TOOLS_REV = 11
+TOOLS_REV_FOR_HASH = "0e2aff640e50"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1179,6 +1179,7 @@ def build_server(version: str = "") -> MCPServer:
         in_flight: bool = False,
         queued: bool = False,
         priority: Optional[str] = None,
+        agenda: Optional[str] = None,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -1199,13 +1200,14 @@ def build_server(version: str = "") -> MCPServer:
         `queued=true` - the batch queue in order (`queue_position`); work it top-down.
         Rows carry `preflight`; the reply a
         `queue_summary`. `priority` (highest|high|medium|low|off|not_set) - only jobs
-        in places with that level of the user's own job priority; rows carry `priority`."""
+        in places with that level of the user's own job priority; rows carry `priority`.
+        `agenda` (today|tomorrow|week, in the user's timezone) - only applications with an interview or follow-up."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
                     due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued,
-                    priority=priority, db=db, user=_user(),
+                    priority=priority, agenda=agenda, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)
@@ -1543,7 +1545,8 @@ def build_server(version: str = "") -> MCPServer:
         when Job360 recorded each event, never by when it happened in the
         world, so a backdated event can never be silently skipped. Always carries
         `open_asks` — the user's unanswered questions — whatever `since` says. Also
-        `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6)."""
+        `proof_missing` (applied, no proof after N days: ask the user once per row, daily step 6) and
+        `interviews` {upcoming (next 7 days: prep), just_passed (last 3 days, no outcome recorded: ask how it went)}."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.whats_new(since, after_id, limit, db, _user())
@@ -1991,7 +1994,8 @@ def build_server(version: str = "") -> MCPServer:
         `auto_emails` (on, sent_today, last sends, due, violations: if violations
         is not empty, send no automatic email and tell the owner),
         `silent_after_interview` (interview-stage jobs with no word for over 30 days
-        since the last interview_done; confirm with the user before any nudge) and
+        since the last interview_done; confirm with the user before any nudge),
+        `interviews` {upcoming, just_passed} (same as whats_new) and
         when the last event was recorded - then whats_new(since=<your last
         check>) for what changed. Writes only one thing: a `ghosted` mark on
         applications silent 45 days after applying and only after your inbox was checked

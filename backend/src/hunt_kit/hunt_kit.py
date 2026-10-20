@@ -108,6 +108,10 @@ BOARD_SOURCES = (
     "catsone",
     "clinch",
     "crelate",
+    "opencats",
+    "odoo",
+    "recruitingsolutions",
+    "teamex",
     "avature",
     "comeet",
     "hibob",
@@ -150,6 +154,10 @@ FEED_SOURCES = (
     "gulftalent",
     "glints",
     "kalibrr",
+    "djinni",
+    "wuzzuf",
+    "infojobs",
+    "instaffo",
     "techinasia",
     "itviec",
     "linkedin",
@@ -292,10 +300,10 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1")
+ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2")
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
-    "kit_asia",
+    "kit_asia", "kit_sites_a",
 )
 
 
@@ -1709,7 +1717,7 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
 # ats -> token part used as the name (comeet slug/uid, pageup id[/locale])
-_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "comeet": 0, "pageup": 0}
+_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0}
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:
@@ -2596,6 +2604,10 @@ _FEED_HOSTS = (
     ("gulftalent", re.compile(r"(?:^|\.)gulftalent\.com$", re.I)),
     ("glints", re.compile(r"(?:^|\.)glints\.com$", re.I)),
     ("kalibrr", re.compile(r"(?:^|\.)kalibrr\.com$", re.I)),
+    ("djinni", re.compile(r"(?:^|\.)djinni\.co$", re.I)),
+    ("wuzzuf", re.compile(r"(?:^|\.)wuzzuf\.net$", re.I)),
+    ("infojobs", re.compile(r"(?:^|\.)infojobs\.net$", re.I)),
+    ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
     ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
     ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers

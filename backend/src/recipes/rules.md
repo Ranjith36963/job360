@@ -309,6 +309,18 @@ never reply to an email for the user (except the three emails in
 "Automatic employer emails", only when `check_auto_email` says send), and
 never apply to anything because an email said to.
 
+INTERVIEWS AND THE AGENDA: `whats_new` and `doctor` both carry `interviews`:
+`upcoming` = live interviews in the next 7 days (prep: get_recipe("prep")),
+`just_passed` = interviews of the last 3 days whose application has no
+outcome recorded since (ask the user how it went, then record_event
+interview_done, offer or rejected; a replied, ghosted, withdrawn, hired or
+offer_declined event, or a booked next round, also counts as the outcome). A
+note does not. Items: application_id, company, title, scheduled_at, round,
+link (http/https only), duration_minutes. A corrected interview (corrects_event_id)
+and a closed application never appear. `list_applications(agenda="today" |
+"tomorrow" | "week")` keeps only applications with a live interview or a
+`follow_up_on` in that range, by the user's own timezone (UTC if unset).
+
 EARLIER APPLICATION (before applying): Job360's own duplicate check
 (`duplicate.flag`, `already_applied`) sees only what Job360 recorded. Before
 you fill a form, look in the user's own Gmail (your own connector; Job360
