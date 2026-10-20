@@ -1689,3 +1689,65 @@ async def test_opening_three_different_pages_is_no_repeat(pool):
     for _ in range(2):
         await run(pool, "u1", "open", url="http://jobs.example/form?job=1")
     assert "3 times in a row" in (await run(pool, "u1", "open", url="http://jobs.example/form?job=1"))["repeat_warning"]
+
+
+# ── Gap-audit #18: a secret in the page address never reaches the assistant ───
+
+
+class _FakeFrame:
+    parent_frame = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    async def evaluate(self, js, arg=None):
+        return {"elements": [], "places": [], "text": "Sign in", "has_password_box": False}
+
+
+class _FakePage:
+    viewport_size = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.frames = [_FakeFrame(url)]
+        self.context = type("Ctx", (), {"pages": []})()
+
+    def is_closed(self) -> bool:
+        return False
+
+    async def title(self) -> str:
+        return "Welcome"
+
+    async def evaluate(self, js, arg=None):
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page_url", "shown"),
+    [
+        ("https://x.example/auth?token=abc&email=a@b.c", "https://x.example/auth"),
+        ("https://x.example/cb#access_token=eyJsecret", "https://x.example/cb"),
+        ("https://co.example/careers?gh_jid=123&sid=S1#frag", "https://co.example/careers?gh_jid=123"),
+        (
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1?source=LinkedIn",
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1",
+        ),
+    ],
+)
+async def test_look_shows_the_address_without_its_secret(page_url, shown):
+    from src.services.browser_agent.agent import Session, look
+
+    page = _FakePage(page_url)
+    out = await look(Session(context=page.context, page=page))
+    assert out["url"] == shown
+    assert "abc" not in str(out) and "secret" not in str(out) and "S1" not in str(out)
+
+
+def test_load_failed_and_error_text_carry_no_secret_either():
+    from src.services.browser_agent.agent import _load_failed, _scrub_links
+
+    out = _load_failed(_FakePage("https://x.example/auth?token=abc#t"), after_action=True)
+    assert out["url"] == "https://x.example/auth"
+    msg = "net::ERR_ABORTED at https://x.example/magic?token=abc&email=a@b.c#frag while loading"
+    assert _scrub_links(msg) == "net::ERR_ABORTED at https://x.example/magic while loading"

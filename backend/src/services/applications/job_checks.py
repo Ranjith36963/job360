@@ -23,10 +23,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from src.core import settings
 
-# Query keys that only track the click, never pick the job.
-_TRACKING_KEYS = frozenset({"gclid", "fbclid", "ref", "trackingid", "refid", "msclkid", "mc_cid", "mc_eid"})
+# Query keys that only track the click, never pick the job (plus every ``utm_*``).
+_TRACKING_KEYS = frozenset({
+    "gclid", "fbclid", "ref", "trackingid", "refid", "msclkid", "mc_cid", "mc_eid", "_hsenc", "_hsmi",
+})
 
-_CUR = r"(?:USD|EUR|GBP|CAD|AUD|CHF|INR|SGD|AED)"
+_CUR =r"(?:USD|EUR|GBP|CAD|AUD|CHF|INR|SGD|AED)"
 # An amount of money. Every quantifier is bounded or single, so the scan is linear.
 _MONEY_RE = re.compile(
     rf"(?:[$€£₹¥]\s?\d|\b{_CUR}\s?\d|\d\s?{_CUR}\b|\d\s?k\s?(?:/|per\s)?\s?(?:yr|year|annum)\b)",
@@ -94,37 +96,188 @@ def word_count(text: str) -> int:
     return len(text.split()) if text and text.strip() else 0
 
 
-def canonical_url(url: str) -> str:
-    """One stable key for "the same ad link": lower-case host (``www.`` folded),
-    ``utm_*`` / gclid / fbclid / ref / trackingId / refId and the fragment dropped,
-    remaining query sorted, trailing slash dropped. ``''`` for a blank or
-    unparseable link. Compared on read - nothing is stored."""
+# Query keys that NAME a job. Used only for the DISPLAY form of a link (``redact_url_for_display``: what an
+# agent is shown, never what is stored or navigated). ATS cases checked 2026-10-20: Workday, Lever, Ashby,
+# SmartRecruiters and iCIMS carry the id in the path; Greenhouse on a company page ``gh_jid``; LinkedIn
+# ``currentJobId``; Indeed ``jk``; Taleo ``job``; SuccessFactors ``career_job_req_id``; Civil Service Jobs ``jcode``.
+_JOB_ID_KEYS = frozenset({
+    "jk", "vjk", "gh_jid", "currentjobid", "jobid", "job_id", "jid", "id", "req", "reqid",
+    "job", "ashby_jid", "career_job_req_id", "req_id", "requisitionid", "jobreqid", "jcode",
+})
+# A job id is short and plain. A long or odd value under an allowed key could still be a token: drop it.
+_SAFE_ID_VALUE = re.compile(r"[\w.~\-]{1,64}")
+
+# Query keys that are secrets whatever their value (a token of an account, a signed link, a password).
+_ALWAYS_SECRET_KEYS = frozenset({
+    "access_token", "id_token", "refresh_token", "password", "pwd", "passwd", "secret", "otp", "pin", "magic",
+    "nonce", "signature", "sig", "apikey", "api_key", "jsessionid", "phpsessid", "sessionid", "session_id",
+    "session", "auth", "authorization", "code",
+})
+_SECRET_PREFIXES = ("x-amz-", "x-goog-")
+# Keys that are a secret only when the value LOOKS random. ``token=4567890`` (Greenhouse's embed link, the
+# numeric job id) and ``state=CA`` are not secrets; a 32-char hex token is.
+_MAYBE_SECRET_KEYS = frozenset({"token", "sid", "key", "hash", "state", "ticket", "login"})
+# Hosts where a "maybe" key carries the job and is never dropped. Civil Service Jobs: the advert link is
+# ``/csr/index.cgi?SID=<base64 of pageclass=Jobs&...&jcode=1912345&...>``. Easy to extend.
+_HOST_KEEP: dict[str, frozenset[str]] = {"civilservicejobs.service.gov.uk": frozenset({"sid"})}
+_FRAGMENT_MAX = 64
+
+
+def _looks_random(value: str) -> bool:
+    """A long value with both a letter and a digit, or a very long one: a session id, not a job id."""
+    if len(value) >= 32:
+        return True
+    return len(value) >= 16 and any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
+
+
+def _host_keeps(host: str, key: str) -> bool:
+    return any(
+        (host == h or host.endswith("." + h)) and key in keys for h, keys in _HOST_KEEP.items()
+    )
+
+
+def _drops_from_stored(key: str, value: str, host: str = "") -> bool:
+    """Whether one ``key=value`` piece of a link is dropped from the STORED form: a tracking key, an
+    always-secret key, or a maybe-secret key whose value looks random (unless the host's job rides in it)."""
+    k = key.lower()
+    if k.startswith("utm_") or k in _TRACKING_KEYS:
+        return True
+    if k in _ALWAYS_SECRET_KEYS or k.startswith(_SECRET_PREFIXES):
+        return True
+    return k in _MAYBE_SECRET_KEYS and not _host_keeps(host, k) and _looks_random(value)
+
+
+def _link_core(url: str) -> Optional[tuple[str, str, str, str, str, str]]:
+    """``(scheme, host, port-suffix, path, raw query, raw fragment)`` of an http(s) link, or None. The user
+    info and ``;param`` path parameters (``;jsessionid=``) are left out."""
     raw = (url or "").strip()
     if not raw:
-        return ""
+        return None
     try:
         parts = urlsplit(raw)
         host = (parts.hostname or "").lower().rstrip(".")
         port = parts.port
     except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    if not host or scheme not in ("http", "https"):
+        return None
+    if ":" in host:  # an IPv6 literal lost its brackets in ``hostname``
+        host = f"[{host}]"
+    suffix = f":{port}" if port and port != (443 if scheme == "https" else 80) else ""
+    path = "/".join(seg.split(";", 1)[0] for seg in parts.path.split("/"))
+    return scheme, host, suffix, path, parts.query, parts.fragment
+
+
+def _query_pairs(query: str) -> list[tuple[str, str, str]]:
+    """``(raw segment, key, value)`` for each ``&``-separated piece of a query string."""
+    out = []
+    for seg in query.split("&"):
+        if not seg:
+            continue
+        pair = parse_qsl(seg, keep_blank_values=True)
+        k, v = pair[0] if pair else (seg, "")
+        out.append((seg, k, v))
+    return out
+
+
+def _sub_pieces(query: str) -> list[list[tuple[str, str, str]]]:
+    """Each ``&`` piece split again on ``;`` (some servers read ``;`` as a separator, so ``a=1;token=x``
+    holds a token): ``[(raw sub-piece, key, value), ...]`` per ``&`` piece."""
+    out = []
+    for seg in query.split("&"):
+        subs = []
+        for sub in seg.split(";"):
+            if not sub:
+                continue
+            pair = parse_qsl(sub, keep_blank_values=True)
+            k, v = pair[0] if pair else (sub, "")
+            subs.append((sub, k, v))
+        if subs:
+            out.append(subs)
+    return out
+
+
+def _stored_query(query: str, host: str) -> str:
+    """The query minus every dropped piece, original order and spelling; ``;`` sub-pieces are decided one by
+    one and the kept ones rejoined with ``;``."""
+    kept = []
+    for subs in _sub_pieces(query):
+        keep = [sub for sub, k, v in subs if not _drops_from_stored(k, v, host)]
+        if keep:
+            kept.append(";".join(keep))
+    return "&".join(kept)
+
+
+def _stored_fragment(fragment: str, host: str) -> str:
+    """The fragment is kept (BrassRing's ``#jobDetails=1234567_5313`` names the job) unless it is longer than
+    ``_FRAGMENT_MAX`` or any ``key=value`` in it is a secret (``#access_token=...``); then all of it goes."""
+    if not fragment or len(fragment) > _FRAGMENT_MAX:
         return ""
-    if not host or parts.scheme.lower() not in ("http", "https"):
+    for subs in _sub_pieces(fragment.replace("?", "&")):
+        for sub, k, v in subs:
+            if "=" in sub and _drops_from_stored(k, v, host):
+                return ""
+    return fragment
+
+
+def redact_url(url: str) -> str:
+    """The form of a link that is STORED (apply_url): scheme + host + path + query + fragment, minus anything
+    that could be a secret. Dropped: user info, ``;jsessionid``-style path parameters, tracking keys
+    (``utm_*``, gclid, fbclid ...), always-secret keys (``access_token``, ``code``, ``otp``, ``signature``,
+    ``x-amz-*`` ...) and maybe-secret keys (``token``, ``sid``, ``key``, ``hash``, ``state`` ...) whose value
+    looks random (so ``token=4567890`` stays; Civil Service Jobs' ``SID`` always stays). Every ``;`` piece is
+    judged alone. The fragment stays unless it holds a secret key or is over 64 chars. Every other key stays,
+    in its original order and spelling: real ATS links need them (``jcode=``, ``company=``, ``for=``). ''
+    for a blank or non-http(s) link. Gap-audit #18."""
+    got = _link_core(url)
+    if got is None:
         return ""
-    host = host.removeprefix("www.")
-    kept = sorted(
-        (k, v)
-        for k, v in parse_qsl(parts.query, keep_blank_values=True)
-        if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_KEYS
-    )
-    netloc = host + (f":{port}" if port and port not in (80, 443) else "")
-    return urlunsplit(("https", netloc, parts.path.rstrip("/"), urlencode(kept), ""))
+    scheme, host, suffix, path, query, fragment = got
+    return urlunsplit((scheme, host + suffix, path, _stored_query(query, host), _stored_fragment(fragment, host)))
+
+
+def redact_url_for_display(url: str) -> str:
+    """The form of an address SHOWN to an agent (never stored, never navigated): scheme + host + path + only
+    the query keys that name a job (``_JOB_ID_KEYS``, short plain values). A non-http(s) page
+    (``about:blank``, ``chrome-error://...``) keeps scheme, host and path and loses query and fragment."""
+    if not url:
+        return ""
+    got = _link_core(url)
+    if got is not None:
+        scheme, host, suffix, path, query, _ = got
+        kept = [
+            (k, v) for _, k, v in _query_pairs(query) if k.lower() in _JOB_ID_KEYS and _SAFE_ID_VALUE.fullmatch(v)
+        ]
+        return urlunsplit((scheme, host + suffix, path, urlencode(kept), ""))
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return ""
+    if parts.scheme.lower() in ("", "http", "https", "data", "javascript", "blob"):
+        return ""
+    return urlunsplit((parts.scheme.lower(), parts.netloc.rsplit("@", 1)[-1], parts.path, "", ""))
+
+
+def canonical_url(url: str) -> str:
+    """One stable key for "the same ad link": lower-case host (``www.`` folded), the fragment dropped, the
+    stored-form drop rule applied to the query (``redact_url``: tracking keys, secret keys), remaining pieces
+    sorted, trailing slash dropped. Other keys stay, so two jobs that differ only by an unknown key
+    (``?posting=5`` / ``?posting=6``) or by Civil Service Jobs' ``SID`` never compare equal. ``''`` for a
+    blank or unparseable link. Compared on read - nothing is stored. An OLD row stored with its full link
+    and a NEW row stored redacted compare equal."""
+    got = _link_core(url)
+    if got is None:
+        return ""
+    _, host, suffix, path, query, _ = got
+    pairs = sorted((k, v) for subs in _sub_pieces(query) for _, k, v in subs if not _drops_from_stored(k, v, host))
+    return urlunsplit(("https", host.removeprefix("www.") + suffix, path.rstrip("/"), urlencode(pairs), ""))
 
 
 # A link names ONE job when it carries a job id: a long number, a UUID-like
 # token, or a known job-id query key. Board roots and careers home pages do not.
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 _JOB_ID_SEGMENT = re.compile(rf"(?:^|[/_-])(?:\d{{4,}}|{_UUID})(?:$|[/_-])", re.I)
-_JOB_ID_KEYS = frozenset({"jk", "vjk", "gh_jid", "currentjobid", "jobid", "job_id", "jid", "id", "req", "reqid"})
 
 
 def is_job_specific_url(url: str) -> bool:

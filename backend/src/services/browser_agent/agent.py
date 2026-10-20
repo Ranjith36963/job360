@@ -30,6 +30,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from src.services.applications.job_checks import redact_url_for_display
 from src.services.browser_agent.egress import EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
@@ -535,6 +536,21 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:n] + "…"
 
 
+def _shown_url(url: str) -> str:
+    """The address the assistant is told (gap-audit #18): scheme + host + path + job-id query keys. A
+    magic link, session id or signed link in the query string or fragment must not reach the
+    assistant's transcript. Shown only: the browser itself still sits on, and opens, the full address."""
+    return _clip(redact_url_for_display(url), MAX_URL)
+
+
+_LINK_IN_TEXT = re.compile(r"https?://[^\s'\"<>]+")
+
+
+def _scrub_links(text: str) -> str:
+    """``text`` (a browser error line) with every http(s) link redacted: Playwright's messages quote the URL."""
+    return _LINK_IN_TEXT.sub(lambda m: redact_url_for_display(m.group(0)) or "[link]", text)
+
+
 def _within_size(
     elements: list[dict[str, Any]], places: list[tuple[float, bool]]
 ) -> tuple[list[dict[str, Any]], int, int]:
@@ -635,7 +651,7 @@ def _load_failed(page: Any, after_action: bool) -> dict[str, Any]:
     if not after_action:
         raise BrowserError("error", "load_failed", "The last page did not load. Open it again or try another link.")
     return {
-        "status": "error", "reason": "load_failed", "url": _clip(page.url, MAX_URL),
+        "status": "error", "reason": "load_failed", "url": _shown_url(page.url),
         "detail": "The page did not load after that action.",
     }
 
@@ -703,7 +719,7 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
-        "url": _clip(page.url, MAX_URL),
+        "url": _shown_url(page.url),
         "title": _clip(await page.title(), MAX_TITLE),
         "note": UNTRUSTED,
         "elements": elements,
@@ -922,7 +938,7 @@ async def run(
         except BrowserError as exc:
             if exc.status == "needs_you" and not exc.url:
                 try:
-                    exc.url = _live_page(s).url
+                    exc.url = redact_url_for_display(_live_page(s).url)
                 except BrowserError:
                     pass
             raise
@@ -935,7 +951,7 @@ async def run(
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
             if getattr(exc, "status_code", None) is not None:
                 raise  # an HTTP refusal from the gate (e.g. not the caller's application) stays one
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
         if action not in ("click", "look"):
@@ -969,7 +985,7 @@ async def _act(
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
         await _settle(page)
         return await look(s)
@@ -1063,7 +1079,7 @@ async def _act(
                 raise
             out = exc.as_dict() if isinstance(exc, BrowserError) else {
                 "status": "error", "reason": "browser_error",
-                "detail": (str(exc).splitlines() or [type(exc).__name__])[0][:300],
+                "detail": _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300],
             }
         out["page_changed"] = changed
         if not changed and not submitted:
