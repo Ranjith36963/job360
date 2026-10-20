@@ -960,6 +960,8 @@ export async function recordApplicationEvent(
     payload?: Record<string, unknown>;
     occurred_at?: string;
     corrects_event_id?: number;
+    // Interview time (ISO-8601 with offset); only on interview_requested/_scheduled.
+    scheduled_at?: string;
     // Owner decision, 2026-09-25 — omit to leave the date alone, "" to
     // clear it, "YYYY-MM-DD" to set it. Works on any event_type.
     follow_up_on?: string;

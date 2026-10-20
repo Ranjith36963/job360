@@ -144,7 +144,7 @@ def _ad_text(value: Any, fallback: str) -> str:
 
 def message(rows: list[dict[str, Any]], site: str, label: str) -> str:
     """The text the started session receives. Plain words; Job360's rules, never the user's chat.
-    Titles and companies are the ad's words, so they sit inside a per-call marker (agent._wrap_untrusted).
+    Titles and companies are the ad's words, so they sit inside a per-call marker (services.untrusted.wrap_untrusted).
 
     ``label`` is minted per start: two started sessions never share a browser or a kit hold."""
     nonce = secrets.token_hex(4)
