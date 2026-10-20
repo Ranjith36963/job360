@@ -185,11 +185,14 @@ def _title(app_row: dict[str, Any]) -> str:
     return f"{title} \u2013 {company}" if company else title
 
 
-async def collect_events(
-    db: JobDatabase, user_id: str, now: datetime, application_id: Optional[int] = None
-) -> list[CalEvent]:
-    """The owner's upcoming interviews and follow-ups. ``user_id`` ALWAYS scopes the
-    query; ``application_id`` narrows it to one (already ownership-checked) application."""
+async def live_interviews(
+    db: JobDatabase, user_id: str, application_id: Optional[int] = None
+) -> tuple[dict[int, dict[str, Any]], list[dict[str, Any]]]:
+    """The ONE notion of a "live interview", shared by the calendar feed and the agenda read
+    (``agenda.py``): every ``interview_scheduled`` event with a ``scheduled_at`` that no later
+    event corrects, on an application that is not closed. Returns ``(open applications by id,
+    live interview event rows oldest first)``. ``user_id`` ALWAYS scopes the query;
+    ``application_id`` narrows it to one (already ownership-checked) application."""
     closed = tuple(settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES)
     sql = "SELECT id, job_title, job_company, status, follow_up_on FROM applications WHERE user_id = ?"
     params: list[Any] = [user_id]
@@ -199,7 +202,7 @@ async def collect_events(
     cur = await db._db.execute(sql, tuple(params))
     apps = [dict(r) for r in await cur.fetchall() if r["status"] not in closed]
     if not apps:
-        return []
+        return {}, []
     by_id = {int(a["id"]): a for a in apps}
     marks = ",".join("?" for _ in by_id)
     cur = await db._db.execute(
@@ -214,6 +217,28 @@ async def collect_events(
         r for r in rows
         if r["event_type"] == "interview_scheduled" and r["scheduled_at"] and r["id"] not in superseded
     ]  # every live interview is its own event (multi-round); a correction supersedes only its target
+    return by_id, interviews
+
+
+def interview_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """What a live interview row says, cleaned: ``round`` (as recorded, capped), ``link`` (http(s) only,
+    else ''), ``location`` (the owner's text, else the link) and ``duration_minutes`` (clamped 5..480)."""
+    p = _payload(row.get("payload"))
+    link = _http_link(p.get("link"))
+    return {
+        "round": _text(p.get("round"), _ROUND_MAX), "link": link,
+        "location": _text(p.get("location"), _LOCATION_MAX) or link,
+        "duration_minutes": _duration(p.get("duration_minutes")),
+    }
+
+
+async def collect_events(
+    db: JobDatabase, user_id: str, now: datetime, application_id: Optional[int] = None
+) -> list[CalEvent]:
+    """The owner's upcoming interviews and follow-ups (see :func:`live_interviews` for scoping)."""
+    by_id, interviews = await live_interviews(db, user_id, application_id)
+    if not by_id:
+        return []
     lo = now - timedelta(days=settings.CALENDAR_FEED_LOOKBACK_DAYS)
     hi = now + timedelta(seconds=settings.APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS)
     base = settings.SITE_BASE_URL
@@ -224,16 +249,15 @@ async def collect_events(
         start = _parse_dt(r["scheduled_at"])
         if start is None or not (lo <= start <= hi):
             continue
-        p = _payload(r.get("payload"))
-        round_ = _text(p.get("round"), _ROUND_MAX).replace("-", " ").replace("_", " ")
+        f = interview_fields(r)
+        round_ = f["round"].replace("-", " ").replace("_", " ")
         round_ = round_[:1].upper() + round_[1:]  # "hiring-manager" reads "Hiring manager"
-        link = _http_link(p.get("link"))
-        location = _text(p.get("location"), _LOCATION_MAX) or link
+        link, location = f["link"], f["location"]
         summary = f"Interview: {_title(by_id[app_id])}" + (f" ({round_})" if round_ else "")
         out.append(CalEvent(
             uid=f"app-{app_id}-ev-{r['id']}@job360.uk", summary=summary,
             url=f"{base}/applications/{app_id}", stamp=_parse_dt(r["recorded_at"]) or now, start=start,
-            duration_minutes=_duration(p.get("duration_minutes")), description=link, location=location,
+            duration_minutes=f["duration_minutes"], description=link, location=location,
             alarms=alarms,
         ))
     hour = settings.CALENDAR_ALARM_FOLLOW_UP_HOUR

@@ -1,10 +1,12 @@
-"""Offline tests for hunt_kit/kit_ats_misc1.py (Betterteam, CATS, ClinchTalent, Crelate).
+"""Offline tests for hunt_kit/kit_ats_misc1.py (Betterteam, CATS, ClinchTalent, Crelate, eRecruiter, gr8people,
+HR-Manager, iSmartRecruit, Loxo, Mindsight).
 
 Fixtures are shaped like the test data in the MIT freehire adapters (internal/ingest/sources/<name>_test.go and
 testdata/): same selectors, ids, and field names. Nothing touches the network.
 """
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -27,7 +29,7 @@ def _load(name: str, file: str):
 m1 = _load("kit_ats_misc1_under_test", "kit_ats_misc1.py")
 F = m1.ATS_FETCHERS
 JOB_KEYS = {"title", "company", "url", "location", "posted", "description", "source", "board", "remote", "visa_flag", "extra"}
-ALL = ["betterteam", "catsone", "clinch", "crelate"]
+ALL = ["betterteam", "catsone", "clinch", "crelate", "erecruiter", "gr8people", "hrmanager", "ismartrecruit", "loxo", "mindsight"]
 
 
 def _stub(routes: dict):
@@ -215,10 +217,277 @@ def test_crelate_error_bad_board_garbage():
     assert _run("crelate", {"name": "x", "token": CRELATE_BOARD}, _stub({"GetAllJobs": (200, {"Jobs": ["junk", 3, None]})}))[0] == []
 
 
+# ----------------------------------------------------------------------------- eRecruiter
+CFG = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+
+def _jsonp(htm: str) -> str:
+    return "(" + json.dumps({"htm": htm}) + ")"
+
+
+def _er_detail(title, city):
+    return ('<div class="job1"><div id="JobTitle">%s</div><div id="WorkPlace">Miejsce pracy: %s</div></div>'
+            "<div id=\"t1\"><p><strong>Zakres</strong></p><ul><li>Rozmowy</li></ul><script>evil()</script></div>"
+            '<div id="CompanyDescription"><p>Od 40 lat.</p></div>') % (title, city)
+
+
+def test_erecruiter_happy_path_stops_at_total_and_keeps_multicity_variants():
+    rows = ("<tr jobOfferId='1' offerId='4891462' externalJobOfferId='574507' externalJobOfferRegionId='309263' comId='20002054' skkResult='offer'>"
+            "<td class='skk_positionName'>Staz</td><td>Wroclaw</td></tr>"
+            "<tr jobOfferId='2' offerId='4882522' externalJobOfferId='570550' externalJobOfferRegionId='308328' comId='20002054' skkResult='offer'>"
+            "<td class='skk_positionName'>Specjalista</td><td>Lodz</td></tr>"
+            "<tr jobOfferId='2' offerId='4882523' externalJobOfferId='570550' externalJobOfferRegionId='308329' comId='20002054' skkResult='offer'>"
+            "<td class='skk_positionName'>Specjalista</td><td>Krakow</td></tr>"
+            "<tr tp='2' tr='3' pn='1' ps='15' style='display:none;'></tr>")
+    http = _stub({"oid=4891462": (200, _er_detail("Staz w Dziale", "Wroclaw")), "oid=4882522": (200, _er_detail("Specjalista", "Lodz")),
+                  "oid=4882523": (200, _er_detail("Specjalista", "Krakow")), "GetHtml.ashx": (200, _jsonp(rows))})
+    jobs, stats = _run("erecruiter", {"name": "Echo Investment", "token": CFG}, http)
+    _check_shape(jobs)
+    assert len(jobs) == 3 and stats["jobs"] == 3
+    assert sum("GetHtml.ashx" in c[0] for c in http.calls) == 1  # total reached after page 1
+    by = {j["extra"]["id"]: j for j in jobs}
+    j = by["4882523"]
+    assert j["location"] == "Krakow" and j["company"] == "Echo Investment"
+    assert j["url"] == "https://skk.erecruiter.pl/Offer.aspx?oid=4882523&cfg=%s&ejoId=570550&ejorId=308329&comId=20002054" % CFG
+    assert "Rozmowy" in j["description"] and "Od 40 lat" in j["description"] and "evil" not in j["description"]
+    assert by["4891462"]["title"] == "Staz w Dziale"
+
+
+def test_erecruiter_detail_failure_and_bodyless_offer_are_dropped_marker_missing_walks_on():
+    rows = ("<tr offerId='1' externalJobOfferId='1' externalJobOfferRegionId='1' comId='9' skkResult='offer'><td class='skk_positionName'>Dead</td><td>X</td></tr>"
+            "<tr offerId='2' externalJobOfferId='1' externalJobOfferRegionId='1' comId='9' skkResult='offer'><td class='skk_positionName'>Empty</td><td>X</td></tr>"
+            "<tr externalJobOfferId='1' skkResult='offer'><td class='skk_positionName'>No offer id</td></tr>")
+    http = _stub({"oid=2": (200, "<div id='JobTitle'>Empty</div>"), "oid=1": (500, None), "pn=1": (200, _jsonp(rows)), "pn=2": (200, _jsonp(""))})
+    jobs, _ = _run("erecruiter", {"name": "A", "token": CFG}, http)
+    assert jobs == []
+    assert any("pn=2" in c[0] for c in http.calls)  # no marker, so page 2 is read and found empty
+
+
+def test_erecruiter_empty_nonok_garbage():
+    assert _run("erecruiter", {"name": "A", "token": CFG}, _stub({"GetHtml.ashx": (200, "")}))[0] == []
+    jobs, stats = _run("erecruiter", {"name": "A", "token": CFG}, _stub({"GetHtml.ashx": (503, None)}))
+    assert jobs == [] and stats.get("ok", 0) == 0
+    assert _run("erecruiter", {"name": "A", "token": CFG}, _stub({"GetHtml.ashx": (200, "({broken")}))[1].get("ok", 0) == 0
+    assert _run("erecruiter", {"name": "A", "token": "cfg"}, _stub({}))[0] == []
+
+
+# ----------------------------------------------------------------------------- gr8people
+HOME = '<script id="__NEXT_DATA__">{"props":{"session":{"token":"eyJnot-a-real-token"}}}</script>'
+
+
+def _gr8_page(nodes, nxt=""):
+    return {"data": {"searchJobs": {"results": {"nodes": nodes, "pageInfo": {"hasNextPage": bool(nxt), "endCursor": nxt}, "totalCount": 9}}}}
+
+
+def test_gr8people_mints_token_pages_and_maps():
+    n1 = {"key": "4709", "title": "FSR - Chicago, IL", "descriptionHTML": "<p>Serve customers.</p><script>x()</script>", "workplaceType": "ON_SITE",
+          "postedOn": "2026-03-18T19:59:49.013Z", "positionType": {"name": "Full Time"}, "primaryPlace": {"name": "Chicago, IL, USA"},
+          "places": {"nodes": [{"name": "Chicago, IL, USA"}, {"name": "Chicago, IL, USA"}, {"name": "Remote"}]}}
+    n2 = {"key": "9", "title": "Analyst", "descriptionHTML": "", "workplaceType": "REMOTE", "positionType": None, "primaryPlace": {"name": "NYC"}, "places": {"nodes": []}}
+
+    def gql(url, method, body):
+        assert method == "POST" and body["variables"]["first"] == 50
+        return (200, _gr8_page([n1], "c1")) if "after" not in body["variables"] else (200, _gr8_page([n2]))
+
+    http = _stub({"/graphql": gql, "etrade.gr8people.com/jobs": (200, HOME)})
+    jobs, stats = _run("gr8people", {"name": "Morgan Stanley E-TRADE", "token": "etrade.gr8people.com"}, http)
+    _check_shape(jobs)
+    assert len(jobs) == 2 and stats["jobs"] == 2
+    a, b = jobs
+    assert a["url"] == "https://etrade.gr8people.com/jobs/4709" and a["location"] == "Chicago, IL, USA; Remote" and a["remote"] is True
+    assert a["extra"]["employment_type"] == "full_time" and a["posted"] == "2026-03-18" and "x()" not in a["description"]
+    assert b["location"] == "NYC" and b["remote"] is True and b["company"] == "Morgan Stanley E-TRADE"
+    posts = [c for c in http.calls if c[1] == "POST"]
+    assert posts[0][3]["Authorization"] == "Bearer eyJnot-a-real-token" and "after" not in posts[0][2]["variables"]
+
+
+def test_gr8people_empty_and_failures():
+    http = _stub({"/graphql": (200, _gr8_page([])), "/jobs": (200, HOME)})
+    assert _run("gr8people", {"name": "T", "token": "t.gr8people.com"}, http)[0] == []
+    http = _stub({"/jobs": (200, "<html>no token</html>")})
+    jobs, stats = _run("gr8people", {"name": "T", "token": "t.gr8people.com"}, http)
+    assert jobs == [] and stats.get("ok", 0) == 0 and len(http.calls) == 1
+    http = _stub({"/graphql": (500, None), "/jobs": (200, HOME)})
+    assert _run("gr8people", {"name": "T", "token": "t.gr8people.com"}, http)[1].get("ok", 0) == 0
+    # a later page failing keeps what was gathered
+    n = {"key": "1", "title": "A", "primaryPlace": {"name": "X"}, "places": {"nodes": []}}
+    http = _stub({"/graphql": lambda u, m, b: (200, _gr8_page([n], "c")) if "after" not in b["variables"] else (500, None), "/jobs": (200, HOME)})
+    jobs, stats = _run("gr8people", {"name": "T", "token": "t.gr8people.com"}, http)
+    assert len(jobs) == 1 and stats["ok"] == 1
+    assert _run("gr8people", {"name": "T", "token": "t.gr8people.com"}, _stub({"/graphql": (200, {"data": None}), "/jobs": (200, HOME)}))[1].get("ok", 0) == 0
+
+
+# ----------------------------------------------------------------------------- HR-Manager
+def _hrm(items, total=None, in_list=None, alias="energinet", status=0):
+    return {"CustomerAlias": alias, "TransactionStatus": {"StatusCode": status, "Description": "x"}, "Items": items,
+            "PositionCountSearch": len(items) if total is None else total, "PositionCountList": len(items) if in_list is None else in_list}
+
+
+HRM_ITEM = {"Id": 188952, "Name": "  Kontorchef  ", "ProjectType": "RecruitmentProject",
+            "AdvertisementUrl": "https://candidate.hr-manager.net/ApplicationInit.aspx?cid=316&ProjectId=188952&DepartmentId=9728&MediaId=5",
+            "Published": "/Date(1791377991000+0200)/", "Created": "/Date(0)/", "WorkPlace": "Fredericia / Ballerup",
+            "Department": {"City": "Fredericia", "Country": "Danmark"},
+            "Advertisements": [{"Introduction": "<p>Intro.</p>", "Content": "<p>Energinet spiller en rolle.</p><script>a()</script>"}]}
+
+
+def test_hrmanager_happy_path_skips_open_application():
+    items = [HRM_ITEM, dict(HRM_ITEM, Id=2, ProjectType="OpenApplication", Name="Open")]
+    http = _stub({"jobportal.svc/energinet/positionlist/json/": (200, _hrm(items))})
+    jobs, stats = _run("hrmanager", {"name": "Energinet", "token": "energinet"}, http)
+    _check_shape(jobs)
+    assert len(jobs) == 1 and stats == {"tried": 1, "ok": 1, "jobs": 1}
+    j = jobs[0]
+    assert j["title"] == "Kontorchef" and j["company"] == "Energinet" and j["location"] == "Fredericia / Ballerup"
+    assert j["url"].startswith("https://candidate.hr-manager.net/ApplicationInit.aspx?cid=316") and j["posted"] == "2026-10-07"
+    assert "Intro." in j["description"] and "Energinet spiller" in j["description"] and "a()" not in j["description"]
+    assert j["extra"]["country"] == "Danmark"
+    assert "incads=1" in http.calls[0][0] and "take=2000" in http.calls[0][0] and len(http.calls) == 1
+
+
+@pytest.mark.parametrize("payload", [
+    _hrm([HRM_ITEM], status=500), _hrm([HRM_ITEM], alias="other"), _hrm([HRM_ITEM], in_list=2),
+    _hrm([HRM_ITEM], total=4), _hrm([HRM_ITEM, HRM_ITEM], total=2), _hrm([HRM_ITEM], total=5000),
+])
+def test_hrmanager_listing_that_cannot_prove_itself_whole_fails_the_board(payload):
+    jobs, stats = _run("hrmanager", {"name": "E", "token": "energinet"}, _stub({"positionlist": (200, payload)}))
+    assert jobs == [] and stats.get("ok", 0) == 0
+
+
+def test_hrmanager_tolerates_two_hidden_and_garbage():
+    assert len(_run("hrmanager", {"name": "E", "token": "energinet"}, _stub({"positionlist": (200, _hrm([HRM_ITEM], total=3))}))[0]) == 1
+    assert _run("hrmanager", {"name": "E", "token": "energinet"}, _stub({"positionlist": (200, _hrm([]))}))[0] == []
+    assert _run("hrmanager", {"name": "E", "token": "energinet"}, _stub({"positionlist": (400, None)}))[1].get("ok", 0) == 0
+    assert _run("hrmanager", {"name": "E", "token": "energinet"}, _stub({"positionlist": (200, {"Items": "x"})}))[1].get("ok", 0) == 0
+    http = _stub({})
+    assert _run("hrmanager", {"name": "E", "token": "bad alias/!"}, http)[0] == [] and http.calls == []
+
+
+# ----------------------------------------------------------------------------- iSmartRecruit
+def _ism_token(raw: str) -> str:
+    return "E7p" + base64.b64encode(raw.encode()).decode() + "Q9e"
+
+
+def _ism_card(raw, title, loc):
+    return ('<div class="jobListing_Data_in"><a href="https://app.ismartrecruit.com/jobDescription?x=%s&amp;view=grid" target="_blank" class="jobListing_Data">'
+            '<div class="ui-panel"><div class="ui-panel-titlebar"><span class="ui-panel-title">%s</span></div><div class="ui-panel-content">'
+            '<table class="ui-panelgrid"><tbody><tr><td class="ui-panelgrid-cell">%s</td></tr></tbody></table></div></div></a></div>') % (_ism_token(raw), title, loc)
+
+
+def test_ismartrecruit_listing_url_wraps_the_board_like_the_widget():
+    http = _stub({"openJobWebsite": (200, "<html></html>")})
+    _run("ismartrecruit", {"name": "CA", "token": "example.com_notarealcode"}, http)
+    assert http.calls[0][0] == ("https://app.ismartrecruit.com/openJobWebsite?tenantId=E7pZXhhbXBsZS5jb21fbm90YXJlYWxjb2RlQ9e&view=grid&col=2&lang=en")
+
+
+def test_ismartrecruit_happy_path():
+    listing = _ism_card("caglobalint.com_14208623_W_en", "On-Site Mining Engineer &#8211; Namibia", "Namibia") + _ism_card("caglobalint.com_14208625_W_en", "Specialist Advisor", "Namibia")
+    listing += '<a class="jobListing_Data" href="https://app.ismartrecruit.com/jobDescription?x=notatoken">bad</a>'
+    detail = '<html><head><meta property="og:title" content="t" /><meta property="og:description" content="&lt;p&gt;Reference 083&lt;/p&gt;&lt;script&gt;e()&lt;/script&gt;" /></head></html>'
+    http = _stub({"jobDescription": (200, detail), "openJobWebsite": (200, listing)})
+    jobs, stats = _run("ismartrecruit", {"name": "CA Global", "token": "example.com_notarealcode"}, http)
+    _check_shape(jobs)
+    assert stats["jobs"] == 2
+    a = jobs[0]
+    assert a["title"] == "On-Site Mining Engineer – Namibia" and a["location"] == "Namibia" and a["extra"]["id"] == "14208623"
+    assert "Reference 083" in a["description"] and "e()" not in a["description"]
+    assert a["url"].startswith("https://app.ismartrecruit.com/jobDescription?x=E7p")
+
+
+def test_ismartrecruit_failed_detail_keeps_the_card_and_errors():
+    listing = _ism_card("caglobalint.com_7_W_en", "Role", "Lagos")
+    jobs, _ = _run("ismartrecruit", {"name": "CA", "token": "caglobalint.com_x"}, _stub({"jobDescription": (500, None), "openJobWebsite": (200, listing)}))
+    assert len(jobs) == 1 and jobs[0]["description"] == ""
+    assert _run("ismartrecruit", {"name": "CA", "token": "caglobalint.com_x"}, _stub({"openJobWebsite": (200, "<div></div>")}))[0] == []
+    assert _run("ismartrecruit", {"name": "CA", "token": "caglobalint.com_x"}, _stub({"openJobWebsite": (429, None)}))[1].get("ok", 0) == 0
+    assert _run("ismartrecruit", {"name": "CA", "token": "bad token!"}, _stub({}))[0] == []
+
+
+# ----------------------------------------------------------------------------- Loxo
+def _loxo_detail(title="Frontend Engineer (React + TypeScript)", location="Remote, US", desc="<p>Build UIs.</p><script>x()</script>"):
+    return ('<html><head><title>%s | FitNext Co.</title><meta content="%s" property="og:title">'
+            '<meta content="%sLocation: %sSalary: $100k" property="og:description"></head><body>'
+            '<script type="application/json" id="public-job-description-json">%s</script></body></html>') % (
+        title, title, title, location, json.dumps({"description": desc}).replace("<", "\\u003c"))
+
+
+LOXO_TOKEN = base64.b64encode(b"42474-7tse3ikc642yzj0v").decode()
+
+
+def test_loxo_happy_path(monkeypatch):
+    naps: list[float] = []
+    monkeypatch.setattr(m1, "_sleep", naps.append)
+    listing = '<a href="/job/%s">Frontend</a><a href="/job/%s?t=1">dup</a><a href="/careers-in-nonprofits">x</a>' % (LOXO_TOKEN, LOXO_TOKEN)
+    http = _stub({"/job/": (200, _loxo_detail()), "fitnext.app.loxo.co/fitnext": (200, listing)})
+    jobs, stats = _run("loxo", {"name": "FitNext Co.", "token": "fitnext.app.loxo.co/fitnext"}, http)
+    _check_shape(jobs)
+    assert len(jobs) == 1 and stats["jobs"] == 1 and naps == []  # dedicated subdomain: no throttle
+    j = jobs[0]
+    assert j["url"] == "https://fitnext.app.loxo.co/job/" + LOXO_TOKEN and j["extra"]["id"] == "42474-7tse3ikc642yzj0v"
+    assert j["title"] == "Frontend Engineer (React + TypeScript)" and j["location"] == "Remote, US" and j["remote"] is True
+    assert "Build UIs" in j["description"] and "x()" not in j["description"] and j["company"] == "FitNext Co."
+
+
+def test_loxo_shared_host_is_throttled_and_hub_splits_client(monkeypatch):
+    naps: list[float] = []
+    monkeypatch.setattr(m1, "_sleep", naps.append)
+    listing = '<a href="/job/%s">x</a>' % LOXO_TOKEN
+    detail = _loxo_detail(title="Platform Engineer — Acme Corp")
+    http = _stub({"/job/": (200, detail), "app.loxo.co/agile": (200, listing)})
+    jobs, _ = _run("loxo", {"name": "Agile Recruiter", "token": "app.loxo.co/agile", "hub": True}, http)
+    assert naps == [m1.LOXO_SHARED_HOST_GAP] and jobs[0]["company"] == "Acme Corp" and jobs[0]["title"] == "Platform Engineer"
+    jobs, _ = _run("loxo", {"name": "Agile Recruiter", "token": "app.loxo.co/agile"}, http)
+    assert jobs[0]["company"] == "Agile Recruiter" and jobs[0]["title"].endswith("Acme Corp")  # hub only when asked
+
+
+def test_loxo_empty_nonok_garbage():
+    assert _run("loxo", {"name": "A", "token": "app.loxo.co/a"}, _stub({"loxo.co/a": (200, "<html></html>")}))[0] == []
+    assert _run("loxo", {"name": "A", "token": "app.loxo.co/a"}, _stub({"loxo.co/a": (404, None)}))[1].get("ok", 0) == 0
+    listing = '<a href="/job/%s">x</a>' % LOXO_TOKEN
+    assert _run("loxo", {"name": "A", "token": "pod4.app.loxo.co/a"}, _stub({"/job/": (500, None), "loxo.co/a": (200, listing)}))[0] == []
+    assert _run("loxo", {"name": "A", "token": "pod4.app.loxo.co/a"}, _stub({"/job/": (200, "<html><body>nothing</body></html>"), "loxo.co/a": (200, listing)}))[0] == []
+    assert _run("loxo", {"name": "A", "token": "no-slash"}, _stub({}))[0] == []
+
+
+# ----------------------------------------------------------------------------- Mindsight
+def _next(obj):
+    return '<html><body><script id="__NEXT_DATA__" type="application/json">%s</script></body></html>' % json.dumps(obj)
+
+
+def test_mindsight_happy_path_drops_closed_posts():
+    listing = _next({"props": {"pageProps": {"publicJobPostings": [
+        {"id": 16, "name": "  Backend Engineer  ", "status": "IN_PROGRESS", "work_model": "REMOTE", "country": "BR", "state": "SP", "city": "Rio Claro",
+         "external_publication_start_at": "2026-06-16T00:00:00Z", "created_at": "2026-06-10T00:00:00Z"},
+        {"id": 99, "name": "Closed", "status": "FINISHED", "work_model": "IN_PERSON", "country": "BR", "state": "SP", "city": "Sao Paulo"},
+        {"name": "No id", "status": "IN_PROGRESS"}]}}})
+    detail = _next({"props": {"pageProps": {"jobPosting": {"id": 16, "description": "<p>Build APIs</p><script>evil()</script>"}}}})
+    http = _stub({"/grupomngt/16": (200, detail), "/grupomngt": (200, listing)})
+    jobs, stats = _run("mindsight", {"name": "Grupo MNGT", "token": "grupomngt"}, http)
+    _check_shape(jobs)
+    assert len(jobs) == 1 and stats["jobs"] == 1
+    j = jobs[0]
+    assert j["url"] == "https://oportunidades.mindsight.com.br/grupomngt/16" and j["title"] == "Backend Engineer"
+    assert j["location"] == "Rio Claro, SP, BR" and j["remote"] is True and j["posted"] == "2026-06-16"
+    assert "Build APIs" in j["description"] and "evil" not in j["description"] and j["extra"]["work_mode"] == "remote"
+
+
+def test_mindsight_future_start_is_not_special_cased_but_failed_detail_keeps_job():
+    listing = _next({"props": {"pageProps": {"publicJobPostings": [{"id": 7, "name": "Role", "work_model": "HYBRID", "city": "Sao Paulo", "created_at": "2026-06-10T00:00:00Z"}]}}})
+    jobs, _ = _run("mindsight", {"name": "A", "token": "acme"}, _stub({"/acme/7": (500, None), "/acme": (200, listing)}))
+    assert len(jobs) == 1 and jobs[0]["description"] == "" and jobs[0]["posted"] == "2026-06-10" and jobs[0]["remote"] is None
+
+
+def test_mindsight_empty_nonok_garbage():
+    assert _run("mindsight", {"name": "A", "token": "acme"}, _stub({"/acme": (200, _next({"props": {"pageProps": {"publicJobPostings": []}}}))}))[0] == []
+    assert _run("mindsight", {"name": "A", "token": "acme"}, _stub({"/acme": (404, None)}))[1].get("ok", 0) == 0
+    assert _run("mindsight", {"name": "A", "token": "acme"}, _stub({"/acme": (200, "<html>no data</html>")}))[1].get("ok", 0) == 0
+    assert _run("mindsight", {"name": "A", "token": "acme"}, _stub({"/acme": (200, '<script id="__NEXT_DATA__">{broken')}))[1].get("ok", 0) == 0
+    assert _run("mindsight", {"name": "A", "token": "a/../b"}, _stub({}))[0] == []
+
+
 # ----------------------------------------------------------------------------- all readers
 @pytest.mark.parametrize("name", ALL)
 def test_every_reader_never_raises_on_garbage_and_http_exceptions(name):
-    row = {"name": "X", "token": {"crelate": CRELATE_BOARD}.get(name, "x")}
+    row = {"name": "X", "token": {"crelate": CRELATE_BOARD, "erecruiter": CFG, "loxo": "app.loxo.co/x", "ismartrecruit": "xxx"}.get(name, "x")}
     for payload in (None, 5, [], {}, "<<>>", "\x00�", {"Jobs": 1}):
         jobs, stats = _run(name, row, lambda url, p=payload, **kw: (200, p))
         assert isinstance(jobs, list) and stats["tried"] == 1
@@ -233,7 +502,7 @@ def test_every_reader_never_raises_on_garbage_and_http_exceptions(name):
 @pytest.mark.parametrize("name", ALL)
 def test_registered_and_first_non200_stops_after_one_request(name):
     assert name in F
-    row = {"name": "X", "token": {"crelate": CRELATE_BOARD}.get(name, "x")}
+    row = {"name": "X", "token": {"crelate": CRELATE_BOARD, "erecruiter": CFG, "loxo": "app.loxo.co/x", "ismartrecruit": "xxx"}.get(name, "x")}
     http = _stub({"": (503, None)})
     assert _run(name, row, http)[0] == [] and len(http.calls) == 1
 
@@ -259,6 +528,16 @@ def test_catsone_never_fetches_or_emits_off_host_links():
     jobs, _ = _run("catsone", {"name": "G", "token": "good.catsone.com"}, http)
     assert [j["url"] for j in jobs] == ["https://good.catsone.com/careers/90438/jobs/16831828-sdr"]
     assert not any("evil" in c[0] or c[0].startswith("http://") for c in http.calls)
+
+
+def test_loxo_never_fetches_or_emits_off_host_links(monkeypatch):
+    monkeypatch.setattr(m1, "_sleep", lambda s: None)
+    listing = ('<a href="https://evil.example/job/%s">x</a><a href="//evil2.example/job/%s">y</a><a href="/job/%s">ok</a>'
+               % (LOXO_TOKEN, LOXO_TOKEN, LOXO_TOKEN))
+    http = _stub({"/job/": (200, _loxo_detail()), "fitnext.app.loxo.co/fitnext": (200, listing)})
+    jobs, _ = _run("loxo", {"name": "F", "token": "fitnext.app.loxo.co/fitnext"}, http)
+    assert [j["url"] for j in jobs] == ["https://fitnext.app.loxo.co/job/" + LOXO_TOKEN]
+    assert not any("evil" in c[0] for c in http.calls)
 
 
 def test_clinch_never_fetches_or_emits_off_host_or_non_https_locs():
@@ -373,3 +652,18 @@ def test_catsone_malformed_href_keeps_the_good_job():
     http = _stub({"/jobs/16831828": (200, CATS_DETAIL), "good.catsone.com/careers": (200, listing)})
     jobs, stats = _run("catsone", {"name": "G", "token": "good.catsone.com"}, http)
     assert [j["url"] for j in jobs] == ["https://good.catsone.com/careers/90438/jobs/16831828-sdr"] and stats["ok"] == 1
+
+
+def test_gr8people_odd_nested_field_shapes_cost_only_that_field():
+    bad = {"key": "7", "title": "Odd", "descriptionHTML": "", "positionType": "Full Time", "primaryPlace": ["x"], "places": ["a"]}
+    good = {"key": "8", "title": "Fine", "descriptionHTML": "", "positionType": {"name": "Full Time"}, "primaryPlace": {"name": "NYC"}, "places": {"nodes": []}}
+    http = _stub({"/graphql": (200, _gr8_page([bad, good])), "t.gr8people.com/jobs": (200, HOME)})
+    jobs, stats = _run("gr8people", {"name": "T", "token": "t.gr8people.com"}, http)
+    assert [j["title"] for j in jobs] == ["Odd", "Fine"] and stats.get("ok") == 1
+
+
+def test_hrmanager_out_of_range_date_costs_only_that_date():
+    far = dict(HRM_ITEM, Id=3, Published="/Date(253402300800000)/", Created="/Date(253402300800000)/")
+    http = _stub({"positionlist": (200, _hrm([HRM_ITEM, far]))})
+    jobs, stats = _run("hrmanager", {"name": "E", "token": "energinet"}, http)
+    assert len(jobs) == 2 and stats.get("ok") == 1 and jobs[1]["posted"] == ""
