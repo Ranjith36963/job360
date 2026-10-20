@@ -803,6 +803,7 @@ async def _kind(loc: Any) -> str:
     return control_kind(
         facts.get("tag", ""), facts.get("type", ""), facts.get("name", ""), facts.get("autocomplete", ""),
         bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
+        bool(facts.get("owns_form")), bool(facts.get("toggle")),
     )
 
 
