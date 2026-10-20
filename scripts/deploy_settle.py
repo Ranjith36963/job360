@@ -378,7 +378,7 @@ def git_worlds() -> list[tuple[str, bool]]:
            "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"]
 
     def git(cwd: str, *args: str) -> str:
-        return subprocess.run(["git", *cfg, *args], cwd=cwd, capture_output=True, text=True,
+        return subprocess.run(["git", *cfg, *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                               check=True, timeout=60).stdout.strip()
 
     with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
