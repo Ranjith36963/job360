@@ -356,3 +356,20 @@ def test_ld_posting_is_linear_on_a_huge_array_and_keeps_document_order():
     first = m1._parse('<script type="application/ld+json">' + json.dumps(
         [{"@graph": [{"@type": "JobPosting", "title": "A"}]}, {"@type": "JobPosting", "title": "B"}]) + "</script>")
     assert m1._ld_posting(first)["title"] == "A"
+
+
+# ----------------------------------------------------------------------------- one malformed href never loses the board
+def test_betterteam_malformed_href_keeps_the_good_job():
+    listing = '<a href="/eng-1">ok</a><a href="http://[bad/x-2">bad</a>'
+    http = _stub({"/eng-1": (200, _bt_detail("Engineer", "d", "2026-06-09T15:07:41Z", "Leeds", "GB")),
+                  "bt.betterteam.com": (200, listing)})
+    jobs, stats = _run("betterteam", {"name": "BT", "token": "bt"}, http)
+    assert [j["url"] for j in jobs] == ["https://bt.betterteam.com/eng-1"] and stats["ok"] == 1
+
+
+def test_catsone_malformed_href_keeps_the_good_job():
+    bad = '<a class="table-row" href="https://[x/careers/1/jobs/6"><div class="title-cell">Bad</div></a>'
+    listing = _cats_listing(("16831828-sdr", "Ok", "Kyiv")) + bad
+    http = _stub({"/jobs/16831828": (200, CATS_DETAIL), "good.catsone.com/careers": (200, listing)})
+    jobs, stats = _run("catsone", {"name": "G", "token": "good.catsone.com"}, http)
+    assert [j["url"] for j in jobs] == ["https://good.catsone.com/careers/90438/jobs/16831828-sdr"] and stats["ok"] == 1

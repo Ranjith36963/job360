@@ -298,10 +298,13 @@ def _betterteam(row: dict[str, Any], http: Http) -> list[Job] | None:
         href = a.attrs.get("href") if a.tag == "a" else ""
         if not href:
             continue
-        path = urlsplit(href).path
-        path = path if path.startswith("/") else "/" + path
-        m = _BT_ID.match(path)
-        url = urljoin(base, href)
+        try:  # one malformed href must not lose the board
+            path = urlsplit(href).path
+            path = path if path.startswith("/") else "/" + path
+            m = _BT_ID.match(path)
+            url = urljoin(base, href)
+        except ValueError:
+            continue
         if not m or url in seen or not _on_host(url, f"{board}.betterteam.com"):
             continue
         seen.add(url)
@@ -357,7 +360,10 @@ def _catsone(row: dict[str, Any], http: Http) -> list[Job] | None:
         m = _CATS_ID.search(href)
         if not m:
             continue
-        url = urljoin(base, href)
+        try:  # one malformed href must not lose the board
+            url = urljoin(base, href)
+        except ValueError:
+            continue
         if url in seen or not _on_host(url, board):
             continue
         seen.add(url)
