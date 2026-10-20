@@ -96,7 +96,7 @@ export default function TrustPage() {
             Job360 records your screen only if you turn on &ldquo;Help improve
             Job360&rdquo; in Settings. It is off by default. The recordings are
             masked: all text and media on screen are hidden. When on, Sentry
-            session replay records 10% of your sessions, and every session
+            session replay records 10% of sessions, and every session
             that hits an error, to help us fix problems.
           </p>
         </section>
