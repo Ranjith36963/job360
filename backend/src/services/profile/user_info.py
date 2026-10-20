@@ -4,7 +4,8 @@ Owner decision 2026-10-08, THREE STORES. Six memory paths under the
 ``user_info.*`` head (their own ``user_profiles.user_info`` column, written by
 ``storage.save_user_info``, overlaid by ``profile_edits`` rows) plus one normal
 preference, ``preferences.salary_by_country``. Every write REPLACES the whole
-value (like ``cv_data.cv_positions``). Rules, all seven:
+value (like ``cv_data.cv_positions``); an item op is resolved to that whole value
+first (``edits.resolve_ops``, gap 4). Rules, all seven:
 
 * an empty answer (``""`` / ``null`` / ``[]``) is DROPPED — a missing key means
   "not answered" (rule #29), never a default we invent; ``false`` is a real
@@ -476,11 +477,12 @@ def _coerce_rtw(path: str, raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _check_record_count(path: str, value: list[Any]) -> None:
-    if len(value) > settings.PROFILE_EDIT_MAX_RECORDS:
-        raise _fail(
-            f"{path} exceeds the {settings.PROFILE_EDIT_MAX_RECORDS}-record limit "
-            "(PROFILE_EDIT_MAX_RECORDS)"
-        )
+    # Saved answers have their own, larger cap (gap 4); every other list keeps the generic one.
+    answers = path == USER_INFO_ANSWERS_PATH
+    cap = settings.USER_INFO_ANSWERS_MAX_RECORDS if answers else settings.PROFILE_EDIT_MAX_RECORDS
+    if len(value) > cap:
+        setting = "USER_INFO_ANSWERS_MAX_RECORDS" if answers else "PROFILE_EDIT_MAX_RECORDS"
+        raise _fail(f"{path} exceeds the {cap}-record limit ({setting})")
 
 
 def _record_list(
@@ -640,12 +642,35 @@ def _one_per_topic(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     last: dict[tuple[str, str], int] = {}
     for i, rec in enumerate(records):
         if rec.get("topic"):
-            last[(rec["topic"], " ".join(str(rec.get("company") or "").lower().split()))] = i
+            last[(rec["topic"], _company_key(rec))] = i
     return [
         rec for i, rec in enumerate(records)
-        if not rec.get("topic")
-        or last[(rec["topic"], " ".join(str(rec.get("company") or "").lower().split()))] == i
+        if not rec.get("topic") or last[(rec["topic"], _company_key(rec))] == i
     ]
+
+
+def _company_key(rec: dict[str, Any]) -> str:
+    return " ".join(str(rec.get("company") or "").lower().split())
+
+
+def answer_upsert_index(records: list[Any], new: Any) -> int | None:
+    """Where an ``upsert`` edit puts ``new`` in the saved answers (gap 4): the record with the
+    same ``topic`` and company (:func:`_one_per_topic`'s rule), else the one with the same
+    question (case/space-insensitive) and company. ``None`` = no match, append it."""
+    if not isinstance(new, dict):
+        return None
+    company = _company_key(new)
+    same = [i for i, rec in enumerate(records) if isinstance(rec, dict) and _company_key(rec) == company]
+    topic = new.get("topic")
+    for i in same if isinstance(topic, str) and topic else ():
+        if records[i].get("topic") == topic:
+            return i
+    question = new.get("question")
+    wanted = " ".join(_strip_control(question).lower().split()) if isinstance(question, str) else ""
+    for i in same if wanted else ():
+        if " ".join(str(records[i].get("question") or "").lower().split()) == wanted:
+            return i
+    return None
 
 
 def validate_country_list(path: str, value: Any) -> list[str]:
