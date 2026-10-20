@@ -1385,7 +1385,13 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
             if base_ref != MAIN_BRANCH and name in MAIN_ONLY_CHECKS:
                 continue
             run = by_name.get(name)
-            if run is None:
+            if run is None and any(r.get("status") != "completed" for r in runs):
+                # Not posted yet while other checks still run (2026-10-20, #1029:
+                # judged at 21:40, `Backend (Python 3.12)` passed at 21:51). A wait.
+                reasons.append(
+                    f"tag `{tag}` needs `{name}`, which has not started yet — other checks on "
+                    f"this commit are still running. FIX: wait; the next run re-judges.")
+            elif run is None:
                 reasons.append(
                     f"tag `{tag}` needs `{name}` and that check never ran on this PR. A tag "
                     f"cannot be earned by absence. FIX: rebase onto main so the workflow "
@@ -3277,6 +3283,19 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        bool(judge_tags(_prod_req, _verify_skipped)),
        "a skipped job was allowed to prove something — a skip proves nothing, "
        "which is the entire point of a tag", T)
+
+    # #1029 (2026-10-20): the cage judged before `Backend (Python 3.12)` was posted
+    # and called it "never ran" -- a red on a PR whose every check later passed.
+    _ci_early = [r for r in _full if r["name"] != TAG_CHECKS["ci"][0]] + \
+        [{"name": "offline-suite-still-going", "status": "in_progress", "conclusion": None}]
+    _early_tags = judge_tags(_prod_req, _ci_early)
+    ok("a tag check not posted yet while others still run is a WAIT, not 'never ran'",
+       bool(_early_tags) and all(any(m in r for m in _WAIT_MARKERS) for r in _early_tags),
+       f"got {_early_tags}", T)
+    _ci_gone = [r for r in _full if r["name"] != TAG_CHECKS["ci"][0]]
+    ok("...but a tag check absent after everything finished still says it never ran",
+       any("never ran" in r for r in judge_tags(_prod_req, _ci_gone)),
+       f"got {judge_tags(_prod_req, _ci_gone)}", T)
 
     _verify_pending = [r for r in _full if not r["name"].startswith("verify")] + \
         [{"name": TAG_CHECKS["verify"][0], "status": "in_progress", "conclusion": None}]
