@@ -135,7 +135,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   - One assistant session at a time per browser: a call with another `session` label gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
   - A frame that never answers is skipped after 3 s, and one action is stopped after 60 s (`error`, `timeout`), so a hung page never holds the browser.
 - **Playbooks:** the `batch` recipe gets a "which browser" line (your own browser first, Job360's when you have none or the user is away); the `forms` recipe points to the tool.
-- **Tests:** `backend/tests/test_browser_agent.py` and the `test_browser_*` files beside it. The safety rules and the off switch always run; the real-Chromium runs run where Playwright + Chromium are installed and skip otherwise (CI).
+- **Tests:** `backend/tests/test_browser_agent.py` and the `test_browser_*` files beside it. The safety rules and the off switch always run; the real-Chromium runs run where Playwright + Chromium are installed and skip otherwise. CI's offline-suite installs both (since 2026-10-20), so they run on every PR, and the skip ratchet (`scripts/test_integrity.py`) is red if they ever skip there.
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.
 
 **Slice 2 (built 2026-10-19, off by default): sign in once.**
@@ -312,4 +312,3 @@ sends every job still waiting on your yes. Each start gets its own session label
 - How many real career sites work from our cloud browser? Slice 4 measures it, from production.
 - Send starting a cloud routine is built (#913); not yet confirmed: a real routine run started from Send on production.
 - Hosting cost per active user: not yet confirmed.
-- Backend CI installs only `.[dev]` (no Python Playwright), so the real-browser tests skip there; adding it edits `ci.yml` / `ci-offline.yml` (owner-lane).
