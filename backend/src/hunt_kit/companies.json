@@ -6305,5 +6305,19 @@
 {"name":"Headway Group","ats":"zohorecruit","board":"headwayms","source":"gulf-research","country":"AE"},
 {"name":"Nationwide Middle East Properties","ats":"zohorecruit","board":"nwmea","source":"gulf-research","country":"AE"},
 {"name":"Premier Inn Middle East","ats":"zohorecruit","board":"global","source":"gulf-research","country":"AE"},
-{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"}
+{"name":"Shorooq Partners","ats":"zohorecruit","board":"shorooq","source":"gulf-research","country":"AE"},
+{"name":"110 Grill","ats":"betterteam","board":"110grill","source":"freehire"},
+{"name":"Sphere","ats":"catsone","board":"sphereinc.catsone.com","source":"freehire"},
+{"name":"Waymo","ats":"clinch","board":"careers.withwaymo.com","source":"freehire"},
+{"name":"Career Tree Network","ats":"crelate","board":"careertree:ec546cba-84d5-4d8a-97e5-52e8ef47db08","source":"freehire"},
+{"name":"Electronic Arts","ats":"avature","board":"jobs.ea.com","source":"freehire"},
+{"name":"Koch","ats":"avature","board":"koch.avature.net","source":"freehire"},
+{"name":"Deloitte","ats":"avature","board":"deloittecm.avature.net","source":"freehire"},
+{"name":"Avature","ats":"avature","board":"careers.avature.net","source":"career-ops"},
+{"name":"Siemens","ats":"avature","board":"jobs.siemens.com","source":"career-ops"},
+{"name":"Overwolf","ats":"comeet","board":"overwolf/B1.001","source":"freehire"},
+{"name":"Capslock","ats":"comeet","board":"capslock/59.001","source":"freehire"},
+{"name":"Spark Hire","ats":"comeet","board":"spark-hire/30.005","source":"career-ops"},
+{"name":"Qogita","ats":"hibob","board":"qogita","source":"freehire"},
+{"name":"Unique","ats":"hibob","board":"unique","source":"freehire"}
 ]
