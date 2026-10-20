@@ -766,15 +766,16 @@ def _load_size() -> tuple[int, int, frozenset[str]]:
 MAX_CHANGED_FILES, MAX_CHANGED_LINES, GENERATED_FILES = _load_size()
 
 
-def _load_data_cap() -> tuple[int, tuple[str, ...]]:
-    """(max_data_lines, data_extensions) from `size:`. Absent means no wider cap
-    for data (it counts as code, as before); present but malformed refuses."""
+def _load_data_cap() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
+    """(max_data_lines, data_extensions, data_paths) from `size:`. Absent means no
+    wider cap for data (it counts as code, as before); present but malformed refuses."""
     import yaml
 
     size = (yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8")) or {}).get("size") or {}
     if "max_data_lines" not in size:
-        return MAX_CHANGED_LINES, ()
+        return MAX_CHANGED_LINES, (), ()
     exts = size.get("data_extensions") or []
+    paths = size.get("data_paths") or []
     try:
         cap = int(size["max_data_lines"])
     except (TypeError, ValueError) as exc:
@@ -783,10 +784,15 @@ def _load_data_cap() -> tuple[int, tuple[str, ...]]:
             isinstance(e, str) and e.startswith(".") for e in exts):
         raise SystemExit("merge_cage: `size.max_data_lines` must be >= max_lines and "
                          "`size.data_extensions` a list like ['.json'].")
-    return cap, tuple(e.lower() for e in exts)
+    if not isinstance(paths, list) or not all(
+            isinstance(x, str) and x.endswith("/") and "*" not in x and not x.startswith("/")
+            for x in paths):
+        raise SystemExit("merge_cage: `size.data_paths` must be folder prefixes ending in '/', "
+                         "no globs: a pattern is a bypass waiting for a file.")
+    return cap, tuple(e.lower() for e in exts), tuple(paths)
 
 
-MAX_DATA_LINES, DATA_EXTENSIONS = _load_data_cap()
+MAX_DATA_LINES, DATA_EXTENSIONS, DATA_PATHS = _load_data_cap()
 _LOCKFILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "uv.lock")
 
 # The commit status the arm posts, and the check run the CI workflows add to wake
@@ -1053,13 +1059,16 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
 def data_lines(files_json: list[dict]) -> int:
     """How many of the counted lines are DATA (owner, 2026-10-20). Pure.
 
-    Data: a data extension, not under `.github/`, not a lockfile, and not already
-    exempt as a fixture or generated file (those are not counted at all)."""
+    Data: a data extension AND a path under `size.data_paths`, not under `.github/`,
+    not a lockfile, and not already exempt as a fixture or generated file (those are
+    not counted at all). The path rule is why `package.json` or `requirements.txt`
+    can never ride the wider cap."""
     n = 0
     for f in files_json:
         name = str(f.get("filename", ""))
         low = name.lower()
         if (not DATA_EXTENSIONS or not low.endswith(DATA_EXTENSIONS)
+                or not name.startswith(DATA_PATHS)
                 or name.startswith(".github/") or low.rsplit("/", 1)[-1] in _LOCKFILES
                 or name in GENERATED_FILES
                 or ((_FIXTURE_DIR in f"/{name}") and low.endswith(_RECORDED_EXT))):
@@ -3097,8 +3106,14 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        "the data cap had no ceiling", ["check_size"])
     _not_data = [{"filename": ".github/workflows/x.yml", "additions": 500, "deletions": 0},
                  {"filename": "frontend/package-lock.json", "additions": 500, "deletions": 0},
-                 {"filename": "backend/src/x.py", "additions": 500, "deletions": 0}]
-    ok("a workflow, a lockfile and a .py are never data",
+                 {"filename": "backend/src/x.py", "additions": 500, "deletions": 0},
+                 # reviewer-security P2 on #1014: data extension, but NOT in a data folder
+                 {"filename": "frontend/package.json", "additions": 500, "deletions": 0},
+                 {"filename": "backend/requirements.txt", "additions": 500, "deletions": 0},
+                 {"filename": "docker-compose.prod.yml", "additions": 500, "deletions": 0},
+                 # a data folder name inside another path does not count: prefix only
+                 {"filename": "frontend/backend/data/x.json", "additions": 500, "deletions": 0}]
+    ok("a workflow, a lockfile, a .py, package.json, requirements.txt and a compose file are never data",
        data_lines(_not_data) == 0, f"got {data_lines(_not_data)}", ["data_lines"])
 
     ok("the discount is SAID OUT LOUD, never silent",
