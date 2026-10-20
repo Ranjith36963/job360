@@ -786,6 +786,10 @@ REQUIRED_CHECKS = [
     "Frontend (Node 20)",
     "Chain wires (harness)",
     "CodeQL",
+    # 2026-10-20: ci.yml `test-integrity` (scripts/test_integrity.py) is red when
+    # a PR adds a skip / xfail / .only, removes a test, or edits test config. A
+    # machine may not merge that; it is NOT in the ruleset, so the owner can.
+    "test-integrity",
 ]
 
 # Checks that STRUCTURALLY CANNOT EXIST on a PR whose base is not `main`.
@@ -1241,7 +1245,7 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
                  "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL",
                  "reviewer-security"),
     # The eyes, AND the two ci-offline.yml jobs they defer to. Since 2026-10-19
-    # (CI audit) `verify / backend` and `verify / frontend` do not re-run Q1-Q4
+    # (CI audit) `verify / backend` and `verify / frontend` do not re-run Q1-Q3
     # or Playwright when ci_scope.py says offline-suite / frontend-e2e already
     # run them on this same tree; they record that instead. Naming those two
     # here keeps `verify` self-contained: it is never earned by a deferral to
@@ -3057,6 +3061,20 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("...and a skipped OPTIONAL check with a similar name still does not block",
        not judge_check_runs(_rs(_opt_skip), len(_opt_skip)),
        "an optional skip was mistaken for a required one", ["judge_check_runs"])
+
+    # B23 — TEST INTEGRITY (2026-10-20). A PR that switched a test off, deleted
+    #       one or edited test config is red on `test-integrity`; a machine may
+    #       not merge it, and an ABSENT one (a branch from before the job) is
+    #       refused too -- the guard cannot pass by not running.
+    _ti_red = [p for p in _all_req if p[0] != "test-integrity"] + [("test-integrity", "failure")]
+    ok("a failed `test-integrity` (a skipped / deleted test) blocks a machine merge",
+       any("test-integrity" in r for r in judge_check_runs(_rs(_ti_red), len(_ti_red))),
+       "a PR that weakened its own tests was machine-mergeable", ["judge_check_runs"])
+    _ti_gone = [p for p in _all_req if p[0] != "test-integrity"]
+    ok("...and a MISSING `test-integrity` blocks too",
+       any("`test-integrity` did not run" in r
+           for r in judge_check_runs(_rs(_ti_gone), len(_ti_gone))),
+       "a PR with no test-integrity verdict was machine-mergeable", ["judge_check_runs"])
 
     # ── THE TAGS CAGE ────────────────────────────────────────────────────────
     # The PRODUCT lane requires `verify`, and `verify-live.yml` is NOT one of

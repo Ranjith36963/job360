@@ -495,6 +495,16 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/mcp_text_budget.py", "--drill"],
         negative=[sys.executable, "scripts/mcp_text_budget.py", "--drill", "--break-checker", "LIMIT"],
     ),
+    # ── Test integrity (2026-10-20) ─────────────────────────────────────────
+    # ci.yml `test-integrity` and the offline-suite skip ratchet. The drill
+    # feeds 22 in-memory diffs that must go red (skip / delete / config, plus a
+    # skip over the ratchet baseline) and 12 harmless ones that must stay green.
+    # The negative blinds the SKIP check: the drill must then FAIL.
+    "scripts/test_integrity.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/test_integrity.py", "--drill"],
+        negative=[sys.executable, "scripts/test_integrity.py", "--drill", "--break-checker", "SKIP"],
+    ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/already_built.py": Guard(
         status="owed",

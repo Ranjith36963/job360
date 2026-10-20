@@ -97,6 +97,53 @@ jobs:
           retention-days: 7
           overwrite: true
 
+  # ─── Test integrity: no PR goes green by running fewer tests ──────────────
+  # 2026-10-20. Coding agents judged by a suite learn to skip, delete or
+  # de-configure the failing test (METR 2025-06-05; Anthropic 2025-11-26). Only
+  # pr-repair.yml and issue-fix.yml checked their own agent's diff; an ordinary
+  # PR had nothing. scripts/test_integrity.py reads `git diff base...head` and
+  # names every added skip / xfail / .only / no-cover, every test removed with
+  # no replacement, and every edit to conftest / pytest / vitest / playwright
+  # config. Any finding is red. merge_cage.py requires this check, so a machine
+  # cannot merge it; the owner reads the report and can merge by hand (it is
+  # not in the ruleset).
+  #
+  # The judge is the BASE branch's copy when it has one, so a PR cannot blind
+  # the guard that judges it. No `needs: scope`: a red scope must not skip it.
+  # Steps run only on pull_request; on a push the job reports success at once.
+  test-integrity:
+    name: test-integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0   # base...head needs the merge base
+      - name: No test was skipped, deleted or re-configured
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          judge=scripts/test_integrity.py
+          if git cat-file -e "$BASE_SHA:scripts/test_integrity.py" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/test_integrity.py" > "$RUNNER_TEMP/test_integrity.py"
+            judge="$RUNNER_TEMP/test_integrity.py"
+            echo "judging with the base branch's copy of scripts/test_integrity.py"
+          fi
+          set +e
+          python "$judge" --base "$BASE_SHA" --head "$HEAD_SHA" | tee "$RUNNER_TEMP/integrity.txt"
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### test-integrity"
+            echo '```'
+            awk '!/^::/ && n++ < 80' "$RUNNER_TEMP/integrity.txt"   # one reader, no SIGPIPE
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
     name: Backend (Python 3.12)
@@ -104,37 +151,10 @@ jobs:
     timeout-minutes: 30
     needs: [scope]
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: job360
-          POSTGRES_PASSWORD: job360dev
-          POSTGRES_DB: job360
-        options: >-
-          --health-cmd "pg_isready -U job360 -d job360"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
+    # No Postgres / Redis services (removed 2026-10-20): since pytest moved to
+    # offline-suite this job is ruff + mypy, both static, and the two idle
+    # containers cost ~20 s on every run, docs PRs included (CI audit D2).
     env:
-      # Exported so tests CAN use Postgres once the migration lands.
-      # Existing tests use SQLite via conftest.py fixtures and are unaffected
-      # by this env var being present.
-      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
-      REDIS_URL: redis://localhost:6379
       # Minimal secrets for auth tests (injected by conftest.py too, but set
       # here so any integration smoke-tests that read .env also have them).
       SESSION_SECRET: ci-test-secret-not-used-in-prod
@@ -356,7 +376,7 @@ jobs:
         run: python scripts/review_debt.py --drill
 
       # The guard on the one route that makes outbound requests to a URL a
-      # stranger chose (docs/plans/2026-09-04-url-fetch/spec.md). Ten
+      # stranger chose (backend/src/services/fetch/guard.py). Ten
       # mutations, each a real SSRF bypass, plus a negative control.
       - name: The SSRF guard can still fail
         if: needs.scope.outputs.scope == 'full'
