@@ -128,6 +128,9 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
   - `BROWSER_AGENT_MAX_LIVE` (default 2): the live sign-in views' own cap, so they never take an assistant's browser.
   - Each live browser uses about 300 MB of memory.
+  - An idle browser is closed by a sweep the app runs every 60 s while the switch is on, not only on the next request.
+  - One assistant session at a time per browser: a call with another `session` label gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
+  - A frame that never answers is skipped after 3 s, and one action is stopped after 60 s (`error`, `timeout`), so a hung page never holds the browser.
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
 - **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.
@@ -271,7 +274,9 @@ website calls `POST /api/assistant-trigger/fire` once after Send (or after all o
 assistant with the list of every job whose newest decision is your yes. **One start per click, never one per job**.
 A 60-second cool-down, claimed in the database before the call, means two presses at once start one session. A yes
 given inside that minute is not in the session that just started: the page says so, and **Start now** on the card
-sends every job still waiting on your yes.
+sends every job still waiting on your yes. Each start names its own session label (`send-` and 8 random hex
+characters) for the kit, `check_submit` and every browser call, so a second start never shares the first one's
+browser or kit hold.
 - **Claude routine (recommended, PC off):** make a routine on claude.ai/code/routines with the Job360 connector and
   the instructions the card gives you; add an **API trigger**, copy its URL and token into the card. Job360 calls
   `POST https://api.anthropic.com/v1/claude_code/routines/<trig_id>/fire` (`anthropic-version: 2023-06-01`,
