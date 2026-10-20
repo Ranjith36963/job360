@@ -13,16 +13,28 @@
 #     week and always fail CI). These are DEV-TOOLING only (not shipped runtime),
 #     so ignoring them carries no security downside. Take them deliberately by
 #     deleting the ignore line when the toolchain catches up.
-#   - aiohttp is a RUNTIME lib → never ignore the whole dep; pin only the exact
-#     broken range (>=3.14 breaks aioresponses in tests — see backend/pyproject.toml).
+#
+# Cooldown (2026-10-20): a version is not proposed until it has been public for
+# 7 days (14 for a major), so a hijacked release that is caught and yanked
+# within a week never reaches a PR. Security updates ignore cooldown.
 version: 2
 updates:
-  # Backend — Python deps declared in backend/pyproject.toml
+  # Backend — Python deps declared in backend/pyproject.toml, installed from the
+  # hashed locks backend/requirements*.lock.txt (2026-10-20). Dependabot reads
+  # only `requirements*.txt` / `*.in` files (dependabot-core
+  # python/shared_file_fetcher.rb), hence the `.lock.txt` names. With no `.in`
+  # file it edits each pin in place and rewrites that pin's hashes in every
+  # lock that names it; scripts/check_py_lock.py and the hashed install in CI
+  # turn a bump the other pins cannot satisfy red, and the fix is
+  # `python3.12 scripts/lock_deps.py` on the PR branch.
   - package-ecosystem: "pip"
     directory: "/backend"
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
     open-pull-requests-limit: 5
     groups:
       pip-minor-and-patch:
@@ -32,12 +44,9 @@ updates:
       pip-major:
         update-types:
           - "major"
-    ignore:
-      # aiohttp 3.14 requires a stream_writer kwarg that aioresponses 0.7.8
-      # doesn't pass → every mocked-HTTP test fails. Lift when aioresponses
-      # supports 3.14+. (PR #59 held for this reason.)
-      - dependency-name: "aiohttp"
-        versions: [">=3.14"]
+    # The aiohttp `>=3.14` ignore is GONE (2026-10-20): pyproject requires
+    # >=3.14.1 since the test-only shim in backend/tests/conftest.py, so the
+    # ignore had come to mean "never bump the aiohttp the locks ship".
     commit-message:
       prefix: "chore(deps)"
 
@@ -47,6 +56,9 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
     open-pull-requests-limit: 5
     groups:
       npm-minor-and-patch:
@@ -86,6 +98,8 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     groups:
       actions-all:
