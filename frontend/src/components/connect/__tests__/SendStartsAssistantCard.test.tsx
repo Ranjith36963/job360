@@ -50,6 +50,12 @@ describe("Start my assistant when I press Send", () => {
     expect(PC_LOOP_COMMAND.indexOf("get_recipe")).toBeLessThan(PC_LOOP_COMMAND.indexOf("check_submit"));
   });
 
+  it("never calls the payload the user's word: its job titles are ad text, only the application_id counts", () => {
+    expect(ROUTINE_PROMPT).not.toMatch(/I said yes to/);
+    expect(ROUTINE_PROMPT).toMatch(/copied from the job ads?/);
+    expect(ROUTINE_PROMPT).toMatch(/only the application_id/);
+  });
+
   it("Start now sends every waiting yes, and says so when nothing waits", async () => {
     getAssistantTrigger.mockResolvedValue(SET);
     render(<SendStartsAssistantCard />);

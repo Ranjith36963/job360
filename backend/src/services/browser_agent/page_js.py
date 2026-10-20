@@ -7,7 +7,8 @@ Playwright import at module level (rule #16).
 """
 from __future__ import annotations
 
-# Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int}.
+# Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int,
+# places: [[dist, above], ...]} (one place per element).
 # Each element: {ref, tag, type, role, name, value, checked, required, disabled, autocomplete,
 # in_form, options, via_label}.
 #
@@ -62,14 +63,16 @@ _LABEL_OF_JS = r"""
 SNAPSHOT_JS = r"""
 (args) => {
 """ + _LABEL_OF_JS + r"""
-  const maxElements = args.maxElements, maxText = args.maxText, maxName = 120;
+  const maxElements = args.maxElements, maxText = args.maxText, maxName = 120, maxAttr = 40;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
     + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=""], '
     + '[contenteditable=true], [contenteditable=plaintext-only]';
-  // Every match in the document AND in open shadow roots, in document order.
-  const all = [];
+  // Every match in the document AND in open shadow roots, in document order; and every element
+  // carrying a ref, which the later action's lookup counts too.
+  const all = [], tagged = [];
   const walk = (root, depth) => {
     for (const el of root.querySelectorAll(sel)) all.push(el);
+    for (const el of root.querySelectorAll('[data-j360-ref]')) tagged.push(el);
     if (depth > 6) return;
     for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
   };
@@ -106,17 +109,24 @@ SNAPSHOT_JS = r"""
   let omittedAbove = 0, omittedBelow = 0;
   for (const c of candidates) if (!keptSet.has(c)) { if (c.above) omittedAbove++; else omittedBelow++; }
   kept.sort((a, b) => a.order - b.order);
+  // A ref the page wrote itself (not Job360's shape), or one two controls share, is replaced.
+  const refShape = /^e\d{1,4}_[a-z0-9]{1,4}$/, refCount = new Map();
+  for (const el of tagged) {
+    const r = el.getAttribute('data-j360-ref');
+    if (r) refCount.set(r, (refCount.get(r) || 0) + 1);
+  }
   const out = kept.map(({ el, tag, type, viaLabel, isPassword }) => {
     let ref = el.getAttribute('data-j360-ref');
-    if (!ref) {
+    if (!ref || !refShape.test(ref) || refCount.get(ref) > 1) {
       ref = 'e' + (++n) + '_' + Math.random().toString(36).slice(2, 6);
       el.setAttribute('data-j360-ref', ref);
     }
     const item = {
-      ref, tag, type, role: el.getAttribute('role') || '', name: clip(labelOf(el), maxName),
+      ref, tag: clip(tag, maxAttr), type: clip(type, maxAttr), role: clip(el.getAttribute('role'), maxAttr),
+      name: clip(labelOf(el), maxName),
       required: !!(el.required || el.getAttribute('aria-required') === 'true'),
       disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
-      autocomplete: el.getAttribute('autocomplete') || '', in_form: inForm(el),
+      autocomplete: clip(el.getAttribute('autocomplete'), maxAttr), in_form: inForm(el),
     };
     if (viaLabel) item.via_label = true;
     // The site's own "this answer is wrong / missing" mark: Workday sets it only after Save
@@ -140,6 +150,8 @@ SNAPSHOT_JS = r"""
   const text = clip(document.body ? document.body.innerText : '', maxText);
   return {
     elements: out, text, has_password_box: hasPassword, omitted_above: omittedAbove, omitted_below: omittedBelow,
+    // Per kept element: [distance from the screen, above it], for the size cut.
+    places: kept.map(c => [c.dist, c.above]),
   };
 }
 """
