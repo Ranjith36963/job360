@@ -220,6 +220,8 @@ the same `request_id` again returns the FIRST receipt with `already_existed: tru
 and writes nothing; the same `request_id` with different fields is refused (409
 `idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
 After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
+Leave `answers` out and the receipt freezes the newest form_filled / form_swept answers (`answers_from`);
+an empty `channel` reads the form's host. A sensitive answer the user did not agree to remember is kept as its hash only.
 
 An ask can also be answered by the user on the Job360 Needs-you page.
 

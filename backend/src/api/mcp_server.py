@@ -279,6 +279,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         # What was recorded at apply time — stored facts, empty when never recorded.
         "application_id": r.application_id,
         "answers": [a.model_dump() for a in r.answers],
+        "answers_from": r.answers_from,
         "fields_filled": r.fields_filled,
         "confirmation": r.confirmation,
         "cv_version_no": r.cv_version_no,
