@@ -17,7 +17,7 @@ from src.services.profile import shapes
 REASONS: frozenset[str] = frozenset({
     "unknown_key", "bad_type", "bad_value", "out_of_range", "retired_path",
     "setup_round_missing_answers", "years_order", "too_long", "validation_error",
-    "rate_limited",
+    "rate_limited", "stale_profile",
 })
 
 # Pydantic error `type` -> reason.
