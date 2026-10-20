@@ -180,6 +180,7 @@ class EventSource(BaseModel):
 
     kind: str = "email"
     message_id: str
+    thread_id: str = ""
     sender: str = ""
     subject: str = ""
     received_at: Optional[str] = None
@@ -404,6 +405,7 @@ class EventSourceOut(BaseModel):
 
     kind: str
     message_id: str
+    thread_id: Optional[str] = None
     sender: str
     subject: str
     received_at: Optional[str]
@@ -801,6 +803,31 @@ class InboxCheckedIn(BaseModel):
 class InboxCheckedOut(BaseModel):
     application_ids: list[int]
     inbox_checked_at: str
+
+
+class MatchEmailIn(BaseModel):
+    """feature 8 - the email the assistant already read; any of the three (at least one)."""
+
+    model_config = ConfigDict(extra="forbid")
+    sender: str = ""
+    thread_id: str = ""
+    subject: str = ""
+
+
+class MatchEmailCandidateOut(BaseModel):
+    application_id: int
+    job_title: str
+    job_company: str
+    status: str
+    reasons: list[str]
+    thread_event_ids: list[int]
+    contact_ids: list[int]
+    email_senders: list[str]
+
+
+class MatchEmailOut(BaseModel):
+    candidates: list[MatchEmailCandidateOut]
+    truncated: bool
 
 
 class SaveArtifactResponse(BaseModel):
@@ -1871,6 +1898,41 @@ async def mark_inbox_checked(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post("/applications/match-email", response_model=MatchEmailOut, dependencies=AUTH_FIRST)
+async def match_email(
+    body: MatchEmailIn,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Feature 8 (G088): the user's applications that a STORED fact links to this email -
+    same thread, a saved contact's email, a sender domain in email_senders, the company named
+    in the subject - each with its reasons. Facts, not a verdict: the assistant decides
+    (VISION rule 5). Read-only. POST so the sender and subject never sit in a URL or access log."""
+    from src.services.applications.email_match import match_email as match  # noqa: PLC0415
+
+    try:
+        result = await match(db, user.id, sender=body.sender, thread_id=body.thread_id, subject=body.subject)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    get_audit_logger().info(
+        "match_email",
+        extra={
+            "event": "match_email",
+            "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)),
+            "has_sender": bool(body.sender.strip()),
+            "has_thread_id": bool(body.thread_id.strip()),
+            "has_subject": bool(body.subject.strip()),
+            "candidate_count": len(result["candidates"]),
+            "application_ids": [c["application_id"] for c in result["candidates"]],
+            "truncated": result["truncated"],
+            "result": "ok",
+        },
+    )
+    return result
 
 
 @router.get("/applications/job/{job_id}", response_model=JobResponse, dependencies=AUTH_FIRST)

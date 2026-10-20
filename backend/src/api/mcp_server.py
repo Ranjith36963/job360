@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 10
-TOOLS_REV_FOR_HASH = "de9ddf9eb6be"
+TOOLS_REV = 11
+TOOLS_REV_FOR_HASH = "149434249c5e"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1063,6 +1063,29 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
+    async def match_email(sender: str = "", thread_id: str = "", subject: str = "") -> dict[str, Any]:
+        """Which of the user's applications an email may belong to, from what Job360 already stores.
+        Give any of `sender` (the From header), `thread_id` (the mail thread id), `subject`.
+        Returns `candidates`: each application with `reasons` - same_thread (an event already
+        recorded with this source.thread_id), contact_email (the sender is a saved contact on it),
+        sender_domain_in_email_senders (the sender's domain is one of its `email_senders`),
+        company_in_subject (its company is named in the subject). Facts, not a verdict: read the
+        email and choose. One clear match: record_event with `source` (pass `thread_id`). Several
+        or none: ONE ask_user, record nothing. Job360 reads no email; nothing is written."""
+        try:
+            body = applications_route.MatchEmailIn(sender=sender, thread_id=thread_id, subject=subject)
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.match_email(body, db, _user())
+        except HTTPException as exc:
+            _audit("match_email", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("match_email", "ok", count=len(resp.get("candidates", [])))
+        return resp
+
+    @mcp.tool()
     async def save_artifact(
         kind: str,
         text: str,
@@ -1247,7 +1270,7 @@ def build_server(version: str = "") -> MCPServer:
     ) -> dict[str, Any]:
         """Append one event to an application's history.
 
-        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; a repeat
+        `source` ({kind, message_id, thread_id?, sender, subject, received_at}) = the email; a repeat
         message_id writes nothing.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
