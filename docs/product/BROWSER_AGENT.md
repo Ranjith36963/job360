@@ -128,7 +128,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   - Each live browser uses about 300 MB of memory.
 - **Playbooks:** the `batch` and `forms` recipes get a "which browser" line: your own browser first, Job360's when you have none or the user is away.
 - **Tests:** `backend/tests/test_browser_agent.py`. The safety rules and the off switch always run; the real-Chromium runs (fill a form, password refused, submit only through the gate, CAPTCHA page, private address, one browser per user) run where Playwright + Chromium are installed and skip otherwise (CI).
-- **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback.
+- **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.
 
 **Slice 2 (built 2026-10-19, off by default): sign in once.**
 - **Where:** Settings → **Job sites** on the Job360 website. Type the job site's sign-in page and press Start.

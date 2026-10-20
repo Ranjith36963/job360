@@ -18,11 +18,50 @@ from __future__ import annotations
 # * open shadow roots are read (Playwright injected.js:4410-4421; SmartRecruiters' spl-* widgets);
 # * a 0x0 / transparent checkbox or radio behind a styled label is read through its label
 #   (Skyvern domUtils.js:514-526, nanobrowser enrich.ts:3-5).
+# How a control is named. ONE copy, used by both the look (SNAPSHOT_JS) and the gate
+# (ELEMENT_FACTS_JS): when the two named a button differently, the gate could read a "Submit
+# application" button the look showed as an ordinary field and let it through (#908 review).
+_LABEL_OF_JS = r"""
+  const labelEl = (el) => {
+    if (el.labels && el.labels.length) return el.labels[0];
+    return el.closest('label');
+  };
+  const labelOf = (el) => {
+    const aria = el.getAttribute('aria-label');
+    if (aria) return aria;
+    const root = el.getRootNode();
+    const by = el.getAttribute('aria-labelledby');
+    if (by && root.getElementById) {
+      const t = by.split(/\s+/).map(id => root.getElementById(id)).filter(Boolean).map(n => n.innerText).join(' ');
+      if (t.trim()) return t;
+    }
+    const l = labelEl(el);
+    if (l && l.innerText.trim()) return l.innerText;
+    if (el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) return el.value;
+    // A picture-only button is named by its alt text, so an icon "Submit" is still a submit.
+    if (el.tagName === 'INPUT' && el.type === 'image' && (el.alt || '').trim()) return el.alt;
+    if (!(el.innerText || '').trim()) {
+      const alts = Array.from(el.querySelectorAll('img[alt]')).map(i => i.alt).join(' ');
+      if (alts.trim()) return alts;
+    }
+    // A button or link is named by what it shows, before any placeholder or tooltip: the gate must
+    // see "Submit application", not a placeholder="Next" or title="Send" (#933 review).
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if ((el.tagName === 'BUTTON' || el.tagName === 'A' || role === 'button' || role === 'link')
+        && (el.innerText || '').trim()) return el.innerText;
+    return el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
+  };
+  // A button can belong to a form it sits outside of (form="id"): el.form knows, closest() does not.
+  const inForm = (el) => !!(el.form || el.closest('form'));
+"""
+
 SNAPSHOT_JS = r"""
 (args) => {
+""" + _LABEL_OF_JS + r"""
   const maxElements = args.maxElements, maxText = args.maxText, maxName = 120;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
-    + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=true]';
+    + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=""], '
+    + '[contenteditable=true], [contenteditable=plaintext-only]';
   // Every match in the document AND in open shadow roots, in document order.
   const all = [];
   const walk = (root, depth) => {
@@ -37,25 +76,7 @@ SNAPSHOT_JS = r"""
     const s = getComputedStyle(el);
     return s.visibility !== 'hidden' && s.display !== 'none';
   };
-  const labelEl = (el) => {
-    if (el.labels && el.labels.length) return el.labels[0];
-    return el.closest('label');
-  };
   const clip = (t, n) => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
-  const labelOf = (el) => {
-    const aria = el.getAttribute('aria-label');
-    if (aria) return aria;
-    const root = el.getRootNode();
-    const by = el.getAttribute('aria-labelledby');
-    if (by && root.getElementById) {
-      const t = by.split(/\s+/).map(id => root.getElementById(id)).filter(Boolean).map(n => n.innerText).join(' ');
-      if (t.trim()) return t;
-    }
-    const l = labelEl(el);
-    if (l && l.innerText.trim()) return l.innerText;
-    if (el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) return el.value;
-    return el.getAttribute('placeholder') || el.getAttribute('title') || el.innerText || el.getAttribute('name') || '';
-  };
   const vh = window.innerHeight || 900;
   let n = 0, hasPassword = false;
   const candidates = [];
@@ -91,7 +112,7 @@ SNAPSHOT_JS = r"""
       ref, tag, type, role: el.getAttribute('role') || '', name: clip(labelOf(el), maxName),
       required: !!(el.required || el.getAttribute('aria-required') === 'true'),
       disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
-      autocomplete: el.getAttribute('autocomplete') || '', in_form: !!el.closest('form'),
+      autocomplete: el.getAttribute('autocomplete') || '', in_form: inForm(el),
     };
     if (viaLabel) item.via_label = true;
     // The site's own "this answer is wrong / missing" mark: Workday sets it only after Save
@@ -123,22 +144,20 @@ SNAPSHOT_JS = r"""
 # safety check runs on what is on the page NOW, not on an old snapshot.
 ELEMENT_FACTS_JS = r"""
 (el) => {
-  const aria = el.getAttribute('aria-label');
-  let name = aria || '';
-  if (!name && el.labels && el.labels.length) name = el.labels[0].innerText;
-  if (!name && el.tagName === 'INPUT' && ['submit', 'button'].includes(el.type)) name = el.value;
-  if (!name) name = el.innerText || el.getAttribute('placeholder') || el.getAttribute('name') || '';
+""" + _LABEL_OF_JS + r"""
+  const name = labelOf(el) || '';
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
-    in_form: !!el.closest('form'), role: el.getAttribute('role') || '',
+    in_form: inForm(el), role: el.getAttribute('role') || '',
     // Any typed answer or chosen file anywhere on the page: the form is being filled.
     page_has_answers: Array.from(el.ownerDocument.querySelectorAll('input, textarea')).some((f) => {
       const t = (f.type || '').toLowerCase();
       if (['hidden', 'submit', 'button', 'image', 'checkbox', 'radio', 'password', 'search'].includes(t)) return false;
       if (t === 'file') return !!(f.files && f.files.length);
       return !!(f.value || '').trim();
-    }),
+    }) || Array.from(el.ownerDocument.querySelectorAll('[contenteditable]')).some(
+      (f) => f.isContentEditable && !!(f.innerText || '').trim()),
   };
 }
 """
