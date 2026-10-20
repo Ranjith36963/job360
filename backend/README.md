@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 # Job360 Backend
 
 FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
