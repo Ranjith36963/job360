@@ -1271,16 +1271,20 @@ async def save_artifact(
             )
         version_no = max_version + 1
         try:
-            ins = await db._db.execute(
-                "INSERT INTO application_artifacts "
-                "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
-                " label, chars, created_at, ats_score, ats_notes, checks_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    user_id, application_id, kind, version_no, text, made_by, model,
-                    profile_version, label or "", len(text), now, ats_score, ats_notes, checks_json,
-                ),
-            )
+            # Scoped (a SAVEPOINT inside a client_key transaction, slice 25): a
+            # bare rollback() is forbidden inside an outer transaction() and
+            # would leave it aborted; the block rolls back only this INSERT.
+            async with db._db.transaction():
+                ins = await db._db.execute(
+                    "INSERT INTO application_artifacts "
+                    "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
+                    " label, chars, created_at, ats_score, ats_notes, checks_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id, application_id, kind, version_no, text, made_by, model,
+                        profile_version, label or "", len(text), now, ats_score, ats_notes, checks_json,
+                    ),
+                )
         except pg.IntegrityError:
             # C4 — a real UNIQUE(application_id, kind, version_no) violation
             # (a concurrent save landed the same version_no first); retry with
@@ -1289,7 +1293,6 @@ async def save_artifact(
             # exception type means too, so a bounded retry loop still bails
             # out via the `artifact_id is None` check below rather than
             # looping forever on something that will never succeed.
-            await db._db.rollback()
             continue
         artifact_id = int(ins.lastrowid or 0)
         break

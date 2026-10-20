@@ -217,6 +217,10 @@ class BringJobRequest(BaseModel):
     origin: Optional[Literal["ai_hunt", "user_link", "user_paste"]] = None
     # Owner ask 2026-10-18: put it straight into the batch (a ``queued`` event) when it is open.
     queue: bool = Field(False, strict=True)
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the same
+    # key + same body returns the FIRST reply (already_existed=true), writing nothing;
+    # another body under it is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -268,6 +272,9 @@ class BringJobResponse(BaseModel):
     # ("not open" = already applied or closed; "already queued" is still true).
     queued: Optional[bool] = None
     queue_note: Optional[str] = None
+    # Slice 25 — true when this client_key was already used: the FIRST reply, nothing
+    # written. Not ``existing`` (that is "you had this job before this bring").
+    already_existed: bool = False
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -318,8 +325,32 @@ async def bring_job(
     Nothing is scored: the caller (the user's agent) already decided this ad
     is worth keeping, and product rule 4 forbids us judging fit. Returns the
     stored job plus the `application_id` the caller should work against from
-    here on.
+    here on. A repeated ``client_key`` returns the first reply (slice 25).
     """
+    from src.services import idempotency  # noqa: PLC0415
+
+    async def _write() -> dict[str, Any]:
+        return (await _bring_job(body, db, user)).model_dump()
+
+    # The MCP tool sends "" where a web body leaves the visa text out (None); both mean
+    # "not said", so they hash the same and the two doors share one key space.
+    key_body = {
+        **body.model_dump(exclude={"client_key"}),
+        "visa_detail": body.visa_detail or "", "visa_country": body.visa_country or "",
+    }
+    try:
+        # Not one transaction (atomic=False): the bring's read-only checks swallow their own
+        # errors, which would abort an enclosing transaction. The key is stored right after;
+        # a retry that slips between the two is caught by the title+company dedupe below.
+        reply = await idempotency.run_once(
+            db._db, user.id, "bring_job", body.client_key, key_body, _write, atomic=False,
+        )
+    except idempotency.IdempotencyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    return BringJobResponse(**reply)
+
+
+async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) -> BringJobResponse:
     # Lazy import (rule #16) — keeps the spine off the module import path.
     from src.models import Job  # noqa: PLC0415
     from src.services.applications import job_facts  # noqa: PLC0415

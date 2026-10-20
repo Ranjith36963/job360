@@ -420,8 +420,9 @@ export interface paths {
         /**
          * Add Contact
          * @description 201 for a new contact, 200 (``already_existed: true``) for the same
-         *     email seen again on this application (R2) — the status code is set
-         *     dynamically since the same call can legitimately answer either.
+         *     email seen again on this application (R2), or a repeated ``client_key``
+         *     — the status code is set dynamically since the same call can legitimately
+         *     answer either.
          */
         post: operations["add_contact_api_applications__application_id__contacts_post"];
         delete?: never;
@@ -1690,7 +1691,9 @@ export interface paths {
          *     (``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to
          *     the SAME service function this route calls (M5 parity) — this route is
          *     the one door that works for a COLD contact too, since it carries no
-         *     ``application_id`` in its URL.
+         *     ``application_id`` in its URL. A ``client_key`` lives in the key space of
+         *     the tool that calls this door: ``save_artifact`` for a message version,
+         *     ``record_event`` for a sent/reply mark.
          */
         post: operations["record_outreach_api_contacts__contact_id__outreach_post"];
         delete?: never;
@@ -1848,7 +1851,7 @@ export interface paths {
          *     Nothing is scored: the caller (the user's agent) already decided this ad
          *     is worth keeping, and product rule 4 forbids us judging fit. Returns the
          *     stored job plus the `application_id` the caller should work against from
-         *     here on.
+         *     here on. A repeated ``client_key`` returns the first reply (slice 25).
          */
         post: operations["bring_job_api_jobs_bring_post"];
         delete?: never;
@@ -2900,6 +2903,8 @@ export interface components {
          *     ``added_by`` is deliberately ABSENT — ``extra="forbid"`` rejects it (S2).
          */
         AddContactRequest: {
+            /** Client Key */
+            client_key?: string | null;
             /**
              * Email
              * @default
@@ -2949,6 +2954,8 @@ export interface components {
         AddPersonRequest: {
             /** Application Id */
             application_id?: number | null;
+            /** Client Key */
+            client_key?: string | null;
             /**
              * Email
              * @default
@@ -3800,6 +3807,8 @@ export interface components {
              * @default
              */
             apply_url: string;
+            /** Client Key */
+            client_key?: string | null;
             /** Company */
             company: string;
             /** Country */
@@ -3839,6 +3848,11 @@ export interface components {
         BringJobResponse: {
             /** Ad Posted At */
             ad_posted_at?: string | null;
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
             /** Application Id */
             application_id: number;
             /** Checks */
@@ -4186,10 +4200,66 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** CreateAskOut */
+        CreateAskOut: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
+            /** Answer */
+            answer: string | null;
+            /** Answered At */
+            answered_at: string | null;
+            /** Answered By */
+            answered_by: string | null;
+            /** Answered By User */
+            answered_by_user: boolean;
+            /** Application Id */
+            application_id: number | null;
+            /** Asked At */
+            asked_at: string;
+            /** Asked By */
+            asked_by: string;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Context */
+            context: string;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string | null;
+            /** Job Title */
+            job_title: string | null;
+            /** Question */
+            question: string;
+            /**
+             * Relayed From Chat
+             * @default false
+             */
+            relayed_from_chat: boolean;
+            /**
+             * Said By
+             * @default assistant
+             * @enum {string}
+             */
+            said_by: "you" | "assistant";
+            /** Status */
+            status: string;
+            /**
+             * User Words
+             * @default
+             */
+            user_words: string;
+            /** Withdrawn At */
+            withdrawn_at: string | null;
+        };
         /** CreateAskRequest */
         CreateAskRequest: {
             /** Application Id */
             application_id?: number | null;
+            /** Client Key */
+            client_key?: string | null;
             /**
              * Context
              * @default
@@ -6413,6 +6483,8 @@ export interface components {
         RecordEventRequest: {
             /** Channel */
             channel?: string | null;
+            /** Client Key */
+            client_key?: string | null;
             /** Contact Id */
             contact_id?: number | null;
             /** Corrects Event Id */
@@ -6470,6 +6542,8 @@ export interface components {
             application_id?: number | null;
             /** Channel */
             channel: string;
+            /** Client Key */
+            client_key?: string | null;
             /** Entry */
             entry: string;
             /** Follow Up On */
@@ -6529,6 +6603,8 @@ export interface components {
             ats_score?: number | null;
             /** Channel */
             channel?: string | null;
+            /** Client Key */
+            client_key?: string | null;
             /** Contact Id */
             contact_id?: number | null;
             /** Kind */
@@ -6545,6 +6621,11 @@ export interface components {
         };
         /** SaveArtifactResponse */
         SaveArtifactResponse: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
             /** Artifact Id */
             artifact_id: number;
             /** Ats Notes */
@@ -9303,7 +9384,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AskOut"];
+                    "application/json": components["schemas"]["CreateAskOut"];
                 };
             };
             /** @description Validation Error */

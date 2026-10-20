@@ -18,6 +18,17 @@
         "additionalProperties": false,
         "description": "Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md \u00a7Tool contracts).\n\nNo length/shape constraints declared here (unlike ``SaveArtifactRequest``'s\n``label``): every cap is a live ``settings`` value a test can monkeypatch,\nso ``contacts.add_contact`` checks them at call time \u2014 the same pattern\n``SaveFitRequest.clamp_reasoning``/``RecordEventRequest.clamp_detail`` use.\n``added_by`` is deliberately ABSENT \u2014 ``extra=\"forbid\"`` rejects it (S2).",
         "properties": {
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "email": {
             "default": "",
             "title": "Email",
@@ -119,6 +130,17 @@
               }
             ],
             "title": "Application Id"
+          },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
           },
           "email": {
             "default": "",
@@ -2441,6 +2463,17 @@
             "title": "Apply Url",
             "type": "string"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "company": {
             "maxLength": 300,
             "minLength": 1,
@@ -2602,6 +2635,11 @@
               }
             ],
             "title": "Ad Posted At"
+          },
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
           },
           "application_id": {
             "title": "Application Id",
@@ -3424,6 +3462,168 @@
         "title": "ControlsCvOut",
         "type": "object"
       },
+      "CreateAskOut": {
+        "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered At"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
+          },
+          "answered_by_user": {
+            "title": "Answered By User",
+            "type": "boolean"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "asked_at": {
+            "title": "Asked At",
+            "type": "string"
+          },
+          "asked_by": {
+            "title": "Asked By",
+            "type": "string"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "relayed_from_chat": {
+            "default": false,
+            "title": "Relayed From Chat",
+            "type": "boolean"
+          },
+          "said_by": {
+            "default": "assistant",
+            "enum": [
+              "you",
+              "assistant"
+            ],
+            "title": "Said By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_words": {
+            "default": "",
+            "title": "User Words",
+            "type": "string"
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
+          }
+        },
+        "required": [
+          "id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "question",
+          "context",
+          "asked_by",
+          "asked_at",
+          "answer",
+          "answered_by",
+          "answered_at",
+          "answered_by_user",
+          "withdrawn_at",
+          "status"
+        ],
+        "title": "CreateAskOut",
+        "type": "object"
+      },
       "CreateAskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3437,6 +3637,17 @@
               }
             ],
             "title": "Application Id"
+          },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
           },
           "context": {
             "default": "",
@@ -8731,6 +8942,17 @@
             ],
             "title": "Channel"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "contact_id": {
             "anyOf": [
               {
@@ -8917,6 +9139,17 @@
             "title": "Channel",
             "type": "string"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "entry": {
             "title": "Entry",
             "type": "string"
@@ -9095,6 +9328,17 @@
             ],
             "title": "Channel"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "contact_id": {
             "anyOf": [
               {
@@ -9142,6 +9386,11 @@
       },
       "SaveArtifactResponse": {
         "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
           "artifact_id": {
             "title": "Artifact Id",
             "type": "integer"
@@ -14553,7 +14802,7 @@
     },
     "/api/applications/{application_id}/contacts": {
       "post": {
-        "description": "201 for a new contact, 200 (``already_existed: true``) for the same\nemail seen again on this application (R2) \u2014 the status code is set\ndynamically since the same call can legitimately answer either.",
+        "description": "201 for a new contact, 200 (``already_existed: true``) for the same\nemail seen again on this application (R2), or a repeated ``client_key``\n\u2014 the status code is set dynamically since the same call can legitimately\nanswer either.",
         "operationId": "add_contact_api_applications__application_id__contacts_post",
         "parameters": [
           {
@@ -16460,7 +16709,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AskOut"
+                  "$ref": "#/components/schemas/CreateAskOut"
                 }
               }
             },
@@ -19054,7 +19303,7 @@
     },
     "/api/contacts/{contact_id}/outreach": {
       "post": {
-        "description": "The one shared door for a contact's outreach ledger \u2014 a drafted\nmessage VERSION, or a ``sent``/``reply`` mark. ``save_artifact``\n(``kind=\"outreach\"`` + ``contact_id``) and ``record_event``\n(``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to\nthe SAME service function this route calls (M5 parity) \u2014 this route is\nthe one door that works for a COLD contact too, since it carries no\n``application_id`` in its URL.",
+        "description": "The one shared door for a contact's outreach ledger \u2014 a drafted\nmessage VERSION, or a ``sent``/``reply`` mark. ``save_artifact``\n(``kind=\"outreach\"`` + ``contact_id``) and ``record_event``\n(``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to\nthe SAME service function this route calls (M5 parity) \u2014 this route is\nthe one door that works for a COLD contact too, since it carries no\n``application_id`` in its URL. A ``client_key`` lives in the key space of\nthe tool that calls this door: ``save_artifact`` for a message version,\n``record_event`` for a sent/reply mark.",
         "operationId": "record_outreach_api_contacts__contact_id__outreach_post",
         "parameters": [
           {
@@ -19453,7 +19702,7 @@
     },
     "/api/jobs/bring": {
       "post": {
-        "description": "Store the pasted ad and birth the Application for it.\n\nNothing is scored: the caller (the user's agent) already decided this ad\nis worth keeping, and product rule 4 forbids us judging fit. Returns the\nstored job plus the `application_id` the caller should work against from\nhere on.",
+        "description": "Store the pasted ad and birth the Application for it.\n\nNothing is scored: the caller (the user's agent) already decided this ad\nis worth keeping, and product rule 4 forbids us judging fit. Returns the\nstored job plus the `application_id` the caller should work against from\nhere on. A repeated ``client_key`` returns the first reply (slice 25).",
         "operationId": "bring_job_api_jobs_bring_post",
         "parameters": [
           {

@@ -929,24 +929,24 @@ async def record_outreach(
         # Bug fix (coordinator review, 2026-09-26) — C4-style retry, same
         # reasoning as spine.save_artifact's version race: two concurrent
         # drafts for the same contact must never surface a raw 500, the
-        # loser just gets renumbered on retry. No `async with transaction()`
-        # here (same as save_artifact) — a single INSERT is already atomic
-        # under the autocommit shim; on a UNIQUE clash `rollback()` alone
-        # clears the error state so the connection is reusable for the retry.
+        # loser just gets renumbered on retry. The INSERT is scoped in its own
+        # `transaction()` (same as save_artifact): a SAVEPOINT inside a
+        # client_key transaction (slice 25), where a bare `rollback()` is
+        # forbidden; on a UNIQUE clash the block rolls back only this INSERT.
         for _attempt in range(5):
             version_no = await _message_version_count(db, contact_id) + 1
             try:
-                ins = await db._db.execute(
-                    "INSERT INTO contact_outreach "
-                    "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
-                    " recorded_by, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        user_id, contact_id, entry, channel, clean_text, version_no, occurred, now, actor,
-                        source_message_id or "",
-                    ),
-                )
+                async with db._db.transaction():
+                    ins = await db._db.execute(
+                        "INSERT INTO contact_outreach "
+                        "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
+                        " recorded_by, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            user_id, contact_id, entry, channel, clean_text, version_no, occurred, now, actor,
+                            source_message_id or "",
+                        ),
+                    )
             except pg.IntegrityError:
-                await db._db.rollback()
                 continue
             outreach_id = int(ins.lastrowid or 0)
             break
