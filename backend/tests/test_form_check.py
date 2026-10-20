@@ -197,9 +197,11 @@ async def test_wording_match_ignores_case_and_punctuation(authenticated_async_co
         app_id = await _bring(client)
         await _seed_answers(client)
         body = (await _form_check(client, app_id, [{"question": "Notice period (In days)?"}])).json()
+        # Notice period is a sensitive question (gap audit #14): the saved answer is offered, and the
+        # user confirms it on this form.
         assert body["answered"] == [{
             "question": "Notice period (In days)?", "required": True, "key": "notice period in days",
-            "value": "30", "source": "approved_text", "matched_by": "wording",
+            "value": "30", "source": "approved_text", "matched_by": "wording", "needs_confirmation": True,
         }]
         # The agent may also pass the saved approved_text question itself as the key.
         keyed = (await _form_check(client, app_id, [{"question": "Notice?", "key": "Notice Period in Days"}])).json()
@@ -448,6 +450,68 @@ async def test_bad_field_type_is_422_and_default_is_unknown(authenticated_async_
         assert long_option.status_code == 422
         ok = (await _form_check(client, app_id, [{"question": "Email", "field_type": "text", "limit": 50}])).json()
         assert ok["missing"][0]["field_type"] == "text"
+
+
+def test_pure_file_question_for_cv_or_letter_is_answered_by_the_saved_artifact():
+    docs = {"cv": {"id": 83, "version_no": 1}, "cover_letter": {"id": 90, "version_no": 2}}
+    qs = [
+        {"question": "CV", "field_type": "file"},
+        {"question": "Upload your Resume / Curriculum Vitae", "field_type": "file"},
+        {"question": "Motivation letter", "field_type": "file", "required": False},
+        {"question": "Portfolio", "field_type": "file"},
+        {"question": "Proof of ID", "field_type": "file"},
+        {"question": "CV or cover letter", "field_type": "file"},
+        {"question": "CV", "field_type": "text"},
+    ]
+    out = kit_service.form_check({}, qs, documents=docs)
+    by_q = {a["question"]: a for a in out["answered"]}
+    assert by_q["CV"]["value"] == "CV v1 (artifact 83)" and by_q["CV"]["source"] == "artifact"
+    assert by_q["Upload your Resume / Curriculum Vitae"]["value"] == "CV v1 (artifact 83)"
+    assert by_q["Motivation letter"]["value"] == "Cover letter v2 (artifact 90)"
+    assert [m["question"] for m in out["missing"]] == ["Portfolio", "Proof of ID", "CV or cover letter", "CV"]
+    assert {m["why"] for m in out["missing"]} == {"no saved answer for this question"}
+    # No artifact saved: the CV stays missing and says what to do.
+    bare = kit_service.form_check({}, qs[:1] + qs[3:4])
+    assert [m["question"] for m in bare["missing"]] == ["CV", "Portfolio"]
+    assert bare["missing"][0]["why"] == "no CV saved for this application yet: save the CV first (save_artifact kind cv)"
+    assert bare["missing"][1]["why"] == "no saved answer for this question"
+
+
+@pytest.mark.asyncio
+async def test_file_question_for_the_cv_lands_in_answered_once_a_cv_is_saved(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        questions = [
+            {"question": "CV", "field_type": "file"},
+            {"question": "Cover letter", "field_type": "file", "required": False},
+            {"question": "Portfolio", "field_type": "file", "required": False},
+        ]
+        before = (await _form_check(client, app_id, questions)).json()
+        assert before["answered"] == []
+        assert before["missing"][0]["why"] == (
+            "no CV saved for this application yet: save the CV first (save_artifact kind cv)"
+        )
+        saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "CV TEXT"})
+        assert saved.status_code == 201, saved.text
+        cv_id = saved.json()["artifact_id"]
+        body = (await _form_check(client, app_id, questions)).json()
+        assert [(a["question"], a["value"], a["source"], a["matched_by"]) for a in body["answered"]] == [
+            ("CV", f"CV v1 (artifact {cv_id})", "artifact", "wording")
+        ]
+        assert [m["question"] for m in body["missing"]] == ["Cover letter", "Portfolio"]
+        assert body["counts"] == {"answered": 1, "missing": 2, "missing_required": 0}
+        letter = await client.post(
+            f"/api/applications/{app_id}/artifacts", json={"kind": "cover_letter", "text": "LETTER TEXT"}
+        )
+        assert letter.status_code == 201, letter.text
+        again = (await _form_check(client, app_id, questions)).json()
+        assert [a["value"] for a in again["answered"]] == [
+            f"CV v1 (artifact {cv_id})", f"Cover letter v1 (artifact {letter.json()['artifact_id']})"
+        ]
+        assert [m["question"] for m in again["missing"]] == ["Portfolio"]
 
 
 async def _post_event(client: AsyncClient, app_id: int, event_type: str, payload: dict[str, Any]):

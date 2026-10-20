@@ -81,12 +81,23 @@ def _gate_and_files(
             )
 
     async def _mark() -> None:
-        async with _db() as db:
-            await applications_route.record_event(
-                application_id, applications_route.RecordEventRequest(event_type="submit_attempted"), db, user
-            )
+        try:
+            async with _db() as db:
+                await applications_route.record_event(
+                    application_id, applications_route.RecordEventRequest(event_type="submit_attempted"), db, user
+                )
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+            # G338: another session holds the submit claim - refuse, so nothing is clicked
+            # (the route's BrowserError handler writes the audit line).
+            raise browser_agent.BrowserError(
+                "refused", "submit_already_started",
+                "Another session already started submitting this application; nothing was clicked.",
+            ) from None
 
     async def _files(kind: str) -> tuple[str, bytes]:
+        from src.services.applications import kit as applications_kit  # noqa: PLC0415
         from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415 - fpdf2 is heavy
 
         async with _db() as db:
@@ -96,7 +107,9 @@ def _gate_and_files(
                 "refused", "no_document", f"No {kind} is saved for this application: save_artifact first."
             )
         pdf = await render_document_pdf(user.id, kind, row.get("text") or "")
-        return ("CV.pdf" if kind == "cv" else "Cover_letter.pdf"), pdf
+        # The file name an employer sees: the kit's own name for this PDF, else the plain default.
+        stem = await applications_kit.named_stem(user.id, kind)
+        return (f"{stem}.pdf" if stem else "CV.pdf" if kind == "cv" else "Cover_letter.pdf"), pdf
 
     async def _proof(image: bytes) -> None:
         # The site's confirmation page, kept as this application's proof screenshot (S7).
@@ -159,6 +172,7 @@ async def browser_action(
         result = await browser_agent.run(
             browser_agent.get_pool(), user.id, body.action, url=body.url, ref=body.ref, text=body.text,
             on=body.on, doc_kind=body.doc_kind, gate=gate, files=files, load_state=_loader(user),
+            owner=body.session,
         )
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
@@ -179,7 +193,7 @@ async def browser_action(
 _BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed"}
 HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. Finish it with your own assistant's browser when your computer is on "
-    "(Claude in Chrome, Gemini in Chrome, ChatGPT agent), or sign in once on Settings, Job sites."
+    "(Claude in Chrome, Gemini in Chrome, ChatGPT's own browser), or sign in once on Settings, Job sites."
 )
 
 

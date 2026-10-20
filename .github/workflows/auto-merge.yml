@@ -100,6 +100,21 @@ jobs:
   # made six PRs look broken when none were.
   precheck:
     name: Are the rules available yet
+    # A WAKE THAT CANNOT CHANGE A VERDICT STARTS NO RUNNER (2026-10-20). That
+    # afternoon 165 runs sat queued behind about 20 runner slots, 68 of them this
+    # cage's, and it finished none for an hour: green PRs went unjudged. A
+    # pending status, a check suite that was cancelled or went stale (a newer
+    # push replaced it), and a suite with no PR all reached `pick` and found
+    # nothing to judge, after queueing for two runners first. A skipped job
+    # takes no runner, and everything below `needs` this one. A `skipped` suite
+    # is still let through: a skipped required check counts as passing, so it
+    # can be the last thing a PR waits on.
+    if: >-
+      !(github.event_name == 'status' && github.event.state == 'pending') &&
+      !(github.event_name == 'check_suite' &&
+        (github.event.check_suite.conclusion == 'cancelled' ||
+         github.event.check_suite.conclusion == 'stale' ||
+         toJSON(github.event.check_suite.pull_requests) == '[]'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -270,19 +285,16 @@ jobs:
               if [ -n "${INPUT_PR:-}" ]; then prs="$INPUT_PR"
               else prs=$(gh pr list --state open --limit 30 --json number --jq '.[].number'); fi ;;
           esac
-          # Only OPEN, non-draft, non-parked, same-repo PRs are ever candidates.
+          # Only OPEN, non-draft, same-repo PRs are ever candidates.
           # A fork PR is a stranger's code and never reaches the arm — the cage
           # would refuse it, but a refusal should be the second line of
-          # defence, not the first. A PR labeled `wip:parked` (scripts/wip_gate.py)
-          # is filtered out for the same reason as a draft: it opted itself out
-          # of the queue, on purpose, and must not be picked up here.
+          # defence, not the first.
           keep=""
           for pr in $prs; do
             meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner,labels,headRefName,mergeable 2>/dev/null || echo '')
             [ -n "$meta" ] || continue
             [ "$(echo "$meta" | jq -r .state)" = "OPEN" ] || continue
             [ "$(echo "$meta" | jq -r .isDraft)" = "false" ] || continue
-            [ "$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')" = "false" ] || continue
             # `human-merge` (issue-fix.yml): code a machine wrote from an ISSUE. This
             # repo is public and detector issues carry scraped, attacker-influenced
             # text (a Sentry message can echo user input), so that code is never
