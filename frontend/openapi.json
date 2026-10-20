@@ -7879,6 +7879,16 @@
             "title": "Grounded",
             "type": "boolean"
           },
+          "source": {
+            "default": "none",
+            "enum": [
+              "profile",
+              "ad",
+              "none"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "text": {
             "title": "Text",
             "type": "string"
@@ -22526,7 +22536,7 @@
     },
     "/api/tailor/{job_id}/{doc_kind}/provenance": {
       "get": {
-        "description": "Per-line provenance for the newest saved version: which lines are the\nuser's OWN facts (grounded in their CV + the job ad) and which were added.\nDeterministic, no LLM \u2014 shown before download so the user can verify what is\nreal (guardrail #2).",
+        "description": "Per-line provenance for the newest saved version: which lines are the\nuser's OWN facts (grounded in their profile), which only echo the job ad\n(``source=\"ad\"``: employer context, never a candidate fact) and which were added.\nDeterministic, no LLM \u2014 shown before download so the user can verify what is\nreal (guardrail #2).",
         "operationId": "provenance_api_tailor__job_id___doc_kind__provenance_get",
         "parameters": [
           {

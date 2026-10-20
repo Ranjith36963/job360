@@ -2836,7 +2836,8 @@ export interface paths {
         /**
          * Provenance
          * @description Per-line provenance for the newest saved version: which lines are the
-         *     user's OWN facts (grounded in their CV + the job ad) and which were added.
+         *     user's OWN facts (grounded in their profile), which only echo the job ad
+         *     (``source="ad"``: employer context, never a candidate fact) and which were added.
          *     Deterministic, no LLM — shown before download so the user can verify what is
          *     real (guardrail #2).
          */
@@ -6181,6 +6182,12 @@ export interface components {
         ProvenanceSegment: {
             /** Grounded */
             grounded: boolean;
+            /**
+             * Source
+             * @default none
+             * @enum {string}
+             */
+            source: "profile" | "ad" | "none";
             /** Text */
             text: string;
         };
