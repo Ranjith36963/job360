@@ -374,6 +374,7 @@ def test_companies_json_valid() -> None:
     } | {"rippling", "breezy", "pinpoint", "phenom", "ultipro", "adp", "cornerstone", "gem",
          "jazzhr", "softgarden", "join", "jibe", "keka", "zohorecruit"}  # the kit_ats_more types
     ok |= {"opencats", "odoo", "recruitingsolutions", "teamex"}  # the kit_ats_misc2 types
+    ok |= {"avature", "comeet", "hibob"}  # the kit_ats_extra types
     seen = set()
     for r in rows:
         assert r["ats"] in ok and r["token"].strip()
