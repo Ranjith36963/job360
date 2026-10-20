@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  P_ABOVE, P_BELOW, P_CAP, P_SCORE, P_EVERY, P_INBOX, ROUNDS, historyWhen, mergeHistory, scopeText, valueText,
+  P_ABOVE, P_BELOW, P_CAP, P_OUTREACH_SEND, P_SCORE, P_EVERY, P_INBOX, ROUNDS, historyWhen, mergeHistory, scopeText, valueText,
 } from "./assistant-tab";
 import { formatFeedTime } from "./home";
 
@@ -16,6 +16,18 @@ describe("valueText", () => {
   it("empty is 'no limit' for the daily limit and 'not set' elsewhere", () => {
     expect(valueText(P_CAP, null)).toBe("no limit");
     expect(valueText(P_SCORE, null)).toBe("not set");
+  });
+});
+
+describe("outreach send", () => {
+  it("valueText: only auto reads as on", () => {
+    expect(valueText(P_OUTREACH_SEND, "auto")).toBe("on");
+    expect(valueText(P_OUTREACH_SEND, "draft_only")).toBe("off");
+    expect(valueText(P_OUTREACH_SEND, "")).toBe("off");
+  });
+  it("mergeHistory labels the path", () => {
+    const m = mergeHistory({ [P_OUTREACH_SEND]: [{ set_by: "web", set_at: "2026-10-10T09:14:00Z", value: "auto" }] });
+    expect(m.map((r) => `${r.label}|${r.now}`)).toEqual(["Automatic outreach emails|on"]);
   });
 });
 

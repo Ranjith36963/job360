@@ -574,10 +574,16 @@ CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 —
 
 # ── Outreach tracking (owner decisions, 2026-09-25) ─────────────────────────
 # People: a contact can be linked to a job or to none (cold networking). The
-# user's own assistant WRITES messages; the USER sends them (or, in daily_check
-# mode auto, the assistant sends from the user's own Gmail); Job360 never sends.
+# user's own assistant WRITES messages; the USER sends them (or, with assistant_settings.outreach_send = auto,
+# the assistant sends from the user's own Gmail); Job360 never sends.
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
+# LinkedIn connection-request note limits: career-ops (MIT) modes/contacto.md:168
+# "200 characters on a free account, 300 on Premium/Sales Navigator ... Default to the
+# safer 200-char budget unless the user has confirmed". LinkedIn's own facts, not
+# operator knobs (no env). Warn-only save check: cv_checks.linkedin_note_too_long.
+LINKEDIN_NOTE_MAX_CHARS = 200
+LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_MAX", "200"))
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
@@ -737,6 +743,9 @@ PROFILE_EDITABLE_PATHS = (
     # Owner decision 2026-10-03 — how often that check runs (3h/6h/12h/24h);
     # daily_check also holds the inbox mode auto/ask/paused. Both stored by Job360.
     "preferences.check_every",
+    # S16 - the user's LinkedIn tier (bool): true = Premium / Sales Navigator, so a
+    # connection note may run to 300 characters instead of 200. Overlay-only.
+    "preferences.linkedin_premium",
     # Slice B2 (decision 28) — dated work history and projects, as lists of
     # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
     "cv_data.cv_positions", "cv_data.cv_projects",
@@ -778,6 +787,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
     # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
     "assistant_settings.auto_employer_emails",
+    # Owner 2026-10-20 (G087) - may the assistant send outreach itself (draft_only | auto); its own consent.
+    "assistant_settings.outreach_send",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

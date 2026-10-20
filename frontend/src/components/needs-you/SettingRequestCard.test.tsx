@@ -82,6 +82,16 @@ describe("describeSettingRequest", () => {
     expect(describeSettingRequest("preferences.daily_check", "auto").title).toBe("Your inbox");
   });
 
+  it("outreach send: auto says it sends in your name; draft_only says you send; the Gmail mode never mentions outreach", () => {
+    const on = describeSettingRequest("assistant_settings.outreach_send", "auto");
+    expect(on.title).toBe("Automatic outreach emails");
+    expect(on.change).toContain("in your name");
+    expect(describeSettingRequest("assistant_settings.outreach_send", "draft_only").change).toBe(
+      "Only draft outreach emails; I send them myself",
+    );
+    expect(describeSettingRequest("preferences.daily_check", "auto").change).not.toMatch(/outreach/i);
+  });
+
   it("says EVERY job plainly when the auto side covers all of them", () => {
     expect(describeSettingRequest("assistant_settings.above_line", "auto", 0).change).toBe(
       "Apply on its own for EVERY job (your score line is 0)",

@@ -35,8 +35,8 @@ const SUBMIT_MODES: Record<string, string> = {
   auto_when_sure: "Send applications on its own when it is sure",
 };
 const INBOX_MODES: Record<string, string> = {
-  auto: "Read my inbox and send outreach emails on its own",
-  scheduled: "Read my inbox and send outreach emails on its own",
+  auto: "Read my inbox and record what happened on its own",
+  scheduled: "Read my inbox and record what happened on its own",
   ask: "Ask me before each inbox check",
   paused: "Stop checking my inbox",
 };
@@ -141,6 +141,14 @@ export function describeSettingRequest(
           value === true
             ? "Let your assistant email employers in your name: a check-in 7 days after applying, a feedback request after a rejection, one follow-up 7 days later"
             : "Stop automatic employer emails",
+      };
+    case "assistant_settings.outreach_send":
+      return {
+        title: "Automatic outreach emails",
+        change:
+          value === "auto"
+            ? "Let your assistant send the outreach emails it writes from your Gmail, in your name"
+            : "Only draft outreach emails; I send them myself",
       };
     case "assistant_settings.paused_until":
       if (value === "" || value === null || value === undefined) {

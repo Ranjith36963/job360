@@ -37,7 +37,14 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_request_db
-from src.api.models import AutoEmailCheckResponse, FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
+from src.api.models import (
+    AutoEmailCheckResponse,
+    FormCheckOut,
+    FormCheckRequest,
+    InterviewAgenda,
+    JobResponse,
+    LessonsResponse,
+)
 from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -925,6 +932,8 @@ class WhatsNewResponse(BaseModel):
     open_asks: list[AskOut]
     # S7 - applied jobs with no proof after PROOF_NO_PROOF_AFTER_DAYS and no ask yet.
     proof_missing: list[ProofMissingOut]
+    # Gap 10 - interviews in the next 7 days, and the last 3 days' with no outcome recorded yet.
+    interviews: InterviewAgenda = InterviewAgenda()
 
 
 class ExportArtifactOut(BaseModel):
@@ -1833,6 +1842,8 @@ async def list_applications(
     queued: bool = Query(False),
     # Owner decision 2026-10-19 - the user's own job priority of the job's place.
     priority: Optional[str] = Query(None, max_length=20),
+    # Gap 10 - only applications with an interview or follow-up in the range, in the user's timezone.
+    agenda: Optional[str] = Query(None, max_length=20),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -1840,6 +1851,7 @@ async def list_applications(
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
             due=due, quiet_days=quiet_days, in_flight=in_flight, queued=queued, priority=priority,
+            agenda=agenda,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2208,7 +2220,8 @@ async def outreach_check(
 ) -> dict[str, Any]:
     """THE one gate before pressing Send on an outreach email (feature 10).
 
-    Reads the user's settings, this contact's facts and the saved message
+    Reads the user's settings (``assistant_settings.outreach_send`` decides send vs
+    ask; the Gmail mode never does), this contact's facts and the saved message
     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
     kind="outreach"`` created), plus today's recorded sends, then answers
     through ``settings_rules.may_send_outreach`` - the same function for this
@@ -2226,9 +2239,7 @@ async def outreach_check(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
-    verdict = settings_rules.may_send_outreach(
-        cfg, facts, counts, now, inbox_mode=profile.preferences.daily_check or ""
-    )
+    verdict = settings_rules.may_send_outreach(cfg, facts, counts, now)
     # Never the email address, the message text or the company name: ids and closed codes only.
     get_audit_logger().info(
         "outreach_check",
@@ -2340,7 +2351,7 @@ async def save_artifact(
                 "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
                 "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": body.model,
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": result["event_id"],
-                "contact_id": body.contact_id,
+                "contact_id": body.contact_id, "checks": outreach.get("checks", []),
             }
         return await spine.save_artifact(
             db, user_id=user.id, application_id=application_id, kind=body.kind, text=body.text,

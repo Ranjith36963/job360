@@ -49,6 +49,14 @@ export function settingAutoEmails(f: { effective?: unknown; value?: unknown } | 
 export const AUTO_EMAILS_HELP =
   "Check-in 7 days after applying, a feedback request after a rejection, one follow-up 7 days later. Sent in your name by your assistant.";
 
+/** The automatic-outreach-emails switch: on only when the server says "auto" (anything else is draft only). */
+export function settingOutreachSend(f: { effective?: unknown; value?: unknown } | undefined): boolean {
+  return settingEffective(f) === "auto";
+}
+
+export const OUTREACH_SEND_HELP =
+  "Off: your assistant drafts emails to recruiters and people you contact, and you send them. On: it may send them from your Gmail itself, within the daily and per-company limits.";
+
 /** A line switch, narrowed to "ask" | "auto" (anything else is "ask"). */
 export function settingSwitch(f: { effective?: unknown; value?: unknown } | undefined): "ask" | "auto" {
   return settingEffective(f) === "auto" ? "auto" : "ask";
@@ -74,11 +82,12 @@ export const MIN_GAP_MAX = 240;
 export const GRANT_COUNT_MAX = 100;
 export const GRANT_MAX_DAYS = 7;
 export const P_AUTO_EMAILS = "assistant_settings.auto_employer_emails";
+export const P_OUTREACH_SEND = "assistant_settings.outreach_send";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
-  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS,
+  P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND,
   P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL,
 ] as const;
 export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
@@ -91,6 +100,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_SUBMIT]: "Submit mode",
   [P_CAP]: "Daily limit",
   [P_AUTO_EMAILS]: "Automatic employer emails",
+  [P_OUTREACH_SEND]: "Automatic outreach emails",
   [P_COMPANY_CAP]: "Applications per company",
   [P_COMPANY_DAYS]: "Days for the company limit",
   [P_WEEKLY_CAP]: "Weekly limit",
@@ -117,6 +127,7 @@ export function everyText(v: unknown): string {
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
   if (path === P_AUTO_EMAILS) return v === true ? "on" : "off";
+  if (path === P_OUTREACH_SEND) return v === "auto" ? "on" : "off";
   if (path === P_CAP || path === P_COMPANY_CAP || path === P_WEEKLY_CAP) return empty ? "no limit" : String(v);
   if (path === P_MIN_GAP) return empty || v === 0 ? "no wait" : `${String(v)} minutes`;
   if (path === P_HOURS) {

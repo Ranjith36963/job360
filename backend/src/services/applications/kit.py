@@ -117,6 +117,7 @@ def _ascii_part(value: Any) -> str:
 
 
 _NAMED_KINDS = {"cv": "CV", "cover_letter": "Cover_Letter"}
+_STEM_MAX = 120  # characters of an uploaded file-name stem (ASCII, so also bytes)
 
 
 def legal_file_stem(profile: Any, kind: str) -> Optional[str]:
@@ -139,8 +140,8 @@ def legal_file_stem(profile: Any, kind: str) -> Optional[str]:
     return f"{first}_{last}_{suffix}"
 
 
-async def download_stem(user_id: str, company: str, kind: str, version_no: int) -> str:
-    """The one download/kit file-name stem: the user's legal name, else ``file_stem``."""
+async def named_stem(user_id: str, kind: str) -> Optional[str]:
+    """``legal_file_stem`` for the user's saved profile; ``None`` when no name is known."""
     import asyncio  # noqa: PLC0415
 
     try:
@@ -149,7 +150,17 @@ async def download_stem(user_id: str, company: str, kind: str, version_no: int) 
         profile = await asyncio.to_thread(load_profile, user_id)
     except Exception:  # noqa: BLE001 - a name lookup must never break a download
         profile = None
-    return legal_file_stem(profile, kind) or file_stem(company, kind, version_no)
+    stem = legal_file_stem(profile, kind)
+    if stem is None or len(stem) <= _STEM_MAX:
+        return stem
+    # An upload writes this name to disk (NAME_MAX 255): keep the start of the name, always the kind.
+    suffix = _NAMED_KINDS[kind]
+    return f"{stem[: -len(suffix) - 1][: _STEM_MAX - len(suffix) - 1].rstrip('_-')}_{suffix}"
+
+
+async def download_stem(user_id: str, company: str, kind: str, version_no: int) -> str:
+    """The one download/kit file-name stem: the user's legal name, else ``file_stem``."""
+    return await named_stem(user_id, kind) or file_stem(company, kind, version_no)
 
 
 def file_stem(company: str, kind: str, version_no: int) -> str:
@@ -2130,6 +2141,10 @@ _KNOCKOUT_RE = re.compile(
     r"\b18 (?:years )?(?:of age )?or (?:over|older)\b"
 )
 _OPTION_FIELDS = frozenset({"select", "radio", "checkbox"})
+# A FILE question that asks for the CV or the cover letter: Job360's browser tool uploads the saved artifact.
+_CV_FILE_RE = re.compile(r"\bcv\b|\bresume\b|résumé|curriculum vitae")
+_LETTER_FILE_RE = re.compile(r"cover(?:ing)? letter|motivation(?:al)? letter|letter of motivation")
+_DOCUMENT_LABELS = {"cv": "CV", "cover_letter": "Cover letter"}
 
 
 def _norm_question(text: Any) -> str:
@@ -2158,9 +2173,16 @@ def _record_item(rec: dict[str, Any]) -> dict[str, Any]:
     return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text"}
 
 
+def _file_kind(text: str) -> Optional[str]:
+    """The artifact kind a file question asks for, or None (portfolio, transcript, ID, "CV or cover letter")."""
+    low = text.casefold()
+    is_cv, is_letter = bool(_CV_FILE_RE.search(low)), bool(_LETTER_FILE_RE.search(low))
+    return "cv" if is_cv and not is_letter else "cover_letter" if is_letter and not is_cv else None
+
+
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
-    records: Any = None, company_key: Optional[str] = None,
+    records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
@@ -2173,6 +2195,8 @@ def form_check(
     not one of a select/radio/checkbox's ``options`` is a gap, one longer than the
     control's ``limit`` is flagged ``over_limit`` (never cut), a sensitive question is
     flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts``.
+    A ``file`` question for the CV or the cover letter is answered by the application's newest saved
+    artifact of that kind (``documents``: kind -> artifact row), source ``artifact``; none saved = a gap.
     Never logs, never writes, never guesses."""
     from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
 
@@ -2219,6 +2243,19 @@ def form_check(
                 item = approved.get(_norm_question(text)) if _norm_question(text) else None
             if item is None and not why:
                 why = "no saved answer for this question"
+        kind = _file_kind(text) if ftype == "file" and item is None else None
+        if kind is not None:
+            label = _DOCUMENT_LABELS[kind]
+            doc = (documents or {}).get(kind)
+            if doc is None:
+                why = f"no {label} saved for this application yet: save the {label} first (save_artifact kind {kind})"
+            else:
+                why = ""
+                item = {
+                    "key": f"artifact.{kind}", "source": "artifact",
+                    "value": f"{label} v{doc['version_no']} (artifact {doc['id']})",
+                }
+                matched_by = "key" if key is not None else "wording"
         options = [str(o) for o in (q.get("options") or [])]
         if item is not None and ftype in _OPTION_FIELDS and options and isinstance(item["value"], str) \
                 and item["value"].casefold() not in {o.casefold() for o in options}:
@@ -2285,7 +2322,14 @@ async def check_form(
         })
         raise SpineError(404, "application not found")
     profile, _country, answers, _missing = await _application_answers(db, user, app_row)
-    out = form_check(answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None)
+    documents = {}
+    for kind in _DOCUMENT_LABELS:
+        row = await spine.latest_artifact(db, user.id, application_id, kind)
+        if row is not None:
+            documents[kind] = row
+    out = form_check(
+        answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None, documents,
+    )
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
         "questions_count": out["questions_count"], "answered": out["counts"]["answered"],
