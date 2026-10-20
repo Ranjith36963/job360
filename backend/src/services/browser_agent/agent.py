@@ -677,6 +677,9 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     page = _live_page(s)
     if page.url.startswith("chrome-error://"):
         return _load_failed(page, after_action)
+    refused = _refusal(s, page)
+    if refused is not None:  # the tab holds the proxy's refusal, never a page to read as "ok"
+        raise refused
     elements: list[dict[str, Any]] = []
     places: list[tuple[float, bool]] = []
     texts: list[str] = []

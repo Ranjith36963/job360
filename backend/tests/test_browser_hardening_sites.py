@@ -31,6 +31,7 @@ def test_only_a_this_or_the_field_blank_label_is_a_trap():
     ("Do not fill this in if you already applied", False),
     # Classic bot traps: "fill this out", or "if you are / you're human".
     ("Don't fill this out if you're human", True),
+    ("Don\u2019t fill this out if you\u2019re human", True),
     ("Do not fill this out", True),
     ("Do not fill in if you are human", True),
     ("Do not fill out this field", True),

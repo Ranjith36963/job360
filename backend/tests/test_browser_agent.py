@@ -358,6 +358,10 @@ async def test_a_redirect_to_a_private_address_never_reaches_the_page(pool, site
     with pytest.raises(BrowserError) as exc:
         await run(pool, "u1", "open", url="http://jobs.example/to-private")
     assert exc.value.status == "refused" and exc.value.reason == "blocked_address"
+    # A look at that tab says the same, never "ok" with the proxy's text.
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "look")
+    assert exc.value.reason == "blocked_address"
     assert any(d.startswith("127.0.0.1") for d in pool.egress.denied)
 
     page = await run(pool, "u1", "open", url="http://jobs.example/links")
