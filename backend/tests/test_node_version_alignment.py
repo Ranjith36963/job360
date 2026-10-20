@@ -58,7 +58,7 @@ def _setup_node_problems(path: Path) -> tuple[set[str], list[str]]:
         if not m:
             continue
         # The step ends at the next non-blank line indented no deeper than its `- `.
-        step_indent = len(m.group(1)) - (2 if line.lstrip().startswith("-") else 0)
+        step_indent = len(m.group(1)) - (0 if line.lstrip().startswith("-") else 2)
         block: list[str] = []
         for nxt in lines[i + 1 :]:
             if nxt.strip() and (len(nxt) - len(nxt.lstrip())) <= step_indent:
