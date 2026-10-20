@@ -139,6 +139,7 @@ FEED_SOURCES = (
     "uber",
     "wellfound",
     "getro",
+    "workatastartup",
     "reed",
     "usajobs",
     "whatjobs",

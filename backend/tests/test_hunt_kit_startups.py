@@ -354,3 +354,21 @@ def test_getro_org_dict_without_name_falls_back_or_drops():
         {**base, "organization": {}},
         {**base, "organization": {"name": None}}]}})
     assert [j["company"] for j in jobs] == ["Acme", "Beta"]
+
+
+def test_waas_full_raw_page_with_a_dropped_hit_still_reads_page_two(monkeypatch):
+    monkeypatch.setenv("WAAS_ALGOLIA_KEY", "k")
+    full = [_waas_hit(i) for i in range(1, ks.WAAS_PER_PAGE)] + [_waas_hit(999, company_name="")]
+    http = _http(lambda url, d: (200, {"hits": full}))
+    _run(ks.fetch_workatastartup, http, queries=["a"])
+    assert len(http.calls) == ks.PAGES  # 50 raw hits (one kept row fewer) is still a full page
+
+
+def test_every_feed_is_a_selectable_default_source():
+    sys.modules.pop("hunt_kit_startups_check", None)
+    spec = importlib.util.spec_from_file_location("hunt_kit_startups_check", _KIT / "hunt_kit.py")
+    hk = importlib.util.module_from_spec(spec)
+    sys.modules["hunt_kit_startups_check"] = hk
+    spec.loader.exec_module(hk)  # type: ignore[union-attr]
+    assert set(ks.FEEDS) <= set(hk.FEED_SOURCES) and "kit_startups" in hk.FEED_MODULES
+    assert set(ks.FEEDS) <= set(hk.select_sources("default"))  # workatastartup sends nothing without a key

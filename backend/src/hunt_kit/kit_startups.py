@@ -328,9 +328,9 @@ def fetch_workatastartup(queries: list[str], http: HttpFn, stats: Stats, *, days
                                                       "hitsPerPage": WAAS_PER_PAGE, "page": page})
             if body is None:
                 break
-            got = parse_waas_hits(body)
-            jobs += got
-            if len(got) < WAAS_PER_PAGE:
+            jobs += parse_waas_hits(body)
+            hits = body.get("hits") if isinstance(body, dict) else None
+            if not isinstance(hits, list) or len(hits) < WAAS_PER_PAGE:  # the raw page, not the kept rows
                 break
         if site.stopped:
             break
