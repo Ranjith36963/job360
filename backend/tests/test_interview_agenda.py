@@ -135,10 +135,13 @@ async def test_just_passed_lists_both_rounds_when_nothing_followed(authenticated
         a = await _bring(client)
         b = await _bring(client, {**_AD, "title": "Analyst", "company": "Globex", "apply_url": "https://g.example/1"})
         await _event(client, a, "interview_scheduled", scheduled_at=_iso(-2), payload={"round": "phone_screen"})
-        await _event(
-            client, b, "interview_scheduled", scheduled_at=_iso(-0.5),
-            payload={"round": "final", "link": "javascript:alert(1)"},
+        final = await _event(
+            client, b, "interview_scheduled", scheduled_at=_iso(-0.5), payload={"round": "final"},
         )
+        # A non-http link is refused at write time now (slice 43); rows from before that can
+        # still hold one, so the agenda must keep dropping it. Plant such a row directly.
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             (json.dumps({"round": "final", "link": "javascript:alert(1)"}), final["event_id"]))
         got = await _interviews(client)
     assert got["upcoming"] == []
     assert [(i["application_id"], i["round"]) for i in got["just_passed"]] == [(a, "phone_screen"), (b, "final")]
