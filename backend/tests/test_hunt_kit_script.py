@@ -767,3 +767,12 @@ def test_harvest_workday_rows_rotate() -> None:
     rows.append({"ats": "workday", "token": "mine|wd1|s", "source": "user"})
     kept = hk.rotate_workday(rows, 3)
     assert len(kept) == 4 and any(r["source"] == "user" for r in kept)
+
+
+def test_a_stated_years_floor_beats_the_text_guess() -> None:
+    col = hk.Collector(_args(work_countries="IN", days=3650))  # max_years default 5
+    base = dict(company="Acme", description="2 years of experience.", posted="", source="feed:test", board="b",
+                remote=None, visa_flag=None, location="Bengaluru")
+    col.offer_job("test", dict(base, title="AI Engineer", url="https://a/1", extra={"years_min": 12}))
+    col.offer_job("test", dict(base, title="ML Engineer", url="https://a/2", extra={}))
+    assert [r["url"] for r in col.results] == ["https://a/2"]

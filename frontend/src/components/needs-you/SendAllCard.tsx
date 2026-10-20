@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { approveSend, getReadyToSend } from "@/lib/api";
+import { startAssistantAfterSend } from "@/lib/assistant-start";
 import { ApiError } from "@/lib/api-error";
 import type { ReadyCardData } from "@/lib/api";
 import { answerHref, flagText, guardSend, rowDetail } from "@/lib/ready-to-send";
@@ -67,6 +68,8 @@ export function SendAllCard({
         .join(" ");
       if (failed.length) toast.error(message);
       else toast.success(message);
+      // One start for the whole batch, after every yes is saved: one session works them in order.
+      if (sent) void startAssistantAfterSend();
     } catch {
       toast.error("Could not send these. Try again.");
     } finally {

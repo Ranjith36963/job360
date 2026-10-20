@@ -1036,6 +1036,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assistant-trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trigger
+         * @description Is Send set to start the user's assistant? Host and last result only; never the token.
+         */
+        get: operations["get_trigger_api_assistant_trigger_get"];
+        /**
+         * Put Trigger
+         * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         */
+        put: operations["put_trigger_api_assistant_trigger_put"];
+        post?: never;
+        /** Delete Trigger */
+        delete: operations["delete_trigger_api_assistant_trigger_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-trigger/fire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fire Trigger
+         * @description Called by the website right after Send / Send all: start the user's assistant once for every
+         *     application whose newest send decision is their yes. Never fails the Send itself: a problem comes
+         *     back as ``fired: false`` with a reason the page shows.
+         */
+        post: operations["fire_trigger_api_assistant_trigger_fire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -7466,6 +7513,16 @@ export interface components {
             /** Prefix */
             prefix: string;
         };
+        /** TriggerIn */
+        TriggerIn: {
+            /**
+             * Token
+             * @default
+             */
+            token: string;
+            /** Url */
+            url: string;
+        };
         /** TypeFirstAnswer */
         TypeFirstAnswer: {
             /** Answer */
@@ -9484,6 +9541,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssistantSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trigger_api_assistant_trigger_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_trigger_api_assistant_trigger_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_trigger_api_assistant_trigger_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fire_trigger_api_assistant_trigger_fire_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

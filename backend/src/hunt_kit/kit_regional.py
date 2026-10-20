@@ -269,6 +269,10 @@ def parse_naukri(payload: Any) -> list[Job]:
         extra: dict[str, Any] = {"truncated": True}
         if labels.get("experience"):
             extra["experience"] = labels["experience"]
+        # freehire naukri.go:364-366: minimumExperience is the employer's stated floor; 0 states none.
+        mn = str(r.get("minimumExperience") or "").strip()
+        if mn.isdigit() and int(mn) > 0:
+            extra["years_min"] = int(mn)
         out.append(_made(
             "naukri", "Naukri", title=title, company=company, url=NAUKRI_BASE + path,
             place="" if place in ("India", "Remote") else place, country="India",

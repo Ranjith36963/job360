@@ -44,6 +44,7 @@ import {
   copyText,
   mcpUrl,
 } from "@/components/connect/ConnectSteps";
+import { SendStartsAssistantCard } from "@/components/connect/SendStartsAssistantCard";
 
 // ---------------------------------------------------------------------------
 // Connect your assistant — the page that gets a user's own AI assistant
@@ -949,6 +950,7 @@ export default function ConnectAgentPage() {
           onCheckEveryChange={onCheckEveryChange}
           modeSaving={savingMode}
         />
+        <SendStartsAssistantCard />
         <ConnectedAppsCard
           grants={grants}
           loading={grantsLoading}

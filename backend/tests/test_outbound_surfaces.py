@@ -64,6 +64,7 @@ SCREENED_SURFACES = {
     "services/fetch/fetcher.py": "POST /jobs/fetch-url — the web fallback's job-ad fetch",
     "services/browser_agent/safety.py": "the browser agent's `open` action",
     "services/browser_agent/egress.py": "EgressProxy — Chromium's only way out",
+    "services/browser_agent/trigger.py": "the user's \"start my assistant\" link, POSTed on Send",
 }
 
 # Outbound, but never to a URL a caller chose, so the guard does not apply.

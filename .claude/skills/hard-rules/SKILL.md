@@ -5,7 +5,7 @@ description: >-
   production or corrupt data when violated. Consult BEFORE editing schema,
   the application spine, MCP tools, auth routes, or profile extraction.
 ---
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 
 # Hard Rules
 

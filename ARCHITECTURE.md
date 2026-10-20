@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-10-11 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
