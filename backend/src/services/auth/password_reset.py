@@ -10,7 +10,8 @@ Two operations, mirroring the two API routes:
 2. ``confirm_password_reset(raw_token, new_password)`` — hash the token,
    look up the row, validate (not expired, not used, user not deleted),
    rehash the password, mark token used, revoke all the user's existing
-   sessions. Returns the affected user id on success or None on any failure
+   sessions, agent tokens and OAuth grants. Returns the affected user id on
+   success or None on any failure
    (caller returns 400 / 401 accordingly).
 
 Tokens are SHA256-hashed at rest (see ``tokens.py``). 1-hour expiry.
@@ -29,6 +30,7 @@ from src.repositories.db_retry import open_db
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
 from src.services.auth.passwords import hash_password
+from src.services.auth.sessions import revoke_agent_access
 from src.utils.logger import mask_email
 
 logger = logging.getLogger("job360.auth.password_reset")
@@ -192,6 +194,9 @@ async def confirm_password_reset(
             "DELETE FROM sessions WHERE user_id = ?",
             (row["user_id"],),
         )
+        # And every assistant: a takeover's `j360_` token or OAuth grant must
+        # not outlive the owner's own recovery (gap roadmap slice 2).
+        await revoke_agent_access(db, row["user_id"])
         await db.commit()
         logger.info("password reset confirm: ok user=%s", row["user_id"])
         return cast(Optional[str], row["user_id"])

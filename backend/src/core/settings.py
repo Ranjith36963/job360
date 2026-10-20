@@ -30,6 +30,14 @@ DATABASE_URL = os.getenv(
 from src.repositories import pg as _pg  # noqa: E402
 
 _pg.configure(DATABASE_URL)
+# Every connection the request-path pool opens gets this Postgres
+# ``statement_timeout`` (repositories/pool.py), so one runaway query cannot pin
+# a pooled connection forever. Pool only: migrations and boot DDL open their own
+# connections through ``pg.connect`` and never see it. ``0`` = no timeout.
+DB_STATEMENT_TIMEOUT_MS = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000"))
+# How long /api/readyz waits to borrow a pooled connection (and then for its
+# ``SELECT 1``) before answering 503. Railway's deploy healthcheck calls it.
+READYZ_POOL_TIMEOUT_S = float(os.getenv("READYZ_POOL_TIMEOUT_S", "2"))
 LOGS_DIR = DATA_DIR / "logs"
 
 
@@ -848,6 +856,12 @@ FILE_BAD_TOKEN_MAX_PER_MIN = int(os.getenv("FILE_BAD_TOKEN_MAX_PER_MIN", "20"))
 CALENDAR_FEED_MAX_PER_HOUR = int(os.getenv("CALENDAR_FEED_MAX_PER_HOUR", "30"))
 # How far back the feed reaches for interviews (days).
 CALENDAR_FEED_LOOKBACK_DAYS = int(os.getenv("CALENDAR_FEED_LOOKBACK_DAYS", "30"))
+# Reminders (VALARM) in the feed: an interview alerts this many minutes before it starts
+# (two alarms; a value <= 0 drops that alarm), a follow-up all-day event alerts at this
+# hour of the day (0-23).
+CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES = int(os.getenv("CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES", "1440"))
+CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES = int(os.getenv("CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES", "60"))
+CALENDAR_ALARM_FOLLOW_UP_HOUR = int(os.getenv("CALENDAR_ALARM_FOLLOW_UP_HOUR", "9"))
 # "Another assistant is on this application": a kit read by someone else this
 # recently warns (never blocks).
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
