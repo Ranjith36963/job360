@@ -20,7 +20,7 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 | **Know what we are building (and not)** | [`product/VISION.md`](product/VISION.md) — the 2026-09-03 decisions; wins over every older product doc |
 | **Understand the project fast** | [`../CLAUDE.md`](../CLAUDE.md) → [`../STATUS.md`](../STATUS.md) |
 | **Understand the architecture deeply** | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — the one architecture reference |
-| **Look up a count, a route, an endpoint** | [`GENERATED.md`](GENERATED.md) — machine-written from the code, never by hand |
+| **Look up a count, a route, an endpoint** | Measure it from the code (`ls`, `grep -n '@router\.' backend/src/api/routes/*.py`); counts are never written down |
 | **Run it locally** | [`../backend/README.md`](../backend/README.md) · [`../frontend/README.md`](../frontend/README.md) |
 | **Contribute / open a PR** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | **Know the rules I must not break** | [`../.claude/skills/hard-rules/SKILL.md`](../.claude/skills/hard-rules/SKILL.md) |
@@ -44,7 +44,6 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 
 | Doc | What it is |
 |---|---|
-| [`GENERATED.md`](GENERATED.md) | Machine-written by `scripts/gen_doc_blocks.py --write`: migration head, route and endpoint counts, test-file count, workflow count, hard-rule count, and the full route table. Never edit it — CI fails if it disagrees with the code. |
 
 ---
 
@@ -71,8 +70,8 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 ---
 
 > **Conventions.** `../ARCHITECTURE.md` is the authoritative architecture reference for how
-> the system fits together; [`GENERATED.md`](GENERATED.md) is the authority for every count
-> and route, because the code writes it. Code is the proof, not docs — verify any claim
+> the system fits together; counts and routes are
+> measured from the code, never written down. Code is the proof, not docs — verify any claim
 > against source before trusting it. A doc's own type header
 > (`<!-- doc: LIVING|PLAN|LOG|REFERENCE|FROZEN|GENERATED -->`) says how it should be read;
 > see `harness/maintenance/DOC-MAINTENANCE.md` §1.
