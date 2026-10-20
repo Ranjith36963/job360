@@ -388,6 +388,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/blocked/submitted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submitted Blocked
+         * @description "I submitted it" - the user got past the block and pressed Submit themselves:
+         *     records ``unblocked`` {resolution: user_did_it} (as "Mark resolved" does) and the
+         *     receipt (``recorded_by`` web, the pasted confirmation), in ONE transaction. 409 when
+         *     nothing is blocked, or when the application already has a receipt or is no longer
+         *     ``considering`` (check_submit's ``already_applied``); nothing is written then.
+         *     Session only; assistants use ``record_event`` + ``record_application``.
+         */
+        post: operations["submitted_blocked_api_applications__application_id__blocked_submitted_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/calendar.ics": {
         parameters: {
             query?: never;
@@ -3725,6 +3750,23 @@ export interface components {
              * @enum {string}
              */
             mode: "allow" | "deny";
+        };
+        /**
+         * BlockedSubmittedOut
+         * @description "I submitted it": the new receipt's id plus the refreshed decision state.
+         */
+        BlockedSubmittedOut: {
+            controls: components["schemas"]["ApplicationControlsOut"];
+            /** Receipt Id */
+            receipt_id: number;
+        };
+        /** BlockedSubmittedRequest */
+        BlockedSubmittedRequest: {
+            /**
+             * Confirmation
+             * @default
+             */
+            confirmation: string;
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -8356,6 +8398,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submitted_blocked_api_applications__application_id__blocked_submitted_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockedSubmittedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedSubmittedOut"];
                 };
             };
             /** @description Validation Error */

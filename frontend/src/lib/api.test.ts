@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getHealth, onEmailNotVerified } from "./api";
+import { getHealth, onEmailNotVerified, submittedBlocked } from "./api";
 import { ApiError } from "./api-error";
 
 function mock403(body: unknown) {
@@ -110,5 +110,28 @@ describe("request() — 403 email_not_verified handling (M16)", () => {
     await getHealth().catch(() => {});
 
     expect(notified).not.toHaveBeenCalled();
+  });
+});
+
+describe("submittedBlocked (\"I submitted it\")", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts exactly the pasted confirmation to the session-only route", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({ receipt_id: 9, controls: {} }),
+      text: async () => "",
+    }) as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await submittedBlocked(7, "APP-48213");
+    expect(res.receipt_id).toBe(9);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/api\/applications\/7\/blocked\/submitted$/);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({ confirmation: "APP-48213" }));
   });
 });
