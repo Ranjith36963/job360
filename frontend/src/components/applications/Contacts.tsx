@@ -23,7 +23,7 @@ const NO_CONTACTS: Contact[] = [];
 /** S5: `linkedin_url` is rendered as text everywhere, an `<a href>` ONLY when
  * it actually starts with `https://` — a stored `javascript:` (or bare
  * `http://`) value must never become a clickable script. */
-function LinkedinCell({ url }: { url: string }) {
+export function LinkedinCell({ url }: { url: string }) {
   if (!url) return null;
   if (url.startsWith("https://")) {
     return (
@@ -51,7 +51,7 @@ function channelLabel(channel: string): string {
  * never changes; this is just plain words for it. `"web"` -> "you" (the
  * seeker added it in the browser); a token/agent actor -> its name, since
  * that is more useful here than the generic word "assistant". */
-function addedByLabel(addedBy: string): string {
+export function addedByLabel(addedBy: string): string {
   if (addedBy === "web") return "you";
   const idx = addedBy.indexOf(":");
   if (idx >= 0) return addedBy.slice(idx + 1).trim() || "your assistant";
