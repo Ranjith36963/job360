@@ -842,6 +842,12 @@ FILE_BAD_TOKEN_MAX_PER_MIN = int(os.getenv("FILE_BAD_TOKEN_MAX_PER_MIN", "20"))
 CALENDAR_FEED_MAX_PER_HOUR = int(os.getenv("CALENDAR_FEED_MAX_PER_HOUR", "30"))
 # How far back the feed reaches for interviews (days).
 CALENDAR_FEED_LOOKBACK_DAYS = int(os.getenv("CALENDAR_FEED_LOOKBACK_DAYS", "30"))
+# Reminders (VALARM) in the feed: an interview alerts this many minutes before it starts
+# (two alarms; a value <= 0 drops that alarm), a follow-up all-day event alerts at this
+# hour of the day (0-23).
+CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES = int(os.getenv("CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES", "1440"))
+CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES = int(os.getenv("CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES", "60"))
+CALENDAR_ALARM_FOLLOW_UP_HOUR = int(os.getenv("CALENDAR_ALARM_FOLLOW_UP_HOUR", "9"))
 # "Another assistant is on this application": a kit read by someone else this
 # recently warns (never blocks).
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
