@@ -79,7 +79,7 @@ some Zoho Recruit sites list no description either, so open the link to read the
 `kit_ats_eu.py` adds Emply (`emply`), Manatal (`manatal`), TalentAdore (`talentadore`), Traffit (`traffit`)
 and Trakstar (`trakstar`), mostly European employers (rows with `source` `freehire`). Each is read with a few
 requests per board; the first refusal ends that board.
-`kit_ats_misc1.py` adds Betterteam (`betterteam:tenant`), CATS (`catsone:host`, e.g. `sphereinc.catsone.com`), ClinchTalent (`clinch:host`, a career-site host) and Crelate (`crelate:slug:orgId` in `companies.json`). They read public career pages; a handful of ads per board get a detail page for the description.
+`kit_ats_misc1.py` adds ten more board types: Betterteam (`betterteam:tenant`), CATS (`catsone:host`, e.g. `sphereinc.catsone.com`), ClinchTalent (`clinch:host`, a career-site host), Crelate (`crelate:slug:orgId` in `companies.json`), eRecruiter (the 32-hex cfg of its widget), gr8people (`gr8people:host`), HR-Manager (`hrmanager:alias`), iSmartRecruit (`ismartrecruit:domain_code`), Loxo (`loxo:host/slug`) and Mindsight (`mindsight:slug`). They read public career pages; a handful of ads per board get a detail page for the description.
 `kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), PageUp People (`pageup`, the
 institution number from `careers.pageuppeople.com/<number>/`), Comeet (`comeet`, `slug/companyUID`), HiBob (`hibob`, the tenant of
 `tenant.careers.hibob.com`) and Freshteam (`freshteam`, the tenant
