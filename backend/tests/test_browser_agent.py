@@ -157,7 +157,9 @@ FORM = """<!doctype html><html><head><title>Apply - Acme</title></head><body>
 </form></body></html>"""
 CAPTCHA = """<!doctype html><html><body><p>Checking your browser before you continue.</p></body></html>"""
 LINKS = """<!doctype html><html><head><title>Links - Acme</title></head><body>
-<a href="/to-private">Partner site</a></body></html>"""
+<a href="/to-private">Partner site</a>
+<a href="/to-private" target="_blank">Apply in a new tab</a>
+<a href="/links" target="_blank">Careers in a new tab</a></body></html>"""
 
 
 def _chromium_available() -> bool:
@@ -190,6 +192,12 @@ async def site():
     async def links(_):
         return web.Response(text=LINKS, content_type="text/html")
 
+    async def to_dead(_):
+        raise web.HTTPFound("http://dead.example/")
+
+    async def to_nowhere(_):
+        raise web.HTTPFound("http://nowhere.example/")
+
     async def fake_block(_):
         # A site's own 403 that copies the proxy's header name and words, without the proxy's mark.
         from src.services.browser_agent.egress import BLOCK_HEADER
@@ -204,6 +212,8 @@ async def site():
     app.router.add_get("/to-private", to_private)
     app.router.add_get("/links", links)
     app.router.add_get("/fake-block", fake_block)
+    app.router.add_get("/to-dead", to_dead)
+    app.router.add_get("/to-nowhere", to_nowhere)
     runner = web.AppRunner(app)
     await runner.setup()
     tcp = web.TCPSite(runner, "127.0.0.1", 0)
@@ -366,6 +376,53 @@ async def test_a_redirect_to_a_private_address_never_reaches_the_page(pool, site
     with pytest.raises(BrowserError) as exc:
         await run(pool, "u1", "back")
     assert exc.value.reason == "blocked_address"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_new_tab_that_redirects_to_a_private_address_is_refused_too(pool):
+    """Review of the small-truths branch: an "Apply" link with target=_blank opens a new tab, and for a
+    new tab's first load Playwright cannot name the frame, so the proxy's 403 came back "ok"."""
+    from src.services.browser_agent.agent import run
+
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(links, "Apply in a new tab"))
+    assert out["status"] == "refused" and out["reason"] == "blocked_address"
+    assert "text" not in out and "elements" not in out
+
+    # A new tab onto a public page is still a page.
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(links, "Careers in a new tab"))
+    assert out["status"] == "ok" and out["title"] == "Links - Acme"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_public_site_that_cannot_be_found_or_does_not_answer_is_load_failed_not_private(site):
+    """The proxy also refuses a host it cannot resolve or reach: that is a dead link, not a private
+    address, so it answers load_failed with no "private" wording."""
+    import asyncio
+
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    resolve, _ = _resolver({"jobs.example": "93.184.216.34", "dead.example": "93.184.216.35"})
+
+    async def open_connection(host, p):
+        if host == "93.184.216.35":
+            raise ConnectionRefusedError("nobody home")
+        return await asyncio.open_connection("127.0.0.1", site)
+
+    p = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=open_connection)
+    try:
+        for url in ("http://jobs.example/to-dead", "http://jobs.example/to-nowhere", "http://dead.example/"):
+            with pytest.raises(BrowserError) as exc:
+                await run(p, "u1", "open", url=url)
+            assert exc.value.status == "error" and exc.value.reason == "load_failed", url
+            assert "private" not in exc.value.detail, url
+    finally:
+        await p.shutdown()
 
 
 @needs_chromium

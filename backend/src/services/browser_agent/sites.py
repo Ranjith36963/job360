@@ -144,10 +144,13 @@ _NOT_FIELD_TYPES = ("submit", "button", "image", "reset", "hidden")
 # (leave blank)" is an ordinary optional field and refusing it would block a real answer.
 _HONEYPOT = re.compile(
     r"leave (?:this|the)\s+(?:field\s+|box\s+)?(?:blank|empty)(?!\s*(?:if|unless|when|for)\b)"
-    # "Do not fill" only for this/the field itself, or with nothing after it ("Do not fill this in."):
-    # "Do not fill in your old address if same" is an ordinary instruction.
-    r"|do ?n['o]?t fill\s+(?:in\s+)?(?:this|the)\s+(?:field|box|input)\b"
-    r"|do ?n['o]?t fill\s+(?:this(?:\s+in)?|in)\W*$",
+    # "Do not fill" only for this/the field itself, with nothing after it ("Do not fill this in."), as
+    # "fill this out", or for humans ("... if you're human"): "Do not fill in your old address if
+    # same" is an ordinary instruction.
+    r"|do ?n['o]?t fill\s+(?:(?:in|out)\s+)?(?:this|the)\s+(?:field|box|input)\b"
+    r"|do ?n['o]?t fill\s+(?:this(?:\s+(?:in|out))?|in|out)\W*$"
+    r"|do ?n['o]?t fill\s+this\s+out\b"
+    r"|do ?n['o]?t fill\b.*\bif you(?:['\u2019]re| are) (?:a )?human\b",
     re.IGNORECASE,
 )
 

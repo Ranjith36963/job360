@@ -29,6 +29,12 @@ def test_only_a_this_or_the_field_blank_label_is_a_trap():
     ("Do not fill in your old address if same", False),
     ("Do not fill in the rest if you are a student", False),
     ("Do not fill this in if you already applied", False),
+    # Classic bot traps: "fill this out", or "if you are / you're human".
+    ("Don't fill this out if you're human", True),
+    ("Do not fill this out", True),
+    ("Do not fill in if you are human", True),
+    ("Do not fill out this field", True),
+    ("Do not fill in the rest if you are a current employee", False),
 ])
 def test_do_not_fill_is_a_trap_only_for_the_field_itself(label, trap):
     from src.services.browser_agent.sites import is_honeypot

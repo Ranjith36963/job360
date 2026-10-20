@@ -16,7 +16,8 @@ launched with this proxy as its only way out (``--proxy-server`` plus
    so the address checked is the address used (no DNS rebinding);
 4. otherwise answers ``403`` and closes. That 403 carries ``BLOCK_HEADER`` with ``BLOCK_MARK``, a
    value fresh in each process that no site can know, so the agent can tell the proxy's refusal of
-   a redirect hop from a page (it answers ``blocked_address``, never "ok" with this text).
+   a redirect hop from a page (it answers ``blocked_address``, never "ok" with this text). A host
+   that cannot be resolved or does not answer gets ``UNREACHABLE_MARK`` instead (``load_failed``).
 
 ``resolve`` and ``open_connection`` are injected, so the suite runs it with a
 fake resolver and a loopback test site and nothing leaves the machine.
@@ -40,6 +41,7 @@ _HOP_BY_HOP = (b"proxy-connection", b"connection", b"keep-alive", b"proxy-author
 # Only the proxy's own 403 carries this header with this value (a new one each process).
 BLOCK_HEADER = "x-job360-egress-refused"
 BLOCK_MARK = secrets.token_hex(16)
+UNREACHABLE_MARK = secrets.token_hex(16)  # the host could not be resolved or did not answer
 
 
 async def _default_open(host: str, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -106,14 +108,16 @@ class EgressProxy:
             await self._server.wait_closed()
             self._server = None
 
-    async def _refuse(self, writer: asyncio.StreamWriter, host: str, reason: str) -> None:
+    async def _refuse(
+        self, writer: asyncio.StreamWriter, host: str, reason: str, mark: str = BLOCK_MARK
+    ) -> None:
         self.denied = (self.denied + [f"{host}: {reason}"])[-20:]
         logger.info("browser egress refused %s (%s)", host, reason)
         try:
             body = b"Job360's browser only reaches the public internet."
             writer.write(
                 b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n"
-                + f"{BLOCK_HEADER}: {BLOCK_MARK}\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
+                + f"{BLOCK_HEADER}: {mark}\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
             )
             await writer.drain()
         finally:
@@ -143,7 +147,7 @@ class EgressProxy:
         try:
             verdict = await screen_host(shape.host, port, resolve=self._resolve)
         except OSError:
-            await self._refuse(writer, host, "the address could not be resolved")
+            await self._refuse(writer, host, "the address could not be resolved", UNREACHABLE_MARK)
             return
         if not verdict.ok or not verdict.approved:
             await self._refuse(writer, host, verdict.reason or "denied")
@@ -152,7 +156,7 @@ class EgressProxy:
         try:
             up_reader, up_writer = await asyncio.wait_for(self._open(address, port), CONNECT_TIMEOUT_S)
         except (OSError, asyncio.TimeoutError):
-            await self._refuse(writer, host, "the site did not answer")
+            await self._refuse(writer, host, "the site did not answer", UNREACHABLE_MARK)
             return
         if method.upper() == "CONNECT":
             writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
