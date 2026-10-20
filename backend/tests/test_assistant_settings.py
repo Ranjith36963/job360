@@ -193,13 +193,19 @@ def test_defaults_are_the_safe_ones_and_empty_is_not_chosen():
         (SCORE, 101), (SCORE, -1), (SCORE, True), (SCORE, "75"), (SCORE, 75.5),
         (CAP, 0), (CAP, -3), (CAP, settings.ASSISTANT_DAILY_CAP_MAX + 1), (CAP, True), (CAP, "5"),
         (PAUSE, "tomorrow"), (PAUSE, "2030-01-01T09:00:00"), (PAUSE, 7),
-        (PAUSE, (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()),
-        (PAUSE, (datetime.now(timezone.utc) + timedelta(days=400)).isoformat()),
+        # A pause time relative to NOW is passed as a timedelta and turned into a
+        # timestamp INSIDE the test: a datetime.now() here would bake the clock
+        # into the test id, so two pytest-xdist workers collect different ids and
+        # xdist refuses to start ("Different tests were collected").
+        pytest.param(PAUSE, timedelta(hours=-1), id="pause-1h-in-the-past"),
+        pytest.param(PAUSE, timedelta(days=400), id="pause-400d-ahead"),
         (REASON, "line one\nline two"), (REASON, "bell\x07"), (REASON, "x" * (settings.PROFILE_EDIT_MAX_ITEM_CHARS + 1)),
         (REASON, 12),
     ],
 )
 def test_bad_values_are_refused_naming_the_path(path, value):
+    if isinstance(value, timedelta):
+        value = (datetime.now(timezone.utc) + value).isoformat()
     detail = _reject(path, value)
     assert detail.startswith(path), detail
     if isinstance(value, str) and 4 <= len(value) < 40:

@@ -183,6 +183,48 @@ async def test_concurrent_up_is_race_safe(tmp_db_path, tmp_migrations_dir):
 
 
 @pytest.mark.asyncio
+async def test_migration_lock_is_per_schema(tmp_path):
+    """The up() advisory lock is database-wide, so ONE fixed key made every
+    pytest-xdist worker wait for every other worker's migration run, though
+    each test owns its own schema. The key is per schema: the same schema
+    always gets the same key (the B11 race above stays closed), two schemas
+    never share one, and production's ``public`` keeps the historical key."""
+    a, b = str(tmp_path / "a.db"), str(tmp_path / "b.db")
+    async with pg.connect(a) as db_a1, pg.connect(a) as db_a2, pg.connect(b) as db_b:
+        key_a1 = await runner._migration_lock_key(db_a1)
+        key_a2 = await runner._migration_lock_key(db_a2)
+        key_b = await runner._migration_lock_key(db_b)
+    assert key_a1 == key_a2, "two booters of one schema must share the lock"
+    assert key_a1 != key_b, "two schemas must not queue behind each other"
+    assert runner.MIGRATION_LOCK_KEY not in (key_a1, key_b)
+    assert 0 < key_a1 < 2**63 and 0 < key_b < 2**63, "pg_advisory_lock takes a signed bigint"
+
+    async with pg.connect(None) as db_public:
+        assert await runner._migration_lock_key(db_public) == runner.MIGRATION_LOCK_KEY == 0x30B360C0DE
+    await pg.drop_schema(a)
+    await pg.drop_schema(b)
+
+
+@pytest.mark.asyncio
+async def test_up_does_not_wait_on_another_schemas_lock(tmp_path, tmp_migrations_dir):
+    """The behaviour, not just the key: while another session holds production's
+    key AND another schema's key, up() on this schema still finishes. With one
+    shared key it would wait on the held production key and time out."""
+    a, b = str(tmp_path / "a.db"), str(tmp_path / "b.db")
+    async with pg.connect(b) as holder:
+        key_b = await runner._migration_lock_key(holder)
+        await holder.execute("SELECT pg_advisory_lock(?)", (runner.MIGRATION_LOCK_KEY,))
+        await holder.execute("SELECT pg_advisory_lock(?)", (key_b,))
+        try:
+            applied = await asyncio.wait_for(runner.up(a, migrations_dir=tmp_migrations_dir), timeout=20)
+        finally:
+            await holder.execute("SELECT pg_advisory_unlock_all()")
+    assert applied == ["0001_create_alpha", "0002_create_beta"]
+    await pg.drop_schema(a)
+    await pg.drop_schema(b)
+
+
+@pytest.mark.asyncio
 async def test_0017_adds_llm_verdict_columns(tmp_db_path):
     """Migration 0017 adds the four per-user LLM-matcher columns to user_feed."""
     # Pre-Batch-2 baseline tables must exist before the runner fires (same
