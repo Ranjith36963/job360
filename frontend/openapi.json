@@ -259,6 +259,33 @@
         "title": "AlignmentOut",
         "type": "object"
       },
+      "AnalyticsConsentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "title": "Consent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "consent"
+        ],
+        "title": "AnalyticsConsentRequest",
+        "type": "object"
+      },
+      "AnalyticsConsentResponse": {
+        "properties": {
+          "analytics_consent": {
+            "title": "Analytics Consent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "analytics_consent"
+        ],
+        "title": "AnalyticsConsentResponse",
+        "type": "object"
+      },
       "AnswerAskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12597,6 +12624,11 @@
       },
       "UserResponse": {
         "properties": {
+          "analytics_consent": {
+            "default": false,
+            "title": "Analytics Consent",
+            "type": "boolean"
+          },
           "email": {
             "title": "Email",
             "type": "string"
@@ -17539,6 +17571,82 @@
         ]
       }
     },
+    "/api/auth/me/analytics-consent": {
+      "put": {
+        "description": "Web session only: the user's own \"Help improve Job360\" switch (gap roadmap slice 4).\n\nThe ONE write door for `users.analytics_consent_at`. ``true`` stamps when they\nagreed; ``false`` clears it, which withdraws consent at once (server PostHog\ncapture and Sentry session replay both read it). Consent is the person's own\nchoice, so an assistant's token is refused (403 ``session_required``).",
+        "operationId": "set_analytics_consent_api_auth_me_analytics_consent_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyticsConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsConsentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Analytics Consent",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/auth/me/email-verified": {
       "get": {
         "description": "Cheap read for the dashboard to render a 'verify email' banner.",
@@ -18387,7 +18495,7 @@
     },
     "/api/browser/sign-ins/{host}": {
       "delete": {
-        "description": "Forget one saved sign-in. The user's live browser (if any) is closed so it forgets too.",
+        "description": "Forget one saved sign-in. The user's browsers (if any) are closed so they forget too.",
         "operationId": "forget_sign_in_api_browser_sign_ins__host__delete",
         "parameters": [
           {
