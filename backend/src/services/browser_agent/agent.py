@@ -43,11 +43,13 @@ from src.services.browser_agent.page_js import (
     OWN_LIST_IDS_JS,
     SHOWN_VALUE_JS,
     SNAPSHOT_JS,
+    SUBMIT_GUARD_READ_JS,
+    SUBMIT_GUARD_START_JS,
     TICK_VIA_LABEL_JS,
     WATCH_READ_JS,
     WATCH_START_JS,
 )
-from src.services.browser_agent.safety import RequestScreen, blocker_for, control_kind
+from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
 from src.services.browser_agent.sites import is_honeypot, looks_like_application, outcome_for, site_for
 from src.services.fetch.guard import ResolveFn
 
@@ -262,7 +264,10 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
         raise BrowserError("refused", "bad_key", "key (in text) must be one of: " + ", ".join(sorted(AGENT_KEYS)))
     page = _live_page(s)
     if ref:
-        await (await _locate(s, ref)).focus()
+        frame, loc = await _find(s, ref)
+        _refuse_captcha_frame(frame)
+        await loc.focus()
+    guarded = None
     if key == "Enter":
         frame = page.main_frame
         for f in page.frames:  # the focus may live in a frame (an embedded form)
@@ -271,14 +276,29 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
                     frame = f
             except Exception:  # noqa: BLE001, S112 - a frame mid-navigation
                 continue
+        _refuse_captcha_frame(frame)
         if not await frame.evaluate(FOCUS_IN_LIST_JS):
             raise BrowserError(
                 "refused", "enter_may_submit",
-                "Enter is only pressed inside a suggestion list (a combobox). In an ordinary field it can submit "
-                "the form: click the form's submit button instead, so check_submit runs.",
+                "Enter is only pressed on a highlighted option of a suggestion list (type, then ArrowDown). "
+                "Anywhere else it can submit the form: click the form's submit button instead, so check_submit runs.",
             )
+        # Defence in depth: a site that lets Enter through to its form would submit it. Stop that submit.
+        await frame.evaluate(SUBMIT_GUARD_START_JS)
+        guarded = frame
     await page.keyboard.press(key)
     await _settle(page)
+    if guarded is not None:
+        try:
+            submitted = await guarded.evaluate(SUBMIT_GUARD_READ_JS)
+        except Exception:  # noqa: BLE001 - the frame navigated: no submit got past the guard to do it
+            submitted = False
+        if submitted:
+            raise BrowserError(
+                "refused", "enter_may_submit",
+                "That Enter would have submitted the form; Job360 stopped it. Click an option instead, and the "
+                "form's submit button only when it is time, so check_submit runs.",
+            )
     return await look(s)
 
 
@@ -480,14 +500,34 @@ def _wrap_untrusted(text: str) -> str:
     return f"<<page-text {nonce}>>\n{clean}\n<<end page-text {nonce}>>"
 
 
+# Can the user see this frame's element: a real size, not hidden or see-through, and not parked off the
+# document? An invisible reCAPTCHA or hCaptcha keeps its challenge frame at full size inside a
+# `visibility: hidden` box at `top: -10000px` until it asks something (seen on Ashby and Lever, 2026-10-20).
+_FRAME_ELEMENT_SHOWN_JS = r"""
+(el) => {
+  const r = el.getBoundingClientRect();
+  if (r.width <= 1 || r.height <= 1) return false;
+  if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) return false;
+  const win = el.ownerDocument.defaultView;
+  return r.right + win.scrollX > 0 && r.bottom + win.scrollY > 0;
+}
+"""
+
+
 async def _frame_shown(frame: Any) -> bool:
-    """A child frame the user cannot see (0x0, hidden) holds no form worth reading."""
-    try:
-        handle = await frame.frame_element()
-        box = await handle.bounding_box()
-    except Exception:  # noqa: BLE001 - detached or cross-process mid-read
-        return False
-    return bool(box) and box["width"] > 1 and box["height"] > 1
+    """A child frame the user cannot see (0x0, hidden, off the page) holds no form worth reading and
+    asks nothing: a challenge frame counts as a CAPTCHA only once it is shown. Every frame up to the
+    page must be shown."""
+    while frame is not None and frame.parent_frame is not None:
+        try:
+            handle = await frame.frame_element()
+            shown = await asyncio.wait_for(handle.evaluate(_FRAME_ELEMENT_SHOWN_JS), FRAME_READ_TIMEOUT_S)
+        except Exception:  # noqa: BLE001 - detached or cross-process mid-read
+            return False
+        if not shown:
+            return False
+        frame = frame.parent_frame
+    return True
 
 
 async def _site_warnings(page: Any, site: str) -> list[str]:
@@ -521,8 +561,11 @@ async def look(s: Session) -> dict[str, Any]:
     # the budget for it: 150 links on the page itself must not crowd the form out.
     shown = [True] + [await _frame_shown(f) for f in frames[1:]]
     embeds = any(shown[1:])
+    captcha_urls: list[str] = []
     for i, frame in enumerate(frames):
         frame_urls.append(frame.url)
+        if shown[i]:
+            captcha_urls.append(frame.url)
         # The cap counts frames READ: hidden ones (ads, trackers) before the form do not use it up.
         if read >= MAX_FRAMES or not shown[i]:
             continue
@@ -537,8 +580,9 @@ async def look(s: Session) -> dict[str, Any]:
         has_password = has_password or bool(snap.get("has_password_box"))
         above += int(snap.get("omitted_above") or 0)
         below += int(snap.get("omitted_below") or 0)
-    # Every frame's URL counts for the CAPTCHA check, including the frames past the cap and hidden ones.
-    frame_urls.extend(f.url for f in page.frames[MAX_FRAMES_CHECKED:])
+    # Every SHOWN frame's URL counts for the CAPTCHA check, the frames past the cap included. A hidden
+    # challenge frame (the invisible kind, waiting) asks nothing; once it asks, it is shown.
+    captcha_urls.extend([f.url for f in page.frames[MAX_FRAMES_CHECKED:] if await _frame_shown(f)])
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
@@ -574,14 +618,48 @@ async def look(s: Session) -> dict[str, Any]:
             "above": above, "below": below,
             "hint": "Only the controls nearest the screen are listed. scroll up or down, then look, to see the rest.",
         }
-    blocker = blocker_for(frame_urls, text, has_password)
+    blocker = blocker_for(captcha_urls, text, has_password)
     if blocker is not None:
         out.update(status="needs_you", reason=blocker.reason, detail=blocker.detail)
     return out
 
 
-async def _locate(s: Session, ref: str) -> Any:
-    return (await _find(s, ref))[1]
+CAPTCHA_DETAIL = (
+    "This page asks for a human check (CAPTCHA). Job360's browser never solves one and does nothing more on "
+    "this page: stop this job; the user finishes it with their own browser."
+)
+
+
+def _refuse_captcha_frame(frame: Any) -> None:
+    """Nothing inside a CAPTCHA's own frame (or a frame within it) is ever clicked, typed or keyed."""
+    while frame is not None:
+        if _captcha_frame(frame.url or ""):
+            raise BrowserError("needs_you", "captcha", CAPTCHA_DETAIL)
+        frame = frame.parent_frame
+
+
+# The frame's text as look reads it (whitespace folded, so a phrase split over lines still matches).
+_BODY_TEXT_JS = "(n) => (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, n)"
+
+
+async def _page_captcha(page: Any) -> bool:
+    """Whether the page shows a CAPTCHA now: the same frames and text ``look`` reads."""
+    urls: list[str] = []
+    texts: list[str] = []
+    read = 0
+    for i, f in enumerate(page.frames):
+        if i and not await _frame_shown(f):
+            continue
+        urls.append(f.url)
+        if i >= MAX_FRAMES_CHECKED or read >= MAX_FRAMES:
+            continue
+        try:
+            texts.append(await asyncio.wait_for(f.evaluate(_BODY_TEXT_JS, MAX_TEXT), FRAME_READ_TIMEOUT_S))
+        except Exception:  # noqa: BLE001, S112 - a frame mid-navigation: its address still counts
+            continue
+        read += 1
+    blocker = blocker_for(urls, "\n\n".join(texts)[:MAX_TEXT], False)
+    return blocker is not None and blocker.reason == "captcha"
 
 
 async def _find(s: Session, ref: str) -> tuple[Any, Any]:
@@ -747,6 +825,9 @@ async def _act(
         await page.go_back()
         await _settle(page)
         return await look(s)
+    # A CAPTCHA stops the run: past this point every action could work the check itself.
+    if await _page_captcha(_live_page(s)):
+        raise BrowserError("needs_you", "captcha", CAPTCHA_DETAIL)
     if action == "key":
         return await _press(s, ref, text)
     if action == "scroll":
@@ -758,6 +839,7 @@ async def _act(
         return await look(s)
 
     frame, loc = await _find(s, ref)
+    _refuse_captcha_frame(frame)
     kind = await _kind(loc)
     page = _live_page(s)
 

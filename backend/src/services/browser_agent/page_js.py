@@ -184,19 +184,50 @@ ELEMENT_FACTS_JS = r"""
 }
 """
 
-# Is the focused element a suggestion list (a combobox, an autocomplete box, an option)? Only
-# there may the assistant press Enter: anywhere else Enter can submit the form.
+# Is an option picked out for Enter to choose? Only then may the assistant press Enter: anywhere else
+# Enter can submit the form. An OPEN list with no option highlighted ("No options") does not count:
+# Enter there falls through to the form (implicit submission), which would skip check_submit.
 FOCUS_IN_LIST_JS = r"""
 () => {
   const el = document.activeElement;
   if (!el || el === document.body) return false;
-  const role = (el.getAttribute('role') || '').toLowerCase();
-  // Focus on an option of an open list: Enter picks it.
-  if (role === 'option' || el.closest('[role=listbox]')) return true;
-  // A suggestion box counts only while its list is OPEN: a closed combobox inside a form
-  // submits on Enter like any field (implicit submission), which would skip check_submit.
-  const box = el.closest('[role=combobox]') || el;
-  return box.getAttribute('aria-expanded') === 'true' || !!el.getAttribute('aria-activedescendant');
+  // Focus on an option: Enter picks it.
+  if (el.closest('[role=option]')) return true;
+  // A suggestion box whose highlighted option (aria-activedescendant) is a real option on the page.
+  const box = el.closest('[role=combobox]');
+  const id = el.getAttribute('aria-activedescendant') || (box && box.getAttribute('aria-activedescendant'));
+  const root = el.getRootNode();
+  const active = id && root.getElementById ? root.getElementById(id) : null;
+  return !!(active && (active.getAttribute('role') || '').toLowerCase() === 'option');
+}
+"""
+
+# Around an allowed Enter: any form submit it sets off is stopped before the page's own handlers see
+# it (capture on window, and on each open shadow root, since a submit there does not leave it), and
+# flagged, so the agent refuses instead of reporting a pick. READ removes the listeners.
+SUBMIT_GUARD_START_JS = r"""
+() => {
+  const stop = (e) => { e.preventDefault(); e.stopImmediatePropagation(); window.__j360submitted = true; };
+  const targets = [window];
+  const walk = (root, depth) => {
+    if (depth > 6) return;
+    for (const host of root.querySelectorAll('*')) if (host.shadowRoot) {
+      targets.push(host.shadowRoot); walk(host.shadowRoot, depth + 1);
+    }
+  };
+  walk(document, 0);
+  for (const t of targets) t.addEventListener('submit', stop, true);
+  window.__j360submitted = false;
+  window.__j360guard = { stop, targets };
+  return true;
+}
+"""
+SUBMIT_GUARD_READ_JS = r"""
+() => {
+  const g = window.__j360guard;
+  if (g) for (const t of g.targets) t.removeEventListener('submit', g.stop, true);
+  window.__j360guard = null;
+  return window.__j360submitted === true;
 }
 """
 

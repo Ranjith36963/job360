@@ -611,8 +611,9 @@ COMBO = """<!doctype html><html><head><title>Location - Acme</title></head><body
 <label for="loc">Location</label>
 <input id="loc" role="combobox" aria-autocomplete="list" aria-expanded="false"
   oninput="document.getElementById('lb').hidden=false; this.setAttribute('aria-expanded','true')"
-  onkeydown="if (event.key==='Enter') { this.value='London, United Kingdom'; document.getElementById('lb').hidden=true; }">
-<ul id="lb" role="listbox" hidden><li role="option">London, United Kingdom</li></ul>
+  onkeydown="if (event.key==='ArrowDown') this.setAttribute('aria-activedescendant','o1');
+    if (event.key==='Enter') { this.value='London, United Kingdom'; document.getElementById('lb').hidden=true; }">
+<ul id="lb" role="listbox" hidden><li id="o1" role="option">London, United Kingdom</li></ul>
 <form onsubmit="event.preventDefault(); document.title='SUBMITTED';">
   <label for="nm">Full name</label><input id="nm"><button type="submit">Submit application</button>
 </form></body></html>"""

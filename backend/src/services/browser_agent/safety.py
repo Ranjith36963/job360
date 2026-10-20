@@ -108,6 +108,8 @@ _CAPTCHA_FRAME = re.compile(
 # challenge frame (bframe) means a human is being asked; a mounted widget (anchor) is a checkbox to
 # tick, unless it is the invisible kind. Ours tells the invisible kind by the anchor's own
 # `size=invisible` (Google's URL; NOT IN REFERENCE, confirm on the first real Greenhouse run).
+# The caller passes only SHOWN frames: the invisible kind loads its challenge frame hidden, waiting
+# (agent._frame_shown; seen on Ashby and Lever, 2026-10-20).
 _RECAPTCHA_CHALLENGE = re.compile(r"recaptcha/(?:api2|enterprise)/bframe", re.IGNORECASE)
 _RECAPTCHA_WIDGET = re.compile(r"recaptcha/(?:api2|enterprise)/anchor", re.IGNORECASE)
 _INVISIBLE = re.compile(r"[?&]size=invisible\b", re.IGNORECASE)
