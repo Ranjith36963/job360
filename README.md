@@ -64,7 +64,7 @@ Two deployables on one Postgres database:
 - **`backend/`** — FastAPI (Python 3.12 in prod). Product path: `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`: one Application, append-only events, versioned artifacts, frozen receipts) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding every step. Migrations apply automatically on boot.
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind 4, a thin screen over the same routes.
 
-The deep reference (directory tree, schema, dependencies) is [`ARCHITECTURE.md`](./ARCHITECTURE.md). Code-verified counts (routes, migrations, workflows) live in [`docs/GENERATED.md`](./docs/GENERATED.md) — never copy a count from prose. Interactive API docs: `http://localhost:8000/docs` when the backend runs.
+The deep reference (directory tree, schema, dependencies) is [`ARCHITECTURE.md`](./ARCHITECTURE.md). Counts (routes, migrations, workflows) are never written down: measure it (`ls`, `grep -c`, `python -m pytest --collect-only -q`). Interactive API docs: `http://localhost:8000/docs` when the backend runs.
 
 ## Quick start (local)
 

@@ -80,23 +80,6 @@ LIVING_DOCS = [
     # more, and `pillars_fully_watched()` went with it.
 ]
 
-# MACHINE-WRITTEN docs. Not LIVING prose: `scripts/gen_doc_blocks.py --write`
-# rewrites every line of these from the code, and `gen_doc_blocks.py` (no args)
-# fails CI if the file on disk disagrees. So they carry no `last-verified`
-# stamp and no doc-type of their own — there is no human whose freshness is in
-# question.
-#
-# They ARE read by the countable-fact loop below, and that is the load-bearing
-# part. Slice 8 (2026-09-12) moved both generated blocks out of ARCHITECTURE.md
-# and deleted the hand-written copies of the route/endpoint, test-file and
-# workflow counts along with them. The generated row is now the ONLY claim for
-# those facts, so leaving this list out of the loop would make four guards
-# report "claim not found in any doc" — the guard-watches-nothing alarm — and
-# the honest fix is to read the doc that now holds the claim.
-GENERATED_DOCS = [
-    "docs/GENERATED.md",
-]
-
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
 FORBIDDEN_PHRASES = [
     ("async SQLite", "the DB is Postgres via psycopg3 since 2026-07-02 (pg.py shim)"),
@@ -821,8 +804,7 @@ def collected_baseline_claims() -> list[tuple[str, str, int]]:
 
     NOT a check against a live collection. Collecting the suite imports conftest,
     which wants a Postgres on 5433, and this runs in a blocking CI step that must
-    stay fast and offline — test_file_count() exists for what the filesystem can
-    answer.
+    stay fast and offline.
 
     This asks a different question, and the only one every other guard here is
     structurally unable to ask: DO TWO DOCS DISAGREE WITH EACH OTHER?
@@ -916,27 +898,6 @@ def skill_dead_paths() -> list[tuple[str, str, str]]:
     return out
 
 
-def workflow_count() -> int:
-    """Number of GitHub Actions workflow files.
-
-    Promoted from the nightly doc-truth routine 2026-08-24, which found the
-    docs claiming 26 while three more had landed. A countable fact an LLM
-    re-discovers every night is a fact this script should hold for free.
-    """
-    return len(list((ROOT / ".github/workflows").glob("*.yml")))
-
-
-def test_file_count() -> int:
-    """Number of backend test_*.py files.
-
-    NOT the collected-test count. Collection imports conftest, which wants a
-    live Postgres, and this checker runs in a blocking CI step that must stay
-    fast and offline. The collected number stays the routine's job; the file
-    count is filesystem-only and cannot lie.
-    """
-    return len(list((ROOT / "backend/tests").glob("test_*.py")))
-
-
 def migration_file_count() -> int:
     """Number of forward-migration files, as a VALIDATED ``0000..head`` sequence.
 
@@ -1027,26 +988,6 @@ def hard_rule_count() -> int:
     for m in re.finditer(r"^(\d+(?:\s*\+\s*\d+)*)\. \*\*", text, re.M):
         numbers.update(int(n) for n in re.findall(r"\d+", m.group(1)))
     return len(numbers)
-
-
-def route_module_count() -> int:
-    """Route modules under backend/src/api/routes/, excluding __init__."""
-    d = ROOT / "backend" / "src" / "api" / "routes"
-    if not d.is_dir():
-        return -1
-    return len([p for p in d.glob("*.py") if p.name != "__init__.py"])
-
-
-def endpoint_count() -> int:
-    """`@router.<verb>` decorators across the route modules."""
-    d = ROOT / "backend" / "src" / "api" / "routes"
-    if not d.is_dir():
-        return -1
-    n = 0
-    for p in d.glob("*.py"):
-        n += len(re.findall(r"@router\.(?:get|post|put|patch|delete)\b",
-                            p.read_text(encoding="utf-8", errors="replace")))
-    return n
 
 
 def dead_path_claims() -> list[tuple[str, str]]:
@@ -1164,18 +1105,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # all wrong at once. A drift checker that only guards what it already
         # guarded is how a doc estate dies while its tripwire stays green.
         ("hard-rules", hard_rule_count(), r"the (\d+) hard rules"),
-        ("route-modules", route_module_count(), r"(\d+) route modules"),
-        ("endpoints", endpoint_count(), r"\((\d+) endpoints"),
-        # Promoted from the nightly doc-truth routine 2026-08-24. Each of these
-        # was drift the LLM found by reading; they are countable, so they belong
-        # here where they cost nothing and are caught on every push.
-        ("workflows", workflow_count(), r"(\d+) workflows in"),
-        # `\*{0,2}` around the digits tolerates markdown bold ("across **133**
-        # `test_*.py` files", backend/README.md) as well as plain prose
-        # ("across 135 `test_*.py` files", ARCHITECTURE.md) — added
-        # 2026-09-07 after the checker couldn't see backend/README.md's own
-        # claim because its bold asterisks broke the naive `(\d+)` match.
-        ("test-files", test_file_count(), r"across \*{0,2}(\d+)\*{0,2} `?test_\*\.py`? files"),
     ]
 
     # String-valued facts. Kept separate because the numeric loop below does
@@ -1201,7 +1130,7 @@ def main() -> int:
     matches_per_fact: dict[str, int] = {}
     today = _dt.date.today()
 
-    for rel in LIVING_DOCS + GENERATED_DOCS:
+    for rel in LIVING_DOCS:
         path = ROOT / rel
         if not path.exists():
             # A vanished LIVING doc is exactly the stale-merge disaster case.
@@ -1227,13 +1156,6 @@ def main() -> int:
                     matches_per_fact[fact] = matches_per_fact.get(fact, 0) + 1
                     if m.group(1) != actual_text:
                         drift.append((rel, str(i), fact, m.group(1), actual_text))
-
-        # Everything below this line judges a HUMAN: is the prose stale, is the
-        # file stamped, when did someone last verify it. None of those questions
-        # mean anything for a file the build rewrites from code every run, and
-        # asking them would demand a 45-day freshness ritual on machine text.
-        if rel in GENERATED_DOCS:
-            continue
 
         for phrase, why in FORBIDDEN_PHRASES:
             for i, line in enumerate(lines, start=1):
