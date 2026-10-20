@@ -1035,10 +1035,16 @@ def check_size(n_files: int, n_lines: int, deletions: list[str],
                exempt_lines: int = 0) -> Verdict:
     """SIZE: within the policy's file and line caps, and no file deleted. Generated lines are reported, not counted."""
     reasons: list[str] = []
-    if deletions:
+    # OWNER, 2026-10-20: deleting a file waits for him only when the file is his
+    # -- migrations, auth, the cage's own rules and policies (the DENY paths). A
+    # deleted ordinary file merges like any other change; the PATH cage already
+    # names a deleted owner file, and this says plainly that it was a deletion.
+    owner_deletions = [d for d in deletions if any(path_matches(d, pat) for pat, _ in DENY)]
+    if owner_deletions:
         reasons.append(
-            f"deletes {len(deletions)} file(s) ({', '.join(deletions[:3])}) — a machine must "
-            f"not delete unsupervised. {_OWNER_MERGES}")
+            f"deletes {len(owner_deletions)} owner-only file(s) "
+            f"({', '.join(owner_deletions[:3])}) — a machine must not delete these "
+            f"unsupervised. {_OWNER_MERGES}")
     if n_files > MAX_CHANGED_FILES:
         reasons.append(
             f"{n_files} files changed (cap {MAX_CHANGED_FILES}) — a change this wide is a "
@@ -2521,8 +2527,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        v_safe.status == "pass", f"the cage refused a change it should allow: {v_safe.reasons}", P)
 
     # ── CAGE: SIZE ───────────────────────────────────────────────────────────
-    red("deleting a file is refused",
-        check_size(1, 10, ["backend/src/x.py"]), "must not delete", ["check_size"])
+    red("deleting an owner-only file (the policy) is refused",
+        check_size(1, 10, [".github/merge-policy.yml"]), "must not delete", ["check_size"])
+    red("deleting an owner-only file (the cage itself) is refused",
+        check_size(1, 10, ["scripts/merge_cage.py"]), "must not delete", ["check_size"])
+    ok("NEGATIVE CONTROL: deleting an ordinary file is not an owner decision (owner, 2026-10-20)",
+       check_size(1, 10, ["backend/src/x.py", "docs/old.md"]).status == "pass",
+       f"got {check_size(1, 10, ['backend/src/x.py', 'docs/old.md']).reasons}", ["check_size"])
     red("a change too wide to reason about is refused",
         check_size(999, 10, []), "judgement call by size", ["check_size"])
 
