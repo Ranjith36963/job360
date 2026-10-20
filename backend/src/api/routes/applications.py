@@ -2828,7 +2828,7 @@ async def submitted_blocked(
             )
     except SpineError as exc:
         _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+        raise AssertionError("unreachable")  # _raise always raises
     get_audit_logger().info(
         "blocked_submitted",
         extra={
