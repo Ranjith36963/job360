@@ -33,6 +33,7 @@ try:
 except ImportError:  # loaded by file path: put this folder on sys.path first
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import kit_regional as _kr
+import kit_xml as _kx  # type: ignore[import-not-found]  # sibling file (this folder is on sys.path by now)
 
 Job = dict[str, Any]
 Stats = dict[str, Any]
@@ -170,8 +171,8 @@ def parse_djinni_page(page: Any) -> list[Job]:
                 continue
             org = p.get("hiringOrganization")
             company = str(org.get("name") or "").strip() if isinstance(org, dict) else ""
-            url, title = str(p.get("url") or "").strip(), _WS.sub(" ", str(p.get("title") or "")).strip()
-            if not (p.get("identifier") and url.startswith("https://") and company and title):
+            url, title = _pinned(p.get("url"), "djinni.co"), _WS.sub(" ", str(p.get("title") or "")).strip()
+            if not (p.get("identifier") and url and company and title):
                 continue
             area = (p.get("applicantLocationRequirements") or {}).get("address") if isinstance(p.get("applicantLocationRequirements"), dict) else None
             area_txt = ""
@@ -291,7 +292,7 @@ def fetch_wuzzuf(queries: list[str], http: HttpFn, stats: Stats, *, days: int, c
             url = WUZZUF_JOBS + "?" + urlencode({"filter[other][ids]": ",".join(h[0] for h in batch), "page[size]": len(batch)})
             docs = _list_get(http, stats, "wuzzuf", budget, url, headers={"Accept": WUZZUF_HEADERS["Accept"]})
             jobs += parse_wuzzuf_docs(docs, dict(batch), allowed)
-    return _keep(_unique(jobs), queries, days, search=False)  # the service matched the query itself
+    return _keep(_unique(jobs), queries, days)  # NOT IN REFERENCE that the endpoint honours `query`: filter locally
 
 
 # ----------------------------------------------------------------------------------------- InfoJobs
@@ -393,18 +394,26 @@ INSTAFFO_HOST = "jobs.instaffo.com"
 INSTAFFO_INDEX = "https://jobs.instaffo.com/sitemap.xml"
 _INSTAFFO_ID = re.compile(r"/de/job/([^/?#]+-[0-9a-f]{12})$")
 _LOC = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.I)
-_URL_BLOCK = re.compile(r"<(?:url|sitemap)\b[^>]*>(.*?)</(?:url|sitemap)>", re.I | re.S)
-_LASTMOD = re.compile(r"<lastmod>\s*([^<\s]+)\s*</lastmod>", re.I)
 
 
 def parse_sitemap(xml: Any) -> list[tuple[str, str]]:
-    """(loc, lastmod) of every <url>/<sitemap> entry."""
+    """(loc, lastmod) of every <url>/<sitemap> entry (parsed with kit_xml.safe_fromstring: linear, no DOCTYPE/entities)."""
+    root = _kx.safe_fromstring(xml) if isinstance(xml, (str, bytes)) else None
     out: list[tuple[str, str]] = []
-    for m in _URL_BLOCK.finditer(xml if isinstance(xml, str) else ""):
-        loc = _LOC.search(m.group(1))
+    if root is None:
+        return out
+    for el in root.iter():
+        if str(el.tag).rsplit("}", 1)[-1].lower() not in ("url", "sitemap"):
+            continue
+        loc = lm = ""
+        for child in el:
+            tag = str(child.tag).rsplit("}", 1)[-1].lower()
+            if tag == "loc" and not loc:
+                loc = (child.text or "").strip()
+            elif tag == "lastmod" and not lm:
+                lm = (child.text or "").strip()
         if loc:
-            lm = _LASTMOD.search(m.group(1))
-            out.append((html.unescape(loc.group(1)), lm.group(1) if lm else ""))
+            out.append((loc, lm))
     return out
 
 

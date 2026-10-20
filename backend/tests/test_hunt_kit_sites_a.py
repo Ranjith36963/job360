@@ -99,6 +99,15 @@ def test_djinni_filters_by_query():
     assert [j["company"] for j in jobs] == ["Beta"]
 
 
+def test_djinni_urls_are_pinned_to_djinni_co():
+    bad = ("https://evil.example/apply", "https://user@djinni.co.evil.example/jobs/1/", "https://djinni.co.evil.example/jobs/1/",
+           "http://djinni.co/jobs/1/", "https://djinni.co:8443/jobs/1/")
+    postings = [{"@type": "JobPosting", "title": "Engineer %d" % i, "url": u, "identifier": i,
+                 "hiringOrganization": {"name": "Acme"}} for i, u in enumerate(bad, 1)]
+    page = '<script type="application/ld+json">' + json.dumps(postings) + "</script>"
+    assert _run(ks.fetch_djinni, _http({"page=": (200, page)}))[0] == []
+
+
 # ------------------------------------------------------------------------------------------ WUZZUF
 ID1, ID2, ID3 = ("db64539c-1e1d-4c1d-9a37-60d455bbd6e5", "32742d1d-5290-4f46-95ef-81ad9764f97f", "0a1b2c3d-1111-4222-8333-444455556666")
 
@@ -137,6 +146,11 @@ def test_wuzzuf_happy_path_headers_body_and_batching():
     assert body["longitude"] == "0" and body["latitude"] == "0" and body["query"] == "erpnext" and body["pageSize"] == 20
     assert get["headers"]["Accept"] == "application/vnd.api+json"
     assert ID1 in get["url"] and ID3 in get["url"] and ID2 not in get["url"]  # the hidden-employer row costs no request
+
+
+def test_wuzzuf_results_are_filtered_by_the_users_queries_locally():
+    http = _http({"api/search/job": (200, WUZZUF_SEARCH), "api/job?": (200, {"data": [_w_doc(ID1), _w_doc(ID3, code="SA", uri="saudi/jobs/p/abc-dev")]})})
+    assert _run(ks.fetch_wuzzuf, http, queries=("plumber",), countries=("*",))[0] == []
 
 
 def test_wuzzuf_countries_gate_and_star():
@@ -200,6 +214,18 @@ def test_infojobs_gate_empty_non200_garbage():
 
 
 # ----------------------------------------------------------------------------------------- Instaffo
+def test_parse_sitemap_is_linear_on_hostile_input_and_reads_namespaces():
+    import time
+    t = time.perf_counter()
+    assert ks.parse_sitemap("<url>" * 40000) == []
+    assert ks.parse_sitemap("<urlset>" + "<url><loc>https://x.example/a</loc>" * 20000) == []
+    assert time.perf_counter() - t < 2
+    ns = ('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc> https://jobs.instaffo.com/de/job/a-0123456789ab </loc>'
+          "<lastmod>2026-10-10</lastmod></url><url><lastmod>2026-01-01</lastmod></url></urlset>")
+    assert ks.parse_sitemap(ns) == [("https://jobs.instaffo.com/de/job/a-0123456789ab", "2026-10-10")]
+    assert ks.parse_sitemap('<!DOCTYPE x [<!ENTITY a "b">]><urlset><url><loc>https://x/&a;</loc></url></urlset>') == []
+
+
 INSTAFFO_INDEX = ("<sitemapindex><sitemap><loc>https://jobs.instaffo.com/sitemap-companies.xml</loc></sitemap>"
                   "<sitemap><loc>https://jobs.instaffo.com/sitemap-jobs-1.xml</loc></sitemap></sitemapindex>")
 INSTAFFO_JOBS = ("<urlset>"
