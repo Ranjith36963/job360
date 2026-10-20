@@ -553,6 +553,49 @@ async def test_the_user_signs_in_once_and_the_next_browser_is_already_signed_in(
 
 
 @pytest.mark.asyncio
+async def test_a_captcha_refusal_on_an_action_also_records_blocked(authenticated_async_context, monkeypatch):
+    """A CAPTCHA that came up after the last look refuses the next click (needs_you, captcha): the job
+    must still land on Needs you, as the tool promises, with the page's host."""
+    import contextlib
+    import json
+
+    from src.api.dependencies import get_request_db
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+
+    async def fake_run(pool, user_id, action, **kw):
+        exc = agent.BrowserError("needs_you", "captcha", agent.CAPTCHA_DETAIL)
+        exc.url = "https://jobs.acme.com/apply/7"
+        raise exc
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    monkeypatch.setattr(agent, "get_pool", lambda: None)
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/7",
+        })
+        app_id = brought.json()["application_id"]
+        out = (await client.post("/api/browser", json={"action": "click", "ref": "e1_ab", "application_id": app_id})).json()
+        assert out["status"] == "needs_you" and out["reason"] == "captcha" and out["blocked_recorded"] is True
+        assert "url" not in out
+        again = (await client.post("/api/browser", json={"action": "type", "ref": "e1_ab", "application_id": app_id})).json()
+        assert again["blocked_recorded"] is False  # one open block, not one per refused action
+
+        user_id = authenticated_async_context.fixture_user_id
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            cur = await db._db.execute(
+                "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
+                "AND event_type = 'blocked'", (user_id, app_id),
+            )
+            rows = [json.loads(r["payload"]) for r in await cur.fetchall()]
+        assert len(rows) == 1 and rows[0]["reason"] == "captcha" and rows[0]["page_host"] == "jobs.acme.com"
+
+
+@pytest.mark.asyncio
 async def test_a_stop_records_blocked_once_and_opens_a_needs_you_ask(authenticated_async_context, monkeypatch):
     import contextlib
     import json
