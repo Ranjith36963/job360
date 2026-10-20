@@ -104,6 +104,13 @@ async def test_type_never_keys_enter_or_tab_and_option_text_stays_untrusted(typi
         assert await s.page.title() == "Typing - Acme"   # never submitted
         page = await run(pool, "u1", "type", ref=_ref(page, "Why us?"), text="Line one.\nLine two.")
         assert page["typed_matches"] is True
+        # Windows line breaks are line breaks: "\r\n" and a lone "\r" go into a multi-line box as "\n".
+        page = await run(pool, "u1", "type", ref=_ref(page, "Why us?"), text="One.\r\nTwo.\rThree.")
+        assert page["typed_matches"] is True
+        assert await s.page.eval_on_selector("#why", "el => el.value") == "One.\nTwo.\nThree."
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "type", ref=_ref(page, "Full name"), text="Ada\r\nLovelace")
+        assert exc.value.reason == "control_characters"
 
         page = await run(pool, "u1", "type", ref=_ref(page, "Location"), text="Lon")
         with pytest.raises(BrowserError) as exc:

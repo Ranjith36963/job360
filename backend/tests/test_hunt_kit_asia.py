@@ -1,10 +1,12 @@
-"""Offline tests for src/hunt_kit/kit_asia.py (Glints and Kalibrr; fixtures only, no network).
+"""Offline tests for src/hunt_kit/kit_asia.py (Glints, Kalibrr, Tech in Asia, ITviec; fixtures only, no network).
 
 Fixture origins: Kalibrr rows follow freehire's kalibrr.go:71-106 field names and testdata/kalibrr/indonesia_it.json
-(first row's values); Glints answers follow career-ops providers/glints.mjs:38-67 and the searchJobsV3 response
-shape in career-ops tests/providers/glints.test.mjs (:119-135 a full data.searchJobsV3 { jobsInPage [...],
-hasMore: false } answer, :150 and :163 more; company name/brandName at :29 and :49). The hosts are unreachable from
-the build container: nothing here was checked against a live response.
+(first row's values); Tech in Asia hits follow techinasia.go:108-133 and testdata/techinasia/list.json (Sigmatech
+row); ITviec cards and posting follow freehire testdata/itviec_list_page1.html and itviec_detail_salary.html;
+Glints answers follow career-ops providers/glints.mjs:38-67 and the searchJobsV3 response shape in career-ops
+tests/providers/glints.test.mjs (:119-135 a full data.searchJobsV3 { jobsInPage [...], hasMore: false } answer,
+:150 and :163 more; company name/brandName at :29 and :49). The hosts are unreachable from the build container: nothing
+here was checked against a live response.
 """
 from __future__ import annotations
 
@@ -221,6 +223,211 @@ def test_kalibrr_empty_non_200_and_gating():
     assert {parse_qs(urlsplit(c["url"]).query)["country"][0] for c in http.calls} == {"Philippines", "Indonesia"}
 
 
+# -------------------------------------------------------------------------------- Tech in Asia
+SEARCH_PAGE = '<html><script src="//static.techinasia.com/assets/v5/app.1a2b3c4d.js"></script></html>'
+BUNDLE = 'x={apiKey:"notarealkeyjustafixturenotarealkey",appId:"ABCDE12345",foo:1}'
+
+
+def _hit(i, country="Indonesia", **kw):
+    h = {"id": f"id-{i}", "title": "Backend Engineer (Golang)", "description": "<p>Golang, SQL</p>",
+         "external_link": f"https://careers.sigmatech.example/jobs/{i}", "published_at": "2026-10-12 09:30:00",
+         "company": {"name": "SIGMATECH"}, "city": {"name": "Tangerang", "country_name": country},
+         "work_arrangement": "on-site", "is_remote": 0, "experience_min": 5}
+    h.update(kw)
+    return h
+
+
+def _tia(hits, pages=1):
+    return {"hits": hits, "nbHits": len(hits), "nbPages": pages, "exhaustiveNbHits": True}
+
+
+def _tia_routes(result):
+    return {"techinasia.com/jobs/search": (200, SEARCH_PAGE),
+            "static.techinasia.com/assets/v5/app.1a2b3c4d.js": (200, BUNDLE),
+            "algolia.net": (200, result)}
+
+
+def test_techinasia_happy_path_and_algolia_request():
+    hits = [_hit(1), _hit(2, work_arrangement="remote", external_link="https://bit.ly/z", experience_min=0),
+            _hit(3, country="Japan")]
+    http = _http(_tia_routes(_tia(hits)))
+    jobs, _ = _run(ka.fetch_techinasia, http, ["ID"], queries=("golang",))
+    _check(jobs, "techinasia")
+    assert [j["extra"]["id"] for j in jobs] == ["id-1", "id-2"]
+    a, b = jobs
+    assert a["company"] == "SIGMATECH" and a["url"] == "https://careers.sigmatech.example/jobs/1"
+    assert a["extra"]["years_min"] == 5 and a["extra"]["board_url"] == "https://www.techinasia.com/jobs/id-1"
+    assert a["posted"] == "2026-10-12" and a["location"] == "Tangerang, Indonesia" and a["remote"] is None
+    assert b["url"] == "https://www.techinasia.com/jobs/id-2" and b["remote"] is True
+    assert "years_min" not in b["extra"]
+    algolia = http.calls[2]
+    assert algolia["url"] == "https://abcde12345-dsn.algolia.net/1/indexes/job_postings/query"
+    assert algolia["method"] == "POST" and algolia["once"] is True
+    assert algolia["headers"]["X-Algolia-Application-Id"] == "ABCDE12345"
+    assert algolia["headers"]["X-Algolia-API-Key"] == "notarealkeyjustafixturenotarealkey"
+    assert algolia["headers"]["Referer"] == "https://www.techinasia.com/"
+    assert "hitsPerPage=1000" in algolia["body"]["params"] and len(http.calls) == 3
+
+
+def test_techinasia_shared_external_link_falls_back_to_posting_page():
+    hits = [_hit(1, external_link="https://forms.example.com/intake"),
+            _hit(2, external_link="https://forms.example.com/intake")]
+    jobs, _ = _run(ka.fetch_techinasia, _http(_tia_routes(_tia(hits))), ["ID"], queries=("golang",))
+    assert [j["url"] for j in jobs] == ["https://www.techinasia.com/jobs/id-1", "https://www.techinasia.com/jobs/id-2"]
+
+
+def test_techinasia_link_shared_across_pages_falls_back_to_posting_page():
+    link = "https://forms.example.com/intake"
+    pages = {0: [_hit(1, external_link=link)], 1: [_hit(2, external_link=link)]}
+    calls = {"n": 0}
+
+    def algolia(_url, _body):
+        page = calls["n"]
+        calls["n"] += 1
+        return 200, _tia(pages[page], pages=2)
+
+    routes = {**_tia_routes(_tia([])), "algolia.net": algolia}
+    jobs, _ = _run(ka.fetch_techinasia, _http(routes), ["ID"], queries=("golang",))
+    assert [j["url"] for j in jobs] == ["https://www.techinasia.com/jobs/id-1", "https://www.techinasia.com/jobs/id-2"]
+
+
+def test_techinasia_keyword_filter_pages_and_star():
+    hits = [_hit(1), _hit(2, title="Accountant", description="<p>Books</p>"), _hit(3, country="Singapore")]
+    http = _http(_tia_routes(_tia(hits, pages=2)))
+    jobs, _ = _run(ka.fetch_techinasia, http, ["ID", "SG"], queries=("golang",))
+    assert {j["extra"]["id"] for j in jobs} == {"id-1", "id-3"}
+    assert len(http.calls) == 2 + ka.TIA_PAGES  # nbPages 2: both pages read
+    jobs, _ = _run(ka.fetch_techinasia, _http(_tia_routes(_tia(hits))), ["*"], queries=("accountant",))
+    assert [j["extra"]["id"] for j in jobs] == ["id-2"]
+
+
+def test_techinasia_empty_non_200_gating_and_missing_credentials():
+    jobs, _ = _run(ka.fetch_techinasia, _http(_tia_routes(_tia([]))), ["ID"])
+    assert jobs == []
+    http = _http({"techinasia.com/jobs/search": (403, None)})
+    assert _run(ka.fetch_techinasia, http, ["ID"])[0] == [] and len(http.calls) == 1
+    http = _http({**_tia_routes(_tia([_hit(1)])), "algolia.net": (429, None)})
+    assert _run(ka.fetch_techinasia, http, ["ID"])[0] == [] and len(http.calls) == 3
+    http = _http({"techinasia.com/jobs/search": (200, "<html>no bundle</html>")})
+    assert _run(ka.fetch_techinasia, http, ["ID"])[0] == [] and len(http.calls) == 1
+    http = _http({"jobs/search": (200, SEARCH_PAGE), "app.1a2b3c4d.js": (200, "var nothing")})
+    assert _run(ka.fetch_techinasia, http, ["ID"])[0] == [] and len(http.calls) == 2
+    http = _http(_tia_routes(_tia([_hit(1)])))
+    for cs in ([], ["GB"], ["IN"], ["US"]):  # India is NOT IN REFERENCE
+        assert _run(ka.fetch_techinasia, http, cs)[0] == []
+    assert http.calls == []
+
+
+# ----------------------------------------------------------------------------------- ITviec
+def _card(key, slug):
+    return (f"<div class='job-card' data-controller='search--job-selection' data-job-key='{key}' "
+            f"data-search--job-selection-job-slug-value='{slug}' data-search--pagination-target='jobCard'>\n</div>\n")
+
+
+LIST_PAGE = ("<html><body><h1>658 IT jobs in Vietnam</h1>\n"
+             + _card("747e3af5-f7ef-4bd9-87f2-69c6499f4914", "tmo-devops-engineer-acb-0103")
+             + _card("4bf8bdb8-e735-4205-a17e-891be1e1ffbd", "data-quality-specialist-mb-bank-5856")
+             + "<a href='/it-jobs/spotlight-job-netcompany-9999' data-search--job-selection-job-slug-value='x'>s</a>\n"
+             + "</body></html>")
+PAST_END = "<html><body><a href='/it-jobs/netcompany-spotlight-1234'>spot</a></body></html>"
+
+
+def _detail(company="MB Bank", desc="Top 3 Reasons To Join Us\\r\\nGood pay\\r\\nThe Job\\r\\n<p>Build AI</p>",
+            badge="At office", title="AI Software Engineer (Python/Go &amp; AI Agents)"):
+    ld = ('{"@context":"http://schema.org","@type":"JobPosting","title":"AI Software Engineer","datePosted":"2026-09-24",'
+          f'"description":"{desc}","hiringOrganization":{{"@type":"Organization","name":"{company}"}},'
+          '"jobLocation":[{"@type":"Place","address":{"@type":"PostalAddress","addressLocality":"Not Available",'
+          '"addressRegion":"Hà Nội","addressCountry":"VN"}}]}')
+    return (f"<html><body><h1 class='x'>{title}</h1><script type='application/ld+json'>\n{ld}\n</script>"
+            "<script type='application/ld+json'>{\"@type\":\"BreadcrumbList\"}</script>"
+            f"<div class='d-inline-block preview-header-item'><div class='d-flex'><span>{badge}</span></div></div>"
+            "</body></html>")
+
+
+def test_itviec_cards_ignore_spotlight_links():
+    assert ka.parse_itviec_cards(LIST_PAGE) == [("747e3af5-f7ef-4bd9-87f2-69c6499f4914", "tmo-devops-engineer-acb-0103"),
+                                                ("4bf8bdb8-e735-4205-a17e-891be1e1ffbd",
+                                                 "data-quality-specialist-mb-bank-5856")]
+    assert ka.parse_itviec_cards(PAST_END) == [] and ka.parse_itviec_cards(None) == []
+
+
+def test_itviec_posting_parse():
+    j = ka.parse_itviec_posting(_detail(), "https://itviec.com/it-jobs/s-1", "key-1")
+    assert j is not None
+    _check([j], "itviec")
+    assert j["title"] == "AI Software Engineer (Python/Go & AI Agents)"  # the heading keeps the punctuation
+    assert j["company"] == "MB Bank" and j["location"] == "Hà Nội, Vietnam" and j["posted"] == "2026-09-24"
+    assert "Build AI" in j["description"] and j["remote"] is None and j["extra"]["id"] == "key-1"
+    r = ka.parse_itviec_posting(_detail(badge="Remote"), "https://itviec.com/it-jobs/s-1", "k")
+    assert r is not None and r["remote"] is True
+    assert ka.parse_itviec_posting(_detail(company=""), "https://itviec.com/it-jobs/s", "k") is None
+    assert ka.parse_itviec_posting("<html>no ld</html>", "https://itviec.com/it-jobs/s", "k") is None
+    assert ka.parse_itviec_posting(None, "https://itviec.com/it-jobs/s", "k") is None
+
+
+def test_itviec_happy_path_requests_and_links():
+    http = _http({"/it-jobs/tmo-devops": (200, _detail()), "/it-jobs/data-quality": (200, _detail(company="Acme")),
+                  "/it-jobs/engineer": (200, LIST_PAGE), "/it-jobs/engineer?page=2": (200, PAST_END)})
+    jobs, stats = _run(ka.fetch_itviec, http, ["VN"])
+    _check(jobs, "itviec")
+    assert [j["url"] for j in jobs] == ["https://itviec.com/it-jobs/tmo-devops-engineer-acb-0103",
+                                        "https://itviec.com/it-jobs/data-quality-specialist-mb-bank-5856"]
+    assert [j["company"] for j in jobs] == ["MB Bank", "Acme"]
+    urls = [c["url"] for c in http.calls]
+    assert urls[0] == "https://itviec.com/it-jobs/engineer" and urls[1] == "https://itviec.com/it-jobs/engineer?page=2"
+    assert all(c["once"] is True and c["method"] == "GET" for c in http.calls) and stats["jobs"] == 2
+
+
+def test_itviec_multiword_query_slug_and_detail_cap(monkeypatch):
+    assert ka._itviec_list_url("Data Engineer", 3) == "https://itviec.com/it-jobs/data-engineer?page=3"
+    monkeypatch.setattr(ka, "ITVIEC_DETAILS", 1)
+    http = _http({"/it-jobs/tmo-devops": (200, _detail()), "/it-jobs/engineer": (200, LIST_PAGE)})
+    jobs, _ = _run(ka.fetch_itviec, http, ["VN"])
+    assert len(jobs) == 1 and len([c for c in http.calls if "tmo-devops" in c["url"]]) == 1
+
+
+def test_itviec_keyword_slug_drops_slashes():
+    assert ka._itviec_list_url("CI/CD Engineer", 1) == "https://itviec.com/it-jobs/cicd-engineer"  # itviec.mjs:140
+
+
+def test_itviec_details_round_robin_across_queries_and_no_page_2_once_full():
+    qs = ("alpha", "bravo", "charlie", "delta", "echo")
+
+    def route(url, _body):
+        seg = urlsplit(url).path.rsplit("/", 1)[-1]
+        if seg in qs:
+            return 200, "<html>" + "".join(_card(f"{seg}-k{i}", f"{seg}-job-{i}") for i in range(20)) + "</html>"
+        return 200, _detail()
+
+    http = _http({"itviec.com": route})
+    jobs, _ = _run(ka.fetch_itviec, http, ["VN"], queries=qs)
+    urls = [c["url"] for c in http.calls]
+    assert not any("?page=2" in u for u in urls)  # each query filled its 6 slots on page 1
+    details = [u for u in urls if "-job-" in u]
+    assert len(details) == ka.ITVIEC_DETAILS and len(jobs) == ka.ITVIEC_DETAILS
+    assert {u.rsplit("/", 1)[-1].split("-job-")[0] for u in details} == set(qs)
+    assert details[:5] == [f"https://itviec.com/it-jobs/{q}-job-0" for q in qs]
+
+
+def test_itviec_empty_non_200_blocked_and_gating():
+    http = _http({"/it-jobs/engineer": (200, PAST_END)})
+    assert _run(ka.fetch_itviec, http, ["VN"])[0] == [] and len(http.calls) == 1
+    http = _http({"/it-jobs": (429, None)})
+    assert _run(ka.fetch_itviec, http, ["VN"], queries=("a", "b"))[0] == [] and len(http.calls) == 1
+    http = _http({"/it-jobs/engineer": (200, LIST_PAGE), "/it-jobs/tmo-devops": (403, None)})
+    jobs, _ = _run(ka.fetch_itviec, http, ["VN"])
+    assert jobs == [] and len([c for c in http.calls if "tmo-devops" in c["url"]]) == 1
+    assert not any("data-quality" in c["url"] for c in http.calls)  # the first refusal ended the site
+    http = _http({"/it-jobs": (200, "<html><title>Just a moment...</title>captcha</html>")})
+    assert _run(ka.fetch_itviec, http, ["VN"], queries=("a", "b"))[0] == [] and len(http.calls) == 1
+    http = _http({"/it-jobs": (200, LIST_PAGE)})
+    for cs in ([], ["IN"], ["SG"], ["ID"]):
+        assert _run(ka.fetch_itviec, http, cs)[0] == []
+    assert http.calls == []
+    _run(ka.fetch_itviec, http, ["*"])
+    assert http.calls
+
+
 # ----------------------------------------------------------------------------- shared contract
 GARBAGE = [None, 123, "<<<not json>>>", [], {}, {"hits": "x"}, {"jobs": [None, 5, "x"]}, {"data": []},
            {"data": {"searchJobsV3": {"jobsInPage": [None, 1]}}}]
@@ -249,10 +456,12 @@ def test_feeds_never_raise_when_http_raises_or_status_zero(name):
 def test_feeds_respect_request_cap_and_empty_queries(name, monkeypatch):
     monkeypatch.setattr(ka, "ASIA_MAX_REQUESTS", 3)
     http = _http({"glints": (200, _glints_page([_glints_row(1)], more=True)),
-                  "kalibrr": (200, {"count": 9999, "jobs": [_kal_row(i) for i in range(1, 101)]})})
+                  "kalibrr": (200, {"count": 9999, "jobs": [_kal_row(i) for i in range(1, 101)]}),
+                  "techinasia.com/jobs/search": (200, SEARCH_PAGE), "app.": (200, BUNDLE),
+                  "algolia": (200, _tia([_hit(1)], pages=50)), "itviec": (200, LIST_PAGE)})
     ka.FEEDS[name](["a", "b", "c", "d"], http, {}, days=30, countries=["*"])
     assert len(http.calls) <= 3
 
 
 def test_feed_names_are_the_dict_keys():
-    assert set(ka.FEEDS) == {"glints", "kalibrr"}
+    assert set(ka.FEEDS) == {"glints", "kalibrr", "techinasia", "itviec"}
