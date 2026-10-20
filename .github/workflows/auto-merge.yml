@@ -227,6 +227,38 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # THE OTHER HALF OF THE WIP LIMIT (2026-10-20). pr-advisor.yml parks a PR
+  # opened over the limit, and `pick` below never judges a parked PR, so with
+  # `merge-cage` required a parked PR could never merge. Nothing ever unparked:
+  # that day 17 of 24 open PRs sat parked, many of them green. Each sweep now
+  # puts the oldest parked PRs back while slots are free (scripts/wip_gate.py
+  # `pick_unpark`), and the next sweep or check suite judges them. Sweep-only:
+  # a slot frees when a PR merges or closes, and 20 minutes is soon enough.
+  unpark:
+    name: Unpark while WIP slots are free
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pr == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write # remove the wip:parked label, and say so on the PR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: The gate's one dependency
+        run: python -m pip install --quiet pyyaml
+      - name: The WIP gate still parks and unparks on purpose
+        run: python scripts/wip_gate.py --drill
+      - name: Unpark
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python scripts/wip_gate.py --unpark
+
   # Which PRs are even worth spending a judgement on. Split out so the expensive
   # job below runs once per candidate and not once per event.
   pick:
