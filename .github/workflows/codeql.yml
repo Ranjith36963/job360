@@ -44,15 +44,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # python = backend, javascript-typescript = frontend
-        language: ["python", "javascript-typescript"]
+        # python = backend, javascript-typescript = frontend, actions = the
+        # workflows (injection, untrusted input, token scope). `actions` was only
+        # ever analyzed by autodetect while `languages:` was misspelled; it is
+        # explicit now so fixing the spelling does not drop it.
+        language: ["python", "javascript-typescript", "actions"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
-          language: ${{ matrix.language }}
+          # `languages` (plural) is the input. `language:` was ignored with
+          # "Unexpected input(s)", so each job autodetected and analyzed python,
+          # javascript AND actions (CI audit, 2026-10-20).
+          languages: ${{ matrix.language }}
           # security-extended, NOT security-and-quality: the quality half
           # duplicates ruff (which already governs style/dead-code and documents
           # deliberate suppressions like S110 empty-except). Running both meant
@@ -61,10 +67,10 @@ jobs:
           queries: security-extended
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/autobuild@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
 
       - name: Analyze
-        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:${{ matrix.language }}"
 

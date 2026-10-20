@@ -24,6 +24,8 @@ import io
 import re
 from typing import Any, Optional
 
+from src.core import settings
+
 MAX_LISTED = 12  # items named in one detail line
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -529,6 +531,27 @@ def stock_phrases(text: str) -> Optional[dict[str, str]]:
     return _issue(
         "stock_phrases", "warn",
         f"Reads as stock or AI writing: {_listed(hits)}. Say it plainly in the user's own words.",
+    )
+
+
+def linkedin_note_too_long(text: str, *, premium: bool) -> Optional[dict[str, str]]:
+    """A LinkedIn message longer than a connection-request note may be. Warn only:
+    a message to an existing connection may be longer, and the user decides.
+    career-ops (MIT) modes/contacto.md:168: 200 on a free account, 300 on Premium."""
+    limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    n = len(text)
+    if n <= limit:
+        return None
+    if premium:
+        tier = "a Premium account"
+        hint = ""
+    else:
+        tier = "a free account"
+        hint = " If the user told you they have Premium, set preferences.linkedin_premium to true (300)."
+    return _issue(
+        "linkedin_note_too_long", "warn",
+        f"{n} characters; a LinkedIn connection-request note on {tier} allows {limit} and longer ones are"
+        f" cut off or refused. Shorten it if this is a connection note.{hint}",
     )
 
 

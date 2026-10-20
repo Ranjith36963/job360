@@ -8,6 +8,7 @@ real values, never "the key exists"). Past dates are made by backdating
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -787,11 +788,16 @@ async def test_the_dispatcher_adds_blocks_and_validates_first(authenticated_asyn
 async def test_mcp_stats_views_equal_the_route(authenticated_async_context, fixture_user_id):
     mcp_server, tools = _mcp_tools()
 
+    fence = re.compile(r"<<untrusted-text ([0-9a-f]{8})>>\n(.*)\n<<end untrusted-text \1>>", re.S)
+
     def strip(value: Any) -> Any:
+        # Gap-audit #15: the tool fences the employer's exact words (`_untrusted`); the route stays raw.
         if isinstance(value, dict):
-            return {k: strip(v) for k, v in value.items() if v is not None}
+            return {k: strip(v) for k, v in value.items() if v is not None and k != "_untrusted"}
         if isinstance(value, list):
             return [strip(v) for v in value]
+        if isinstance(value, str) and (m := fence.fullmatch(value)):
+            return m.group(2)
         return value
 
     async with authenticated_async_context() as client:
@@ -806,6 +812,10 @@ async def test_mcp_stats_views_equal_the_route(authenticated_async_context, fixt
                 via_route = (await client.get("/api/applications/stats", params={"view": view})).json()
                 assert via_tool[key]["available"] is True
                 assert strip(via_tool[key]) == strip(via_route[key])
+                if view == "patterns":
+                    reason = via_tool[key]["rejection_reasons"][0]
+                    assert reason["_untrusted"] == ["reason"] and fence.fullmatch(reason["reason"])
+                    assert via_route[key]["rejection_reasons"][0]["reason"] == "Location"
         finally:
             mcp_server._current_user.reset(ctx)
 

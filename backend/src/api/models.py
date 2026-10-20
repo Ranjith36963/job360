@@ -269,6 +269,7 @@ class AssistantSettingsView(BaseModel):
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut
+    outreach_send: SettingFieldOut
     paused: bool
     inbox_mode: str = ""
     check_every: str = ""
@@ -323,6 +324,10 @@ class ProfileResponse(BaseModel):
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.
     current_version_id: Optional[int] = None
+    # Gap 4 (slice 26) — MAX(profile_edits.id) for the user, read BEFORE the profile
+    # (0 = none yet). It moves on every accepted edit, unlike `current_version_id`;
+    # send it back as `expected_profile_version` to refuse a write over a newer one.
+    profile_edit_id: int = 0
     # Slice 4 (spec R11) — the current agent-edit overlay: every path an
     # agent has SET and not since cleared, as {path, value, set_by, set_at}.
     # Provenance made visible: the web profile page renders each overlaid
@@ -500,6 +505,26 @@ class DoctorSilentItem(BaseModel):
     confirmed: bool
 
 
+class InterviewAgendaItem(BaseModel):
+    """One live interview in the agenda read (services/applications/agenda.py)."""
+
+    application_id: int
+    company: str
+    title: str
+    scheduled_at: str
+    round: str = ""
+    link: str = ""
+    duration_minutes: int = 60
+
+
+class InterviewAgenda(BaseModel):
+    """``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose
+    application has no outcome event yet (ask the user how it went)."""
+
+    upcoming: list[InterviewAgendaItem] = []
+    just_passed: list[InterviewAgendaItem] = []
+
+
 class DoctorSilentBlock(BaseModel):
     """Feedback loop slice 4: interviews with silence past ``courtesy_days`` (read-only)."""
 
@@ -533,6 +558,7 @@ class DoctorResponse(BaseModel):
     ghosted_now: list[int] = []
     auto_emails: DoctorAutoEmails = DoctorAutoEmails()
     silent_after_interview: DoctorSilentBlock = DoctorSilentBlock()
+    interviews: InterviewAgenda = InterviewAgenda()
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""

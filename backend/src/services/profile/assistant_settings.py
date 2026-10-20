@@ -23,6 +23,9 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   active the mode resolves to auto, after that it is the user's own ``submit_mode``
 * ``paused_until`` — ``""`` | ``"until_resumed"`` | an ISO-8601 time in the future
 * ``pause_reason`` — one short line for the user's own memory
+* ``outreach_send`` — ``draft_only`` (default) | ``auto``: may the assistant press Send on an outreach
+  email (feature 10 gate). Its own consent, never implied by the Gmail mode
+  ``preferences.daily_check`` (owner 2026-10-20, G087).
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -60,9 +63,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
 from src.repositories import pgsync
+from src.services.applications.job_checks import _JOB_ID_KEYS, canonical_url
 from src.services.profile import edits as profile_edits
 from src.services.profile.models import (
     VALID_DAILY_CHECK_VALUES,
+    VALID_OUTREACH_SEND_VALUES,
     VALID_SUBMIT_MODES,
     AssistantSettings,
     UserProfile,
@@ -94,11 +99,14 @@ AUTO_GRANT_UNTIL_PATH = f"{HEAD}.auto_grant_until"
 PAUSED_UNTIL_PATH = f"{HEAD}.paused_until"
 PAUSE_REASON_PATH = f"{HEAD}.pause_reason"
 AUTO_EMPLOYER_EMAILS_PATH = f"{HEAD}.auto_employer_emails"
+OUTREACH_SEND_PATH = f"{HEAD}.outreach_send"
+DEFAULT_OUTREACH_SEND = "draft_only"
+OUTREACH_SEND_AUTO = "auto"
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
-    AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH,
+    AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -342,6 +350,8 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
+    if path == OUTREACH_SEND_PATH:
+        return _closed_set(path, value, VALID_OUTREACH_SEND_VALUES)
     raise _bad(path, "is not an assistant setting")  # pragma: no cover — callers pass SETTING_PATHS
 
 
@@ -369,6 +379,7 @@ class EffectiveSettings:
     apply_hours: Optional[tuple[str, str]] = None
     auto_grant_count: Optional[int] = None
     auto_grant_until: str = ""
+    outreach_send: str = DEFAULT_OUTREACH_SEND
 
 
 def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
@@ -379,9 +390,14 @@ def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
     return None
 
 
+def _outreach_send(raw: Any) -> str:
+    """Only a stored ``auto`` sends; "" / anything else (a historical row) reads as ``draft_only`` (G087)."""
+    return OUTREACH_SEND_AUTO if raw == OUTREACH_SEND_AUTO else DEFAULT_OUTREACH_SEND
+
+
 def effective(s: AssistantSettings) -> EffectiveSettings:
     """Fill the safe defaults: no score line / ask / ask / confirm / no cap / not paused /
-    no company limit (and the default window when the user set a limit without days)."""
+    no company limit (and the default window when the user set a limit without days) / draft only."""
     return EffectiveSettings(
         apply_min_score=None if s.apply_min_score is None else int(s.apply_min_score),
         above_line=s.above_line or DEFAULT_LINE_SWITCH,
@@ -400,6 +416,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         apply_hours=_hours_tuple(s.apply_hours),
         auto_grant_count=None if s.auto_grant_count is None else int(s.auto_grant_count),
         auto_grant_until=s.auto_grant_until or "",
+        outreach_send=_outreach_send(s.outreach_send),
     )
 
 
@@ -448,6 +465,8 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw or ""
     if path == AUTO_EMPLOYER_EMAILS_PATH:
         return bool(raw)
+    if path == OUTREACH_SEND_PATH:
+        return _outreach_send(raw)
     raise KeyError(path)
 
 
@@ -538,7 +557,9 @@ def classify_change(
     pause_reason         never                                          always
     auto_employer_       off -> on (the assistant emails employers     on -> off (the stop
     emails               in the owner's name)                          switch; applies at once)
-    preferences.         anything -> auto (the assistant sends mail     every other value
+    outreach_send        draft_only -> auto (the assistant sends       auto -> draft_only
+                         outreach in the user's name)                  (applies at once)
+    preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
     """
@@ -589,6 +610,8 @@ def classify_change(
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
     if path == AUTO_EMPLOYER_EMAILS_PATH:
         return "riskier" if (bool(after) and not bool(before)) else "safer"
+    if path == OUTREACH_SEND_PATH:
+        return "riskier" if (after == OUTREACH_SEND_AUTO and before != OUTREACH_SEND_AUTO) else "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
 
 
@@ -674,7 +697,8 @@ class SubmitFacts:
     * ``cv_seen`` - the user saw the latest CV (web click / download, or an OK
       in chat);
     * ``approved`` - a stored ``submit_approved`` matches the latest CV
-      (artifact id + hash); a CV edit makes it stop matching;
+      (artifact id + hash); a CV edit makes it stop matching; so does
+      ``approval_stale`` (gap roadmap slice 8);
     * ``declined`` - the user's newest word on this application is "don't send";
     * ``blocked`` - the assistant recorded ``blocked`` with no later ``unblocked`` (S6);
     * ``form_filled`` - at least one ``form_filled`` event is recorded (the store
@@ -707,6 +731,10 @@ class SubmitFacts:
     # The host stored on the NEWEST ``form_filled`` (``None`` = none / unreadable).
     # check_submit's ``form_url`` must name the same host (``form_host_mismatch``).
     form_host: Optional[str] = None
+    # Gap roadmap slice 7: the :func:`clean_form_url` page stored on the newest ``form_filled`` /
+    # ``form_swept`` that carries one (``kit.latest_form_url``; ``None`` = none). check_submit's
+    # ``form_url`` must name the same host + path (``form_page_mismatch``).
+    form_url: Optional[str] = None
     # The account's email is confirmed (or REQUIRE_EMAIL_VERIFICATION is off).
     # ``kit.gate_facts`` always sets it from the caller; ``False`` asks
     # ``email_not_verified`` and a yes never clears it (2026-10-14).
@@ -742,6 +770,11 @@ class SubmitFacts:
     # user has not verified (``ready.has_unverified_guess``, the card's ``guessed`` flag). Asks
     # ``answer_guessed`` in EVERY mode; a yes does NOT clear it - the user verifies or edits the answer.
     guessed_unverified: bool = False
+    # Gap roadmap slice 8: the newest yes for this CV no longer holds (``kit.approval_stale``): the
+    # part named here changed since the user said yes - ``expired`` (older than
+    # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
+    # ``approved`` is then False; the ask the gate would give is answered as ``approval_stale``.
+    approval_stale: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -760,10 +793,20 @@ REASONS: tuple[str, ...] = (
     "weekly_cap_reached", "pace_wait", "outside_hours", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
-    "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
+    "form_not_recorded", "form_not_swept", "form_host_mismatch", "form_page_mismatch", "email_not_verified",
+    "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
-    "type_first_pending", "below_score_line", "answer_guessed",
+    "type_first_pending", "below_score_line", "answer_guessed", "approval_stale",
 )
+
+# What each ``approval_stale`` part means, in the words the ask shows the user.
+APPROVAL_STALE_WORDS: dict[str, str] = {
+    "expired": "the yes is older than {ttl} minutes",
+    "cover_letter": "the cover letter changed",
+    "form_fill": "the form was filled again with different answers",
+    "form_page": "the form is on another page",
+    "profile": "the assistant changed the profile",
+}
 
 
 _SCHEME_PREFIX_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -864,6 +907,32 @@ def screen_form_url(raw: Optional[str]) -> Optional[str]:
     return host
 
 
+def clean_form_url(raw: Optional[str]) -> Optional[str]:
+    """The form PAGE address as stored on ``form_filled`` / ``form_swept`` and compared by
+    check_submit (gap roadmap slice 7): ``None`` unless :func:`screen_form_url` reads it, else
+    ``job_checks.canonical_url`` with only the job-id query keys kept (``_JOB_ID_KEYS``) -
+    https + host (``www.`` folded) + path; no fragment, token, ``code=`` or session id. A bare
+    host is read as https."""
+    if screen_form_url(raw) is None:
+        return None
+    text = (raw or "").strip()
+    cleaned = canonical_url(text if _SCHEME_RE.match(text) else f"https://{text}", only_keys=_JOB_ID_KEYS)
+    return cleaned or None
+
+
+def _same_form_page(a: str, b: str) -> bool:
+    """Two :func:`clean_form_url` addresses are the same form when the host matches and one path
+    is the other or extends it by whole segments: a multi-step form (``/apply`` then
+    ``/apply/review``) stays one page, while two jobs on one ATS (``/acme/111/apply`` vs
+    ``/acme/222/apply``) do not."""
+    pa, pb = urlsplit(a), urlsplit(b)
+    if pa.netloc != pb.netloc:
+        return False
+    x, y = pa.path.rstrip("/"), pb.path.rstrip("/")
+    short, long_ = (x, y) if len(x) <= len(y) else (y, x)
+    return long_ == short or long_.startswith(short + "/")
+
+
 def host_kind(host: Optional[str]) -> Literal["brand", "company", "invalid"]:
     """``brand`` when any whole label of ``host`` is an always-ask brand
     (``uk.indeed.com``, ``indeed.co.uk``, ``lnkd.in``); ``company`` for any other
@@ -929,6 +998,10 @@ def may_submit(
         ``unknown_site`` (a yes does NOT clear it)
     5e. ``form_url``'s host is not the host of the newest ``form_filled`` -> ask
         ``form_host_mismatch`` (a yes does NOT clear it)
+    5e2. both ``form_url`` and the stored page (``form_url`` fact) are known and are not the same
+        form (host differs, or neither path extends the other) -> ask ``form_page_mismatch`` (a yes
+        does NOT clear it: the yes was for the page that was filled; either side missing = no
+        stop, so older assistants keep working)
     5b2. the newest CV has save-time checks for numbers or terms not in the profile -> ask
         ``cv_unsupported_claims`` (inside ``_first_ask``, right after the duplicate ask; a yes clears it)
     5c. the fit score vs the user's score line (``line_side``): no line or no fit
@@ -947,8 +1020,11 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
-    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e), ``email_not_verified`` (4d),
+    ``user_approved``. A yes that no longer holds (``approval_stale``: expired, or the letter, fill,
+    page or profile changed since) clears nothing; the ask it would have cleared answers
+    ``approval_stale`` naming the part.
+    Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
+    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
     ``below_score_line`` (4a4) and ``answer_guessed`` (4e) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
@@ -1081,12 +1157,29 @@ def may_submit(
             "This address is not the site where the form was filled (form_filled). "
             "Do not submit; check the page, and ask the user.",
         )
+    current = clean_form_url(site_host)
+    stored = clean_form_url(application.form_url)
+    if current and stored and not _same_form_page(current, stored):
+        return SubmitDecision(
+            "ask", "form_page_mismatch",
+            "This is not the page where the form was filled (form_filled / form_swept). "
+            "Do not submit; go back to that page, or fill and sweep this one, and ask the user.",
+        )
     ask = _first_ask(cfg, application, screened, counts, override=override, auto=auto)
     if ask is None:
         return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
     if application.approved:
         return SubmitDecision(
             "submit", "user_approved", "The user said yes to sending this application with this CV. You may submit."
+        )
+    if application.approval_stale:
+        why = APPROVAL_STALE_WORDS.get(application.approval_stale, application.approval_stale).format(
+            ttl=settings.SUBMIT_APPROVAL_TTL_MINUTES
+        )
+        return SubmitDecision(
+            "ask", "approval_stale",
+            f"The user's yes no longer counts ({application.approval_stale}: {why}). Show what changed and "
+            f"ask yes again. {ask.detail}",
         )
     return ask
 
@@ -1294,8 +1387,6 @@ def may_send_outreach(
     facts: OutreachFacts,
     counts: OutreachCounts,
     now: datetime,
-    *,
-    inbox_mode: str = "",
 ) -> OutreachDecision:
     """May the assistant press Send on this outreach email? Pure; first match wins.
 
@@ -1305,8 +1396,8 @@ def may_send_outreach(
     daily_outreach_cap_reached (``OUTREACH_AUTO_SENDS_MAX_PER_DAY``),
     company_cap_reached (``OUTREACH_COMPANY_MAX`` within
     ``OUTREACH_COMPANY_WINDOW_DAYS``).
-    ASK (save a Gmail draft, ask_user): mode_not_auto (``preferences.daily_check``
-    is not ``auto``/``scheduled``), no_found_via, unlinked_contact.
+    ASK (save a Gmail draft, ask_user): mode_not_auto (``assistant_settings.outreach_send``
+    is not ``auto``; the Gmail mode never counts), no_found_via, unlinked_contact.
     SEND: auto_mode.
     """
     if is_paused(cfg.paused_until, now):
@@ -1344,9 +1435,10 @@ def may_send_outreach(
             f"Enough people at this company were emailed in the last {settings.OUTREACH_COMPANY_WINDOW_DAYS} days. "
             "Do not send.",
         )
-    if not _is_auto_inbox(inbox_mode):
+    if cfg.outreach_send != OUTREACH_SEND_AUTO:
         return OutreachDecision(
-            "ask", "mode_not_auto", "The user sends outreach themselves. Save a Gmail draft and ask_user.",
+            "ask", "mode_not_auto",
+            "Sending outreach is off (outreach_send is draft_only): save a Gmail draft and ask_user.",
         )
     if not facts.found_via:
         return OutreachDecision(
@@ -1358,7 +1450,8 @@ def may_send_outreach(
         )
     return OutreachDecision(
         "send", "auto_mode",
-        "Auto mode: you may press Send in Gmail, then record outreach_sent with the Gmail message id as source.",
+        "outreach_send is auto: you may press Send in Gmail, then record outreach_sent "
+        "with the Gmail message id as source.",
     )
 
 
@@ -1799,6 +1892,7 @@ def build_settings_view(
         },
         "pause_reason": {"value": raw.pause_reason, "effective": eff.pause_reason},
         "auto_employer_emails": {"value": raw.auto_employer_emails, "effective": eff.auto_employer_emails},
+        "outreach_send": {"value": raw.outreach_send, "effective": eff.outreach_send},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,
