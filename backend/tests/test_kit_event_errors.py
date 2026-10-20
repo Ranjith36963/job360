@@ -38,7 +38,7 @@ async def test_receipt_accepts_and_round_trips_answer_source(authenticated_async
         # Not a sensitive question: a sensitive one not remembered is stored hashed (G023, slice 11).
         {"question": "Full name?", "answer": "Ada Lovelace", "source": "profile", "key": "contact.name"},
         {"question": "Why us?", "answer": "The data team.", "source": "written"},
-        {"question": "Notice period?", "answer": "Four weeks."},  # the old shape still works
+        {"question": "How did you hear about us?", "answer": "A friend."},  # the old shape still works
     ]
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
