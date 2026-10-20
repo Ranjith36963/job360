@@ -35,7 +35,7 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 | Doc | What it is |
 |---|---|
 | [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the decision log. |
-| [`product/BROWSER_AGENT.md`](product/BROWSER_AGENT.md) | The Job360 browser agent: what we agreed (2026-10-19, decision 29) and the build plan. Slices 1-3 built, off by default. |
+| [`product/BROWSER_AGENT.md`](product/BROWSER_AGENT.md) | The Job360 browser agent: what we agreed (2026-10-19, decision 29) and the build plan. |
 | [`product/product_design_rules.md`](product/product_design_rules.md) | Owner-set product rules. The mission rules are M1–M5 in [`hard-rules`](../.claude/skills/hard-rules/SKILL.md). |
 
 ---
