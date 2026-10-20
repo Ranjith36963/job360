@@ -46,6 +46,24 @@ from src.services.browser_agent.safety import RequestScreen, blocker_for, contro
         ("a", "", "Apply for this job", "", False, "", True, "field"),
         ("button", "button", "Apply for this job", "", False, "", False, "field"),
         ("a", "", "Submit application", "", False, "", False, "submit"),
+        # A button that submits its form, with a name in another language or none we know: the safe side.
+        ("button", "submit", "Bewerbung absenden", "", True, "", False, "submit"),
+        ("button", "", "Envoyer ma candidature", "", True, "", False, "submit"),
+        ("input", "submit", "Postuler", "", True, "", False, "submit"),
+        ("input", "image", "Proceed", "", True, "", False, "submit"),
+        ("button", "submit", "Done", "", True, "", True, "submit"),
+        ("button", "button", "Done", "", True, "", True, "field"),
+        ("div", "", "Yes", "", True, "button", True, "field"),
+        # A step word does not hide "send / apply ... application".
+        ("button", "submit", "Save and send application", "", True, "", True, "submit"),
+        ("button", "button", "Continue and send application", "", True, "", True, "submit"),
+        ("button", "submit", "Save application", "", True, "", True, "field"),
+        # A link-like role names the end the way a link does.
+        ("div", "", "Submit application", "", False, "link", False, "submit"),
+        ("div", "", "Submit application", "", False, "tab", True, "submit"),
+        ("span", "", "Submit", "", True, "switch", False, "submit"),
+        ("div", "", "Submit application", "", False, "option", False, "submit"),
+        ("div", "", "Apply for this job", "", False, "link", False, "field"),
     ],
 )
 def test_control_kind(tag, input_type, name, autocomplete, in_form, role, answers, kind):
@@ -593,8 +611,9 @@ COMBO = """<!doctype html><html><head><title>Location - Acme</title></head><body
 <label for="loc">Location</label>
 <input id="loc" role="combobox" aria-autocomplete="list" aria-expanded="false"
   oninput="document.getElementById('lb').hidden=false; this.setAttribute('aria-expanded','true')"
-  onkeydown="if (event.key==='Enter') { this.value='London, United Kingdom'; document.getElementById('lb').hidden=true; }">
-<ul id="lb" role="listbox" hidden><li role="option">London, United Kingdom</li></ul>
+  onkeydown="if (event.key==='ArrowDown') this.setAttribute('aria-activedescendant','o1');
+    if (event.key==='Enter') { this.value='London, United Kingdom'; document.getElementById('lb').hidden=true; }">
+<ul id="lb" role="listbox" hidden><li id="o1" role="option">London, United Kingdom</li></ul>
 <form onsubmit="event.preventDefault(); document.title='SUBMITTED';">
   <label for="nm">Full name</label><input id="nm"><button type="submit">Submit application</button>
 </form></body></html>"""
