@@ -1411,6 +1411,7 @@ class Collector:
                 company=job.get("company", ""),
                 board=job.get("board", ""),
                 visa_flag=job.get("visa_flag") is True,
+                years=(job.get("extra") or {}).get("years_min"),
             ),
             rec_source=job.get("source") or label,
         )
@@ -1443,7 +1444,9 @@ class Collector:
         if not row:
             return
         self.bump(source, "location_matches")
-        y = years_min(desc)
+        # A feed field stating the employer's floor (Naukri minimumExperience) beats a guess from the text.
+        stated = raw.get("years")
+        y = stated if isinstance(stated, int) and not isinstance(stated, bool) and stated > 0 else years_min(desc)
         if y is not None and y >= a.max_years:
             return
         if not within_days(raw.get("posted", ""), a.days):
