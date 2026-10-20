@@ -140,6 +140,8 @@ FEED_SOURCES = (
     "wellfound",
     "getro",
     "workatastartup",
+    "builtin",
+    "wttj",
     "reed",
     "usajobs",
     "whatjobs",
@@ -2575,6 +2577,8 @@ _FEED_HOSTS = (
     ("uber", re.compile(r"(?:^|\.)jobs\.uber\.com$", re.I)),
     ("wellfound", re.compile(r"(?:^|\.)wellfound\.com$", re.I)),
     ("workatastartup", re.compile(r"(?:^|\.)workatastartup\.com$", re.I)),
+    ("builtin", re.compile(r"(?:^|\.)builtin\.com$", re.I)),
+    ("wttj", re.compile(r"(?:^|\.)welcometothejungle\.com$", re.I)),
     ("adzuna", re.compile(r"(?:^|\.)adzuna\.[a-z.]+$", re.I)),
     ("jooble", re.compile(r"(?:^|\.)jooble\.org$", re.I)),
 )
