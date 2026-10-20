@@ -171,6 +171,30 @@ async def test_a_grant_covers_the_queue_it_was_given_and_not_one_queued_after(
 
 
 @pytest.mark.asyncio
+async def test_a_safer_edit_of_the_grant_keeps_its_scope(authenticated_async_context, fixture_user_id):
+    """A shorter end or a new count does not begin a new grant (``grant_info``), so it must not
+    re-snapshot the queue either: that would cover applications queued after the user looked."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        first, second, late = await _bring(client, 1), await _bring(client, 2), await _bring(client, 3)
+        for app_id in (first, second, late):
+            await _fill(client, app_id)
+        for app_id in (first, second):
+            await _event(client, app_id, "queued")
+        await _grant(client)
+        await _event(client, late, "queued")  # queued AFTER the user said yes
+        shorter = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        resp = await client.patch("/api/profile", json={"edits": [
+            {"path": GRANT_N, "value": 3}, {"path": GRANT_UNTIL, "value": shorter},
+        ]})
+        assert resp.status_code == 200, resp.text
+        assert _pair(await _check(client, late)) == ("ask", "grant_scope")
+        assert _pair(await _check(client, first)) == AUTO
+        view = (await client.get("/api/assistant-settings")).json()["auto_grant_scope"]
+        assert view["granted"] == {"count": 2, "hosts": [FORM_HOST], "no_host": 0}
+
+
+@pytest.mark.asyncio
 async def test_a_covered_application_whose_form_moved_site_is_asked(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
