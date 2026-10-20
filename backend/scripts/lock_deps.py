@@ -34,6 +34,12 @@ RUNTIME = "requirements.lock.txt"
 EXTRAS = {"requirements-dev.lock.txt": "dev", "requirements-browser.lock.txt": "browser"}
 TARGET = ["--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu"]
 COOLDOWN_DAYS = 7
+# A package named here ignores the cooldown and is moved to its newest release: a known
+# critical advisory outweighs a few days of waiting. Keep the reason, and drop the entry once
+# the fixed release is older than COOLDOWN_DAYS (the lock then keeps it on its own).
+#   certifi: GHSA-6q48-6c7w-9gw2 (critical, "certifi bundles emSign root CAs with compromised
+#   intermediate CA keys"); fixed in 2026.10.19, released 2026-10-20. 2026.7.22 is affected.
+COOLDOWN_EXEMPT = ("certifi",)
 COMMAND = "python scripts/lock_deps.py   (from backend/, needs uv; see that file)"
 
 
@@ -44,6 +50,9 @@ def compile_lock(uv: str, output: str, extra: str | None, upgrade: bool, cutoff:
         cmd += ["--extra", extra, "--constraints", RUNTIME]
     if upgrade:
         cmd.append("--upgrade")
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for pkg in COOLDOWN_EXEMPT:
+        cmd += ["--exclude-newer-package", f"{pkg}={now}", "--upgrade-package", pkg]
     print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, cwd=BACKEND, check=True)
 
