@@ -399,3 +399,178 @@ async def test_application_ics_requires_owner(authenticated_async_context):
         assert 'attachment; filename="job360-application-' in resp.headers["content-disposition"]
         assert "SUMMARY:Interview: Data Engineer" in _unfold(resp.text)
         assert (await client.get("/api/applications/999999/calendar.ics")).status_code == 404
+
+
+# ── one VEVENT per interview, details from the payload, reminders ───────────
+
+
+def _vevents(body: str) -> list[str]:
+    return [b.split("END:VEVENT")[0] for b in body.split("BEGIN:VEVENT")[1:]]
+
+
+async def _feed_body(client: AsyncClient) -> str:
+    url = await _make_feed(client)
+    async with _anon_client() as anon:
+        resp = await anon.get(_path(url))
+    assert resp.status_code == 200, resp.text
+    return _unfold(resp.text)
+
+
+def _span(vevent: str) -> timedelta:
+    start = re.search(r"DTSTART:(\d{8}T\d{6}Z)", vevent).group(1)
+    end = re.search(r"DTEND:(\d{8}T\d{6}Z)", vevent).group(1)
+    return datetime.strptime(end, "%Y%m%dT%H%M%SZ") - datetime.strptime(start, "%Y%m%dT%H%M%SZ")
+
+
+@pytest.mark.asyncio
+async def test_two_interviews_on_one_application_are_two_events(authenticated_async_context):
+    _reset_limits()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        first = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(3),
+                             payload={"round": "Phone screen"})
+        second = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(8),
+                              payload={"round": "hiring-manager"})
+        body = await _feed_body(client)
+    events = _vevents(body)
+    assert len(events) == 2
+    assert f"UID:app-{app_id}-ev-{first['event_id']}@job360.uk" in events[0]
+    assert f"UID:app-{app_id}-ev-{second['event_id']}@job360.uk" in events[1]
+    assert "SUMMARY:Interview: Data Engineer – Northwind (Phone screen)" in events[0]
+    assert "SUMMARY:Interview: Data Engineer – Northwind (Hiring manager)" in events[1]
+
+
+@pytest.mark.asyncio
+async def test_corrected_interview_is_dropped_but_the_other_round_stays(authenticated_async_context):
+    _reset_limits()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        keep = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2))
+        old = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(4))
+        fixed = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(5),
+                             corrects_event_id=old["event_id"])
+        body = await _feed_body(client)
+    assert f"app-{app_id}-ev-{old['event_id']}@" not in body
+    assert f"app-{app_id}-ev-{keep['event_id']}@" in body and f"app-{app_id}-ev-{fixed['event_id']}@" in body
+    assert len(_vevents(body)) == 2
+
+
+@pytest.mark.asyncio
+async def test_interview_outside_the_window_is_not_listed(authenticated_async_context):
+    _reset_limits()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _event(client, app_id, "interview_scheduled",
+                     scheduled_at=_iso(-(settings.CALENDAR_FEED_LOOKBACK_DAYS + 5)))
+        inside = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2))
+        body = await _feed_body(client)
+    events = _vevents(body)
+    assert len(events) == 1 and f"app-{app_id}-ev-{inside['event_id']}@" in events[0]
+
+
+@pytest.mark.asyncio
+async def test_duration_round_link_location_come_from_the_payload(authenticated_async_context):
+    _reset_limits()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(4), payload={
+            "round": "Technical", "duration_minutes": 90, "link": "https://meet.example/room?id=1,2",
+            "location": "HQ; floor 3",
+        })
+        solo_ev = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(5),
+                               payload={"link": "https://meet.example/solo", "duration_minutes": 480})
+        tiny_ev = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(6),
+                               payload={"duration_minutes": 5})
+        await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(7))
+        # Out-of-range durations are refused at write time now (slice 43); rows from before that
+        # can still hold them, so the feed must keep clamping. Plant such rows directly.
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"link": "https://meet.example/solo", "duration_minutes": 9999}', solo_ev["event_id"]))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"duration_minutes": 1}', tiny_ev["event_id"]))
+        body = await _feed_body(client)
+    full, solo, tiny, bare = _vevents(body)
+    assert _span(full) == timedelta(minutes=90)
+    assert "DESCRIPTION:https://meet.example/room?id=1\\,2\r\n" in full
+    assert "LOCATION:HQ\\; floor 3" in full, "an explicit location wins over the link"
+    assert "LOCATION:https://meet.example/solo" in solo and "DESCRIPTION:https://meet.example/solo" in solo
+    assert _span(solo) == timedelta(minutes=480), "clamped to 8 hours"
+    assert _span(tiny) == timedelta(minutes=5), "clamped to 5 minutes"
+    assert _span(bare) == timedelta(minutes=60), "no payload: the old 60 minutes"
+    assert "LOCATION" not in bare
+
+
+@pytest.mark.asyncio
+async def test_non_http_link_is_dropped(authenticated_async_context):
+    _reset_limits()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        refused = await client.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "interview_scheduled", "scheduled_at": _iso(2), "payload": {"link": "javascript:alert(1)"},
+        })
+        assert refused.status_code == 422, "a non-http link is refused at write time (slice 43)"
+        # Rows from before that check can still hold one; the feed must keep dropping it.
+        first = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2), payload={"round": "Screen"})
+        second = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(3))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"link": "javascript:alert(1)", "round": "Screen"}', first["event_id"]))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?",
+             ('{"link": "file:///etc/passwd"}', second["event_id"]))
+        body = await _feed_body(client)
+    assert "javascript" not in body and "file:" not in body and "passwd" not in body
+    assert "LOCATION" not in body
+    assert len(_vevents(body)) == 2 and "(Screen)" in body
+
+
+@pytest.mark.asyncio
+async def test_bad_payload_json_never_breaks_the_feed(authenticated_async_context):
+    _reset_limits()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        ev = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2), payload={"round": "x"})
+        other = await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(3))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?", ("{not json", ev["event_id"]))
+        _sql("UPDATE application_events SET payload = ? WHERE id = ?", ('["a list"]', other["event_id"]))
+        body = await _feed_body(client)
+    events = _vevents(body)
+    assert len(events) == 2
+    assert all("\r\nSUMMARY:Interview: Data Engineer – Northwind\r\n" in "\r\n" + e for e in events)
+    assert all("TRIGGER:-P1D" in e for e in events), "a bad payload still gets its reminders"
+
+
+@pytest.mark.asyncio
+async def test_interview_has_two_alarms_and_follow_up_one(authenticated_async_context):
+    _reset_limits()
+    follow_day = (datetime.now(timezone.utc) + timedelta(days=9)).date().isoformat()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _event(client, app_id, "interview_scheduled", scheduled_at=_iso(2), payload={"round": "Final"})
+        await _event(client, app_id, "note", follow_up_on=follow_day)
+        body = await _feed_body(client)
+    interview, follow = _vevents(body)
+    assert interview.count("BEGIN:VALARM") == 2 == interview.count("END:VALARM")
+    assert interview.count("ACTION:DISPLAY") == 2
+    assert "TRIGGER:-P1D" in interview and "TRIGGER:-PT1H" in interview
+    assert interview.count("DESCRIPTION:Interview: Data Engineer – Northwind (Final)") == 2
+    assert follow.count("BEGIN:VALARM") == 1 and "TRIGGER:PT9H" in follow
+    assert "DESCRIPTION:Follow up: Data Engineer – Northwind" in follow
+
+
+def test_alarm_offsets_come_from_settings(monkeypatch):
+    monkeypatch.setattr(settings, "CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES", 2880)
+    monkeypatch.setattr(settings, "CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES", 90)
+    assert calendar_ics._interview_alarms() == ("-P2D", "-PT90M")
+    monkeypatch.setattr(settings, "CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES", 0)
+    assert calendar_ics._interview_alarms() == ("-P2D",)
+
+
+def test_alarm_lines_are_crlf_and_folded():
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    ev = calendar_ics.CalEvent(uid="u@x", summary="Interview: " + "é" * 80, url="https://x/1", stamp=now, start=now,
+                               description="https://meet.example/" + "a" * 120, alarms=("-P1D", "-PT1H"))
+    out = calendar_ics.render_calendar([ev])
+    assert out.endswith("END:VCALENDAR\r\n") and "\n" not in out.replace("\r\n", "")
+    assert all(len(line.encode()) <= 75 for line in out.split("\r\n"))
+    unfolded = _unfold(out)
+    assert unfolded.count("BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Interview: ") == 2
+    assert "\r\nTRIGGER:-P1D\r\nEND:VALARM\r\n" in unfolded and "\r\nTRIGGER:-PT1H\r\nEND:VALARM\r\n" in unfolded

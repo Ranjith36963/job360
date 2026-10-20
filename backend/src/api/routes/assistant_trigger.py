@@ -7,6 +7,7 @@ returned. No MCP tool exposes these (rule M5 is about tools that exist; none sho
 from __future__ import annotations
 
 import contextlib
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,6 +21,7 @@ from src.services.browser_agent.sign_ins import SignInKeyMissingError
 from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["assistant-trigger"])
+logger = logging.getLogger("job360.api.assistant_trigger")
 
 
 class TriggerIn(BaseModel):
@@ -52,7 +54,10 @@ async def get_trigger(user: CurrentUser = Depends(require_session_user)) -> dict
 async def put_trigger(
     body: TriggerIn, user: CurrentUser = Depends(require_session_user)  # noqa: B008
 ) -> dict[str, Any]:
-    """Save (or replace) the start address and its token. The token is encrypted at rest."""
+    """Save (or replace) the start address and its token. The token is encrypted at rest.
+
+    An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+    it, the error is logged without its traceback or message, and a plain 500 replaces it (from None)."""
     try:
         async with _db() as db:
             await trigger_service.save(db, user.id, body.url, body.token)
@@ -61,6 +66,11 @@ async def put_trigger(
         raise HTTPException(status_code=422, detail=exc.detail) from None
     except SignInKeyMissingError:
         raise HTTPException(status_code=503, detail="This server cannot keep tokens yet (no SESSION_SECRET).") from None
+    except Exception:  # noqa: BLE001 - its message and frames can hold the token
+        logger.error("assistant trigger not saved for user %s", safe_log_value(user.id))
+        raise HTTPException(status_code=500, detail="The start address could not be saved. Try again.") from None
+    finally:
+        body.token = ""
     _audit(user, "save", "ok")
     return view
 

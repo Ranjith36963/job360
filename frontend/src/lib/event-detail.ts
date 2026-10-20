@@ -46,6 +46,29 @@ export function contactNameOf(e: { payload?: unknown }): string | null {
   return typeof n === "string" && n.trim() ? n.trim() : null;
 }
 
+/** "85,000 GBP per year" from an offer's stored figures; null unless all three
+ * are there (the backend only stores them together). */
+export function offerFigures(e: { event_type: string; payload?: unknown }): string | null {
+  if (e.event_type !== "offer") return null;
+  const { offer_amount: amount, offer_currency: currency, offer_period: period } = payloadOf(e);
+  if (typeof amount !== "number" || typeof currency !== "string" || typeof period !== "string") return null;
+  return `${amount.toLocaleString("en-GB")} ${currency} per ${period}`;
+}
+
+/** "Technical · 45 min · Head office" from an interview event's stored details;
+ * null when none of them were given. */
+export function interviewDetails(e: { event_type: string; payload?: unknown }): string | null {
+  if (e.event_type !== "interview_requested" && e.event_type !== "interview_scheduled") return null;
+  const p = payloadOf(e);
+  const parts: string[] = [];
+  if (typeof p.round === "string" && p.round) {
+    parts.push(p.round.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase()));
+  }
+  if (typeof p.duration_minutes === "number") parts.push(`${p.duration_minutes} min`);
+  if (typeof p.location === "string" && p.location) parts.push(p.location);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 /** The one-line title for an event: the label, made specific when the payload
  * allows. Never claims more than the payload carries. */
 export function eventTitle(e: { event_type: string; payload?: unknown; recorded_by?: string }): string {
