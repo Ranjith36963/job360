@@ -85,12 +85,12 @@ describe("DailyCheckCard", () => {
     expect(screen.getByTestId("daily-check-reset")).toBeInTheDocument();
   });
 
-  it("Auto says the assistant sends the outreach it wrote; Ask says it only drafts", () => {
-    expect(dailyCheckStatusLine("auto", true)).toMatch(/sends the outreach messages it wrote/i);
-    expect(dailyCheckStatusLine("scheduled", true)).toMatch(/sends the outreach messages it wrote/i);
-    expect(dailyCheckStatusLine("ask", true)).toMatch(
-      /asks you before each gmail check and only drafts messages/i
-    );
+  it("Auto reads and records; it never claims to send", () => {
+    expect(dailyCheckStatusLine("auto", true)).toMatch(/records what happened/i);
+    expect(dailyCheckStatusLine("auto", true)).not.toMatch(/send/i);
+    expect(dailyCheckStatusLine("scheduled", true)).toMatch(/records what happened/i);
+    expect(dailyCheckStatusLine("scheduled", true)).not.toMatch(/send/i);
+    expect(dailyCheckStatusLine("ask", true)).toMatch(/asks you before each gmail check/i);
   });
 
   it("shows the declined line and a reset button for 'declined'", () => {

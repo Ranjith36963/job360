@@ -103,7 +103,7 @@ jobs:
         # A lost marker only makes a later main push run `full`. It must never fail
         # `scope`: a red scope SKIPS the required jobs, and the ruleset passes skipped.
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ci-tested-tree-${{ steps.tree.outputs.tree }}
           path: tested-tree.txt
@@ -117,8 +117,8 @@ jobs:
     timeout-minutes: 45
     needs: [scope]
     # The backend is Postgres-backed now (pg shim); tests need a DB + Redis.
-    # Mirrors ci.yml's service setup — without it, tests hit the dev-default
-    # :5433 and fail with "connection refused".
+    # This is the ONE backend job that runs pytest (ci.yml Backend is ruff +
+    # mypy only) — without these, tests hit the dev-default :5433 and fail.
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -156,12 +156,48 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
-      - name: Install backend (with dev extras)
+      # FROM THE HASHED LOCKS (2026-10-20): the runtime pins the prod image installs
+      # (backend/Dockerfile) plus the dev tools, then Playwright for the browser-agent tests
+      # (tests/test_browser_*.py, the code that fills and submits real job forms: `@needs_chromium`,
+      # skipped on every CI run until now). Every file is sha256-checked, then the app goes in with
+      # --no-deps so nothing outside the locks can arrive. `pip check` fails on pins that do not
+      # satisfy each other.
+      - name: Install backend (with dev + browser)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install --require-hashes -r requirements-dev.lock.txt
+          python -m pip install --require-hashes -r requirements-browser.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip check
+          python -m pip show playwright | grep -E '^Version:'
+      # The Chromium build that the installed Python playwright expects, plus
+      # its system libraries. Not cached: the download is the small part; the
+      # apt step (--with-deps) is most of the time and an actions/cache entry
+      # would not cover it.
+      - name: Install Chromium for the browser-agent tests
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: python -m playwright install --with-deps chromium
+      # Fail in seconds, not after the suite: the tests' own helper must now
+      # see Chromium. If it ever does not, the suite would skip ~66 tests and
+      # the skip ratchet below goes red too ("Playwright + Chromium not
+      # installed" has a baseline of 0), so this only makes it fast and plain.
+      - name: The browser-agent tests can run (Chromium is visible to them)
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import sys
+          from tests.test_browser_agent import _chromium_available
+          if not _chromium_available():
+              print("::error title=chromium::Playwright + Chromium not visible to "
+                    "tests/test_browser_agent.py::_chromium_available; every "
+                    "@needs_chromium test would skip")
+              sys.exit(1)
+          print("Chromium visible: @needs_chromium tests will run")
+          PY
       # The template dump must come from a pg_dump the SERVER can load. The
       # runner image's own client drifts (ubuntu-latest moves to Ubuntu 26 from
       # 2026-10-19, with a newer Postgres client than this pg16 service), so
@@ -191,6 +227,17 @@ jobs:
           set -o pipefail
           pg_dump --version
           python -m pytest -q -p no:randomly -n auto --junitxml=/tmp/junit.xml | tee /tmp/pytest.out
+      # SKIP RATCHET (2026-10-20). A skipped test is a test that did not run, and
+      # the count only ever grew without anyone deciding it should. This fails
+      # when the report's skips exceed SKIP_BASELINE in scripts/test_integrity.py,
+      # in total or for any one reason, and prints each reason that is new or
+      # grew. "Playwright + Chromium not installed" has no allowance: Chromium is
+      # installed above, so one such skip is red. Raising the baseline is an
+      # edit to that file, which the `test-integrity` check (ci.yml) flags.
+      # `!cancelled()`: it still reports after a red suite; no report is red.
+      - name: Skipped tests do not grow (skip ratchet)
+        if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
+        run: python scripts/test_integrity.py --skips /tmp/junit.xml
       # Per-file verdict for tests/test_e2e_lifecycle.py, read from the report
       # of the run above. `absent` (no report, or no lifecycle test in it) is
       # NOT a pass: loop2-e2e-spotlight goes red on anything but `passed`.
@@ -268,7 +315,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         with:
           node-version: "22"
@@ -307,7 +354,7 @@ jobs:
       # pass or fail, 14 days. (Was: report on failure only, 7 days.)
       - name: Keep the evidence (Playwright report + test results)
         if: always() && (needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-evidence-${{ github.event.pull_request.number || github.run_id }}
           path: |

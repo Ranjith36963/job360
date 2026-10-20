@@ -8,12 +8,12 @@ name: Daily digest (what needs the owner today?)
 # nothing, opens nothing. Free: no LLM, no secrets except the Slack token.
 #
 # THE RULES (each section is one `gh` query plus one plain rule):
-#   1. PRs waiting for him — open, not draft, not `wip:parked`, not
+#   1. PRs waiting for him — open, not draft, not
 #      `autofix:exhausted` / `autofix:needs-human` (those have their own
 #      section), and one of:
 #        a. labelled `human-merge`;
-#        b. in the only human-only lane, `lane:harness-owner` (merge-policy.yml
-#           `harness_owner: auto_merge: false`) with every check green;
+#        b. in a human-only lane, `lane:harness-owner` or `lane:product-human`
+#           (merge-policy.yml `auto_merge: false`) with every check green;
 #        c. every check green but NOT auto-mergeable: no lane label yet, or the
 #           autopilot says `automerge:blocked`. A green PR in an auto lane is
 #           the machine's job, not his.
@@ -73,7 +73,8 @@ jobs:
 
           CAP = 5  # items shown per group; the rest become "+N more"
           AUTO_LANES = {"lane:harness", "lane:product", "lane:product-owner"}
-          OWNER_LANE = "lane:harness-owner"
+          # Hand-merged lanes: the cage's own rules, and migrations + auth (owner, 2026-10-20).
+          OWNER_LANES = {"lane:harness-owner", "lane:product-human"}
           GREEN = {"SUCCESS", "SKIPPED", "NEUTRAL"}
 
 
@@ -123,7 +124,7 @@ jobs:
           exhausted_items: list[str] = []
           for pr in sorted(prs, key=lambda p: p["number"]):
               labels = {l["name"] for l in pr["labels"]}
-              if pr["isDraft"] or "wip:parked" in labels:
+              if pr["isDraft"]:
                   continue
               n, title, url = pr["number"], clean(pr["title"]), pr["url"]
               if labels & {"autofix:exhausted", "fix:exhausted"}:
@@ -139,7 +140,7 @@ jobs:
                   verb = "Merge" if green else "Look at (checks not green)"
                   merge_items.append(f"{verb} PR #{n}: {title} — {url}")
               elif green and (
-                  OWNER_LANE in labels
+                  labels & OWNER_LANES
                   or "automerge:blocked" in labels
                   or not (labels & AUTO_LANES)
               ):

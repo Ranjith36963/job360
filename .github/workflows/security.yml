@@ -53,13 +53,17 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
-      - name: Install backend + pip-audit
-        working-directory: backend
+      # AUDITS THE LOCKS, NOT A FRESH RESOLVE (2026-10-20). It used to install
+      # `-e .` and audit whatever pip resolved that day, and never the [browser]
+      # extra (REAL-OR-FAKE §11). The three locks are the exact sets that ship
+      # (runtime, runtime + Playwright) and that CI runs with its tokens (dev);
+      # every entry is pinned and hashed, so --require-hashes --disable-pip audits them
+      # as written, with no resolution and no install.
+      - name: Install pip-audit
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e "."
           python -m pip install pip-audit
-      - name: Audit installed dependencies
+      - name: Audit the locked dependencies (runtime, browser, dev)
         working-directory: backend
         # BLOCKING with ZERO waivers. A CVE in ANY backend dependency fails the
         # build — there is nothing on the ignore list to hide behind.
@@ -71,7 +75,28 @@ jobs:
         #
         # If a new CVE appears: fix it. Waive by ID only as a last resort, with
         # a comment naming what blocks the fix and what would unblock it.
-        run: python -m pip_audit --progress-spinner off
+        run: |
+          python -m pip_audit --progress-spinner off --require-hashes --disable-pip \
+            -r requirements.lock.txt -r requirements-browser.lock.txt -r requirements-dev.lock.txt
+
+  # WHAT THIS PR ADDS, NOT WHAT IS ALREADY INSTALLED (2026-10-20). pip-audit and
+  # npm audit read today's set; this reads the PR's manifest diff (the hashed
+  # backend locks give it every Python transitive) and fails on a newly added
+  # dependency with a high or critical advisory. Only a pull_request has a diff:
+  # on push / schedule the step is skipped and the job reports success, so it
+  # can become a required check without blocking main.
+  dependency-review:
+    name: dependency-review (new deps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+      - name: Review the dependencies this PR adds
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
 
   npm-audit:
     name: npm audit (frontend deps)
@@ -79,7 +104,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "20"
       - name: Install frontend deps
