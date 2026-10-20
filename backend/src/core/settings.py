@@ -260,6 +260,10 @@ SESSION_TOUCH_TIMEOUT_SECONDS = float(os.getenv("SESSION_TOUCH_TIMEOUT_SECONDS",
 # connection, and Postgres allows ~100. Extra touches are skipped (informational
 # only) with a rate-limited warning.
 SESSION_TOUCH_MAX_INFLIGHT = int(os.getenv("SESSION_TOUCH_MAX_INFLIGHT", "20"))
+# Account deletion for a magic-link-only account (no password to ask for, GDPR
+# Art. 17): allowed only from a session created at most this many seconds ago,
+# i.e. one the user just made by clicking a fresh email link.
+ACCOUNT_DELETE_FRESH_SESSION_SECONDS = int(os.getenv("ACCOUNT_DELETE_FRESH_SESSION_SECONDS", "600"))
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""
@@ -856,6 +860,9 @@ CALENDAR_ALARM_FOLLOW_UP_HOUR = int(os.getenv("CALENDAR_ALARM_FOLLOW_UP_HOUR", "
 # "Another assistant is on this application": a kit read by someone else this
 # recently warns (never blocks).
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
+# Gap roadmap slice 8: the user's Send yes (``submit_approved``) counts for this many minutes
+# after it was recorded; an older yes is ``approval_stale`` (expired) and check_submit asks again.
+SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "120"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
 # Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
@@ -904,6 +911,9 @@ PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))
 USER_INFO_QUESTION_MAX_CHARS = int(os.getenv("USER_INFO_QUESTION_MAX_CHARS", "300"))
 USER_INFO_ANSWER_MAX_CHARS = int(os.getenv("USER_INFO_ANSWER_MAX_CHARS", "2000"))
 USER_INFO_ANSWERS_MAX_CHARS = int(os.getenv("USER_INFO_ANSWERS_MAX_CHARS", "120000"))
+# Gap 4 (slice 26) - saved answers grow by one or two per application, so they
+# get their own record cap; every other list keeps PROFILE_EDIT_MAX_RECORDS.
+USER_INFO_ANSWERS_MAX_RECORDS = int(os.getenv("USER_INFO_ANSWERS_MAX_RECORDS", "500"))
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
@@ -1055,3 +1065,20 @@ BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
 # Live sign-in views (Settings -> Job sites) have their own cap, apart from the assistants' browsers.
 BROWSER_AGENT_MAX_LIVE = int(os.getenv("BROWSER_AGENT_MAX_LIVE", "2"))
 BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))
+
+
+# -- Migration safety (gap roadmap slice 20). Migrations auto-apply on boot and
+# every merge to main deploys, so one bad migration must fail fast, not stall
+# production. migrations/runner.py issues SET LOCAL lock_timeout / statement_timeout
+# inside each migration's own transaction (0 = Postgres "no limit"). Before applying
+# pending migrations it copies every existing table their up.sql alters, drops,
+# updates, deletes from or truncates into the `migration_snapshots` schema as
+# `<table>__<migration_id>`, skipping tables over the row cap. Snapshots never run in
+# test mode (pg.TEST_MODE), whatever this flag says.
+MIGRATION_LOCK_TIMEOUT_S = int(os.getenv("MIGRATION_LOCK_TIMEOUT_S", "5"))
+MIGRATION_STATEMENT_TIMEOUT_S = int(os.getenv("MIGRATION_STATEMENT_TIMEOUT_S", "120"))
+MIGRATION_SNAPSHOTS_ENABLED = _env_flag("MIGRATION_SNAPSHOTS_ENABLED", True)
+MIGRATION_SNAPSHOT_MAX_ROWS = int(os.getenv("MIGRATION_SNAPSHOT_MAX_ROWS", "200000"))
+# Snapshots hold whole tables (users, applications, receipts), outside the erasure
+# path, so they must not outlive the backups: every up() drops those older than this.
+MIGRATION_SNAPSHOT_RETENTION_DAYS = int(os.getenv("MIGRATION_SNAPSHOT_RETENTION_DAYS", "14"))

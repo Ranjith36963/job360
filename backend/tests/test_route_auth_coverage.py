@@ -166,6 +166,20 @@ PUBLIC_ROUTES: dict[str, str] = {
 
 AUTH_MARKERS = {"require_user", "require_verified_user", "optional_user"}
 
+# ---------------------------------------------------------------------------
+# Session-only routes: a browser session, never a bearer (personal ``j360_``
+# token or OAuth access token). Gap roadmap slice 3: a leaked, never-expiring
+# agent token must not reach the account itself. Each must depend on
+# ``require_session_user`` (403 ``session_required`` for a token).
+# ---------------------------------------------------------------------------
+SESSION_ONLY_ROUTES: dict[tuple[str, str], str] = {
+    ("GET", "/api/auth/users/me/export"): "downloads every table held on the account (GDPR Art. 20)",
+    ("DELETE", "/api/auth/users/me"): "erases the account (GDPR Art. 17)",
+    ("PATCH", "/api/auth/users/me/password"): "changes the sign-in credential",
+    ("PATCH", "/api/auth/users/me/email"): "moves the account to another mailbox",
+    ("POST", "/api/profile/clear"): "'all' wipes CV, preferences, memory and assistant settings at once",
+}
+
 
 _DISCOVER = r"""
 import importlib, json, sys
@@ -211,6 +225,7 @@ for name, prefix in MODULES.items():
             "path": prefix + path,
             "verbs": ",".join(sorted(methods - {"HEAD", "OPTIONS"})),
             "protected": bool(dep_names(route) & AUTH_MARKERS),
+            "session_only": "require_session_user" in dep_names(route),
         })
 print(json.dumps(out))
 """
@@ -308,4 +323,16 @@ def test_public_entries_carry_a_reason(path: str, reason: str) -> None:
     assert len(reason.strip()) >= 15, (
         f"PUBLIC_ROUTES[{path!r}] needs a real reason explaining why anonymous "
         f"access is correct. Got: {reason!r}"
+    )
+
+
+@pytest.mark.parametrize("verb,path", sorted(SESSION_ONLY_ROUTES))
+def test_account_routes_are_session_only(verb: str, path: str) -> None:
+    """A bearer token must never reach these (gap roadmap slice 3). Dropping
+    ``require_session_user`` from one of them turns this red, naming the route."""
+    matches = [r for r in _all_routes() if r["path"] == path and verb in r["verbs"].split(",")]
+    assert matches, f"{verb} {path} no longer exists: update SESSION_ONLY_ROUTES"
+    assert all(r["session_only"] for r in matches), (
+        f"{verb} {path} is reachable with an agent token. It must depend on "
+        f"require_session_user: {SESSION_ONLY_ROUTES[(verb, path)]}."
     )
