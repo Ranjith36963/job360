@@ -306,3 +306,53 @@ def test_deeply_nested_html_keeps_the_board_and_does_not_stall():
     m1._parse("<b>" * 12500 + "</i>" * 12500)
     assert time.monotonic() - t0 < 3
     assert m1._own_text(m1._parse("<div>" * 3000 + "hi")) == "hi"
+
+
+# ----------------------------------------------------------------------------- review round 2
+def test_betterteam_deeply_nested_ldjson_drops_only_that_posting():
+    bomb = '<script type="application/ld+json">' + "[" * 100000 + "]" * 100000 + "</script>"
+    listing = '<a href="/bad-1">x</a><a href="/good-2">y</a>'
+    http = _stub({"/bad-1": (200, "<html>" + bomb + "</html>"),
+                  "/good-2": (200, _bt_detail("Cook", "Fry.", "2026-06-09", "Leeds", "GB")),
+                  "bt.betterteam.com": (200, listing)})
+    jobs, stats = _run("betterteam", {"name": "BT", "token": "bt"}, http)
+    assert [j["title"] for j in jobs] == ["Cook"] and stats["ok"] == 1
+
+
+def test_betterteam_cats_clinch_detail_parse_failure_drops_only_that_posting(monkeypatch):
+    real = m1._parse
+
+    def boom(text, *a, **k):
+        if "BOOM" in str(text):
+            raise RuntimeError("parser blew up")
+        return real(text, *a, **k)
+
+    monkeypatch.setattr(m1, "_parse", boom)
+    http = _stub({"/bad-1": (200, "BOOM"), "/good-2": (200, _bt_detail("Cook", "Fry.", "2026-06-09", "Leeds", "GB")),
+                  "bt.betterteam.com": (200, '<a href="/bad-1">x</a><a href="/good-2">y</a>')})
+    jobs, stats = _run("betterteam", {"name": "BT", "token": "bt"}, http)
+    assert [j["title"] for j in jobs] == ["Cook"] and stats["ok"] == 1
+
+    http = _stub({"/jobs/1": (200, "BOOM"), "/jobs/2": (200, '<div class="job-description">Fine</div>'),
+                  "c.example.com/careers": (200, _cats_listing(("1", "Nurse", "Leeds"), ("2", "Cook", "York")))})
+    jobs, stats = _run("catsone", {"name": "C", "token": "c.example.com"}, http)
+    assert [j["title"] for j in jobs] == ["Cook"] and stats["ok"] == 1
+
+    http = _stub({"sitemap.xml": (200, _sitemap("https://k.example.com/jobs/nurse-canada", "https://k.example.com/jobs/cook-canada")),
+                  "/jobs/nurse-canada": (200, "BOOM"), "/jobs/cook-canada": (200, '<div class="job-description">Fine</div>')})
+    jobs, stats = _run("clinch", {"name": "K", "token": "k.example.com"}, http)
+    assert sorted(j["title"] for j in jobs) == ["Cook", "Nurse"] and stats["ok"] == 1
+
+
+def test_ld_posting_is_linear_on_a_huge_array_and_keeps_document_order():
+    import time
+
+    n = 200000
+    blob = json.dumps([{"@type": "Thing"}] * n + [{"@type": "JobPosting", "title": "Last"}])
+    root = m1._parse('<script type="application/ld+json">' + blob + "</script>")
+    t0 = time.monotonic()
+    assert m1._ld_posting(root)["title"] == "Last"
+    assert time.monotonic() - t0 < 1
+    first = m1._parse('<script type="application/ld+json">' + json.dumps(
+        [{"@graph": [{"@type": "JobPosting", "title": "A"}]}, {"@type": "JobPosting", "title": "B"}]) + "</script>")
+    assert m1._ld_posting(first)["title"] == "A"

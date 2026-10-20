@@ -192,7 +192,7 @@ def _json_scripts(root: _Node, **match: str) -> list[Any]:
         if x.tag == "script" and all(x.attrs.get(k.rstrip("_")) == v for k, v in match.items()):
             try:
                 out.append(json.loads("".join(k for k in x.kids if isinstance(k, str))))
-            except ValueError:
+            except (ValueError, RecursionError):  # deeply nested JSON raises RecursionError, not ValueError
                 continue
     return out
 
@@ -259,15 +259,15 @@ def _ld_posting(root: _Node) -> dict[str, Any] | None:
     for blob in _json_scripts(root, type_="application/ld+json"):
         stack: list[Any] = [blob]
         while stack:
-            x = stack.pop(0)
+            x = stack.pop()  # DFS in document order: children go on reversed, pop from the end (O(n))
             if isinstance(x, list):
-                stack = x + stack
+                stack.extend(reversed(x))
             elif isinstance(x, dict):
                 t = x.get("@type")
                 if t == "JobPosting" or (isinstance(t, list) and "JobPosting" in t):
                     return x
                 if isinstance(x.get("@graph"), list):
-                    stack = x["@graph"] + stack
+                    stack.extend(reversed(x["@graph"]))
     return None
 
 
@@ -311,7 +311,10 @@ def _betterteam(row: dict[str, Any], http: Http) -> list[Job] | None:
         _, det = _page(http, url)
         if det is None:
             continue  # freehire drops a posting whose page fails (betterteam.go:59-61)
-        p = _ld_posting(_parse(det))
+        try:
+            p = _ld_posting(_parse(det))
+        except Exception:  # noqa: BLE001, S112 - one bad page drops only its own posting
+            continue
         if not p or not str(p.get("title") or "").strip():
             continue
         loc = _schema_place(p.get("jobLocation"))
@@ -366,7 +369,10 @@ def _catsone(row: dict[str, Any], http: Http) -> list[Job] | None:
             _, det = _page(http, url)
             if det is None:
                 continue  # catsone.go:58-60: a failed detail drops just this posting
-            desc = _body_text(_by_class(_parse(det), "job-description"))
+            try:
+                desc = _body_text(_by_class(_parse(det), "job-description"))
+            except Exception:  # noqa: BLE001, S112 - one bad page drops only its own posting
+                continue
         jobs.append(_job(row, "catsone", title=title, url=url, location=loc, description=desc,
                          remote=True if "remote" in loc.lower() else None, extra={"id": m.group(1)}))
     return [j for j in jobs if j["title"]]
@@ -433,7 +439,10 @@ def _clinch(row: dict[str, Any], http: Http) -> list[Job] | None:
             details += 1
             st, det = _get(http, loc, as_json=False, headers=_HTML)
             if st == 200 and isinstance(det, str):
-                desc = _body_text(_by_class(_parse(det), "job-description", "div"))
+                try:
+                    desc = _body_text(_by_class(_parse(det), "job-description", "div"))
+                except Exception:  # noqa: BLE001 - descriptions are best effort; one bad page costs only its own
+                    desc = ""
             else:
                 latched = True
         m = _UUID_TAIL.search(slug)
