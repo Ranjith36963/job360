@@ -794,6 +794,25 @@ export async function withdrawAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/withdraw`, { method: "POST" });
 }
 
+// ---- Unmatched mail (feature 10): emails the assistant could not tie to one application ----
+export type InboxItem = _Schemas["InboxItemOut"];
+
+export async function listInboxItems(
+  status: "open" | "all" = "open"
+): Promise<_Schemas["ListInboxItemsResponse"]> {
+  return request(`/api/inbox-items${qs({ status })}`);
+}
+
+export async function resolveInboxItem(
+  id: number,
+  body: { application_id: number } | { dismiss: true }
+): Promise<InboxItem> {
+  return request<InboxItem>(`/api/inbox-items/${id}/resolve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 // ---- Assistant settings (S2, owner decision 2026-10-08) ----
 // A RISKIER change an assistant asks for (more freedom for it) is never applied;
 // it waits as a request that only the signed-in user can confirm here. The full

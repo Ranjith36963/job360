@@ -8,6 +8,7 @@ import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
 import { ReadyToSend } from "./ReadyToSend";
 import { BatchApplyPanel } from "./BatchApplyPanel";
+import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
@@ -389,6 +390,7 @@ export function NeedsYou() {
           </ul>
         )}
       </section>
+      <UnmatchedMail />
 
       {answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">
