@@ -7,7 +7,8 @@ Playwright import at module level (rule #16).
 """
 from __future__ import annotations
 
-# Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int}.
+# Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int,
+# places: [[dist, above], ...]} (one place per element).
 # Each element: {ref, tag, type, role, name, value, checked, required, disabled, autocomplete,
 # in_form, options, via_label}.
 #
@@ -62,14 +63,16 @@ _LABEL_OF_JS = r"""
 SNAPSHOT_JS = r"""
 (args) => {
 """ + _LABEL_OF_JS + r"""
-  const maxElements = args.maxElements, maxText = args.maxText, maxName = 120;
+  const maxElements = args.maxElements, maxText = args.maxText, maxName = 120, maxAttr = 40;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
     + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=""], '
     + '[contenteditable=true], [contenteditable=plaintext-only]';
-  // Every match in the document AND in open shadow roots, in document order.
-  const all = [];
+  // Every match in the document AND in open shadow roots, in document order; and every element
+  // carrying a ref, which the later action's lookup counts too.
+  const all = [], tagged = [];
   const walk = (root, depth) => {
     for (const el of root.querySelectorAll(sel)) all.push(el);
+    for (const el of root.querySelectorAll('[data-j360-ref]')) tagged.push(el);
     if (depth > 6) return;
     for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
   };
@@ -126,17 +129,24 @@ SNAPSHOT_JS = r"""
   let omittedAbove = 0, omittedBelow = 0;
   for (const c of candidates) if (!keptSet.has(c)) { if (c.above) omittedAbove++; else omittedBelow++; }
   kept.sort((a, b) => a.order - b.order);
+  // A ref the page wrote itself (not Job360's shape), or one two controls share, is replaced.
+  const refShape = /^e\d{1,4}_[a-z0-9]{1,4}$/, refCount = new Map();
+  for (const el of tagged) {
+    const r = el.getAttribute('data-j360-ref');
+    if (r) refCount.set(r, (refCount.get(r) || 0) + 1);
+  }
   const out = kept.map(({ el, tag, type, viaLabel, isPassword }) => {
     let ref = el.getAttribute('data-j360-ref');
-    if (!ref) {
+    if (!ref || !refShape.test(ref) || refCount.get(ref) > 1) {
       ref = 'e' + (++n) + '_' + Math.random().toString(36).slice(2, 6);
       el.setAttribute('data-j360-ref', ref);
     }
     const item = {
-      ref, tag, type, role: el.getAttribute('role') || '', name: clip(labelOf(el), maxName),
+      ref, tag: clip(tag, maxAttr), type: clip(type, maxAttr), role: clip(el.getAttribute('role'), maxAttr),
+      name: clip(labelOf(el), maxName),
       required: !!(el.required || el.getAttribute('aria-required') === 'true'),
       disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
-      autocomplete: el.getAttribute('autocomplete') || '', in_form: inForm(el),
+      autocomplete: clip(el.getAttribute('autocomplete'), maxAttr), in_form: inForm(el),
     };
     if (viaLabel) item.via_label = true;
     // The site's own "this answer is wrong / missing" mark: Workday sets it only after Save
@@ -160,6 +170,8 @@ SNAPSHOT_JS = r"""
   const text = clip(document.body ? document.body.innerText : '', maxText);
   return {
     elements: out, text, has_password_box: hasPassword, omitted_above: omittedAbove, omitted_below: omittedBelow,
+    // Per kept element: [distance from the screen, above it], for the size cut.
+    places: kept.map(c => [c.dist, c.above]),
   };
 }
 """
@@ -211,19 +223,50 @@ ELEMENT_FACTS_JS = r"""
 }
 """
 
-# Is the focused element a suggestion list (a combobox, an autocomplete box, an option)? Only
-# there may the assistant press Enter: anywhere else Enter can submit the form.
+# Is an option picked out for Enter to choose? Only then may the assistant press Enter: anywhere else
+# Enter can submit the form. An OPEN list with no option highlighted ("No options") does not count:
+# Enter there falls through to the form (implicit submission), which would skip check_submit.
 FOCUS_IN_LIST_JS = r"""
 () => {
   const el = document.activeElement;
   if (!el || el === document.body) return false;
-  const role = (el.getAttribute('role') || '').toLowerCase();
-  // Focus on an option of an open list: Enter picks it.
-  if (role === 'option' || el.closest('[role=listbox]')) return true;
-  // A suggestion box counts only while its list is OPEN: a closed combobox inside a form
-  // submits on Enter like any field (implicit submission), which would skip check_submit.
-  const box = el.closest('[role=combobox]') || el;
-  return box.getAttribute('aria-expanded') === 'true' || !!el.getAttribute('aria-activedescendant');
+  // Focus on an option: Enter picks it.
+  if (el.closest('[role=option]')) return true;
+  // A suggestion box whose highlighted option (aria-activedescendant) is a real option on the page.
+  const box = el.closest('[role=combobox]');
+  const id = el.getAttribute('aria-activedescendant') || (box && box.getAttribute('aria-activedescendant'));
+  const root = el.getRootNode();
+  const active = id && root.getElementById ? root.getElementById(id) : null;
+  return !!(active && (active.getAttribute('role') || '').toLowerCase() === 'option');
+}
+"""
+
+# Around an allowed Enter: any form submit it sets off is stopped before the page's own handlers see
+# it (capture on window, and on each open shadow root, since a submit there does not leave it), and
+# flagged, so the agent refuses instead of reporting a pick. READ removes the listeners.
+SUBMIT_GUARD_START_JS = r"""
+() => {
+  const stop = (e) => { e.preventDefault(); e.stopImmediatePropagation(); window.__j360submitted = true; };
+  const targets = [window];
+  const walk = (root, depth) => {
+    if (depth > 6) return;
+    for (const host of root.querySelectorAll('*')) if (host.shadowRoot) {
+      targets.push(host.shadowRoot); walk(host.shadowRoot, depth + 1);
+    }
+  };
+  walk(document, 0);
+  for (const t of targets) t.addEventListener('submit', stop, true);
+  window.__j360submitted = false;
+  window.__j360guard = { stop, targets };
+  return true;
+}
+"""
+SUBMIT_GUARD_READ_JS = r"""
+() => {
+  const g = window.__j360guard;
+  if (g) for (const t of g.targets) t.removeEventListener('submit', g.stop, true);
+  window.__j360guard = null;
+  return window.__j360submitted === true;
 }
 """
 
