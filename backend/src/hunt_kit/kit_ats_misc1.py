@@ -1,14 +1,19 @@
-"""Four more ATS board readers for the hunt kit: Betterteam, CATS (catsone), ClinchTalent and Crelate (eRecruiter,
-gr8people, HR-Manager, iSmartRecruit, Loxo and Mindsight follow in the next slice). Same contract as kit_ats.py:
-``fetch(row, http, stats) -> list[Job]``, never raises, network only through the ``http`` callable, no file IO at import,
-standard library only. Nothing here ranks or scores a job. Every request is a plain public page or keyless API call
-(no key, login or cookie).
+"""Ten more ATS board readers for the hunt kit: Betterteam, CATS (catsone), ClinchTalent, Crelate, eRecruiter,
+gr8people, HR-Manager, iSmartRecruit, Loxo and Mindsight. Same contract as kit_ats.py: ``fetch(row, http, stats) ->
+list[Job]``, never raises, network only through the ``http`` callable, no file IO at import, standard library only.
+Nothing here ranks or scores a job. Every request is a plain public page or keyless API call (no key, login or cookie).
 
 Board tokens (companies.json ``board`` / ``token``):
   betterteam    tenant subdomain from <tenant>.betterteam.com
   catsone       careers host, e.g. sphereinc.catsone.com (or a custom domain mapped to CATS)
   clinch        career-site host, e.g. careers.withwaymo.com
   crelate       <portalSlug>:<organizationId> from jobs.crelate.com/portal/<slug>
+  erecruiter    the 32-hex cfg from the company's skk.erecruiter.pl widget script
+  gr8people     the tenant careers host, e.g. etrade.gr8people.com or batesville.workgr8.com
+  hrmanager     customer alias from api.hr-manager.net/jobportal.svc/<alias>/
+  ismartrecruit readable tenant id "<domain>_<code>" (the kit wraps it into the widget token)
+  loxo          <host>/<slug>, e.g. fitnext.app.loxo.co/fitnext or app.loxo.co/<slug>
+  mindsight     tenant path segment from oportunidades.mindsight.com.br/<slug>
 
 Endpoints, selectors and field names are adapted from the MIT-licensed freehire adapters
 (internal/ingest/sources/<name>.go, commit in NOTICE.md); each reader below cites the lines it follows. Anything the
@@ -17,9 +22,12 @@ reference does not state is marked NOT IN REFERENCE.
 # ruff: noqa: E501
 from __future__ import annotations
 
+import base64
 import html
 import json
 import re
+import time
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Callable, Iterator
 from urllib.parse import quote, urlencode, urljoin, urlsplit
@@ -64,12 +72,24 @@ except ImportError:  # loaded by file path: find the sibling file
 
 _JSON = {"Accept": "application/json"}
 _HTML = {"Accept": "text/html"}
+_POST = {"Content-Type": "application/json", "Accept": "application/json"}
 
 # Detail-page requests per board (the rest keep their listing fields, no description). The references fetch every
 # detail with a worker pool; the kit keeps a small request budget instead.
 BETTERTEAM_DETAIL_CAP = 25
 CATSONE_DETAIL_CAP = 25
 CLINCH_DETAIL_CAP = 10
+ERECRUITER_DETAIL_CAP = 25
+ERECRUITER_LIST_PAGES = 5
+GR8PEOPLE_PAGES = 5
+ISMART_DETAIL_CAP = 25
+LOXO_DETAIL_CAP = 25
+MINDSIGHT_DETAIL_CAP = 25
+LOXO_SHARED_HOST_GAP = 0.35  # seconds between requests to app.loxo.co (loxo.go:205-207)
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
 
 
 # --------------------------------------------------------------------------- tiny HTML tree
@@ -147,6 +167,10 @@ def _by_class(n: _Node, cls: str, tag: str | None = None) -> _Node | None:
     return _find(n, lambda x: x.has_class(cls) and (tag is None or x.tag == tag))
 
 
+def _by_id(n: _Node, ident: str) -> _Node | None:
+    return _find(n, lambda x: x.attrs.get("id") == ident)
+
+
 def _own_text(n: _Node | None) -> str:
     """textContent (scripts and styles excluded), whitespace-collapsed; '' for a missing node."""
     if n is None:
@@ -185,6 +209,11 @@ def _body_text(n: _Node | None) -> str:
     return "\n".join(" ".join(line.split()) for line in s.split("\n") if line.strip())
 
 
+def _meta(root: _Node, prop: str) -> str:
+    n = _find(root, lambda x: x.tag == "meta" and x.attrs.get("property") == prop)
+    return (n.attrs.get("content") or "") if n else ""
+
+
 def _json_scripts(root: _Node, **match: str) -> list[Any]:
     """JSON.parse of every <script> whose attributes match (unparseable blocks are skipped)."""
     out: list[Any] = []
@@ -195,6 +224,35 @@ def _json_scripts(root: _Node, **match: str) -> list[Any]:
             except (ValueError, RecursionError):  # deeply nested JSON raises RecursionError, not ValueError
                 continue
     return out
+
+
+def _bracket_slice(s: str, key: str, open_: str, close: str) -> str:
+    """The balanced open..close run after the first ``key`` in ``s`` (depth counted outside JSON strings), else ''.
+    Mirrors freehire nextflight.go:117-150."""
+    at = s.find(key)
+    if at < 0:
+        return ""
+    start = s.find(open_, at)
+    if start < 0:
+        return ""
+    depth, in_str, i = 0, False, start
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == open_:
+            depth += 1
+        elif c == close:
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+        i += 1
+    return ""
 
 
 def _html_text(value: Any) -> str:
@@ -494,9 +552,463 @@ def _crelate(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- eRecruiter
+# Borrowed from freehire internal/ingest/sources/erecruiter.go:60 (GET https://skk.erecruiter.pl/GetHtml.ashx?cfg=<cfg>&
+# grid=rows&pn=<page>, a JSONP body ({"htm":"<tr…>"})), :124-133 (strip the optional ";" and the parentheses, JSON-decode),
+# :144-160 and :171-176 (rows are <tr skkResult='offer'> carrying offerId, externalJobOfferId, externalJobOfferRegionId, comId; a row
+# without offerId is skipped), :171-196 (title = td.skk_positionName, city = last td), :148-156 (the other <tr> is a marker
+# whose tr="<n>" attribute is the total; stop when seen >= total or a page has no rows), :91 (detail
+# Offer.aspx?oid=<offerId>&cfg=<cfg>&ejoId=<extId>&ejorId=<regionId>&comId=<comId>), :200-218 (:200-218: #JobTitle, #WorkPlace with its
+# "Miejsce pracy:" label cut at the first ":", body = #offCont minus #JobTitle/#WorkPlace/#Clause, else #t1, #Opportunities,
+# #CompanyDescription). The kit walks at most ERECRUITER_LIST_PAGES pages, fetches details for ERECRUITER_DETAIL_CAP
+# title-gated rows, and keeps the list-row title/city for the rest (NOT IN REFERENCE: freehire drops rows with no detail).
+_CFG = re.compile(r"[0-9A-Fa-f]{32}")
+_ER_DROP = frozenset(("JobTitle", "WorkPlace", "Clause"))
+
+
+def _er_rows(body: str) -> tuple[list[dict[str, str]], int]:
+    s = body.strip()
+    s = s[:-1].strip() if s.endswith(";") else s
+    s = s[1:] if s.startswith("(") else s
+    s = s[:-1] if s.endswith(")") else s
+    if not s.strip():
+        return [], -1
+    htm = json.loads(s).get("htm")
+    rows: list[dict[str, str]] = []
+    total = -1
+    for tr in _walk(_parse("<table>" + (htm if isinstance(htm, str) else "") + "</table>")):
+        if tr.tag != "tr":
+            continue
+        if tr.attrs.get("skkresult") != "offer":
+            if tr.attrs.get("tr", "").isdigit():
+                total = int(tr.attrs["tr"])
+            continue
+        oid = tr.attrs.get("offerid", "")
+        if not oid:
+            continue
+        tds = [x for x in _walk(tr) if x.tag == "td"]
+        title = next((_own_text(td) for td in tds if td.has_class("skk_positionName")), "")
+        rows.append({"oid": oid, "ejo": tr.attrs.get("externaljobofferid", ""), "ejor": tr.attrs.get("externaljobofferregionid", ""),
+                     "com": tr.attrs.get("comid", ""), "title": title, "city": _own_text(tds[-1]) if tds else ""})
+    return rows, total
+
+
+def _er_detail(root: _Node) -> tuple[str, str, str]:
+    title = _own_text(_by_id(root, "JobTitle"))
+    place = _own_text(_by_id(root, "WorkPlace"))
+    if ":" in place:
+        place = place.split(":", 1)[1].strip()
+    cont = _by_id(root, "offCont")
+    if cont is not None:
+        for x in list(_walk(cont)):
+            if x.attrs.get("id") in _ER_DROP and x.parent is not None:
+                x.parent.kids = [k for k in x.parent.kids if k is not x]
+        body = _body_text(cont)
+    else:
+        body = "\n".join(t for t in (_body_text(_by_id(root, i)) for i in ("t1", "Opportunities", "CompanyDescription")) if t)
+    return title, place, body
+
+
+def _erecruiter(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """eRecruiter Polska career board (skk.erecruiter.pl): JSONP list pages, then Offer.aspx details."""
+    cfg = _token(row)
+    if not _CFG.fullmatch(cfg):
+        return None
+    listed: list[dict[str, str]] = []
+    total, seen = -1, 0
+    for page in range(1, ERECRUITER_LIST_PAGES + 1):
+        st, body = _get(http, f"https://skk.erecruiter.pl/GetHtml.ashx?cfg={cfg}&grid=rows&pn={page}", as_json=False, headers=_HTML)
+        if st != 200 or not isinstance(body, str):
+            if page == 1:
+                return None
+            break
+        rows, t = _er_rows(body)
+        total = t if total < 0 <= t else total
+        if not rows:
+            break
+        listed += rows
+        seen += len(rows)
+        if 0 <= total <= seen:
+            break
+    jobs: list[Job] = []
+    details = 0
+    for r in listed:
+        url = (f"https://skk.erecruiter.pl/Offer.aspx?oid={r['oid']}&cfg={cfg}&ejoId={r['ejo']}&ejorId={r['ejor']}&comId={r['com']}")
+        title, place, desc = r["title"], r["city"], ""
+        if details < ERECRUITER_DETAIL_CAP and _title_ok(row, title):
+            details += 1
+            st, det = _get(http, url, as_json=False, headers=_HTML)
+            if st != 200 or not isinstance(det, str):
+                continue  # erecruiter.go:92-95: an unreachable detail drops the posting
+            t2, p2, desc = _er_detail(_parse(det))
+            title, place = t2 or title, p2 or place
+            if not desc:
+                continue  # erecruiter.go:106-108: a body-less offer is closed
+        if title:
+            jobs.append(_job(row, "erecruiter", title=title, url=url, location=place, description=desc, remote=_remote_from(place),
+                             extra={"id": r["oid"]}))
+    return jobs
+
+
+# --------------------------------------------------------------------------- gr8people
+# Borrowed from freehire internal/ingest/sources/gr8people.go:119 (GET https://<board>/jobs; the board is the whole
+# careers host on gr8people.com or workgr8.com), :41 (the page's __NEXT_DATA__ embeds the anonymous session JWT, regex
+# "token"\s*:\s*"(eyJ[^"]+)"), :146-147 (POST https://<board>/graphql with Authorization: Bearer <token>), :37 and :176-186
+# (operationName searchJobs, variables query "", start 0, first 50, filters {}, after omitted on the first page),
+# :48-66 (the searchJobs query text, copied verbatim), :153-165 (stop on no nodes or hasNextPage false; only page 0
+# failing fails the board), :97-110 (results.nodes[] with key, title, descriptionHTML, workplaceType, postedOn, positionType
+# {name}, primaryPlace{name}, places.nodes[].name), :86-99 (location = distinct place names joined "; ", else
+# primaryPlace), :202 (job URL https://<board>/jobs/<key>). The kit caps the walk at GR8PEOPLE_PAGES pages.
+_GR8_TOKEN = re.compile(r'"token"\s*:\s*"(eyJ[^"]+)"')
+_GR8_QUERY = """query searchJobs($query: String, $start: Int, $first: Int, $after: String, $filters: JobPostingSearchFiltersInput) {
+  searchJobs: searchJobPostings(query: $query, start: $start, first: $first, after: $after, filters: $filters) {
+    results {
+      nodes {
+        key
+        title
+        descriptionHTML
+        workplaceType
+        postedOn
+        positionType { name }
+        primaryPlace { name }
+        places { nodes { name } }
+      }
+      pageInfo { hasNextPage endCursor }
+      totalCount
+    }
+  }
+}"""
+
+
+def _dict(v: Any) -> dict[str, Any]:
+    """A nested GraphQL field that should be an object; anything else reads as empty."""
+    return v if isinstance(v, dict) else {}
+
+
+def _gr8people(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """gr8people career site: mint the anonymous token from /jobs, then page the tenant's GraphQL search."""
+    board = _token(row).lower()
+    if not _HOST.fullmatch(board):
+        return None
+    _, home = _page(http, f"https://{board}/jobs")
+    m = _GR8_TOKEN.search(home or "")
+    if not m:
+        return None
+    headers = dict(_POST, Authorization="Bearer " + m.group(1))
+    nodes: list[dict[str, Any]] = []
+    after = ""
+    for page in range(GR8PEOPLE_PAGES):
+        variables: dict[str, Any] = {"query": "", "start": 0, "first": 50, "filters": {}}
+        if after:
+            variables["after"] = after
+        body = json.dumps({"operationName": "searchJobs", "query": _GR8_QUERY, "variables": variables}).encode()
+        st, data = _get(http, f"https://{board}/graphql", method="POST", data=body, headers=headers)
+        res = ((data.get("data") or {}).get("searchJobs") or {}).get("results") if st == 200 and isinstance(data, dict) else None
+        if not isinstance(res, dict) or not isinstance(res.get("nodes"), list):
+            if page == 0:
+                return None
+            break
+        if not res["nodes"]:
+            break
+        nodes += [n for n in res["nodes"] if isinstance(n, dict)]
+        info = res.get("pageInfo") or {}
+        if not info.get("hasNextPage") or not info.get("endCursor"):
+            break
+        after = str(info["endCursor"])
+    jobs: list[Job] = []
+    for n in nodes:
+        key, title = str(n.get("key") or ""), str(n.get("title") or "").strip()
+        if not key or not title:
+            continue
+        pl_nodes = _dict(n.get("places")).get("nodes")
+        names = [str(p.get("name") or "").strip() for p in (pl_nodes if isinstance(pl_nodes, list) else []) if isinstance(p, dict)]
+        place = "; ".join(dict.fromkeys(x for x in names if x)) or str(_dict(n.get("primaryPlace")).get("name") or "")
+        mode = str(n.get("workplaceType") or "").replace("_", "-").lower()
+        pt = str(_dict(n.get("positionType")).get("name") or "").strip().lower()
+        jobs.append(_job(row, "gr8people", title=title, url=f"https://{board}/jobs/{quote(key, safe='')}", location=place,
+                         posted=_iso_date(n.get("postedOn")), description=_html_text(n.get("descriptionHTML")),
+                         remote=True if mode == "remote" or "remote" in place.lower() else None,
+                         extra={"work_mode": mode, "employment_type": {"full time": "full_time", "full-time": "full_time", "part time": "part_time", "part-time": "part_time"}.get(pt, "")}))
+    return jobs
+
+
+# --------------------------------------------------------------------------- HR-Manager
+# Borrowed from freehire internal/ingest/sources/hrmanager.go:35 (GET https://api.hr-manager.net/jobportal.svc/<alias>/
+# positionlist/json/?incads=1&take=2000: ONE keyless call, advertisement HTML inline), :54-56 (alias [A-Za-z0-9_-]+),
+# :64-90 (Items[]: Id, Name, ProjectType, AdvertisementUrl, Published, Created, WorkPlace, PositionLocationMultiSelection
+# [].Name, Department{City,Country}, Advertisements[].Introduction+Content), :127-150 (the listing must prove itself whole:
+# TransactionStatus.StatusCode 0, CustomerAlias equal to the board, PositionCountList equal to the rows read, at most 2
+# postings short of PositionCountSearch, ids distinct; otherwise the board fails), :105 and :49 (ProjectType OpenApplication is the
+# standing unsolicited-application entry, skipped), :190-201 (location = WorkPlace, else the picklist names joined "; ",
+# else Department.City), :167-175 and :206-218 (timestamps are .NET /Date(<ms>+0200)/; Published, else Created). The employer is the
+# customer named in the board row. NOT IN REFERENCE: nothing beyond the Go file; the freehire "Countries" normaliser is
+# replaced by the raw Department.Country text in extra.country.
+_HRM_ALIAS = re.compile(r"[A-Za-z0-9_-]+")
+_HRM_DATE = re.compile(r"^/Date\((-?\d+)(?:[+-]\d{4})?\)/$")
+_HRM_TAKE, _HRM_MAX_HIDDEN = 2000, 2
+
+
+def _hrm_date(v: Any) -> str:
+    m = _HRM_DATE.match(str(v or ""))
+    if not m or int(m.group(1)) <= 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(int(m.group(1)) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    except (ValueError, OverflowError, OSError):
+        return ""  # hrmanager.go parseEpochMillis drops only the bad date
+
+
+def _hrmanager(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """HR-Manager job-portal API (Danish ATS): the whole customer listing in one request."""
+    alias = _token(row)
+    if not _HRM_ALIAS.fullmatch(alias):
+        return None
+    st, d = _get(http, f"https://api.hr-manager.net/jobportal.svc/{alias}/positionlist/json/?incads=1&take={_HRM_TAKE}", headers=_JSON)
+    if st != 200 or not isinstance(d, dict) or not isinstance(d.get("Items"), list):
+        return None
+    ts, total, in_list = d.get("TransactionStatus"), d.get("PositionCountSearch"), d.get("PositionCountList")
+    if not isinstance(ts, dict) or ts.get("StatusCode") != 0 or not isinstance(total, int) or not isinstance(in_list, int):
+        return None
+    items = [i for i in d["Items"] if isinstance(i, dict)]
+    ids = [i.get("Id") for i in items]
+    if (str(d.get("CustomerAlias") or "").lower() != alias.lower() or total > _HRM_TAKE or len(items) != in_list
+            or len(items) > total or total - len(items) > _HRM_MAX_HIDDEN or len(set(map(str, ids))) != len(ids)):
+        return None
+    jobs: list[Job] = []
+    for it in items:
+        title = " ".join(str(it.get("Name") or "").split())
+        url = str(it.get("AdvertisementUrl") or "")
+        jid = it.get("Id")
+        if it.get("ProjectType") == "OpenApplication" or not isinstance(jid, int) or jid <= 0 or not title or not url.startswith("https://"):
+            continue
+        body = ""
+        for ad in it.get("Advertisements") or []:
+            if isinstance(ad, dict) and str(ad.get("Content") or "").strip():
+                body = str(ad.get("Introduction") or "") + str(ad.get("Content"))
+                break
+        dep: dict[str, Any] = it["Department"] if isinstance(it.get("Department"), dict) else {}
+        names = [str(x.get("Name") or "").strip() for x in (it.get("PositionLocationMultiSelection") or []) if isinstance(x, dict)]
+        place = str(it.get("WorkPlace") or "").strip() or "; ".join(dict.fromkeys(n for n in names if n)) or str(dep.get("City") or "").strip()
+        jobs.append(_job(row, "hrmanager", title=title, url=url, location=place, posted=_hrm_date(it.get("Published")) or _hrm_date(it.get("Created")),
+                         description=_html_text(body), remote=_remote_from(place), extra={"id": str(jid), "country": str(dep.get("Country") or "")}))
+    return jobs
+
+
+# --------------------------------------------------------------------------- iSmartRecruit
+# Borrowed from freehire internal/ingest/sources/ismartrecruit.go:61-63 (the board "<domain>_<code>" is wrapped as
+# tenantId = "E7p" + rawbase64(board) + "Q9e"; GET https://app.ismartrecruit.com/openJobWebsite?tenantId=<tenant>&view=grid&
+# col=2&lang=en server-renders EVERY posting, no paging), :104 and :119-120 (cards are <a class="jobListing_Data"> with
+# title in .ui-panel-title and location in .ui-panelgrid-cell), :129-134 (the href's x=<token> decodes, after stripping
+# the E7p/Q9e envelope, to "<domain>_<id>_W_<lang>"; the numeric id is the dedup id and a card without one is skipped),
+# :89 (the detail page's og:description holds the body; a failed detail only costs the description), :92-94 (og:title as
+# title fallback). Detail requests are capped at ISMART_DETAIL_CAP and title-gated (NOT IN REFERENCE).
+_ISMART_X = re.compile(r"[?&]x=([^&]+)")
+_ISMART_ID = re.compile(r"_(\d+)_W_")
+_ISMART_BOARD = re.compile(r"[A-Za-z0-9._-]{3,120}")
+
+
+def _ismart_id(href: str) -> str:
+    m = _ISMART_X.search(href)
+    tok = m.group(1) if m else ""
+    if not (tok.startswith("E7p") and tok.endswith("Q9e")):
+        return ""
+    mid = tok[3:-3]
+    for decode in (base64.b64decode, base64.urlsafe_b64decode):
+        try:
+            dec = decode(mid + "=" * (-len(mid) % 4)).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        found = _ISMART_ID.search(dec)
+        if found:
+            return found.group(1)
+    return ""
+
+
+def _ismartrecruit(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """iSmartRecruit open job website: one grid page lists every posting."""
+    board = _token(row)
+    if not _ISMART_BOARD.fullmatch(board):
+        return None
+    tenant = "E7p" + base64.b64encode(board.encode()).decode().rstrip("=") + "Q9e"
+    _, page = _page(http, f"https://app.ismartrecruit.com/openJobWebsite?tenantId={tenant}&view=grid&col=2&lang=en")
+    if page is None:
+        return None
+    jobs: list[Job] = []
+    seen: set[str] = set()
+    details = 0
+    for a in _walk(_parse(page)):
+        if a.tag != "a" or not a.has_class("jobListing_Data"):
+            continue
+        href = a.attrs.get("href", "")
+        jid = _ismart_id(href)
+        if not jid or jid in seen or not href.startswith("https://app.ismartrecruit.com/"):
+            continue
+        seen.add(jid)
+        title, place, desc = _own_text(_by_class(a, "ui-panel-title")), _own_text(_by_class(a, "ui-panelgrid-cell")), ""
+        if details < ISMART_DETAIL_CAP and _title_ok(row, title):
+            details += 1
+            _, det = _page(http, href)
+            if det is not None:
+                root = _parse(det)
+                desc = _html_text(_meta(root, "og:description"))
+                title = title or _meta(root, "og:title").strip()
+        if title:
+            jobs.append(_job(row, "ismartrecruit", title=title, url=href, location=place, description=desc,
+                             remote=_remote_from(place), extra={"id": jid}))
+    return jobs
+
+
+# --------------------------------------------------------------------------- Loxo
+# Borrowed from freehire internal/ingest/sources/loxo.go:18-24 (the board is "<host>/<slug>": an agency subdomain such as
+# fitnext.app.loxo.co, bare app.loxo.co or a pod such as pod4.app.loxo.co), :44 (GET https://<board>), :96 and :134-140 (each
+# posting is linked /job/<base64>, regex /job/([A-Za-z0-9=_-]+)(?:$|[/?#]); links resolved against the board URL and
+# de-duplicated), :101-118 (the base64 decodes to "<agency_id>-<slug>", the stable id; the raw token when it does not decode),
+# :71-74 (title = og:title, else the document <title> minus a trailing " | <agency>"), :124-146 (description = the "description"
+# of the first <script type="application/json"> block), :150-161 (location = the og:description text between "Location:" and
+# "Salary:"), :168-182 (on a hub board, an agency hosting many clients, the client is split off the title at " — " or " @ ";
+# the ASCII " - " is never a delimiter; otherwise the agency name), :205-207 and :222-231 (app.loxo.co is rate limited: 350 ms between
+# requests; subdomains and pods are not). A failed detail drops that posting (:56-60).
+_LOXO_ID = re.compile(r"/job/([A-Za-z0-9=_-]+)(?:$|[/?#])")
+_LOXO_BOARD = re.compile(r"[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+")
+
+
+def _loxo_id(href: str) -> str:
+    m = _LOXO_ID.search(href)
+    if not m:
+        return ""
+    tok = m.group(1)
+    for decode in (base64.b64decode, base64.urlsafe_b64decode):
+        try:
+            dec = decode(tok + "=" * (-len(tok) % 4)).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if "-" in dec and dec.isprintable():
+            return dec
+    return tok
+
+
+def _loxo(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Loxo agency careers board: the page links every /job/<base64>; each detail page carries the role."""
+    board = _token(row)
+    if not _LOXO_BOARD.fullmatch(board):
+        return None
+    base = f"https://{board}"
+    shared = board.split("/", 1)[0].lower() == "app.loxo.co"
+    _, page = _page(http, base)
+    if page is None:
+        return None
+    links: dict[str, str] = {}  # id -> URL (freehire dedups by URL; the kit also drops the ?t=<cache-buster> twin)
+    for a in _walk(_parse(page)):
+        href = a.attrs.get("href", "") if a.tag == "a" else ""
+        if href and _LOXO_ID.search(href) and _loxo_id(href):
+            url = urljoin(base, href)
+            if _on_host(url, board.split("/", 1)[0]):
+                links.setdefault(_loxo_id(href), url)
+    jobs: list[Job] = []
+    for jid, url in list(links.items())[:LOXO_DETAIL_CAP]:
+        if shared:
+            _sleep(LOXO_SHARED_HOST_GAP)
+        _, det = _page(http, url)
+        if det is None:
+            continue
+        root = _parse(det)
+        title = _meta(root, "og:title").strip()
+        if not title:
+            doc = _own_text(_find(root, lambda x: x.tag == "title"))
+            title = doc.rsplit(" | ", 1)[0].strip() if " | " in doc else doc
+        desc = ""
+        for blob in _json_scripts(root, type_="application/json"):
+            if isinstance(blob, dict) and blob.get("description"):
+                desc = str(blob["description"])
+                break
+        if not title and not desc:
+            continue  # not a rendered job page
+        company = ""
+        if row.get("hub"):
+            for sep in (" — ", " @ "):
+                i = title.rfind(sep)
+                if i >= 0 and title[i + len(sep):].strip() and title[:i].strip():
+                    company, title = title[i + len(sep):].strip(), title[:i].strip()
+                    break
+        og = _meta(root, "og:description")
+        place = ""
+        if "Location:" in og:
+            place = og.split("Location:", 1)[1].split("Salary:", 1)[0].strip()
+        job = _job(row, "loxo", title=title, url=url, location=place, description=_html_text(desc), remote=_remote_from(place), extra={"id": jid})
+        if company:
+            job["company"] = company
+        if job["title"]:
+            jobs.append(job)
+    return jobs
+
+
+# --------------------------------------------------------------------------- Mindsight
+# Borrowed from freehire internal/ingest/sources/mindsight.go:13 (every tenant lives at https://oportunidades.mindsight.com.br/
+# <slug>), :53 (the page embeds __NEXT_DATA__; the balanced {...} after that key), :60 (props.pageProps.publicJobPostings[]:
+# id, name, status, work_model, country, state, city, external_publication_start_at, created_at), :17 and :79-81 (a post with no id
+# or a status other than IN_PROGRESS is dropped), :81 (job page https://oportunidades.mindsight.com.br/<slug>/<id>), :86-96 (the
+# detail page's __NEXT_DATA__ props.pageProps.jobPosting.description; a failed detail only costs the description), :106-109 (posted =
+# publication start, else created_at), :118 (location "city, state, country"), :127-138 (work_model REMOTE / HYBRID /
+# IN_PERSON). Details are title-gated and capped (NOT IN REFERENCE).
+_MS_SLUG = re.compile(r"[A-Za-z0-9_-]{1,80}")
+_MS_BASE = "https://oportunidades.mindsight.com.br"
+
+
+def _ms_next(page: str | None) -> Any:
+    raw = _bracket_slice(page or "", "__NEXT_DATA__", "{", "}")
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def _mindsight(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Mindsight (Brazil) career page: listing from __NEXT_DATA__, description from each job page."""
+    slug = _token(row)
+    if not _MS_SLUG.fullmatch(slug):
+        return None
+    _, page = _page(http, f"{_MS_BASE}/{slug}")
+    data = _ms_next(page)
+    try:
+        posts = data["props"]["pageProps"]["publicJobPostings"]
+    except (TypeError, KeyError):
+        return None
+    if not isinstance(posts, list):
+        return None
+    jobs: list[Job] = []
+    details = 0
+    for p in posts:
+        if not isinstance(p, dict) or not isinstance(p.get("id"), int) or p["id"] <= 0 or p.get("status") not in (None, "", "IN_PROGRESS"):
+            continue
+        title = str(p.get("name") or "").strip()
+        if not title:
+            continue
+        url, desc = f"{_MS_BASE}/{slug}/{p['id']}", ""
+        if details < MINDSIGHT_DETAIL_CAP and _title_ok(row, title):
+            details += 1
+            _, det = _page(http, url)
+            d = _ms_next(det)
+            try:
+                desc = _html_text(d["props"]["pageProps"]["jobPosting"]["description"])
+            except (TypeError, KeyError):
+                desc = ""
+        mode = {"REMOTE": "remote", "HYBRID": "hybrid", "IN_PERSON": "onsite"}.get(str(p.get("work_model") or "").strip().upper(), "")
+        jobs.append(_job(row, "mindsight", title=title, url=url, location=_commas(p.get("city"), p.get("state"), p.get("country")),
+                         posted=_iso_date(p.get("external_publication_start_at")) or _iso_date(p.get("created_at")),
+                         description=desc, remote=True if mode == "remote" else None,
+                         extra={"id": str(p["id"]), "work_mode": mode, "country": str(p.get("country") or "")}))
+    return jobs
+
+
 ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
     "betterteam": _wrap(_betterteam),
     "catsone": _wrap(_catsone),
     "clinch": _wrap(_clinch),
     "crelate": _wrap(_crelate),
+    "erecruiter": _wrap(_erecruiter),
+    "gr8people": _wrap(_gr8people),
+    "hrmanager": _wrap(_hrmanager),
+    "ismartrecruit": _wrap(_ismartrecruit),
+    "loxo": _wrap(_loxo),
+    "mindsight": _wrap(_mindsight),
 }

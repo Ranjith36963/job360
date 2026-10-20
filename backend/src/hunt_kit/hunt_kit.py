@@ -110,6 +110,12 @@ BOARD_SOURCES = (
     "avature",
     "comeet",
     "hibob",
+    "erecruiter",
+    "gr8people",
+    "hrmanager",
+    "ismartrecruit",
+    "loxo",
+    "mindsight",
     "pageup",
     "freshteam",
 )
