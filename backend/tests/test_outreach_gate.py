@@ -177,6 +177,8 @@ async def _contact(
     body: dict[str, Any] = {"name": name, "role": "Recruiter", "email": email}
     if app_id is not None:
         body["application_id"] = app_id
+    if app_id is None:
+        body["company"] = "Contoso"
     if found_via:
         body["found_via"] = found_via
     resp = await client.post("/api/contacts", json=body)

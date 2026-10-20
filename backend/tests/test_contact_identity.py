@@ -35,7 +35,7 @@ async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
 
 
 async def _add_person(client: AsyncClient, **body: Any):
-    payload = {"name": "Priya Shah", "role": "Talent Partner", **body}
+    payload = {"name": "Priya Shah", "role": "Talent Partner", "company": "Northwind", **body}
     return await client.post("/api/contacts", json=payload)
 
 
@@ -355,12 +355,12 @@ async def test_mcp_add_contact_dedupes_and_carries_source_url(authenticated_asyn
 
             first = payload(await mcp.call_tool("add_contact", {
                 "name": "Mona Lisa", "linkedin_url": "https://www.linkedin.com/in/mona/",
-                "source_url": "https://louvre.example/team",
+                "source_url": "https://louvre.example/team", "company": "Louvre",
             }))
             assert first["already_existed"] is False
             assert first["contact"]["source_url"] == "https://louvre.example/team"
             again = payload(await mcp.call_tool("add_contact", {
-                "name": "Mona L.", "linkedin_url": "https://linkedin.com/in/mona",
+                "name": "Mona L.", "linkedin_url": "https://linkedin.com/in/mona", "company": "Louvre",
             }))
             assert again["already_existed"] is True and again["matched_on"] == "linkedin_url"
             assert again["contact_id"] == first["contact_id"]

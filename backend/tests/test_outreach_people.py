@@ -27,7 +27,7 @@ async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
 
 
 async def _add_person(client: AsyncClient, **body: Any):
-    payload = {"name": "Priya Shah", "role": "Talent Partner", **body}
+    payload = {"name": "Priya Shah", "role": "Talent Partner", "company": "Northwind", **body}
     return await client.post("/api/contacts", json=payload)
 
 

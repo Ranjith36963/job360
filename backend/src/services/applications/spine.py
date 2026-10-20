@@ -2099,6 +2099,7 @@ async def get_application_detail(
     from src.services.applications.asks import list_asks  # noqa: PLC0415
     from src.services.applications.contacts import list_contacts  # noqa: PLC0415
     from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
+    from src.services.applications.known_people import for_application as known_people_for  # noqa: PLC0415
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
@@ -2157,6 +2158,7 @@ async def get_application_detail(
         "interview_at": interview_at,
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
         "contacts": await list_contacts(db, user_id, application_id),
+        "known_people": await known_people_for(db, user_id, app_row),
         # "Needs you" - every ask about this job, open first (never filtered).
         "asks": await list_asks(
             db, user_id, "all", application_id=application_id, limit=settings.ASKS_MAX_OPEN_PER_USER

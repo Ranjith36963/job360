@@ -1644,26 +1644,21 @@ async def load_outreach_counts(
     """Count what :func:`may_send_outreach` needs: this user's recorded ``sent``
     marks today (the user's own day, same boundary as :func:`load_submit_counts`)
     and, when ``company`` is given, ``sent`` marks to contacts linked to a job at
-    that (lower-cased, trimmed) company within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
+    that company key (contacts.company_key, rule #1; cold contacts with that company
+    count) within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
     sent_today = await count_on_user_today(
         db, user_id, now,
         "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND recorded_at >= ?",
         (user_id,),
     )
     company_sent = 0
-    key = (company or "").strip().lower()
+    key = (company or "").strip()
     if key:
+        # Lazy: contacts imports this module.
+        from src.services.applications.contacts import count_company_sends  # noqa: PLC0415
+
         since = (now - timedelta(days=settings.OUTREACH_COMPANY_WINDOW_DAYS)).isoformat()
-        cur = await db._db.execute(
-            "SELECT COUNT(*) FROM contact_outreach co "
-            "JOIN application_contacts ac ON ac.id = co.contact_id "
-            "JOIN applications a ON a.id = ac.application_id "
-            "WHERE co.user_id = ? AND ac.user_id = ? AND co.entry = 'sent' AND co.recorded_at >= ? "
-            "AND LOWER(TRIM(COALESCE(a.job_company, ''))) = ?",
-            (user_id, user_id, since, key),
-        )
-        row = await cur.fetchone()
-        company_sent = int(row[0]) if row else 0
+        company_sent = await count_company_sends(db, user_id, key, since)
     return OutreachCounts(sent_today=sent_today, company_sent_in_window=company_sent)
 
 

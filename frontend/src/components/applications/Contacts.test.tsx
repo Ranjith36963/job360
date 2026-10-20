@@ -189,4 +189,64 @@ describe("Contacts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(updateContact).toHaveBeenCalledWith(1, { found_via: "" }));
   });
+
+  describe("known people", () => {
+    const person = (over: Record<string, unknown>) => ({
+      contact_ids: [7],
+      name: "Asha Rao",
+      role: "",
+      company: "Northwind Ltd",
+      found_via: null,
+      reachable: true,
+      application_ids: [],
+      message_count: 0,
+      last_sent_at: null,
+      last_sent_channel: null,
+      replied: false,
+      last_reply_at: null,
+      ...over,
+    });
+
+    it("shows the count and a compact list with sent state", () => {
+      render(
+        <Contacts
+          applicationId={42}
+          contacts={[]}
+          knownPeople={{
+            count: 2,
+            truncated: false,
+            people: [
+              person({ last_sent_at: "2026-10-03T09:00:00+00:00", replied: true }),
+              person({ contact_ids: [8], name: "Rita Recruiter", role: "Recruiter" }),
+            ],
+          }}
+        />
+      );
+      expect(screen.getByTestId("known-people-count").textContent).toBe("You already know 2 people here");
+      const list = screen.getByTestId("known-people-list").textContent ?? "";
+      expect(list).toContain("Asha Rao");
+      expect(list).toContain("replied");
+      expect(list).toContain("Rita Recruiter · Recruiter · Not contacted yet");
+    });
+
+    it("says person for one", () => {
+      render(
+        <Contacts
+          applicationId={42}
+          contacts={[]}
+          knownPeople={{ count: 1, truncated: false, people: [person({})] }}
+        />
+      );
+      expect(screen.getByTestId("known-people-count").textContent).toBe("You already know 1 person here");
+    });
+
+    it("renders nothing at zero or when absent", () => {
+      const { rerender } = render(
+        <Contacts applicationId={42} contacts={[]} knownPeople={{ count: 0, truncated: false, people: [] }} />
+      );
+      expect(screen.queryByTestId("known-people-count")).toBeNull();
+      rerender(<Contacts applicationId={42} contacts={[]} />);
+      expect(screen.queryByTestId("known-people-count")).toBeNull();
+    });
+  });
 });

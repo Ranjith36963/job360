@@ -49,7 +49,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.models import JobResponse
+from src.api.models import JobResponse, KnownPeopleOut
 from src.core import settings
 from src.core.settings import USER_BROUGHT_SOURCE
 from src.repositories.database import JobDatabase
@@ -268,6 +268,8 @@ class BringJobResponse(BaseModel):
     # ("not open" = already applied or closed; "already queued" is still true).
     queued: Optional[bool] = None
     queue_note: Optional[str] = None
+    # people THIS user already stored at this company (known_people.py) - a join, never a lookup
+    known_people: KnownPeopleOut = Field(default_factory=KnownPeopleOut)
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -518,12 +520,21 @@ async def bring_job(
             description=str(app_now.get("job_description_snapshot") or body.description),
         )
 
+    from src.services.applications import known_people as known_people_service  # noqa: PLC0415
+
+    known = (
+        await known_people_service.for_application(db, user.id, app_now)
+        if app_now
+        else dict(known_people_service.EMPTY, people=[])
+    )
+
     get_audit_logger().info(
         "job_brought",
         extra={
             "event": "job_brought", "job_id": job_id, "user_id": user.id,
             "application_id": birth["application_id"],
             "existing": bool(birth["existing"]), "catalog_existing": not inserted, "status": "ok",
+            "known_people_count": known["count"],
         },
     )
 
@@ -562,6 +573,7 @@ async def bring_job(
         employer_published_at=stored.get("employer_published_at"),
         checks=checks,
         repost=flagged_repost,
+        known_people=KnownPeopleOut(**known),
         **facts,
     )
 
