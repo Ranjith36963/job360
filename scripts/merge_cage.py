@@ -330,7 +330,7 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 # lane. Drilled in `scripts/lane.py`: "a migration AND a workflow file is
 # harness_owner, never machine-merged" — put this tuple back the old way and that
 # case goes red.
-LANES: tuple[str, ...] = ("harness_owner", "product_owner", "product", "harness")
+LANES: tuple[str, ...] = ("harness_owner", "product_human", "product_owner", "product", "harness")
 
 # pattern -> the sentence printed when it refuses. Keys MUST exist in the policy
 # as the path of an `auto_merge: false` lane, and `check_lists()` refuses a key
@@ -354,6 +354,16 @@ _CHECK_FACTORY = ("a workflow that PRODUCES a required check — the ruleset tru
                   + _OWNER_MERGES)
 
 DENY_REASONS: dict[str, str] = {
+    # ── OWNER 2026-10-20: migrations and auth wait for his hand again ────────
+    # "Only migration, auth ... for those things harness owner should come."
+    "backend/src/api/routes/auth.py": f"authentication — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/services/auth/**": f"authentication — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/api/routes/account*.py":
+        f"account management — the owner merges it. {_OWNER_MERGES}",
+    "backend/migrations/**":
+        "schema change — irreversible against live data: a Railway rollback restores "
+        "the previous IMAGE, not the previous SCHEMA. Every migration ships with its "
+        f"`.down.sql`. {_OWNER_MERGES}",
     # ── the harness must not quietly edit its own cage ───────────────────────
     # `.github/**` and `scripts/**` were blanket keys here until 2026-10-18,
     # when the owner moved both blankets to the `harness` lane ("let PRs
@@ -467,10 +477,6 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/models.py":
         f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_WATCHED}",
     # ── users: identity, sessions, anything that can lock someone out ────────
-    "backend/src/api/routes/auth.py": f"authentication — a user decision. {_WATCHED}",
-    "backend/src/services/auth/**": f"authentication — a user decision. {_WATCHED}",
-    "backend/src/api/routes/account*.py":
-        f"account management — a user decision. {_WATCHED}",
     "backend/src/services/notifications/**":
         f"sends real messages to real people. {_WATCHED}",
     # This one was denied on its PATH precisely because a path cage cannot tell a
@@ -482,11 +488,6 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/api/routes/profile.py":
         f"a per-user API route — rules #12/#25. {_WATCHED}",
     # ── infrastructure ───────────────────────────────────────────────────────
-    "backend/migrations/**":
-        f"schema change — irreversible against live data. {_WATCHED} "
-        "NOTE: a Railway rollback restores the previous IMAGE, not the previous "
-        "SCHEMA. The watcher can undo the deploy; only a down-migration undoes the "
-        "table. Hard rule: every migration ships with its `.down.sql`.",
     "**/*docker-compose*": f"infrastructure decision. {_WATCHED}",
     "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
     "**/railway.json": f"infrastructure decision. {_WATCHED}",
@@ -1034,10 +1035,16 @@ def check_size(n_files: int, n_lines: int, deletions: list[str],
                exempt_lines: int = 0) -> Verdict:
     """SIZE: within the policy's file and line caps, and no file deleted. Generated lines are reported, not counted."""
     reasons: list[str] = []
-    if deletions:
+    # OWNER, 2026-10-20: deleting a file waits for him only when the file is his
+    # -- migrations, auth, the cage's own rules and policies (the DENY paths). A
+    # deleted ordinary file merges like any other change; the PATH cage already
+    # names a deleted owner file, and this says plainly that it was a deletion.
+    owner_deletions = [d for d in deletions if any(path_matches(d, pat) for pat, _ in DENY)]
+    if owner_deletions:
         reasons.append(
-            f"deletes {len(deletions)} file(s) ({', '.join(deletions[:3])}) — a machine must "
-            f"not delete unsupervised. {_OWNER_MERGES}")
+            f"deletes {len(owner_deletions)} owner-only file(s) "
+            f"({', '.join(owner_deletions[:3])}) — a machine must not delete these "
+            f"unsupervised. {_OWNER_MERGES}")
     if n_files > MAX_CHANGED_FILES:
         reasons.append(
             f"{n_files} files changed (cap {MAX_CHANGED_FILES}) — a change this wide is a "
@@ -1875,6 +1882,13 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
 # required check, a PR stays queued and GitHub holds it until this says
 # `success`. "Still waiting" is `pending`, a real refusal is `failure`; both hold.
 _WAIT_MARKERS = ("has not finished", "cannot pass by being absent")
+# THE OWNER'S TURN IS NOT A FAILURE (owner, 2026-10-20). A PR only the owner may
+# merge (the cage's own files, migrations, auth, a deletion) used to post a red
+# `failure` even when every check was green, so every one of them looked broken
+# and every hand merge walked past a red X. It is `pending` now -- still holding
+# GitHub's queue (a required check only passes on `success`), but yellow, saying
+# whose turn it is. A real refusal anywhere in the list still posts `failure`.
+_OWNER_MARKERS = ("so he merges it by hand", "merge it yourself")
 
 
 def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
@@ -1883,10 +1897,13 @@ def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
         return "success", "every cage passed"
     blocks = blocks_of(verdicts) or ["refused, and no reason was recorded"]
     waiting = [b for b in blocks if any(m in b for m in _WAIT_MARKERS)]
-    if len(waiting) == len(blocks):
+    owners = [b for b in blocks if b not in waiting and any(m in b for m in _OWNER_MARKERS)]
+    real = [b for b in blocks if b not in waiting and b not in owners]
+    if real:
+        return "failure", real[0][:140]
+    if waiting:
         return "pending", ("waiting: " + waiting[0])[:140]
-    real = next(b for b in blocks if b not in waiting)
-    return "failure", real[:140]
+    return "pending", ("the owner merges this by hand: " + owners[0])[:140]
 
 
 def requires_context(rules: object, context: str) -> bool:
@@ -2276,11 +2293,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # go red — which is correct: the policy and its drill have to say the same
     # thing, and that is the whole reason both lists come from one file.
     flipped = ["backend/src/services/skill_matcher.py",
-               "backend/src/api/routes/auth.py",
                "backend/src/api/routes/profile.py",
                "docker-compose.prod.yml",
                "frontend/package.json",
-               "backend/migrations/0042_x.up.sql",
                "docs/product/product_design_rules.md",
                "backend/src/core/settings.py"]
     still_denied = [f for f in flipped if check_paths([f]).status != "pass"]
@@ -2288,6 +2303,11 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not still_denied,
        f"`product_owner` is flipped in the policy but the cage still refuses: {still_denied}",
        P)
+    # OWNER 2026-10-20: migrations and auth left the flip and wait for his hand.
+    for owner_only in ("backend/migrations/0042_x.up.sql", "backend/src/api/routes/auth.py",
+                       "backend/src/services/auth/session.py", "backend/src/api/routes/account_x.py"):
+        red(f"migrations and auth are the owner's to merge: {owner_only}",
+            check_paths([owner_only]), "merges it by hand", P)
     # The witness moved on 2026-08-26 and the invariant did not. It used to be
     # `backend/src/some_new_module.py`, which was only "unrecognised" because
     # the cage's hand-typed ALLOW list had never heard of `backend/src/**` —
@@ -2507,8 +2527,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        v_safe.status == "pass", f"the cage refused a change it should allow: {v_safe.reasons}", P)
 
     # ── CAGE: SIZE ───────────────────────────────────────────────────────────
-    red("deleting a file is refused",
-        check_size(1, 10, ["backend/src/x.py"]), "must not delete", ["check_size"])
+    red("deleting an owner-only file (the policy) is refused",
+        check_size(1, 10, [".github/merge-policy.yml"]), "must not delete", ["check_size"])
+    red("deleting an owner-only file (the cage itself) is refused",
+        check_size(1, 10, ["scripts/merge_cage.py"]), "must not delete", ["check_size"])
+    ok("NEGATIVE CONTROL: deleting an ordinary file is not an owner decision (owner, 2026-10-20)",
+       check_size(1, 10, ["backend/src/x.py", "docs/old.md"]).status == "pass",
+       f"got {check_size(1, 10, ['backend/src/x.py', 'docs/old.md']).reasons}", ["check_size"])
     red("a change too wide to reason about is refused",
         check_size(999, 10, []), "judgement call by size", ["check_size"])
 
@@ -3636,6 +3661,21 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("one real refusal among waits posts FAILURE and names the real reason",
        status_for(False, [_wait, _real]) == ("failure", _real.reasons[0][:140]),
        f"got {status_for(False, [_wait, _real])}", ST)
+    _owner = Verdict("PATH", "fail", [f"`.github/merge-policy.yml` — {_CAGE_ESCAPE}"])
+    _lane = Verdict("LANE", "fail", [("this PR is in the `product_human` lane ... FIX: nothing an "
+                                      "agent can do. Read the file named above and merge it yourself.")])
+    ok("an owner-only PR with every check green posts PENDING (his turn), never a red failure",
+       status_for(False, [_owner, _lane])[0] == "pending"
+       and "owner merges this by hand" in status_for(False, [_owner, _lane])[1],
+       f"got {status_for(False, [_owner, _lane])}", ST)
+    ok("...an owner-only PR still waiting on CI says it is WAITING first",
+       status_for(False, [_owner, _wait]) == ("pending", ("waiting: " + _wait.reasons[0])[:140]),
+       f"got {status_for(False, [_owner, _wait])}", ST)
+    ok("...and a real refusal beside the owner's turn is still a FAILURE",
+       status_for(False, [_owner, _real]) == ("failure", _real.reasons[0][:140]),
+       f"got {status_for(False, [_owner, _real])}", ST)
+    ok("NEGATIVE CONTROL: the owner's turn is never SUCCESS -- GitHub must not merge it",
+       status_for(False, [_owner])[0] != "success", f"got {status_for(False, [_owner])}", ST)
     ok("a cage that did not run is a FAILURE, never a wait",
        status_for(False, [Verdict("RATCHET", "not_checked", [])])[0] == "failure",
        f"got {status_for(False, [Verdict('RATCHET', 'not_checked', [])])}", ST)

@@ -4367,6 +4367,13 @@ export interface components {
              * @default []
              */
             ghosted_now: number[];
+            /**
+             * @default {
+             *       "just_passed": [],
+             *       "upcoming": []
+             *     }
+             */
+            interviews: components["schemas"]["InterviewAgenda"];
             /** Latest Event Recorded At */
             latest_event_recorded_at?: string | null;
             /** Missing */
@@ -4923,6 +4930,52 @@ export interface components {
             application_ids: number[];
             /** Inbox Checked At */
             inbox_checked_at: string;
+        };
+        /**
+         * InterviewAgenda
+         * @description ``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose
+         *     application has no outcome event yet (ask the user how it went).
+         */
+        InterviewAgenda: {
+            /**
+             * Just Passed
+             * @default []
+             */
+            just_passed: components["schemas"]["InterviewAgendaItem"][];
+            /**
+             * Upcoming
+             * @default []
+             */
+            upcoming: components["schemas"]["InterviewAgendaItem"][];
+        };
+        /**
+         * InterviewAgendaItem
+         * @description One live interview in the agenda read (services/applications/agenda.py).
+         */
+        InterviewAgendaItem: {
+            /** Application Id */
+            application_id: number;
+            /** Company */
+            company: string;
+            /**
+             * Duration Minutes
+             * @default 60
+             */
+            duration_minutes: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /**
+             * Round
+             * @default
+             */
+            round: string;
+            /** Scheduled At */
+            scheduled_at: string;
+            /** Title */
+            title: string;
         };
         /** JobFactsOut */
         JobFactsOut: {
@@ -7759,6 +7812,13 @@ export interface components {
             applications: components["schemas"]["WhatsNewApplicationOut"][];
             /** Events */
             events: components["schemas"]["WhatsNewEventOut"][];
+            /**
+             * @default {
+             *       "just_passed": [],
+             *       "upcoming": []
+             *     }
+             */
+            interviews: components["schemas"]["InterviewAgenda"];
             /** Next After Id */
             next_after_id: number | null;
             /** Next Since */
@@ -7855,6 +7915,7 @@ export interface operations {
                 in_flight?: boolean;
                 queued?: boolean;
                 priority?: string | null;
+                agenda?: string | null;
             };
             header?: {
                 authorization?: string | null;
