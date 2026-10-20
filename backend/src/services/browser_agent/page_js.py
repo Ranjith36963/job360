@@ -77,6 +77,34 @@ SNAPSHOT_JS = r"""
     for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
   };
   walk(document, 0);
+  // What the page held when first read (a cookie switch, a pre-ticked box, a picked option) is not
+  // an answer. Stamp it once per page; the gate counts only what changed since.
+  if (!window.__j360stamped) {
+    window.__j360stamped = true;
+    const stamp = (root, depth) => {
+      for (const f of root.querySelectorAll('input[type=checkbox], input[type=radio], select, '
+          + '[aria-checked], [aria-pressed]')) {
+        if (f.hasAttribute('aria-checked') || f.hasAttribute('aria-pressed')) {
+          const on = f.getAttribute('aria-checked') === 'true' || f.getAttribute('aria-pressed') === 'true';
+          f.setAttribute('data-j360-aria0', String(on));
+        }
+        if (f.tagName === 'SELECT') {
+          f.setAttribute('data-j360-sel0', Array.from(f.selectedOptions).map((o) => o.index).join(','));
+        } else if (f.tagName === 'INPUT') f.setAttribute('data-j360-checked0', String(f.checked));
+      }
+      if (depth > 6) return;
+      for (const host of root.querySelectorAll('*')) if (host.shadowRoot) stamp(host.shadowRoot, depth + 1);
+    };
+    stamp(document, 0);
+  }
+  // A section the site copies (cloneNode) copies our ref too: the copy loses it and gets its own below,
+  // or typing into the copy would land in the original.
+  const seenRefs = new Set();
+  for (const el of all) {
+    const r = el.getAttribute('data-j360-ref');
+    if (r && seenRefs.has(r)) el.removeAttribute('data-j360-ref');
+    else if (r) seenRefs.add(r);
+  }
   const shown = (el) => {
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return false;
@@ -85,6 +113,16 @@ SNAPSHOT_JS = r"""
   };
   const clip = (t, n) => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
   const vh = window.innerHeight || 900;
+  // A child frame's part of the user's screen, in its own coordinates (agent.look): an auto-sized frame as
+  // tall as its form never scrolls itself, the outer page does. Its submit button is always listed.
+  const vTop = Math.max(0, args.vTop ?? 0), vBottom = Math.min(vh, args.vBottom ?? vh);
+  const submitShaped = (el, tag, type) => {
+    const isButton = tag === 'button' || el.getAttribute('role') === 'button'
+      || (tag === 'input' && ['submit', 'image'].includes(type));
+    if (!isButton) return false;
+    const name = labelOf(el) || '';
+    return /\bsubmit/i.test(name) || (type === 'submit' && /\b(apply|send|finish|complete|confirm)\b/i.test(name));
+  };
   let n = 0, hasPassword = false;
   const candidates = [];
   all.forEach((el, order) => {
@@ -100,8 +138,9 @@ SNAPSHOT_JS = r"""
     const isPassword = type === 'password' || (el.getAttribute('autocomplete') || '').includes('password');
     if (isPassword) hasPassword = true;
     const r = box.getBoundingClientRect();
-    const dist = r.bottom < 0 ? -r.bottom : r.top > vh ? r.top - vh : 0;
-    candidates.push({ el, tag, type, viaLabel, isPassword, order, dist, above: r.bottom < 0 });
+    let dist = r.bottom < vTop ? vTop - r.bottom : r.top > vBottom ? r.top - vBottom : 0;
+    if (args.keepSubmit && submitShaped(el, tag, type)) dist = -1;
+    candidates.push({ el, tag, type, viaLabel, isPassword, order, dist, above: r.bottom < vTop });
   });
   // Nearest the screen first; ties keep page order. Then back to page order for reading.
   const kept = candidates.slice().sort((a, b) => a.dist - b.dist || a.order - b.order).slice(0, maxElements);
@@ -118,7 +157,8 @@ SNAPSHOT_JS = r"""
   const out = kept.map(({ el, tag, type, viaLabel, isPassword }) => {
     let ref = el.getAttribute('data-j360-ref');
     if (!ref || !refShape.test(ref) || refCount.get(ref) > 1) {
-      ref = 'e' + (++n) + '_' + Math.random().toString(36).slice(2, 6);
+      do { ref = 'e' + (++n) + '_' + Math.random().toString(36).slice(2, 6); } while (seenRefs.has(ref));
+      seenRefs.add(ref);
       el.setAttribute('data-j360-ref', ref);
     }
     const item = {
@@ -171,14 +211,19 @@ ELEMENT_FACTS_JS = r"""
     }
     return found;
   };
-  // A typed answer, a chosen file or option, a ticked box, a pressed choice: what the page held at
-  // load (defaultSelected / defaultChecked) is not an answer.
+  // A typed answer, a chosen file or option, a ticked box, a pressed choice: what the page held when
+  // the look first read it (its data-j360-*0 stamp) is not an answer. Unstamped, any counts (safe side).
+  // Not defaultChecked: a framework that ticks by setting the attribute moves it too.
   const answered = (f) => {
-    if (f.getAttribute('aria-checked') === 'true' || f.getAttribute('aria-pressed') === 'true') return true;
-    if (f.tagName === 'SELECT') return Array.from(f.selectedOptions).some((o) => o.index > 0 && !o.defaultSelected);
+    const on = f.getAttribute('aria-checked') === 'true' || f.getAttribute('aria-pressed') === 'true';
+    if (on && f.getAttribute('data-j360-aria0') !== 'true') return true;
+    if (f.tagName === 'SELECT') {
+      const held = (f.getAttribute('data-j360-sel0') || '').split(',');
+      return Array.from(f.selectedOptions).some((o) => o.index > 0 && !held.includes(String(o.index)));
+    }
     if (f.tagName === 'INPUT' || f.tagName === 'TEXTAREA') {
       const t = (f.type || '').toLowerCase();
-      if (t === 'checkbox' || t === 'radio') return f.checked && !f.defaultChecked;
+      if (t === 'checkbox' || t === 'radio') return f.checked && f.getAttribute('data-j360-checked0') !== 'true';
       if (['hidden', 'submit', 'button', 'image', 'password', 'search'].includes(t)) return false;
       if (t === 'file') return !!(f.files && f.files.length);
       return !!(f.value || '').trim();
@@ -189,6 +234,8 @@ ELEMENT_FACTS_JS = r"""
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
     in_form: inForm(el), role: el.getAttribute('role') || '',
+    // Whether it can submit a form itself: a button in a shadow root has no form owner.
+    owns_form: !!el.form, toggle: el.hasAttribute('aria-pressed'),
     // Any answer anywhere on the page, shadow roots included: the form is being filled.
     page_has_answers: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
       + '[aria-checked=true], [aria-pressed=true]', 0).some(answered),
@@ -385,6 +432,24 @@ WATCH_READ_JS = r"""
 CONTROL_STATE_JS = r"""
 (el) => JSON.stringify([el.checked, el.value, el.getAttribute('aria-expanded'), el.getAttribute('aria-checked'),
   el.getAttribute('aria-pressed'), el.isConnected])
+"""
+
+# An upload's evidence: the frame's own text, and the text of the field's own small box (up to 4 levels
+# up, at most 600 characters) where a site draws the file chip or its "Upload failed".
+PAGE_TEXT_JS = r"""
+() => document.body ? document.body.innerText : ''
+"""
+NEAR_TEXT_JS = r"""
+(el) => {
+  let best = '';
+  let n = el.parentElement;
+  for (let i = 0; i < 4 && n; i++, n = n.parentElement) {
+    const t = n.innerText || '';
+    if (t.length > 600) break;
+    best = t;
+  }
+  return best;
+}
 """
 
 # The picked option shown near the field (react-select draws it in a sibling, not the input's value).
