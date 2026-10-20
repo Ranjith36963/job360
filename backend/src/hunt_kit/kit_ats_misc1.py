@@ -79,18 +79,23 @@ _SKIP_TEXT = frozenset(("script", "style"))
 
 
 class _Node:
-    __slots__ = ("tag", "attrs", "kids", "parent")
+    __slots__ = ("tag", "attrs", "kids", "parent", "depth")
 
     def __init__(self, tag: str, attrs: dict[str, str], parent: _Node | None) -> None:
         self.tag, self.attrs, self.parent = tag, attrs, parent
+        self.depth: int = parent.depth + 1 if parent is not None else 0
         self.kids: list[Any] = []  # _Node or str
 
     def has_class(self, cls: str) -> bool:
         return cls in (self.attrs.get("class") or "").split()
 
 
+MAX_TREE_DEPTH = 200  # bounds every recursive walk and the end-tag parent scan on hostile or broken HTML
+
+
 class _Tree(HTMLParser):
-    """Lenient tree builder: unmatched end tags are ignored, unclosed tags close at the end."""
+    """Lenient tree builder: unmatched end tags are ignored, unclosed tags close at the end. Nesting stops at
+    MAX_TREE_DEPTH: deeper tags are kept as leaves of the deepest open node instead of descending."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -100,7 +105,7 @@ class _Tree(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         n = _Node(tag, {k.lower(): (v or "") for k, v in attrs}, self.cur)
         self.cur.kids.append(n)
-        if tag not in _VOID:
+        if tag not in _VOID and n.depth < MAX_TREE_DEPTH:
             self.cur = n
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -194,7 +199,12 @@ def _json_scripts(root: _Node, **match: str) -> list[Any]:
 
 def _html_text(value: Any) -> str:
     """Plain text of an HTML fragment with <script>/<style> dropped (the references run sanitizeHTML on every body)."""
-    return _body_text(_parse(str(value))) if value else ""
+    if not value:
+        return ""
+    try:
+        return _body_text(_parse(str(value)))
+    except Exception:  # one bad ad must not cost the whole board
+        return ""
 
 
 def _commas(*parts: Any) -> str:

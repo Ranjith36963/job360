@@ -289,3 +289,20 @@ def test_misc1_is_wired_into_the_kit():
     assert set(ALL) <= set(F) and set(ALL) <= set(hk.BOARD_SOURCES)
     from src.api.routes.hunt_kit import KIT_FILES
     assert "kit_ats_misc1.py" in KIT_FILES
+
+
+def test_deeply_nested_html_keeps_the_board_and_does_not_stall():
+    import time
+
+    deep = "<p>line" * 3000
+    jobs_in = [
+        {"Id": "1", "JobCode": "a", "Title": "Nurse", "Description": "<p>ok"},
+        {"Id": "2", "JobCode": "b", "Title": "Cook", "Description": deep},
+    ]
+    jobs, _ = _run("crelate", {"name": "x", "token": CRELATE_BOARD}, _stub({"GetAllJobs": (200, {"IsError": False, "Jobs": jobs_in})}))
+    assert [j["title"] for j in jobs] == ["Nurse", "Cook"]
+    assert "line" in jobs[1]["description"]
+    t0 = time.monotonic()
+    m1._parse("<b>" * 12500 + "</i>" * 12500)
+    assert time.monotonic() - t0 < 3
+    assert m1._own_text(m1._parse("<div>" * 3000 + "hi")) == "hi"
