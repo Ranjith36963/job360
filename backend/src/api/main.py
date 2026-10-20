@@ -1,11 +1,12 @@
 """FastAPI application for Job360 backend."""
 
 import asyncio
+import contextlib
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 # psycopg async requires the selector event loop on Windows (the default
 # ProactorEventLoop never signals socket readiness for libpq -> the DB lifespan
@@ -113,6 +114,16 @@ def _init_sentry() -> None:
     init_sentry(component="api")
 
 
+def _start_browser_reaper() -> Optional[asyncio.Task[None]]:
+    """The browser agent's idle sweep: a browser left open is closed after BROWSER_AGENT_IDLE_SECONDS
+    even when no request comes. Only when the agent is on; the import is lazy and starts no Chromium."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        return None
+    from src.services.browser_agent.agent import reap_forever  # noqa: PLC0415
+
+    return asyncio.create_task(reap_forever(), name="browser-idle-sweep")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Sentry init moved to MODULE scope (below, before `app = FastAPI(...)`) —
@@ -157,6 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # LOOP_WATCHDOG_ENABLED (default on); forced OFF under pytest, where the
     # instant-asyncio.sleep fixture would turn the sampler into a busy-spin.
     watchdog = start_loop_watchdog()
+    reaper = _start_browser_reaper()
     # MCP: the SDK session manager needs a running task group for the life of
     # the process (src/api/mcp_server.py). Tests enter mcp_runtime() themselves
     # because the auth fixture replaces this lifespan with a no-op.
@@ -166,6 +178,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if watchdog is not None:
             watchdog.cancel()
+        if reaper is not None:
+            reaper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reaper
         # Background session `last_seen` touches (FC-008): finish or cancel
         # them before the DB closes. Bound: up to 2 s waiting, then up to 1 s
         # more for the cancelled ones to unwind, so at most ~3 s in total.
