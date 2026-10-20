@@ -6,7 +6,8 @@ posting as a hex-length text row); Djinni follows djinni_test.go (an ld+json ARR
 testdata/work180_jobs_sitemap_au.xml and work180_detail_au.html (ld+json JobPosting plus the page's RSC "job" record);
 WUZZUF follows testdata/wuzzuf/search_it.json and jobs_it.json; InfoJobs follows infojobs_test.go:20-35 (double-encoded
 __INITIAL_PROPS__); Instaffo and JobiDanmark follow instaffo.go / jobdanmark.go (their tests are not used: the ld+json
-shape is the schema.org one).
+shape is the schema.org one); Deel follows testdata/deel_klarna.html (flight chunks, "$N" description reference); Dover
+follows dover_test.go:13-60.
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ JOB_KEYS = {"title", "company", "url", "location", "posted", "description", "sou
 def _no_pause(monkeypatch):
     monkeypatch.setattr(ks, "PAUSE_S", 0)
     monkeypatch.setattr(ks, "WORK180_PAUSE_S", 0)
+    monkeypatch.setattr(ks, "DOVER_PAUSE_S", 0)
 
 
 def _http(routes):
@@ -481,6 +483,107 @@ def test_jobdanmark_list_date_fallback_gate_empty_non200_garbage():
         assert _run(ks.fetch_jobdanmark, _http({"search": (200, body)}), countries=("DK",))[0] == []
 
 
+# ---------------------------------------------------------------------------------------- Deel (ATS)
+def _deel_page(postings=None, desc_ref=True):
+    postings = postings if postings is not None else [
+        {"id": "5d3636f8-0712", "jobId": "j1", "title": "Customer Trust Consultant (Remote - Sweden)",
+         "richtextDescription": "$2" if desc_ref else "<p>inline</p>", "createdAt": "2026-10-05T10:00:00Z",
+         "job": {"jobLocations": [{"location": {"name": "Stockholm"}}, {"location": {"name": "Sweden"}}]}},
+        {"id": "", "title": "no id"},
+    ]
+    flight = ('8:["$","$L1f",null,{"careerPageSettings":{"id":"x","urlSlug":"klarna","preferredOrganizationName":"Klarna"},"jobPostings":'
+              + json.dumps(postings) + "}]" + _row("2", "<p>Resolve [EMEA] <b>issues</b>, fast</p>"))
+    return _push(flight)
+
+
+ROW = {"name": "Klarna", "ats": "deel", "token": "klarna"}
+
+
+def test_deel_happy_path_resolves_description_reference():
+    http = _http({"jobs.deel.com/klarna": (200, _deel_page())})
+    stats: dict = {}
+    jobs = ks.ATS_FETCHERS["deel"](ROW, http, stats)
+    assert len(jobs) == 1 and stats == {"tried": 1, "ok": 1, "jobs": 1}
+    j = jobs[0]
+    assert j["url"] == "https://jobs.deel.com/klarna/job-details/5d3636f8-0712/overview" and j["company"] == "Klarna"
+    assert j["location"] == "Stockholm, Sweden" and j["posted"] == "2026-10-05" and "Resolve [EMEA] issues" in j["description"]
+    assert j["remote"] is True and set(j) == JOB_KEYS and j["source"] == "deel" and j["board"] == "klarna"
+    assert http.calls[0]["url"] == "https://jobs.deel.com/klarna"
+    assert ks.ATS_FETCHERS["deel"](ROW, _http({"klarna": (200, _deel_page(desc_ref=False))}), {})[0]["description"] == "inline"
+
+
+def test_deel_empty_nonexistent_and_garbage():
+    stats: dict = {}
+    assert ks.ATS_FETCHERS["deel"](ROW, _http({"klarna": (200, _deel_page(postings=[]))}), stats) == []
+    assert stats["ok"] == 1  # a valid empty board is a success
+    for resp in ((404, None), (403, None), (200, None), (200, "<html></html>"), (200, 5), (200, _push('"jobPostings":[{"id":'))):
+        s: dict = {}
+        assert ks.ATS_FETCHERS["deel"](ROW, _http({"klarna": resp}), s) == [] and s.get("ok", 0) == 0
+    s = {}
+    assert ks.ATS_FETCHERS["deel"]({"name": "x", "token": "../etc"}, _http({}), s) == [] and s.get("tried") == 1
+
+
+# --------------------------------------------------------------------------------------- Dover (ATS)
+DOVER_SLUG = {"id": "72c2afbf-36e4-4eec-8d78-5d2600498018", "slug": "qompyl", "name": "Qompyl"}
+DOVER_JOB = {"id": "f9fd123e-e7ff-4bcc-a16a-bb8c47e591b5", "title": "Cloud Infra Engineer", "locations": [], "workplace_type": "REMOTE",
+             "is_published": True, "is_sample": False}
+DOVER_SAMPLE = {**DOVER_JOB, "id": "sample-1", "title": "Sample Job", "is_sample": True}
+DOVER_UNPUB = {**DOVER_JOB, "id": "unpub-1", "title": "Unpublished Job", "is_published": False}
+DOVER_ROW = {"name": "Qompyl", "ats": "dover", "token": "qompyl"}
+
+
+def _dover_detail(**kw):
+    d = {"id": DOVER_JOB["id"], "title": "Cloud Infra Engineer", "user_provided_description": "<p>Do <b>things</b></p>",
+         "locations": [{"location_type": "REMOTE", "location_option": {"display_name": "Germany", "location_type": "COUNTRY", "country": "DE"}}],
+         "workplace_type": "REMOTE", "active": True, "is_private": False, "visa_support": True,
+         "compensation": {"offers_equity": True, "employment_type": "FULL_TIME"}}
+    d.update(kw)
+    return 200, d
+
+
+def _dover_http(listing=None, detail=None):
+    return _http({"careers-page-slug/qompyl": (200, DOVER_SLUG),
+                  "careers-page/72c2afbf-36e4-4eec-8d78-5d2600498018/jobs": (200, listing or {"next": None, "results": [DOVER_JOB, DOVER_SAMPLE, DOVER_UNPUB]}),
+                  "inbound/application-portal-job/": detail or _dover_detail()})
+
+
+def test_dover_happy_path_resolves_lists_and_hydrates():
+    http = _dover_http()
+    stats: dict = {}
+    jobs = ks.ATS_FETCHERS["dover"](DOVER_ROW, http, stats)
+    assert len(jobs) == 1 and stats == {"tried": 1, "ok": 1, "jobs": 1}  # sample and unpublished never reach detail
+    j = jobs[0]
+    assert j["url"] == "https://app.dover.com/apply/qompyl/f9fd123e-e7ff-4bcc-a16a-bb8c47e591b5" and j["company"] == "Qompyl"
+    assert j["location"] == "Germany" and j["remote"] is True and set(j) == JOB_KEYS
+    assert "Do things" in j["description"] and "offers equity" in j["description"] and "sponsors a work visa" in j["description"]
+    assert [c["url"].split("/api/v1/")[1].split("/")[0] for c in http.calls] == ["careers-page-slug", "careers-page", "inbound"]
+
+
+def test_dover_inactive_private_title_gate_next_url_and_failures():
+    assert ks.ATS_FETCHERS["dover"](DOVER_ROW, _dover_http(detail=_dover_detail(active=False)), {}) == []
+    assert ks.ATS_FETCHERS["dover"](DOVER_ROW, _dover_http(detail=_dover_detail(is_private=True)), {}) == []
+    http = _dover_http()
+    jobs = ks.ATS_FETCHERS["dover"]({**DOVER_ROW, "title_ok": lambda t: False}, http, {})
+    assert len(jobs) == 1 and jobs[0]["description"] == "" and not any("inbound" in c["url"] for c in http.calls)
+    nxt = _dover_http(listing={"next": "https://evil.example/x", "results": [DOVER_JOB]})
+    assert len(ks.ATS_FETCHERS["dover"](DOVER_ROW, nxt, {})) == 1
+    assert not any("evil.example" in c["url"] for c in nxt.calls)
+    s: dict = {}
+    assert ks.ATS_FETCHERS["dover"](DOVER_ROW, _dover_http(listing={"next": None, "results": []}), s) == [] and s["ok"] == 1
+    for http in (_http({}), _http({"careers-page-slug": (404, None)}), _http({"careers-page-slug": (200, {"id": ""})}),
+                 _http({"careers-page-slug": (200, DOVER_SLUG), "jobs": (500, None)}),
+                 _http({"careers-page-slug": (200, DOVER_SLUG), "jobs": (200, {"results": "x"})}),
+                 _http({"careers-page-slug": (200, "garbage")})):
+        s = {}
+        assert ks.ATS_FETCHERS["dover"](DOVER_ROW, http, s) == [] and s.get("ok", 0) == 0
+
+
+def test_dover_detail_failure_keeps_listing_fields():
+    http = _dover_http(detail=(500, None))
+    jobs = ks.ATS_FETCHERS["dover"](DOVER_ROW, http, {})
+    assert len(jobs) == 1 and jobs[0]["description"] == "" and jobs[0]["remote"] is True
+
+
 # ------------------------------------------------------------------------------------------ countries
 def test_wanted_puts_the_users_countries_first_then_the_rest_for_star():
     assert ks._wanted(["SA", "GB", "*"], "EG", "SA", "AE") == ["SA", "EG", "AE"]
@@ -491,6 +594,7 @@ def test_wanted_puts_the_users_countries_first_then_the_rest_for_star():
 # ------------------------------------------------------------------------------------------ registry
 def test_registries_and_every_feed_survives_total_garbage():
     assert set(ks.FEEDS) == {"remotedotcom", "djinni", "work180", "wuzzuf", "infojobs", "instaffo", "jobdanmark"}
+    assert set(ks.ATS_FETCHERS) == {"deel", "dover"}
     junk = _http({"": (200, {"data": [None, 1], "items": 3, "offers": "x"})})
     for fn in ks.FEEDS.values():
         jobs, stats = _run(fn, junk, countries=("*",))
@@ -506,11 +610,13 @@ def _core():
     return hk
 
 
-def test_every_feed_is_registered_in_the_core():
+def test_every_feed_and_board_type_is_registered_in_the_core():
     hk = _core()
     assert set(ks.FEEDS) <= set(hk.FEED_SOURCES) and "kit_sites_a" in hk.FEED_MODULES
     assert set(ks.FEEDS) <= set(hk.select_sources("default"))
     assert set(ks.FEEDS) <= set(hk._merged("FEEDS", hk.FEED_MODULES))
+    assert set(ks.ATS_FETCHERS) <= set(hk.BOARD_SOURCES) and "kit_sites_a" in hk.ATS_MODULES
+    assert set(ks.ATS_FETCHERS) <= set(hk._merged("ATS_FETCHERS", hk.ATS_MODULES))
     hosts = dict(hk._FEED_HOSTS)
     for host, feed in (("djinni.co", "djinni"), ("www.wuzzuf.net", "wuzzuf"), ("www.infojobs.net", "infojobs"),
                        ("jobs.instaffo.com", "instaffo"), ("jobdanmark.dk", "jobdanmark"),
@@ -518,6 +624,17 @@ def test_every_feed_is_registered_in_the_core():
         assert hosts[feed].search(host), host
         assert hk.board_from_job_url(f"https://{host}/jobs/1")["kind"] != "ats"
     assert not any(rx.search("careers.globex.example") for _, rx in hk._FEED_HOSTS)
+
+
+def test_deel_and_dover_links_resolve_to_a_board_token():
+    board = _core().board_from_job_url
+    deel = board("https://jobs.deel.com/klarna/job-details/5d3636f8-0712/overview")
+    assert (deel["kind"], deel["ats"], deel["token"]) == ("ats", "deel", "klarna")
+    assert board("https://jobs.deel.com/")["token"] == ""
+    for url in ("https://app.dover.com/jobs/qompyl", "https://app.dover.com/apply/Qompyl/f9fd123e-e7ff"):
+        dover = board(url)
+        assert (dover["kind"], dover["ats"], dover["token"]) == ("ats", "dover", "qompyl")
+    assert board("https://app.dover.com/")["token"] == "" and board("https://app.dover.com/jobs/")["token"] == ""
 
 
 # ------------------------------------------------------------------------- review findings (pinned hosts, once, pacing, paging)

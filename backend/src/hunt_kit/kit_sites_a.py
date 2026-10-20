@@ -1,5 +1,5 @@
-"""Job-site feeds, set A (parts 1 and 2 of 3), for the Job360 hunt kit: remote.com, Djinni, WORK180, WUZZUF, InfoJobs, Instaffo, JobiDanmark.
-Two per-company ATS readers, Deel and Dover, follow in the next part.
+"""Job-site feeds, set A, for the Job360 hunt kit: remote.com, Djinni, WORK180, WUZZUF, InfoJobs, Instaffo, JobiDanmark.
+Also two per-company ATS readers, Deel and Dover, because both only exist per employer board.
 
 Feed contract is the same as ``kit_regional.FEEDS``: ``fetch_x(queries, http, stats, *, days, countries) -> list[Job]``,
 never raises, networking only through the ``http`` callable the core passes in. A country-gated feed runs ONLY when one of
@@ -11,6 +11,8 @@ or scores. No logins, no cookies. Standard library only.
 Every ad names its own employer; the board name is never put in ``company``. Each site has a small request cap, and the first
 answer that is not HTTP 200 ends that site's run (a refused request repeated only holds the refusal up). The container this
 was written in could not reach any of these hosts, so every parser is tested on fixtures shaped like the references' data only.
+
+ATS side: ``ATS_FETCHERS`` holds ``deel`` and ``dover`` with the ``fetch(row, http, stats)`` contract of ``kit_ats_more``.
 
 Skipped on purpose (see the integration notes): Gusto, Gradcracker and JobLeads (freehire serves them only to a Chrome TLS
 fingerprint, which urllib cannot imitate) and Consider (needs a Set-Cookie session the kit's http helper cannot carry).
@@ -35,6 +37,12 @@ except ImportError:  # loaded by file path: put this folder on sys.path first
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import kit_regional as _kr
 import kit_xml as _kx  # type: ignore[import-not-found]  # sibling file (this folder is on sys.path by now)
+
+try:
+    import kit_ats as _ka  # type: ignore[import-not-found]
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import kit_ats as _ka
 
 Job = dict[str, Any]
 Stats = dict[str, Any]
@@ -67,6 +75,8 @@ INFOJOBS_DETAIL_CAP = 8
 INSTAFFO_DETAIL_CAP = 10
 JD_PAGES = 3
 JD_DETAIL_CAP = 10
+DOVER_DETAIL_CAP = 25
+DOVER_PAGES = 3
 
 _WS = re.compile(r"\s+")
 
@@ -874,6 +884,152 @@ def fetch_jobdanmark(queries: list[str], http: HttpFn, stats: Stats, *, days: in
         jobs.append(_made("jobdanmark", "JobiDanmark", title=it["title"], company=it["company"], url=it["url"], place=it["address"],
                           country="Denmark", posted=posted, description=desc))
     return _keep(_unique(jobs), queries, days, search=False)
+
+
+# ---------------------------------------------------------------------------------------------- ATS
+_JSON_HDR = {"Accept": "application/json"}
+_HTML_HDR = {"Accept": "text/html"}
+_SLUG_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$")
+
+
+# Deel. Borrowed from freehire internal/ingest/sources/deel.go:23 (board page https://jobs.deel.com/<orgSlug>), :35-44 (one GET
+# carries the org's whole catalogue in the Next.js flight; `"jobPostings":` is a JSON array; org name and text rows are read from
+# the same stream), :72-84 (posting: id, title, richtextDescription = "$N" reference to flight text row N or inline HTML,
+# createdAt, job.jobLocations[].location.name), :93-107 (`"careerPageSettings":` object, preferredOrganizationName), :26 (public
+# page https://jobs.deel.com/<slug>/job-details/<id>/overview), :113-135 (toJob: company = the org name, else the configured one;
+# remote from title + location text). NOT IN REFERENCE: nothing else.
+def _deel(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Deel ATS board (token = org slug from jobs.deel.com/<slug>): the flight stream carries every posting."""
+    slug = str(row.get("token") or "").strip()
+    if not _SLUG_OK.match(slug):
+        return None
+    st, page = _ka._get(http, f"https://jobs.deel.com/{quote(slug, safe='')}", as_json=False, headers=_HTML_HDR)
+    if st != 200 or not isinstance(page, str):
+        return None
+    flight = _decode_flight(page)
+    arr = _json(_bracket(flight, '"jobPostings":', "[", "]") or "null")
+    if not isinstance(arr, list):
+        return None
+    settings = _json(_bracket(flight, '"careerPageSettings":', "{", "}") or "null")
+    org = str(settings.get("preferredOrganizationName") or "").strip() if isinstance(settings, dict) else ""
+    rows = _flight_rows(flight)
+    jobs: list[Job] = []
+    for p in arr:
+        pid = str(p.get("id") or "") if isinstance(p, dict) else ""
+        title = _WS.sub(" ", str(p.get("title") or "")).strip() if pid else ""
+        if not (pid and title):
+            continue
+        desc = str(p.get("richtextDescription") or "")
+        if desc.startswith("$"):
+            desc = rows.get(desc[1:], "")
+        job_o = p.get("job")
+        places = [str(((jl or {}).get("location") or {}).get("name") or "").strip()
+                  for jl in (job_o.get("jobLocations") or [] if isinstance(job_o, dict) else []) if isinstance(jl, dict)]
+        place = ", ".join(dict.fromkeys(x for x in places if x))
+        job = _ka._job(row, "deel", title=title, url=f"https://jobs.deel.com/{quote(slug, safe='')}/job-details/{quote(pid, safe='')}/overview",
+                       location=place, posted=_ka._iso_date(p.get("createdAt")), description=strip_html(desc),
+                       remote=_ka._remote_from(title, place))
+        job["company"] = org or job["company"]
+        jobs.append(job)
+    return jobs
+
+
+# Dover. Borrowed from freehire internal/ingest/sources/dover.go:15 (API root https://app.dover.com/api/v1), :19 (page size 300),
+# :145-158 (GET /careers-page/<client id>/jobs?limit=300&offset=0 -> {next, results[]}, follow the response's own "next" URL; keep
+# is_published and not is_sample), :98-100 (GET /careers-page-slug/<slug> answers {"id": client id}), :161-165 (apply URL
+# https://app.dover.com/apply/<slug>/<job id>), :210-221 (results[]/detail fields: id, title, locations[], workplace_type, active,
+# is_private, visa_support), :113-121 (locations[].location_option.display_name / location_type) and :187-193 (COUNTRY entries carry
+# the country), :210-227 (detail GET /inbound/application-portal-job/<id>: user_provided_description, compensation.employment_type),
+# :87 (a detail that is inactive or private drops the ad), :280-298 (equity / visa notes are added to the description; company =
+# the board's company), pacer.go:409-411 (~2 requests a second, so the kit pauses 0.5 s). Not used: compensation (shown only when
+# open_to_sharing_comp; the kit has no pay field).
+# NOT IN REFERENCE: nothing else.
+DOVER_PAUSE_S = 0.5
+
+
+def _dover_places(locs: Any) -> str:
+    names: list[str] = []
+    for loc in locs if isinstance(locs, list) else []:
+        opt = loc.get("location_option") if isinstance(loc, dict) else None
+        nm = str(opt.get("display_name") or "").strip() if isinstance(opt, dict) else ""
+        if nm and nm not in names:
+            names.append(nm)
+    return ", ".join(names)
+
+
+def _dover(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Dover career page (token = slug from app.dover.com/jobs/<slug>): resolve the client id, list, then detail (capped)."""
+    slug = str(row.get("token") or "").strip()
+    if not _SLUG_OK.match(slug):
+        return None
+    base = "https://app.dover.com/api/v1"
+    st, res = _ka._get(http, f"{base}/careers-page-slug/{quote(slug, safe='')}", headers=_JSON_HDR)
+    cid = str(res.get("id") or "") if st == 200 and isinstance(res, dict) else ""
+    if not _SLUG_OK.match(cid):
+        return None
+    listed: list[dict[str, Any]] = []
+    nxt = f"{base}/careers-page/{quote(cid, safe='')}/jobs?limit=300&offset=0"
+    for page in range(DOVER_PAGES):
+        if page:
+            _pause(DOVER_PAUSE_S)
+        st, res = _ka._get(http, nxt, headers=_JSON_HDR)
+        if st != 200 or not isinstance(res, dict) or not isinstance(res.get("results"), list):
+            if page:
+                break  # a hiccup after the first page keeps what we have
+            return None
+        listed += [r for r in res["results"] if isinstance(r, dict) and r.get("is_published") and not r.get("is_sample") and r.get("id")]
+        nxt = str(res.get("next") or "")
+        if not nxt.startswith("https://app.dover.com/"):
+            break
+    jobs: list[Job] = []
+    details = 0
+    for r in listed:
+        title, jid = _WS.sub(" ", str(r.get("title") or "")).strip(), str(r["id"])
+        if not title:
+            continue
+        mode = str(r.get("workplace_type") or "").strip().lower()
+        place, desc, remote = _dover_places(r.get("locations")), "", True if mode == "remote" else None
+        if details < DOVER_DETAIL_CAP and _ka._title_ok(row, title):
+            details += 1
+            _pause(DOVER_PAUSE_S)
+            dst, d = _ka._get(http, f"{base}/inbound/application-portal-job/{quote(jid, safe='')}", headers=_JSON_HDR)
+            if dst == 200 and isinstance(d, dict):
+                if d.get("active") is False or d.get("is_private") is True:
+                    continue  # closed or private: not an open ad
+                desc = strip_html(d.get("user_provided_description"))
+                place = _dover_places(d.get("locations")) or place
+                notes = []
+                comp = _d(d.get("compensation"))
+                if comp.get("offers_equity"):
+                    notes.append("This role offers equity compensation.")
+                if d.get("visa_support"):
+                    notes.append("The employer sponsors a work visa for this role.")
+                desc = "\n\n".join(x for x in [desc, *notes] if x)
+        jobs.append(_ka._job(row, "dover", title=title, url=f"https://app.dover.com/apply/{quote(slug, safe='')}/{quote(jid, safe='')}",
+                             location=place, description=desc, remote=remote))
+    return jobs
+
+
+Http = Callable[..., "tuple[int, Any]"]
+
+
+def _wrap_ats(body: Callable[[dict[str, Any], Http], list[Job] | None]) -> Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]:
+    """Turn ``body(row, http) -> jobs | None`` (None = the board failed) into a never-raising fetcher that counts."""
+    def fetch(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
+        try:
+            jobs = body(row, http)
+        except Exception:  # noqa: BLE001 - fetchers must never raise
+            jobs = None
+        _ka._count(stats, ok=jobs is not None, jobs=len(jobs or []))
+        return jobs or []
+    fetch.__doc__ = body.__doc__
+    return fetch
+
+
+ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
+    "deel": _wrap_ats(_deel),
+    "dover": _wrap_ats(_dover),
+}
 
 FEEDS: dict[str, Callable[..., list[Job]]] = {
     "remotedotcom": fetch_remotedotcom,
