@@ -135,6 +135,8 @@ FEED_SOURCES = (
     "gulftalent",
     "glints",
     "kalibrr",
+    "techinasia",
+    "itviec",
     "linkedin",
     "glassdoor",
     "googlejobs",
@@ -2577,6 +2579,8 @@ _FEED_HOSTS = (
     ("gulftalent", re.compile(r"(?:^|\.)gulftalent\.com$", re.I)),
     ("glints", re.compile(r"(?:^|\.)glints\.com$", re.I)),
     ("kalibrr", re.compile(r"(?:^|\.)kalibrr\.com$", re.I)),
+    ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
+    ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
