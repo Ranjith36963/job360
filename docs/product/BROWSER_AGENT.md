@@ -122,6 +122,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Final submit:**
   - The tool runs `check_submit` itself and records `submit_attempted` first.
   - It clicks only on `submit`. An `ask` becomes a `submit` once the user clicks Send on Needs you.
+  - What counts as the final submit (`safety.control_kind`): any button that submits its form (type submit or image, or a `<button>` with no type) unless its name is a step ("Next", "Save and continue"), so a name in another language ("Bewerbung absenden") or one we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named "Submit"; and "Apply" / "Send" on a button once the page holds an answer. An answer is a typed value, a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too, and a button in a shadow root sits in the `<form>` around its host.
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the tool turns on.
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
@@ -140,7 +141,12 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   your password goes straight to the site and is not logged, stored or sent back. Table `browser_sign_ins`
   (migration 0065), one row per (user, site); **Forget** deletes it; deleting the account deletes them all.
 - **Who can use it:** only you, in a signed-in browser session. An assistant's token is refused (403), so no AI can
-  drive the live view or type into it. The assistant's own `browser` tool simply starts already signed in.
+  drive the live view or type into it. The live view is its own browser, not the one the assistant's `browser` tool
+  drives: the assistant cannot see your sign-in, and Start or Cancel never touches its half-filled form. Both count
+  toward `BROWSER_AGENT_MAX_SESSIONS`. The assistant's own `browser` tool simply starts already signed in.
+- **How long it stays open:** the picture refreshes every 1.5 s while the tab is shown, and stops after Keep. The
+  refresh does not keep the browser open: it closes after `BROWSER_AGENT_IDLE_SECONDS` without a click, key or typing
+  of yours, and 15 minutes after Start at the latest.
 - **Changing `SESSION_SECRET`** signs everyone out of every saved site (they sign in again). Nothing breaks.
 - **Checked end to end** in a real browser against a local test site: the page signs in, keeps the site, lists it,
   the password is in neither the logs nor the database, and an assistant's new browser opens already signed in.
@@ -156,11 +162,18 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 
 **`key` action (2026-10-19):** ArrowDown, ArrowUp, Tab, Escape and Enter, for the suggestion lists real forms use
 (Greenhouse location and school, Workday dropdowns): type, ArrowDown, Enter. Enter is refused outside a suggestion
-list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. The list
-must be OPEN (`aria-expanded` true, or an option highlighted): a closed suggestion box in a form submits on Enter too.
+list (`enter_may_submit`), because in an ordinary field it can submit the form and skip `check_submit`. An option
+must be highlighted (focus on an option, or `aria-activedescendant` naming one): a closed suggestion box, or an open
+list that shows "No options", submits on Enter too. And if a site lets an allowed Enter through to its form anyway,
+the submit is stopped before the page sees it and the key is refused (`enter_may_submit`).
 
 **CAPTCHA vs. invisible reCAPTCHA:** every Greenhouse posting loads an invisible reCAPTCHA that asks nothing, so it
 is not a stop. A reCAPTCHA image challenge or a tick-box widget is (freehire `atsapply/browser.go:167-234`).
+Only a challenge frame the user can see counts: Ashby and Lever load theirs on every form, full size but hidden
+off the page until it asks something, and that waiting frame is no stop.
+Once a page shows a CAPTCHA, every action but `look`, `back`, `open` and `close` is refused (`needs_you`, reason
+`captcha`), and nothing inside a CAPTCHA's own frame is ever clicked, typed or keyed: the cloud browser never ticks
+"I'm not a robot" itself.
 
 **Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
 the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.

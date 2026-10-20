@@ -1698,8 +1698,8 @@ def build_server(version: str = "") -> MCPServer:
         Use it when you have no browser of your own, or to apply while the user is away.
         action: open (url) | look (read the page) | click (ref) | type (ref, text) | choose (ref, text = the
         option) | tick (ref, on) | upload (ref, doc_kind cv|cover_letter, application_id: Job360 sends the saved
-        version as a PDF) | key (text = ArrowDown, ArrowUp, Tab, Escape or Enter; Enter only in a suggestion
-        list: pick a combobox option with type, ArrowDown, Enter) | scroll (text down|up: loads more of
+        version as a PDF) | key (text = ArrowDown, ArrowUp, Tab, Escape or Enter; Enter only on a highlighted
+        suggestion: type, ArrowDown, Enter; refused = choose) | scroll (text down|up: loads more of
         the page) | back | close.
         Every result: url, title, elements [{ref, tag, type, name, value,
         required, ...}] nearest the screen (`more_elements` = how many more above/below: scroll, then look) and
