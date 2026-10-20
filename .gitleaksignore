@@ -65,7 +65,10 @@ e0db04e8f28b908a7e3e96e704b35baaca96c5fa:docs/superpowers/plans/2026-04-07-fasta
 # 6. False positive: a made-up 32-character Algolia search key in a WTTJ test
 #    fixture (backend/tests/test_hunt_kit_startups.py, "0123456789abcdef" twice;
 #    the reader takes the real key fresh from welcometothejungle.com/api/env at run
-#    time and never stores one). The next commit builds the fixture as
-#    "0123456789abcdef" * 2, so no key-shaped literal remains and the rule no
-#    longer matches. This waives one line of one branch commit; PR #956 squash-merges.
+#    time and never stores one). The first fix wrote it as "0123456789abcdef" * 2
+#    next to a name containing KEY, which generic-api-key matched in turn; the
+#    fixture is now the plainly fake, low-entropy _WTTJ_FIXTURE_VALUE, so neither
+#    rule matches. These waive one line in each of two branch commits; PR #956
+#    squash-merges, so main receives neither.
 ee8d92687e328744a4a0c41d8f50b37a7f5ace80:backend/tests/test_hunt_kit_startups.py:algolia-api-key:412
+d8e350ae8f04f0c624801bfc08fb5e8f2a6b3354:backend/tests/test_hunt_kit_startups.py:generic-api-key:411

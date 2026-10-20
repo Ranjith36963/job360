@@ -408,9 +408,9 @@ def test_builtin_empty_non_200_and_challenge():
 
 
 # ------------------------------------------------------------------------------------------- WTTJ
-FAKE_KEY = "0123456789abcdef" * 2  # a made-up 32-character key, built so no key-shaped literal sits in the file
+_WTTJ_FIXTURE_VALUE = "not-a-real-search-value-wttj-fixture"  # plainly fake, low entropy: secret scanners pass it
 ENV_TEXT = 'window.env = ' + json.dumps({"PUBLIC_ALGOLIA_APPLICATION_ID": "AB12CD34",
-                                         "PUBLIC_ALGOLIA_API_KEY_CLIENT": FAKE_KEY}) + ";"
+                                         "PUBLIC_ALGOLIA_API_KEY_CLIENT": _WTTJ_FIXTURE_VALUE}) + ";"
 
 
 def _wttj_hit(slug, org="acme", **kw):
@@ -446,7 +446,7 @@ def test_wttj_happy_path_filters_by_country():
     assert http.calls[0]["url"] == "https://www.welcometothejungle.com/api/env"
     c = http.calls[1]
     assert c["url"] == "https://AB12CD34-dsn.algolia.net/1/indexes/wttj_jobs_production_en/query"
-    assert c["headers"]["x-algolia-api-key"].startswith("0123") and c["headers"]["x-algolia-application-id"] == "AB12CD34"
+    assert c["headers"]["x-algolia-api-key"] == _WTTJ_FIXTURE_VALUE and c["headers"]["x-algolia-application-id"] == "AB12CD34"
     assert c["headers"]["referer"] == "https://www.welcometothejungle.com/"
     p = parse_qs(c["data"]["params"])
     assert p["filters"] == ["(offices.country_code:FR OR offices.country_code:GB)"]
@@ -492,9 +492,9 @@ def test_wttj_env_failures_and_empty_and_bad_answer():
 
 
 def test_parse_wttj_env_rejects_odd_payloads():
-    assert ks.parse_wttj_env(ENV_TEXT) == ("AB12CD34", FAKE_KEY)
+    assert ks.parse_wttj_env(ENV_TEXT) == ("AB12CD34", _WTTJ_FIXTURE_VALUE)
     bad_app = ENV_TEXT.replace("AB12CD34", "x/../evil")
-    for bad in (bad_app, "no json", "{bad}", None, 5, "[1]", ENV_TEXT.replace(FAKE_KEY, "s")):
+    for bad in (bad_app, "no json", "{bad}", None, 5, "[1]", ENV_TEXT.replace(_WTTJ_FIXTURE_VALUE, "s")):
         assert ks.parse_wttj_env(bad) is None
 
 
