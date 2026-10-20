@@ -57,10 +57,10 @@ def _run(name: str, row: dict, http, *, check: bool = True):
 
 # --------------------------------------------------------------------------- shared
 def test_registry_and_hunt_kit_wiring():
-    assert set(F) == {"opencats", "odoo", "recruitingsolutions", "teamex"}
+    assert set(F) == {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream"}
     src = (KIT_DIR / "kit_ats_misc2.py").read_text(encoding="utf-8")
     assert src.count("Borrowed from freehire internal/ingest/sources/") >= len(F)  # every reader names its reference file
-    for fname in ("opencats", "odoo", "recruitingsolutions", "teamex"):
+    for fname in ("opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream"):
         assert f"sources/{fname}.go" in src
 
 
@@ -68,6 +68,8 @@ BAD_TOKENS = {
     "opencats": ["", "not a host", "https://x.com/y z"],
     "odoo": ["", "nodot", "a b.com"],
     "recruitingsolutions": ["", "bad token", "x/y"],
+    "werecruit": ["", "idiap", "en/", "/idiap", "en/a/b"],
+    "workstream": ["", "zzzzzzzz", "965a796", "965A796B0"],
 }
 
 
@@ -79,7 +81,7 @@ def test_bad_token_makes_no_request_and_counts_not_ok(name, tok):
 
 
 GOOD_TOKEN = {"opencats": "careers.boomit.pt/careers", "odoo": "jobs.amewaregroup.com", "recruitingsolutions": "riv-prod",
-              "teamex": "global"}
+              "teamex": "global", "wantapply": "global", "werecruit": "en/idiap", "workstream": "965a796b"}
 
 
 @pytest.mark.parametrize("name", sorted(F))
@@ -290,6 +292,160 @@ def test_teamex_empty():
     assert jobs == [] and stats["ok"] == 1
 
 
+# --------------------------------------------------------------------------- Wantapply
+WA_SITEMAP = """<?xml version="1.0"?><urlset>
+<url><loc>https://wantapply.cy/</loc></url><url><loc>https://wantapply.cy/android-team-lead-at-tradingview-3</loc></url>
+<url><loc>https://wantapply.cy/company/tradingview</loc></url><url><loc>https://wantapply.cy/sign-in</loc></url>
+<url><loc>https://example.com/some-role-at-acme</loc></url><url><loc>https://wantapply.cy/head-of-qa-remote-only-at-cloudlinux</loc></url>
+<url><loc>https://wantapply.cy/no-employer-at-nobody</loc></url></urlset>"""
+
+
+def _wa_detail(title, company, jlt="", desc="<p>Flat text.</p>"):
+    org = f'"hiringOrganization":{{"@type":"Organization","name":"{company}"}},' if company else ""
+    jl = '"jobLocation":[{"@type":"Place","address":{"@type":"PostalAddress","addressLocality":"Limassol","addressCountry":"Cyprus"}},{"@type":"Place","address":{"@type":"PostalAddress","addressCountry":"Cyprus"}}]'
+    return ('<html><body><script type="application/ld+json">{"@context":"https://schema.org","@type":"JobPosting","title":"' + title
+            + '","description":"' + desc.replace('"', '\\"') + '","datePosted":"2026-09-01T10:00:00Z","employmentType":["FULL_TIME"],'
+            + (f'"jobLocationType":"{jlt}",' if jlt else "") + org + jl + '}</script><div class="Description"><h2>Role</h2><p>Rich body.</p></div></body></html>')
+
+
+def test_wantapply_reads_vacancy_slugs_only_and_maps_jobposting():
+    http = _stub({"sitemap.xml": (200, WA_SITEMAP),
+                  "android-team-lead-at-tradingview-3": (200, _wa_detail("Android Team Lead", "TradingView")),
+                  "head-of-qa-remote-only-at-cloudlinux": (200, _wa_detail("Head of QA", "CloudLinux", jlt="TELECOMMUTE")),
+                  "no-employer-at-nobody": (200, _wa_detail("Ghost", ""))})
+    jobs, stats = _run("wantapply", {"token": "global"}, http)
+    assert stats["jobs"] == 2
+    assert [c[0] for c in http.calls] == ["https://wantapply.cy/sitemap.xml", "https://wantapply.cy/android-team-lead-at-tradingview-3",
+                                         "https://wantapply.cy/head-of-qa-remote-only-at-cloudlinux", "https://wantapply.cy/no-employer-at-nobody"]
+    a, b = jobs
+    assert (a["title"], a["company"], a["location"], a["posted"]) == ("Android Team Lead", "TradingView", "Limassol, Cyprus; Cyprus", "2026-09-01")
+    assert "Rich body." in a["description"] and a["url"] == "https://wantapply.cy/android-team-lead-at-tradingview-3" and a["remote"] is None
+    assert b["remote"] is True and b["company"] == "CloudLinux"
+
+
+def test_wantapply_stops_on_first_throttle_and_respects_title_gate():
+    http = _stub({"sitemap.xml": (200, WA_SITEMAP), "android": (429, None), "head-of-qa": (200, _wa_detail("QA", "X"))})
+    jobs, _ = _run("wantapply", {"token": "g"}, http)
+    assert jobs == [] and len(http.calls) == 2  # sitemap + the throttled page; nothing after
+    http = _stub({"sitemap.xml": (200, WA_SITEMAP)})
+    _run("wantapply", {"token": "g", "title_ok": lambda t: False}, http)
+    assert len(http.calls) == 1
+
+
+def test_wantapply_empty_sitemap():
+    jobs, stats = _run("wantapply", {"token": "g"}, _stub({"sitemap.xml": (200, "<urlset></urlset>")}))
+    assert jobs == [] and stats["ok"] == 1
+
+
+# --------------------------------------------------------------------------- werecruit
+WR_LISTING = ('<html><script>window.allOffers = [{"Id":"49895d7f-fe57","TitleTranslated":"Postdoctoral Researcher",'
+              '"Url":"https://careers.werecruit.io/en/idiap/offers/postdoctoral-researcher-49895d","Address_City":"Martigny","Address_Region":"Valais",'
+              '"Address_State":"CH","TimeTranslated":"Full time","PublicationStartDate":"2026-08-20T15:07:34.2606458+00:00"},'
+              '{"Id":"","TitleTranslated":"No id","Url":"https://careers.werecruit.io/en/idiap/offers/x"},'
+              '{"Id":"b","TitleTranslated":"Off host","Url":"https://evil.example.org/x"}];</script></html>')
+WR_DETAIL = '<html><body><div class="description rich-text"><p>Study things.</p><script>x()</script></div><div class="description-blocks">not me</div></body></html>'
+
+
+def test_werecruit_happy_path():
+    http = _stub({"/offers/postdoctoral-researcher-49895d": (200, WR_DETAIL), "https://careers.werecruit.io/en/idiap": (200, WR_LISTING)})
+    jobs, stats = _run("werecruit", {"name": "IDIAP", "token": "en/idiap"}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1}
+    j = jobs[0]
+    assert (j["title"], j["company"], j["location"], j["posted"]) == ("Postdoctoral Researcher", "IDIAP", "Martigny, Valais", "2026-08-20")
+    assert j["description"] == "Study things." and j["extra"] == {"job_id": "49895d7f-fe57", "country_code": "CH", "employment_type": "full_time"}
+
+
+def test_werecruit_unserved_locale_is_empty_not_an_error_and_broken_json_is_an_error():
+    jobs, stats = _run("werecruit", {"token": "fr/idiap"}, _stub({"/fr/idiap": (200, "<html><body>no offers here</body></html>")}))
+    assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
+    jobs, stats = _run("werecruit", {"token": "fr/idiap"}, _stub({"/fr/idiap": (200, "<script>window.allOffers = [{broken</script>")}))
+    assert jobs == [] and stats == {"tried": 1, "jobs": 0}
+
+
+def test_werecruit_detail_cap_keeps_listing_fields_past_it():
+    offers = [{"Id": str(i), "TitleTranslated": f"Role {i}", "Url": f"https://careers.werecruit.io/en/t/offers/r{i}"} for i in range(40)]
+    http = _stub({"/offers/": (200, WR_DETAIL), "/en/t": (200, "window.allOffers = " + json.dumps(offers) + ";")})
+    jobs, _ = _run("werecruit", {"token": "en/t"}, http)
+    assert len(jobs) == 40 and len(http.calls) == 1 + 25
+    assert jobs[0]["description"] and jobs[30]["description"] == ""
+
+
+# --------------------------------------------------------------------------- Workstream
+WS_BOARD = "965a796b"
+WS_POST = "/j/965a796b/moxies/pickering-79247/line-cook-09eacfc8"
+
+
+def _ws_card(href, title, address, pay="", *tags):
+    tag_html = "".join(f'<span class="tag tag-small">{t}</span>' for t in tags)
+    pay_html = f'<div><img data-icon="rate-of-pay" src="/x.svg"/><span class="mute">{pay}</span></div>' if pay else ""
+    return (f'<div class="position-card pointer" onclick="location.href=\'{href}?locale=en\'"><span><a class="b" href="{href}?locale=en">{title}</a>{tag_html}</span>'
+            f'<div class="position-address mute">{address}</div><div class="position-short-desc">blurb…</div>{pay_html}'
+            f'<a class="view-position-btn" href="{href}?locale=en"><img data-icon="right-arrow"/></a></div>')
+
+
+def _ws_list(base, pages, *cards):
+    return (f"<html><head><title>FineCasual Careers and Jobs</title></head><body>{''.join(cards)}</body>"
+            f"<script>var query = {{}};var totalPages = {pages};var searchBaseUrl = '{base}';</script></html>")
+
+
+WS_POSTING = '<html><body><h1>Line Cook</h1><div class="position-rich-text-content"><p>You will cook.</p><script>x()</script></div></body></html>'
+
+
+def test_workstream_multi_brand_listing_then_posting():
+    base = f"https://www.workstream.us/j/{WS_BOARD}/positions"
+    card = _ws_card(WS_POST, "Line Cook", "1355 Kingston Rd, Pickering, ON L1V 1B8, Canada", "$17.00 - 20.00 per hour", "Full-time")
+    http = _stub({WS_POST: (200, WS_POSTING), "/positions": (200, _ws_list(base, 1, card))})
+    jobs, stats = _run("workstream", {"name": "FineCasual", "token": WS_BOARD}, http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 1}
+    assert len(http.calls) == 2  # listing (page 1 was already in hand), one posting
+    j = jobs[0]
+    assert j["url"] == "https://www.workstream.us" + WS_POST and j["company"] == "FineCasual"  # canonical: no ?locale
+    assert (j["title"], j["location"]) == ("Line Cook", "1355 Kingston Rd, Pickering, ON L1V 1B8, Canada")
+    assert j["description"] == "You will cook.\n\nPay: $17.00 - 20.00 per hour" and j["posted"] == ""
+    assert j["extra"] == {"posting_id": "09eacfc8", "employment_type": "full_time", "pay": "$17.00 - 20.00 per hour"}
+
+
+def test_workstream_single_brand_follows_the_stated_listing_and_pages_by_total():
+    brand = "https://www.workstream.us/j/a8f9405b/sarku-japan/positions"
+    p1 = "/j/a8f9405b/sarku-japan/clearwater-217806/crew-member-3ae49676"
+    p2 = "/j/a8f9405b/sarku-japan/tampa-1/crew-member-11111111"
+    http = _stub({p1: (200, WS_POSTING), p2: (200, WS_POSTING),
+                  "sarku-japan/positions?page=2": (200, _ws_list(brand, 2, _ws_card(p2, "Crew Member", "Tampa", "", "Full-time", "Part-time"))),
+                  "sarku-japan/positions": (200, _ws_list(brand, 2, _ws_card(p1, "Crew Member", "Clearwater"))),
+                  "/j/a8f9405b/positions": (200, _ws_list(brand, 2))})  # the redirected locations page: no cards
+    jobs, _ = _run("workstream", {"token": "a8f9405b"}, http)
+    assert [j["extra"]["posting_id"] for j in jobs] == ["3ae49676", "11111111"]
+    assert jobs[1]["extra"]["employment_type"] == ""  # two schedules state no single type
+    assert not any("page=3" in c[0] for c in http.calls)  # totalPages is exact
+
+
+def test_workstream_page_failure_keeps_earlier_pages_and_bodyless_posting_has_no_description():
+    base = f"https://www.workstream.us/j/{WS_BOARD}/positions"
+    http = _stub({WS_POST: (200, "<html><body>no body</body></html>"), "page=2": (503, None),
+                  "/positions": (200, _ws_list(base, 3, _ws_card(WS_POST, "Line Cook", "Pickering")))})
+    jobs, _ = _run("workstream", {"token": WS_BOARD}, http)
+    assert len(jobs) == 1 and jobs[0]["description"] == ""
+
+
+def test_workstream_throttle_stops_posting_requests_and_card_cap():
+    base = f"https://www.workstream.us/j/{WS_BOARD}/positions"
+    cards = [_ws_card(f"/j/965a796b/b/s/job-{i:08x}", f"Cook {i}", "X") for i in range(1, 11)]
+    http = _stub({"/job-": (429, None), "/positions": (200, _ws_list(base, 1, *cards))})
+    jobs, _ = _run("workstream", {"token": WS_BOARD}, http)
+    assert len(jobs) == 10 and len(http.calls) == 2  # one throttled posting request, then none
+
+
+def test_workstream_page_that_is_not_a_career_site_fails():
+    jobs, stats = _run("workstream", {"token": WS_BOARD}, _stub({"/positions": (200, "<html><body>marketing</body></html>")}))
+    assert jobs == [] and stats == {"tried": 1, "jobs": 0}
+
+
+def test_workstream_live_career_site_with_nothing_open_is_ok_and_empty():
+    base = f"https://www.workstream.us/j/{WS_BOARD}/positions"
+    jobs, stats = _run("workstream", {"token": WS_BOARD}, _stub({"/positions": (200, _ws_list(base, 1))}))
+    assert jobs == [] and stats == {"tried": 1, "ok": 1, "jobs": 0}
+
+
 # --------------------------------------------------------------------------- wiring into hunt_kit.py and the served files
 def test_registered_in_hunt_kit_and_served():
     hk = _load("hunt_kit_misc2_under_test", "hunt_kit.py")
@@ -297,9 +453,9 @@ def test_registered_in_hunt_kit_and_served():
 
     assert "kit_ats_misc2" in hk.ATS_MODULES and "kit_ats_misc2.py" in KIT_FILES
     assert set(F) <= set(hk._merged("ATS_FETCHERS", hk.ATS_MODULES)) and set(F) <= set(hk.BOARD_SOURCES)
-    rows = hk.parse_extra("opencats:careers.boomit.pt/careers,odoo:jobs.amewaregroup.com,evil:x")
+    rows = hk.parse_extra("opencats:careers.boomit.pt/careers,werecruit:en/idiap,odoo:jobs.amewaregroup.com,evil:x")
     assert [(r["ats"], r["token"], r["name"]) for r in rows] == [
-        ("opencats", "careers.boomit.pt/careers", "careers.boomit.pt"), ("odoo", "jobs.amewaregroup.com", "jobs.amewaregroup.com")]
+        ("opencats", "careers.boomit.pt/careers", "careers.boomit.pt"), ("werecruit", "en/idiap", "idiap"), ("odoo", "jobs.amewaregroup.com", "jobs.amewaregroup.com")]
     assert set(F) <= {r["ats"] for r in hk.load_companies(KIT_DIR / "companies.json")}  # every type has a shipped row
 
 
@@ -317,6 +473,17 @@ def test_body_strips_script_and_style_in_linear_time():
     assert m2._body("ok<script") == "ok"
     for bomb in ("<script>" * 25000, "<style>" * 25000, "<script" * 40000, "<scripts>" * 25000, "<script>" + "</script" * 30000):
         _fast(lambda b=bomb: m2._body(b))
+
+
+def test_sitemap_scans_are_linear_and_keep_index_vs_urlset():
+    xml = "<sitemapindex><sitemap><loc> https://a.example/x </loc></sitemap></sitemapindex><urlset><url><loc>https://a.example/u</loc></url></urlset>"
+    assert m2._locs(xml, "sitemap") == ["https://a.example/x"] and m2._locs(xml, "url") == ["https://a.example/u"]
+    assert m2._locs("<url><loc>a&amp;b</loc><loc>second</loc></url><url><url><loc>c</loc>", "url") == ["a&b", "c"]
+    for bomb in ("<url>" * 20000, "<url><loc>" * 20000, "<url><loc>" + " " * 400000, "<loc>" + " " * 400000 + "x"):
+        _fast(lambda b=bomb: m2._locs(b, "url"))
+    http = _stub({"sitemap.xml": (200, "<url>" * 20000)})
+    jobs, stats = _fast(lambda: _run("wantapply", {"token": "g"}, http))
+    assert jobs == [] and stats["ok"] == 1
 
 
 def test_opencats_nested_unclosed_anchors_stay_linear():

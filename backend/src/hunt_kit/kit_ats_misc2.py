@@ -1,4 +1,4 @@
-"""Four more ATS readers for the hunt kit: OpenCATS, Odoo, recruiting-solutions.org and TeamEx. Same contract as
+"""Seven more ATS readers for the hunt kit: OpenCATS, Odoo, recruiting-solutions.org, TeamEx, Wantapply, werecruit and Workstream. Same contract as
 kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only through the ``http`` callable, no file IO at
 import, standard library only. Nothing here ranks or scores a job.
 
@@ -7,6 +7,9 @@ Board tokens (companies JSON ``board``, or ``--companies-extra "ats:token"``):
   odoo                 careers host of an Odoo recruitment site, e.g. jobs.amewaregroup.com
   recruitingsolutions  platform tenant key (the customerId header), e.g. riv-prod
   teamex               none (one global marketplace feed): any placeholder token works
+  wantapply            none (one aggregator, read from the wantapply.cy mirror): any placeholder token works
+  werecruit            <locale>/<tenant> from careers.werecruit.io/<locale>/<tenant>, e.g. en/idiap
+  workstream           the eight hex characters of www.workstream.us/j/<board>
 
 Endpoints, params and field names are adapted from the MIT-licensed freehire adapters (internal/ingest/sources/<name>.go,
 see NOTICE.md). Where the kit differs from the reference it says so next to the reader: the kit never fans out, so every
@@ -20,7 +23,7 @@ import json
 import re
 from html.parser import HTMLParser
 from typing import Any, Callable, Iterator
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit
 
 try:  # shared helpers live in the sibling kit_ats.py
     from kit_ats import (  # type: ignore[import-not-found]
@@ -178,6 +181,30 @@ def _itemprops(root: _N, prop: str) -> list[_N]:
     return [n for n in _walk(root) if n.attrs.get("itemprop") == prop]
 
 
+def _script_text(n: _N) -> str:
+    return "".join(k for k in n.kids if isinstance(k, str))
+
+
+def _ld_posting(root: _N) -> dict[str, Any] | None:
+    """The first schema.org JobPosting in an application/ld+json block: bare object, array of nodes or @graph."""
+    for n in _walk(root):
+        if n.tag != "script" or n.attrs.get("type", "").strip().lower() != "application/ld+json":
+            continue
+        try:
+            data = json.loads(_script_text(n), strict=False)
+        except ValueError:
+            continue
+        nodes: list[Any] = data if isinstance(data, list) else [data]
+        for it in list(nodes):
+            if isinstance(it, dict) and isinstance(it.get("@graph"), list):
+                nodes += it["@graph"]
+        for it in nodes:
+            t = it.get("@type") if isinstance(it, dict) else None
+            if isinstance(t, str) and t.lower() == "jobposting":
+                return dict(it)
+    return None
+
+
 # --------------------------------------------------------------------------- shared helpers
 _OPEN_BLOCK = re.compile(r"<(script|style)(?![a-z0-9_])", re.I)
 _LOWER = {c: c + 32 for c in range(65, 91)}  # ASCII-only lowercasing keeps every index of the original string
@@ -239,6 +266,17 @@ def _page(http: Http, url: str) -> tuple[int, str | None]:
     return st, page if st == 200 and isinstance(page, str) else None
 
 
+def _ld_place(jl: Any) -> list[str]:
+    """Each jobLocation (one Place or a list) as 'City, Region, Country', blanks dropped, repeats collapsed."""
+    out: list[str] = []
+    for pl in jl if isinstance(jl, list) else [jl]:
+        a = pl.get("address") if isinstance(pl, dict) else None
+        s = _commas(*(a.get(k) for k in ("addressLocality", "addressRegion", "addressCountry"))) if isinstance(a, dict) else ""
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
 def _wrap(body: Callable[[dict[str, Any], Http], list[Job] | None]) -> Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]:
     """Turn ``body(row, http) -> jobs | None`` (None = the board failed) into a never-raising fetcher that counts."""
     def fetch(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
@@ -250,6 +288,30 @@ def _wrap(body: Callable[[dict[str, Any], Http], list[Job] | None]) -> Callable[
         return jobs or []
     fetch.__doc__ = body.__doc__
     return fetch
+
+
+def _slug_title(slug: str) -> str:
+    """A rough title from a URL slug, used only to ask the user's title gate before a detail request (never shown)."""
+    return re.sub(r"[-_]+", " ", re.sub(r"^\d+-", "", slug)).strip()
+
+
+def _locs(xml: str, outer: str) -> list[str]:
+    """The <loc> values inside <url> (or <sitemap>) blocks of a sitemap text."""
+    # One forward scan: the first <loc> after each opening <outer> tag counts. Nothing here can backtrack over an unclosed tag.
+    pat = re.compile(rf"<(/?){re.escape(outer)}>|<loc>([^<]*)</loc>")
+    out: list[str] = []
+    inside = got = False
+    for m in pat.finditer(xml[:5_000_000]):
+        if m.group(2) is None:
+            inside, got = not m.group(1), False
+        elif inside and not got:
+            got = True
+            loc = html.unescape(m.group(2)).strip()
+            if loc:
+                out.append(loc)
+                if len(out) >= 5000:
+                    break
+    return out
 
 
 # --------------------------------------------------------------------------- OpenCATS
@@ -516,9 +578,233 @@ def _teamex(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- Wantapply
+# Borrowed from freehire internal/ingest/sources/wantapply.go:14-21 (the .com host sits behind a WAF that 403s non-browser clients, so
+# the .cy mirror is read), :51-55 (sitemap https://wantapply.cy/sitemap.xml, loc host wantapply.cy), :63-68 and :280-293 (a vacancy is
+# a single-segment path; /company/*, /jobs/* and the pages create, sign-in, sign-up, privacy-policy, terms-of-service are not),
+# :206-251 (vacancy page: schema.org JobPosting ld+json; no JobPosting, or no hiringOrganization.name, drops the vacancy; the
+# company is the ad's own employer), :253-269 (body: the page's <div class="Description">, else the ld+json description),
+# :318-335 (jobLocation places "City, Region, Country" joined by "; "), :227-233 (jobLocationType TELECOMMUTE is remote),
+# :56-60 (the .cy edge rate-caps by IP: few, slow requests). Kit differences: detail requests are capped and gated by
+# the user's title test on the slug (the sitemap has no titles), vacancies past the cap are not listed, and the first 403 or
+# 429 ends the board. NOT IN REFERENCE: sitemap order, or any direct employer link (the posting is the wantapply.cy page).
+_WA_HOST = "wantapply.cy"
+_WA_RESERVED = frozenset({"create", "sign-in", "sign-up", "privacy-policy", "terms-of-service"})
+
+
+def _wantapply(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Wantapply aggregator via the wantapply.cy mirror: sitemap, then each vacancy's JobPosting (capped; token ignored)."""
+    st, xml = _get(http, f"https://{_WA_HOST}/sitemap.xml", as_json=False, headers={"Accept": "application/xml, text/xml"})
+    if st != 200 or not isinstance(xml, str):
+        return None
+    slugs: list[tuple[str, str]] = []
+    for loc in _locs(xml, "url"):
+        try:
+            u = urlsplit(loc)
+        except ValueError:
+            u = None
+        seg = u.path.strip("/") if u else ""
+        if u and u.scheme == "https" and (u.hostname or "").lower() == _WA_HOST and seg and "/" not in seg and seg not in _WA_RESERVED:
+            slugs.append((seg, f"https://{_WA_HOST}{u.path}"))
+    jobs: list[Job] = []
+    details = 0
+    for seg, url in slugs:
+        if details >= DETAIL_CAP:
+            break
+        if not _title_ok(row, _slug_title(seg)):
+            continue
+        details += 1
+        st, det = _page(http, url)
+        if st in (403, 429):
+            break  # throttled: stop asking
+        p = _ld_posting(_dom(det)) if det is not None else None
+        org = p.get("hiringOrganization") if p else None
+        company = str(org.get("name") or "").strip() if isinstance(org, dict) else ""
+        title = str((p or {}).get("title") or "").strip()
+        if not p or not company or not title:
+            continue
+        root = _dom(det or "")
+        rich = _by_class(root, "Description", "div")
+        desc = _node_text(rich) if rich is not None else ""
+        place = "; ".join(_ld_place(p.get("jobLocation")))
+        remote = str(p.get("jobLocationType") or "").upper() == "TELECOMMUTE"
+        j = _job(row, "wantapply", title=title, url=url, location=place, posted=_iso_date(p.get("datePosted")),
+                 description=desc or _body(p.get("description")), remote=True if remote else _remote_from(place),
+                 extra={"slug": seg})
+        j["company"] = company
+        jobs.append(j)
+    return jobs
+
+
+# --------------------------------------------------------------------------- werecruit
+# Borrowed from freehire internal/ingest/sources/werecruit.go:39 (https://careers.werecruit.io), :64 and :79-85 (board is
+# "<locale>/<tenant>", both required: a tenant answers a locale it is not configured for with an empty listing), :44 and :90-101 (the
+# listing page assigns window.allOffers = [...], the tenant's whole list; a page without the assignment is an empty listing, not an
+# error), :48-57 (Id, TitleTranslated, Url, Address_City, Address_Region, Address_State = a two-letter COUNTRY code,
+# TimeTranslated, PublicationStartDate), :106-128 (a posting without Id is skipped; its own page carries the body in
+# <div class="description">; location = city + region), :133-142 (Full time / Part time). Kit differences: detail pages are
+# capped and gated by title_ok, a posting past the cap keeps its listing fields without a description, and the posting link
+# must stay on careers.werecruit.io.
+_WR_BOARD = re.compile(r"([A-Za-z]{2}(?:[-_][A-Za-z]{2})?)/([A-Za-z0-9_.-]{1,80})")
+_WR_OFFERS = re.compile(r"window\.allOffers\s*=\s*")
+
+
+def _werecruit(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """werecruit career site (token locale/tenant): the embedded offer list, then a capped detail page per offer."""
+    m = _WR_BOARD.fullmatch(str(row.get("token") or "").strip())
+    if not m:
+        return None
+    _st, page = _page(http, f"https://careers.werecruit.io/{m.group(1)}/{quote(m.group(2), safe='')}")
+    if page is None:
+        return None
+    mark = _WR_OFFERS.search(page)
+    if not mark:
+        return []  # a locale the tenant does not serve: empty, not an error (:87-94; AGENTS.md:493-494)
+    try:
+        offers, _end = json.JSONDecoder().raw_decode(page, mark.end())
+    except ValueError:
+        return None
+    if not isinstance(offers, list):
+        return None
+    jobs: list[Job] = []
+    details = 0
+    for o in offers[:_LIST_CAP]:
+        if not isinstance(o, dict) or not str(o.get("Id") or ""):
+            continue
+        url, title = _https(o.get("Url"), "careers.werecruit.io"), str(o.get("TitleTranslated") or "").strip()
+        if not url or not title:
+            continue
+        desc = ""
+        if details < DETAIL_CAP and _title_ok(row, title):
+            details += 1
+            _s, det = _page(http, url)
+            rich = _by_class(_dom(det), "description", "div") if det is not None else None
+            desc = _node_text(rich) if rich is not None else ""
+        place = _commas(o.get("Address_City"), o.get("Address_Region"))
+        sched = str(o.get("TimeTranslated") or "").strip().lower().replace("-", " ")
+        jobs.append(_job(row, "werecruit", title=title, url=url, location=place, posted=_iso_date(o.get("PublicationStartDate")),
+                         description=desc, remote=_remote_from(place),
+                         extra={"job_id": str(o["Id"]), "country_code": str(o.get("Address_State") or ""),
+                                "employment_type": {"full time": "full_time", "part time": "part_time"}.get(sched, "")}))
+    return jobs
+
+
+# --------------------------------------------------------------------------- Workstream
+# Borrowed from freehire internal/ingest/sources/workstream.go:75,256 (GET https://www.workstream.us/j/<board>/positions; the board is
+# the eight hex characters of /j/<board>), :106,:213-238 (the page states its own positions listing in "var searchBaseUrl = '...'";
+# a single-brand employer is redirected to a brand root, so the stated URL is fetched when it differs; no such variable = not a
+# career site), :109,:246-252 (var totalPages = N), :261-267 (later pages: the page query parameter), :90-101 (posting id: the
+# path /j/<hex8>/<brand>/<store>/<slug>-<hex8>), :332-382 (cards: class position-card; the first <a> with a posting id gives the
+# id and the title; .position-address the street address; .tag the schedule, read only when exactly one; the pay line is the text next
+# to the img data-icon="rate-of-pay"), :384-393 (canonical URL: path only, no ?locale), :324-330 (body: .position-rich-text-content; no
+# body = skip the posting), :313-319 (the pay line is appended to the body as "Pay: ..."), :290-304 (company = the employer account
+# the board names; no posted date), :419-428 (Full-time / Part-time). The origin meters requests per IP and 410 means a retired
+# employer (:51-54). Kit differences: at most MAX_PAGES listing pages and WORKSTREAM_DETAIL_CAP posting pages (title_ok gated),
+# a posting past the cap keeps its card fields, and the first 403 or 429 ends the board.
+WORKSTREAM_DETAIL_CAP = 15
+_WS_BASE = "https://www.workstream.us"
+_WS_POST = re.compile(r"^/j/[0-9a-f]{8}/[^/]+/[^/]+/[^/]+-([0-9a-f]{8})$")
+_WS_SEARCH = re.compile(r"var searchBaseUrl = '([^']+)'")
+_WS_PAGES = re.compile(r"var totalPages = (\d+)")
+
+
+def _ws_scripts(root: _N) -> str:
+    return "\n".join(_script_text(n) for n in _walk(root) if n.tag == "script")
+
+
+def _ws_cards(root: _N) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for card in _walk(root):
+        if "position-card" not in _classes(card):
+            continue
+        c = {"id": "", "url": "", "title": "", "location": "", "pay": "", "type": ""}
+        tags: list[str] = []
+        for n in _walk(card):
+            if n.tag == "a" and not c["id"]:
+                href = n.attrs.get("href", "")
+                try:
+                    path = urlsplit(href).path
+                except ValueError:
+                    continue
+                pm = _WS_POST.match(path)
+                if pm:
+                    c["id"], c["url"], c["title"] = pm.group(1), _WS_BASE + path, _inline(n)
+            elif "position-address" in _classes(n):
+                c["location"] = _inline(n)
+            elif "tag" in _classes(n):
+                tags.append(_inline(n))
+            elif n.tag == "img" and n.attrs.get("data-icon") == "rate-of-pay":
+                c["pay"] = _inline(n.parent)
+        if c["id"] and c["title"]:
+            c["type"] = tags[0] if len(tags) == 1 else ""
+            out.append(c)
+    return out
+
+
+def _workstream(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Workstream hourly/frontline ATS (token = employer id): positions listing pages, then capped posting pages."""
+    board = str(row.get("token") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{8}", board):
+        return None
+    asked = f"{_WS_BASE}/j/{board}/positions"
+    st, page = _page(http, asked)
+    if page is None:
+        return None
+    root = _dom(page)
+    scripts = _ws_scripts(root)
+    sm = _WS_SEARCH.search(scripts)
+    if not sm:
+        return None  # not a career site
+    base = urljoin(_WS_BASE + "/", sm.group(1))
+    if _https(base, "www.workstream.us") != base:
+        return None
+    if base != asked:
+        st, page = _page(http, base)
+        if page is None:
+            return None
+        root = _dom(page)
+        scripts = _ws_scripts(root)
+    pm = _WS_PAGES.search(scripts)
+    pages = min(int(pm.group(1)), MAX_PAGES) if pm and 1 <= int(pm.group(1)) <= 200 else MAX_PAGES
+    cards: dict[str, dict[str, str]] = {}
+    for n in range(1, pages + 1):
+        if n > 1:
+            u = urlsplit(base)
+            q = [(k, v) for k, v in parse_qsl(u.query) if k != "page"] + [("page", str(n))]
+            st, page = _page(http, u._replace(query=urlencode(q)).geturl())
+            if page is None:
+                break
+            root = _dom(page)
+        found = _ws_cards(root)
+        if not found:
+            break
+        for c in found:
+            cards.setdefault(c["id"], c)
+    jobs: list[Job] = []
+    details = 0
+    stop = False
+    for c in list(cards.values())[:_LIST_CAP]:
+        desc = ""
+        if not stop and details < WORKSTREAM_DETAIL_CAP and _title_ok(row, c["title"]):
+            details += 1
+            st, det = _page(http, c["url"])
+            stop = st in (403, 429)
+            rich = _by_class(_dom(det), "position-rich-text-content") if det is not None else None
+            desc = _node_text(rich) if rich is not None else ""
+            if desc and c["pay"]:
+                desc += "\n\nPay: " + c["pay"]
+        emp = {"Full-time": "full_time", "Part-time": "part_time"}.get(c["type"], "")
+        jobs.append(_job(row, "workstream", title=c["title"], url=c["url"], location=c["location"], description=desc,
+                         remote=_remote_from(c["location"]), extra={"posting_id": c["id"], "employment_type": emp, "pay": c["pay"]}))
+    return jobs
+
+
 ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
     "opencats": _wrap(_opencats),
     "odoo": _wrap(_odoo),
     "recruitingsolutions": _wrap(_recruitingsolutions),
     "teamex": _wrap(_teamex),
+    "wantapply": _wrap(_wantapply),
+    "werecruit": _wrap(_werecruit),
+    "workstream": _wrap(_workstream),
 }
