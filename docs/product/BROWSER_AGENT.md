@@ -122,7 +122,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Final submit:**
   - The tool runs `check_submit` itself and records `submit_attempted` first.
   - It clicks only on `submit`. An `ask` becomes a `submit` once the user clicks Send on Needs you.
-  - What counts as the final submit (`safety.control_kind`): any button that submits its form (type submit or image, or a `<button>` with no type) unless its name is a step ("Next", "Save and continue"), so a name in another language ("Bewerbung absenden") or one we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named "Submit"; and "Apply" / "Send" on a button once the page holds an answer. An answer is a typed value, a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too, and a button in a shadow root sits in the `<form>` around its host.
+  - What counts as the final submit (`safety.control_kind`): any button that can submit its form itself (type submit or image, or a `<button>` with no type, that has a form owner) unless its name is a step ("Next", "Save and continue") or it is a pressed-or-not toggle (`aria-pressed`, Ashby's Yes / No), so a name we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named with the whole word "Submit" ("Submitted applications" is a tab), or "Send application" once the page holds an answer; and "Apply" / "Send" (or the common EU verbs: absenden, envoyer, postuler, enviar, verzenden...) on a button in a form or once the page holds an answer, inside the `<form>` around a shadow root's host too. An answer is a typed value, a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too; a box, option or switch the page already held when the first look read it (a cookie switch) is not one.
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the tool turns on.
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
@@ -180,6 +180,7 @@ off the page until it asks something, and that waiting frame is no stop.
 Once a page shows a CAPTCHA, every action but `look`, `back`, `open` and `close` is refused (`needs_you`, reason
 `captcha`), and nothing inside a CAPTCHA's own frame is ever clicked, typed or keyed: the cloud browser never ticks
 "I'm not a robot" itself.
+Cloudflare Turnstile is told by its host (`challenges.cloudflare.com`), not the word: `jobs.ashbyhq.com/turnstile` is an employer.
 
 **Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
 the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.
@@ -241,6 +242,8 @@ form; the test fails when the wait is removed.
 - **Workday pages:** `form_step` (for example `{current: 2, total: 7}`) from Workday's progress bar. Workday ignores
   values set by a script, so short answers in a Workday field are typed as real keys and the field is then left,
   which is when Workday saves and checks it. Long answers (over 200 characters) are filled.
+- **Workday's sign-in step** (title "Sign In", or "Create Account/Sign In" as the current step) is `needs_you`
+  (`login_required`) even before a password box shows. A "Sign In" button in the header of another Workday page is not.
 - **`invalid: true`** on any field the site marks wrong or missing. Workday marks them only after Save and
   Continue; the tips say: fix them, Save again, and after 2 stuck Saves stop and record blocked.
 - **iCIMS** forms inside a frame on the company page are named iCIMS; `login.icims.com` is not. **Teamtailor** is
@@ -248,7 +251,7 @@ form; the test fails when the wait is removed.
   **SmartRecruiters** needed nothing new: its shadow-DOM fields were already read in step 2.
 - **Agencies and unknown sites:** no reference covers agency forms, so only general rules apply.
   - `application_form` says whether the page looks like the form itself (a file box, or 3 or more labelled
-    fields) or still the ad.
+    fields, not all of them dropdowns) or still the ad. A job list's filter dropdowns and links are not a form.
   - A field labelled "leave this blank" (a trap for bots) reads `leave_blank: true`, and `type`, `choose`, `tick`
     and `upload` refuse it. The label must say "this" or "the" field: "Middle name (leave blank)" is just optional.
 
@@ -272,7 +275,7 @@ each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no cli
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
 Each row also names the playbook the assistant would get (`site`: greenhouse, lever, ashby, workday...), Workday's
 page (`form_step`, like 2/7) and how many controls sit past the first read (`more_below`). "Is it the form?" is
-look's own `application_form` (a file box or 3+ labelled fields), so a lone search box is `no_form`.
+look's own `application_form` (a file box or 3+ labelled fields, not only dropdowns), so a lone search box is `no_form`.
 It needs the open internet, so run it on Railway once the switch is on, with a list of real apply links.
 
 **Send starts my assistant (built 2026-10-19).** Before this, Send / Send all on Needs you only saved the yes,
