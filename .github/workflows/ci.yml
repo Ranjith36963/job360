@@ -104,37 +104,10 @@ jobs:
     timeout-minutes: 30
     needs: [scope]
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: job360
-          POSTGRES_PASSWORD: job360dev
-          POSTGRES_DB: job360
-        options: >-
-          --health-cmd "pg_isready -U job360 -d job360"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
+    # No Postgres / Redis services (removed 2026-10-20): since pytest moved to
+    # offline-suite this job is ruff + mypy, both static, and the two idle
+    # containers cost ~20 s on every run, docs PRs included (CI audit D2).
     env:
-      # Exported so tests CAN use Postgres once the migration lands.
-      # Existing tests use SQLite via conftest.py fixtures and are unaffected
-      # by this env var being present.
-      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
-      REDIS_URL: redis://localhost:6379
       # Minimal secrets for auth tests (injected by conftest.py too, but set
       # here so any integration smoke-tests that read .env also have them).
       SESSION_SECRET: ci-test-secret-not-used-in-prod
