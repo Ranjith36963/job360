@@ -327,17 +327,41 @@ async def revoke_session(db_path: str, cookie: str, *, secret: str) -> Optional[
     return user_id
 
 
+async def revoke_agent_access(db: pg.Connection, user_id: str) -> dict[str, int]:
+    """Soft-revoke every personal token (`api_tokens`) and OAuth grant the
+    user holds, on the caller's open connection so it shares their
+    transaction. A credential change must lock the assistants out too: a
+    takeover that minted a `j360_` token or approved an OAuth client would
+    otherwise survive the user's own recovery (gap roadmap slice 2). Revoking
+    the grant kills every access and refresh token under it, because
+    `oauth_flow` checks `grant_revoked_at` on every call. The caller commits.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    tok = await db.execute(
+        "UPDATE api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+        (now, user_id),
+    )
+    grants = await db.execute(
+        "UPDATE oauth_grants SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+        (now, user_id),
+    )
+    return {"api_tokens": int(tok.rowcount or 0), "oauth_grants": int(grants.rowcount or 0)}
+
+
 async def revoke_all_for_user(db_path: str, user_id: str) -> int:
-    """Delete every session row for a user — terminating all their sessions
-    across devices. Used on password/email change (rule #26) so a session held
-    elsewhere (other device, stolen cookie) cannot survive a credential change.
+    """Delete every session row for a user and revoke every agent token and
+    OAuth grant — terminating all their access across devices and assistants.
+    Used on password/email change (rule #26) so a session held elsewhere
+    (other device, stolen cookie) or an assistant connected by whoever held
+    the old credential cannot survive a credential change.
     Returns the number of sessions removed.
     """
     async with open_db(db_path) as db:
         cur = await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        agents = await revoke_agent_access(db, user_id)
         await db.commit()
         get_audit_logger().info(
             "sessions_revoked_all",
-            extra={"event": "sessions_revoked_all", "user_id": user_id, "count": cur.rowcount},
+            extra={"event": "sessions_revoked_all", "user_id": user_id, "count": cur.rowcount, **agents},
         )
         return cast(int, cur.rowcount)
