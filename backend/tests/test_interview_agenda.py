@@ -17,8 +17,6 @@ from httpx import ASGITransport, AsyncClient
 
 from src.core import settings
 
-pytest.importorskip("mcp")
-
 _AD = {
     "title": "Data Engineer", "company": "Northwind", "location": "London", "country": "GB", "remote": False,
     "apply_url": "https://northwind.example/careers/7", "description": "Build the pipelines.",
