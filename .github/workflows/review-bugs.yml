@@ -149,16 +149,35 @@ jobs:
       # decides what "changed" means.
       - name: List changed files vs base
         if: steps.token.outputs.have == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git diff --name-only "${{ github.event.pull_request.base.sha }}...HEAD" > changed-files.txt
+          # GITHUB'S OWN PR FILE LIST AND DIFF, never `git diff <base>...HEAD`.
+          # HEAD here is refs/pull/N/merge (the PR merged into the base tip of
+          # NOW), so when the branch trails main that diff also carried main's
+          # newer commits. PR #996 (3 behind, one a Dependabot bump of
+          # claude.yml): changed-files.txt had 18-20 files to GitHub's 13, the
+          # reviewer flagged claude.yml:29, the inline post got HTTP 422 "path
+          # could not be resolved" (not in the PR diff), and no verdict landed.
+          # These are exactly the files and lines an inline comment can land on.
+          gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' > changed-files.txt
           # THE DIFF ITSELF, AS A FILE. The agent reads it with the Read tool
           # and needs no shell to see what changed: on PR #563 (run
           # 34704599005) it spent 21 of its 41 turns on denied Bash calls and
           # hit the turn cap with no verdict. A reviewer that reads files does
           # not need `git`, `cat` or `wc` — and an allowlist it cannot trip on
-          # cannot eat its budget.
-          git diff "${{ github.event.pull_request.base.sha }}...HEAD" > pr.diff
+          # cannot eat its budget. `gh pr diff` refuses a very large diff
+          # (HTTP 406); then fall back to the PR's HEAD commit, never the merge
+          # ref: `base...head` diffs from the merge base, as GitHub does.
+          if ! gh pr diff "$PR_NUMBER" > pr.diff; then
+            echo "gh pr diff failed; pr.diff built from git diff base...head instead" >> "$GITHUB_STEP_SUMMARY"
+            git diff "$BASE_SHA...$HEAD_SHA" > pr.diff
+          fi
           git show "${{ github.event.pull_request.base.sha }}:CLAUDE.md" > base-CLAUDE.md 2>/dev/null             || echo "(CLAUDE.md missing on base)" > base-CLAUDE.md
           n=$(wc -l < changed-files.txt | tr -d ' ')
           echo "### reviewer-bugs: $n changed file(s)" >> "$GITHUB_STEP_SUMMARY"
@@ -254,10 +273,16 @@ jobs:
             Bash call is ever denied, do not retry it in another form — with
             ONE exception, the verdict post (see "If posting fails" below).
             1. Read `changed-files.txt` in the repo root — the exact set of
-               files this PR changed versus its base — and `pr.diff`, the full
-               unified diff against the base. Review ONLY those files (and, as
-               needed, the code they call, to understand context), opening
-               them with the Read tool.
+               files this PR changed versus its base, from GitHub's own PR
+               file list — and `pr.diff`, GitHub's own diff of this PR. Review
+               ONLY those files (and, as needed, the code they call, to
+               understand context), opening them with the Read tool.
+               A FINDING MUST BE ON A LINE THAT APPEARS IN `pr.diff` (an added
+               or context line inside one of its hunks, in a file listed in
+               `changed-files.txt`). Code outside the diff — other files, or
+               lines of a changed file outside its hunks — is context only and
+               never a finding, even if it looks wrong: GitHub rejects an
+               inline comment there (HTTP 422).
             2. For each candidate bug, VERIFY it against the real code — open
                the file, confirm the line, trace the path. Do not report
                speculation.
@@ -315,11 +340,27 @@ jobs:
             head SHA with it.
 
             ### If posting fails
-            If a verdict post (a finding or the no-bugs comment) is denied or
-            errors, run the SAME command again, unchanged, exactly ONCE. If it
-            still fails, do not try any other form: end your turn with the
-            full verdict (every finding as you would have posted it, or the
-            no-bugs line) as your final message, so the run log shows it.
+            If an inline finding post fails with HTTP 422 (for example "path
+            could not be resolved" or "line could not be resolved"), do NOT
+            rerun it: the line is not in this PR's diff. Re-check it against
+            `pr.diff`. If it is outside the diff, it is not a finding — drop
+            it. If it IS in the diff but still cannot be placed inline, post
+            it instead as ONE plain PR comment, as this ONE line:
+
+              gh pr comment ${{ github.event.pull_request.number }} --body "[reviewer-bugs][P2] <the same one-line body, with file:line> (head ${{ github.event.pull_request.head.sha }})"
+
+            using the finding's own tag ([P0], [P1] or [P2]), no double
+            quote, backtick, `$` or backslash in the body, and the `(head ...)`
+            suffix exactly: the gate counts that comment as a finding of that
+            severity. If dropping leaves you with no finding at all, post the
+            single no-bugs comment above instead.
+
+            If any other verdict post (a finding or the no-bugs comment) is
+            denied or errors, run the SAME command again, unchanged, exactly
+            ONCE. If it still fails, do not try any other form: end your turn
+            with the full verdict (every finding as you would have posted it,
+            or the no-bugs line) as your final message, so the run log shows
+            it.
 
             POST YOUR VERDICT AS THE LAST THING YOU DO, THEN STOP. Whether it is
             the review comments or the single no-bugs comment, post it and end
@@ -421,9 +462,22 @@ jobs:
               --jq "[.[] | select(.original_commit_id == \"$HEAD_SHA\" and .user.login == \"github-actions[bot]\" and (.body | startswith(\"$1\")))] | length" \
               | awk '{s+=$1} END {print s+0}'
           }
-          p0=$(count_tag "[reviewer-bugs][P0]")
-          p1=$(count_tag "[reviewer-bugs][P1]")
-          p2=$(count_tag "[reviewer-bugs][P2]")
+          # A finding that could not be placed inline (HTTP 422) is posted as a
+          # plain PR comment instead; it counts at its severity only when the
+          # bot wrote it and it carries THIS head's `(head <sha>)` suffix, the
+          # same anchor the no-bugs comment uses. So a P0/P1 given that way
+          # still fails the check, and a P2 is still a recorded verdict.
+          count_plain() {
+            gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+              --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$1\")) and (.body | contains(\"(head $HEAD_SHA)\")))] | length" \
+              | awk '{s+=$1} END {print s+0}'
+          }
+          # One plain assignment per call, so `set -e` + pipefail still fail
+          # the step on a gh error (a `$(( $(..) ))` hides that status).
+          p0i=$(count_tag "[reviewer-bugs][P0]"); p0c=$(count_plain "[reviewer-bugs][P0]")
+          p1i=$(count_tag "[reviewer-bugs][P1]"); p1c=$(count_plain "[reviewer-bugs][P1]")
+          p2i=$(count_tag "[reviewer-bugs][P2]"); p2c=$(count_plain "[reviewer-bugs][P2]")
+          p0=$((p0i + p0c)); p1=$((p1i + p1c)); p2=$((p2i + p2c))
           # The no-bugs verdict is a plain issue comment, not SHA-anchored by
           # GitHub — so the prompt makes the agent write `(head <sha>)` into
           # it, and only a bot comment carrying THIS head's SHA counts.
@@ -449,7 +503,7 @@ jobs:
             exit 1
           fi
           {
-            echo "### reviewer-bugs: P0=$p0 P1=$p1 P2=$p2 (counted from review comments CREATED on head $HEAD_SHA — not a self-reported file)"
+            echo "### reviewer-bugs: P0=$p0 P1=$p1 P2=$p2 (inline review comments CREATED on head $HEAD_SHA: $p0i/$p1i/$p2i; plain PR comments tagged (head $HEAD_SHA): $p0c/$p1c/$p2c — not a self-reported file)"
             echo "P0/P1 fail this check. P2 alone passes here but is still posted as an open"
             echo "review thread — the merge cage's REVIEW gate requires it resolved regardless."
           } >> "$GITHUB_STEP_SUMMARY"
