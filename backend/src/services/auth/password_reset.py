@@ -196,10 +196,7 @@ async def confirm_password_reset(
         )
         # And every assistant: a takeover's `j360_` token or OAuth grant must
         # not outlive the owner's own recovery (gap roadmap slice 2).
-        agents = await revoke_agent_access(db, row["user_id"])
+        await revoke_agent_access(db, row["user_id"])
         await db.commit()
-        logger.info(
-            "password reset confirm: ok user=%s api_tokens_revoked=%d oauth_grants_revoked=%d",
-            row["user_id"], agents["api_tokens"], agents["oauth_grants"],
-        )
+        logger.info("password reset confirm: ok user=%s", row["user_id"])
         return cast(Optional[str], row["user_id"])
