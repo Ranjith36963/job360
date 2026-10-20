@@ -2172,6 +2172,17 @@
           "auto_grant_count": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "auto_grant_scope": {
+            "$ref": "#/components/schemas/GrantScopeOut",
+            "default": {
+              "queue": {
+                "count": 0,
+                "hosts": [],
+                "no_host": 0
+              },
+              "unscoped": false
+            }
+          },
           "auto_grant_until": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -4989,6 +5000,61 @@
           "grants"
         ],
         "title": "GrantListResponse",
+        "type": "object"
+      },
+      "GrantScopeCount": {
+        "description": "How many applications, their distinct form hosts, and how many have no host yet.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "hosts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Hosts",
+            "type": "array"
+          },
+          "no_host": {
+            "default": 0,
+            "title": "No Host",
+            "type": "integer"
+          }
+        },
+        "title": "GrantScopeCount",
+        "type": "object"
+      },
+      "GrantScopeOut": {
+        "description": "Gap roadmap slice 30 - what an \"Auto for a while\" grant covers. ``queue``: what a grant\nconfirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the\ngrant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from\nbefore snapshots, covering every application until it ends.",
+        "properties": {
+          "granted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GrantScopeCount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue": {
+            "$ref": "#/components/schemas/GrantScopeCount",
+            "default": {
+              "count": 0,
+              "hosts": [],
+              "no_host": 0
+            }
+          },
+          "unscoped": {
+            "default": false,
+            "title": "Unscoped",
+            "type": "boolean"
+          }
+        },
+        "title": "GrantScopeOut",
         "type": "object"
       },
       "HTTPValidationError": {
