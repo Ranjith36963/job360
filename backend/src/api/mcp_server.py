@@ -74,7 +74,7 @@ DAILY_CHECK_HINT = (
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
 TOOLS_REV = 10
-TOOLS_REV_FOR_HASH = "f98d978729e1"
+TOOLS_REV_FOR_HASH = "65a436d682c8"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
