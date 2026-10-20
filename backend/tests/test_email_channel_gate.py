@@ -221,7 +221,6 @@ async def test_email_drafted_stores_recipient_subject_and_versions_never_the_bod
 async def test_an_email_application_without_a_draft_stops_on_the_route_and_the_tool(
     authenticated_async_context, fixture_user_id
 ):
-    pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as client:
@@ -335,7 +334,6 @@ async def _receipt(client, app_id: int, **body: Any) -> dict[str, Any]:
 async def test_the_receipt_takes_the_recipient_and_files_from_the_draft(
     authenticated_async_context, fixture_user_id, log_capture
 ):
-    pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as client:
@@ -385,7 +383,6 @@ async def test_the_receipt_takes_the_recipient_and_files_from_the_draft(
 async def test_a_given_recipient_that_differs_warns_and_mcp_takes_the_new_params(
     authenticated_async_context, fixture_user_id
 ):
-    pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as client:

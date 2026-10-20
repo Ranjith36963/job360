@@ -326,7 +326,7 @@ def _same_answer(a: dict[str, Any], text: Any) -> bool:
     """``a`` (a stored form answer) says ``text``. A G023-hashed answer (``kit.redacted_answer``) is
     compared by the sha256 of the text, never by a value it no longer holds."""
     if isinstance(a.get("value_sha256"), str):
-        return kit.sha256_text(str(text or "").strip()) == a["value_sha256"]
+        return bool(kit.sha256_text(str(text or "").strip()) == a["value_sha256"])
     return _norm(a["answer"]) == _norm(text)
 
 
