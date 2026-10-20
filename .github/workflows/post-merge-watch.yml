@@ -558,6 +558,13 @@ jobs:
       # ── THE HONESTY RULE — always, win or lose ────────────────────────────
       - name: "HONESTY — what this run watched, what it could NOT, and the verdict"
         if: always()
+        # Dispatch inputs reach the script through the ENVIRONMENT, never pasted into
+        # it (reviewer-security P2 on #728): a `${{ inputs.* }}` inside `run:` is
+        # code, so a crafted value such as `$(cmd)` would run in this shell.
+        env:
+          IN_SETTLE_MINUTES: ${{ inputs.settle_minutes || '5' }}
+          IN_SENTRY_MIN_EVENTS: ${{ inputs.sentry_min_events || '5' }}
+          IN_SENTRY_NOISE_ESCALATE: ${{ inputs.sentry_noise_escalate_events || '20' }}
         run: |
           {
             echo "## Post-merge watch — run summary"
@@ -568,9 +575,9 @@ jobs:
             echo "### Watched"
             echo "- \`readyz\` (${{ needs.policy.outputs.readyz_url }}) — every ${{ needs.policy.outputs.poll_seconds }}s for ${{ needs.policy.outputs.watch_minutes }} min; trips at ${{ needs.policy.outputs.readyz_non_200 }} consecutive non-200"
             echo "- \`frontend\` (${{ needs.policy.outputs.frontend_url }}) — same cadence; trips at ${{ needs.policy.outputs.frontend_non_200 }} consecutive non-200"
-            echo "- deploy identity — \`${{ steps.settle.outputs.deploy_state || 'not reached' }}\` (live = Railway reported THIS commit's deploy SUCCESS, then ${{ inputs.settle_minutes || '5' }} min settle; anything else = the settle was blind)"
+            echo "- deploy identity — \`${{ steps.settle.outputs.deploy_state || 'not reached' }}\` (live = Railway reported THIS commit's deploy SUCCESS, then ${IN_SETTLE_MINUTES} min settle; anything else = the settle was blind)"
             if [ "${{ steps.sentry.outputs.watched }}" = "true" ]; then
-              echo "- Sentry — new unresolved issues since the deploy that cleared the noise filter (min events ${{ inputs.sentry_min_events || '5' }} or any user; known deploy noise ignored below ${{ inputs.sentry_noise_escalate_events || '20' }} events; ignored issues are listed in Step 3's output, not hidden)"
+              echo "- Sentry — new unresolved issues since the deploy that cleared the noise filter (min events ${IN_SENTRY_MIN_EVENTS} or any user; known deploy noise ignored below ${IN_SENTRY_NOISE_ESCALATE} events; ignored issues are listed in Step 3's output, not hidden)"
             fi
             echo
             echo "### NOT watched — say it loud, never a silent skip"
