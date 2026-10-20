@@ -890,6 +890,9 @@ PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))
 USER_INFO_QUESTION_MAX_CHARS = int(os.getenv("USER_INFO_QUESTION_MAX_CHARS", "300"))
 USER_INFO_ANSWER_MAX_CHARS = int(os.getenv("USER_INFO_ANSWER_MAX_CHARS", "2000"))
 USER_INFO_ANSWERS_MAX_CHARS = int(os.getenv("USER_INFO_ANSWERS_MAX_CHARS", "120000"))
+# Gap 4 (slice 26) - saved answers grow by one or two per application, so they
+# get their own record cap; every other list keeps PROFILE_EDIT_MAX_RECORDS.
+USER_INFO_ANSWERS_MAX_RECORDS = int(os.getenv("USER_INFO_ANSWERS_MAX_RECORDS", "500"))
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL

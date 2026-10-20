@@ -575,14 +575,29 @@ save it again with source user_said. Never mark your own guess user_said. To dro
 `fields` plus the new names); rewriting `cv_data.skills` only reaches the CV's
 share and is capped per edit.
 
+ITEM OPS. On a list path an edit may carry `"op"` instead of resending the list:
+`"append"` (value = ONE item, added at the end); `"remove_at"` with `"index"` (drops
+item N of the current `fields[...]` list, counted from 0; no value); `"upsert"`
+(`user_info.answers` only: value = ONE answer record; it replaces the saved answer
+with the same `topic` and `company`, else the same question and `company`, else it is
+added). The default `"set"` = the value is the whole value. Ops run in order inside the
+same all-or-nothing call and the history keeps the resulting full list. An unknown op,
+an op on a path that is not a list, or an index out of range is refused: nothing saved.
+TWO ASSISTANTS: get_profile (and every update_profile reply) returns `profile_edit_id`,
+which moves on every saved edit. Send it back as `expected_profile_version`; if another
+write landed since, the call is refused with 409 `{"code": "stale_profile", "current":
+<id>}` and nothing is saved: re-read get_profile, redo the change on the fresh values,
+send again. Without it the last write wins. `user_info.answers` holds up to 500 records
+(USER_INFO_ANSWERS_MAX_RECORDS); every other record list holds 50.
+
 Standing instructions (`preferences.assistant_notes`) are a list of short lines,
 and a write REPLACES the list: to add a note, send the current
-`fields["preferences.assistant_notes"]` plus the new line; to remove one, send
-the list without it. Each note is one line, at most PROFILE_NOTE_MAX_CHARS
+`fields["preferences.assistant_notes"]` plus the new line (or one `"op": "append"`);
+to remove one, send the list without it (or `"op": "remove_at"`). Each note is one line, at most PROFILE_NOTE_MAX_CHARS
 characters (200 by default). Only add a note the user asked you to remember.
 
 Work history and projects are lists of records, and a write REPLACES the whole
-list (send every role, not only the new one): `cv_data.cv_positions` =
+list (send every role, not only the new one, or add one with `"op": "append"`): `cv_data.cv_positions` =
 [{"title", "company", "dates", "location", "bullets": [str]}], title or company
 required; `cv_data.cv_projects` = [{"name", "description", "technologies":
 [str], "dates"}], name required. No other keys. `dates` is "Jan 2020 –
@@ -610,7 +625,7 @@ value for every structured path - copy its shape. A refused save says
 paths to resend in ONE call - never resend only some, never drop an answer
 to make a save pass. The reply's `normalized` lists what Job360 tidied
 (a country name to its code, "hourly" to 1h). A write REPLACES the whole value: send the
-current `fields[...]` with your change. Empty ("" / null / []) means not
+current `fields[...]` with your change (one saved answer: `"op": "upsert"`, see ITEM OPS). Empty ("" / null / []) means not
 answered and is dropped; `false` is a real answer.
 `user_info.contact` = {email, phone, address_lines: [up to 3 str],
 address_city, address_postcode, address_country (ISO2), date_of_birth
