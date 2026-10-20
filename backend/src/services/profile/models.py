@@ -36,7 +36,7 @@ VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"1h", "3h", "6h", "12h", "
 # Preference fields the web preferences form does not own: written only through
 # the agent-edit overlay, carried forward by a web save, kept by a "Clear
 # preferences" (only "Clear all" resets them).
-OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset({"daily_check", "check_every"})
+OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset({"daily_check", "check_every", "linkedin_premium"})
 VALID_WORK_AUTH_STATUSES: frozenset[str] = frozenset(
     {"citizen", "permanent_resident", "visa", "needs_sponsorship"}
 )
@@ -621,6 +621,13 @@ class UserPreferences:
     # "12h" or "24h"; "" = not set = once a day. Same write/carry-forward rules as
     # `daily_check` (overlay only; kept on a "preferences" clear).
     check_every: str = ""
+    # S16 (2026-10-20) - the user's LinkedIn account tier, told to the assistant in
+    # chat: True = Premium / Sales Navigator (a connection note may run to
+    # LINKEDIN_NOTE_MAX_CHARS_PREMIUM), False = not told / assume the free limit, the
+    # safer budget (career-ops modes/contacto.md:168). Only a warn-only save check
+    # reads it; never a penalty (hard rule #29). Same write/carry-forward rules as
+    # daily_check: overlay only, kept on a "preferences" clear, reset only by "clear all".
+    linkedin_premium: bool = False
     # Owner decision 2026-10-08 — the salary the user wants, one record per
     # HIRING country: {country (ISO2), amount, currency (ISO 4217), period
     # ("year" | "month")}. A normal web-owned preference (partial-save shape like

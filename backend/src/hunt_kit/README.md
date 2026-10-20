@@ -76,6 +76,9 @@ from the first 20 ads of each board only; the rest come back undated.
 UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN,
 Jibe, Keka Hire (`keka`) and Zoho Recruit (`zohorecruit`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
 some Zoho Recruit sites list no description either, so open the link to read the ad.
+`kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), Comeet (`comeet`, `slug/companyUID`)
+and HiBob (`hibob`, the tenant of `tenant.careers.hibob.com`). These boards are unofficial public endpoints: a board that
+refuses scripts is skipped, and the first refusal ends that board.
 
 India: many Indian employers post on Keka Hire and Zoho Recruit, not on the boards above. The
 `keka` and `zohorecruit` rows in `companies.json` (`source` `commoncrawl`, `country` `IN` when most
@@ -114,7 +117,7 @@ Big-company career sites (`kit_bigco.py`): Amazon (`amazon`), Google Careers (`g
 
 Startup boards (`kit_startups.py`): Wellfound (`wellfound`, role pages; behind Cloudflare, so it often stops at its first answer), Getro VC-portfolio job networks (`getro`, career-ops' list), Built In (`builtin`, US tech jobs, only with US in your countries), Welcome to the Jungle (`wttj`, its public search index, narrowed to your countries) and Work at a Startup (`workatastartup`: it sends a request only if you put your own search key in `WAAS_ALGOLIA_KEY`; otherwise it sends nothing and prints one warning). Low volume (3 searches, 2 pages per site, 3 seconds apart); each site stops at its first refusal or challenge page.
 
-South-East Asia (`kit_asia.py`; unofficial site endpoints, so a site that refuses scripts is skipped): Glints (`glints`: ID SG MY VN, searched by title) and Kalibrr (`kalibrr`: PH ID, searched by title, full posting text included). At most 24 requests per site per run; the first refusal or CAPTCHA page ends that site.
+South-East Asia (`kit_asia.py`; unofficial site endpoints, so a site that refuses scripts is skipped): Glints (`glints`: ID SG MY VN, searched by title), Kalibrr (`kalibrr`: PH ID, searched by title, full posting text included), Tech in Asia (`techinasia`: ID SG MY VN PH JP, one index read with search keys taken fresh from the site's own page, your titles matched here) and ITviec (`itviec`: VN, IT jobs, keyword listing pages then up to 12 posting pages at one request a second). At most 24 requests per site per run; the first refusal or CAPTCHA page ends that site.
 
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
@@ -245,7 +248,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py` and `kit_ats_extra.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
