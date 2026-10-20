@@ -148,7 +148,8 @@ HN_SAMPLES = [
      "https://news.ycombinator.com/item?id=222"),
     ("PrairieLearn (Remote US) — Full-Stack Software Engineer — TypeScript &#x2F; Postgres<p>"
      "Visa sponsorship available. <a href=\"https:&#x2F;&#x2F;www.prairielearn.com\">site</a>",
-     "PrairieLearn", "Full-Stack Software Engineer", True, True, "https://www.prairielearn.com"),
+     # 2026-10-20 smoke test: a homepage link is not the posting, so the HN comment is the ad
+     "PrairieLearn", "Full-Stack Software Engineer", True, True, "https://news.ycombinator.com/item?id=113"),
 ]
 
 
@@ -446,3 +447,15 @@ def test_national_services_run_everywhere_for_visa_onsite():
     assert http.calls == []
     kf.fetch_jobtech(["engineer"], http, _stats(), days=30, countries=["IN", "*"])
     assert http.calls and "jobtechdev.se" in http.calls[0]["url"]
+
+
+
+def test_hn_keeps_a_job_link_and_files_a_homepage_under_company_site():
+    # Owner's PC smoke test 2026-10-20: Mastra linked its GitHub repo, Metcor its homepage.
+    raw = ('Mastra | AI Engineer | Remote <a href="https:&#x2F;&#x2F;github.com&#x2F;mastra-ai">repo</a> '
+           'apply <a href="https:&#x2F;&#x2F;jobs.ashbyhq.com&#x2F;mastra&#x2F;123">here</a>')
+    job = kf.parse_hn_comment(raw, 7)
+    assert job is not None and job["url"] == "https://jobs.ashbyhq.com/mastra/123" and "company_site" not in job["extra"]
+    home = kf.parse_hn_comment('Metcor | Data Engineer | London <a href="https:&#x2F;&#x2F;metcor.co.uk">site</a>', 8)
+    assert home is not None and home["url"] == "https://news.ycombinator.com/item?id=8"
+    assert home["extra"]["company_site"] == "https://metcor.co.uk"
