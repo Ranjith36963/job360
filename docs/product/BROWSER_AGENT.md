@@ -173,7 +173,12 @@ form; the test fails when the wait is removed.
 - **Hidden checkboxes and radios:** custom-styled ones (the real input is invisible, the label is the card the user
   clicks) are read and ticked through their label.
 - **Shadow DOM:** inputs inside open shadow roots are read (SmartRecruiters builds its whole form this way).
-- **Frames:** invisible frames are skipped, at most 20 are read, and each read has 3 seconds.
+- **Frames:** invisible frames are skipped, at most 20 are read, and each read has 3 seconds. Inside a frame,
+  "nearest the screen" means nearest the part the user sees after the OUTER page scrolls, so a tall auto-sized
+  frame (it never scrolls itself) shows its later questions as you scroll; its submit button is always listed.
+- **One ref, one control:** a form section the site copies copies the ref too; each read gives the copy its own
+  ref, and an action on a ref that matches two controls is refused (`ref_not_found`: look again), never sent to
+  the first one.
 - **Untrusted text:** the page text sits inside a marker with a random code per read. A site that plants a fake end
   marker gets it removed, so its text cannot pose as instructions.
 
@@ -188,7 +193,9 @@ form; the test fails when the wait is removed.
   (`aria-controls`); two open lists with no owner named are refused (`two_lists_open`), never guessed between.
   A contenteditable box keeps what was typed: the React value setter is used only on inputs and text boxes.
 - **`upload`** also works from an "Attach" button by catching the file picker. `upload_confirmed` says whether the
-  file name shows on the page, because Greenhouse can take the file and still show an error (ApplYourself).
+  site newly drew the file name on the page (not just the file box holding it, and not a name already on the page),
+  because Greenhouse can take the file and still show an error (ApplYourself). A new "failed / error / try again /
+  too large / not supported" line next to the field makes it false and comes back as `upload_error` (page text).
 - **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
   `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); line breaks go
   only into a multi-line box, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
@@ -263,7 +270,8 @@ sends every job still waiting on your yes.
 - **Safety:** set, changed and fired only from the website (an assistant's token gets 403, and no MCP tool reaches
   it); the token is encrypted (table `assistant_triggers`, migration 0066) and never shown again; https only,
   screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
-  yes stays saved.
+  yes stays saved. An unexpected error while saving answers a plain 500 with the token already cleared from the
+  request, and Sentry scrubs every depth of a frame's variables, so the token cannot reach an error report.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
 

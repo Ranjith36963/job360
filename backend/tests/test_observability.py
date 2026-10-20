@@ -105,6 +105,13 @@ def test_sentry_with_dsn_in_prod_calls_init(monkeypatch):
     assert calls[0]["dsn"] == fake_dsn
     assert calls[0]["environment"] == "production"
     assert calls[0]["max_request_body_size"] == "never"
+    # Frame locals are scrubbed at every depth: a token inside a dict local (headers, a decrypted state)
+    # is caught too, not only a local NAMED token.
+    event = {"exception": {"values": [{"stacktrace": {"frames": [{"vars": {
+        "headers": {"Authorization": "Bearer sk-ant-oat01-x"}, "state": {"token": "sk-ant-oat01-x"},
+    }}]}}]}}
+    calls[0]["event_scrubber"].scrub_event(event)
+    assert "sk-ant-oat01-x" not in str(event)
 
 
 # ---------------------------------------------------------------------------

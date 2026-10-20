@@ -207,14 +207,12 @@ async def fire(db: Any, user_id: str, *, site: str, resolve: ResolveFn) -> dict[
     if not rows:
         await _remember(db, user_id, now, "nothing_approved")
         return {"fired": False, "reason": "nothing_approved"}
-    token = ""
-    if row["token_enc"]:
-        state = decrypt_state(row["token_enc"])
-        if state is None:
-            await _remember(db, user_id, now, "refused: token unreadable")
-            return {"fired": False, "reason": "token_unreadable",
-                    "detail": "The saved token can no longer be read: save the trigger again."}
-        token = str(state.get("token") or "")
+    # Only a variable NAMED token holds it: an error report scrubs that name, never a dict under another one.
+    token = _saved_token(row["token_enc"]) if row["token_enc"] else ""
+    if token is None:
+        await _remember(db, user_id, now, "refused: token unreadable")
+        return {"fired": False, "reason": "token_unreadable",
+                "detail": "The saved token can no longer be read: save the trigger again."}
     host = screen_url(row["url"]).host
     try:
         status, data = await _post(row["url"], headers_for(host, token), {"text": message(rows, site)}, resolve)
@@ -237,6 +235,12 @@ async def fire(db: Any, user_id: str, *, site: str, resolve: ResolveFn) -> dict[
         "fired": True, "count": len(rows), "application_ids": [int(r["id"]) for r in rows],
         "session_url": session_url if isinstance(session_url, str) and session_url.startswith("https://") else None,
     }
+
+
+def _saved_token(token_enc: str) -> Optional[str]:
+    """The saved token, or None when it can no longer be read. Only a variable named token holds it."""
+    token = decrypt_state(token_enc)
+    return None if token is None else str(token.get("token") or "")
 
 
 async def _remember(db: Any, user_id: str, when: datetime, result: str) -> None:

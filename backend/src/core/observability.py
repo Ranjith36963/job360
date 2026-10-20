@@ -104,6 +104,7 @@ def init_sentry(*, component: str = "api") -> bool:
 
     import sentry_sdk
     from sentry_sdk.integrations.logging import ignore_logger
+    from sentry_sdk.scrubber import EventScrubber
 
     sentry_sdk.init(
         dsn=dsn,
@@ -117,6 +118,9 @@ def init_sentry(*, component: str = "api") -> bool:
         # Never read a request body before the handler runs (bodies are
         # redacted anyway; this also stops the SDK buffering large uploads).
         max_request_body_size="never",
+        # Frame locals are scrubbed at every depth, not only top-level names: a token inside a dict local
+        # (request headers, a decrypted sign-in state, FastAPI's parsed body) is caught too.
+        event_scrubber=EventScrubber(recursive=True),
     )
     sentry_sdk.set_tag("component", component)
     # The positive half. Without it, "Sentry is quiet" is unfalsifiable: you

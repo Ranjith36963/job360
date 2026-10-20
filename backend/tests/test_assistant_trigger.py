@@ -229,3 +229,91 @@ async def test_a_list_too_long_for_one_start_is_refused_not_cut(authenticated_as
             out = (await client.post("/api/assistant-trigger/fire")).json()
             assert not mocked.requests   # nothing was sent
         assert out["fired"] is False and out["reason"] == "too_many"
+
+
+def _reported(exc: BaseException) -> str:
+    """What Sentry would send for this exception (frame locals included), after its default scrubber."""
+    from sentry_sdk.scrubber import EventScrubber
+    from sentry_sdk.utils import event_from_exception
+
+    event, _ = event_from_exception(exc)
+    EventScrubber().scrub_event(event)
+    return json.dumps(event, default=str)
+
+
+def _locals_holding_token(exc: BaseException) -> list[str]:
+    """Every frame variable of the error (and the errors it chains) that holds the token under a name the
+    scrubber does not know. Read off the frames, because a report keeps only a frame's first 10 variables."""
+    from sentry_sdk.scrubber import DEFAULT_DENYLIST
+
+    found: list[str] = []
+    err: BaseException | None = exc
+    while err is not None:
+        tb = err.__traceback__
+        while tb is not None:
+            found += [f"{tb.tb_frame.f_code.co_name}.{k}" for k, v in tb.tb_frame.f_locals.items()
+                      if k.lower() not in DEFAULT_DENYLIST and TOKEN in repr(v)]
+            tb = tb.tb_next
+        err = err.__cause__ if err.__suppress_context__ else err.__context__
+    return found
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_save_error_keeps_the_token_out_of_the_answer_logs_and_error_report(
+    monkeypatch, caplog
+):
+    import contextlib
+    import logging
+
+    from fastapi import HTTPException
+
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import assistant_trigger as route
+    from src.services.browser_agent import trigger
+
+    @contextlib.asynccontextmanager
+    async def no_db():
+        yield None
+
+    async def save(db, user_id, url, token):   # a database error that echoes its parameters
+        raise RuntimeError(f"insert failed with parameters ({user_id}, {url}, {token})")
+
+    monkeypatch.setattr(route, "_db", no_db)
+    monkeypatch.setattr(trigger, "save", save)
+    body = route.TriggerIn(url=FIRE, token=TOKEN)
+    with caplog.at_level(logging.DEBUG), pytest.raises(Exception) as exc:  # noqa: PT011 - any escape is checked
+        await route.put_trigger(body, CurrentUser(id="u1", email="u1@example.com"))
+    assert TOKEN not in _reported(exc.value)   # not in a local, not in a chained message
+    assert _locals_holding_token(exc.value) == []
+    assert isinstance(exc.value, HTTPException) and exc.value.status_code == 500
+    assert TOKEN not in str(exc.value.detail) and TOKEN not in caplog.text
+    assert any("not saved" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_an_error_while_firing_leaves_no_decrypted_token_dict_for_an_error_report(
+    authenticated_async_context, monkeypatch
+):
+    import contextlib
+
+    from src.api.dependencies import get_request_db
+    from src.services.browser_agent import trigger
+
+    async with authenticated_async_context() as client:
+        await _bring_approved(client)
+        await client.put("/api/assistant-trigger", json={"url": FIRE, "token": TOKEN})
+
+    def message(rows, site):
+        raise OSError("boom")
+
+    async def remember(*args):
+        raise RuntimeError("the database went away")
+
+    monkeypatch.setattr(trigger, "message", message)
+    monkeypatch.setattr(trigger, "_remember", remember)
+    async with contextlib.asynccontextmanager(get_request_db)() as db:
+        with pytest.raises(RuntimeError) as exc:
+            await trigger.fire(db, authenticated_async_context.fixture_user_id, site="https://job360.uk",
+                               resolve=None)
+    assert TOKEN not in _reported(exc.value)
+    assert _locals_holding_token(exc.value) == []   # not even past the report's 10-variable cut

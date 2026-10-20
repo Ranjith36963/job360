@@ -40,7 +40,9 @@ from src.services.browser_agent.page_js import (
     IS_WORKDAY_FIELD_JS,
     LEVER_CHECK_JS,
     NATIVE_SET_JS,
+    NEAR_TEXT_JS,
     OWN_LIST_IDS_JS,
+    PAGE_TEXT_JS,
     SHOWN_VALUE_JS,
     SNAPSHOT_JS,
     TICK_VIA_LABEL_JS,
@@ -449,13 +451,16 @@ FRAME_ELEMENT_FLOOR = 50
 FRAME_READ_TIMEOUT_S = 3.0
 
 
-async def _read_frame(frame: Any, max_elements: int, *, main: bool) -> Optional[dict[str, Any]]:
+async def _read_frame(
+    frame: Any, max_elements: int, *, main: bool, window: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
     """One frame's snapshot. A child frame that fails is skipped; the page itself gets one more try
-    and then an error, never an empty "ok" (CodeRabbit on #914)."""
+    and then an error, never an empty "ok" (CodeRabbit on #914). ``window`` is a child frame's part of
+    the screen (``_frame_window``)."""
     for attempt in range(2 if main else 1):
         try:
             return await asyncio.wait_for(
-                frame.evaluate(SNAPSHOT_JS, {"maxElements": max_elements, "maxText": MAX_TEXT}),
+                frame.evaluate(SNAPSHOT_JS, {"maxElements": max_elements, "maxText": MAX_TEXT, **(window or {})}),
                 FRAME_READ_TIMEOUT_S,
             )
         except Exception:  # noqa: BLE001, S112 - a frame that navigated, hung or is cross-process mid-read
@@ -480,14 +485,30 @@ def _wrap_untrusted(text: str) -> str:
     return f"<<page-text {nonce}>>\n{clean}\n<<end page-text {nonce}>>"
 
 
-async def _frame_shown(frame: Any) -> bool:
-    """A child frame the user cannot see (0x0, hidden) holds no form worth reading."""
+async def _frame_box(frame: Any) -> Optional[dict[str, Any]]:
+    """A child frame's box on the page's screen (Playwright: relative to the main frame's viewport)."""
     try:
         handle = await frame.frame_element()
-        box = await handle.bounding_box()
+        box: Optional[dict[str, Any]] = await handle.bounding_box()
+        return box
     except Exception:  # noqa: BLE001 - detached or cross-process mid-read
-        return False
-    return bool(box) and box["width"] > 1 and box["height"] > 1
+        return None
+
+
+async def _frame_shown(frame: Any) -> bool:
+    """A child frame the user cannot see (0x0, hidden) holds no form worth reading."""
+    return _box_shown(await _frame_box(frame))
+
+
+def _box_shown(box: Optional[dict[str, Any]]) -> bool:
+    return box is not None and box["width"] > 1 and box["height"] > 1
+
+
+def _frame_window(page: Any, box: dict[str, Any]) -> dict[str, Any]:
+    """The screen's top and bottom in the frame's own coordinates, so "nearest the screen" inside a tall
+    frame follows the OUTER page's scroll; and the frame's submit button is always kept."""
+    height = (page.viewport_size or VIEWPORT)["height"]
+    return {"vTop": -box["y"], "vBottom": height - box["y"], "keepSubmit": True}
 
 
 async def _site_warnings(page: Any, site: str) -> list[str]:
@@ -519,7 +540,8 @@ async def look(s: Session) -> dict[str, Any]:
     frames = page.frames[:MAX_FRAMES_CHECKED]
     # A page that embeds a shown frame (a Greenhouse or iCIMS form on a careers page) keeps part of
     # the budget for it: 150 links on the page itself must not crowd the form out.
-    shown = [True] + [await _frame_shown(f) for f in frames[1:]]
+    boxes = [None] + [await _frame_box(f) for f in frames[1:]]
+    shown = [True] + [_box_shown(b) for b in boxes[1:]]
     embeds = any(shown[1:])
     for i, frame in enumerate(frames):
         frame_urls.append(frame.url)
@@ -527,7 +549,8 @@ async def look(s: Session) -> dict[str, Any]:
         if read >= MAX_FRAMES or not shown[i]:
             continue
         budget = MAX_ELEMENTS - (FRAME_ELEMENT_FLOOR if embeds else 0) if i == 0 else MAX_ELEMENTS - len(elements)
-        snap = await _read_frame(frame, budget, main=i == 0)
+        box = boxes[i]
+        snap = await _read_frame(frame, budget, main=i == 0, window=_frame_window(page, box) if box else None)
         if snap is None:
             continue
         read += 1
@@ -589,13 +612,23 @@ async def _find(s: Session, ref: str) -> tuple[Any, Any]:
     if not _REF.match(ref or ""):
         raise BrowserError("refused", "bad_ref", "Use a ref from the latest look, like e12_ab3f.")
     page = _live_page(s)
+    found: list[tuple[Any, Any, int]] = []
     for frame in page.frames:
         loc = frame.locator(f'[data-j360-ref="{ref}"]')
         try:
-            if await loc.count():
-                return frame, loc.first
+            count = await loc.count()
         except Exception:  # noqa: BLE001, S112 - detached frame
             continue
+        if count:
+            found.append((frame, loc, count))
+    if len(found) == 1 and found[0][2] == 1:
+        return found[0][0], found[0][1].first
+    if found:
+        # The site copied a control since the last look: acting on "the first" could type into the wrong one.
+        raise BrowserError(
+            "refused", "ref_not_found",
+            "That ref now matches more than one control. Call look again and use a new one.",
+        )
     raise BrowserError("refused", "ref_not_found", "That ref is not on the page any more. Call look and use a new one.")
 
 
@@ -895,6 +928,7 @@ async def _act(
             "refused", "upload_needs_application", "Uploads need application_id: Job360 sends the CV saved for it."
         )
     name, data = await files(doc_kind)
+    page_before, near_before = await _upload_texts(frame, loc)
     is_file_input = (await loc.evaluate("(el) => el.tagName === 'INPUT' && el.type === 'file'"))
     with tempfile.TemporaryDirectory(prefix="j360-upload-") as tmp:
         path = os.path.join(tmp, name)
@@ -916,12 +950,31 @@ async def _act(
                 ) from None
             await chooser.set_files(path)
     await _settle(page)
+    page_after, near_after = await _upload_texts(frame, loc)
     out = await look(s)
-    # A site can take the file and still show an error (Greenhouse): believe the file name on the page.
-    out["upload_confirmed"] = name in out["text"] or any(
-        name in str(e.get("value") or "") for e in out["elements"] if e.get("type") == "file"
-    )
+    # A site can take the file into the box and still show an error (Greenhouse): believe only the file name
+    # the site newly drew on the page, and never over an error that appeared next to the field.
+    new_lines = [ln.strip() for ln in near_after.splitlines() if ln.strip() and ln.strip() not in near_before]
+    error = next((ln for ln in new_lines if _UPLOAD_ERROR.search(ln)), "")
+    shown_before = name in page_before or name in near_before
+    out["upload_confirmed"] = not error and not shown_before and (name in page_after or name in near_after)
+    if error:
+        out["upload_error"] = _wrap_untrusted(error[:200])
     return out
+
+
+_UPLOAD_ERROR = re.compile(r"failed|error|try again|too large|not supported", re.IGNORECASE)
+
+
+async def _upload_texts(frame: Any, loc: Any) -> tuple[str, str]:
+    """The field's frame text and the text of its own small box; "" for one that cannot be read."""
+    out = []
+    for target, js in ((frame, PAGE_TEXT_JS), (loc, NEAR_TEXT_JS)):
+        try:
+            out.append(str(await asyncio.wait_for(target.evaluate(js), FRAME_READ_TIMEOUT_S) or ""))
+        except Exception:  # noqa: BLE001 - re-drawn or navigated mid-read: nothing seen
+            out.append("")
+    return out[0], out[1]
 
 
 # ── The live view: the USER signs in themselves (slice 2) ─────────────────────
