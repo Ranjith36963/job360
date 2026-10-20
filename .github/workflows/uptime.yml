@@ -1,12 +1,15 @@
 name: Uptime
 
 # Free uptime monitor — no third-party account. Pings the live backend's
-# readiness probe (checks DB+Redis) on a schedule. If it's not 200, the job FAILS,
+# readiness probe (checks the DB pool) on a schedule. If it's not 200, the job FAILS,
 # and GitHub emails the repo owner (default notification on scheduled-workflow
 # failure). Scheduled workflows only run on the default branch (main).
 on:
   schedule:
-    - cron: "*/10 * * * *" # every ~10 minutes
+    # GitHub throttles this: measured 2026-10-20, runs land every 3-6 HOURS,
+    # not every 10 minutes. This is a backstop, not real uptime monitoring;
+    # an external pinger on https://job360.uk/api/readyz is the real one.
+    - cron: "*/10 * * * *"
   workflow_dispatch: {} # allow manual runs from the Actions tab
 
 # Least-privilege token: this workflow only curls a public URL, it never reads
@@ -18,24 +21,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Ping backend /api/readyz
+      # Both the railway.app hosts (is the service up?) and job360.uk, the
+      # address users actually type (are DNS, TLS and the custom domain up?).
+      # Every URL is tried before the job fails, so one red names all broken ones.
+      - name: Ping backend /api/readyz and the frontend
         run: |
-          URL="https://backend-production-80e8e.up.railway.app/api/readyz"
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$URL")
-          echo "GET $URL -> HTTP $code"
-          if [ "$code" != "200" ]; then
-            echo "::error::Backend readiness check failed (HTTP $code)"
-            exit 1
-          fi
-      - name: Ping frontend
-        run: |
-          URL="https://frontend-production-c608f.up.railway.app/"
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$URL")
-          echo "GET $URL -> HTTP $code"
-          if [ "$code" != "200" ]; then
-            echo "::error::Frontend check failed (HTTP $code)"
-            exit 1
-          fi
+          failed=0
+          for URL in \
+            "https://backend-production-80e8e.up.railway.app/api/readyz" \
+            "https://frontend-production-c608f.up.railway.app/" \
+            "https://job360.uk/api/readyz" \
+            "https://job360.uk/"; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$URL" || true)
+            echo "GET $URL -> HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::Uptime check failed: $URL (HTTP $code)"
+              failed=1
+            fi
+          done
+          exit "$failed"
 
   # ── Make this loop LOUD ───────────────────────────────────────────────────
   # A watcher nobody reads is worse than no watcher: measured 2026-07-26, every
@@ -126,7 +130,7 @@ jobs:
           severity: critical
           title: "job360 is DOWN — the uptime probe is failing"
           body: |
-            The backend readiness probe (/api/readyz, which checks DB + Redis) or
+            The backend readiness probe (/api/readyz, which checks the DB pool) or
             the frontend did not return 200. Users hitting job360.uk see this.
 
             Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
