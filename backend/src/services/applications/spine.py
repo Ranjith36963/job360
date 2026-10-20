@@ -1588,7 +1588,8 @@ async def _receipt_replay(
         "receipt_replayed",
         extra={
             "event": "receipt_replayed", "user_id": safe_log_value(user_id),
-            "application_id": body["application_id"], "receipt_id": stored.get("receipt_id"), "result": "ok",
+            "application_id": int(body["application_id"]), "receipt_id": safe_log_value(stored.get("receipt_id")),
+            "result": "ok",
         },
     )
     return {**stored, "already_existed": True}
