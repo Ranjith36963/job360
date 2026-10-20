@@ -354,8 +354,11 @@ def test_duplicate_question_is_refused_ignoring_case_and_space():
 def test_record_cap_and_encoded_ceiling():
     cap = settings.PROFILE_EDIT_MAX_RECORDS
     assert cap == 50
-    assert "50-record limit (PROFILE_EDIT_MAX_RECORDS)" in _reject(
-        ANSWERS, [{"question": f"q{i}", "answer": "a"} for i in range(cap + 1)]
+    # Gap 4 - saved answers have their own cap (500); 51 of them is fine now.
+    assert settings.USER_INFO_ANSWERS_MAX_RECORDS == 500
+    assert len(validate_edit(ANSWERS, [{"question": f"q{i}", "answer": "a"} for i in range(500)])) == 500
+    assert "500-record limit (USER_INFO_ANSWERS_MAX_RECORDS)" in _reject(
+        ANSWERS, [{"question": f"q{i}", "answer": "a"} for i in range(501)]
     )
     assert "50-record limit (PROFILE_EDIT_MAX_RECORDS)" in _reject(
         LANGS, [{"language": f"l{i}", "level": "basic"} for i in range(cap + 1)]
@@ -1081,3 +1084,212 @@ def test_answer_topic_is_validated_and_old_items_stay_valid():
         with pytest.raises(ProfileEditError) as info:
             validate_edit(ANSWERS, [{"question": "q", "answer": "a", "topic": bad}])
         assert f"{ANSWERS}[0].topic" in str(info.value)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Gap 4 (slice 26) - two assistants: item ops + expected_profile_version
+# ═══════════════════════════════════════════════════════════════════════════
+
+NOTES = "preferences.assistant_notes"
+
+
+def _ans(question: str, answer: str, **kw: Any) -> dict[str, Any]:
+    return {"question": question, "answer": answer, "recorded_at": "2026-10-01", **kw}
+
+
+def test_resolve_ops_append_upsert_remove_at_give_the_whole_list():
+    saved = [_ans("Notice?", "1 month", topic="notice"), _ans("Why us?", "Mission", company="Acme")]
+    current = {ANSWERS: saved, NOTES: ["a", "b", "c"]}
+
+    [(path, value)] = edits.resolve_ops([(ANSWERS, "append", _ans("New?", "x"), None)], current)
+    assert path == ANSWERS and value == [*saved, _ans("New?", "x")]
+    # upsert by topic (+ same company): replaced in place, not duplicated
+    notice = _ans("Notice period?", "2 months", topic="notice")
+    [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", notice, None)], current)
+    assert [r["answer"] for r in value] == ["2 months", "Mission"]
+    # upsert by question + company (no topic): replaced; no match = appended
+    [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans(" why  US? ", "People", company="ACME"), None)], current)
+    assert [r["answer"] for r in value] == ["1 month", "People"]
+    [(_, value)] = edits.resolve_ops([(ANSWERS, "upsert", _ans("Salary?", "Ask", topic="salary"), None)], current)
+    assert len(value) == 3 and value[-1]["topic"] == "salary"
+    [(_, value)] = edits.resolve_ops([(NOTES, "remove_at", None, 1)], current)
+    assert value == ["a", "c"]
+    # several ops on one path collapse into ONE pair, in call order; a `set` passes through untouched
+    pairs = edits.resolve_ops(
+        [(NOTES, "append", "d", None), ("preferences.about_me", "set", "Hi", None), (NOTES, "remove_at", None, 0)],
+        current,
+    )
+    assert pairs == [(NOTES, ["b", "c", "d"]), ("preferences.about_me", "Hi")]
+    assert current[NOTES] == ["a", "b", "c"], "the current value is never mutated"
+
+
+@pytest.mark.parametrize(
+    ("edit", "words"),
+    [
+        ((NOTES, "remove_at", None, 3), "remove_at index must be from 0 to 2"),
+        ((NOTES, "remove_at", None, -1), "remove_at index must be from 0 to 2"),
+        ((NOTES, "remove_at", "x", 0), "remove_at takes an index, not a value"),
+        ((NOTES, "upsert", "x", None), "upsert works only on user_info.answers"),
+        ((NOTES, "append", None, None), "append needs a value"),
+        (("preferences.about_me", "append", "x", None), "works only on a list path"),
+        ((NOTES, "set", ["x"], 0), "index is only for op remove_at"),
+        ((NOTES, "insert", "x", None), "op must be one of set, append, upsert, remove_at"),
+    ],
+)
+def test_resolve_ops_refuses_a_bad_op_with_a_422(edit, words):
+    with pytest.raises(ProfileEditError) as info:
+        edits.resolve_ops([edit], {NOTES: ["a", "b", "c"]})
+    assert info.value.status_code == 422
+    assert words in info.value.detail
+
+
+async def _edit_rows(user_id: str) -> int:
+    from src.repositories import pg
+
+    async with pg.connect(str(settings.DB_PATH)) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM profile_edits WHERE user_id = ?", (user_id,))
+        row = await cur.fetchone()
+    return int(row[0])
+
+
+@pytest.mark.asyncio
+async def test_expected_profile_version_stale_409_match_writes_omitted_is_old_behaviour(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _get(client))["profile_edit_id"] == 0
+        first = await _patch(client, {"path": NOTES, "value": ["one"]})
+        assert first.status_code == 200, first.text
+        seen = first.json()["profile"]["profile_edit_id"]
+        assert seen > 0 and seen == edits.current_edit_id(fixture_user_id)
+        # another assistant writes; our view (seen) is now stale
+        assert (await _patch(client, {"path": NOTES, "value": ["one", "two"]})).status_code == 200
+        before = await _edit_rows(fixture_user_id)
+        stale = await client.patch(
+            "/api/profile",
+            json={"edits": [{"path": NOTES, "value": ["one", "MINE"]}], "expected_profile_version": seen},
+        )
+        assert stale.status_code == 409, stale.text
+        now = edits.current_edit_id(fixture_user_id)
+        assert stale.json() == {"detail": {"code": "stale_profile", "current": now}}
+        assert now > seen
+        assert await _edit_rows(fixture_user_id) == before, "a 409 writes nothing"
+        assert (await _get(client))["preferences"]["assistant_notes"] == ["one", "two"]
+        ok = await client.patch(
+            "/api/profile",
+            json={"edits": [{"path": NOTES, "value": ["one", "two", "three"]}], "expected_profile_version": now},
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["profile"]["profile_edit_id"] > now
+        assert (await _get(client))["preferences"]["assistant_notes"] == ["one", "two", "three"]
+        # omitted: no check, last write wins as before
+        assert (await _patch(client, {"path": NOTES, "value": ["solo"]})).status_code == 200
+        assert (await _get(client))["preferences"]["assistant_notes"] == ["solo"]
+
+
+@pytest.mark.asyncio
+async def test_patch_item_ops_write_the_resulting_full_list_append_only(
+    authenticated_async_context, fixture_user_id
+):
+    from src.services.profile.edits import path_history
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        saved = [_ans("Notice?", "1 month", topic="notice", approved=True), _ans("Why us?", "Mission")]
+        assert (await _patch(client, {"path": ANSWERS, "value": saved})).status_code == 200
+        resp = await _patch(client, {"path": ANSWERS, "op": "append", "value": _ans("Visa?", "No")})
+        assert resp.status_code == 200, resp.text
+        answers = (await _get(client))["user_info"]["answers"]
+        assert [a["question"] for a in answers] == ["Notice?", "Why us?", "Visa?"]
+        resp = await _patch(
+            client, {"path": ANSWERS, "op": "upsert", "value": _ans("Notice period?", "2 months", topic="notice")}
+        )
+        assert resp.status_code == 200, resp.text
+        answers = (await _get(client))["user_info"]["answers"]
+        assert [(a["question"], a["answer"]) for a in answers] == [
+            ("Notice period?", "2 months"), ("Why us?", "Mission"), ("Visa?", "No")
+        ]
+        assert (await _patch(client, {"path": ANSWERS, "op": "remove_at", "index": 1})).status_code == 200
+        assert [a["question"] for a in (await _get(client))["user_info"]["answers"]] == ["Notice period?", "Visa?"]
+        # history: one new row per call, each holding the WHOLE list, nothing rewritten
+        history = path_history(fixture_user_id, ANSWERS, 10)
+        assert [len(row["value"]) for row in history] == [2, 3, 3, 2]
+        # strict: unknown op (model) and out-of-range index (resolver) are 422s that write nothing
+        before = await _edit_rows(fixture_user_id)
+        bad_op = await _patch(client, {"path": ANSWERS, "op": "insert", "value": _ans("Q", "A")})
+        assert bad_op.status_code == 422
+        far = await _patch(client, {"path": ANSWERS, "op": "remove_at", "index": 9})
+        assert far.status_code == 422 and "Nothing was saved." in far.json()["detail"]
+        assert "remove_at index must be from 0 to 1" in far.json()["detail"]
+        assert await _edit_rows(fixture_user_id) == before
+
+
+@pytest.mark.asyncio
+async def test_append_respects_the_list_caps_answers_500_others_50(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        many = [_ans(f"q{i}", "a") for i in range(499)]
+        assert (await _patch(client, {"path": ANSWERS, "value": many})).status_code == 200
+        assert (await _patch(client, {"path": ANSWERS, "op": "append", "value": _ans("q499", "a")})).status_code == 200
+        over = await _patch(client, {"path": ANSWERS, "op": "append", "value": _ans("q500", "a")})
+        assert over.status_code == 422 and "USER_INFO_ANSWERS_MAX_RECORDS" in over.json()["detail"]
+        assert len((await _get(client))["user_info"]["answers"]) == 500
+        langs = [{"language": f"l{i}", "level": "basic"} for i in range(50)]
+        assert (await _patch(client, {"path": LANGS, "value": langs})).status_code == 200
+        over = await _patch(client, {"path": LANGS, "op": "append", "value": {"language": "x", "level": "basic"}})
+        assert over.status_code == 422 and "50-record limit (PROFILE_EDIT_MAX_RECORDS)" in over.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_profile_agrees_with_the_route(authenticated_async_context, fixture_user_id):
+    pytest.importorskip("mcp")
+    from src.api import mcp_server
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        tools = mcp_server.build_server()._tool_manager
+        mcp_server._current_user.set(mcp_server.CurrentUser(
+            id=fixture_user_id, email="e2e@example.com", auth_via="token", actor_name="claude-code"
+        ))
+        try:
+            got = await tools.get_tool("get_profile").fn()
+            assert got["profile_edit_id"] == (await _get(client))["profile_edit_id"] == 0
+            reply = await tools.get_tool("update_profile").fn(
+                [{"path": NOTES, "op": "append", "value": "be brief"}], expected_profile_version=0
+            )
+            assert reply["profile_edit_id"] == edits.current_edit_id(fixture_user_id) > 0
+            assert (await tools.get_tool("get_profile").fn())["fields"][NOTES] == ["be brief"]
+            with pytest.raises(Exception) as info:
+                await tools.get_tool("update_profile").fn(
+                    [{"path": NOTES, "op": "append", "value": "lost"}], expected_profile_version=0
+                )
+            assert "409" in str(info.value) and "stale_profile" in str(info.value)
+            with pytest.raises(Exception) as info:
+                await tools.get_tool("update_profile").fn([{"path": NOTES, "op": "insert", "value": "x"}])
+            assert "Nothing was saved." in str(info.value)
+        finally:
+            mcp_server._current_user.set(None)
+        assert (await _get(client))["preferences"]["assistant_notes"] == ["be brief"]
+
+
+@pytest.mark.asyncio
+async def test_every_writer_waits_for_the_user_edit_lock(authenticated_async_context, fixture_user_id):
+    """The check-and-write is atomic: a write from another door (here record_edits on its own)
+    cannot land while a guarded update_profile holds the user's lock."""
+    import threading
+
+    async with authenticated_async_context():
+        done = threading.Event()
+
+        def other_writer() -> None:
+            edits.record_edits(fixture_user_id, "web", [(NOTES, ["other"])], enforce_rate_limit=False)
+            done.set()
+
+        with edits.user_edit_lock(fixture_user_id):
+            thread = threading.Thread(target=other_writer)
+            thread.start()
+            assert not done.wait(0.5), "a write landed while the lock was held"
+            assert edits.current_edit_id(fixture_user_id) == 0
+        thread.join(5)
+        assert done.is_set() and edits.current_edit_id(fixture_user_id) > 0
