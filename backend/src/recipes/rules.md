@@ -98,7 +98,8 @@ latest `form_filled`), form_page_mismatch (the host + path of `form_url` is not 
 `form_filled` / `form_swept`: submit on the page you filled, or fill and sweep this one), form_check_missing (`stop`: a newer application has no `form_checked`: call check_form, record it), email_not_verified (the user has not confirmed their
 email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
-(the user said yes to this CV: `submit`), auto_when_sure, blocked (you
+(the user said yes to this CV: `submit`), approval_stale (`ask`: that yes no longer counts - the `detail` names
+what changed), auto_when_sure, blocked (you
 recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it), below_score_line (`stop`: below the
 line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
@@ -108,7 +109,10 @@ email_not_verified, blocked, held_by_other_session, company_avoided, submit_unco
 outside_hours, form_pages_incomplete, below_score_line or answer_guessed: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
-no longer counts - ask again. A setting that says to apply is never a reason
+no longer counts - ask again. A yes also lapses after SUBMIT_APPROVAL_TTL_MINUTES (120 by default) and, for a
+Send on the website, when a new cover letter, a re-fill with other answers, another form page or your own
+profile edit comes after it (`approval_stale`: expired, cover_letter, form_fill, form_page or profile). Typing
+the answers the user changed (`type_first`) never cancels it. A setting that says to apply is never a reason
 to apply to a job the user did not bring.
 
 ## Writing the CV

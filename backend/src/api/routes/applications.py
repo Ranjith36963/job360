@@ -2560,7 +2560,7 @@ async def get_application_controls(
 
 async def _web_decision(
     db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any],
-    *, once_per_version: bool = False,
+    *, once_per_version: bool = False, fingerprint: Optional[dict[str, Any]] = None,
 ) -> None:
     """One button click: prove the application is the caller's, then write the
     event through the same rules the chat path uses."""
@@ -2568,7 +2568,8 @@ async def _web_decision(
         raise HTTPException(status_code=404, detail="application not found")
     try:
         await kit_service.record_decision(
-            db, user, application_id, event_type, payload, once_per_version=once_per_version
+            db, user, application_id, event_type, payload, once_per_version=once_per_version,
+            fingerprint=fingerprint,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2638,7 +2639,9 @@ async def approve_send(
 ) -> dict[str, Any]:
     """"Send this one" - the user says yes to sending this application with the
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
-    where=web. A CV edited later makes the yes stop matching. Clears an earlier
+    where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
+    letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
+    (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
     nothing is recorded (the yes must name what the user saw)."""
@@ -2652,8 +2655,11 @@ async def approve_send(
     # Owner decision 2026-10-19: an answer the user edited does not block the yes - submit-check hands
     # the assistant those answers (`type_first`) to type into the form before it submits.
     payload = {"artifact_id": cv["id"], "sha256": kit_service.sha256_text(cv["text"]), "where": "web"}
+    # Gap roadmap slice 8: the yes is bound to what the card showed (letter, fill, page, the
+    # assistant's profile edits) and to time; check_submit asks `approval_stale` once any of it moves.
+    stamp = await kit_service.approval_fingerprint(db, user.id, application_id)
     await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
-    await _web_decision(db, user, application_id, "submit_approved", payload)
+    await _web_decision(db, user, application_id, "submit_approved", payload, fingerprint=stamp)
     return await _controls(db, user, application_id)
 
 

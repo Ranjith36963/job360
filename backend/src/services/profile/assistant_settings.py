@@ -675,7 +675,8 @@ class SubmitFacts:
     * ``cv_seen`` - the user saw the latest CV (web click / download, or an OK
       in chat);
     * ``approved`` - a stored ``submit_approved`` matches the latest CV
-      (artifact id + hash); a CV edit makes it stop matching;
+      (artifact id + hash); a CV edit makes it stop matching; so does
+      ``approval_stale`` (gap roadmap slice 8);
     * ``declined`` - the user's newest word on this application is "don't send";
     * ``blocked`` - the assistant recorded ``blocked`` with no later ``unblocked`` (S6);
     * ``form_filled`` - at least one ``form_filled`` event is recorded (the store
@@ -747,6 +748,11 @@ class SubmitFacts:
     # user has not verified (``ready.has_unverified_guess``, the card's ``guessed`` flag). Asks
     # ``answer_guessed`` in EVERY mode; a yes does NOT clear it - the user verifies or edits the answer.
     guessed_unverified: bool = False
+    # Gap roadmap slice 8: the newest yes for this CV no longer holds (``kit.approval_stale``): the
+    # part named here changed since the user said yes - ``expired`` (older than
+    # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
+    # ``approved`` is then False; the ask the gate would give is answered as ``approval_stale``.
+    approval_stale: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -768,8 +774,17 @@ REASONS: tuple[str, ...] = (
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "form_page_mismatch", "email_not_verified",
     "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
-    "type_first_pending", "below_score_line", "answer_guessed",
+    "type_first_pending", "below_score_line", "answer_guessed", "approval_stale",
 )
+
+# What each ``approval_stale`` part means, in the words the ask shows the user.
+APPROVAL_STALE_WORDS: dict[str, str] = {
+    "expired": "the yes is older than {ttl} minutes",
+    "cover_letter": "the cover letter changed",
+    "form_fill": "the form was filled again with different answers",
+    "form_page": "the form is on another page",
+    "profile": "the assistant changed the profile",
+}
 
 
 _SCHEME_PREFIX_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -983,7 +998,10 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
+    ``user_approved``. A yes that no longer holds (``approval_stale``: expired, or the letter, fill,
+    page or profile changed since) clears nothing; the ask it would have cleared answers
+    ``approval_stale`` naming the part.
+    Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
     ``below_score_line`` (4a4) and ``answer_guessed`` (4e) are NEVER cleared by a yes.
     """
@@ -1131,6 +1149,15 @@ def may_submit(
     if application.approved:
         return SubmitDecision(
             "submit", "user_approved", "The user said yes to sending this application with this CV. You may submit."
+        )
+    if application.approval_stale:
+        why = APPROVAL_STALE_WORDS.get(application.approval_stale, application.approval_stale).format(
+            ttl=settings.SUBMIT_APPROVAL_TTL_MINUTES
+        )
+        return SubmitDecision(
+            "ask", "approval_stale",
+            f"The user's yes no longer counts ({application.approval_stale}: {why}). Show what changed and "
+            f"ask yes again. {ask.detail}",
         )
     return ask
 

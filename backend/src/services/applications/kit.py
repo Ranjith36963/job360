@@ -41,7 +41,7 @@ from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
-from src.services.profile.edits import is_assistant_actor, is_confirmed
+from src.services.profile.edits import WEB_ACTOR, is_assistant_actor, is_confirmed
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -356,6 +356,7 @@ async def controls_state(
         ("cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared"),
     )
     seen = approved = None
+    stale: Optional[str] = None
     cv_id = cv["id"] if cv else None
     cv_sha = sha256_text(cv["text"]) if cv else ""
     for ev in events:
@@ -365,8 +366,9 @@ async def controls_state(
         ):
             if seen is None:
                 seen = _who(ev)
-            if approved is None and ev["event_type"] == "submit_approved":
-                approved = _who(ev)
+            if approved is None and stale is None and ev["event_type"] == "submit_approved":
+                stale = await approval_stale(db, user_id, app_row, ev, now)
+                approved = None if stale else _who(ev)
     newest_approval = next((e for e in events if e["event_type"] == "submit_approved"), None)
     newest_decline = next((e for e in events if e["event_type"] == "submit_declined"), None)
     declined = (
@@ -393,7 +395,78 @@ async def controls_state(
         },
         "duplicate": {**dup, "cleared": _who(cleared_ev) if cleared_ev else None},
         "blocked": await blocked_service.open_block(db, user_id, application_id),
+        # Slice 8: the part of the newest yes for this CV that no longer holds (None = it holds,
+        # or there is none). Read by gate_facts; the web response model does not carry it.
+        "approval_stale": stale,
     }
+
+
+# ── The yes is bound to what the user saw (gap roadmap slice 8) ──────────────
+
+
+async def _assistant_edit_id(db: JobDatabase, user_id: str) -> int:
+    """The newest ``profile_edits`` id an ASSISTANT wrote for this user (0 = none). The user's own
+    web edits are left out: an answer the user edited does not cancel their yes (owner decision
+    2026-10-19, the ``type_first`` answers)."""
+    cur = await db._db.execute(
+        "SELECT MAX(id) FROM profile_edits WHERE user_id = ? AND set_by <> ?", (user_id, WEB_ACTOR)
+    )
+    got = await cur.fetchone()
+    return int(got[0]) if got is not None and got[0] is not None else 0
+
+
+async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: int) -> dict[str, Any]:
+    """What a web Send yes is bound to besides the CV id + hash: the cover letter, the newest
+    ``form_filled``, the form page (:func:`latest_form_url`) and the newest assistant profile edit.
+    The approve route stores it on ``submit_approved``; :func:`approval_stale` compares it again."""
+    letter = await spine.latest_artifact(db, user_id, application_id, "cover_letter")
+    fills = await _events(db, user_id, application_id, ("form_filled",))
+    return {
+        "cover_letter_id": letter["id"] if letter else None,
+        "cover_letter_sha256": sha256_text(letter["text"]) if letter else None,
+        "form_filled_event_id": int(fills[0]["id"]) if fills else None,
+        "form_url": await latest_form_url(db, user_id, application_id),
+        "profile_edit_id": await _assistant_edit_id(db, user_id),
+    }
+
+
+def _approval_age_over(recorded_at: Any, now: datetime) -> bool:
+    at = recorded_at if isinstance(recorded_at, datetime) else datetime.fromisoformat(str(recorded_at))
+    at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    return now - at > timedelta(minutes=settings.SUBMIT_APPROVAL_TTL_MINUTES)
+
+
+async def approval_stale(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], event: dict[str, Any], now: datetime
+) -> Optional[str]:
+    """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
+    part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
+    ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``. A yes without a ``fingerprint``
+    (a chat yes, or one from before slice 8) is bound to the CV and the time only. A part that was
+    unknown at the yes (no fill, no page yet) is not compared. A newer fill still holds when it differs
+    only by answers that are now the user's own words (:func:`ready.refill_keeps_answers`)."""
+    if _approval_age_over(event["recorded_at"], now):
+        return "expired"
+    stamp = event["payload"].get("fingerprint")
+    if not isinstance(stamp, dict):
+        return None
+    application_id = int(app_row["id"])
+    now_fp = await approval_fingerprint(db, user_id, application_id)
+    for key in ("cover_letter_id", "cover_letter_sha256"):
+        if stamp.get(key) != now_fp[key]:
+            return "cover_letter"
+    was_fill, fill = stamp.get("form_filled_event_id"), now_fp["form_filled_event_id"]
+    if isinstance(was_fill, int) and fill != was_fill:
+        from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+        if fill is None or not await ready.refill_keeps_answers(db, user_id, app_row, was_fill, fill):
+            return "form_fill"
+    was_page, page = stamp.get("form_url"), now_fp["form_url"]
+    if isinstance(was_page, str) and was_page and not (page and settings_rules._same_form_page(page, was_page)):
+        return "form_page"
+    if now_fp["profile_edit_id"] > int(stamp.get("profile_edit_id") or 0):
+        return "profile"
+    return None
 
 
 async def _filled_with_latest_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
@@ -582,7 +655,10 @@ async def gate_facts(
     state = await controls_state(db, user_id, app_row, now)
     shortfalls = await _sweep_shortfalls(db, user_id, application_id)
     cv = state["cv"]
-    approved = state["cv"]["approved"] is not None if cv else await _approved_without_cv(db, user_id, application_id)
+    stale = state["approval_stale"]
+    approved = cv["approved"] is not None if cv else stale is None and await _approved_without_cv(
+        db, user_id, application_id
+    )
     dup = state["duplicate"]
     form_host = await _newest_form_host(db, user_id, application_id)
     return settings_rules.SubmitFacts(
@@ -596,6 +672,7 @@ async def gate_facts(
         new_site=await _new_site(db, user_id, application_id, form_host),
         cv_seen=bool(cv and cv["seen"] is not None),
         approved=bool(approved),
+        approval_stale=stale,
         declined=state["declined"] is not None,
         blocked=state["blocked"] is not None,
         form_filled=await _filled_with_latest_cv(db, user_id, application_id),
@@ -1241,14 +1318,17 @@ def log_kit_event(
 
 async def record_decision(
     db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any],
-    *, once_per_version: bool = False,
+    *, once_per_version: bool = False, fingerprint: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Validate + append one S3 event (the web buttons and the download wiring use
     this; ``record_event`` runs :func:`check_kit_event` and its own append).
     ``once_per_version``: an identical event for the same artifact + hash + where
-    is returned instead of written again. The caller has proven the application
-    is the user's."""
+    is returned instead of written again. ``fingerprint`` (:func:`approval_fingerprint`,
+    server-computed by the web Send route only) is stored beside the checked payload.
+    The caller has proven the application is the user's."""
     stored = await check_kit_event(db, user, application_id, event_type, payload)
+    if fingerprint is not None:
+        stored = {**stored, "fingerprint": fingerprint}
     if once_per_version:
         for ev in await _events(db, user.id, application_id, (event_type,)):
             p = ev["payload"]

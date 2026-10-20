@@ -848,6 +848,9 @@ CALENDAR_ALARM_FOLLOW_UP_HOUR = int(os.getenv("CALENDAR_ALARM_FOLLOW_UP_HOUR", "
 # "Another assistant is on this application": a kit read by someone else this
 # recently warns (never blocks).
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
+# Gap roadmap slice 8: the user's Send yes (``submit_approved``) counts for this many minutes
+# after it was recorded; an older yes is ``approval_stale`` (expired) and check_submit asks again.
+SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "120"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
 # Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window

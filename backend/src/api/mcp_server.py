@@ -1648,7 +1648,7 @@ def build_server(version: str = "") -> MCPServer:
         """Call right before the FINAL submit, with `form_url` (the page the form is on) and
         your `session` label (as given to get_application_kit). ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
-        the user yes for this one; `stop` - do not submit. `reason` = a code, `detail` = a
+        the user yes; `stop` - do not submit. `reason` = a code, `detail` = a
         sentence for the user. Reasons:
         paused, already_applied, user_declined,
         daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
@@ -1660,14 +1660,15 @@ def build_server(version: str = "") -> MCPServer:
         duplicate_job (same job already applied to: `stop`
         in auto mode, else `ask`), duplicate_role (`ask`: same company+title before),
         new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
-        profile), held_by_other_session (another session holds this kit),
+        profile), held_by_other_session (another session holds it),
         unknown_site (not one plain http(s) address),
         form_host_mismatch / form_page_mismatch (not the site / page you filled),
         email_not_verified, ask_always_site, job_override_confirm,
-        submit_mode_confirm, cv_not_seen (auto mode, user has not seen the latest CV), practice_run,
-        user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
-        `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_*_mismatch,
-        email_not_verified, blocked or held_by_other_session: tell the user.
+        submit_mode_confirm, cv_not_seen (auto mode, latest CV unseen), practice_run,
+        user_approved (the user's yes: `submit`), approval_stale (`ask`: the yes expired or what it
+        named changed), auto_when_sure, blocked (you recorded `blocked`, no `unblocked`: `ask`).
+        A yes NEVER clears unknown_site, form_*_mismatch, email_not_verified, blocked or
+        held_by_other_session: tell the user.
         Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
         changed on the web - type each in, then form_swept with `answers`; until then
         `stop` (type_first_pending), even after a yes.
