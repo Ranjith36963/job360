@@ -524,9 +524,6 @@ jobs:
           # The owner's switch: repository variable AUTO_MERGE. `off` stops every
           # machine merge and takes back anything queued; unset or `on` is on.
           AUTO_MERGE_SWITCH: ${{ vars.AUTO_MERGE || 'on' }}
-          # The owner's token, to ask CodeRabbit again when it skipped or hit its
-          # limit (it is not known to honour a bot's comment). Same secret as pr-advisor.yml.
-          CODERABBIT_TRIGGER_TOKEN: ${{ secrets.CODERABBIT_TRIGGER_TOKEN }}
         run: |
           set -euo pipefail
           set +e
