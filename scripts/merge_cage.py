@@ -360,6 +360,8 @@ DENY_REASONS: dict[str, str] = {
     "backend/src/services/auth/**": f"authentication — the owner merges it. {_OWNER_MERGES}",
     "backend/src/api/routes/account*.py":
         f"account management — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/core/settings.py":
+        f"settings flags change production behaviour for every user. {_OWNER_MERGES}",
     "backend/migrations/**":
         "schema change — irreversible against live data: a Railway rollback restores "
         "the previous IMAGE, not the previous SCHEMA. Every migration ships with its "
@@ -492,8 +494,6 @@ WATCHED_RISKS: dict[str, str] = {
     "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
     "**/railway.json": f"infrastructure decision. {_WATCHED}",
     "**/*.env*": f"secrets and configuration. {_WATCHED}",
-    "backend/src/core/settings.py":
-        f"flags here change production behaviour globally. {_WATCHED}",
     # ── dependency manifests ─────────────────────────────────────────────────
     # The cage has no semver awareness, and a manifest runs postinstall scripts
     # on the build host. `dependabot-auto.yml` still owns the bump decision and
@@ -2296,8 +2296,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
                "backend/src/api/routes/profile.py",
                "docker-compose.prod.yml",
                "frontend/package.json",
-               "docs/product/product_design_rules.md",
-               "backend/src/core/settings.py"]
+               "docs/product/product_design_rules.md"]
     still_denied = [f for f in flipped if check_paths([f]).status != "pass"]
     ok("the product's sharp end is machine-mergeable now, under the watcher",
        not still_denied,
