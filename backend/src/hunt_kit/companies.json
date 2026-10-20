@@ -6310,5 +6310,15 @@
 {"name":"10 Federal","ats":"hiringthing","board":"10federal-partners-inc.prismhr-hire.com","source":"freehire"},
 {"name":"BASH","ats":"hiringthing","board":"1235-keystone-way-llc.gnahiring.com","source":"freehire"},
 {"name":"Integral Senior Living","ats":"hiringthing","board":"1440-by-the-bay.oasisrecruit.com","source":"freehire"},
-{"name":"4Minds","ats":"hiringthing","board":"4mindsai.hiringthing.com","source":"freehire"}
+{"name":"4Minds","ats":"hiringthing","board":"4mindsai.hiringthing.com","source":"freehire"},
+{"name":"Electronic Arts","ats":"avature","board":"jobs.ea.com","source":"freehire"},
+{"name":"Koch","ats":"avature","board":"koch.avature.net","source":"freehire"},
+{"name":"Deloitte","ats":"avature","board":"deloittecm.avature.net","source":"freehire"},
+{"name":"Avature","ats":"avature","board":"careers.avature.net","source":"career-ops"},
+{"name":"Siemens","ats":"avature","board":"jobs.siemens.com","source":"career-ops"},
+{"name":"Overwolf","ats":"comeet","board":"overwolf/B1.001","source":"freehire"},
+{"name":"Capslock","ats":"comeet","board":"capslock/59.001","source":"freehire"},
+{"name":"Spark Hire","ats":"comeet","board":"spark-hire/30.005","source":"career-ops"},
+{"name":"Qogita","ats":"hibob","board":"qogita","source":"freehire"},
+{"name":"Unique","ats":"hibob","board":"unique","source":"freehire"}
 ]
