@@ -630,6 +630,44 @@ async def _form_check_missing(db: JobDatabase, user_id: str, app_row: dict[str, 
     return not await _events(db, user_id, int(app_row["id"]), ("form_checked",))
 
 
+# Owner rule 2026-10-20 (strict): an autofill answers every REQUIRED question from the user's saved facts;
+# only optional questions may stay blank. Applications created on or after this day cannot be submitted
+# while the newest ``form_checked`` of any page still lists a required question with no answer.
+REQUIRED_ANSWERS_FROM = datetime(2026, 10, 20, tzinfo=timezone.utc)
+
+
+def required_answers_enforced(created_at: Any) -> bool:
+    """True when an application created at ``created_at`` is under the required-answers rule (it follows
+    the ``form_checked`` cut-off too, so a test that moves that cut-off moves this one). Fail open on an
+    unreadable timestamp, like :func:`form_check_required`."""
+    if not form_check_required(created_at):
+        return False
+    made = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=timezone.utc)
+    return made >= REQUIRED_ANSWERS_FROM
+
+
+async def _required_unanswered(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest ``form_checked`` of a page (or of the unpaged form) still lists a required question with
+    no answer. ``missing_required`` is the count check_form returned; a check that reports ``missing``
+    questions without saying how many are required counts as unanswered too (it must say). A later
+    ``form_checked`` of the same page, recorded after the user answered, clears it."""
+    if not required_answers_enforced(app_row.get("created_at")):
+        return False
+    newest: dict[Optional[int], dict[str, Any]] = {}
+    for e in await _events(db, user_id, int(app_row["id"]), ("form_checked",)):  # newest first
+        newest.setdefault(_page_of(e), e)
+    for e in newest.values():
+        required = e["payload"].get("missing_required")
+        if isinstance(required, int) and not isinstance(required, bool):
+            if required > 0:
+                return True
+        elif (e["payload"].get("missing") or 0) > 0:
+            return True
+    return False
+
+
 async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
     """The host stored on the NEWEST ``form_filled`` (``None`` when there is none)."""
     fills = await _events(db, user_id, application_id, ("form_filled",))
@@ -694,6 +732,7 @@ async def gate_facts(
         unreadable_fields=shortfalls[1],
         form_pages_incomplete=shortfalls[2],
         form_check_missing=await _form_check_missing(db, user_id, app_row),
+        required_unanswered=await _required_unanswered(db, user_id, app_row),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=form_host,
@@ -860,7 +899,7 @@ async def submit_verdict(
         # shows a form_host_mismatch for a form that is not filled yet.
         facts = replace(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
-            form_check_missing=False, form_pages_incomplete=False,
+            form_check_missing=False, form_pages_incomplete=False, required_unanswered=False,
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
@@ -913,7 +952,7 @@ FORM_SWEPT_NOTES_MAX = 300
 FORM_SWEPT_UNREADABLE_MAX = 50
 # ``form_checked`` (weak spot #1b): what check_form found, COUNTS and wording only - never an answer value.
 FORM_CHECKED_REQUIRED = frozenset({"questions_count", "answered", "missing"})
-FORM_CHECKED_OPTIONAL = frozenset({"answers", "page", "pages_total"})
+FORM_CHECKED_OPTIONAL = frozenset({"answers", "page", "pages_total", "missing_required"})
 FORM_PAGES_MAX = 20  # bulk-apply F2: the most pages one form may declare
 FORM_CHECKED_ANSWER_KEYS = frozenset({"question", "key", "source", "needs_confirmation"})
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
@@ -1167,9 +1206,15 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
     elif event_type == "form_checked":
         problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
         _pages_problems(payload, problems)
-        for name in ("questions_count", "answered", "missing"):
+        for name in ("questions_count", "answered", "missing", "missing_required"):
             if name in payload:
                 _count_problem(name, payload[name], problems)
+        missing_required, missing = payload.get("missing_required"), payload.get("missing")
+        if (
+            isinstance(missing_required, int) and isinstance(missing, int)
+            and not isinstance(missing_required, bool) and not isinstance(missing, bool) and missing_required > missing
+        ):
+            problems.append("missing_required cannot be more than missing")
         if "answers" in payload:
             _checked_answers(payload["answers"], problems)
     return problems
@@ -1343,7 +1388,9 @@ async def _check_kit_event(
         found = payload_problems(event_type, payload)
         if found:
             raise SpineError(422, found[0])
-        stored_checked: dict[str, Any] = {k: payload[k] for k in ("questions_count", "answered", "missing")}
+        stored_checked: dict[str, Any] = {
+            k: payload[k] for k in ("questions_count", "answered", "missing", "missing_required") if k in payload
+        }
         if "answers" in payload:
             stored_checked["answers"] = _checked_answers(payload["answers"], [])
         if "page" in payload:
