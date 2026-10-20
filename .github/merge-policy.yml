@@ -699,6 +699,12 @@ data_exemptions:
 # `revert/*` branches (emergency undos) never count toward the limit and are
 # never themselves parked -- see scripts/wip_gate.py's module docstring.
 wip:
+  # OFF since 2026-10-20 (owner: "Turn WIP parking off"). That afternoon 29 of 45
+  # open PRs sat parked while 4 slots stood free: unparking rode a scheduled sweep
+  # that GitHub delayed for hours under load. With `enabled: false` no PR is
+  # parked and the unpark sweep clears any label left behind. Turn it back on
+  # with `enabled: true`; `limit` is kept for that day.
+  enabled: false
   limit: 10
 
 # ── Size ceiling ───────────────────────────────────────────────────────────

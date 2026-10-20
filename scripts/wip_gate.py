@@ -133,6 +133,17 @@ def load_wip_limit(path: Path = POLICY_PATH) -> int:
     return limit
 
 
+def wip_enabled(path: Path = POLICY_PATH) -> bool:
+    """`wip.enabled` from the policy. Absent means on (the gate's behaviour before
+    the switch existed); anything but a real boolean refuses, like `limit`."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    wip = data.get("wip") if isinstance(data, dict) else None
+    enabled = wip.get("enabled", True) if isinstance(wip, dict) else True
+    if not isinstance(enabled, bool):
+        raise PolicyError(f"wip.enabled must be true or false, got {enabled!r}")
+    return enabled
+
+
 def human_only_labels(path: Path = POLICY_PATH) -> frozenset[str]:
     """The `lane:*` labels of every lane the policy marks `auto_merge: false`.
 
@@ -531,6 +542,22 @@ def _drill() -> int:
     check("a parked draft is never unparked",
           pick_unpark([pr(1, draft=True, labels=[P])], limit=2, human_only=ho), [])
 
+    # 20. The on/off switch: absent reads as on, `false` reads as off, and a
+    #     non-boolean refuses instead of guessing.
+    import tempfile as _tf
+    sw = Path(_tf.mkdtemp(prefix="wip-gate-drill-")) / "merge-policy.yml"
+    sw.write_text("wip:\n  limit: 2\n", encoding="utf-8")
+    check("no `enabled` key -> parking is on", wip_enabled(sw), True)
+    sw.write_text("wip:\n  enabled: false\n  limit: 2\n", encoding="utf-8")
+    check("`enabled: false` -> parking is off", wip_enabled(sw), False)
+    sw.write_text("wip:\n  enabled: maybe\n  limit: 2\n", encoding="utf-8")
+    try:
+        wip_enabled(sw)
+        refused = False
+    except PolicyError:
+        refused = True
+    check("a non-boolean `enabled` refuses, never guesses", refused, True)
+
     # 19. The real policy names harness_owner, and only it, as human-only.
     try:
         check("this repo's policy: human-only lanes are exactly lane:harness-owner",
@@ -564,6 +591,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         limit = load_wip_limit()
         human_only = human_only_labels()
+        enabled = wip_enabled()
     except PolicyError as exc:
         # LOUD REFUSAL, per the module docstring: a misread policy must never
         # park a real PR. Exit 2 is "the gate could not judge", not "no park".
@@ -578,8 +606,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wip_gate: could not read open PRs: {exc}", file=sys.stderr)
         return 2
 
-    if args.unpark:
+    # PARKING OFF (2026-10-20): nothing is parked, and the sweep takes the label
+    # off every PR still carrying it, whatever the count.
+    if args.unpark and not enabled:
+        picked = sorted(p["number"] for p in open_prs if _is_parked(p.get("labels")))
+    elif args.unpark:
         picked = pick_unpark(open_prs, limit, human_only)
+    if args.unpark:
         print(f"wip_gate: unparking {picked or 'nothing'} (limit {limit})")
         for n in picked:
             subprocess.run(["gh", "pr", "edit", str(n), "--remove-label", PARKED_LABEL],
@@ -589,7 +622,11 @@ def main(argv: list[str] | None = None) -> int:
             subprocess.run(["gh", "pr", "comment", str(n), "--body", note], check=False, timeout=60)
         return 0
 
-    verdict = decide(open_prs, args.pr, limit, human_only)
+    if not enabled:
+        verdict = {"park": False, "count": 0,
+                   "why": "WIP parking is off (wip.enabled: false in .github/merge-policy.yml)."}
+    else:
+        verdict = decide(open_prs, args.pr, limit, human_only)
     text = json.dumps(verdict, indent=2, sort_keys=True)
     print(text)
     if args.json:
