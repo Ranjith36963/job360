@@ -25,9 +25,16 @@ from src.services.fetch.guard import ResolveFn, screen_host, screen_url
 
 # "Submit" in a button's name always means the end of a form.
 _STRONG_SUBMIT = re.compile(r"\bsubmit", re.IGNORECASE)
+# A link, tab, switch or option needs the whole word: "Submitted applications" is a tab.
+_STRONG_SUBMIT_WORD = re.compile(r"\bsubmit\b", re.IGNORECASE)
 # These mean the end on a button in a form, or on any page where answers have
 # been typed; a job ad's "Apply for this job" (nothing typed yet) just opens the form.
-_SUBMIT_WORDS = re.compile(r"\b(apply|send|finish|complete|confirm)\b", re.IGNORECASE)
+# The common EU send / apply verbs count the same ("Bewerbung absenden", "Postuler").
+_SUBMIT_WORDS = re.compile(
+    r"\b(apply|send|finish|complete|confirm|absenden|senden|bewerben|envoyer|postuler|soumettre|enviar|"
+    r"solicitar|inviare|candidati|verzenden|solliciteren)\b",
+    re.IGNORECASE,
+)
 # Words that make a submit-shaped button a step, not the end: multi-page forms
 # (Workday, SmartRecruiters) use <button type=submit> for "Next".
 _STEP_WORDS = re.compile(
@@ -36,7 +43,7 @@ _STEP_WORDS = re.compile(
 )
 _PASSWORD_NAME = re.compile(r"pass(word|code|phrase)|\bpwd\b", re.IGNORECASE)
 # "Save and send application": the step word does not make it a step.
-_APPLICATION = re.compile(r"\bapplication", re.IGNORECASE)
+_APPLICATION = re.compile(r"\b(application|bewerbung|candidature|candidatura|solicitud|sollicitatie)", re.IGNORECASE)
 # Roles the look lists that are clicked like a link: named the way a link is.
 _LINK_ROLES = ("link", "tab", "switch", "option")
 
@@ -49,6 +56,8 @@ def control_kind(
     in_form: bool = False,
     role: str = "",
     page_has_answers: bool = False,
+    owns_form: Optional[bool] = None,
+    toggle: bool = False,
 ) -> str:
     """``password`` | ``submit`` | ``field`` for one control on the page.
 
@@ -57,7 +66,11 @@ def control_kind(
     ``autocomplete`` its autocomplete attribute, ``in_form`` whether it sits
     inside a ``<form>``, ``role`` its ARIA role (a ``<div role=button>`` is a
     button too) and ``page_has_answers`` whether any field on the page already
-    holds a typed answer or a chosen file. "Apply" / "Send" / "Finish" on a
+    holds a typed answer or a chosen file. ``owns_form`` is whether the
+    control itself can submit a form (``el.form``: a button in a shadow root
+    cannot submit the ``<form>`` around its host); unknown, it is ``in_form``.
+    ``toggle`` is a pressed-or-not button (``aria-pressed``), a choice.
+    "Apply" / "Send" / "Finish" on a
     button counts as the final submit inside a form OR on a page with answers
     (React forms often have no ``<form>``); on a page with nothing typed it is
     the ad's "Apply for this job" that opens the form. When unsure, a button counts as the final submit: the
@@ -78,17 +91,22 @@ def control_kind(
     is_link = not is_button and (tag == "a" or role in _LINK_ROLES)
     if not is_button and not is_link:
         return "field"
+    strong = (_STRONG_SUBMIT_WORD if is_link else _STRONG_SUBMIT).search(name)
     sends_application = bool(_SUBMIT_WORDS.search(name) and _APPLICATION.search(name))
-    if _STEP_WORDS.search(name) and not _STRONG_SUBMIT.search(name) and not sends_application:
+    if _STEP_WORDS.search(name) and not strong and not sends_application:
         return "field"
-    if _STRONG_SUBMIT.search(name):
+    if strong:
         return "submit"
     if is_link:
-        return "field"
+        # "Send application" as a link, once answers are held; a bare "Apply" link opens the form.
+        return "submit" if page_has_answers and sends_application else "field"
     if (in_form or page_has_answers) and _SUBMIT_WORDS.search(name):
         return "submit"
-    # A button that submits its form, whatever its name ("Bewerbung absenden", "Done"): the safe side.
-    if in_form and ((tag == "button" and input_type in ("submit", "")) or input_type in ("submit", "image")):
+    if toggle:
+        return "field"
+    # A button that submits its form, whatever its name ("Done"): the safe side.
+    owns = in_form if owns_form is None else owns_form
+    if owns and ((tag == "button" and input_type in ("submit", "")) or input_type in ("submit", "image")):
         return "submit"
     # Any other button of a form with no clear name: the safe side.
     if in_form and input_type in ("submit", "image", "") and not name.strip():
@@ -97,9 +115,10 @@ def control_kind(
 
 
 # Frame addresses of the CAPTCHA and bot-check vendors we know. A page that
-# loads one of these is asking a human to prove they are human.
+# loads one of these is asking a human to prove they are human. Turnstile is
+# matched by Cloudflare's host, not the word: jobs.ashbyhq.com/turnstile is an employer.
 _CAPTCHA_FRAME = re.compile(
-    r"hcaptcha\.com|challenges\.cloudflare\.com|turnstile|arkoselabs|funcaptcha|"
+    r"hcaptcha\.com|challenges\.cloudflare\.com|arkoselabs|funcaptcha|"
     r"captcha-delivery\.com|geo\.captcha|perimeterx|px-captcha|kasada|datadome",
     re.IGNORECASE,
 )

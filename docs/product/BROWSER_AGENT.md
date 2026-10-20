@@ -122,7 +122,7 @@ that's by design. What we *can* do: behave well (human pace, one application at 
 - **Final submit:**
   - The tool runs `check_submit` itself and records `submit_attempted` first.
   - It clicks only on `submit`. An `ask` becomes a `submit` once the user clicks Send on Needs you.
-  - What counts as the final submit (`safety.control_kind`): any button that submits its form (type submit or image, or a `<button>` with no type) unless its name is a step ("Next", "Save and continue"), so a name in another language ("Bewerbung absenden") or one we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named "Submit"; and "Apply" / "Send" on a button once the page holds an answer. An answer is a typed value, a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too, and a button in a shadow root sits in the `<form>` around its host.
+  - What counts as the final submit (`safety.control_kind`): any button that can submit its form itself (type submit or image, or a `<button>` with no type, that has a form owner) unless its name is a step ("Next", "Save and continue") or it is a pressed-or-not toggle (`aria-pressed`, Ashby's Yes / No), so a name we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named with the whole word "Submit" ("Submitted applications" is a tab), or "Send application" once the page holds an answer; and "Apply" / "Send" (or the common EU verbs: absenden, envoyer, postuler, enviar, verzenden...) on a button in a form or once the page holds an answer, inside the `<form>` around a shadow root's host too. An answer is a typed value, a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too; a box, option or switch the page already held when the first look read it (a cookie switch) is not one.
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the tool turns on.
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
@@ -162,6 +162,7 @@ must be OPEN (`aria-expanded` true, or an option highlighted): a closed suggesti
 
 **CAPTCHA vs. invisible reCAPTCHA:** every Greenhouse posting loads an invisible reCAPTCHA that asks nothing, so it
 is not a stop. A reCAPTCHA image challenge or a tick-box widget is (freehire `atsapply/browser.go:167-234`).
+Cloudflare Turnstile is told by its host (`challenges.cloudflare.com`), not the word: `jobs.ashbyhq.com/turnstile` is an employer.
 
 **Real-site behaviour (2026-10-19):** after `open`, a click, a key or a scroll, the browser waits up to 3 seconds for
 the page's own requests to finish, because single-page sites (React forms) draw their fields after the HTML arrives.
