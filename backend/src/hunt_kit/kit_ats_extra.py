@@ -112,11 +112,12 @@ def _wrap(body: Callable[[dict[str, Any], Http], list[Job] | None]) -> Callable[
 # :276-277 (stop on a page with nothing new or fewer than 6 cards).
 # NOT IN REFERENCE: freehire avature.go:42-62 reads the sitemap and fetches every JobDetail page (hundreds of requests per
 # board); this reader takes the career-ops listing route to keep the budget small, so jobs carry no description.
-_AVATURE_ARTICLE = re.compile(r'<article class="article article--(?:result|jobs)\b[^"]*"[\s\S]*?</article>')
+_AVATURE_ARTICLE = re.compile(r'<article class="article article--(?:result|jobs)\b')
+_AVATURE_CARD_MAX = 20_000  # characters of one card scanned; a broken page cannot make the scans quadratic
 _AVATURE_TITLE = (
-    re.compile(r'article__header__text__title[^>]*>\s*<a[^>]*href="([^"]*/JobDetail/[^"]+)"[^>]*>([\s\S]*?)</a>'),
-    re.compile(r'<a[^>]*class="link"[^>]*href="([^"]*/JobDetail/[^"]+)"[^>]*>([\s\S]*?)</a>'),
-    re.compile(r'<a[^>]*href="([^"]*/JobDetail/[^"]+)"[^>]*>([\s\S]*?)</a>'),
+    re.compile(r'article__header__text__title[^>]{0,200}>\s*<a\b[^>]{0,500}?href="([^"]{0,500}/JobDetail/[^"]{1,500})"[^>]{0,500}>([\s\S]{0,2000}?)</a>'),
+    re.compile(r'<a\b[^>]{0,500}?class="link"[^>]{0,500}?href="([^"]{0,500}/JobDetail/[^"]{1,500})"[^>]{0,500}>([\s\S]{0,2000}?)</a>'),
+    re.compile(r'<a\b[^>]{0,500}?href="([^"]{0,500}/JobDetail/[^"]{1,500})"[^>]{0,500}>([\s\S]{0,2000}?)</a>'),
 )
 _AVATURE_LOC = (
     re.compile(r"list-item-location[^>]*>([\s\S]*?)</span>", re.I),
@@ -130,14 +131,20 @@ _AVATURE_POSTED = re.compile(r"Posted\s+(\d{1,2})-([A-Za-z]{3})-(\d{4})")
 def _avature_page(page: str, origin: str) -> tuple[list[dict[str, str]], int]:
     """(parsed postings, raw card count) of one SearchJobs page."""
     out: list[dict[str, str]] = []
-    cards = _AVATURE_ARTICLE.findall(page)
+    starts = [m.start() for m in _AVATURE_ARTICLE.finditer(page)]
+    cards = []
+    for i, st in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(page)
+        close = page.find("</article>", st, min(end, st + _AVATURE_CARD_MAX))
+        cards.append(page[st:close + 10] if close >= 0 else page[st:min(end, st + _AVATURE_CARD_MAX)])
+    host = origin.removeprefix("https://")
     for block in cards:
         m = next((x for x in (r.search(block) for r in _AVATURE_TITLE) if x), None)
         if not m:
             continue
         title = _clean(m.group(2))
         href = html.unescape(m.group(1))
-        url = _https(href if re.match(r"https?://", href, re.I) else origin + (href if href.startswith("/") else "/" + href))
+        url = _https(href if re.match(r"https?://", href, re.I) else origin + (href if href.startswith("/") else "/" + href), host)
         if not title or not url:
             continue
         idm = re.search(r"/JobDetail/[^/]*/(\d+)", url)

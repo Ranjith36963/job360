@@ -315,3 +315,23 @@ def test_hibob_remote_idless_and_failures():
     assert [j["title"] for j in jobs] == ["Remote Dev"] and jobs[0]["remote"] is True
     assert _run("hibob", {"token": "qogita"}, _stub({"job-ad": (401, None)}))[1] == {"tried": 1, "jobs": 0}
     assert _run("hibob", {"token": "qogita"}, _stub({"job-ad": (200, {"jobAdDetails": []})}))[1] == {"tried": 1, "ok": 1, "jobs": 0}
+
+
+def test_avature_hostile_pages_parse_in_bounded_time():
+    import time
+
+    pages = ['<article class="article article--result"><a href="/JobDetail/x' * 2500,
+             '<article class="article article--result"><a class="link"' * 2000,
+             '<article class="article article--result">' * 2500,
+             '<article class="article article--result">' + '<a href="/JobDetail/x' * 5000]
+    for page in pages:
+        t0 = time.perf_counter()
+        extra._avature_page(page, "https://acme.avature.net")
+        assert time.perf_counter() - t0 < 1.0
+
+
+def test_avature_drops_a_job_url_on_a_foreign_host():
+    page = ('<article class="article article--result"><a class="link" href="https://evil.example/JobDetail/x/1">Role</a></article>'
+            '<article class="article article--result"><a class="link" href="https://acme.avature.net/JobDetail/y/2">Good</a></article>')
+    items, cards = extra._avature_page(page, "https://acme.avature.net")
+    assert cards == 2 and [i["id"] for i in items] == ["2"]
