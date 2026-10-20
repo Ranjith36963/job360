@@ -359,8 +359,21 @@ jobs:
             cd "$GITHUB_WORKSPACE" || return 1
             for f in .git/config .git/config.worktree; do
               if [ -L "$f" ]; then echo "SYMLINK $f"; fi
-              if [ -f "$f" ]; then sha256sum "$f"; fi
             done
+            # claude-code-action itself writes [user] name/email and an authed
+            # remote.origin.url into .git/config while it runs, so a raw hash never
+            # matched and every run failed here (4 of 4, 2026-10-04..10-20). Hash
+            # the file WITHOUT exactly those keys: hooksPath, fsmonitor, filters,
+            # includes, aliases, sshCommand and any other key still trip this check.
+            if [ -f .git/config ]; then
+              awk '
+                /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec) }
+                sec == "[user]" && (/^[[:space:]]*\[user\][[:space:]]*$/ || /^[[:space:]]*(name|email)[[:space:]]*=/) { next }
+                sec == "[remote\"origin\"]" && /^[[:space:]]*url[[:space:]]*=/ { next }
+                { print }
+              ' .git/config | sha256sum | sed 's|-$|.git/config (minus the action-written keys)|'
+            fi
+            if [ -f .git/config.worktree ]; then sha256sum .git/config.worktree; fi
             echo "--- listing of .git/hooks and .git/info"
             find .git/hooks .git/info -printf '%y %m %p -> %l\n' 2>/dev/null | sort
             echo "--- contents of .git/hooks and .git/info"
@@ -548,8 +561,21 @@ jobs:
             cd "$GITHUB_WORKSPACE" || return 1
             for f in .git/config .git/config.worktree; do
               if [ -L "$f" ]; then echo "SYMLINK $f"; fi
-              if [ -f "$f" ]; then sha256sum "$f"; fi
             done
+            # claude-code-action itself writes [user] name/email and an authed
+            # remote.origin.url into .git/config while it runs, so a raw hash never
+            # matched and every run failed here (4 of 4, 2026-10-04..10-20). Hash
+            # the file WITHOUT exactly those keys: hooksPath, fsmonitor, filters,
+            # includes, aliases, sshCommand and any other key still trip this check.
+            if [ -f .git/config ]; then
+              awk '
+                /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec) }
+                sec == "[user]" && (/^[[:space:]]*\[user\][[:space:]]*$/ || /^[[:space:]]*(name|email)[[:space:]]*=/) { next }
+                sec == "[remote\"origin\"]" && /^[[:space:]]*url[[:space:]]*=/ { next }
+                { print }
+              ' .git/config | sha256sum | sed 's|-$|.git/config (minus the action-written keys)|'
+            fi
+            if [ -f .git/config.worktree ]; then sha256sum .git/config.worktree; fi
             echo "--- listing of .git/hooks and .git/info"
             find .git/hooks .git/info -printf '%y %m %p -> %l\n' 2>/dev/null | sort
             echo "--- contents of .git/hooks and .git/info"
