@@ -12,7 +12,8 @@ This pool opens a small set of connections once and hands them out repeatedly,
 and never lets more than `max_size` exist at a time. Connections are configured
 to be byte-for-byte equivalent to `pg._open_raw` (autocommit + the same row
 factory), so a pooled connection is indistinguishable from a freshly opened one
-to every call site.
+to every call site. One deliberate difference: each pooled connection also gets
+a ``statement_timeout`` (``settings.DB_STATEMENT_TIMEOUT_MS``) when it is opened.
 
 Production only. The schema-per-test isolation (`TEST_MODE`) opens a fresh
 `JobDatabase` per test and tears its schema down afterwards; pooling there would
@@ -24,10 +25,12 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
+import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from src.core import settings
 from src.repositories import pg
 
 
@@ -40,20 +43,69 @@ def _pool_kwargs() -> dict[str, Any]:
     return {"autocommit": True, "row_factory": pg._row_factory}
 
 
-def build_pool(dsn: str, *, min_size: int, max_size: int) -> AsyncConnectionPool[Any]:
+def _statement_timeout_configurer(
+    timeout_ms: int,
+) -> Callable[[psycopg.AsyncConnection[Any]], Awaitable[None]]:
+    """The pool's ``configure`` callback: run once on every NEW pooled connection.
+
+    It sets a session-level ``statement_timeout`` so one runaway query cannot
+    hold a pooled connection (and so a request slot) forever. ``set_config``
+    instead of ``SET`` because ``SET`` takes no bind parameter. The connection is
+    autocommit, so the setting sticks for the life of the connection and the
+    pool's rollback-on-return does not undo it. Only pooled connections get it:
+    migrations and boot DDL open their own via ``pg.connect``.
+    """
+
+    async def _configure(conn: psycopg.AsyncConnection[Any]) -> None:
+        await conn.execute(
+            "SELECT set_config('statement_timeout', %s, false)", (f"{timeout_ms}ms",)
+        )
+
+    return _configure
+
+
+def build_pool(
+    dsn: str,
+    *,
+    min_size: int,
+    max_size: int,
+    statement_timeout_ms: Optional[int] = None,
+) -> AsyncConnectionPool[Any]:
     """Construct (but do not open) a pool. Caller does `await pool.open()`.
 
     psycopg_pool 3.2+ requires `open=False` at construction and an explicit
     `open()` — opening inside `__init__` is deprecated because it hides an
-    `await` behind a synchronous call.
+    `await` behind a synchronous call. ``statement_timeout_ms`` defaults to
+    ``settings.DB_STATEMENT_TIMEOUT_MS``.
     """
+    if statement_timeout_ms is None:
+        statement_timeout_ms = settings.DB_STATEMENT_TIMEOUT_MS
     return AsyncConnectionPool(
         dsn,
         min_size=min_size,
         max_size=max_size,
         kwargs=_pool_kwargs(),
+        configure=_statement_timeout_configurer(statement_timeout_ms),
         open=False,
     )
+
+
+def stats(pool: AsyncConnectionPool[Any]) -> dict[str, int]:
+    """Occupancy numbers for /api/readyz (no DSN, no counters).
+
+    ``size`` is how many connections exist now, ``idle`` how many sit in the
+    pool, ``used`` how many requests hold one, ``waiting`` how many wait for one.
+    """
+    raw = pool.get_stats()
+    size = raw.get("pool_size", 0)
+    idle = raw.get("pool_available", 0)
+    return {
+        "size": size,
+        "idle": idle,
+        "used": size - idle,
+        "waiting": raw.get("requests_waiting", 0),
+        "max": raw.get("pool_max", 0),
+    }
 
 
 @asynccontextmanager
