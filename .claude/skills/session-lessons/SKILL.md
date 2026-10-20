@@ -217,6 +217,12 @@ Apify web-fetch tool, before you build. Never cite from memory.
   into main, and #977 sat open, red, with nothing left to ship. **Rule:** when a stacked child
   merges, merge main into the base (`--no-commit`); if the tree equals main, close the base PR
   as shipped, naming the merge commit.
+- 2026-10-20, same session: a gate helper ended with `echo`, so it exited 0 even when the gate
+  failed. Run from `backend/` instead of the repo root, the gate never ran (rc=127), yet
+  `helper && git commit && git push` committed and pushed the s30 merge (#1007). The hook did not
+  stop it because the command did not start with `git commit`. The same tree passed the gate
+  right after. **Rule:** a gate step is its own command: read its PASS line, then run
+  `git commit` as a separate command; a helper must exit with the gate's own code.
 - 2026-10-15: pushes failed CI on the mypy ratchet and, after merging main, on
   the recipe line cap and MCP tool count. **Rule:** run the ratchet
   (`cd backend && python scripts/mypy_ratchet.py`) before every backend push, and
