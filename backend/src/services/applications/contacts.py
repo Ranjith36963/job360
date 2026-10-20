@@ -508,8 +508,9 @@ async def add_contact(
                 get_audit_logger().info(
                     "contact_already_existed",
                     extra={
-                        "event": "contact_already_existed", "application_id": application_id,
-                        "contact_id": existing["id"], "matched_on": matched_on,
+                        # CodeQL py/log-injection: ids and a closed code, sanitized like every logged value here.
+                        "event": "contact_already_existed", "application_id": safe_log_value(application_id),
+                        "contact_id": safe_log_value(existing["id"]), "matched_on": safe_log_value(matched_on),
                     },
                 )
                 view = await _full_contact_view(db, user_id, existing)
