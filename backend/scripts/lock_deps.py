@@ -39,7 +39,9 @@ COOLDOWN_DAYS = 7
 # the fixed release is older than COOLDOWN_DAYS (the lock then keeps it on its own).
 #   certifi: GHSA-6q48-6c7w-9gw2 (critical, "certifi bundles emSign root CAs with compromised
 #   intermediate CA keys"); fixed in 2026.10.19, released 2026-10-20. 2026.7.22 is affected.
-COOLDOWN_EXEMPT = ("certifi",)
+#   pillow: eight CVEs (CVE-2026-112395 ... CVE-2026-112899) in 12.3.0, all fixed in 13.0.0,
+#   released 2026-10-16 (needs Python >= 3.11; the prod image is 3.12).
+COOLDOWN_EXEMPT = ("certifi", "pillow")
 COMMAND = "python scripts/lock_deps.py   (from backend/, needs uv; see that file)"
 
 
