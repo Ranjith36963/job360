@@ -544,17 +544,6 @@ REGISTRY: dict[str, Guard] = {
         "always-green with no signal",
         since="2026-08-25",
     ),
-    "scripts/gen_doc_blocks.py": Guard(
-        status="drilled",
-        # Generation, not detection: it writes the countable facts INTO the doc
-        # from code, so those cannot drift at all. Two failure paths, both
-        # watched going red by hand before this entry was written — a wrong
-        # value inside the block, and DELETING the marker (a block quietly
-        # going back to being hand-written, which is the sneakier one).
-        drill=[sys.executable, "scripts/gen_doc_blocks.py"],
-        no_negative="its drill IS the generator's check mode; a negative means planting a wrong value and "
-                      "restoring it, i.e. a mutation harness of its own",
-    ),
     "scripts/provider_probe.py": Guard(
         status="owed",
         reason="calls a live credential endpoint; a drill needs a recorded 401/422 "
