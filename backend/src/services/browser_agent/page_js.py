@@ -263,10 +263,15 @@ FOCUS_IN_LIST_JS = r"""
 
 # Around an allowed Enter: any form submit it sets off is stopped before the page's own handlers see
 # it (capture on window, and on each open shadow root, since a submit there does not leave it), and
-# flagged, so the agent refuses instead of reporting a pick. READ removes the listeners.
+# flagged, so the agent refuses instead of reporting a pick. form.submit() fires no submit event:
+# while the guard is on it only flags (every form in this window, shadow roots' too, shares the
+# prototype); requestSubmit() fires the event, so the listeners stop it. READ puts both back.
 SUBMIT_GUARD_START_JS = r"""
 () => {
   const stop = (e) => { e.preventDefault(); e.stopImmediatePropagation(); window.__j360submitted = true; };
+  // A guard left on (its READ never ran) already holds the browser's own submit.
+  const submit = (window.__j360guard && window.__j360guard.submit) || HTMLFormElement.prototype.submit;
+  HTMLFormElement.prototype.submit = function () { window.__j360submitted = true; };
   const targets = [window];
   const walk = (root, depth) => {
     if (depth > 6) return;
@@ -277,14 +282,17 @@ SUBMIT_GUARD_START_JS = r"""
   walk(document, 0);
   for (const t of targets) t.addEventListener('submit', stop, true);
   window.__j360submitted = false;
-  window.__j360guard = { stop, targets };
+  window.__j360guard = { stop, targets, submit };
   return true;
 }
 """
 SUBMIT_GUARD_READ_JS = r"""
 () => {
   const g = window.__j360guard;
-  if (g) for (const t of g.targets) t.removeEventListener('submit', g.stop, true);
+  if (g) {
+    for (const t of g.targets) t.removeEventListener('submit', g.stop, true);
+    HTMLFormElement.prototype.submit = g.submit;
+  }
   window.__j360guard = null;
   return window.__j360submitted === true;
 }

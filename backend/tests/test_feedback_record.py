@@ -162,6 +162,57 @@ async def test_bad_outcome_payload_is_422_naming_the_key(authenticated_async_con
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_type,payload",
+    [
+        ("interview_scheduled", {"round": "technical", "link": " https://meet.example.com/abc?x=1 ",
+                                 "duration_minutes": 45, "location": "Head office, Leeds"}),
+        ("interview_requested", {"link": "http://zoom.example.com/j/1", "duration_minutes": 480}),
+        ("offer", {"offer_amount": 55000.5, "offer_currency": "GBP", "offer_period": "year"}),
+    ],
+)
+async def test_web_form_details_are_stored(authenticated_async_context, event_type, payload):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        extra: dict[str, Any] = {}
+        if event_type in settings.APPLICATION_SCHEDULABLE_EVENT_TYPES:
+            extra["scheduled_at"] = (datetime.now(timezone.utc) + timedelta(days=5)).replace(microsecond=0).isoformat()
+        res = await _event(client, app_id, event_type, payload=payload, **extra)
+        events = (await _detail(client, app_id))["events"]
+        event = next(e for e in events if e["id"] == res["event_id"])
+    expected = {k: (v.strip() if isinstance(v, str) else v) for k, v in payload.items()}
+    assert event["payload"] == expected
+    if extra:
+        assert event["scheduled_at"] == extra["scheduled_at"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_type,payload,fragment",
+    [
+        ("interview_scheduled", {"round": 3}, "round"),
+        ("interview_scheduled", {"link": "ftp://files.example.com/x"}, "link"),
+        ("interview_scheduled", {"link": "javascript:alert(1)"}, "link"),
+        ("interview_requested", {"link": "https://" + "a" * 500}, "link"),
+        ("interview_requested", {"link": "not a url"}, "link"),
+        ("interview_scheduled", {"duration_minutes": 4}, "duration_minutes"),
+        ("interview_scheduled", {"duration_minutes": 481}, "duration_minutes"),
+        ("interview_scheduled", {"duration_minutes": "60"}, "duration_minutes"),
+        ("interview_scheduled", {"duration_minutes": True}, "duration_minutes"),
+        ("interview_requested", {"location": "l" * 201}, "location"),
+        ("offer", {"offer_amount": 50000, "offer_currency": "gbp", "offer_period": "year"}, "offer_currency"),
+    ],
+)
+async def test_bad_web_form_details_are_422_naming_the_key(authenticated_async_context, event_type, payload, fragment):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        resp = await _post(client, app_id, event_type, payload=payload)
+        assert resp.status_code == 422, resp.text
+        assert fragment in resp.json()["detail"]
+        assert (await _detail(client, app_id))["status"] == "considering"
+
+
+@pytest.mark.asyncio
 async def test_post_mortem_links_an_outcome_event_on_the_same_application(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client, 1)
@@ -343,3 +394,12 @@ async def test_a_correcting_note_removes_a_lesson_from_get_profile(authenticated
     assert [r["detail"] for r in after] == ["Keep this one."]
     assert [r["event_id"] for r in after] == [keep["event_id"]]
     assert [r["detail"] for r in listed["lessons"]] == ["Keep this one."]
+
+
+def test_interview_round_is_free_text_so_an_agents_own_wording_keeps_working():
+    """Slice 43: interview_* payloads were never checked before; a round outside
+    the web form's choices ("panel") must still be stored, trimmed."""
+    from src.services.applications import interview_payloads
+
+    cleaned = interview_payloads.validate("interview_scheduled", {"round": "  panel  "})
+    assert cleaned["round"] == "panel"
