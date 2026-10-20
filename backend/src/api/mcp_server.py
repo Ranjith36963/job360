@@ -1090,6 +1090,8 @@ def build_server(version: str = "") -> MCPServer:
         For a cv or cover_letter, the reply's `checks` lists claims not found in the profile and PDF problems
         (each `{code, severity, detail}`); fix them and save a new version, or tell
         the user. They warn only - the save always succeeds.
+        Outreach with channel `linkedin` also gets linkedin_note_too_long over 200
+        characters (300 if preferences.linkedin_premium is true).
 
         Give `contact_id` (a person from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and

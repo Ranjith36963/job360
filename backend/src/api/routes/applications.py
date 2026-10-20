@@ -2339,7 +2339,7 @@ async def save_artifact(
                 "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
                 "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": body.model,
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": result["event_id"],
-                "contact_id": body.contact_id,
+                "contact_id": body.contact_id, "checks": outreach.get("checks", []),
             }
         return await spine.save_artifact(
             db, user_id=user.id, application_id=application_id, kind=body.kind, text=body.text,

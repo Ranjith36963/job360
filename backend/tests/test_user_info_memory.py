@@ -69,7 +69,7 @@ def test_the_seven_paths_are_editable_and_the_memory_head_matches_the_dataclass(
 def test_guard_every_overlay_only_field_is_a_declared_editable_field():
     declared = set(UserPreferences.__dataclass_fields__)
     paths = set(edits.editable_paths())
-    assert OVERLAY_ONLY_PREFERENCE_FIELDS == {"daily_check", "check_every"}
+    assert OVERLAY_ONLY_PREFERENCE_FIELDS == {"daily_check", "check_every", "linkedin_premium"}
     for name in OVERLAY_ONLY_PREFERENCE_FIELDS:
         assert name in declared, f"{name} is overlay-only but not a UserPreferences field"
         assert f"preferences.{name}" in paths, f"{name} is overlay-only but not an editable path"

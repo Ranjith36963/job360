@@ -29,6 +29,7 @@ full history ("was X") is every edit plus the base value, oldest first.
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from email.utils import parseaddr
@@ -802,6 +803,27 @@ async def _message_version_count(db: JobDatabase, contact_id: int) -> int:
     return int(row[0]) if row else 0
 
 
+async def _linkedin_premium(user_id: str, contact_id: int) -> bool:
+    """``preferences.linkedin_premium`` off the MERGED profile (agent-edit overlay
+    applied: load_profile's default with_overlay=True). Not set, no profile, or a
+    failed read = False: the free-account limit, the safer budget (career-ops
+    modes/contacto.md:168). Never raises: a warn-only check must never break a save
+    (same rule as spine._run_save_checks)."""
+    import asyncio  # noqa: PLC0415
+
+    try:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415 - rule #16
+
+        profile = await asyncio.to_thread(load_profile, user_id)
+    except Exception:  # noqa: BLE001 - advisory; a profile read must not break a save
+        logging.getLogger("job360.contacts").exception(
+            "linkedin_premium_unavailable", extra={"contact_id": contact_id},
+        )
+        return False
+    prefs = getattr(profile, "preferences", None)
+    return bool(getattr(prefs, "linkedin_premium", False))
+
+
 async def record_outreach(
     db: JobDatabase,
     user_id: str,
@@ -1005,7 +1027,15 @@ async def record_outreach(
         # Returned with the reply, not stored; the message is saved as written.
         from src.services.applications import cv_checks  # noqa: PLC0415
 
-        outreach["checks"] = cv_checks.check_text("outreach", clean_text, None)
+        checks = cv_checks.check_text("outreach", clean_text, None)
+        if channel == "linkedin":
+            # S16 - the connection-note limit; the profile is read only for this channel.
+            note = cv_checks.linkedin_note_too_long(
+                clean_text, premium=await _linkedin_premium(user_id, contact_id)
+            )
+            if note is not None:
+                checks.append(note)
+        outreach["checks"] = checks
     return {
         "outreach": outreach, "already_existed": False, "event_id": event_id,
         "follow_up_on": final_follow_up_on,

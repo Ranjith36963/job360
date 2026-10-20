@@ -301,6 +301,11 @@ networking. add_contact them (application_id if tied to a job, omitted
 for cold networking; pass `found_via` — where you found them), write the
 message YOURSELF, then save_artifact(contact_id=..., kind="outreach",
 channel="linkedin"|"email"|"other", text=...) — this DRAFTS a version.
+On channel="linkedin" the reply's `checks` warns `linkedin_note_too_long` over
+200 characters (a free account's connection-request note) or over 300 when
+`preferences.linkedin_premium` is true; set that to true with update_profile
+only when the user tells you they have LinkedIn Premium or Sales Navigator.
+Shorten a connection note to fit; the save itself always succeeds.
 SENDING depends on preferences.daily_check: in mode "auto" (or the older
 "scheduled") you MAY send an email you wrote and saved with channel="email",
 to a contact that has an email address, **only by pressing Send in Gmail in
