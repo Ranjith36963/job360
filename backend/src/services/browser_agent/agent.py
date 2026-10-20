@@ -73,6 +73,10 @@ MAX_ELEMENTS_CHARS = 60_000
 MAX_TYPE_CHARS = 5000
 ACTION_TIMEOUT_MS = 10_000
 NAV_TIMEOUT_MS = 30_000
+# One action, end to end: past this the user's browser is let go, never held by a page that hangs.
+ACT_TIMEOUT_S = 60.0
+# How often idle browsers are swept, started by the app's lifespan when the agent is on.
+REAP_EVERY_S = 60.0
 _REF = re.compile(r"^e\d{1,4}_[a-z0-9]{1,4}$")
 
 
@@ -131,6 +135,8 @@ class Session:
     recent: list[tuple[str, str, str, str]] = field(default_factory=list)
     # A live sign-in view closes at this time (monotonic) however busy it is; None = no limit.
     closes_at: Optional[float] = None
+    # The assistant session (its `session` label) driving this browser: another one is refused.
+    owner: str = ""
 
 
 class BrowserPool:
@@ -291,11 +297,11 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
     guarded = None
     if key == "Enter":
         frame = page.main_frame
-        for f in page.frames:  # the focus may live in a frame (an embedded form)
+        for f in page.frames[:MAX_FRAMES_CHECKED]:  # the focus may live in a frame (an embedded form)
             try:
-                if await f.evaluate("() => document.hasFocus()"):
+                if await asyncio.wait_for(f.evaluate("() => document.hasFocus()"), FRAME_READ_TIMEOUT_S):
                     frame = f
-            except Exception:  # noqa: BLE001, S112 - a frame mid-navigation
+            except Exception:  # noqa: BLE001, S112 - a frame mid-navigation, or one that never answers
                 continue
         _refuse_captcha_frame(frame)
         if not await frame.evaluate(FOCUS_IN_LIST_JS):
@@ -773,11 +779,11 @@ async def _find(s: Session, ref: str) -> tuple[Any, Any]:
         raise BrowserError("refused", "bad_ref", "Use a ref from the latest look, like e12_ab3f.")
     page = _live_page(s)
     found: list[tuple[Any, Any, int]] = []
-    for frame in page.frames:
+    for frame in page.frames[:MAX_FRAMES_CHECKED]:  # the frames look reads, so the only ones with refs
         loc = frame.locator(f'[data-j360-ref="{ref}"]')
         try:
-            count = await loc.count()
-        except Exception:  # noqa: BLE001, S112 - detached frame
+            count = await asyncio.wait_for(loc.count(), FRAME_READ_TIMEOUT_S)
+        except Exception:  # noqa: BLE001, S112 - detached frame, or one that never answers
             continue
         if count:
             found.append((frame, loc, count))
@@ -875,8 +881,12 @@ async def run(
     gate: Optional[Gate] = None,
     files: Optional[FileFn] = None,
     load_state: Optional[StateFn] = None,
+    owner: str = "",
 ) -> dict[str, Any]:
-    """Carry out one action for one user and return what the page looks like after it."""
+    """Carry out one action for one user and return what the page looks like after it.
+
+    ``owner`` is the caller's session label: while one session drives the user's browser, a call
+    with another label is refused (``busy``), so two assistant runs never fill one form."""
     if action not in ACTIONS:
         raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(ACTIONS) + ".")
     if action == "close":
@@ -885,11 +895,23 @@ async def run(
     s = await pool.get(user_id, create=action == "open", load_state=load_state)
     if s is None:
         raise BrowserError("refused", "no_browser", "No browser is open. Start with action open and a url.")
+    if owner:
+        # Checked and claimed with no await between: two sessions cannot both pass.
+        if s.owner and s.owner != owner:
+            raise BrowserError(
+                "busy", "browser_in_use",
+                "Another assistant session is using this user's Job360 browser. Wait for it to finish (it is "
+                f"closed after {max(1, int(pool.idle_s // 60))} idle minutes), or ask the user before you close "
+                "it (action close).",
+            )
+        s.owner = owner
     async with s.lock:
         s.last_used = time.monotonic()
         try:
-            result = await _act(pool, s, action, url=url, ref=ref, text=text, on=on, doc_kind=doc_kind,
-                                gate=gate, files=files)
+            result = await asyncio.wait_for(
+                _act(pool, s, action, url=url, ref=ref, text=text, on=on, doc_kind=doc_kind, gate=gate, files=files),
+                ACT_TIMEOUT_S,
+            )
         except BrowserError as exc:
             if exc.status == "needs_you" and not exc.url:
                 try:
@@ -897,6 +919,12 @@ async def run(
                 except BrowserError:
                     pass
             raise
+        except asyncio.TimeoutError:
+            raise BrowserError(
+                "error", "timeout",
+                f"That action took longer than {int(ACT_TIMEOUT_S)} seconds and was stopped. Call look to see "
+                "the page.",
+            ) from None
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
             if getattr(exc, "status_code", None) is not None:
                 raise  # an HTTP refusal from the gate (e.g. not the caller's application) stays one
@@ -1309,6 +1337,16 @@ def get_pool() -> BrowserPool:
             resolve=DEFAULT_RESOLVE,
         )
     return _pool
+
+
+async def reap_forever(every_s: float = REAP_EVERY_S) -> None:
+    """Close idle browsers on a clock, not only on the next request (the app's lifespan runs this)."""
+    while True:
+        await asyncio.sleep(every_s)
+        try:
+            await get_pool().reap()
+        except Exception:  # noqa: BLE001 - one failed sweep must not end the sweeping
+            logger.warning("browser_agent idle sweep failed", exc_info=True)
 
 
 async def shutdown_pool() -> None:
