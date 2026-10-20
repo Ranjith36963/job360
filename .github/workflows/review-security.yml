@@ -62,10 +62,13 @@ jobs:
             echo "no changed files — nothing to review" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          non_docs=$(grep -vE '(^docs/|\.md$)' changed-files.txt || true)
+          # Prose = docs/**, or *.md OUTSIDE backend/, frontend/src/, .claude/
+          # and .github/ (same rule as review-bugs.yml and scripts/ci_scope.py).
+          non_docs=$( { grep -vE '(^docs/|\.md$)' changed-files.txt; \
+            grep -E '^(backend/|frontend/src/|\.claude/|\.github/).*\.md$' changed-files.txt; } || true)
           if [ -z "$non_docs" ]; then
             echo "docsonly=true" >> "$GITHUB_OUTPUT"
-            echo "diff touches only docs (*.md / docs/**) — reviewer-security skipped, nothing to security-review" >> "$GITHUB_STEP_SUMMARY"
+            echo "diff touches only prose (docs/**, *.md outside code trees) — reviewer-security skipped, nothing to security-review" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "docsonly=false" >> "$GITHUB_OUTPUT"
           fi

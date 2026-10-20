@@ -186,11 +186,15 @@ jobs:
             echo "no changed files — nothing to review" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          # Not docs = not (docs/** or *.md at any depth).
-          non_docs=$(grep -vE '(^docs/|\.md$)' changed-files.txt || true)
+          # Prose = docs/**, or *.md OUTSIDE backend/, frontend/src/, .claude/
+          # and .github/ (same rule as scripts/ci_scope.py). Markdown in those
+          # trees is code: backend/src/recipes/*.md is served to users' agents
+          # and carries the never-submit-without-check_submit lines.
+          non_docs=$( { grep -vE '(^docs/|\.md$)' changed-files.txt; \
+            grep -E '^(backend/|frontend/src/|\.claude/|\.github/).*\.md$' changed-files.txt; } || true)
           if [ -z "$non_docs" ]; then
             echo "docsonly=true" >> "$GITHUB_OUTPUT"
-            echo "diff touches only docs (*.md / docs/**) — reviewer-bugs skipped, nothing to bug-hunt" >> "$GITHUB_STEP_SUMMARY"
+            echo "diff touches only prose (docs/**, *.md outside code trees) — reviewer-bugs skipped, nothing to bug-hunt" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "docsonly=false" >> "$GITHUB_OUTPUT"
           fi
