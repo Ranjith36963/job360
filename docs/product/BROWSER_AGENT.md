@@ -140,7 +140,12 @@ that's by design. What we *can* do: behave well (human pace, one application at 
   your password goes straight to the site and is not logged, stored or sent back. Table `browser_sign_ins`
   (migration 0065), one row per (user, site); **Forget** deletes it; deleting the account deletes them all.
 - **Who can use it:** only you, in a signed-in browser session. An assistant's token is refused (403), so no AI can
-  drive the live view or type into it. The assistant's own `browser` tool simply starts already signed in.
+  drive the live view or type into it. The live view is its own browser, not the one the assistant's `browser` tool
+  drives: the assistant cannot see your sign-in, and Start or Cancel never touches its half-filled form. Both count
+  toward `BROWSER_AGENT_MAX_SESSIONS`. The assistant's own `browser` tool simply starts already signed in.
+- **How long it stays open:** the picture refreshes every 1.5 s while the tab is shown, and stops after Keep. The
+  refresh does not keep the browser open: it closes after `BROWSER_AGENT_IDLE_SECONDS` without a click, key or typing
+  of yours, and 15 minutes after Start at the latest.
 - **Changing `SESSION_SECRET`** signs everyone out of every saved site (they sign in again). Nothing breaks.
 - **Checked end to end** in a real browser against a local test site: the page signs in, keeps the site, lists it,
   the password is in neither the logs nor the database, and an assistant's new browser opens already signed in.
