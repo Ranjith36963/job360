@@ -2763,7 +2763,8 @@ def _submitted_refused(user: CurrentUser, application_id: int, status: int, reas
         "blocked_submitted_refused",
         extra={
             "event": "blocked_submitted_refused", "user_id": safe_log_value(user.id),
-            "application_id": application_id, "status": status, "reason": reason, "result": "refused",
+            "application_id": int(application_id), "status": int(status), "reason": safe_log_value(reason, max_len=40),
+            "result": "refused",
         },
     )
     return HTTPException(status_code=status, detail={
@@ -2824,8 +2825,8 @@ async def submitted_blocked(
     get_audit_logger().info(
         "blocked_submitted",
         extra={
-            "event": "blocked_submitted", "user_id": safe_log_value(user.id), "application_id": application_id,
-            "receipt_id": receipt["receipt_id"], "channel": safe_log_value(channel, max_len=40), "result": "ok",
+            "event": "blocked_submitted", "user_id": safe_log_value(user.id), "application_id": int(application_id),
+            "receipt_id": int(receipt["receipt_id"]), "channel": safe_log_value(channel, max_len=40), "result": "ok",
         },
     )
     return {"receipt_id": receipt["receipt_id"], "controls": await _controls(db, user, application_id)}
