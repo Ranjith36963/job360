@@ -1051,7 +1051,7 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
         n = int(f.get("additions", 0)) + int(f.get("deletions", 0))
         name = str(f.get("filename", ""))
         recorded = (_FIXTURE_DIR in f"/{name}") and name.lower().endswith(_RECORDED_EXT)
-        # A generated file (openapi.json, api-types.ts, GENERATED.md) is written by a
+        # A generated file (openapi.json, api-types.ts) is written by a
         # script, not read by a reviewer. EXACT paths from the policy only, and the
         # discount is reported in the verdict like the fixture one.
         if recorded or name in GENERATED_FILES:
