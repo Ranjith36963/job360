@@ -300,16 +300,17 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
         frame, loc = await _find(s, ref)
         _refuse_captcha_frame(frame)
         await loc.focus()
+    # Every key goes where the focus is, a hidden challenge frame included: find that frame first.
+    frame = page.main_frame
+    for f in page.frames[:MAX_FRAMES_CHECKED]:  # the focus may live in a frame (an embedded form)
+        try:
+            if await asyncio.wait_for(f.evaluate("() => document.hasFocus()"), FRAME_READ_TIMEOUT_S):
+                frame = f
+        except Exception:  # noqa: BLE001, S112 - a frame mid-navigation, or one that never answers
+            continue
+    _refuse_captcha_frame(frame)
     guarded = None
     if key == "Enter":
-        frame = page.main_frame
-        for f in page.frames[:MAX_FRAMES_CHECKED]:  # the focus may live in a frame (an embedded form)
-            try:
-                if await asyncio.wait_for(f.evaluate("() => document.hasFocus()"), FRAME_READ_TIMEOUT_S):
-                    frame = f
-            except Exception:  # noqa: BLE001, S112 - a frame mid-navigation, or one that never answers
-                continue
-        _refuse_captcha_frame(frame)
         if not await frame.evaluate(FOCUS_IN_LIST_JS):
             raise BrowserError(
                 "refused", "enter_may_submit",
@@ -951,6 +952,10 @@ async def run(
         return result
 
 
+# Roles a click ticks, like a checkbox or radio input.
+_TICK_ROLES = ("checkbox", "radio", "switch")
+
+
 async def _act(
     pool: BrowserPool, s: Session, action: str, *, url: str, ref: str, text: str, on: bool, doc_kind: str,
     gate: Optional[Gate], files: Optional[FileFn],
@@ -998,9 +1003,15 @@ async def _act(
     kind = await _kind(loc)
     page = _live_page(s)
 
-    # A trap field for bots says to leave it blank: never fill, pick, tick or upload into it.
-    fills = action in ("choose", "upload") or (action == "type" and text) or (action == "tick" and on)
-    if fills and is_honeypot(str((await loc.evaluate(ELEMENT_FACTS_JS)).get("name") or "")):
+    # A trap field for bots says to leave it blank: never fill, pick, tick or upload into it, and never
+    # click it (a click ticks a trap checkbox or radio).
+    fills = action in ("choose", "upload", "click") or (action == "type" and text) or (action == "tick" and on)
+    facts = await loc.evaluate(ELEMENT_FACTS_JS) if fills else {}
+    if action == "click" and not (
+        facts.get("tag") in ("input", "textarea", "select") or str(facts.get("role")).lower() in _TICK_ROLES
+    ):
+        fills = False
+    if fills and is_honeypot(str(facts.get("name") or "")):
         raise BrowserError(
             "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
         )
