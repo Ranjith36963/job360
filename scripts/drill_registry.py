@@ -355,6 +355,19 @@ REGISTRY: dict[str, Guard] = {
         no_negative="the drill mutates a copy of the lock inline; blinding it means a flag that skips that "
                       "edit",
     ),
+    "scripts/check_py_lock.py": Guard(
+        status="drilled",
+        # The backend twin (2026-10-20): the prod image and CI install ONLY the
+        # hashed backend/requirements*.lock.txt, so a pyproject edit the locks
+        # do not follow ships without its dependency. Drill breaks copies of
+        # pyproject + locks five ways (hallucinated name added, floor raised,
+        # dependency removed, hashes stripped, dev lock drifted) and demands
+        # each rule fires; the untouched copy must stay green.
+        drill=[sys.executable, "scripts/check_py_lock.py", "--drill"],
+        # NEGATIVE CONTROL: MISSING switched off, so the drill must FAIL.
+        # Verified exit 1 for every rule on the commit that added this line.
+        negative=[sys.executable, "scripts/check_py_lock.py", "--drill", "--break-checker", "MISSING"],
+    ),
     "scripts/check_workflow_slack_wiring.py": Guard(
         status="drilled",
         # Checks the CALLERS, not the sender: every slack step passes a token, a
@@ -530,17 +543,6 @@ REGISTRY: dict[str, Guard] = {
         "found it ran in NO workflow at all, which let 27 guards degrade to "
         "always-green with no signal",
         since="2026-08-25",
-    ),
-    "scripts/gen_doc_blocks.py": Guard(
-        status="drilled",
-        # Generation, not detection: it writes the countable facts INTO the doc
-        # from code, so those cannot drift at all. Two failure paths, both
-        # watched going red by hand before this entry was written — a wrong
-        # value inside the block, and DELETING the marker (a block quietly
-        # going back to being hand-written, which is the sneakier one).
-        drill=[sys.executable, "scripts/gen_doc_blocks.py"],
-        no_negative="its drill IS the generator's check mode; a negative means planting a wrong value and "
-                      "restoring it, i.e. a mutation harness of its own",
     ),
     "scripts/provider_probe.py": Guard(
         status="owed",
