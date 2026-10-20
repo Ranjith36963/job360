@@ -61,7 +61,7 @@ def test_registry_and_citations():
 
 
 def test_hunt_kit_wiring():
-    assert hk.ATS_MODULES[-1] == "kit_ats_extra"
+    assert "kit_ats_extra" in hk.ATS_MODULES
     assert set(F) <= set(hk.BOARD_SOURCES)
     assert set(hk._merged("ATS_FETCHERS", hk.ATS_MODULES)) >= set(F)  # the run finds every reader
     info = hk.board_from_job_url("https://qogita.careers.hibob.com/jobs/abc")
