@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AccountSettingsPage from "../page";
+import { ApiError } from "@/lib/api-error";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -26,6 +27,7 @@ vi.mock("@/lib/api", () => ({
   // mounting the whole page in these unrelated tests never throws.
   me: (...args: unknown[]) => mockMe(...args),
   setTimezone: (...args: unknown[]) => mockSetTimezone(...args),
+  setAnalyticsConsent: vi.fn(),
   resendVerificationEmail: (...args: unknown[]) => mockResendVerificationEmail(...args),
   // CalendarFeedSection also lives on this page - stub it so mounting never throws.
   getCalendarFeed: () => Promise.resolve({ exists: false, created_at: null }),
@@ -303,5 +305,41 @@ describe("DeleteAccountCard", () => {
     await user.click(submitBtn);
 
     await waitFor(() => expect(mockDeleteAccount).toHaveBeenCalledWith("mypassword"));
+  });
+});
+
+describe("DeleteAccountCard — account with no password (magic link only)", () => {
+  beforeEach(() => {
+    mockDeleteAccount.mockReset().mockResolvedValue(undefined);
+    mockMe.mockResolvedValue({ id: "u1", email: "a@example.com", timezone: "UTC", has_password: false });
+  });
+  afterEach(() => {
+    mockMe.mockResolvedValue(null);
+  });
+
+  it("asks for no password and deletes without one", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: /delete my account/i }));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(within(dialog).getByTestId("delete-no-password")).toBeInTheDocument());
+    expect(within(dialog).queryByLabelText(/current password/i)).toBeNull();
+    await user.type(within(dialog).getByLabelText(/type DELETE to confirm/i), "DELETE");
+    await user.click(within(dialog).getByRole("button", { name: /delete my account/i }));
+    await waitFor(() => expect(mockDeleteAccount).toHaveBeenCalledWith(undefined));
+  });
+
+  it("on 403 tells the user to sign in again with a fresh link", async () => {
+    const detail =
+      "This account has no password. To delete it, sign out, sign in again with a fresh email link, then delete your account within 10 minutes.";
+    mockDeleteAccount.mockRejectedValue(new ApiError(403, detail));
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: /delete my account/i }));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(within(dialog).getByTestId("delete-no-password")).toBeInTheDocument());
+    await user.type(within(dialog).getByLabelText(/type DELETE to confirm/i), "DELETE");
+    await user.click(within(dialog).getByRole("button", { name: /delete my account/i }));
+    expect(await within(dialog).findByText(detail)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: /sign out and get a fresh link/i }));
+    await waitFor(() => expect(mockLogout).toHaveBeenCalled());
   });
 });

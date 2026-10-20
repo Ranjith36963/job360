@@ -538,7 +538,7 @@ async def bring_job(
 
     try:
         if await analytics.mark_first_bring(db._db, user.id):
-            analytics.capture_event(user.id, "first_bring", {"job_id": job_id})
+            await analytics.capture_event(db._db, user.id, "first_bring", {"job_id": job_id})
     except Exception:  # noqa: BLE001 — analytics must never break a bring
         logger.debug("analytics_first_bring_failed", extra={"user_id": user.id})
 

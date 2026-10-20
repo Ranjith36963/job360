@@ -242,7 +242,16 @@ export async function getJsonResume(): Promise<JsonResumeResponse> {
 // Auth (Batch 2)
 // ---------------------------------------------------------------------------
 
-export type User = { id: string; email: string; timezone?: string };
+export type User = {
+  id: string;
+  email: string;
+  timezone?: string;
+  /** "Help improve Job360" (Settings > Account). Gates Sentry session replay. */
+  analytics_consent?: boolean;
+  /** GET /api/auth/me only: false for an account only a magic link has ever
+   * signed in; the account page then deletes without a password. */
+  has_password?: boolean;
+};
 
 // M2 — register no longer returns the user or a session (no account-enumeration:
 // a new-user response that differs from a duplicate would leak whether an email
@@ -309,6 +318,18 @@ export async function setTimezone(timezone: string): Promise<{ timezone: string 
   return request<{ timezone: string }>("/api/auth/me/timezone", {
     method: "PUT",
     body: JSON.stringify({ timezone }),
+  });
+}
+
+/** Gap roadmap slice 4 — the user's own "Help improve Job360" switch. `true`
+ * stores consent, `false` withdraws it. A browser session only (a token gets
+ * 403 session_required). */
+export async function setAnalyticsConsent(
+  consent: boolean,
+): Promise<{ analytics_consent: boolean }> {
+  return request<{ analytics_consent: boolean }>("/api/auth/me/analytics-consent", {
+    method: "PUT",
+    body: JSON.stringify({ consent }),
   });
 }
 
@@ -405,10 +426,13 @@ export async function changeEmail(
   });
 }
 
-export async function deleteAccount(currentPassword: string): Promise<void> {
+/** Erase the account. Pass the password for an account that has one; an
+ * account with none (magic link only) sends no password and must be on a
+ * fresh email-link sign-in, else the server answers 403 saying so. */
+export async function deleteAccount(currentPassword?: string): Promise<void> {
   await request<void>("/api/auth/users/me", {
     method: "DELETE",
-    body: JSON.stringify({ current_password: currentPassword }),
+    body: JSON.stringify(currentPassword ? { current_password: currentPassword } : {}),
   });
 }
 
