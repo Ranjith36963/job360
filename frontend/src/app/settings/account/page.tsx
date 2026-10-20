@@ -31,9 +31,12 @@ import {
   logout,
   me,
   resendVerificationEmail,
+  setAnalyticsConsent,
   setTimezone,
 } from "@/lib/api";
-import { apiErrorMessage } from "@/lib/api-error";
+import { ApiError, apiErrorMessage } from "@/lib/api-error";
+import { setConsent as setBrowserConsent } from "@/lib/consent";
+import { syncReplayConsent } from "@/lib/sentry-replay";
 import {
   CARD_CLASS,
   TITLE_CLASS,
@@ -241,10 +244,30 @@ function ChangeEmailCard() {
 // Delete Account
 // ---------------------------------------------------------------------------
 
+const FRESH_LINK_FALLBACK =
+  "This account has no password. Sign out, sign in again with a fresh email link, then delete your account.";
+
 function DeleteAccountCard() {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Assume a password until /me says otherwise (an account with one must send it).
+  const [hasPassword, setHasPassword] = useState(true);
+  const [needsFreshLink, setNeedsFreshLink] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    me()
+      .then((u) => {
+        if (!cancelled && u && u.has_password === false) setHasPassword(false);
+      })
+      .catch(() => {
+        // Unknown: keep asking for a password; the server decides either way.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const {
     register,
@@ -256,17 +279,33 @@ function DeleteAccountCard() {
   function openDialog() {
     reset();
     setServerError(null);
+    setNeedsFreshLink(false);
     setDialogOpen(true);
   }
 
   async function onConfirmDelete(data: DeleteConfirmValues) {
     setServerError(null);
+    setNeedsFreshLink(false);
     try {
-      await deleteAccount(data.currentPassword);
+      await deleteAccount(hasPassword ? data.currentPassword : undefined);
       router.push("/login");
     } catch (err) {
+      if (!hasPassword && err instanceof ApiError && err.status === 403) {
+        setNeedsFreshLink(true);
+        setServerError(err.detail || FRESH_LINK_FALLBACK);
+        return;
+      }
       setServerError(apiErrorMessage(err, "Failed to delete account."));
     }
+  }
+
+  async function onSignOutForFreshLink() {
+    try {
+      await logout();
+    } catch {
+      // Signing out failed (network): the login page still offers a fresh link.
+    }
+    router.push("/login");
   }
 
   return (
@@ -302,19 +341,26 @@ function DeleteAccountCard() {
           </DialogHeader>
           <form onSubmit={handleSubmit(onConfirmDelete)} noValidate>
             <div className="space-y-4 py-2">
-              <div className="space-y-1">
-                <Label htmlFor="del-password" className={LABEL_CLASS}>Current password</Label>
-                <Input
-                  id="del-password"
-                  type="password"
-                  autoComplete="current-password"
-                  aria-invalid={!!errors.currentPassword}
-                  {...register("currentPassword", {
-                    required: "Enter your password",
-                  })}
-                />
-                <FieldError message={errors.currentPassword?.message} />
-              </div>
+              {hasPassword ? (
+                <div className="space-y-1">
+                  <Label htmlFor="del-password" className={LABEL_CLASS}>Current password</Label>
+                  <Input
+                    id="del-password"
+                    type="password"
+                    autoComplete="current-password"
+                    aria-invalid={!!errors.currentPassword}
+                    {...register("currentPassword", {
+                      required: "Enter your password",
+                    })}
+                  />
+                  <FieldError message={errors.currentPassword?.message} />
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground" data-testid="delete-no-password">
+                  Your account has no password, so no password is asked. Deleting
+                  works within 10 minutes of signing in with an email link.
+                </p>
+              )}
               <div className="space-y-1">
                 <Label htmlFor="del-confirm" className={LABEL_CLASS}>Type DELETE to confirm</Label>
                 <Input
@@ -331,6 +377,16 @@ function DeleteAccountCard() {
                 <FieldError message={errors.confirmText?.message} />
               </div>
               {serverError && <p className="text-sm text-danger mt-1" role="alert">{serverError}</p>}
+              {needsFreshLink && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={QUIET_BTN_CLASS}
+                  onClick={() => void onSignOutForFreshLink()}
+                >
+                  Sign out and get a fresh link
+                </Button>
+              )}
             </div>
             <DialogFooter className="mt-4">
               <Button
@@ -588,6 +644,75 @@ function YourDataCard() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Help improve Job360 — the user's own analytics consent (gap roadmap slice 4)
+// ---------------------------------------------------------------------------
+
+function HelpImproveCard() {
+  const [consent, setConsentState] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    me().then((user) => {
+      if (cancelled || !user) return;
+      setConsentState(user.analytics_consent === true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onToggle() {
+    if (consent === null) return;
+    setBusy(true);
+    setServerError(null);
+    try {
+      const result = await setAnalyticsConsent(!consent);
+      setConsentState(result.analytics_consent);
+      // Apply at once in this tab: Sentry replay starts (masked) or stops, and
+      // the browser's PostHog choice follows the same switch.
+      setBrowserConsent(result.analytics_consent ? "accepted" : "declined");
+      await syncReplayConsent(result.analytics_consent).catch(() => {});
+    } catch (err) {
+      setServerError(apiErrorMessage(err, "Failed to save your choice."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className={CARD_CLASS}>
+      <CardHeader>
+        <CardTitle className={TITLE_CLASS}>Help improve Job360</CardTitle>
+        <CardDescription className={DESC_CLASS}>
+          Help improve Job360: share anonymous usage and masked screen
+          recordings of errors. Off by default.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={consent === true}
+          aria-label="Help improve Job360"
+          data-testid="analytics-consent-toggle"
+          disabled={busy || consent === null}
+          onClick={() => void onToggle()}
+          className={
+            "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9 " +
+            (consent ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")
+          }
+        >
+          {consent ? "On" : "Off"}
+        </button>
+        <FieldError message={serverError ?? undefined} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AccountSettingsPage() {
   return (
     <div className="max-w-3xl space-y-8 py-12">
@@ -605,6 +730,7 @@ export default function AccountSettingsPage() {
       <ChangePasswordCard />
       <ChangeEmailCard />
       <YourDataCard />
+      <HelpImproveCard />
       <DeleteAccountCard />
     </div>
   );

@@ -223,7 +223,11 @@ async def test_sensitive_memory_goes_to_its_field_never_the_approved_list(authen
         await _fill(client, app_id, [GENDER])
         card = await _card(client, app_id)
         assert _codes(card) == ["not_in_memory"]
-        resp = await _confirm(client, app_id, 0, card["form_filled_event_id"])
+        # G023 (slice 11): not in memory, so the fill kept only its hash - Verify cannot see it, Edit types it.
+        assert (card["answers"][0]["redacted"], card["answers"][0]["answer"]) == (True, "")
+        refused = await _confirm(client, app_id, 0, card["form_filled_event_id"])
+        assert refused.status_code == 422 and "use Edit" in refused.json()["detail"]
+        resp = await _confirm(client, app_id, 0, card["form_filled_event_id"], "Female")
         assert resp.status_code == 200, resp.text
         assert resp.json()["answers"][0]["verified"] is True and _codes(resp.json()) == []
         profile = load_profile(fixture_user_id)

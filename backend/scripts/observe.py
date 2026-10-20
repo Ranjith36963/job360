@@ -62,6 +62,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # per-user table nobody registers here is one this layer silently cannot see.
     ("email_verifications", "user_id"),
     ("password_resets", "user_id"),
+    ("email_change_undos", "user_id"),
     ("oauth_states", "user_id"),
     ("oauth_grants", "user_id"),
     ("audit_log", "user_id"),
@@ -86,6 +87,8 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("browser_sign_ins", "user_id"),
     # "Send starts my assistant": the user's start link, token encrypted (migration 0066).
     ("assistant_triggers", "user_id"),
+    # Write-tool idempotency keys: request_id -> the first reply (migration 0068).
+    ("idempotency_keys", "user_id"),
 )
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here

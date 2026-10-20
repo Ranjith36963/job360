@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 9
-TOOLS_REV_FOR_HASH = "527c5802061d"
+TOOLS_REV = 10
+TOOLS_REV_FOR_HASH = "f98d978729e1"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -279,6 +279,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         # What was recorded at apply time — stored facts, empty when never recorded.
         "application_id": r.application_id,
         "answers": [a.model_dump() for a in r.answers],
+        "answers_from": r.answers_from,
         "fields_filled": r.fields_filled,
         "confirmation": r.confirmation,
         "cv_version_no": r.cv_version_no,
@@ -854,6 +855,7 @@ def build_server(version: str = "") -> MCPServer:
         cover_letter_artifact_id: Optional[int] = None,
         applied_at: Optional[str] = None,
         application_id: Optional[int] = None,
+        request_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record that the user has applied to this job — ONLY after they say so, or an
         employer's confirmation email in their Gmail proves it (name it in `note`). Pass
@@ -877,6 +879,8 @@ def build_server(version: str = "") -> MCPServer:
 
         cover_letter_artifact_id: pass it ONLY if a letter was actually sent; leave it out
         and the receipt records no letter (`cover_letter_sent` false, plus a warning).
+        `applied_at` is ISO-8601 with a timezone. `request_id` (your own id for this submit)
+        makes a retry safe: the same one returns the first receipt (`already_existed` true).
         """
         try:
             body = applications_route.RecordApplicationReceiptRequest(
@@ -884,6 +888,7 @@ def build_server(version: str = "") -> MCPServer:
                 answers=[applications_route.ReceiptAnswer(**a) for a in (answers or [])],
                 fields_filled=fields_filled or {}, cv_artifact_id=cv_artifact_id,
                 cover_letter_artifact_id=cover_letter_artifact_id, applied_at=applied_at,
+                request_id=request_id,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -923,7 +928,10 @@ def build_server(version: str = "") -> MCPServer:
                 http_status=exc.status_code,
             )
             raise _tool_error(exc) from None
-        _audit("record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"])
+        _audit(
+            "record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"],
+            already_existed=bool(resp.get("already_existed")),
+        )
         # The spine's url is site-relative; every other tool hands out the absolute one.
         resp = {**resp, "url": _application_url(application["id"])}
         reply: dict[str, Any] = {"job_id": job_id, **resp}
@@ -2185,7 +2193,7 @@ class _CaptureFirstToolCall:
         try:
             async with _request_db() as db:
                 if await analytics.mark_first_tool_call(db._db, user_id):
-                    analytics.capture_event(user_id, "first_tool_call")
+                    await analytics.capture_event(db._db, user_id, "first_tool_call")
         except Exception:  # noqa: BLE001 — analytics must never break a tool call
             logger.debug("analytics_first_tool_call_failed", extra={"user_id": user_id})
 

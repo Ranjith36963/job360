@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
 from src.repositories import pg
+from src.services import idempotency
 from src.services.applications.status import (
     PROGRESS_RANK,
     progress_rank,
@@ -284,13 +285,14 @@ def _parse_bounded_iso(
     return parsed.astimezone(timezone.utc).isoformat()
 
 
-def parse_occurred_at(raw: Optional[str]) -> str:
-    """S6 — ISO-8601 with a timezone, bounded on the future side only."""
+def parse_occurred_at(raw: Optional[str], field: str = "occurred_at") -> str:
+    """S6 — ISO-8601 with a timezone, bounded on the future side only.
+    ``field`` names the input in the 422 (record_application passes ``applied_at``)."""
     if raw is None:
         return datetime.now(timezone.utc).isoformat()
     return _parse_bounded_iso(
         raw,
-        field="occurred_at",
+        field=field,
         max_future_seconds=settings.APPLICATION_EVENT_MAX_FUTURE_SECONDS,
         max_future_setting="APPLICATION_EVENT_MAX_FUTURE_SECONDS",
     )
@@ -1566,6 +1568,81 @@ async def _resolve_receipt_artifact(
     return await latest_artifact(db, user_id, application_id, kind)
 
 
+_RECEIPT_TOOL = "record_application"
+
+
+def _event_answers_count(payload: dict[str, Any]) -> int:
+    """How many answers a form event says were typed: its own ``answers_count``, else its list's length."""
+    claimed = payload.get("answers_count")
+    if isinstance(claimed, int) and not isinstance(claimed, bool) and claimed >= 0:
+        return claimed
+    listed = payload.get("answers")
+    return len(listed) if isinstance(listed, list) else 0
+
+
+async def _form_answers_source(
+    db: JobDatabase, user_id: str, application_id: int
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Slice 11 - ``(the form event a receipt freezes its answers from, the host the form was filled on)``.
+
+    Reads this application's surviving ``form_filled`` / ``form_swept`` events (one a
+    ``corrects_event_id`` names is skipped) from the newest ``form_filled`` on, newest first: the
+    newest one listing answers wins, else the newest one that says it typed some (``answers_missing``).
+    A page's sweep (``page`` set) holds that page only, so it never stands for the whole form.
+    The host is the newest ``form_filled``'s (a sweep carries none)."""
+    cur = await db._db.execute(
+        "SELECT e.id, e.event_type, e.payload FROM application_events e "
+        "WHERE e.user_id = ? AND e.application_id = ? AND e.event_type IN ('form_filled', 'form_swept') "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "ORDER BY e.id DESC",
+        (user_id, application_id),
+    )
+    rows: list[dict[str, Any]] = []
+    for r in await cur.fetchall():
+        row = dict(r)
+        row["payload"] = _receipt_json(row.get("payload"), dict)
+        rows.append(row)
+        if row["event_type"] == "form_filled":
+            break  # an older fill is an earlier attempt at the form
+    whole = [r for r in rows if "page" not in r["payload"]]
+    source = next((r for r in whole if isinstance(r["payload"].get("answers"), list) and r["payload"]["answers"]), None)
+    if source is None:
+        source = next((r for r in whole if _event_answers_count(r["payload"]) > 0), None)
+    host = rows[-1]["payload"].get("host") if rows and rows[-1]["event_type"] == "form_filled" else None
+    return source, host if isinstance(host, str) and host else None
+
+
+def _channel_for_host(host: str) -> str:
+    """The closed channel a form's host stands for: LinkedIn = ``linkedin_easy_apply``, Indeed =
+    ``job_board`` (the always-ask brands), any other host = the employer's own form, ``company_site``
+    (the reading the ``ats_form`` / ``greenhouse`` aliases already give)."""
+    labels = host.lower().split(".")
+    if "linkedin" in labels or "lnkd" in labels:
+        return "linkedin_easy_apply"
+    return "job_board" if "indeed" in labels else "company_site"
+
+
+async def _receipt_replay(
+    db: JobDatabase, user_id: str, request_id: str, body: dict[str, Any]
+) -> Optional[dict[str, Any]]:
+    """The FIRST reply stored for this ``request_id`` (``already_existed: True``), or None."""
+    try:
+        stored = await idempotency.lookup(db._db, user_id, _RECEIPT_TOOL, request_id, body)
+    except idempotency.IdempotencyError as exc:
+        raise SpineError(exc.status_code, exc.detail) from None
+    if stored is None:
+        return None
+    get_audit_logger().info(
+        "receipt_replayed",
+        extra={
+            "event": "receipt_replayed", "user_id": safe_log_value(user_id),
+            "application_id": int(body["application_id"]), "receipt_id": safe_log_value(stored.get("receipt_id")),
+            "result": "ok",
+        },
+    )
+    return {**stored, "already_existed": True}
+
+
 async def record_receipt(
     db: JobDatabase,
     *,
@@ -1580,6 +1657,7 @@ async def record_receipt(
     cv_artifact_id: Optional[int] = None,
     cover_letter_artifact_id: Optional[int] = None,
     applied_at: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1591,7 +1669,24 @@ async def record_receipt(
 
     ``channel`` is a closed set for every NEW receipt (owner decision
     2026-10-04, ``normalize_receipt_channel``) — '' stays "not said".
+
+    Gap roadmap slice 10 — the receipt, its ``applied`` event and the
+    ``request_id`` row (``services/idempotency``) commit in ONE transaction:
+    a failure between them leaves no receipt. The same ``request_id`` again
+    returns the FIRST reply with ``already_existed: True`` and writes nothing;
+    with a different body it is a 409. ``applied_at`` arrives already parsed
+    (the route's ``parse_occurred_at``).
+
+    Gap roadmap slice 11 — no ``answers``: the newest form event's are frozen
+    (``answers_from``, :func:`_form_answers_source`); no ``channel``: the form's
+    host picks one. Every answer, given or frozen, passes G023
+    (``kit.redact_unremembered``). ``idem_body`` stays the CALLER's body.
     """
+    idem_body = {
+        "application_id": application_id, "channel": channel, "note": note, "confirmation": confirmation,
+        "answers": answers or [], "fields_filled": fields_filled or {}, "cv_artifact_id": cv_artifact_id,
+        "cover_letter_artifact_id": cover_letter_artifact_id, "applied_at": applied_at,
+    }
     channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
     warnings: list[str] = []
@@ -1615,6 +1710,37 @@ async def record_receipt(
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
+    if request_id is not None:
+        replay = await _receipt_replay(db, user_id, request_id, idem_body)
+        if replay is not None:
+            return replay
+
+    # Lazy: kit imports spine.
+    from src.services.applications import kit as kit_service  # noqa: PLC0415
+
+    # Slice 11 - no answers given: freeze the ones the assistant already recorded on the form
+    # events (prod receipt 12 read "0 of 11 fields" for a form filled with 11). An empty
+    # channel reads the form's host. Both decided here, before the INSERT (M3).
+    answers_list: list[dict[str, Any]] = [dict(a) for a in (answers or [])]
+    answers_from, answers_count, form_host = "", None, None
+    source: Optional[dict[str, Any]] = None
+    if not answers_list or not channel_given:
+        source, form_host = await _form_answers_source(db, user_id, application_id)
+    if not answers_list and source is not None:
+        answers_from = f"{source['event_type']}#{int(source['id'])}"
+        answers_count = _event_answers_count(source["payload"])
+        listed = source["payload"].get("answers")
+        answers_list = [dict(a) for a in listed if isinstance(a, dict)] if isinstance(listed, list) else []
+        if not answers_list:
+            warnings.append(
+                f"answers_missing: {answers_from} says {answers_count} answers were typed but lists none; "
+                "the receipt keeps the count only"
+            )
+    if not channel_given and form_host:
+        channel = _channel_for_host(form_host)
+        warnings.append(f"channel not given: stored '{channel}' from the form's host {form_host}")
+    # G023 - a sensitive answer the user did not agree to remember is hashed (given or frozen alike).
+    answers_list, hashed = await kit_service.redact_unremembered(db, user_id, app_row, answers_list)
 
     cv_artifact = await _resolve_receipt_artifact(db, user_id, application_id, "cv", cv_artifact_id)
     if cv_artifact_id is None and cv_artifact is not None:
@@ -1642,13 +1768,11 @@ async def record_receipt(
     profile_version = current_profile_version_id(user_id)
     now = datetime.now(timezone.utc).isoformat()
     sent_at = applied_at or now
-    answers_json = json.dumps(answers or [])
+    answers_json = json.dumps(answers_list)
     fields_json = json.dumps(fields_filled or {})
 
     # S3 - flag a possible duplicate and name the kit the assistant filled from.
     # Both are set HERE, at INSERT (M3): a flag never blocks the receipt.
-    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
-
     dup = await kit_service.duplicate_facts(
         db, user_id, app_row, datetime.now(timezone.utc), include_self=True
     )
@@ -1668,33 +1792,57 @@ async def record_receipt(
         except (ValueError, AttributeError):
             kit_sha256 = ""
 
-    cur = await db._db.execute(
-        "INSERT INTO application_receipts "
-        "(user_id, job_id, sent_at, job_title, job_company, job_location, job_apply_url, job_source, "
-        " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
-        " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
-        " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            user_id, app_row["job_id"], sent_at,
-            app_row.get("job_title") or "", app_row.get("job_company") or "",
-            app_row.get("job_location") or "", app_row.get("job_url") or "",
-            app_row.get("job_source") or "", app_row.get("job_description_snapshot") or "",
-            cv_artifact["text"] if cv_artifact else None, "artifact" if cv_artifact else None,
-            cl_artifact["text"] if cl_artifact else None, "artifact" if cl_artifact else None,
-            profile_version, channel or "", note or "", now,
-            application_id, cv_artifact["id"] if cv_artifact else None,
-            cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
-            confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
-        ),
-    )
-    receipt_id = int(cur.lastrowid or 0)
-
-    event = await append_event(
-        db, user_id=user_id, application_id=application_id, event_type="applied",
-        payload={"receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate},
-        occurred_at=sent_at, recorded_by=recorded_by,
-    )
+    try:
+        async with db._db.transaction():
+            cur = await db._db.execute(
+                "INSERT INTO application_receipts "
+                "(user_id, job_id, sent_at, job_title, job_company, job_location, job_apply_url, job_source, "
+                " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
+                " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
+                " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+                " answers_from, answers_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_id, app_row["job_id"], sent_at,
+                    app_row.get("job_title") or "", app_row.get("job_company") or "",
+                    app_row.get("job_location") or "", app_row.get("job_url") or "",
+                    app_row.get("job_source") or "", app_row.get("job_description_snapshot") or "",
+                    cv_artifact["text"] if cv_artifact else None, "artifact" if cv_artifact else None,
+                    cl_artifact["text"] if cl_artifact else None, "artifact" if cl_artifact else None,
+                    profile_version, channel or "", note or "", now,
+                    application_id, cv_artifact["id"] if cv_artifact else None,
+                    cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
+                    confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
+                    answers_from, answers_count,
+                ),
+            )
+            receipt_id = int(cur.lastrowid or 0)
+            event = await append_event(
+                db, user_id=user_id, application_id=application_id, event_type="applied",
+                payload={"receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate},
+                occurred_at=sent_at, recorded_by=recorded_by,
+            )
+            result: dict[str, Any] = {
+                "receipt_id": receipt_id, "sent_at": sent_at,
+                "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
+                "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
+                "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
+                "cover_letter_sent": cl_artifact is not None,
+                "cover_letter_version_no": cl_artifact["version_no"] if cl_artifact else None,
+                "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
+                "confirmation": confirmation or "",
+                "url": f"/applications/{application_id}", "event_id": event["event_id"],
+                "possible_duplicate": possible_duplicate, "answers_from": answers_from, "already_existed": False,
+            }
+            if request_id is not None:
+                await idempotency.store(db._db, user_id, _RECEIPT_TOOL, request_id, idem_body, result)
+    except pg.IntegrityError:
+        # Two retries raced past the lookup: the UNIQUE key rolled this whole
+        # transaction back (no receipt, no event). Return the winner's reply.
+        replay = await _receipt_replay(db, user_id, request_id, idem_body) if request_id is not None else None
+        if replay is None:
+            raise
+        return replay
     get_audit_logger().info(
         "receipt_created",
         extra={
@@ -1702,6 +1850,19 @@ async def record_receipt(
             "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
         },
     )
+    if answers_from or hashed or (form_host and not channel_given):
+        # Slice 11 - ids and counts only: never an answer, a question or the host.
+        get_audit_logger().info(
+            "receipt_from_form",
+            extra={
+                "event": "receipt_from_form", "user_id": safe_log_value(user_id),
+                "application_id": int(application_id), "receipt_id": receipt_id,
+                "from_event_id": int(source["id"]) if answers_from and source is not None else None,
+                "answers_count": answers_count, "answers_missing": bool(answers_from) and not answers_list,
+                "redacted_count": hashed, "channel_from_form": bool(form_host and not channel_given),
+                "result": "ok",
+            },
+        )
     if possible_duplicate:
         get_audit_logger().info(
             "possible_duplicate",
@@ -1712,18 +1873,7 @@ async def record_receipt(
                 "actor": safe_log_value(recorded_by, max_len=80), "result": "ok",
             },
         )
-    return {
-        "receipt_id": receipt_id, "sent_at": sent_at,
-        "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
-        "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
-        "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
-        "cover_letter_sent": cl_artifact is not None,
-        "cover_letter_version_no": cl_artifact["version_no"] if cl_artifact else None,
-        "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
-        "confirmation": confirmation or "",
-        "url": f"/applications/{application_id}", "event_id": event["event_id"],
-        "possible_duplicate": possible_duplicate,
-    }
+    return result
 
 
 async def write_through_legacy_receipt(
@@ -1902,16 +2052,20 @@ async def _list_receipts_for_application(
     return rows
 
 
-def _receipt_answers(raw: Any) -> list[dict[str, str]]:
+def _receipt_answers(raw: Any) -> list[dict[str, Any]]:
     """Only well-formed {question, answer} pairs survive — the response model
     is strict (extra="forbid"), so a malformed legacy entry would otherwise
     turn a read into a 500. ``source`` / ``key`` come back when stored (text
     only); a receipt recorded before they existed simply has neither."""
     out: list[dict[str, str]] = []
     for a in _receipt_json(raw, list):
-        if not (isinstance(a, dict) and "question" in a and "answer" in a):
+        hashed = isinstance(a, dict) and a.get("redacted") is True and isinstance(a.get("value_sha256"), str)
+        if not (isinstance(a, dict) and "question" in a and ("answer" in a or hashed)):
             continue
-        item = {"question": str(a["question"]), "answer": str(a["answer"])}
+        # G023: a hashed answer reads back with no value - ``redacted`` + the hash, never a guess.
+        item: dict[str, Any] = {"question": str(a["question"]), "answer": "" if hashed else str(a["answer"])}
+        if hashed:
+            item.update(redacted=True, value_sha256=a["value_sha256"])
         for extra in ("source", "key"):
             if isinstance(a.get(extra), str) and a[extra]:
                 item[extra] = a[extra]
@@ -1949,7 +2103,7 @@ async def receipt_summary_facts(db: JobDatabase, user_id: str, receipt_id: int) 
         "counts_line": "", "fields_total": None, "fields_skipped": 0, "guessed_count": 0, "form_host": "",
     }
     cur = await db._db.execute(
-        "SELECT application_id, created_at, job_apply_url, answers, fields_filled "
+        "SELECT application_id, created_at, job_apply_url, answers, fields_filled, answers_count "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
     )
@@ -1981,7 +2135,12 @@ async def receipt_summary_facts(db: JobDatabase, user_id: str, receipt_id: int) 
     total = form.get("fields_count")
     if isinstance(total, bool) or not isinstance(total, int):
         return out
-    done = min(len(filled) + len(answers), total)
+    # Slice 11: a receipt whose frozen form event listed no answers keeps that event's count.
+    stored_count = r.get("answers_count")
+    typed = len(answers)
+    if not typed and isinstance(stored_count, int) and not isinstance(stored_count, bool):
+        typed = stored_count
+    done = min(len(filled) + typed, total)
     skipped_list = form.get("fields_skipped")
     skipped = len(skipped_list) if isinstance(skipped_list, list) else max(total - done, 0)
     out.update(
@@ -2003,7 +2162,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     """
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
-        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, answers_from, "
         "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
@@ -2019,6 +2178,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "application_id": application_id,
         "proof": (await proof_for(db, user_id, [application_id]))[application_id] if application_id else NO_PROOF,
         "answers": _receipt_answers(r.get("answers")),
+        "answers_from": r.get("answers_from") or "",
         "fields_filled": _receipt_json(r.get("fields_filled"), dict),
         "confirmation": r.get("confirmation") or None,
         "recorded_by": r.get("recorded_by") or None,

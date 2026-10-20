@@ -1051,6 +1051,9 @@ export interface paths {
         /**
          * Put Trigger
          * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         *
+         *     An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+         *     it, the error is logged without its traceback or message, and a plain 500 replaces it (from None).
          */
         put: operations["put_trigger_api_assistant_trigger_put"];
         post?: never;
@@ -1077,6 +1080,34 @@ export interface paths {
          *     back as ``fired: false`` with a reason the page shows.
          */
         post: operations["fire_trigger_api_assistant_trigger_fire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/email-change/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email Change Undo
+         * @description Undo an email change from the link mailed to the OLD address.
+         *
+         *     Public, authenticated by its one-time token (like password-reset/confirm).
+         *     On success: 204, the previous email and its previous verified state are
+         *     back, and every session, agent token and OAuth grant is revoked.
+         *     Unknown, used, expired or deleted-user token: generic 400. The previous
+         *     address now belonging to another account: 409, nothing changed.
+         *
+         *     Rate-limited per IP (429) like the password-reset request.
+         */
+        post: operations["email_change_undo_api_auth_email_change_undo_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1184,6 +1215,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/me/analytics-consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Analytics Consent
+         * @description Web session only: the user's own "Help improve Job360" switch (gap roadmap slice 4).
+         *
+         *     The ONE write door for `users.analytics_consent_at`. ``true`` stamps when they
+         *     agreed; ``false`` clears it, which withdraws consent at once (server PostHog
+         *     capture and Sentry session replay both read it). Consent is the person's own
+         *     choice, so an assistant's token is refused (403 ``session_required``).
+         */
+        put: operations["set_analytics_consent_api_auth_me_analytics_consent_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me/email-verified": {
         parameters: {
             query?: never;
@@ -1244,8 +1300,9 @@ export interface paths {
          * Password Reset Confirm
          * @description Validate the token and set the new password.
          *
-         *     On success: 204, and every existing session for that user is revoked
-         *     (forces re-login on all devices — security best practice after reset).
+         *     On success: 204, and every existing session, agent token and OAuth grant
+         *     for that user is revoked (forces re-login on all devices and reconnection
+         *     of every assistant — security best practice after reset).
          *     The caller's session cookie is cleared too so the API response itself
          *     can't accidentally land the caller into the just-reset account.
          *
@@ -1319,8 +1376,13 @@ export interface paths {
         post?: never;
         /**
          * Delete Account
-         * @description ERASE the caller's account (GDPR Article 17). Requires current-password
-         *     verification (hard rule #26), then clears the session cookie.
+         * @description ERASE the caller's account (GDPR Article 17), then clear the session cookie.
+         *
+         *     Web session only: an agent token can never erase the account. An account
+         *     with a password must send it (hard rule #26). An account with NO password
+         *     (``has_password`` FALSE: only a magic link ever signed it in) cannot, so it
+         *     may delete only from a session created by a fresh email link, inside
+         *     ``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.
          *
          *     Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
          *     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
@@ -1348,6 +1410,11 @@ export interface paths {
         /**
          * Change Email
          * @description Change email. Requires current password. Invalidates session → re-login required.
+         *
+         *     The new address is unproven, so ``email_verified_at`` is cleared and the
+         *     verification mail goes to it. The OLD address gets a notice with a 24 h
+         *     one-time link that undoes the change (``/email-change/undo``). Both mails
+         *     are background work: a failed send never breaks the request.
          */
         patch: operations["change_email_api_auth_users_me_email_patch"];
         trace?: never;
@@ -1362,6 +1429,10 @@ export interface paths {
         /**
          * Export My Data
          * @description Download everything we hold on the caller as one JSON file (Article 20).
+         *
+         *     Web session only (gap roadmap slice 3): a leaked, never-expiring agent token
+         *     must not be able to download the whole account. An assistant reads history
+         *     through ``export_history``, which leaves out the account tables.
          *
          *     GET is correct here: it is a pure read, no state changes. Scoped to the
          *     session's own ``user.id`` (rule #12) — the caller can never name another user.
@@ -2152,13 +2223,18 @@ export interface paths {
          * Clear Profile Section
          * @description Empty ONE input (or the whole profile), so the next upload starts clean.
          *
+         *     WEB SESSION ONLY (gap roadmap slice 3): "all" wipes the CV, preferences,
+         *     memory and assistant settings at once, so a leaked agent token must not
+         *     reach it. An assistant clears one field with ``update_profile(null)``.
+         *
          *     ``section``: cv | linkedin | github | preferences | memory | all.
          *
          *     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
          *     (``user_info.*``: contact, right to work, logistics, languages, equality
          *     answers, saved answers): the base column and the assistant's overlay rows.
-         *     It takes no version snapshot and leaves the CV, the preferences and
-         *     ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
+         *     It takes no version snapshot (it copies the memory into ``profile_edits``
+         *     first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+         *     preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
          *     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
          *     ``github`` leave it alone; only ``all`` resets it.
          *
@@ -2545,14 +2621,21 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Readiness probe — checks real dependencies before accepting traffic.
+         * @description Readiness probe: can the request path get a DB connection right now?
          *
-         *     Checks:
-         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
-         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *     Production borrows a connection from the SAME pool ``get_request_db`` uses
+         *     (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+         *     runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+         *     held) or an unreachable database answers 503, which is what Railway's deploy
+         *     healthcheck (``backend/railway.json``) and the uptime probe need to see.
          *
-         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
-         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         *     200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+         *
+         *     Test mode has no request-path pool (``get_request_db`` opens a fresh
+         *     connection per request there), so the probe opens one the same way and
+         *     ``pool`` is null. Redis is no longer checked: the service was deleted
+         *     2026-09-02 and the auth rate limiter falls back without it.
          */
         get: operations["readyz_api_readyz_get"];
         put?: never;
@@ -2862,7 +2945,7 @@ export interface components {
         /** AccountDeleteRequest */
         AccountDeleteRequest: {
             /** Current Password */
-            current_password: string;
+            current_password?: string | null;
         };
         /**
          * AddContactRequest
@@ -3000,6 +3083,16 @@ export interface components {
             skills_not_in_ad: string[];
             /** Skills Total */
             skills_total: number;
+        };
+        /** AnalyticsConsentRequest */
+        AnalyticsConsentRequest: {
+            /** Consent */
+            consent: boolean;
+        };
+        /** AnalyticsConsentResponse */
+        AnalyticsConsentResponse: {
+            /** Analytics Consent */
+            analytics_consent: boolean;
         };
         /** AnswerAskRequest */
         AnswerAskRequest: {
@@ -4450,6 +4543,11 @@ export interface components {
              */
             new_email: string;
         };
+        /** EmailChangeUndoRequest */
+        EmailChangeUndoRequest: {
+            /** Token */
+            token: string;
+        };
         /** EmailVerificationConfirmRequest */
         EmailVerificationConfirmRequest: {
             /** Token */
@@ -5343,6 +5441,28 @@ export interface components {
             /** Next */
             next?: string | null;
         };
+        /** MeResponse */
+        MeResponse: {
+            /**
+             * Analytics Consent
+             * @default false
+             */
+            analytics_consent: boolean;
+            /** Email */
+            email: string;
+            /**
+             * Has Password
+             * @default true
+             */
+            has_password: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
+        };
         /**
          * MissingToolRequest
          * @description ``POST /api/missing-tools`` body. ``name`` must match
@@ -6009,6 +6129,11 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /**
+             * Redacted
+             * @default false
+             */
+            redacted: boolean;
             /** Saved At */
             saved_at?: string | null;
             /** Saved By */
@@ -6097,6 +6222,11 @@ export interface components {
         Receipt: {
             /** Answers */
             answers?: components["schemas"]["ReceiptAnswerOut"][];
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Application Id */
             application_id?: number | null;
             /** Channel */
@@ -6214,8 +6344,12 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /** Redacted */
+            redacted?: boolean | null;
             /** Source */
             source?: string | null;
+            /** Value Sha256 */
+            value_sha256?: string | null;
         };
         /** ReceiptListResponse */
         ReceiptListResponse: {
@@ -6323,9 +6457,21 @@ export interface components {
              * @default
              */
             note: string;
+            /** Request Id */
+            request_id?: string | null;
         };
         /** RecordApplicationReceiptResponse */
         RecordApplicationReceiptResponse: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Channel */
             channel: string;
             /**
@@ -7611,6 +7757,11 @@ export interface components {
         };
         /** UserResponse */
         UserResponse: {
+            /**
+             * Analytics Consent
+             * @default false
+             */
+            analytics_consent: boolean;
             /** Email */
             email: string;
             /** Id */
@@ -9698,6 +9849,37 @@ export interface operations {
             };
         };
     };
+    email_change_undo_api_auth_email_change_undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChangeUndoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     login_api_auth_login_post: {
         parameters: {
             query?: never;
@@ -9843,7 +10025,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserResponse"];
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_analytics_consent_api_auth_me_analytics_consent_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyticsConsentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsConsentResponse"];
                 };
             };
             /** @description Validation Error */

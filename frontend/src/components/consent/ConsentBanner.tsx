@@ -90,10 +90,10 @@ export function ConsentBanner() {
       <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
           Job360 keeps a full record of your job hunt: your CV, every version,
-          and what you and your assistant do. To fix problems, we also record
-          your screen while you use Job360 (including your CV text) with Sentry,
-          our error-tracking provider in the EU. Accept or Decline below only
-          controls optional analytics (PostHog); Job360 works the same either way.
+          and what you and your assistant do. Accept or Decline below controls
+          optional analytics (PostHog); Job360 works the same either way. Masked
+          screen recordings of errors happen only if you turn on &ldquo;Help
+          improve Job360&rdquo; in Settings.
         </p>
         <div className="flex shrink-0 gap-2">
           {/* Same size + weight as Accept: rejecting must be no harder. */}
