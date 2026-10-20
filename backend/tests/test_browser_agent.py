@@ -156,6 +156,8 @@ FORM = """<!doctype html><html><head><title>Apply - Acme</title></head><body>
   <button type="submit">Submit application</button>
 </form></body></html>"""
 CAPTCHA = """<!doctype html><html><body><p>Checking your browser before you continue.</p></body></html>"""
+LINKS = """<!doctype html><html><head><title>Links - Acme</title></head><body>
+<a href="/to-private">Partner site</a></body></html>"""
 
 
 def _chromium_available() -> bool:
@@ -185,11 +187,23 @@ async def site():
     async def to_private(_):
         raise web.HTTPFound(f"http://127.0.0.1:{site_port[0]}/form")
 
+    async def links(_):
+        return web.Response(text=LINKS, content_type="text/html")
+
+    async def fake_block(_):
+        # A site's own 403 that copies the proxy's header name and words, without the proxy's mark.
+        from src.services.browser_agent.egress import BLOCK_HEADER
+
+        return web.Response(status=403, text="Job360's browser only reaches the public internet.",
+                            headers={BLOCK_HEADER: "forged"})
+
     site_port: list[int] = []
     app = web.Application()
     app.router.add_get("/form", form)
     app.router.add_get("/captcha", captcha)
     app.router.add_get("/to-private", to_private)
+    app.router.add_get("/links", links)
+    app.router.add_get("/fake-block", fake_block)
     runner = web.AppRunner(app)
     await runner.setup()
     tcp = web.TCPSite(runner, "127.0.0.1", 0)
@@ -326,16 +340,32 @@ async def test_one_browser_per_user_and_a_cap_on_live_browsers(pool):
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_a_redirect_to_a_private_address_never_reaches_the_page(pool, site):
-    """CodeRabbit on #902: route() never sees redirect hops. The egress proxy does."""
+    """CodeRabbit on #902: route() never sees redirect hops. The egress proxy does. And its refusal is
+    never read as a loaded page (production: an open that redirected to 127.0.0.1 came back "ok" with
+    the proxy's 403 text): open, click and back answer blocked_address, as a direct private open does."""
     from src.services.browser_agent.agent import BrowserError, run
 
-    try:
-        page = await run(pool, "u1", "open", url="http://jobs.example/to-private")
-    except BrowserError as exc:
-        assert exc.reason == "load_failed"
-    else:
-        assert "Senior Engineer" not in page["text"]
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "open", url="http://jobs.example/to-private")
+    assert exc.value.status == "refused" and exc.value.reason == "blocked_address"
     assert any(d.startswith("127.0.0.1") for d in pool.egress.denied)
+
+    page = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(page, "Partner site"))
+    assert out["status"] == "refused" and out["reason"] == "blocked_address"
+    assert "text" not in out and "elements" not in out
+
+    # Only the proxy's own mark counts: a site's 403 with the same header name and words is a page.
+    page = await run(pool, "u1", "open", url="http://jobs.example/fake-block")
+    assert page["status"] == "ok" and "public internet" in page["text"]
+
+    # Back onto the refused address (history holds 127.0.0.1 itself) is refused the same way.
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    await run(pool, "u1", "click", ref=_ref(links, "Partner site"))
+    await run(pool, "u1", "open", url="http://jobs.example/links")
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "back")
+    assert exc.value.reason == "blocked_address"
 
 
 @needs_chromium
@@ -593,6 +623,8 @@ async def test_a_captcha_refusal_on_an_action_also_records_blocked(authenticated
             )
             rows = [json.loads(r["payload"]) for r in await cur.fetchall()]
         assert len(rows) == 1 and rows[0]["reason"] == "captcha" and rows[0]["page_host"] == "jobs.acme.com"
+        # "ChatGPT agent" was retired by OpenAI: the hand-off names a browser that survives renames.
+        assert "ChatGPT's own browser" in rows[0]["detail"] and "ChatGPT agent" not in rows[0]["detail"]
 
 
 @pytest.mark.asyncio
