@@ -409,7 +409,6 @@ lanes:
       - "**/railway.json"
       - "**/*docker-compose*"
       - "**/*Dockerfile*"
-      - "backend/src/core/settings.py"   # flags change prod behaviour globally
       # dependency manifests run postinstall scripts on the build host;
       # dependabot-auto.yml already owns the safe subset of this decision
       - "**/package.json"
@@ -462,6 +461,7 @@ lanes:
   product_human:
     paths:
       - "backend/migrations/**"
+      - "backend/src/core/settings.py"   # flags change prod behaviour globally (owner, 2026-10-20)
       - "backend/src/api/routes/auth.py"
       - "backend/src/services/auth/**"
       - "backend/src/api/routes/account*.py"

@@ -24,7 +24,7 @@ it here (``monkeypatch.setattr(tailor, "load_profile", fake)``).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from src.api.auth_deps import VERIFIED_FIRST, CurrentUser, require_verified_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
+from src.services.applications import cv_checks
 from src.services.applications import spine as applications_spine
 from src.services.applications.spine import SpineError
 from src.services.profile.storage import load_profile
@@ -77,7 +78,12 @@ class TailorSaveRequest(BaseModel):
 
 class ProvenanceSegment(BaseModel):
     text: str
-    grounded: bool  # True = grounded in the user's CV/job (their fact); False = added
+    # True ONLY when the line is grounded in the user's own profile (their fact). A line
+    # that matches just the job ad, or nothing, is False.
+    grounded: bool
+    # "profile" = the user's own fact; "ad" = matches only the job ad (employer context,
+    # never a candidate fact); "none" = in neither (added by the AI).
+    source: Literal["profile", "ad", "none"] = "none"
 
 
 def _doc_out(kind: str, row: dict[str, Any]) -> TailoredDocOut:
@@ -118,15 +124,15 @@ async def _latest(db: JobDatabase, user_id: str, application_id: int, kind: str)
     return row
 
 
-def _load_cv_text(user_id: str) -> str:
-    """The user's own CV text (stored CV + LinkedIn) — the ground truth the
-    provenance view highlights against."""
+def _load_profile_text(user_id: str) -> str:
+    """Everything the user's OWN profile says (CV, LinkedIn, GitHub, structured fields) —
+    the ground truth the provenance view highlights against. Never includes the job ad.
+    Same helper the save-time checks use (``cv_checks.profile_source_text``)."""
     profile = load_profile(user_id)  # sync (pgsync shim), fast single-row
     if profile is None:
         return ""
-    cv = profile.cv_data
-    parts = [getattr(cv, "raw_text", "") or "", getattr(cv, "linkedin_raw_text", "") or ""]
-    return "\n\n".join(p for p in parts if p.strip()).strip()
+    # Target titles are wishes, not history: a title copied from the ad must stay "ad".
+    return cv_checks.profile_source_text(profile, include_targets=False)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -161,7 +167,8 @@ async def provenance(
     user: CurrentUser = Depends(require_verified_user),
 ) -> list[dict[str, Any]]:
     """Per-line provenance for the newest saved version: which lines are the
-    user's OWN facts (grounded in their CV + the job ad) and which were added.
+    user's OWN facts (grounded in their profile), which only echo the job ad
+    (``source="ad"``: employer context, never a candidate fact) and which were added.
     Deterministic, no LLM — shown before download so the user can verify what is
     real (guardrail #2)."""
     _check_kind(doc_kind)
@@ -170,8 +177,8 @@ async def provenance(
     # P0 2026-10-14 — the ad as THIS user brought it (their snapshot), never
     # the shared catalog row another user may have pasted first.
     app_row = await applications_spine.get_owned_application(db, user.id, application_id) or {}
-    source = _load_cv_text(user.id) + "\n" + str(app_row.get("job_description_snapshot") or "")
-    return annotate_provenance(row.get("text") or "", source)
+    ad_text = str(app_row.get("job_description_snapshot") or "")
+    return annotate_provenance(row.get("text") or "", _load_profile_text(user.id), ad_text)
 
 
 @router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut, dependencies=VERIFIED_FIRST)
