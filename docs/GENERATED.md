@@ -15,10 +15,10 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0069** | `backend/migrations/` |
-| Migration files | **70** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 23 route modules (137 endpoints) | `backend/src/api/routes/` |
-| Test files | across 253 `test_*.py` files | `backend/tests/` |
+| Migration head | **0070** | `backend/migrations/` |
+| Migration files | **71** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 23 route modules (138 endpoints) | `backend/src/api/routes/` |
+| Test files | across 254 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 30 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -84,6 +84,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/assistant-trigger` | `assistant_trigger.py` |
 | `PUT` | `/api/assistant-trigger` | `assistant_trigger.py` |
 | `POST` | `/api/assistant-trigger/fire` | `assistant_trigger.py` |
+| `POST` | `/api/auth/email-change/undo` | `auth.py` |
 | `POST` | `/api/auth/login` | `auth.py` |
 | `POST` | `/api/auth/logout` | `auth.py` |
 | `POST` | `/api/auth/magic-link/consume` | `auth.py` |
@@ -171,5 +172,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**137 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**138 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

@@ -384,6 +384,22 @@ export async function confirmPasswordReset(
 }
 
 // ---------------------------------------------------------------------------
+// Email-change undo (gap roadmap slice 35)
+// ---------------------------------------------------------------------------
+//
+// Public, authenticated by the one-time token in the notice mailed to the OLD
+// address. 204 = the old email is back and every session, assistant token and
+// OAuth grant was revoked. 400 = unknown / used / expired (generic). 409 = the
+// old address now belongs to another account (nothing changed).
+
+export async function undoEmailChange(token: string): Promise<void> {
+  await request<void>("/api/auth/email-change/undo", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Email verification (Phase −2 item B)
 // ---------------------------------------------------------------------------
 //

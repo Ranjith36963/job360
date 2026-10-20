@@ -1051,6 +1051,9 @@ export interface paths {
         /**
          * Put Trigger
          * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         *
+         *     An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+         *     it, the error is logged without its traceback or message, and a plain 500 replaces it (from None).
          */
         put: operations["put_trigger_api_assistant_trigger_put"];
         post?: never;
@@ -1077,6 +1080,34 @@ export interface paths {
          *     back as ``fired: false`` with a reason the page shows.
          */
         post: operations["fire_trigger_api_assistant_trigger_fire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/email-change/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email Change Undo
+         * @description Undo an email change from the link mailed to the OLD address.
+         *
+         *     Public, authenticated by its one-time token (like password-reset/confirm).
+         *     On success: 204, the previous email and its previous verified state are
+         *     back, and every session, agent token and OAuth grant is revoked.
+         *     Unknown, used, expired or deleted-user token: generic 400. The previous
+         *     address now belonging to another account: 409, nothing changed.
+         *
+         *     Rate-limited per IP (429) like the password-reset request.
+         */
+        post: operations["email_change_undo_api_auth_email_change_undo_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1269,8 +1300,9 @@ export interface paths {
          * Password Reset Confirm
          * @description Validate the token and set the new password.
          *
-         *     On success: 204, and every existing session for that user is revoked
-         *     (forces re-login on all devices — security best practice after reset).
+         *     On success: 204, and every existing session, agent token and OAuth grant
+         *     for that user is revoked (forces re-login on all devices and reconnection
+         *     of every assistant — security best practice after reset).
          *     The caller's session cookie is cleared too so the API response itself
          *     can't accidentally land the caller into the just-reset account.
          *
@@ -1378,6 +1410,11 @@ export interface paths {
         /**
          * Change Email
          * @description Change email. Requires current password. Invalidates session → re-login required.
+         *
+         *     The new address is unproven, so ``email_verified_at`` is cleared and the
+         *     verification mail goes to it. The OLD address gets a notice with a 24 h
+         *     one-time link that undoes the change (``/email-change/undo``). Both mails
+         *     are background work: a failed send never breaks the request.
          */
         patch: operations["change_email_api_auth_users_me_email_patch"];
         trace?: never;
@@ -2584,14 +2621,21 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Readiness probe — checks real dependencies before accepting traffic.
+         * @description Readiness probe: can the request path get a DB connection right now?
          *
-         *     Checks:
-         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
-         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *     Production borrows a connection from the SAME pool ``get_request_db`` uses
+         *     (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+         *     runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+         *     held) or an unreachable database answers 503, which is what Railway's deploy
+         *     healthcheck (``backend/railway.json``) and the uptime probe need to see.
          *
-         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
-         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         *     200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+         *
+         *     Test mode has no request-path pool (``get_request_db`` opens a fresh
+         *     connection per request there), so the probe opens one the same way and
+         *     ``pool`` is null. Redis is no longer checked: the service was deleted
+         *     2026-09-02 and the auth rate limiter falls back without it.
          */
         get: operations["readyz_api_readyz_get"];
         put?: never;
@@ -4498,6 +4542,11 @@ export interface components {
              * Format: email
              */
             new_email: string;
+        };
+        /** EmailChangeUndoRequest */
+        EmailChangeUndoRequest: {
+            /** Token */
+            token: string;
         };
         /** EmailVerificationConfirmRequest */
         EmailVerificationConfirmRequest: {
@@ -9769,6 +9818,37 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    email_change_undo_api_auth_email_change_undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChangeUndoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

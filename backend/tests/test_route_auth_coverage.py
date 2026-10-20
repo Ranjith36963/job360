@@ -98,6 +98,7 @@ PUBLIC_ROUTES: dict[str, str] = {
     "/api/auth/password-reset/request": "reset request — by definition unauthenticated",
     "/api/auth/password-reset/confirm": "reset confirmation, authenticated by its token",
     "/api/auth/verify-email/confirm": "email verification, authenticated by its token",
+    "/api/auth/email-change/undo": "undo link mailed to the OLD address, authenticated by its one-time token",
     # --- deliberately public product surface ---
     # `/api/jobs` and `/api/sources` used to sit here. Slice 5 (#483) DELETED
     # them rather than re-scoping (spec S1): once `jobs` held nothing but ads
