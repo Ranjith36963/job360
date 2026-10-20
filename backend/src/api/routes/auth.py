@@ -409,7 +409,10 @@ async def set_analytics_consent(
     await db._db.commit()
     get_audit_logger().info(
         "auth",
-        extra={"event": "analytics_consent_set", "user_id": user.id, "consent": body.consent, "status": "ok"},
+        extra={
+            "event": "analytics_consent_set", "user_id": safe_log_value(user.id),
+            "consent": bool(body.consent), "status": "ok",
+        },
     )
     return {"analytics_consent": body.consent}
 
