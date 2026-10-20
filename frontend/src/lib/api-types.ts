@@ -742,7 +742,9 @@ export interface paths {
          * Approve Send
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
-         *     where=web. A CV edited later makes the yes stop matching. Clears an earlier
+         *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
+         *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
+         *     (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
          *     nothing is recorded (the yes must name what the user saw).
@@ -794,8 +796,10 @@ export interface paths {
          *     (``unknown_site``). The address is read strictly (``screen_form_url``): a
          *     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
          *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
-         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
-         *     a stored yes clears neither. An unconfirmed email answers ``ask`` /
+         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
+         *     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
+         *     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
+         *     clears none of them. An unconfirmed email answers ``ask`` /
          *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
          *     ``get_application_kit``; 422 when malformed): another session's live kit hold
          *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -1051,6 +1055,9 @@ export interface paths {
         /**
          * Put Trigger
          * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         *
+         *     An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+         *     it, the error is logged without its traceback or message, and a plain 500 replaces it (from None).
          */
         put: operations["put_trigger_api_assistant_trigger_put"];
         post?: never;
@@ -1269,8 +1276,9 @@ export interface paths {
          * Password Reset Confirm
          * @description Validate the token and set the new password.
          *
-         *     On success: 204, and every existing session for that user is revoked
-         *     (forces re-login on all devices — security best practice after reset).
+         *     On success: 204, and every existing session, agent token and OAuth grant
+         *     for that user is revoked (forces re-login on all devices and reconnection
+         *     of every assistant — security best practice after reset).
          *     The caller's session cookie is cleared too so the API response itself
          *     can't accidentally land the caller into the just-reset account.
          *
@@ -2169,6 +2177,11 @@ export interface paths {
          *     value (S3): an edit can carry a name, an email fragment inside `about_me`,
          *     or anything else the agent chose to write, and none of that belongs in a
          *     log line.
+         *
+         *     Gap 4 (slice 26) - two assistants writing one profile: the whole call runs
+         *     under the user's profile-write lock, so `expected_profile_version` (409
+         *     `stale_profile` when another write landed since) and the item ops (applied
+         *     to the CURRENT list) are checked against exactly what gets written.
          */
         patch: operations["update_profile_api_profile_patch"];
         trace?: never;
@@ -2584,14 +2597,21 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Readiness probe — checks real dependencies before accepting traffic.
+         * @description Readiness probe: can the request path get a DB connection right now?
          *
-         *     Checks:
-         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
-         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *     Production borrows a connection from the SAME pool ``get_request_db`` uses
+         *     (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+         *     runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+         *     held) or an unreachable database answers 503, which is what Railway's deploy
+         *     healthcheck (``backend/railway.json``) and the uptime probe need to see.
          *
-         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
-         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         *     200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+         *
+         *     Test mode has no request-path pool (``get_request_db`` opens a fresh
+         *     connection per request there), so the probe opens one the same way and
+         *     ``pool`` is null. Redis is no longer checked: the service was deleted
+         *     2026-09-02 and the auth rate limiter falls back without it.
          */
         get: operations["readyz_api_readyz_get"];
         put?: never;
@@ -5729,6 +5749,14 @@ export interface components {
         };
         /** ProfileEditIn */
         ProfileEditIn: {
+            /** Index */
+            index?: number | null;
+            /**
+             * Op
+             * @default set
+             * @enum {string}
+             */
+            op: "set" | "append" | "upsert" | "remove_at";
             /** Path */
             path: string;
             /** Remember */
@@ -5808,6 +5836,11 @@ export interface components {
             preferences: {
                 [key: string]: unknown;
             };
+            /**
+             * Profile Edit Id
+             * @default 0
+             */
+            profile_edit_id: number;
             /**
              * Skill Esco
              * @default {}
@@ -7656,6 +7689,8 @@ export interface components {
         UpdateProfileRequest: {
             /** Edits */
             edits: components["schemas"]["ProfileEditIn"][];
+            /** Expected Profile Version */
+            expected_profile_version?: number | null;
         };
         /**
          * UpdateProfileResponse
