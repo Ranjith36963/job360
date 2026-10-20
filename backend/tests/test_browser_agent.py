@@ -659,7 +659,19 @@ def test_the_probe_summary_reads_a_page_the_way_the_assistant_would():
         {"tag": "button", "type": "submit", "name": "Submit application", "in_form": True},
         {"tag": "a", "type": "", "name": "Privacy"},
     ]}
-    assert summarise(form) == {"outcome": "ok", "title": "Apply", "fields": 2, "file_inputs": 1, "submit_buttons": 1}
+    assert summarise(form) == {
+        "outcome": "ok", "title": "Apply", "fields": 2, "file_inputs": 1, "submit_buttons": 1, "site": "-",
+    }
+    # look's own verdict wins: one search box is not an application form.
+    search = {"status": "ok", "title": "Jobs", "application_form": False,
+              "elements": [{"tag": "input", "type": "text", "name": "Search jobs"}]}
+    assert summarise(search)["outcome"] == "no_form"
+    workday = {"status": "ok", "title": "Apply", "application_form": True, "site": {"name": "workday", "tips": []},
+               "form_step": {"current": 2, "total": 7}, "more_elements": {"above": 0, "below": 40}, "elements": []}
+    assert summarise(workday) == {
+        "outcome": "ok", "title": "Apply", "fields": 0, "file_inputs": 0, "submit_buttons": 0, "site": "workday",
+        "form_step": "2/7", "more_below": 40,
+    }
     ad = {"status": "ok", "title": "Engineer", "elements": [{"tag": "a", "type": "", "name": "Apply for this job"}]}
     assert summarise(ad)["outcome"] == "no_form"
     wall = {"status": "needs_you", "reason": "captcha", "elements": []}
@@ -667,6 +679,8 @@ def test_the_probe_summary_reads_a_page_the_way_the_assistant_would():
     text = table([{"host": "jobs.acme.com", **summarise(form)}, {"host": "x.com", "outcome": "error", "detail": "403"}])
     lines = text.splitlines()
     assert lines[1].split()[:2] == ["jobs.acme.com", "ok"]
+    assert "workday" in table([{"host": "acme.wd3.myworkdayjobs.com", **summarise(workday)}]).splitlines()[1]
+    assert "+40 below" in table([{"host": "acme.wd3.myworkdayjobs.com", **summarise(workday)}])
     assert lines[-1] == "total: error 1, ok 1"
 
 
@@ -1205,6 +1219,149 @@ def test_the_form_not_the_ad_and_trap_fields():
     assert is_honeypot("Leave this field blank") and is_honeypot("Please do not fill this in")
     assert not is_honeypot("Leave date") and not is_honeypot("Blank space for notes")
     assert not is_honeypot("Middle name (leave blank if none)")
+
+
+# ── Step 6: did it do anything, never twice, proof ────────────────────────────
+
+CLICKS = """<!doctype html><html><head><title>Clicks - Acme</title></head><body>
+<button type="button">Does nothing</button>
+<button type="button" onclick="document.body.insertAdjacentHTML('beforeend', '<p>Added</p>')">Add entry</button>
+<label><input type="checkbox" id="ok"> I agree</label>
+<label for="nm">Full name</label><input id="nm">
+<form onsubmit="event.preventDefault()"><button type="submit">Submit application</button></form>
+</body></html>"""
+
+
+@pytest.fixture
+async def clicks_site():
+    from aiohttp import web
+
+    async def clicks(_):
+        return web.Response(text=CLICKS, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/clicks", clicks)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_dead_click_is_named_never_repeated_blind_and_a_submit_never_twice(clicks_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, Gate, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(clicks_site))
+    marks: list[str] = []
+
+    async def mark():
+        marks.append("submit_attempted")
+
+    async def go(form_url):
+        return {"decision": "submit", "reason": "auto_when_sure", "detail": ""}
+
+    gate = Gate(check=go, mark_attempt=mark)
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/clicks")
+        dead = _ref(page, "Does nothing")
+        out = await run(pool, "u1", "click", ref=dead)
+        assert out["page_changed"] is False and "changed nothing" in out["next"]
+        assert (await run(pool, "u1", "click", ref=dead))["page_changed"] is False
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "click", ref=dead)
+        assert exc.value.reason == "no_effect"
+
+        assert (await run(pool, "u1", "click", ref=_ref(page, "Add entry")))["page_changed"] is True
+        # A tick box changes its own state, not the page: still a change.
+        assert (await run(pool, "u1", "click", ref=_ref(page, "I agree")))["page_changed"] is True
+
+        name = _ref(page, "Full name")
+        for _ in range(2):
+            assert "repeat_warning" not in await run(pool, "u1", "type", ref=name, text="Ada")
+        assert "3 times in a row" in (await run(pool, "u1", "type", ref=name, text="Ada"))["repeat_warning"]
+
+        submit = _ref(page, "Submit application")
+        out = await run(pool, "u1", "click", ref=submit, gate=gate)
+        assert out["submit_clicked"] is True and "Do NOT click submit again" in out["next"]
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "click", ref=submit, gate=gate)
+        assert exc.value.reason == "already_submitted" and marks == ["submit_attempted"]
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_confirmation_is_kept_as_a_proof_screenshot_and_a_refused_submit_may_be_retried(ats_site):
+    from src.services.browser_agent.agent import BrowserPool, Gate, run
+
+    table = {"jobs.lever.co": "93.184.216.34", "jobs.ashbyhq.com": "93.184.216.34"}
+    resolve, _ = _resolver(table)
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(ats_site))
+    proofs: list[bytes] = []
+
+    async def mark():
+        return None
+
+    async def go(form_url):
+        return {"decision": "submit", "reason": "auto_when_sure", "detail": ""}
+
+    async def keep(image):
+        proofs.append(image)
+
+    gate = Gate(check=go, mark_attempt=mark, save_proof=keep)
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.lever.co/acme/123/apply")
+        page = await run(pool, "u1", "click", ref=_ref(page, "Allow cookies"))   # the banner covers the button
+        out = await run(pool, "u1", "click", ref=_ref(page, "Submit application"), gate=gate)
+        assert out["confirmation_seen"] is True and out["proof_saved"] is True
+        assert len(proofs) == 1 and proofs[0].startswith(b"\xff\xd8\xff")   # a JPEG of the thank-you page
+
+        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme/456/application")
+        submit = _ref(page, "Submit Application")
+        out = await run(pool, "u1", "click", ref=submit, gate=gate)
+        assert out["site_refused"] and "proof_saved" not in out and len(proofs) == 1
+        # The site said it did not take it: after fixing, a second submit is allowed (through the gate).
+        out = await run(pool, "u1", "click", ref=submit, gate=gate)
+        assert out["submit_clicked"] is True
+    finally:
+        await pool.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_the_route_keeps_the_proof_screenshot_on_the_callers_application(authenticated_async_context):
+    import contextlib
+    import json
+
+    from src.api.auth_deps import CurrentUser
+    from src.api.dependencies import get_request_db
+    from src.api.routes import browser as browser_route
+    from src.services.applications import proof
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/8",
+        })
+        app_id = brought.json()["application_id"]
+        user_id = authenticated_async_context.fixture_user_id
+        user = CurrentUser(id=user_id, email="ada@example.com", auth_via="token", actor_name="claude")
+        gate, _ = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        await gate.save_proof(b"\xff\xd8\xff\xe0" + b"0" * 64)
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            shots = await proof.screenshot_meta(db, user_id, app_id)
+            cur = await db._db.execute(
+                "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
+                "AND event_type = 'proof_screenshot'", (user_id, app_id),
+            )
+            events = [json.loads(r["payload"]) for r in await cur.fetchall()]
+    assert len(shots) == 1 and shots[0]["mime"] == "image/jpeg"
+    assert events[0]["via"] == "browser" and shots[0]["created_by"] == "token:claude"
 
 
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>

@@ -9,7 +9,9 @@ the open internet, which a dev container may not have)::
 
 For each page it reports the outcome the assistant would meet:
 
-* ``ok``          — loaded, form fields visible (``fields``, ``file_inputs``, ``submit_buttons``);
+* ``ok``          — loaded, and look says it is the application form (``fields``, ``file_inputs``,
+  ``submit_buttons``; ``site`` = the playbook the assistant gets, ``form_step`` = Workday's page, ``more_below``
+  = controls past the first read);
 * ``no_form``     — loaded, but no form on this page (an ad page: the apply form is a click away);
 * ``captcha`` / ``login_required`` — the browser would stop and hand the job to Needs you;
 * ``blocked``     — the address was refused (not the public internet);
@@ -42,16 +44,27 @@ def summarise(page: dict[str, Any]) -> dict[str, Any]:
         if control_kind(e.get("tag", ""), e.get("type", ""), e.get("name", ""), e.get("autocomplete", ""),
                         bool(e.get("in_form")), e.get("role", "")) == "submit"
     )
+    # look's own "is this the form or still the ad" (step 5); an older read without it: any field.
+    is_form = page["application_form"] if "application_form" in page else bool(fields or files)
     if page.get("status") == "needs_you":
         outcome = str(page.get("reason") or "needs_you")
-    elif fields or files:
+    elif is_form:
         outcome = "ok"
     else:
         outcome = "no_form"
-    return {
+    row: dict[str, Any] = {
         "outcome": outcome, "title": (page.get("title") or "")[:80], "fields": fields,
         "file_inputs": files, "submit_buttons": submits,
+        # Which playbook the assistant would get (steps 4-5), so the report says which sites were met.
+        "site": (page.get("site") or {}).get("name") or "-",
     }
+    step = page.get("form_step")
+    if step:
+        row["form_step"] = f"{step.get('current')}/{step.get('total')}"
+    below = (page.get("more_elements") or {}).get("below")
+    if below:
+        row["more_below"] = int(below)  # the form goes on past what one read lists: scroll to measure the rest
+    return row
 
 
 async def probe(urls: list[str], *, resolve: ResolveFn, pool: Optional[BrowserPool] = None) -> list[dict[str, Any]]:
@@ -79,11 +92,13 @@ async def probe(urls: list[str], *, resolve: ResolveFn, pool: Optional[BrowserPo
 
 def table(rows: list[dict[str, Any]]) -> str:
     """The report as plain text, one line per site."""
-    lines = [f"{'site':40} {'outcome':15} fields files submit"]
+    lines = [f"{'site':40} {'outcome':15} fields files submit playbook  step"]
     for r in rows:
         lines.append(
             f"{r['host'][:40]:40} {r['outcome']:15} {r.get('fields', '-')!s:>6} {r.get('file_inputs', '-')!s:>5} "
-            f"{r.get('submit_buttons', '-')!s:>6}" + (f"  {r['detail']}" if r.get("detail") else "")
+            f"{r.get('submit_buttons', '-')!s:>6} {r.get('site', '-'):15} {r.get('form_step', '-'):>5}"
+            + (f"  +{r['more_below']} below" if r.get("more_below") else "")
+            + (f"  {r['detail']}" if r.get("detail") else "")
         )
     counts: dict[str, int] = {}
     for r in rows:

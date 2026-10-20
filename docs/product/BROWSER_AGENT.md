@@ -222,9 +222,27 @@ form; the test fails when the wait is removed.
   - A field labelled "leave this blank" (a trap for bots) reads `leave_blank: true`, and `type`, `choose`, `tick`
     and `upload` refuse it. The label must say "this" or "the" field: "Middle name (leave blank)" is just optional.
 
+**Step 6, proof and "did that do anything?" (2026-10-19):**
+- **`page_changed`** after every click. The browser watches the page from just before the click until it settles:
+  a new address, a new tab, a frame that navigated, any change to the page (inside open shadow roots too, and in
+  the clicked control's own frame even past the 20-frame cap), or a change in the control itself (a tick box) counts. When unsure, it counts as changed. Nothing changed: `next` says not to click it again
+  (nanobrowser's changed / none receipts).
+- **Never blind:** a control whose clicks changed nothing twice in a row is refused (`no_effect`) until another
+  action (an answer typed, a box ticked, a scroll or a new page) gives it its tries back.
+- **Never twice:** after a final submit on a page, a second submit for the same application on the same page is
+  refused (`already_submitted`; another job on the same form page goes to its own `check_submit`), unless the site said it did not take the first (`site_refused`). Even then `check_submit`
+  holds a second submit until the user marks the first one "not sent" on Job360, so `next` says to ask them.
+- **`repeat_warning`:** the same action with the same ref and text 3 times in a row (browser-use's loop nudge).
+- **Proof:** when a gated submit lands on the site's confirmation (`confirmation_seen`), a screenshot of that page
+  (the tab that shows it, a new one included) is stored as the application's proof (`proof_screenshot`, `via: browser`, the S7 store, at most 3 per
+  application). `proof_saved` says whether it was kept; a failed save never undoes the application.
+
 **Slice 4 tool ready, not run yet:** `python -m src.cli browser-probe <url> <url> ...` (add `--json` for rows). It opens
 each page READ-ONLY in a fresh throwaway browser (no sign-ins, no typing, no clicking) and reports per site: `ok` (form
 fields, file inputs, submit buttons found), `no_form` (an ad page), `captcha`, `login_required`, `blocked` or `error`.
+Each row also names the playbook the assistant would get (`site`: greenhouse, lever, ashby, workday...), Workday's
+page (`form_step`, like 2/7) and how many controls sit past the first read (`more_below`). "Is it the form?" is
+look's own `application_form` (a file box or 3+ labelled fields), so a lone search box is `no_form`.
 It needs the open internet, so run it on Railway once the switch is on, with a list of real apply links.
 
 **To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy. Then reconnect Job360 in the assistant (rev 9).
