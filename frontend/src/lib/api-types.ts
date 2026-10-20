@@ -1053,6 +1053,9 @@ export interface paths {
         /**
          * Put Trigger
          * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         *
+         *     An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+         *     it, the error is logged without its traceback or message, and a plain 500 replaces it (from None).
          */
         put: operations["put_trigger_api_assistant_trigger_put"];
         post?: never;
@@ -1246,8 +1249,9 @@ export interface paths {
          * Password Reset Confirm
          * @description Validate the token and set the new password.
          *
-         *     On success: 204, and every existing session for that user is revoked
-         *     (forces re-login on all devices — security best practice after reset).
+         *     On success: 204, and every existing session, agent token and OAuth grant
+         *     for that user is revoked (forces re-login on all devices and reconnection
+         *     of every assistant — security best practice after reset).
          *     The caller's session cookie is cleared too so the API response itself
          *     can't accidentally land the caller into the just-reset account.
          *
@@ -2549,14 +2553,21 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Readiness probe — checks real dependencies before accepting traffic.
+         * @description Readiness probe: can the request path get a DB connection right now?
          *
-         *     Checks:
-         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
-         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *     Production borrows a connection from the SAME pool ``get_request_db`` uses
+         *     (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+         *     runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+         *     held) or an unreachable database answers 503, which is what Railway's deploy
+         *     healthcheck (``backend/railway.json``) and the uptime probe need to see.
          *
-         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
-         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         *     200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+         *
+         *     Test mode has no request-path pool (``get_request_db`` opens a fresh
+         *     connection per request there), so the probe opens one the same way and
+         *     ``pool`` is null. Redis is no longer checked: the service was deleted
+         *     2026-09-02 and the auth rate limiter falls back without it.
          */
         get: operations["readyz_api_readyz_get"];
         put?: never;
@@ -2801,6 +2812,24 @@ export interface paths {
         get: operations["provenance_api_tailor__job_id___doc_kind__provenance_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Templates */
+        get: operations["list_templates_api_templates_get"];
+        put?: never;
+        /** Save Template */
+        post: operations["save_template_api_templates_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5295,6 +5324,11 @@ export interface components {
              */
             truncated: boolean;
         };
+        /** ListTemplatesResponse */
+        ListTemplatesResponse: {
+            /** Templates */
+            templates: components["schemas"]["TemplateOut"][];
+        };
         /** LiveActionRequest */
         LiveActionRequest: {
             /** Action */
@@ -5497,6 +5531,11 @@ export interface components {
             entry: string;
             /** Id */
             id: number;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Occurred At */
             occurred_at: string;
             /** Recorded At */
@@ -6463,6 +6502,11 @@ export interface components {
             entry: string;
             /** Follow Up On */
             follow_up_on?: string | null;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Occurred At */
             occurred_at?: string | null;
             source?: components["schemas"]["EventSource"] | null;
@@ -6557,6 +6601,11 @@ export interface components {
             event_id: number | null;
             /** Kind */
             kind: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Made By */
             made_by: string;
             /** Model */
@@ -6625,6 +6674,17 @@ export interface components {
             fit: components["schemas"]["ApplicationFitOut"];
             line: components["schemas"]["SaveFitLineOut"];
             visa?: components["schemas"]["ApplicationVisaOut"] | null;
+        };
+        /** SaveTemplateRequest */
+        SaveTemplateRequest: {
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Model */
+            model?: string | null;
+            /** Text */
+            text: string;
         };
         /**
          * SetVisaRequest
@@ -7072,6 +7132,27 @@ export interface components {
             /** Still Waiting */
             still_waiting: number;
         };
+        /**
+         * StatsOutreachVariantGroupOut
+         * @description Pack #13 — per outreach `label` (lower(trim)): contacts with a sent mark, counted
+         *     once under the label of their newest message version saved BEFORE their first sent
+         *     mark ('' / none = key null, "Not set"); of those, how many have a reply mark;
+         *     reply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N.
+         */
+        StatsOutreachVariantGroupOut: {
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string;
+            /** Outreach Replied */
+            outreach_replied: number;
+            /** Outreach Sent */
+            outreach_sent: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+        };
         /** StatsOverallOut */
         StatsOverallOut: {
             /** Applied */
@@ -7226,6 +7307,11 @@ export interface components {
             by_cv_version: components["schemas"]["StatsCvVersionGroupOut"][];
             /** By Job Source */
             by_job_source: components["schemas"]["StatsKeyedGroupOut"][];
+            /**
+             * By Outreach Variant
+             * @default []
+             */
+            by_outreach_variant: components["schemas"]["StatsOutreachVariantGroupOut"][];
             /** By Role */
             by_role: components["schemas"]["StatsRoleGroupOut"][];
             calibration?: components["schemas"]["StatsCalibrationOut"] | null;
@@ -7506,6 +7592,27 @@ export interface components {
             receipt_id?: number | null;
             /** Title */
             title: string;
+        };
+        /** TemplateOut */
+        TemplateOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model?: string | null;
+            /** Template Id */
+            template_id: number;
+            /** Text */
+            text: string;
+            /** Version No */
+            version_no: number;
         };
         /** TimezoneRequest */
         TimezoneRequest: {
@@ -12313,6 +12420,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvenanceSegment"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_templates_api_templates_get: {
+        parameters: {
+            query?: {
+                kind?: string;
+                label?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListTemplatesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_template_api_templates_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateOut"];
                 };
             };
             /** @description Validation Error */

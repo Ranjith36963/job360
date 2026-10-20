@@ -336,6 +336,8 @@ itself. When you record `replied` on a job with `source.sender`, Job360 also mar
 the person replied if that sender is a contact on the same job you sent
 outreach to - do not record both.
 
+Variants and templates: pass `label` on save_artifact(contact_id=..., kind="outreach") to name the approach (for example a template's label). stats `by_outreach_variant` counts each contact once, under the label of its newest message saved before its first `sent` mark (no message or no label = "Not set"), with sent, replied and reply rate. Keep reusable wording with save_artifact(kind="outreach_template", label=..., text=...) and no application_id or contact_id: each save is a new version; get_profile `outreach_templates` returns the newest of each label. You fill a template in yourself for each person, with true facts only; Job360 never fills, renders or sends one.
+
 ## Automatic employer emails
 
 Job360 never sends mail. Your own Gmail connector sends; Job360 stores, gates and counts.

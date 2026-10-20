@@ -580,6 +580,15 @@ CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 —
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
+# Outreach pack #13 — the caller's own variant label on a message version / a template
+# (stats `by_outreach_variant` groups on lower(trim(label))). Free text, one line.
+VARIANT_LABEL_MAX_CHARS = 100
+# User-level templates (not tied to a job or a person): reusable wording the assistant
+# fills in itself. Versioned per label, append-only. Job360 never fills, renders or sends one.
+USER_TEMPLATE_KINDS = ("outreach_template",)
+USER_TEMPLATE_MAX_CHARS = int(os.getenv("USER_TEMPLATE_MAX_CHARS", "3000"))
+USER_TEMPLATE_LABELS_MAX = int(os.getenv("USER_TEMPLATE_LABELS_MAX", "10"))
+USER_TEMPLATE_VERSIONS_PER_LABEL_MAX = int(os.getenv("USER_TEMPLATE_VERSIONS_PER_LABEL_MAX", "50"))
 OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_MAX", "200"))
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
 CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))

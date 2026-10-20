@@ -14,7 +14,7 @@ Print this checklist and tick each step:
    `source_url`; other detail in `notes`.
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
-   `email`, `linkedin` or `other`). This is a draft.
+   `email`, `linkedin` or `other`; `label` = the approach or template you used). This is a draft.
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
    `preferences.daily_check` from `get_profile`.
    - `auto` (or the older `scheduled`), channel `email`: right before Send,

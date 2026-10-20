@@ -6183,6 +6183,22 @@
         "title": "ListPeopleResponse",
         "type": "object"
       },
+      "ListTemplatesResponse": {
+        "properties": {
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateOut"
+            },
+            "title": "Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "title": "ListTemplatesResponse",
+        "type": "object"
+      },
       "LiveActionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6626,6 +6642,11 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
           },
           "occurred_at": {
             "title": "Occurred At",
@@ -8970,6 +8991,12 @@
             ],
             "title": "Follow Up On"
           },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
           "occurred_at": {
             "anyOf": [
               {
@@ -9150,7 +9177,7 @@
           },
           "label": {
             "default": "",
-            "maxLength": 100,
+            "maxLength": 200,
             "title": "Label",
             "type": "string"
           },
@@ -9249,6 +9276,11 @@
           },
           "kind": {
             "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
             "type": "string"
           },
           "made_by": {
@@ -9578,6 +9610,43 @@
           "event_id"
         ],
         "title": "SaveFitResponse",
+        "type": "object"
+      },
+      "SaveTemplateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "text"
+        ],
+        "title": "SaveTemplateRequest",
         "type": "object"
       },
       "SetVisaRequest": {
@@ -10905,6 +10974,59 @@
         "title": "StatsLessonSideOut",
         "type": "object"
       },
+      "StatsOutreachVariantGroupOut": {
+        "description": "Pack #13 \u2014 per outreach `label` (lower(trim)): contacts with a sent mark, counted\nonce under the label of their newest message version saved BEFORE their first sent\nmark ('' / none = key null, \"Not set\"); of those, how many have a reply mark;\nreply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outreach_replied": {
+            "title": "Outreach Replied",
+            "type": "integer"
+          },
+          "outreach_sent": {
+            "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "outreach_sent",
+          "outreach_replied",
+          "reply_rate",
+          "small_sample"
+        ],
+        "title": "StatsOutreachVariantGroupOut",
+        "type": "object"
+      },
       "StatsOverallOut": {
         "properties": {
           "applied": {
@@ -11412,6 +11534,14 @@
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
             },
             "title": "By Job Source",
+            "type": "array"
+          },
+          "by_outreach_variant": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StatsOutreachVariantGroupOut"
+            },
+            "title": "By Outreach Variant",
             "type": "array"
           },
           "by_role": {
@@ -12295,6 +12425,65 @@
           "at"
         ],
         "title": "TallyItem",
+        "type": "object"
+      },
+      "TemplateOut": {
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "template_id": {
+            "title": "Template Id",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "template_id",
+          "kind",
+          "label",
+          "version_no",
+          "text",
+          "chars",
+          "made_by",
+          "created_at"
+        ],
+        "title": "TemplateOut",
         "type": "object"
       },
       "TimezoneRequest": {
@@ -17267,7 +17456,7 @@
         ]
       },
       "put": {
-        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.",
+        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.\n\nAn unexpected error must not carry the plaintext token into an error report: the body is emptied of\nit, the error is logged without its traceback or message, and a plain 500 replaces it (from None).",
         "operationId": "put_trigger_api_assistant_trigger_put",
         "parameters": [
           {
@@ -17784,7 +17973,7 @@
     },
     "/api/auth/password-reset/confirm": {
       "post": {
-        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session for that user is revoked\n(forces re-login on all devices \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
+        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session, agent token and OAuth grant\nfor that user is revoked (forces re-login on all devices and reconnection\nof every assistant \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
         "operationId": "password_reset_confirm_api_auth_password_reset_confirm_post",
         "requestBody": {
           "content": {
@@ -21506,7 +21695,7 @@
     },
     "/api/readyz": {
       "get": {
-        "description": "Readiness probe \u2014 checks real dependencies before accepting traffic.\n\nChecks:\n  * db   \u2014 trivial ``SELECT 1`` through the pg connection layer.\n  * redis \u2014 ping via redis-py. Skipped (not failed) when REDIS_URL unset.\n\nReturns 200 ``{status:\"ready\", ...}`` when all checks pass,\n503 ``{status:\"not ready\", ...}`` when any required check fails.",
+        "description": "Readiness probe: can the request path get a DB connection right now?\n\nProduction borrows a connection from the SAME pool ``get_request_db`` uses\n(``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and\nruns ``SELECT 1`` under the same bound. A pinned pool (every connection\nheld) or an unreachable database answers 503, which is what Railway's deploy\nhealthcheck (``backend/railway.json``) and the uptime probe need to see.\n\n200 ``{\"status\": \"ready\", \"pool\": {size, idle, used, waiting, max}}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}``\n\nTest mode has no request-path pool (``get_request_db`` opens a fresh\nconnection per request there), so the probe opens one the same way and\n``pool`` is null. Redis is no longer checked: the service was deleted\n2026-09-02 and the auth rate limiter falls back without it.",
         "operationId": "readyz_api_readyz_get",
         "responses": {
           "200": {
@@ -22384,6 +22573,172 @@
         "summary": "Provenance",
         "tags": [
           "tailor"
+        ]
+      }
+    },
+    "/api/templates": {
+      "get": {
+        "operationId": "list_templates_api_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "outreach_template",
+              "maxLength": 40,
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTemplatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "templates"
+        ]
+      },
+      "post": {
+        "operationId": "save_template_api_templates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Template",
+        "tags": [
+          "templates"
         ]
       }
     },
