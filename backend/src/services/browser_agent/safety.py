@@ -151,7 +151,9 @@ class Blocker:
     detail: str
 
 
-def blocker_for(frame_urls: list[str], page_text: str, has_password_box: bool) -> Optional[Blocker]:
+def blocker_for(
+    frame_urls: list[str], page_text: str, has_password_box: bool, account_step: bool = False,
+) -> Optional[Blocker]:
     """The first reason this page needs the user, or None.
 
     A CAPTCHA wins over a sign-in wall: both need the user, the CAPTCHA is the
@@ -168,6 +170,13 @@ def blocker_for(frame_urls: list[str], page_text: str, has_password_box: bool) -
             "login_required",
             "This page asks for a sign-in. Job360's browser never types a password: the user signs in once "
             "themselves on the Job360 website (Browser page, 'Keep me signed in'), then try again.",
+        )
+    if account_step:
+        return Blocker(
+            "login_required",
+            "This page asks the user to sign in or create an account. Job360's browser never types a password "
+            "and never makes an account: the user signs in once themselves on the Job360 website (Browser page, "
+            "'Keep me signed in'), then try again.",
         )
     return None
 
