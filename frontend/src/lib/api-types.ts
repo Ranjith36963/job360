@@ -1053,6 +1053,9 @@ export interface paths {
         /**
          * Put Trigger
          * @description Save (or replace) the start address and its token. The token is encrypted at rest.
+         *
+         *     An unexpected error must not carry the plaintext token into an error report: the body is emptied of
+         *     it, the error is logged without its traceback or message, and a plain 500 replaces it (from None).
          */
         put: operations["put_trigger_api_assistant_trigger_put"];
         post?: never;
@@ -1246,8 +1249,9 @@ export interface paths {
          * Password Reset Confirm
          * @description Validate the token and set the new password.
          *
-         *     On success: 204, and every existing session for that user is revoked
-         *     (forces re-login on all devices — security best practice after reset).
+         *     On success: 204, and every existing session, agent token and OAuth grant
+         *     for that user is revoked (forces re-login on all devices and reconnection
+         *     of every assistant — security best practice after reset).
          *     The caller's session cookie is cleared too so the API response itself
          *     can't accidentally land the caller into the just-reset account.
          *
@@ -2549,14 +2553,21 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Readiness probe — checks real dependencies before accepting traffic.
+         * @description Readiness probe: can the request path get a DB connection right now?
          *
-         *     Checks:
-         *       * db   — trivial ``SELECT 1`` through the pg connection layer.
-         *       * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+         *     Production borrows a connection from the SAME pool ``get_request_db`` uses
+         *     (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+         *     runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+         *     held) or an unreachable database answers 503, which is what Railway's deploy
+         *     healthcheck (``backend/railway.json``) and the uptime probe need to see.
          *
-         *     Returns 200 ``{status:"ready", ...}`` when all checks pass,
-         *     503 ``{status:"not ready", ...}`` when any required check fails.
+         *     200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+         *
+         *     Test mode has no request-path pool (``get_request_db`` opens a fresh
+         *     connection per request there), so the probe opens one the same way and
+         *     ``pool`` is null. Redis is no longer checked: the service was deleted
+         *     2026-09-02 and the auth rate limiter falls back without it.
          */
         get: operations["readyz_api_readyz_get"];
         put?: never;
@@ -2884,6 +2895,8 @@ export interface components {
              * @default
              */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /**
@@ -2937,6 +2950,8 @@ export interface components {
              * @default
              */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /**
@@ -4085,6 +4100,8 @@ export interface components {
             };
             /** Email */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Id */
@@ -4108,6 +4125,8 @@ export interface components {
         };
         /** ContactOutreachOut */
         ContactOutreachOut: {
+            /** Bounced */
+            bounced?: components["schemas"]["OutreachEntryOut"][];
             last_reply: components["schemas"]["OutreachEntryOut"] | null;
             last_sent: components["schemas"]["OutreachEntryOut"] | null;
             /** Message Count */
@@ -5486,7 +5505,7 @@ export interface components {
          * @description One row of a contact's outreach ledger — a drafted message VERSION
          *     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
          *     (``version_no`` null — unversioned, a person can be sent to or replied
-         *     to many times).
+         *     to many times). A ``bounced`` mark's ``text`` is the address that bounced.
          */
         OutreachEntryOut: {
             /** Channel */
@@ -5575,6 +5594,8 @@ export interface components {
             };
             /** Email */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Id */
@@ -5618,6 +5639,8 @@ export interface components {
             contact_ids: number[];
             /** Email */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Jobs */
@@ -7578,6 +7601,8 @@ export interface components {
         UpdateContactRequest: {
             /** Email */
             email?: string | null;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Linkedin Url */

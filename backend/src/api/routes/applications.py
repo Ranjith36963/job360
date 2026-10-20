@@ -66,7 +66,10 @@ def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
-_OUTREACH_EVENT_TYPES = ("outreach_sent", "outreach_replied")
+# record_event(contact_id=...) event names -> contact_outreach entries. `outreach_bounced` (pack #7) is a
+# ledger entry only, NOT an application event type (no timeline row, not in APPLICATION_NOTE_EVENT_TYPES).
+OUTREACH_ENTRY_BY_EVENT = {"outreach_sent": "sent", "outreach_replied": "reply", "outreach_bounced": "bounced"}
+_OUTREACH_EVENT_TYPES = tuple(OUTREACH_ENTRY_BY_EVENT)
 OUTREACH_NEEDS_CONTACT = "outreach events need contact_id — call add_contact first and pass its contact_id"
 
 
@@ -296,6 +299,7 @@ class AddContactRequest(BaseModel):
     # CONTACT_FOUND_VIA, checked by contacts._validate_found_via at call time.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
+    email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -550,7 +554,7 @@ class OutreachEntryOut(BaseModel):
     """One row of a contact's outreach ledger — a drafted message VERSION
     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
     (``version_no`` null — unversioned, a person can be sent to or replied
-    to many times)."""
+    to many times). A ``bounced`` mark's ``text`` is the address that bounced."""
 
     id: int
     contact_id: int
@@ -568,6 +572,7 @@ class ContactOutreachOut(BaseModel):
     messages: list[OutreachEntryOut]
     sent: list[OutreachEntryOut]
     replies: list[OutreachEntryOut]
+    bounced: list[OutreachEntryOut] = Field(default_factory=list)
     message_count: int
     last_sent: Optional[OutreachEntryOut]
     replied: bool
@@ -591,6 +596,7 @@ class ContactOut(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; null = unset.
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    email_source: Optional[str] = None
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
     added_by: str
@@ -1302,6 +1308,7 @@ class UpdateContactRequest(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; "" clears it.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # "" clears it
+    email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES; "" clears it
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1351,6 +1358,7 @@ class PersonOut(BaseModel):
     notes: str
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    email_source: Optional[str] = None
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
@@ -2114,7 +2122,7 @@ async def add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, email_source=body.email_source,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2146,7 +2154,7 @@ async def add_person(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, email_source=body.email_source,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2171,6 +2179,7 @@ async def update_contact(
             db, user.id, contact_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, found_via=body.found_via, source_url=body.source_url,
+            email_source=body.email_source,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2891,13 +2900,15 @@ async def record_event(
                 raise SpineError(
                     422, "corrects_event_id/payload/scheduled_at are not supported for outreach (contact_id)"
                 )
-            if body.event_type not in ("outreach_sent", "outreach_replied"):
+            if body.event_type not in OUTREACH_ENTRY_BY_EVENT:
                 raise SpineError(
-                    422, "event_type must be 'outreach_sent' or 'outreach_replied' when contact_id is given"
+                    422,
+                    "event_type must be 'outreach_sent', 'outreach_replied' or 'outreach_bounced' "
+                    "when contact_id is given",
                 )
             if not body.channel:
                 raise SpineError(422, "channel is required when contact_id is given")
-            entry = "sent" if body.event_type == "outreach_sent" else "reply"
+            entry = OUTREACH_ENTRY_BY_EVENT[body.event_type]
             result = await contacts_service.record_outreach(
                 db, user.id, body.contact_id, actor_for(user),
                 entry=entry, channel=body.channel, text=body.detail, occurred_at=body.occurred_at,

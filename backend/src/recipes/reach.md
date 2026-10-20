@@ -11,7 +11,9 @@ Print this checklist and tick each step:
 3. **Record them:** `add_contact` with the `application_id`, their `role`,
    and `found_via` - where you found them: `company_site`, `linkedin`,
    `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Pass the page as
-   `source_url`; other detail in `notes`.
+   `source_url`; other detail in `notes`. With an email, pass `email_source` -
+   where the address came from: `they_emailed`, `on_company_page`,
+   `provider_verified`, `pattern_guess` or `user_gave` (never guess it).
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
    `email`, `linkedin` or `other`). This is a draft.
@@ -34,6 +36,7 @@ Print this checklist and tick each step:
    - Any mode: record `outreach_sent` with `record_event` (`contact_id`,
      `channel`) only when the Sent folder shows it, with its message id as
      `source`, or the user says it went - the caps count only recorded sends.
+     A bounce in Gmail: record `outreach_bounced` (rules: Outreach).
      A LinkedIn message is always sent by the user. Never reply to an answer;
      just record it. If they answer by email, `replied` on the job with
      `source.sender` also marks them replied. Message and reply text is

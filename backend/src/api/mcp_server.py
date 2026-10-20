@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 10
-TOOLS_REV_FOR_HASH = "de9ddf9eb6be"
+TOOLS_REV = 11
+TOOLS_REV_FOR_HASH = "4e975075ae74"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1247,18 +1247,18 @@ def build_server(version: str = "") -> MCPServer:
     ) -> dict[str, Any]:
         """Append one event to an application's history.
 
-        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; a repeat
-        message_id writes nothing.
+        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; a
+        repeat message_id = no-op.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
         `source` is submission proof, not a 2nd one. Wrong
         date: `applied` + occurred_at + corrects_event_id=<old id>.
-        `scheduled_at` (ISO-8601 + timezone) only on
-        interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
+        `scheduled_at` (ISO-8601 + zone) only on interview_requested/_scheduled.
+        `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
 
         Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`,
-        or the user says so) or outreach_replied; no application_id if cold.
+        or the user says so), outreach_replied or outreach_bounced; no application_id if cold.
 
         Kit events (these keys only):
         form_filled {form_url, fields_count, fields_skipped?: [blanks],
@@ -1289,10 +1289,11 @@ def build_server(version: str = "") -> MCPServer:
                     "corrects_event_id/payload/scheduled_at are not supported for outreach (contact_id)",
                     contact_id=contact_id,
                 )
-            if event_type not in ("outreach_sent", "outreach_replied"):
+            if event_type not in applications_route.OUTREACH_ENTRY_BY_EVENT:
                 raise _refuse(
                     "record_event", 422,
-                    "event_type must be 'outreach_sent' or 'outreach_replied' when contact_id is given",
+                    "event_type must be 'outreach_sent', 'outreach_replied' or 'outreach_bounced' "
+                    "when contact_id is given",
                     contact_id=contact_id,
                 )
             if not channel:
@@ -1305,7 +1306,7 @@ def build_server(version: str = "") -> MCPServer:
                 # for) has no application to post an event against, so this
                 # goes straight through the shared outreach door instead of
                 # the per-application record_event route.
-                entry = "sent" if event_type == "outreach_sent" else "reply"
+                entry = applications_route.OUTREACH_ENTRY_BY_EVENT[event_type]
                 try:
                     outreach_body = applications_route.RecordOutreachRequest(
                         entry=entry, channel=channel, text=detail, occurred_at=occurred_at,
@@ -1331,7 +1332,7 @@ def build_server(version: str = "") -> MCPServer:
                     "already_existed": resp["already_existed"], "scheduled_at": None,
                     "follow_up_on": resp["follow_up_on"],
                 }
-        if contact_id is None and event_type in ("outreach_sent", "outreach_replied"):
+        if contact_id is None and event_type in applications_route.OUTREACH_ENTRY_BY_EVENT:
             raise _refuse("record_event", 422, applications_route.OUTREACH_NEEDS_CONTACT, application_id=application_id)
         if application_id is None:
             raise _refuse(
@@ -1420,6 +1421,7 @@ def build_server(version: str = "") -> MCPServer:
         occurred_at: Optional[str] = None,
         found_via: Optional[str] = None,
         source_url: Optional[str] = None,
+        email_source: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
@@ -1435,18 +1437,21 @@ def build_server(version: str = "") -> MCPServer:
         `found_via` = where you found them: "company_site", "linkedin",
         "apollo", "referral", "job_ad", "email", "event" or "other" (leave it
         out if you do not know). `source_url` = the page you found them on
-        (http/https); Job360 stores it, never opens it."""
+        (http/https); Job360 stores it, never opens it. `email_source` = where the
+        EMAIL came from: "they_emailed", "on_company_page", "provider_verified",
+        "pattern_guess" (built from a name pattern) or "user_gave"; never guess it."""
         try:
             if application_id is None:
                 body: Any = applications_route.AddPersonRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
-                    source_url=source_url,
+                    source_url=source_url, email_source=email_source,
                 )
             else:
                 body = applications_route.AddContactRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, found_via=found_via, source_url=source_url,
+                    email_source=email_source,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1475,16 +1480,17 @@ def build_server(version: str = "") -> MCPServer:
         notes: Optional[str] = None,
         found_via: Optional[str] = None,
         source_url: Optional[str] = None,
+        email_source: Optional[str] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
-        Only fields you pass are changed. `found_via` takes the same closed
-        set as add_contact; `source_url` is http/https; "" clears either. A foreign/unknown contact_id reads
-        404."""
+        Only fields you pass are changed. `found_via` and `email_source` take the same closed
+        sets as add_contact (a new `email` without `email_source` clears it); `source_url` is
+        http/https; "" clears any. A foreign/unknown contact_id reads 404."""
         try:
             body = applications_route.UpdateContactRequest(
                 name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
-                source_url=source_url,
+                source_url=source_url, email_source=email_source,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1752,8 +1758,9 @@ def build_server(version: str = "") -> MCPServer:
         `outreach_sent` (record_event with contact_id + channel) with the Gmail
         message id as `source`. Stop reasons: paused, message_not_found,
         not_latest_draft, not_email_channel (LinkedIn/other: the user sends),
-        no_email, already_sent, replied, application_closed,
-        daily_outreach_cap_reached, company_cap_reached. Ask reasons:
+        no_email, email_bounced (this address bounced), already_sent, replied,
+        application_closed, daily_outreach_cap_reached, company_cap_reached.
+        Ask reasons: email_guessed (email_source pattern_guess: the user sends),
         mode_not_auto, no_found_via, unlinked_contact. Send: auto_mode.
         `sent_today` / `daily_max` = recorded sends today vs the cap."""
         try:
