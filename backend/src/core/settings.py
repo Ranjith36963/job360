@@ -1003,11 +1003,10 @@ URL_FETCH_MAX_JSONLD_BYTES = int(os.getenv("URL_FETCH_MAX_JSONLD_BYTES", str(256
 
 # Owner decision, 2026-09-28 — two funnel events only the backend can see
 # (`first_tool_call`, `first_bring`) fire through `src/services/analytics.py`.
-# The frontend's consent banner (fable/05 C3) stores its choice in the
-# BROWSER only — there is no per-user consent flag in the database for the
-# backend to read — so this is the owner's own opt-in for every user, off by
-# default, not a per-user consent check. Off, every `capture_event` call is a
-# no-op: nothing is sent, nothing is queued.
+# This is the owner's global switch, off by default; on top of it each user
+# must have turned on "Help improve Job360" (`users.analytics_consent_at`,
+# migration 0067) or nothing is sent for them. Off, every `capture_event`
+# call is a no-op: nothing is sent, nothing is queued.
 ANALYTICS_BACKEND_ENABLED = _env_flag("ANALYTICS_BACKEND_ENABLED", False)
 # The SAME PostHog project the frontend posts to (its keys are
 # NEXT_PUBLIC_POSTHOG_KEY / NEXT_PUBLIC_POSTHOG_HOST, PostHogProviderWrapper.tsx)
