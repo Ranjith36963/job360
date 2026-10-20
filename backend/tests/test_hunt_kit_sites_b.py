@@ -143,6 +143,19 @@ def test_briefhq_happy_path_and_country_filter():
     assert len(us) == 2  # "CA" in "San Francisco, CA, US" is a state, not Canada
 
 
+def test_briefhq_urlless_and_refused_url_postings_all_kept():
+    page = ("<html>" + _ld(title="Backend Engineer", identifier={"value": "be"})
+            + _ld(title="Frontend Engineer", identifier={"value": "fe"})
+            + _ld(title="Data Engineer", url="http://briefhq.ai/careers/#data", identifier={"value": "de"})
+            + _ld(title="Ops Engineer") + _ld(title="Ops Engineer") + "</html>")
+    jobs = sb.fetch_briefhq(["engineer"], _http({"briefhq.ai": (200, page)}), {}, days=BIG, countries=[])
+    got = sorted((j["title"], j["url"]) for j in jobs)
+    assert got == [("Backend Engineer", "https://briefhq.ai/careers/#be"),
+                   ("Data Engineer", "https://briefhq.ai/careers/#de"),
+                   ("Frontend Engineer", "https://briefhq.ai/careers/#fe"),
+                   ("Ops Engineer", "https://briefhq.ai/careers/")]
+
+
 def test_briefhq_empty_nonjob_blocks_and_non_200():
     http = _http({"briefhq.ai": (200, "<html>" + _ld(**{"@type": "Organization"}) + "</html>")})
     assert sb.fetch_briefhq([], http, {}, days=BIG, countries=[]) == []

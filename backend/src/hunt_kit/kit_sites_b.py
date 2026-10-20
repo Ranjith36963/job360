@@ -369,14 +369,22 @@ def fetch_airswift(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
 BRIEFHQ_URL = "https://briefhq.ai/careers/"
 
 
-def _brief_url(url: Any) -> str:
-    """The posting's own link when it is https on briefhq.ai, else the careers page."""
+_BRIEF_ID = re.compile(r"^[a-z0-9-]+$")
+
+
+def _brief_url(url: Any, ident: Any = None) -> str:
+    """The posting's own link when it is https on briefhq.ai, else the careers page plus "#<identifier>"
+    (freehire briefhq.go:15-16 documents the per-job deeplink careers/#<slug>, :40 keys by identifier.value)."""
     try:
         u = urlsplit(str(url or "").strip())
         host = (u.hostname or "").lower()
+        if u.scheme == "https" and host in ("briefhq.ai", "www.briefhq.ai"):
+            return u.geturl()
     except ValueError:
-        return BRIEFHQ_URL
-    return u.geturl() if u.scheme == "https" and host in ("briefhq.ai", "www.briefhq.ai") else BRIEFHQ_URL
+        pass
+    slug = ident.get("value") if isinstance(ident, dict) else ident
+    slug = str(slug).strip() if isinstance(slug, (str, int)) else ""
+    return BRIEFHQ_URL + "#" + slug if _BRIEF_ID.match(slug) else BRIEFHQ_URL
 
 
 def parse_briefhq(page: Any, page_url: str = BRIEFHQ_URL) -> list[Job]:
@@ -395,7 +403,7 @@ def parse_briefhq(page: Any, page_url: str = BRIEFHQ_URL) -> list[Job]:
                           if x and str(x).strip())
         remote = True if str(p.get("jobLocationType") or "").upper() == "TELECOMMUTE" else _remote(place)
         out.append(_made("briefhq", "Brief careers page", title=title, company=_posting_company(p) or "Brief",
-                         url=_brief_url(p.get("url")), place=place, country="",
+                         url=_brief_url(p.get("url"), p.get("identifier")), place=place, country="",
                          posted=_date(p.get("datePosted")), description=_unescaped(p.get("description")),
                          remote=remote))
     return out
@@ -407,7 +415,13 @@ def fetch_briefhq(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
     budget = _Budget(SITES_MAX_REQUESTS)
     jobs = parse_briefhq(_fetch(http, stats, "briefhq", budget, BRIEFHQ_URL, as_json=False))
     jobs = [j for j in jobs if _place_ok(j["location"], countries, j["remote"])]
-    return _keep(_unique(jobs), queries, days)
+    seen: set[tuple[str, str]] = set()  # url-less postings share the careers URL: key on (title, url)
+    uniq: list[Job] = []
+    for j in jobs:
+        if (j["title"], j["url"]) not in seen:
+            seen.add((j["title"], j["url"]))
+            uniq.append(j)
+    return _keep(uniq, queries, days)
 
 
 # --------------------------------------------------------------------------------- Functional Works
