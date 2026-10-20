@@ -1948,12 +1948,24 @@ _SENSITIVE_GROUPS = frozenset({"right_to_work", "salary", "equality"})
 _SENSITIVE_RE = re.compile(
     r"visa|sponsor|work authori[sz]ation|right to work|eligible to work|relocat|salary|compensation|"
     r"disabilit|veteran|gender|ethnic|\brace\b|sexual|religio|criminal|convict|background check|"
-    r"self.?identif|demographic"
+    r"self.?identif|demographic|"
+    # UK wording and legal terms (gap audit #14). The text is only casefolded, so SC / DV count only next to
+    # "clear..." ("SC or DV security clearance", "DV cleared") - never "B. Sc." or "Charleston, SC".
+    r"authori[sz]ed to work|entitled to work|permission to work|security clearance|"
+    r"\b(?:sc|dv)\b.{0,30}\bclear|\bclearance\b.{0,30}\b(?:sc|dv)\b|\bbpss\b|security vetting|"
+    r"vetting (?:check|process|level)|(?:undergo|pass|hold) (?:\w+ )?vetting|"
+    r"day.?rate|expected (?:pay|salary)|notice period|\bitar\b|export controls?|non.?compete|"
+    r"interview record(?:ing)?|record(?:ing)? (?:of )?(?:the |this )?interview|"
+    r"previously (?:been )?employed (?:by|at|with)"
 )
 _KNOCKOUT_GROUPS = frozenset({"right_to_work", "salary"})
 _KNOCKOUT_RE = re.compile(
     r"\byears?\b.{0,30}\bexperience|\bexperience\b.{0,30}\byears?\b|\bdegree\b|bachelor|master'?s|"
-    r"sponsor|\bvisa\b|work authori[sz]ation|right to work|salary|compensation expectation"
+    r"sponsor|\bvisa\b|work authori[sz]ation|right to work|salary|compensation expectation|"
+    r"authori[sz]ed to work|entitled to work|driving licen[cs]e|"
+    # Age, only as an age: "over 18?", "aged 18 or over" - not "over 180 countries" or "over 18 engineers".
+    r"\b(?:over|at least) (?:the age of )?18\b(?!\s*(?:months|weeks|days|people|engineers|countries|staff|members))|"
+    r"\b18 (?:years )?(?:of age )?or (?:over|older)\b"
 )
 _OPTION_FIELDS = frozenset({"select", "radio", "checkbox"})
 

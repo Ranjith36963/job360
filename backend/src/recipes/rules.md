@@ -224,6 +224,12 @@ history and are not a promise you can take back. If the user does not want even
 that, do not call `answer_ask` for that fact - use it in the form and leave the
 ask open.
 
+Legal questions (right to work, SC / DV clearance, BPSS, ITAR / export control, non-compete, interview recording, "previously employed by", day rate):
+explain the question to the user in one sentence, then ask; never infer the answer. ITAR "US person" is not work
+authorisation, and a non-compete is not "worked for a competitor". Save right to work, clearance and day rate as the
+SENSITIVE rule above says (remember: true only after a yes); save non-compete, interview-recording consent and
+"previously employed by" as `user_info.answers` with that job's `company`.
+
 ## Gmail and the daily check
 
 OFFER THE DAILY CHECK ONCE: Job360 remembers the answer, not you — so
