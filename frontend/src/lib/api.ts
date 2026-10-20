@@ -477,10 +477,16 @@ export async function getTailored(jobId: number): Promise<TailorBundle> {
   return request<TailorBundle>(`/api/tailor/${jobId}`);
 }
 
-/** One line of the doc + whether it's grounded in the user's CV (their fact) or AI-added. */
+/**
+ * One line of the doc. `grounded` is true ONLY when the line is in the user's own
+ * profile (their fact). `source` says why not: "ad" = it only echoes the job ad
+ * (employer context, never a candidate fact), "none" = AI-added. Optional so an
+ * older API response (no `source`) still type-checks.
+ */
 export interface ProvenanceSegment {
   text: string;
   grounded: boolean;
+  source?: "profile" | "ad" | "none";
 }
 
 /** Per-line provenance for a saved doc — your own facts vs lines added on top. */

@@ -272,6 +272,35 @@ async def test_provenance_marks_the_users_own_facts(authenticated_async_context,
 
 
 @pytest.mark.asyncio
+async def test_provenance_labels_a_line_copied_from_the_ad_as_from_ad(authenticated_async_context, monkeypatch):
+    """Gap-audit #17: the job ad can give employer context but never a candidate fact.
+    A CV line lifted from the ad is NOT grounded; it is labelled source="ad"."""
+    import src.api.routes.tailor as tailor
+    monkeypatch.setattr(tailor, "load_profile", _fake_load_profile)
+    ad = {**_AD, "description": "You bring 5+ years of Kubernetes operating clusters in production."}
+    cv = (
+        "Built fraud models at Acme.\n"
+        "5+ years of Kubernetes operating clusters in production\n"
+        "Won the Nobel Prize in Chemistry."
+    )
+
+    async with authenticated_async_context() as client:
+        job_id, app_id = await _bring(client, ad)
+        await _save(client, app_id, "cv", cv)
+        prov = await client.get(f"/api/tailor/{job_id}/cv/provenance")
+
+    assert prov.status_code == 200, prov.text
+    by_text = {s["text"]: s for s in prov.json()}
+    assert by_text["Built fraud models at Acme."]["source"] == "profile"
+    assert by_text["Built fraud models at Acme."]["grounded"] is True
+    ad_line = by_text["5+ years of Kubernetes operating clusters in production"]
+    assert ad_line["grounded"] is False
+    assert ad_line["source"] == "ad"
+    assert by_text["Won the Nobel Prize in Chemistry."]["source"] == "none"
+    assert by_text["Won the Nobel Prize in Chemistry."]["grounded"] is False
+
+
+@pytest.mark.asyncio
 async def test_documents_are_user_scoped(authenticated_async_context, fixture_user_id):
     """Privacy/IDOR (rule #25): the tailor resolves the application from the
     CALLER, so another user's job reads as 404, never as their documents."""
