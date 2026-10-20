@@ -115,6 +115,7 @@ def _ascii_part(value: Any) -> str:
 
 
 _NAMED_KINDS = {"cv": "CV", "cover_letter": "Cover_Letter"}
+_STEM_MAX = 120  # characters of an uploaded file-name stem (ASCII, so also bytes)
 
 
 def legal_file_stem(profile: Any, kind: str) -> Optional[str]:
@@ -137,8 +138,8 @@ def legal_file_stem(profile: Any, kind: str) -> Optional[str]:
     return f"{first}_{last}_{suffix}"
 
 
-async def download_stem(user_id: str, company: str, kind: str, version_no: int) -> str:
-    """The one download/kit file-name stem: the user's legal name, else ``file_stem``."""
+async def named_stem(user_id: str, kind: str) -> Optional[str]:
+    """``legal_file_stem`` for the user's saved profile; ``None`` when no name is known."""
     import asyncio  # noqa: PLC0415
 
     try:
@@ -147,7 +148,17 @@ async def download_stem(user_id: str, company: str, kind: str, version_no: int) 
         profile = await asyncio.to_thread(load_profile, user_id)
     except Exception:  # noqa: BLE001 - a name lookup must never break a download
         profile = None
-    return legal_file_stem(profile, kind) or file_stem(company, kind, version_no)
+    stem = legal_file_stem(profile, kind)
+    if stem is None or len(stem) <= _STEM_MAX:
+        return stem
+    # An upload writes this name to disk (NAME_MAX 255): keep the start of the name, always the kind.
+    suffix = _NAMED_KINDS[kind]
+    return f"{stem[: -len(suffix) - 1][: _STEM_MAX - len(suffix) - 1].rstrip('_-')}_{suffix}"
+
+
+async def download_stem(user_id: str, company: str, kind: str, version_no: int) -> str:
+    """The one download/kit file-name stem: the user's legal name, else ``file_stem``."""
+    return await named_stem(user_id, kind) or file_stem(company, kind, version_no)
 
 
 def file_stem(company: str, kind: str, version_no: int) -> str:

@@ -1426,6 +1426,43 @@ async def test_the_route_keeps_the_proof_screenshot_on_the_callers_application(a
     assert events[0]["via"] == "browser" and shots[0]["created_by"] == "token:claude"
 
 
+@pytest.mark.asyncio
+async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(authenticated_async_context):
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_route
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+    from src.services.profile.storage import save_profile, save_user_info
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/9",
+        })
+        app_id = brought.json()["application_id"]
+        for kind in ("cv", "cover_letter"):
+            saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": kind, "text": "Hello"})
+            assert saved.status_code in (200, 201)
+        user_id = authenticated_async_context.fixture_user_id
+        user = CurrentUser(id=user_id, email="ada@example.com", auth_via="token", actor_name="claude")
+        _, files = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        # No name known yet: the plain defaults.
+        assert [(await files(k))[0] for k in ("cv", "cover_letter")] == ["CV.pdf", "Cover_letter.pdf"]
+        save_profile(
+            UserProfile(cv_data=CVData(raw_text="Data engineer.", name="Ranjith Maliga-Guruprakash")),
+            user_id, source_action="cv_upload",
+        )
+        name, pdf = await files("cv")
+        assert name == "Ranjith_Maliga-Guruprakash_CV.pdf" and pdf.startswith(b"%PDF")
+        assert (await files("cover_letter"))[0] == "Ranjith_Maliga-Guruprakash_Cover_Letter.pdf"
+        # Two 200-character legal names must not make a file name the disk refuses.
+        save_user_info(
+            user_id, UserInfo(contact={"legal_first_name": "A" * 200, "legal_last_name": "B" * 200}), "test"
+        )
+        for kind, tail in (("cv", "_CV.pdf"), ("cover_letter", "_Cover_Letter.pdf")):
+            long_name = (await files(kind))[0]
+            assert len(long_name.encode()) <= 150 and long_name.startswith("AAAA") and long_name.endswith(tail)
+
+
 FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
