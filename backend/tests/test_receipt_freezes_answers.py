@@ -26,7 +26,7 @@ _AD = {
 _FORM = "https://boards.greenhouse.io/northwind/jobs/7"
 _DOT = "·"
 WHY = {"question": "Why this role?", "answer": "I like the product.", "source": "written"}
-NOTICE = {"question": "Notice period?", "answer": "One month", "source": "written"}
+NOTICE = {"question": "Which team interests you most?", "answer": "Platform", "source": "written"}
 VISA = {"question": "Will you require visa sponsorship?", "answer": "Yes - Skilled Worker 7731", "source": "written"}
 PAY = {"question": "What are your salary expectations?", "answer": "GBP 61,500", "source": "written"}
 
@@ -88,7 +88,7 @@ async def test_no_answers_freezes_the_newest_form_filled(authenticated_async_con
     assert full["counts_line"] == f"2 of 2 fields {_DOT} 0 skipped {_DOT} 0 guessed"
     stored = _sql("SELECT answers, answers_from, answers_count FROM application_receipts WHERE id = ?",
                   (made["receipt_id"],))[0]
-    assert [a["answer"] for a in json.loads(stored[0])] == ["I like the product.", "One month"]
+    assert [a["answer"] for a in json.loads(stored[0])] == ["I like the product.", NOTICE["answer"]]
     assert (stored[1], stored[2]) == (f"form_filled#{fill}", 2)
     token = await _mint_token(authenticated_async_context)
     from src.api.mcp_server import mcp_runtime
@@ -101,7 +101,7 @@ async def test_no_answers_freezes_the_newest_form_filled(authenticated_async_con
 
 @pytest.mark.asyncio
 async def test_a_newer_form_swept_wins_over_an_older_form_filled(authenticated_async_context):
-    fixed = {**NOTICE, "answer": "Two months"}
+    fixed = {**NOTICE, "answer": "Data"}
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         await _fill(client, app_id, [WHY, NOTICE])
@@ -109,7 +109,7 @@ async def test_a_newer_form_swept_wins_over_an_older_form_filled(authenticated_a
         made = await _receipt(client, app_id)
         full = await _read(client, made["receipt_id"])
     assert made["answers_from"] == f"form_swept#{sweep}"
-    assert _qa(full["answers"]) == [(WHY["question"], WHY["answer"]), (NOTICE["question"], "Two months")]
+    assert _qa(full["answers"]) == [(WHY["question"], WHY["answer"]), (NOTICE["question"], "Data")]
 
 
 @pytest.mark.asyncio
