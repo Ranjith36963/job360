@@ -11,7 +11,8 @@ Print this checklist and tick each step:
 3. **Record them:** `add_contact` with the `application_id`, their `role`,
    and `found_via` - where you found them: `company_site`, `linkedin`,
    `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Pass the page as
-   `source_url`; other detail in `notes`.
+   `source_url`; other detail in `notes`. If the user knows them, pass `relationship`
+   and `shared` (the get_profile path of the job or school you share) - never guess.
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
    `email`, `linkedin` or `other`). This is a draft.

@@ -164,6 +164,52 @@ describe("Contacts", () => {
     expect(screen.queryByTestId("contact-found-via")).toBeNull();
   });
 
+  it("shows the relationship and the shared record in plain words, nothing when unset", () => {
+    const { rerender } = render(
+      <Contacts
+        applicationId={42}
+        contacts={[
+          makeContact({
+            relationship: "former_colleague",
+            shared: "cv_data.cv_positions[0]: Northwind Ltd — Data Analyst",
+          }),
+        ]}
+      />
+    );
+    expect(screen.getByTestId("contact-relationship")).toHaveTextContent("Former colleague");
+    expect(screen.getByTestId("contact-shared")).toHaveTextContent("Shared: Northwind Ltd — Data Analyst");
+    expect(screen.queryByText(/cv_data/)).toBeNull();
+    rerender(<Contacts applicationId={42} contacts={[makeContact({ relationship: null, shared: null })]} />);
+    expect(screen.queryByTestId("contact-relationship")).toBeNull();
+    expect(screen.queryByTestId("contact-shared")).toBeNull();
+  });
+
+  it("the add form sends relationship only when one is chosen", async () => {
+    addContact.mockResolvedValue({ contact: makeContact({ id: 9, name: "Sam", relationship: "alumni" }), already_existed: false });
+    render(<Contacts applicationId={42} contacts={[]} />);
+    fireEvent.click(screen.getByTestId("contacts-add-toggle"));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sam" } });
+    fireEvent.change(screen.getByLabelText("Relationship (optional)"), { target: { value: "alumni" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add person" }));
+    await waitFor(() => expect(addContact).toHaveBeenCalledWith(42, { name: "Sam", relationship: "alumni" }));
+  });
+
+  it("the edit form writes relationship, and Not set clears it", async () => {
+    updateContact.mockResolvedValue(makeContact({ relationship: "friend" }));
+    render(<Contacts applicationId={42} contacts={[makeContact({ relationship: null })]} />);
+    fireEvent.click(screen.getByText("Edit"));
+    fireEvent.change(screen.getByLabelText("Relationship"), { target: { value: "friend" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateContact).toHaveBeenCalledWith(1, { relationship: "friend" }));
+
+    updateContact.mockClear();
+    updateContact.mockResolvedValue(makeContact({ relationship: null }));
+    fireEvent.click(screen.getByText("Edit"));
+    fireEvent.change(screen.getByLabelText("Relationship"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateContact).toHaveBeenCalledWith(1, { relationship: "" }));
+  });
+
   it("the add form sends found_via only when one is chosen", async () => {
     addContact.mockResolvedValue({ contact: makeContact({ id: 9, name: "Sam", found_via: "apollo" }), already_existed: false });
     render(<Contacts applicationId={42} contacts={[]} />);

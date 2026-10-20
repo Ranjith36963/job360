@@ -296,6 +296,8 @@ class AddContactRequest(BaseModel):
     # CONTACT_FOUND_VIA, checked by contacts._validate_found_via at call time.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
+    relationship: Optional[str] = None  # closed set CONTACT_RELATIONSHIP
+    shared: Optional[str] = None  # a profile record pointer, checked by contacts._validate_shared
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -591,6 +593,8 @@ class ContactOut(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; null = unset.
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    relationship: Optional[str] = None
+    shared: Optional[str] = None
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
     added_by: str
@@ -1302,6 +1306,8 @@ class UpdateContactRequest(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; "" clears it.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # "" clears it
+    relationship: Optional[str] = None  # "" clears it
+    shared: Optional[str] = None  # "" clears it
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1351,6 +1357,8 @@ class PersonOut(BaseModel):
     notes: str
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    relationship: Optional[str] = None
+    shared: Optional[str] = None
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
@@ -1748,6 +1756,7 @@ class StatsResponse(BaseModel):
     by_job_source: list[StatsKeyedGroupOut]
     by_channel: list[StatsKeyedGroupOut]
     by_contact_found_via: list[StatsContactFoundViaGroupOut]
+    by_contact_relationship: list[StatsContactFoundViaGroupOut]  # same group model, per relationship
     score_line: StatsScoreLineOut
     groups_truncated: bool
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
@@ -2114,7 +2123,7 @@ async def add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, relationship=body.relationship, shared=body.shared,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2146,7 +2155,7 @@ async def add_person(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, relationship=body.relationship, shared=body.shared,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2171,6 +2180,7 @@ async def update_contact(
             db, user.id, contact_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, found_via=body.found_via, source_url=body.source_url,
+            relationship=body.relationship, shared=body.shared,
         )
     except SpineError as exc:
         _raise(exc)

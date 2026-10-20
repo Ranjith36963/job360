@@ -39,6 +39,7 @@ two above (``_group_by``):
   mark, and ``reply_rate`` = contacts with BOTH a sent and a reply mark /
   contacts with a sent mark (``None`` when nothing was sent — rule #29).
   One aggregate query, bounded by the closed set.
+* ``by_contact_relationship`` — the same, per current ``relationship``.
 """
 from __future__ import annotations
 
@@ -231,7 +232,7 @@ _SIMULATED_SQL = (
 
 
 async def _contact_found_via_groups(
-    db: JobDatabase, user_id: str, since_val: Optional[str]
+    db: JobDatabase, user_id: str, since_val: Optional[str], field: str = "found_via"
 ) -> list[dict[str, Any]]:
     """``by_contact_found_via`` — ONE aggregate query over the caller's own
     contacts (S1: ``user_id`` on every table), grouped by the CURRENT
@@ -239,7 +240,10 @@ async def _contact_found_via_groups(
     base row; a cleared edit '' reads as unset). ``reachable`` counts contacts
     whose CURRENT email or LinkedIn URL is saved. Bounded by the closed set,
     so there is no row cap to apply. ``since`` scopes by the contact's own
-    ``created_at``."""
+    ``created_at``. ``field='relationship'`` gives ``by_contact_relationship``
+    (same shape)."""
+    if field not in ("found_via", "relationship"):
+        raise ValueError(field)
     where = ["ac.user_id = ?", "NOT " + _SIMULATED_SQL.format(app="ac.application_id")]
     where_params: list[Any] = [user_id, user_id, settings.SIMULATION_EVENT_TYPE]
     if since_val:
@@ -251,7 +255,7 @@ async def _contact_found_via_groups(
                SUM(sent * replied) AS sent_and_replied
         FROM (
             SELECT
-                NULLIF(COALESCE(le.fv, ac.found_via), '') AS fv,
+                NULLIF(COALESCE(le.fv, ac.{field}), '') AS fv,
                 CASE WHEN COALESCE(le.em, ac.email, '') <> '' OR COALESCE(le.li, ac.linkedin_url, '') <> ''
                      THEN 1 ELSE 0 END AS reachable,
                 CASE WHEN EXISTS (
@@ -265,13 +269,13 @@ async def _contact_found_via_groups(
             FROM application_contacts ac
             LEFT JOIN (
                 SELECT contact_id,
-                       MAX(CASE WHEN field = 'found_via' THEN value END) AS fv,
+                       MAX(CASE WHEN field = '{field}' THEN value END) AS fv,
                        MAX(CASE WHEN field = 'email' THEN value END) AS em,
                        MAX(CASE WHEN field = 'linkedin_url' THEN value END) AS li
                 FROM (
                     SELECT contact_id, field, value,
                            ROW_NUMBER() OVER (PARTITION BY contact_id, field ORDER BY id DESC) AS rn
-                    FROM contact_edits WHERE user_id = ? AND field IN ('found_via', 'email', 'linkedin_url')
+                    FROM contact_edits WHERE user_id = ? AND field IN ('{field}', 'email', 'linkedin_url')
                 ) t WHERE rn = 1 GROUP BY contact_id
             ) le ON le.contact_id = ac.id
             WHERE {where_sql}
@@ -505,6 +509,7 @@ async def compute_stats(
     by_job_source, source_truncated = _group_by(rows, lambda r: r.get("job_found_on") or None)
     by_channel, channel_truncated = _group_by(rows, lambda r: receipt_channel_key(r.get("receipt_channel")))
     by_contact_found_via = await _contact_found_via_groups(db, user_id, since_val)
+    by_contact_relationship = await _contact_found_via_groups(db, user_id, since_val, field="relationship")
     score_line = await _score_line_counts(user_id, rows)
 
     # Every view key is present on every response; a view ADDS one block, the
@@ -555,6 +560,7 @@ async def compute_stats(
         "by_job_source": by_job_source,
         "by_channel": by_channel,
         "by_contact_found_via": by_contact_found_via,
+        "by_contact_relationship": by_contact_relationship,
         "score_line": score_line,
         "groups_truncated": (
             cv_truncated or role_truncated or country_truncated or source_truncated or channel_truncated

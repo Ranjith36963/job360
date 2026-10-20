@@ -59,10 +59,32 @@
             ],
             "title": "Occurred At"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -183,10 +205,32 @@
             ],
             "title": "Occurred At"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -3202,9 +3246,31 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -6870,9 +6936,31 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -6998,6 +7086,17 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "replied": {
             "title": "Replied",
             "type": "boolean"
@@ -7005,6 +7104,17 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -11393,6 +11503,13 @@
             "title": "By Contact Found Via",
             "type": "array"
           },
+          "by_contact_relationship": {
+            "items": {
+              "$ref": "#/components/schemas/StatsContactFoundViaGroupOut"
+            },
+            "title": "By Contact Relationship",
+            "type": "array"
+          },
           "by_country": {
             "items": {
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
@@ -11570,6 +11687,7 @@
           "by_job_source",
           "by_channel",
           "by_contact_found_via",
+          "by_contact_relationship",
           "score_line",
           "groups_truncated",
           "applications_truncated",
@@ -12524,6 +12642,17 @@
             ],
             "title": "Notes"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "anyOf": [
               {
@@ -12534,6 +12663,17 @@
               }
             ],
             "title": "Role"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -17267,7 +17407,7 @@
         ]
       },
       "put": {
-        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.",
+        "description": "Save (or replace) the start address and its token. The token is encrypted at rest.\n\nAn unexpected error must not carry the plaintext token into an error report: the body is emptied of\nit, the error is logged without its traceback or message, and a plain 500 replaces it (from None).",
         "operationId": "put_trigger_api_assistant_trigger_put",
         "parameters": [
           {
@@ -17784,7 +17924,7 @@
     },
     "/api/auth/password-reset/confirm": {
       "post": {
-        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session for that user is revoked\n(forces re-login on all devices \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
+        "description": "Validate the token and set the new password.\n\nOn success: 204, and every existing session, agent token and OAuth grant\nfor that user is revoked (forces re-login on all devices and reconnection\nof every assistant \u2014 security best practice after reset).\nThe caller's session cookie is cleared too so the API response itself\ncan't accidentally land the caller into the just-reset account.\n\nOn failure: 400 with a generic message. We deliberately don't\ndistinguish unknown vs expired vs used vs deleted-user \u2014 that would\nleak which tokens exist.",
         "operationId": "password_reset_confirm_api_auth_password_reset_confirm_post",
         "requestBody": {
           "content": {
@@ -21506,7 +21646,7 @@
     },
     "/api/readyz": {
       "get": {
-        "description": "Readiness probe \u2014 checks real dependencies before accepting traffic.\n\nChecks:\n  * db   \u2014 trivial ``SELECT 1`` through the pg connection layer.\n  * redis \u2014 ping via redis-py. Skipped (not failed) when REDIS_URL unset.\n\nReturns 200 ``{status:\"ready\", ...}`` when all checks pass,\n503 ``{status:\"not ready\", ...}`` when any required check fails.",
+        "description": "Readiness probe: can the request path get a DB connection right now?\n\nProduction borrows a connection from the SAME pool ``get_request_db`` uses\n(``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and\nruns ``SELECT 1`` under the same bound. A pinned pool (every connection\nheld) or an unreachable database answers 503, which is what Railway's deploy\nhealthcheck (``backend/railway.json``) and the uptime probe need to see.\n\n200 ``{\"status\": \"ready\", \"pool\": {size, idle, used, waiting, max}}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}``\n\nTest mode has no request-path pool (``get_request_db`` opens a fresh\nconnection per request there), so the probe opens one the same way and\n``pool`` is null. Redis is no longer checked: the service was deleted\n2026-09-02 and the auth rate limiter falls back without it.",
         "operationId": "readyz_api_readyz_get",
         "responses": {
           "200": {
