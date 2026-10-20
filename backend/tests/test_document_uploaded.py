@@ -92,7 +92,7 @@ async def _browser_upload(user_id: str, app_id: int, kind: str) -> bytes:
 
     _gate, files = browser_route._gate_and_files(_user(user_id), app_id, "")  # noqa: SLF001
     name, data = await files(kind)
-    assert name.endswith("CV.pdf" if kind == "cv" else "_letter.pdf") and data[:5] == b"%PDF-"
+    assert name.lower().endswith("cv.pdf" if kind == "cv" else "cover_letter.pdf") and data[:5] == b"%PDF-"
     return data
 
 
