@@ -531,10 +531,11 @@ def _drill() -> int:
     check("a parked draft is never unparked",
           pick_unpark([pr(1, draft=True, labels=[P])], limit=2, human_only=ho), [])
 
-    # 19. The real policy names harness_owner, and only it, as human-only.
+    # 19. The real policy names harness_owner and product_human (2026-10-20:
+    # migrations, auth, settings, new dependencies), and only them, as human-only.
     try:
-        check("this repo's policy: human-only lanes are exactly lane:harness-owner",
-              human_only_labels(POLICY_PATH), frozenset({"lane:harness-owner"}))
+        check("this repo's policy: human-only lanes are exactly lane:harness-owner + lane:product-human",
+              human_only_labels(POLICY_PATH), frozenset({"lane:harness-owner", "lane:product-human"}))
     except PolicyError as exc:
         check(f"this repo's policy lists its human-only lanes ({exc})", False, True)
 
