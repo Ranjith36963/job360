@@ -279,3 +279,25 @@ async def test_refusals_write_nothing(authenticated_async_context, fixture_user_
         assert (await _confirm(client, app_id, 0, fill, "   ")).status_code == 422
         assert (await _confirm(client, 999999, 0, fill)).status_code == 404
         assert _approved(fixture_user_id) == []
+
+
+def test_verify_keeps_a_same_worded_answer_saved_for_another_topic():
+    """Verifying "Notice period?" on an India form must not delete the UK answer the user saved
+    under the same wording; only the answer on the same topic (or an untopiced one) is replaced."""
+    from types import SimpleNamespace
+
+    from src.services.applications.ready import _with_approved
+
+    uk = {"question": "Notice period?", "answer": "Immediately", "approved": True, "topic": "notice_period.GB.text"}
+    old = {"question": "Notice period?", "answer": "1 month", "approved": True, "topic": "notice_period.IN.text"}
+    plain = {"question": "Notice period?", "answer": "2 weeks", "approved": True}
+    profile = SimpleNamespace(user_info=SimpleNamespace(answers=[uk, old, plain]))
+
+    out = _with_approved(profile, "Notice period?", "30 days", None, "notice_period.IN.text")
+    assert uk in out and old not in out and plain in out
+    assert out[-1] == {"question": "Notice period?", "answer": "30 days", "approved": True,
+                       "topic": "notice_period.IN.text"}
+    # An answer with no topic replaces only the untopiced one, never a topic'd answer.
+    out = _with_approved(profile, "Notice period?", "30 days", None)
+    assert uk in out and old in out and plain not in out
+    assert out[-1] == {"question": "Notice period?", "answer": "30 days", "approved": True}

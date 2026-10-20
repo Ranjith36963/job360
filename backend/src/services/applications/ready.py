@@ -466,17 +466,21 @@ def _path_value(profile: Any, path: str) -> Any:
     return getattr(profile.user_info if head == "user_info" else profile.preferences, name, None)
 
 
-def _with_approved(profile: Any, question: str, text: str, company_key: Optional[str]) -> list[dict[str, Any]]:
+def _with_approved(
+    profile: Any, question: str, text: str, company_key: Optional[str], topic: str = "",
+) -> list[dict[str, Any]]:
     """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
-    to the same question (unscoped, or scoped to this company)."""
+    to the same question (unscoped, or scoped to this company) on the same topic. A same-worded
+    answer saved for another topic (another country's right to work) is kept."""
     q = _norm(question)
     keep = [
         dict(r) for r in kit._records(profile.user_info.answers)
-        if not (_norm(r.get("question") or "") == q and (
-            not str(r.get("company") or "").strip()
-            or kit.normalized_company_key(str(r["company"])) == company_key))
+        if not (_norm(r.get("question") or "") == q
+                and str(r.get("topic") or "").strip() == topic
+                and (not str(r.get("company") or "").strip()
+                     or kit.normalized_company_key(str(r["company"])) == company_key))
     ]
-    return [*keep, {"question": question, "answer": text, "approved": True}]
+    return [*keep, {"question": question, "answer": text, "approved": True, **({"topic": topic} if topic else {})}]
 
 
 def answer_edits(
@@ -497,7 +501,8 @@ def answer_edits(
         if kit._present(value):
             out.append((path, value))  # the same value, now saved by the user
     if not sensitive or not out:
-        out.append((user_info.USER_INFO_ANSWERS_PATH, _with_approved(profile, answer["question"], text, company_key)))
+        approved = _with_approved(profile, answer["question"], text, company_key, key)
+        out.append((user_info.USER_INFO_ANSWERS_PATH, approved))
     return out
 
 
