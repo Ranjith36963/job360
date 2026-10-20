@@ -37,6 +37,7 @@ export default function JobSitesPage() {
   const [text, setText] = useState("");
   const [hide, setHide] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [kept, setKept] = useState(false);
   const busyRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -58,7 +59,11 @@ export default function JobSitesPage() {
     try {
       const res = await browserLive(s);
       if (res.status === "ok" && res.image) setShot(res);
-      else if (res.status !== "ok" && !quiet) toast.error(res.detail || "The browser did not answer.");
+      else if (quiet && res.reason === "no_browser") {
+        // The view closed (idle or past its lifetime): stop refreshing a picture that is gone.
+        setShot(null);
+        toast.error("The sign-in window closed; press Start again.");
+      } else if (res.status !== "ok" && !quiet) toast.error(res.detail || "The browser did not answer.");
       return res;
     } catch (err) {
       if (!quiet) toast.error(apiErrorMessage(err, "The browser did not answer."));
@@ -69,16 +74,20 @@ export default function JobSitesPage() {
     }
   }, []);
 
-  // Keep the picture fresh while a sign-in is open (pages change on their own: redirects, codes).
+  // Keep the picture fresh while a sign-in is open (pages change on their own: redirects, codes):
+  // not once it is kept, and not while this tab is hidden.
   useEffect(() => {
-    if (!shot) return;
-    const id = window.setInterval(() => void step({ action: "shot" }, true), REFRESH_MS);
+    if (!shot || kept) return;
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void step({ action: "shot" }, true);
+    }, REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [shot, step]);
+  }, [shot, kept, step]);
 
   async function start() {
     const target = url.trim();
     if (!target) return;
+    setKept(false);
     const res = await step({ action: "start", url: /^https?:\/\//i.test(target) ? target : `https://${target}` });
     if (res && res.status !== "ok") setShot(null);
   }
@@ -102,6 +111,7 @@ export default function JobSitesPage() {
   async function keep() {
     const res = await step({ action: "keep" });
     if (res?.status === "ok" && res.kept) {
+      setKept(true);
       const sites = Object.keys(res.kept);
       toast.success(`Kept you signed in to ${sites.join(", ")}.`);
       await load();

@@ -163,7 +163,13 @@ async def browser_action(
         )
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
-        return exc.as_dict()
+        refused = exc.as_dict()
+        # A CAPTCHA that came up after the last look stops this action: the job still goes to Needs you.
+        if exc.status == "needs_you" and body.application_id is not None:
+            refused["blocked_recorded"] = await _hand_off(
+                user, body.application_id, {**refused, "url": exc.url},
+            )
+        return refused
     if result.get("status") == "needs_you" and body.application_id is not None:
         result["blocked_recorded"] = await _hand_off(user, body.application_id, result)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
@@ -268,7 +274,7 @@ async def forget_sign_in(
     host: str,
     user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """Forget one saved sign-in. The user's live browser (if any) is closed so it forgets too."""
+    """Forget one saved sign-in. The user's browsers (if any) are closed so they forget too."""
     from src.services.browser_agent import sign_ins  # noqa: PLC0415
 
     clean = sign_ins.site_host(host)
@@ -279,5 +285,6 @@ async def forget_sign_in(
     if not forgotten:
         raise HTTPException(status_code=404, detail="no saved sign-in for that site")
     await browser_agent.get_pool().close(user.id)
+    await browser_agent.get_pool().close(browser_agent.live_key(user.id))
     _audit(user, "forget_sign_in", "ok")
     return {"forgotten": clean}

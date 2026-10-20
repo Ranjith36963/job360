@@ -91,6 +91,9 @@ async def test_a_hung_frame_does_not_hang_the_enter_focus_scan(monkeypatch):
     monkeypatch.setattr(agent, "FRAME_READ_TIMEOUT_S", 0.2)
 
     class _Main:
+        url = "https://jobs.example/apply"
+        parent_frame = None
+
         async def evaluate(self, script, *_a):
             return script == "() => document.hasFocus()"  # focused, but not inside a suggestion list
 
