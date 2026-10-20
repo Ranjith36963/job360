@@ -816,7 +816,7 @@ def _ripplehire_posted(vo: dict[str, Any]) -> str:
     if isinstance(pub, str):
         try:
             pub = json.loads(pub)
-        except ValueError:
+        except (ValueError, RecursionError):  # a hostile, deeply nested string must not empty the board
             pub = None
     iso = _iso_date(pub.get("CAREER_SITE")) if isinstance(pub, dict) else ""
     if iso:
@@ -834,7 +834,7 @@ def ripplehire_jobs(row: dict[str, Any], tenant: str, tok: str, items: list[dict
     seen: set[str] = set()
     for j in items:
         title, seq = str(j.get("jobTitle") or "").strip(), str(j.get("jobSeq") or "").strip()
-        if not title or not seq.isdigit() or seq in seen:
+        if not title or not (seq.isascii() and seq.isdigit()) or seq in seen:
             continue
         seen.add(seq)
         place = str(j.get("locations") or "").strip()
@@ -878,7 +878,7 @@ def _ripplehire(row: dict[str, Any], http: Http) -> list[Job] | None:
         if len(details) >= RIPPLEHIRE_DETAIL_CAP:
             break
         seq = str(j.get("jobSeq") or "").strip()
-        if not seq.isdigit() or seq in details or not _title_ok(row, str(j.get("jobTitle") or "")):
+        if not (seq.isascii() and seq.isdigit()) or seq in details or not _title_ok(row, str(j.get("jobTitle") or "")):
             continue
         st, d = _get(http, f"{origin}/candidate/candidatejobdetail?token={tok}&jobSeq={seq}", headers=_JSON)
         vo = d.get("jobVO") if st == 200 and isinstance(d, dict) else None

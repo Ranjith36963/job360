@@ -100,6 +100,12 @@ def test_new_ats_hosts_are_official(host):
     assert classify_host(host) == "official_ats"
 
 
+@pytest.mark.parametrize("host", ["app.ripplehire.com", "www.ripplehire.com"])
+def test_shared_ats_sandbox_is_not_an_employer_host(host):
+    """Security review 2026-10-20: app.ripplehire.com answers any company's token."""
+    assert classify_host(host) == "unknown"
+
+
 @pytest.mark.parametrize("host", ["gem.com.evil.com", "evilgem.com", "rippling.com.evil.io"])
 def test_lookalike_hosts_are_unknown(host):
     assert classify_host(host) == "unknown"

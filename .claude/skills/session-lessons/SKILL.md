@@ -111,6 +111,13 @@ delete a lesson; if one stops being true, say so on its line and why.
   and PR #935 sat unmerged for hours while I reported it as armed. **Rule:** a new doc's kind is one
   of LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED; run `python scripts/doc_sync_check.py` before
   pushing any docs PR, and re-read `gh pr checks` before saying a PR will merge.
+- 2026-10-20: my RippleHire research brief said "keep the token with the highest count". The worker
+  picked archived tokens over the one each public careers page hands out; the security review found 14
+  of 43 differed (eClerx 559 archived vs 17 public: likely an internal site). Swapped to public tokens,
+  dropped 3 boards whose public token lists nothing. **Rule:** store only what the public page gives today.
+- 2026-10-20: the Gulf rows (PR #947) added 4 Zoho Recruit rows in the UAE, and
+  `test_company_rows_for_india_boards` assumed every Zoho row is Indian. I ran only the tests next to my
+  change; CI caught it. **Rule:** after editing `companies.json`, run every test that reads it.
 
 ## Real applications for the owner
 

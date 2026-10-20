@@ -1677,7 +1677,8 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
-_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0}  # ats -> token part used as the name
+_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0,  # ats -> token part used as the name
+               "ripplehire": 0}
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:

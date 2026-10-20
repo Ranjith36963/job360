@@ -165,7 +165,7 @@ def classify_host(host: str) -> str:
     """``official_ats`` | ``job_board`` | ``unknown``. STRICT: the host must BE
     the vendor domain or end with ``.<domain>``. ``evil-greenhouse.io`` and
     ``greenhouse.io.evil.com`` are ``unknown``."""
-    if not host:
+    if not host or host in settings.SHARED_ATS_HOSTS:
         return "unknown"
     if any(_is_or_under(host, a) for a in settings.OFFICIAL_ATS_HOSTS):
         return "official_ats"

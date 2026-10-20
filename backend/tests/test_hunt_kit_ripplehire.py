@@ -165,6 +165,37 @@ def test_board_from_job_url(url: str, token: str):
     assert got["kind"] == "ats" and got["ats"] == "ripplehire" and got["token"] == token
 
 
+def test_hostile_description_and_publish_block_stay_fast_and_keep_the_board():
+    """Security review 2026-10-20: '<p ' * n was quadratic in _text; a nested publishDetails emptied the board."""
+    import time
+    t0 = time.perf_counter()
+    for bad in ("<p " * 100_000, "</p" * 100_000, "<" * 100_000):
+        more._text(bad)
+    assert time.perf_counter() - t0 < 2.0
+    assert more._text("<p>a</p><div class='x'>b</div><b>c</b> d") == "a\nb\nc d"
+    items = [{"jobSeq": "1", "jobTitle": "AI Engineer", "locations": "Pune"},
+             {"jobSeq": "2", "jobTitle": "AI Engineer", "locations": "Pune"}]
+    jobs = more.ripplehire_jobs({"name": "X"}, "x", TOK, items, {"1": {"publishDetails": "[" * 200_000 + "]" * 200_000}})
+    assert len(jobs) == 2 and jobs[0]["posted"] == ""
+
+
+def test_unicode_digit_job_ids_are_skipped():
+    jobs = more.ripplehire_jobs({"name": "X"}, "x", TOK, [{"jobSeq": "١٢", "jobTitle": "AI", "locations": "Pune"}], {})
+    assert jobs == []
+
+
+def test_companies_extra_accepts_tenant_and_token_with_case():
+    """Review 2026-10-20: the one-slug branch had no '/', so the form README and --why-missed advise was dropped."""
+    assert hk.parse_extra(f"ripplehire:mphasis/{TOK}") == [
+        {"name": "mphasis", "ats": "ripplehire", "token": f"mphasis/{TOK}", "source": "user"}]
+
+
+def test_why_missed_advice_round_trips_through_parse_extra():
+    url = f"https://hdfcbank.ripplehire.com/candidate/?token={TOK}&source=CAREERSITE#detail/job/1"
+    b = hk.board_from_job_url(url)
+    assert hk.parse_extra(f"{b['ats']}:{b['token']}")[0]["token"] == f"hdfcbank/{TOK}"
+
+
 def test_shared_sandbox_host_is_not_a_board():
     assert hk.board_from_job_url(f"https://app.ripplehire.com/candidate/?token={TOK}")["ats"] != "ripplehire"
 

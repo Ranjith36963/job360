@@ -457,6 +457,9 @@ OFFICIAL_ATS_HOSTS = (
     "zohorecruit.com", "zohorecruit.in", "ripplehire.com", "rippling.com", "icims.com", "taleo.net",
     "ultipro.com", "careers-page.com",
 )
+# Hosts under an official ATS domain that are NOT one employer's site: RippleHire's
+# shared sandbox answers any company's token (security review 2026-10-20).
+SHARED_ATS_HOSTS = ("app.ripplehire.com", "www.ripplehire.com")
 # Gmail check slice (owner decision 2026-10-15): an employer's ATS sends its
 # emails from its OWN domain, and many never name the company in the text
 # (an Ashby confirmation signed "TALENT TEAM"), so a company-name search misses
