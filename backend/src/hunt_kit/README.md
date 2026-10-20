@@ -76,6 +76,9 @@ from the first 20 ads of each board only; the rest come back undated.
 UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN,
 Jibe, Keka Hire (`keka`) and Zoho Recruit (`zohorecruit`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
 some Zoho Recruit sites list no description either, so open the link to read the ad.
+`kit_ats_misc2.py` adds OpenCATS portals (`opencats`), Odoo recruitment sites (`odoo`), recruiting-solutions.org
+(`recruitingsolutions`) and the TeamEx marketplace (`teamex`).
+Detail-page readers in this file have their own small request caps.
 `kit_ats_misc1.py` adds ten more board types: Betterteam (`betterteam:tenant`), CATS (`catsone:host`, e.g. `sphereinc.catsone.com`), ClinchTalent (`clinch:host`, a career-site host), Crelate (`crelate:slug:orgId` in `companies.json`), eRecruiter (the 32-hex cfg of its widget), gr8people (`gr8people:host`), HR-Manager (`hrmanager:alias`), iSmartRecruit (`ismartrecruit:domain_code`), Loxo (`loxo:host/slug`) and Mindsight (`mindsight:slug`). They read public career pages; a handful of ads per board get a detail page for the description.
 `kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), PageUp People (`pageup`, the
 institution number from `careers.pageuppeople.com/<number>/`), Comeet (`comeet`, `slug/companyUID`), HiBob (`hibob`, the tenant of
@@ -154,6 +157,8 @@ Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT
 `cornerstone:tenant/siteId` (from `tenant.csod.com/ux/ats/careersite/4/home`), `phenom:careers.example.com`
 (the branded career host). One slug each: `rippling:slug` (`ats.rippling.com/slug/jobs`), `breezy:tenant`,
 `pinpoint:tenant`, `jazzhr:tenant` (`tenant.applytojob.com`), `softgarden:tenant`, `jibe:slug`,
+`opencats:host[/path]` (`careers.boomit.pt/careers`), `odoo:careers-host`,
+`recruitingsolutions:key` (the customerId, e.g. `riv-prod`), `teamex:global`,
 `keka:tenant` (`tenant.keka.com/careers`), `zohorecruit:tenant` (`tenant.zohorecruit.in`, then `.com` is tried;
 a `companies.json` row may set `"tld": "com"`), `gem:id`
 (`jobs.gem.com/id`), `join:slug` (`join.com/companies/slug`). Cornerstone sites that need a session cookie return no ads.
@@ -256,7 +261,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_extra.py` and `kit_ats_misc1.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_extra.py`, `kit_ats_misc1.py` and `kit_ats_misc2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
