@@ -8,7 +8,7 @@ name: Daily digest (what needs the owner today?)
 # nothing, opens nothing. Free: no LLM, no secrets except the Slack token.
 #
 # THE RULES (each section is one `gh` query plus one plain rule):
-#   1. PRs waiting for him — open, not draft, not `wip:parked`, not
+#   1. PRs waiting for him — open, not draft, not
 #      `autofix:exhausted` / `autofix:needs-human` (those have their own
 #      section), and one of:
 #        a. labelled `human-merge`;
@@ -124,7 +124,7 @@ jobs:
           exhausted_items: list[str] = []
           for pr in sorted(prs, key=lambda p: p["number"]):
               labels = {l["name"] for l in pr["labels"]}
-              if pr["isDraft"] or "wip:parked" in labels:
+              if pr["isDraft"]:
                   continue
               n, title, url = pr["number"], clean(pr["title"]), pr["url"]
               if labels & {"autofix:exhausted", "fix:exhausted"}:
