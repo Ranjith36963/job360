@@ -128,6 +128,8 @@ FEED_SOURCES = (
     "naukri",
     "bayt",
     "gulftalent",
+    "glints",
+    "kalibrr",
     "linkedin",
     "glassdoor",
     "googlejobs",
@@ -271,6 +273,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = ("kit_ats", "kit_ats_more")
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
+    "kit_asia",
 )
 
 
@@ -2567,6 +2570,8 @@ _FEED_HOSTS = (
     ("naukri", re.compile(r"(?:^|\.)naukri\.com$", re.I)),
     ("bayt", re.compile(r"(?:^|\.)bayt\.com$", re.I)),
     ("gulftalent", re.compile(r"(?:^|\.)gulftalent\.com$", re.I)),
+    ("glints", re.compile(r"(?:^|\.)glints\.com$", re.I)),
+    ("kalibrr", re.compile(r"(?:^|\.)kalibrr\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
