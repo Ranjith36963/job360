@@ -77,6 +77,14 @@ SNAPSHOT_JS = r"""
     for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot, depth + 1);
   };
   walk(document, 0);
+  // A section the site copies (cloneNode) copies our ref too: the copy loses it and gets its own below,
+  // or typing into the copy would land in the original.
+  const seenRefs = new Set();
+  for (const el of all) {
+    const r = el.getAttribute('data-j360-ref');
+    if (r && seenRefs.has(r)) el.removeAttribute('data-j360-ref');
+    else if (r) seenRefs.add(r);
+  }
   const shown = (el) => {
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return false;
@@ -85,6 +93,16 @@ SNAPSHOT_JS = r"""
   };
   const clip = (t, n) => { t = (t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; };
   const vh = window.innerHeight || 900;
+  // A child frame's part of the user's screen, in its own coordinates (agent.look): an auto-sized frame as
+  // tall as its form never scrolls itself, the outer page does. Its submit button is always listed.
+  const vTop = Math.max(0, args.vTop ?? 0), vBottom = Math.min(vh, args.vBottom ?? vh);
+  const submitShaped = (el, tag, type) => {
+    const isButton = tag === 'button' || el.getAttribute('role') === 'button'
+      || (tag === 'input' && ['submit', 'image'].includes(type));
+    if (!isButton) return false;
+    const name = labelOf(el) || '';
+    return /\bsubmit/i.test(name) || (type === 'submit' && /\b(apply|send|finish|complete|confirm)\b/i.test(name));
+  };
   let n = 0, hasPassword = false;
   const candidates = [];
   all.forEach((el, order) => {
@@ -100,8 +118,9 @@ SNAPSHOT_JS = r"""
     const isPassword = type === 'password' || (el.getAttribute('autocomplete') || '').includes('password');
     if (isPassword) hasPassword = true;
     const r = box.getBoundingClientRect();
-    const dist = r.bottom < 0 ? -r.bottom : r.top > vh ? r.top - vh : 0;
-    candidates.push({ el, tag, type, viaLabel, isPassword, order, dist, above: r.bottom < 0 });
+    let dist = r.bottom < vTop ? vTop - r.bottom : r.top > vBottom ? r.top - vBottom : 0;
+    if (args.keepSubmit && submitShaped(el, tag, type)) dist = -1;
+    candidates.push({ el, tag, type, viaLabel, isPassword, order, dist, above: r.bottom < vTop });
   });
   // Nearest the screen first; ties keep page order. Then back to page order for reading.
   const kept = candidates.slice().sort((a, b) => a.dist - b.dist || a.order - b.order).slice(0, maxElements);
@@ -118,7 +137,8 @@ SNAPSHOT_JS = r"""
   const out = kept.map(({ el, tag, type, viaLabel, isPassword }) => {
     let ref = el.getAttribute('data-j360-ref');
     if (!ref || !refShape.test(ref) || refCount.get(ref) > 1) {
-      ref = 'e' + (++n) + '_' + Math.random().toString(36).slice(2, 6);
+      do { ref = 'e' + (++n) + '_' + Math.random().toString(36).slice(2, 6); } while (seenRefs.has(ref));
+      seenRefs.add(ref);
       el.setAttribute('data-j360-ref', ref);
     }
     const item = {
@@ -377,6 +397,24 @@ WATCH_READ_JS = r"""
 CONTROL_STATE_JS = r"""
 (el) => JSON.stringify([el.checked, el.value, el.getAttribute('aria-expanded'), el.getAttribute('aria-checked'),
   el.getAttribute('aria-pressed'), el.isConnected])
+"""
+
+# An upload's evidence: the frame's own text, and the text of the field's own small box (up to 4 levels
+# up, at most 600 characters) where a site draws the file chip or its "Upload failed".
+PAGE_TEXT_JS = r"""
+() => document.body ? document.body.innerText : ''
+"""
+NEAR_TEXT_JS = r"""
+(el) => {
+  let best = '';
+  let n = el.parentElement;
+  for (let i = 0; i < 4 && n; i++, n = n.parentElement) {
+    const t = n.innerText || '';
+    if (t.length > 600) break;
+    best = t;
+  }
+  return best;
+}
 """
 
 # The picked option shown near the field (react-select draws it in a sibling, not the input's value).
