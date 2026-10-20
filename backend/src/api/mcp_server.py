@@ -1252,7 +1252,7 @@ def build_server(version: str = "") -> MCPServer:
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is submission proof, not a 2nd one. Wrong
+        `source` is proof, not a 2nd one. Wrong
         date: `applied` + occurred_at + corrects_event_id=<old id>.
         `scheduled_at` (ISO-8601 + timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
@@ -1267,7 +1267,7 @@ def build_server(version: str = "") -> MCPServer:
         form_checked {questions_count, answered, missing, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
-        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers};
+        form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
@@ -1662,11 +1662,11 @@ def build_server(version: str = "") -> MCPServer:
         new_site_first_time (`ask`: auto mode, first time on this site), cv_unsupported_claims (CV claims not in the
         profile), held_by_other_session (another session holds this kit),
         unknown_site (not one plain http(s) address),
-        form_host_mismatch (not the site of your latest
-        `form_filled`), email_not_verified, ask_always_site, job_override_confirm,
+        form_host_mismatch / form_page_mismatch (not the site / page you filled),
+        email_not_verified, ask_always_site, job_override_confirm,
         submit_mode_confirm, cv_not_seen (auto mode, user has not seen the latest CV), practice_run,
         user_approved (the user said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
-        `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_host_mismatch,
+        `blocked`, no `unblocked` yet: `ask`). A yes NEVER clears unknown_site, form_*_mismatch,
         email_not_verified, blocked or held_by_other_session: tell the user.
         Also `daily_left`, `company_left` (null = no limit). `type_first`: answers the user
         changed on the web - type each in, then form_swept with `answers`; until then

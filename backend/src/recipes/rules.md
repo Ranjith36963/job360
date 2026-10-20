@@ -94,7 +94,8 @@ held_by_other_session (another assistant session read this application's kit
 recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
 the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
-latest `form_filled`), form_check_missing (`stop`: a newer application has no `form_checked`: call check_form, record it), email_not_verified (the user has not confirmed their
+latest `form_filled`), form_page_mismatch (the host + path of `form_url` is not the page of your latest
+`form_filled` / `form_swept`: submit on the page you filled, or fill and sweep this one), form_check_missing (`stop`: a newer application has no `form_checked`: call check_form, record it), email_not_verified (the user has not confirmed their
 email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you
@@ -102,7 +103,7 @@ recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it), belo
 line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
-`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
+`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch, form_page_mismatch,
 email_not_verified, blocked, held_by_other_session, company_avoided, submit_unconfirmed, weekly_cap_reached, pace_wait,
 outside_hours, form_pages_incomplete, below_score_line or answer_guessed: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
@@ -456,7 +457,8 @@ they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat"} -
 ONLY when the user typed yes to submitting THIS application; `submit_declined`
 {where:"chat"} - the user said don't send; `autofill_set` {mode:"deny"} - you
 may only send deny; `form_filled` {form_url, fields_count, fields_skipped?, answers?} - after you filled
-the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?, page?, pages_total?, unreadable?: [field names you could not read back], answers?: [{question, answer, source}] - what the form holds after you typed check_submit's `type_first` (required to clear `type_first_pending`)} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill, while `unreadable` is not empty, or if fields_checked < the latest `form_checked` questions_count - per page on a multi-page form); `form_checked` {questions_count, answered, missing, page?, pages_total?, answers?: [{question, source, key?, needs_confirmation?}]} - after check_form and the user's reply, counts and wording only, never values; on a multi-page form send `page` (1..N) and `pages_total` on BOTH `form_checked` and `form_swept` for every page (each page's sweep must be newer than its check, else `form_pages_incomplete`); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
+the form (form_url = the page the fields are on; stored as https + host + path + job-id keys only, never a
+token or fragment; a non-http(s) one is 422); answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?, form_url?, page?, pages_total?, unreadable?: [field names you could not read back], answers?: [{question, answer, source}] - what the form holds after you typed check_submit's `type_first` (required to clear `type_first_pending`)} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill, while `unreadable` is not empty, or if fields_checked < the latest `form_checked` questions_count - per page on a multi-page form); `form_checked` {questions_count, answered, missing, page?, pages_total?, answers?: [{question, source, key?, needs_confirmation?}]} - after check_form and the user's reply, counts and wording only, never values; on a multi-page form send `page` (1..N) and `pages_total` on BOTH `form_checked` and `form_swept` for every page (each page's sweep must be newer than its check, else `form_pages_incomplete`); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
 wall (never a password anywhere). A payload that is wrong is refused ONCE (422) with every
 problem listed and one complete valid example for that event; fix them all and
