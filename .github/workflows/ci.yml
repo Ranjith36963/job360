@@ -90,12 +90,59 @@ jobs:
         # A lost marker only makes a later main push run `full`. It must never fail
         # `scope`: a red scope SKIPS the required jobs, and the ruleset passes skipped.
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ci-tested-tree-${{ steps.tree.outputs.tree }}
           path: tested-tree.txt
           retention-days: 7
           overwrite: true
+
+  # ─── Test integrity: no PR goes green by running fewer tests ──────────────
+  # 2026-10-20. Coding agents judged by a suite learn to skip, delete or
+  # de-configure the failing test (METR 2025-06-05; Anthropic 2025-11-26). Only
+  # pr-repair.yml and issue-fix.yml checked their own agent's diff; an ordinary
+  # PR had nothing. scripts/test_integrity.py reads `git diff base...head` and
+  # names every added skip / xfail / .only / no-cover, every test removed with
+  # no replacement, and every edit to conftest / pytest / vitest / playwright
+  # config. Any finding is red. merge_cage.py requires this check, so a machine
+  # cannot merge it; the owner reads the report and can merge by hand (it is
+  # not in the ruleset).
+  #
+  # The judge is the BASE branch's copy when it has one, so a PR cannot blind
+  # the guard that judges it. No `needs: scope`: a red scope must not skip it.
+  # Steps run only on pull_request; on a push the job reports success at once.
+  test-integrity:
+    name: test-integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0   # base...head needs the merge base
+      - name: No test was skipped, deleted or re-configured
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          judge=scripts/test_integrity.py
+          if git cat-file -e "$BASE_SHA:scripts/test_integrity.py" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/test_integrity.py" > "$RUNNER_TEMP/test_integrity.py"
+            judge="$RUNNER_TEMP/test_integrity.py"
+            echo "judging with the base branch's copy of scripts/test_integrity.py"
+          fi
+          set +e
+          python "$judge" --base "$BASE_SHA" --head "$HEAD_SHA" | tee "$RUNNER_TEMP/integrity.txt"
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### test-integrity"
+            echo '```'
+            awk '!/^::/ && n++ < 80' "$RUNNER_TEMP/integrity.txt"   # one reader, no SIGPIPE
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
@@ -375,7 +422,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         with:
           node-version: "22"

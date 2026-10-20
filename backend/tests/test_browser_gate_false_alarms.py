@@ -27,6 +27,21 @@ _EU_VERBS = ("absenden", "senden", "bewerben", "envoyer", "postuler", "soumettre
         ("div", "", "Submitted applications", False, "tab", True, {}, "field"),
         ("a", "", "Submitted applications", False, "", True, {}, "field"),
         ("div", "", "Submit application", False, "tab", True, {}, "submit"),
+        # The ARIA tab pattern is a <button role="tab">: a tab, unless it would submit its form natively.
+        ("button", "button", "Submitted applications", True, "tab", True, {"owns_form": True}, "field"),
+        ("button", "button", "I have submitted before", True, "tab", True, {}, "field"),
+        ("button", "button", "Submit application", True, "tab", True, {}, "submit"),
+        ("button", "", "Submitted applications", True, "tab", True, {"owns_form": True}, "submit"),
+        ("button", "", "Submitted applications", False, "tab", True, {"owns_form": False}, "field"),
+        ("input", "button", "Submitted applications", True, "tab", True, {}, "field"),
+        ("input", "submit", "Submitted applications", True, "tab", True, {"owns_form": True}, "submit"),
+        # ...but a tab-styled button keeps every other button rule: a wizard's last step can be a tab.
+        ("button", "button", "Finish", True, "tab", True, {}, "submit"),
+        ("button", "button", "Send application", True, "tab", True, {}, "submit"),
+        ("button", "button", "Apply", True, "tab", True, {}, "submit"),
+        ("div", "", "Finish", True, "tab", True, {}, "field"),
+        ("input", "text", "Passwort", True, "tab", True, {}, "password"),
+        ("input", "text", "Employer", True, "tab", True, {}, "field"),
         ("span", "", "Submit", True, "switch", False, {}, "submit"),
         # Other languages: the end once answers are held; a link names it with the application.
         ("div", "", "Bewerbung absenden", False, "button", True, {}, "submit"),
