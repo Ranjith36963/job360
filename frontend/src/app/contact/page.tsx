@@ -25,20 +25,6 @@ export default function ContactPage() {
             </a>
           </p>
         </section>
-        <section className="border-t border-border pt-6">
-          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">GitHub</h2>
-          <p className="mt-2">
-            <a
-              href="https://github.com/Ranjith36963/job360"
-              className="text-foreground underline hover:text-brand"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              github.com/Ranjith36963/job360
-            </a>{" "}
-            — open an issue for bugs or feature requests.
-          </p>
-        </section>
       </div>
     </main>
   );
