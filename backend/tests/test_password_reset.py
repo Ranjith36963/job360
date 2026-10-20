@@ -327,3 +327,51 @@ def test_token_generate_uniqueness():
 def test_hash_token_is_deterministic():
     assert tokens.hash_token("hello") == tokens.hash_token("hello")
     assert tokens.hash_token("hello") != tokens.hash_token("world")
+
+
+# ─── Gap roadmap slice 2: a reset locks the assistants out too ──────────────
+
+
+async def _give_agent_access(db_path, user_id):
+    """One personal `j360_` token and one live OAuth grant for the user."""
+    from src.services.auth import api_tokens
+
+    minted = await api_tokens.mint(db_path, user_id=user_id, name="claude")
+    async with pg.connect(db_path) as db:
+        await db.execute(
+            "INSERT INTO oauth_clients (id, client_name, redirect_uris) VALUES (?, ?, ?)",
+            ("j360c_test", "Test client", '["https://claude.ai/cb"]'),
+        )
+        await db.execute(
+            "INSERT INTO oauth_grants (user_id, client_id, scope) VALUES (?, ?, ?)",
+            (user_id, "j360c_test", "mcp"),
+        )
+        await db.commit()
+    return minted["token"]
+
+
+async def _live_grants(db_path, user_id):
+    async with pg.connect(db_path) as db:
+        cur = await db.execute(
+            "SELECT COUNT(*) FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL", (user_id,)
+        )
+        return (await cur.fetchone())[0]
+
+
+def test_reset_confirm_revokes_agent_tokens_and_oauth_grants(client, monkeypatch, temp_db):
+    from src.services.auth import api_tokens
+
+    user_id = _register(client, "alice@example.com", "originalpassword")
+    token = asyncio.run(_give_agent_access(temp_db, user_id))
+    assert asyncio.run(api_tokens.resolve(temp_db, token)) is not None
+    assert asyncio.run(_live_grants(temp_db, user_id)) == 1
+
+    raw = _issue_reset_and_get_raw_token(client, monkeypatch, "alice@example.com", temp_db)
+    r = client.post(
+        "/api/auth/password-reset/confirm",
+        json={"token": raw, "new_password": "newpasswordvalue"},
+    )
+    assert r.status_code == 204, r.text
+
+    assert asyncio.run(api_tokens.resolve(temp_db, token)) is None, "agent token survived the reset"
+    assert asyncio.run(_live_grants(temp_db, user_id)) == 0, "OAuth grant survived the reset"
