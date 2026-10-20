@@ -2,13 +2,14 @@ name: CLAUDE.md drift apply (weekly)
 
 # THE HOLE THIS FILLS
 # --------------------
-# `.claude/hooks/claude-md-proposal.sh` (a Stop hook) asks each substantial
-# Claude session once: "did you verify that CLAUDE.md is wrong somewhere?". The
-# answer used to be appended to a gitignored LOCAL file that nothing ever read,
-# so every proposal died on the machine that wrote it. The hook now files each
-# one as a GitHub ISSUE labelled `claude-md-drift` (shared state, no file
-# clobbering between ~6 parallel sessions). This workflow is the reader: it is
-# the "one designated applier" the hook's header always promised.
+# A Stop hook (`.claude/hooks/claude-md-proposal.sh`, since deleted; nothing
+# files these automatically now) asked each substantial Claude session once:
+# "did you verify that CLAUDE.md is wrong somewhere?". The answer used to be
+# appended to a gitignored LOCAL file that nothing ever read, so every proposal
+# died on the machine that wrote it. The hook filed each one as a GitHub ISSUE
+# labelled `claude-md-drift` (shared state, no file clobbering between parallel
+# sessions); an issue filed by hand with that label still works. This workflow
+# is the reader: the "one designated applier" the hook's header promised.
 #
 # SHAPE: dumb code gates, a capped agent edits, dumb code cages and ships.
 #   1. Dumb code lists OPEN `claude-md-drift` issues and keeps ONLY those
