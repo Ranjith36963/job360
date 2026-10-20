@@ -1911,6 +1911,13 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
 # `success`. "Still waiting" is `pending`, a real refusal is `failure`; both hold.
 _WAIT_MARKERS = ("has not finished", "cannot pass by being absent", "has not settled yet",
                  "has not started yet")
+# THE OWNER'S TURN IS NOT A FAILURE (owner, 2026-10-20). A PR only the owner may
+# merge (the cage's own files, migrations, auth, a deletion) used to post a red
+# `failure` even when every check was green, so every one of them looked broken
+# and every hand merge walked past a red X. It is `pending` now -- still holding
+# GitHub's queue (a required check only passes on `success`), but yellow, saying
+# whose turn it is. A real refusal anywhere in the list still posts `failure`.
+_OWNER_MARKERS = ("so he merges it by hand", "merge it yourself")
 
 
 def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
@@ -1919,10 +1926,13 @@ def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
         return "success", "every cage passed"
     blocks = blocks_of(verdicts) or ["refused, and no reason was recorded"]
     waiting = [b for b in blocks if any(m in b for m in _WAIT_MARKERS)]
-    if len(waiting) == len(blocks):
+    owners = [b for b in blocks if b not in waiting and any(m in b for m in _OWNER_MARKERS)]
+    real = [b for b in blocks if b not in waiting and b not in owners]
+    if real:
+        return "failure", real[0][:140]
+    if waiting:
         return "pending", ("waiting: " + waiting[0])[:140]
-    real = next(b for b in blocks if b not in waiting)
-    return "failure", real[:140]
+    return "pending", ("the owner merges this by hand: " + owners[0])[:140]
 
 
 def requires_context(rules: object, context: str) -> bool:
@@ -3703,6 +3713,21 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("one real refusal among waits posts FAILURE and names the real reason",
        status_for(False, [_wait, _real]) == ("failure", _real.reasons[0][:140]),
        f"got {status_for(False, [_wait, _real])}", ST)
+    _owner = Verdict("PATH", "fail", [f"`.github/merge-policy.yml` — {_CAGE_ESCAPE}"])
+    _lane = Verdict("LANE", "fail", [("this PR is in the `product_human` lane ... FIX: nothing an "
+                                      "agent can do. Read the file named above and merge it yourself.")])
+    ok("an owner-only PR with every check green posts PENDING (his turn), never a red failure",
+       status_for(False, [_owner, _lane])[0] == "pending"
+       and "owner merges this by hand" in status_for(False, [_owner, _lane])[1],
+       f"got {status_for(False, [_owner, _lane])}", ST)
+    ok("...an owner-only PR still waiting on CI says it is WAITING first",
+       status_for(False, [_owner, _wait]) == ("pending", ("waiting: " + _wait.reasons[0])[:140]),
+       f"got {status_for(False, [_owner, _wait])}", ST)
+    ok("...and a real refusal beside the owner's turn is still a FAILURE",
+       status_for(False, [_owner, _real]) == ("failure", _real.reasons[0][:140]),
+       f"got {status_for(False, [_owner, _real])}", ST)
+    ok("NEGATIVE CONTROL: the owner's turn is never SUCCESS -- GitHub must not merge it",
+       status_for(False, [_owner])[0] != "success", f"got {status_for(False, [_owner])}", ST)
     ok("a cage that did not run is a FAILURE, never a wait",
        status_for(False, [Verdict("RATCHET", "not_checked", [])])[0] == "failure",
        f"got {status_for(False, [Verdict('RATCHET', 'not_checked', [])])}", ST)
