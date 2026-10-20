@@ -382,7 +382,8 @@ def test_paycom_bootstraps_the_session_jwt_lists_previews_and_maps_postings():
     assert a["url"] == f"https://www.paycomonline.net/v4/ats/web.php/portal/{PC_KEY}/jobs/546849"
     api = [c for c in http.calls if "portal-applicant-tracking" in c[0]]
     assert api and all(c[3].get("Authorization") == "JWT123" and c[3].get("Locale") == "en-US" for c in api)
-    assert all("paycomonline.net" in c[0] for c in http.calls)  # the JWT only goes to paycomonline.net hosts
+    hosts = {urlsplit(c[0]).hostname for c in http.calls}
+    assert hosts == {"www.paycomonline.net", "portal-applicant-tracking.us-cent.paycomonline.net"}  # JWT stays on Paycom
     post = next(c for c in http.calls if c[1] == "POST")
     assert post[2]["take"] == 50 and post[2]["skip"] == 0 and post[2]["filtersForQuery"]["keywordSearchText"] == ""
 
