@@ -76,6 +76,9 @@ def test_hunt_kit_wiring():
     ("https://acme.traffit.com/public/an/list/", "traffit", "acme"),
     ("https://acme.hire.trakstar.com/jobs/xyz", "trakstar", "acme"),
     ("https://www.careers-page.com/acme/job/ABC123", "manatal", "acme"),
+    ("https://acme.careers-page.com/jobs/1", "manatal", "acme"),
+    ("https://davidjoseph-co.careers-page.com/jobs/1", "manatal", "davidjoseph-co"),
+    ("https://careers-page.com/acme/job/ABC123", "manatal", "acme"),
 ])
 def test_job_links_are_read_as_these_boards(url, ats, token):
     info = hk.board_from_job_url(url)
