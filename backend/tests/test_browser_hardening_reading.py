@@ -210,6 +210,50 @@ async def test_a_submit_that_lands_on_an_error_page_still_says_it_was_clicked(mo
 @needs_chromium
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
+async def test_a_submit_whose_next_page_cannot_be_read_yet_says_look_not_blocked(more_site, monkeypatch):
+    """A confirmation page still loading is no failed load: the answer says the submit went and to look again,
+    never "record blocked", and a plain browser exception there loses nothing either."""
+    import asyncio
+
+    from src.services.browser_agent import agent
+    from src.services.browser_agent.agent import BrowserPool, Gate, run
+    from tests.test_browser_agent import _resolver
+
+    resolve, _ = _resolver({"jobs.example": "93.184.216.34", "down.example": "93.184.216.35"})
+
+    async def connect(host, port):
+        if host != "93.184.216.34":
+            raise ConnectionRefusedError("no answer")
+        return await asyncio.open_connection("127.0.0.1", more_site)
+
+    async def go(form_url):
+        return {"decision": "submit", "reason": "auto_when_sure", "detail": ""}
+
+    async def mark():
+        return None
+
+    real_look = agent.look
+
+    async def busy_look(s, after_action=False):
+        if after_action:
+            raise RuntimeError("Execution context was destroyed, most likely because of a navigation")
+        return await real_look(s, after_action=after_action)
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=connect)
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/down")
+        monkeypatch.setattr(agent, "look", busy_look)
+        out = await run(pool, "u1", "click", ref=_ref(page, "Submit application"), gate=Gate(check=go, mark_attempt=mark))
+        assert out["submit_clicked"] is True and out["status"] == "error" and out["reason"] == "browser_error"
+        assert "Do NOT submit again" in out["next"] and "call look" in out["next"]
+        assert "record blocked and tell the user." not in out["next"].split(";")[0]
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
 async def test_a_ref_the_page_copies_onto_a_span_is_replaced_by_the_next_look(more_site):
     from src.services.browser_agent.agent import BrowserPool, run
 

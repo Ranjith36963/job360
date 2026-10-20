@@ -984,10 +984,13 @@ async def _act(
             s.dead_clicks[ref] = s.dead_clicks.get(ref, 0) + 1
         try:
             out = await look(s, after_action=True)
-        except BrowserError as exc:
+        except Exception as exc:  # noqa: BLE001 - after a submit, any failure to read must still say it went
             if not submitted:
                 raise
-            out = exc.as_dict()  # the submit went: the answer must still say so
+            out = exc.as_dict() if isinstance(exc, BrowserError) else {
+                "status": "error", "reason": "browser_error",
+                "detail": (str(exc).splitlines() or [type(exc).__name__])[0][:300],
+            }
         out["page_changed"] = changed
         if not changed and not submitted:
             out["next"] = (
@@ -996,9 +999,15 @@ async def _act(
         if submitted:
             s.submit_refused = bool(out.get("site_refused"))
             out["submit_clicked"] = True
-            if out.get("status") == "error":
+            if out.get("status") == "error" and out.get("reason") == "load_failed":
                 out["next"] = (
                     "The page after the submit did not load. Do NOT submit again: record blocked and tell the user."
+                )
+            elif out.get("status") == "error":
+                # Often the confirmation page still loading: it may have gone through.
+                out["next"] = (
+                    "The page after the submit could not be read yet. Do NOT submit again: call look; a "
+                    "confirmation means record_application, anything else means record blocked and tell the user."
                 )
             elif out.get("site_refused"):
                 out["next"] = (
