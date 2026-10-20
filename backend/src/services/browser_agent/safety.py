@@ -83,12 +83,18 @@ def control_kind(
     role = (role or "").lower()
     if input_type == "password" or "password" in autocomplete:
         return "password"
-    is_button = (
+    owns = in_form if owns_form is None else owns_form
+    native_submit = owns and (
+        (tag == "button" and input_type in ("submit", "")) or (tag == "input" and input_type in ("submit", "image"))
+    )
+    # A <button role="tab"> (the ARIA tab pattern) is a tab, unless clicking it submits its form anyway.
+    link_role = role in _LINK_ROLES and not native_submit
+    is_button = not link_role and (
         tag == "button" or role == "button" or (tag == "input" and input_type in ("submit", "button", "image"))
     )
-    if tag in ("input", "textarea") and not is_button:
+    if tag == "textarea" or (tag == "input" and input_type not in ("submit", "button", "image")):
         return "password" if _PASSWORD_NAME.search(name) else "field"
-    is_link = not is_button and (tag == "a" or role in _LINK_ROLES)
+    is_link = not is_button and (tag == "a" or link_role)
     if not is_button and not is_link:
         return "field"
     strong = (_STRONG_SUBMIT_WORD if is_link else _STRONG_SUBMIT).search(name)
@@ -105,7 +111,6 @@ def control_kind(
     if toggle:
         return "field"
     # A button that submits its form, whatever its name ("Done"): the safe side.
-    owns = in_form if owns_form is None else owns_form
     if owns and ((tag == "button" and input_type in ("submit", "")) or input_type in ("submit", "image")):
         return "submit"
     # Any other button of a form with no clear name: the safe side.
