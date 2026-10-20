@@ -6315,5 +6315,13 @@
 {"name":"Capslock","ats":"comeet","board":"capslock/59.001","source":"freehire"},
 {"name":"Spark Hire","ats":"comeet","board":"spark-hire/30.005","source":"career-ops"},
 {"name":"Qogita","ats":"hibob","board":"qogita","source":"freehire"},
-{"name":"Unique","ats":"hibob","board":"unique","source":"freehire"}
+{"name":"Unique","ats":"hibob","board":"unique","source":"freehire"},
+{"name":"Monash University","ats":"pageup","board":"513","source":"freehire"},
+{"name":"Flight Centre","ats":"pageup","board":"889","source":"freehire"},
+{"name":"Melbourne Water","ats":"pageup","board":"391","source":"freehire"},
+{"name":"Leighton Contractors","ats":"pageup","board":"709","source":"freehire"},
+{"name":"The University of Hong Kong","ats":"pageup","board":"932","source":"career-ops"},
+{"name":"Bank of China (Hong Kong)","ats":"pageup","board":"798","source":"career-ops"},
+{"name":"Oklahoma State University","ats":"pageup","board":"1216/en-us","source":"career-ops"},
+{"name":"Simera","ats":"freshteam","board":"simera-talent","source":"freehire"}
 ]
