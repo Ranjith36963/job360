@@ -43,8 +43,19 @@ _PASSWORD_NAME = re.compile(
     r"|\b(?:mot de passe|contrase[nñ]a|senha|palavra-passe|has[lł]o|heslo|passord|jelsz[oó]|пароль)\b",
     re.IGNORECASE,
 )
-# The same words with odd spacing ("Pass word", "P a s s w o r d"): read with every gap taken out.
-_PASSWORD_SQUEEZED = re.compile(r"pass(?:word|code|phrase)|passwort|kennwort|wachtwoord|motdepasse", re.IGNORECASE)
+
+
+def _spaced(*words: str) -> str:
+    # One word with any gap or mark between its letters ("Pass word", "P a s s w o r d", "PASS-WORD").
+    return "|".join(r"[\W_]*".join(w) for w in words)
+
+
+# The same words with odd spacing, each matched as ONE word: "Bypass word filter" and "pass code
+# review" are ordinary questions. Two-word "pass code" stays a field; "Passcode" is caught above.
+_PASSWORD_SPACED = re.compile(
+    rf"\b(?:{_spaced('password', 'passphrase', 'passwort', 'kennwort', 'wachtwoord', 'motdepasse')})\b",
+    re.IGNORECASE,
+)
 _INVISIBLE_CHARS = re.compile(r"[\u00ad\u200b-\u200d\u2060\ufeff]")
 # Autocomplete tokens that name a sign-in secret.
 _PASSWORD_AUTOCOMPLETE = frozenset({"current-password", "new-password", "one-time-code"})
@@ -112,7 +123,7 @@ def control_kind(
 def _password_name(name: str) -> bool:
     name = _INVISIBLE_CHARS.sub("", unicodedata.normalize("NFKC", name))
     name = " ".join(name.split())
-    return bool(_PASSWORD_NAME.search(name) or _PASSWORD_SQUEEZED.search(re.sub(r"[\W_]+", "", name)))
+    return bool(_PASSWORD_NAME.search(name) or _PASSWORD_SPACED.search(name))
 
 
 # Frame addresses of the CAPTCHA and bot-check vendors we know. A page that
@@ -170,8 +181,7 @@ _CAPTCHA_TEXT = re.compile(
     r"verify (that )?you are (a )?human|are you a robot|i'?m not a robot|press (&|and) hold|"
     r"checking your browser|unusual traffic|complete the security check|prove you'?re not a robot|"
     # An image-text box: a picture of letters to copy.
-    r"(type|enter) the characters (you see|shown|in the image)|enter the code (shown|in the image|above)|"
-    r"solve this puzzle",
+    r"(type|enter) the characters (you see|shown|in the image)|enter the code (shown|in the image)",
     re.IGNORECASE,
 )
 

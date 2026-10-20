@@ -53,6 +53,20 @@ from tests.test_browser_agent import _ref, _site_resolver, _to_site, needs_chrom
         ("Postcode", "postal-code", "field"),
         ("Email", "email", "field"),
         ("Haslett office", "", "field"),
+        # Spaced-out words count only as ONE word: "pass" and a next word are not a password.
+        ("Encompass code base experience", "", "field"),
+        ("Bypass word filter", "", "field"),
+        ("Did your last PR pass code review?", "", "field"),
+        ("Describe a project where you had to pass. Words: 200 max", "", "field"),
+        # "Pass code" as two words is a field ("pass code review"); "Passcode" as one word is a password.
+        ("Pass code review experience", "", "field"),
+        ("Pass code", "", "field"),
+        ("Passcode", "", "password"),
+        ("P a s s w o r t", "", "password"),
+        ("Kenn wort", "", "password"),
+        ("Wacht-woord", "", "password"),
+        ("M o t d e p a s s e", "", "password"),
+        ("Pass phrase", "", "password"),
     ],
 )
 def test_a_password_box_is_known_by_its_name_in_any_common_language(name, autocomplete, kind):
@@ -108,8 +122,6 @@ def test_a_vendor_word_in_an_employer_address_is_not_a_captcha(url):
         "Enter the characters in the image",
         "Enter the code shown",
         "Enter the code in the image below",
-        "Enter the code above to continue",
-        "Solve this puzzle to continue",
     ],
 )
 def test_an_image_text_box_needs_the_user(text):
@@ -118,7 +130,15 @@ def test_an_image_text_box_needs_the_user(text):
 
 
 def test_ordinary_code_wording_is_not_a_captcha():
-    for text in ("Enter the code we sent to your email", "Promo code", "Postcode", "Enter the characters' names"):
+    for text in (
+        "Enter the code we sent to your email",
+        "Promo code",
+        "Postcode",
+        "Enter the characters' names",
+        # The page text holds the job ad too: an email code and an ad line are not a CAPTCHA.
+        "We sent a 6-digit code. Enter the code above to verify your email",
+        "Can you solve this puzzle? Apply below",
+    ):
         assert blocker_for(["https://jobs.example/apply"], text, False) is None, text
 
 
