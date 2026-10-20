@@ -173,6 +173,9 @@ FEED_SOURCES = (
     "wuzzuf",
     "infojobs",
     "instaffo",
+    "airswift",
+    "briefhq",
+    "functionalworks",
     "techinasia",
     "itviec",
     "jobdanmark",
@@ -324,7 +327,7 @@ ATS_MODULES = (
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
-    "kit_asia", "kit_sites_a",
+    "kit_asia", "kit_sites_a", "kit_sites_b",
 )
 
 
@@ -2622,6 +2625,8 @@ WHY_VERDICTS = {
                     "or the feed needs a key you have not set",
 }
 # Job sites the kit reads as a feed (host -> feed name). Checked before the aggregator list.
+# The sites_b entries are anchored to the host the reader fetches: a link on another host of the same
+# domain is not something the feed reads.
 _FEED_HOSTS = (
     ("reed", re.compile(r"(?:^|\.)reed\.co\.uk$", re.I)),
     ("jobstreet", re.compile(r"(?:^|\.)(?:seek\.com\.au|seek\.co\.nz|jobstreet\.com|jobsdb\.com)$", re.I)),
@@ -2634,6 +2639,9 @@ _FEED_HOSTS = (
     ("wuzzuf", re.compile(r"(?:^|\.)wuzzuf\.net$", re.I)),
     ("infojobs", re.compile(r"(?:^|\.)infojobs\.net$", re.I)),
     ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
+    ("airswift", re.compile(r"^(?:www\.)?airswift\.com$", re.I)),
+    ("briefhq", re.compile(r"^(?:www\.)?briefhq\.ai$", re.I)),
+    ("functionalworks", re.compile(r"^functional\.works-hub\.com$", re.I)),
     ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
     ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
     ("jobdanmark", re.compile(r"(?:^|\.)jobdanmark\.dk$", re.I)),
