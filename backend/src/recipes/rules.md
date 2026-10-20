@@ -457,7 +457,8 @@ one job always ask before submit, whatever the account setting says. You can
 only send "confirm"; "auto_when_sure" and "inherit" need the user's own click on
 the Job360 website (403).
 
-`submit_attempted` (no payload): record it right before the final submit click; the user's website click
+`submit_attempted` (no payload): record it right before the final submit click; a second submit_attempted while one
+is unresolved, after a receipt, or off considering is refused (409): do not click. The user's website click
 `submit_resolved` {outcome:"not_sent"} (403 from you) says it never went out. A submit that WAS sent is
 `record_application`. `queued` (no payload) / `unqueued` ({} or {reason: blocked|duplicate|avoided_company|cap_reached|closed_posting|
 user_removed|other}; `detail` optional) put a considering application on the user's batch
