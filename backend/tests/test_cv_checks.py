@@ -177,3 +177,39 @@ def test_a_letter_date_is_never_an_unsupported_number():
 
     assert number_tokens("15 October 2026\nOctober 15th, 2026") == []
     assert ("15", "15") in number_tokens("I shipped it in 15 weeks")
+
+
+# ── S16 - LinkedIn connection-note limit (warn only) ───────────────────────
+
+_LI_BASE = "I build data pipelines in Python and dbt at Northwind and would value a short chat. "
+
+
+def _li(n: int) -> str:
+    text = (_LI_BASE * 10)[:n]
+    assert len(text) == n
+    return text
+
+
+def test_linkedin_note_too_long_free_limit_is_200():
+    assert cc.linkedin_note_too_long(_li(200), premium=False) is None
+    issue = cc.linkedin_note_too_long(_li(201), premium=False)
+    assert issue is not None
+    assert issue["code"] == "linkedin_note_too_long"
+    assert issue["severity"] == "warn"
+    for needle in ("201 characters", "allows 200", "preferences.linkedin_premium"):
+        assert needle in issue["detail"]
+
+
+def test_linkedin_note_too_long_premium_limit_is_300():
+    assert cc.linkedin_note_too_long(_li(250), premium=True) is None
+    assert cc.linkedin_note_too_long(_li(300), premium=True) is None
+    issue = cc.linkedin_note_too_long(_li(301), premium=True)
+    assert issue is not None
+    assert "301 characters" in issue["detail"]
+    assert "allows 300" in issue["detail"]
+    assert "preferences.linkedin_premium" not in issue["detail"]
+
+
+def test_check_text_has_no_channel_check():
+    codes = [c["code"] for c in cc.check_text("outreach", _li(400), None)]
+    assert "linkedin_note_too_long" not in codes

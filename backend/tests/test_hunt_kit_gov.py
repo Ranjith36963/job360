@@ -350,3 +350,9 @@ def test_star_runs_every_market_for_visa_onsite():
     hosts = {c["url"].split("/api/")[0] for c in http.calls}
     assert hosts == {"https://www.seek.com.au", "https://www.seek.co.nz", "https://my.jobstreet.com",
                      "https://sg.jobstreet.com", "https://id.jobstreet.com", "https://hk.jobsdb.com"}
+
+
+def test_wanted_puts_the_users_own_markets_first():
+    assert kg._wanted(["NZ", "*"], "AU", "NZ", "MY")[:1] == ["NZ"]
+    assert kg._wanted(["NZ", "*"], "AU", "NZ", "MY") == ["NZ", "AU", "MY"]
+    assert kg._wanted(["NZ"], "AU", "NZ", "MY") == ["NZ"]
