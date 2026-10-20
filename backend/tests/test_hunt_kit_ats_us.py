@@ -10,6 +10,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -235,7 +236,7 @@ def test_hiringthing_reads_the_record_found_by_component_name_and_dedups_by_id()
     assert a["url"] == f"https://{host}/job/111/guest-services" and a["location"] == "Remote - Windsor Locks, CT"
     assert a["posted"] == "2026-06-18" and a["description"] == "Welcome guests." and a["company"] == "Crown Shredding"
     assert a["remote"] is True and a["extra"]["country"] == "US" and b["remote"] is None  # the flag decides, not the location text
-    assert not any("other.hiringthing.com" in c[0] for c in http.calls)  # a link off the board's host is never followed
+    assert {urlsplit(c[0]).hostname for c in http.calls} == {host}  # a link off the board's host is never followed
 
 
 def test_hiringthing_failed_detail_keeps_listing_title_and_empty_board_is_ok():
