@@ -242,7 +242,9 @@ export async function getJsonResume(): Promise<JsonResumeResponse> {
 // Auth (Batch 2)
 // ---------------------------------------------------------------------------
 
-export type User = { id: string; email: string; timezone?: string };
+// `has_password` (GET /api/auth/me only): false for an account only a magic
+// link has ever signed in; the account page then deletes without a password.
+export type User = { id: string; email: string; timezone?: string; has_password?: boolean };
 
 // M2 — register no longer returns the user or a session (no account-enumeration:
 // a new-user response that differs from a duplicate would leak whether an email
@@ -405,10 +407,13 @@ export async function changeEmail(
   });
 }
 
-export async function deleteAccount(currentPassword: string): Promise<void> {
+/** Erase the account. Pass the password for an account that has one; an
+ * account with none (magic link only) sends no password and must be on a
+ * fresh email-link sign-in, else the server answers 403 saying so. */
+export async function deleteAccount(currentPassword?: string): Promise<void> {
   await request<void>("/api/auth/users/me", {
     method: "DELETE",
-    body: JSON.stringify({ current_password: currentPassword }),
+    body: JSON.stringify(currentPassword ? { current_password: currentPassword } : {}),
   });
 }
 

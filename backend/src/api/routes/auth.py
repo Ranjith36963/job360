@@ -105,6 +105,13 @@ class UserResponse(BaseModel):
     timezone: str = "UTC"
 
 
+class MeResponse(UserResponse):
+    # Migration 0069 — False for an account only a magic link has ever signed
+    # in (no password the user knows). The account page then deletes without a
+    # password prompt, from a fresh email-link sign-in (``delete_account``).
+    has_password: bool = True
+
+
 class RegisterResponse(BaseModel):
     # M2 — deliberately generic and IDENTICAL whether or not the email was already
     # registered, so /register cannot be used to enumerate accounts. Carries no
@@ -319,15 +326,15 @@ async def logout(
     return response
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=MeResponse)
 async def me(
     user: CurrentUser = Depends(require_user),  # noqa: B008
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-) -> UserResponse:
-    cur = await db._db.execute("SELECT timezone FROM users WHERE id = ?", (user.id,))
-    row = await cur.fetchone()
-    tz = (dict(row).get("timezone") if row else None) or "UTC"
-    return UserResponse(id=user.id, email=user.email, timezone=tz)
+) -> MeResponse:
+    cur = await db._db.execute("SELECT timezone, has_password FROM users WHERE id = ?", (user.id,))
+    row = dict(await cur.fetchone() or {})
+    tz = row.get("timezone") or "UTC"
+    return MeResponse(id=user.id, email=user.email, timezone=tz, has_password=row.get("has_password") is not False)
 
 
 class TimezoneRequest(BaseModel):
@@ -369,9 +376,13 @@ async def set_timezone(
 @router.get("/users/me/export", dependencies=AUTH_FIRST)
 async def export_my_data(
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Download everything we hold on the caller as one JSON file (Article 20).
+
+    Web session only (gap roadmap slice 3): a leaked, never-expiring agent token
+    must not be able to download the whole account. An assistant reads history
+    through ``export_history``, which leaves out the account tables.
 
     GET is correct here: it is a pure read, no state changes. Scoped to the
     session's own ``user.id`` (rule #12) — the caller can never name another user.
@@ -416,7 +427,34 @@ async def export_my_data(
 
 
 class AccountDeleteRequest(BaseModel):
-    current_password: str
+    # Optional only for an account with no password (``users.has_password`` is
+    # FALSE); an account WITH one must still send it (hard rule #26).
+    current_password: Optional[str] = None
+
+
+def _fresh_link_required() -> str:
+    """The 403 detail for a passwordless delete from a stale session: what to do next."""
+    minutes = max(1, settings.ACCOUNT_DELETE_FRESH_SESSION_SECONDS // 60)
+    return (
+        "This account has no password. To delete it, sign out, sign in again with a fresh "
+        f"email link, then delete your account within {minutes} minutes."
+    )
+
+
+async def _session_is_fresh(cookie: Optional[str]) -> bool:
+    """True when the caller's session was created inside the fresh-sign-in window.
+
+    The sessions table does not record HOW a session was made, so this reads its
+    ``created_at`` alone. For an account with no password that is enough: the
+    only way such an account gets a session is consuming a magic link.
+    """
+    if not cookie:
+        return False
+    created = await auth_sessions.session_created_at(str(DB_PATH), cookie, secret=_secret())
+    if created is None:
+        return False
+    age = (datetime.now(timezone.utc) - created).total_seconds()
+    return 0 <= age <= settings.ACCOUNT_DELETE_FRESH_SESSION_SECONDS
 
 
 @router.delete("/users/me", status_code=204, dependencies=AUTH_FIRST)
@@ -424,10 +462,16 @@ async def delete_account(
     req: AccountDeleteRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
+    job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> Response:
-    """ERASE the caller's account (GDPR Article 17). Requires current-password
-    verification (hard rule #26), then clears the session cookie.
+    """ERASE the caller's account (GDPR Article 17), then clear the session cookie.
+
+    Web session only: an agent token can never erase the account. An account
+    with a password must send it (hard rule #26). An account with NO password
+    (``has_password`` FALSE: only a magic link ever signed it in) cannot, so it
+    may delete only from a session created by a fresh email link, inside
+    ``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.
 
     Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
@@ -435,13 +479,27 @@ async def delete_account(
     async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = pg.Row
         cursor = await adb.execute(
-            "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
+            "SELECT password_hash, has_password FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
         )
         row = await cursor.fetchone()
-    if not row or not verify_password(row["password_hash"], req.current_password):
+    if not row:
         raise HTTPException(status_code=401, detail="current password is incorrect")
+    if row["has_password"] is False:
+        if not await _session_is_fresh(job360_session):
+            get_audit_logger().info(
+                "auth", extra={"event": "account_delete", "user_id": user.id, "status": "stale_session"}
+            )
+            raise HTTPException(status_code=403, detail=_fresh_link_required())
+        verified_by = "fresh_link"
+    else:
+        if not req.current_password or not verify_password(row["password_hash"], req.current_password):
+            raise HTTPException(status_code=401, detail="current password is incorrect")
+        verified_by = "password"
     await db.hard_delete_user(user.id)
+    get_audit_logger().info(
+        "auth", extra={"event": "account_delete", "user_id": user.id, "status": "ok", "verified_by": verified_by}
+    )
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)
@@ -462,7 +520,7 @@ async def change_password(
     req: PasswordChangeRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Authenticated password change. Requires current password verification,
     then invalidates the session cookie to force re-login (hard rule #26 —
@@ -501,7 +559,7 @@ async def change_email(
     req: EmailChangeRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Change email. Requires current password. Invalidates session → re-login required."""
     async with open_db(str(DB_PATH)) as adb:

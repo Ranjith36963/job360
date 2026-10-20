@@ -183,7 +183,8 @@ async def confirm_password_reset(
             (now, row["reset_id"]),
         )
         await db.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
+            # has_password (migration 0069): a magic-link-only account now has one.
+            "UPDATE users SET password_hash = ?, has_password = TRUE WHERE id = ?",
             (new_hash, row["user_id"]),
         )
         # Force re-login on every device. Security best practice after a
