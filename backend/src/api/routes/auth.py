@@ -103,6 +103,11 @@ class UserResponse(BaseModel):
     # page prefills the browser's own zone when this still reads the
     # untouched default (rule #29 — only a real Save ever writes it).
     timezone: str = "UTC"
+    # Gap roadmap slice 4 — True only when the user turned on "Help improve
+    # Job360" (`users.analytics_consent_at`, migration 0067). The web app gates
+    # Sentry session replay on it; the backend gates PostHog capture on the
+    # column itself. Off by default.
+    analytics_consent: bool = False
 
 
 class MeResponse(UserResponse):
@@ -331,10 +336,17 @@ async def me(
     user: CurrentUser = Depends(require_user),  # noqa: B008
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
 ) -> MeResponse:
-    cur = await db._db.execute("SELECT timezone, has_password FROM users WHERE id = ?", (user.id,))
-    row = dict(await cur.fetchone() or {})
-    tz = row.get("timezone") or "UTC"
-    return MeResponse(id=user.id, email=user.email, timezone=tz, has_password=row.get("has_password") is not False)
+    cur = await db._db.execute(
+        "SELECT timezone, has_password, analytics_consent_at FROM users WHERE id = ?", (user.id,)
+    )
+    row = await cur.fetchone()
+    data = dict(row) if row else {}
+    tz = data.get("timezone") or "UTC"
+    return MeResponse(
+        id=user.id, email=user.email, timezone=tz,
+        analytics_consent=bool(data.get("analytics_consent_at")),
+        has_password=data.get("has_password") is not False,
+    )
 
 
 class TimezoneRequest(BaseModel):
@@ -368,6 +380,38 @@ async def set_timezone(
     await db._db.execute("UPDATE users SET timezone = ? WHERE id = ?", (body.timezone, user.id))
     await db._db.commit()
     return {"timezone": body.timezone}
+
+
+class AnalyticsConsentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    consent: bool
+
+
+class AnalyticsConsentResponse(BaseModel):
+    analytics_consent: bool
+
+
+@router.put("/me/analytics-consent", response_model=AnalyticsConsentResponse, dependencies=AUTH_FIRST)
+async def set_analytics_consent(
+    body: AnalyticsConsentRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Web session only: the user's own "Help improve Job360" switch (gap roadmap slice 4).
+
+    The ONE write door for `users.analytics_consent_at`. ``true`` stamps when they
+    agreed; ``false`` clears it, which withdraws consent at once (server PostHog
+    capture and Sentry session replay both read it). Consent is the person's own
+    choice, so an assistant's token is refused (403 ``session_required``)."""
+    stamp = datetime.now(timezone.utc).isoformat() if body.consent else None
+    await db._db.execute("UPDATE users SET analytics_consent_at = ? WHERE id = ?", (stamp, user.id))
+    await db._db.commit()
+    get_audit_logger().info(
+        "auth",
+        extra={"event": "analytics_consent_set", "user_id": user.id, "consent": body.consent, "status": "ok"},
+    )
+    return {"analytics_consent": body.consent}
 
 
 # ── GDPR Article 20 — data portability (docs/fable/05 C7) ────────────────────

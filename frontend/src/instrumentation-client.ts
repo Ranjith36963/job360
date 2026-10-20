@@ -19,14 +19,12 @@ if (dsn) {
   Sentry.init({
     dsn,
     tracesSampleRate: process.env.NODE_ENV === "development" ? 1.0 : 0.1,
-    integrations: [
-      // Session Replay — records the user session for error investigation.
-      // Only 10% of normal sessions; 100% of sessions that hit an error.
-      Sentry.replayIntegration({
-        maskAllText: false,
-        blockAllMedia: false,
-      }),
-    ],
+    // NO Session Replay here. It used to start for every visitor with text
+    // unmasked, recording CV text and equality answers with no consent. It is
+    // now added lazily, masked, and only once the signed-in user has turned on
+    // "Help improve Job360" (src/lib/sentry-replay.ts, called by AuthProvider).
+    // The two rates below are read by that integration when it is added:
+    // 10% of consenting sessions; 100% of consenting sessions that hit an error.
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
     ignoreErrors: [

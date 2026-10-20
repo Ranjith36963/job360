@@ -242,9 +242,16 @@ export async function getJsonResume(): Promise<JsonResumeResponse> {
 // Auth (Batch 2)
 // ---------------------------------------------------------------------------
 
-// `has_password` (GET /api/auth/me only): false for an account only a magic
-// link has ever signed in; the account page then deletes without a password.
-export type User = { id: string; email: string; timezone?: string; has_password?: boolean };
+export type User = {
+  id: string;
+  email: string;
+  timezone?: string;
+  /** "Help improve Job360" (Settings > Account). Gates Sentry session replay. */
+  analytics_consent?: boolean;
+  /** GET /api/auth/me only: false for an account only a magic link has ever
+   * signed in; the account page then deletes without a password. */
+  has_password?: boolean;
+};
 
 // M2 — register no longer returns the user or a session (no account-enumeration:
 // a new-user response that differs from a duplicate would leak whether an email
@@ -311,6 +318,18 @@ export async function setTimezone(timezone: string): Promise<{ timezone: string 
   return request<{ timezone: string }>("/api/auth/me/timezone", {
     method: "PUT",
     body: JSON.stringify({ timezone }),
+  });
+}
+
+/** Gap roadmap slice 4 — the user's own "Help improve Job360" switch. `true`
+ * stores consent, `false` withdraws it. A browser session only (a token gets
+ * 403 session_required). */
+export async function setAnalyticsConsent(
+  consent: boolean,
+): Promise<{ analytics_consent: boolean }> {
+  return request<{ analytics_consent: boolean }>("/api/auth/me/analytics-consent", {
+    method: "PUT",
+    body: JSON.stringify({ consent }),
   });
 }
 

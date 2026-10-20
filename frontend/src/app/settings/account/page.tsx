@@ -31,9 +31,12 @@ import {
   logout,
   me,
   resendVerificationEmail,
+  setAnalyticsConsent,
   setTimezone,
 } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
+import { setConsent as setBrowserConsent } from "@/lib/consent";
+import { syncReplayConsent } from "@/lib/sentry-replay";
 import {
   CARD_CLASS,
   TITLE_CLASS,
@@ -641,6 +644,75 @@ function YourDataCard() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Help improve Job360 — the user's own analytics consent (gap roadmap slice 4)
+// ---------------------------------------------------------------------------
+
+function HelpImproveCard() {
+  const [consent, setConsentState] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    me().then((user) => {
+      if (cancelled || !user) return;
+      setConsentState(user.analytics_consent === true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onToggle() {
+    if (consent === null) return;
+    setBusy(true);
+    setServerError(null);
+    try {
+      const result = await setAnalyticsConsent(!consent);
+      setConsentState(result.analytics_consent);
+      // Apply at once in this tab: Sentry replay starts (masked) or stops, and
+      // the browser's PostHog choice follows the same switch.
+      setBrowserConsent(result.analytics_consent ? "accepted" : "declined");
+      await syncReplayConsent(result.analytics_consent).catch(() => {});
+    } catch (err) {
+      setServerError(apiErrorMessage(err, "Failed to save your choice."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className={CARD_CLASS}>
+      <CardHeader>
+        <CardTitle className={TITLE_CLASS}>Help improve Job360</CardTitle>
+        <CardDescription className={DESC_CLASS}>
+          Help improve Job360: share anonymous usage and masked screen
+          recordings of errors. Off by default.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={consent === true}
+          aria-label="Help improve Job360"
+          data-testid="analytics-consent-toggle"
+          disabled={busy || consent === null}
+          onClick={() => void onToggle()}
+          className={
+            "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9 " +
+            (consent ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")
+          }
+        >
+          {consent ? "On" : "Off"}
+        </button>
+        <FieldError message={serverError ?? undefined} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AccountSettingsPage() {
   return (
     <div className="max-w-3xl space-y-8 py-12">
@@ -658,6 +730,7 @@ export default function AccountSettingsPage() {
       <ChangePasswordCard />
       <ChangeEmailCard />
       <YourDataCard />
+      <HelpImproveCard />
       <DeleteAccountCard />
     </div>
   );

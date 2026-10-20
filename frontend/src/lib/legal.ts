@@ -36,7 +36,7 @@ export const SUBPROCESSORS: {
     name: "Sentry",
     purpose: "Error monitoring",
     dataShared:
-      "Error traces and request metadata (request bodies are scrubbed), plus screen recordings (session replay) that include on-screen text such as your CV and profile. Recordings cover about 1 in 10 sessions and every session where an error happens, whether or not you accept analytics",
+      "Error traces and request metadata (request bodies are scrubbed). Only if you turn on \"Help improve Job360\" in Settings: masked screen recordings (session replay, all text and media hidden) of about 1 in 10 sessions and every session where an error happens",
     location: "EU (Germany)",
   },
   {
