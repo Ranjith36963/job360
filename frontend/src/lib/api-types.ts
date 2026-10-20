@@ -4261,6 +4261,8 @@ export interface components {
         };
         /** ContactOutreachOut */
         ContactOutreachOut: {
+            /** Interactions */
+            interactions?: components["schemas"]["OutreachEntryOut"][];
             last_reply: components["schemas"]["OutreachEntryOut"] | null;
             last_sent: components["schemas"]["OutreachEntryOut"] | null;
             /** Message Count */
@@ -5313,6 +5315,7 @@ export interface components {
             follow_up_on?: string | null;
             /** Id */
             id: number;
+            referred_by?: components["schemas"]["KitReferredByOut"] | null;
             /** Status */
             status: string;
             /** Submit Override */
@@ -5460,6 +5463,13 @@ export interface components {
             key: string;
             /** Why */
             why: string;
+        };
+        /** KitReferredByOut */
+        KitReferredByOut: {
+            /** Contact Id */
+            contact_id: number;
+            /** Name */
+            name: string;
         };
         /** KitSameJobOut */
         KitSameJobOut: {
@@ -5837,7 +5847,8 @@ export interface components {
          * @description One row of a contact's outreach ledger — a drafted message VERSION
          *     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
          *     (``version_no`` null — unversioned, a person can be sent to or replied
-         *     to many times).
+         *     to many times). Also a meeting/call/intro/referral entry (``follow_up_on``
+         *     is set only on those).
          */
         OutreachEntryOut: {
             /** Channel */
@@ -5846,6 +5857,8 @@ export interface components {
             contact_id: number;
             /** Entry */
             entry: string;
+            /** Follow Up On */
+            follow_up_on?: string | null;
             /** Id */
             id: number;
             /** Occurred At */
@@ -6586,6 +6599,8 @@ export interface components {
             proof?: components["schemas"]["ProofOut"];
             /** Recorded By */
             recorded_by?: string | null;
+            /** Referred By Contact Id */
+            referred_by_contact_id?: number | null;
             /** Sent At */
             sent_at: string;
         };
@@ -6728,6 +6743,8 @@ export interface components {
              * @default
              */
             note: string;
+            /** Referred By Contact Id */
+            referred_by_contact_id?: number | null;
         };
         /** RecordApplicationReceiptResponse */
         RecordApplicationReceiptResponse: {
@@ -6762,6 +6779,8 @@ export interface components {
             possible_duplicate: string;
             /** Receipt Id */
             receipt_id: number;
+            /** Referred By Contact Id */
+            referred_by_contact_id?: number | null;
             /** Sent At */
             sent_at: string;
             /** Url */
@@ -7582,6 +7601,43 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** StatsReferralGroupOut */
+        StatsReferralGroupOut: {
+            /** Applied */
+            applied: number;
+            /** Brought */
+            brought: number;
+            /** Interview */
+            interview: number;
+            /** Interview Rate */
+            interview_rate: number | null;
+            /** Offer */
+            offer: number;
+            /** Offer Rate */
+            offer_rate: number | null;
+            /** Rejected */
+            rejected: number;
+            /** Replied */
+            replied: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+        };
+        /**
+         * StatsReferralsOut
+         * @description ``stats(view="referrals")``: referred vs not. Facts only, never a ranking.
+         */
+        StatsReferralsOut: {
+            /** N */
+            n: number;
+            not_referred: components["schemas"]["StatsReferralGroupOut"];
+            /** Note */
+            note: string;
+            /** Referral Asked */
+            referral_asked: number;
+            referred: components["schemas"]["StatsReferralGroupOut"];
+        };
         /** StatsResponse */
         StatsResponse: {
             /** Applications Truncated */
@@ -7621,6 +7677,7 @@ export interface components {
             lesson_effect?: components["schemas"]["StatsLessonEffectOut"] | null;
             overall: components["schemas"]["StatsOverallOut"];
             patterns?: components["schemas"]["StatsPatternsOut"] | null;
+            referrals?: components["schemas"]["StatsReferralsOut"] | null;
             score_line: components["schemas"]["StatsScoreLineOut"];
             /** Since */
             since: string | null;

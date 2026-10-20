@@ -2081,9 +2081,12 @@ async def build_kit(
         # Plain facts about this ad (job_checks.py) - never a verdict, never a sort key.
         "checks": base_checks,
     }
+    from src.services.applications import contacts as contacts_service  # noqa: PLC0415 - contacts imports spine
+
     application = {
         "id": application_id, "status": app_row["status"], "follow_up_on": app_row.get("follow_up_on"),
         "submit_override": await spine.submit_override(db, user.id, application_id),
+        "referred_by": await contacts_service.referred_by(db, user.id, application_id),
     }
     host = settings_rules.parse_site_host(apply_url)
     learned = {

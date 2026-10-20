@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 14
-TOOLS_REV_FOR_HASH = "68129d3cbb95"
+TOOLS_REV = 15
+TOOLS_REV_FOR_HASH = "7b6c6ea1a8ad"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -449,6 +449,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "possible_duplicate": r.possible_duplicate,
         "kit_event_id": r.kit_event_id,
         "kit_sha256": r.kit_sha256,
+        "referred_by_contact_id": r.referred_by_contact_id,
         "proof": r.proof.model_dump(),
         "url": _receipt_url(r.id),
     }
@@ -1026,6 +1027,7 @@ def build_server(version: str = "") -> MCPServer:
         cover_letter_artifact_id: Optional[int] = None,
         applied_at: Optional[str] = None,
         application_id: Optional[int] = None,
+        referred_by_contact_id: Optional[int] = None,
     ) -> dict[str, Any]:
         """Record that the user has applied to this job — ONLY after they say so, or an
         employer's confirmation email in their Gmail proves it (name it in `note`). Pass
@@ -1039,6 +1041,7 @@ def build_server(version: str = "") -> MCPServer:
         greenhouse etc. = company_site; other text is stored as "other" (never refused;
         the reply has `channel_given` + a `warning`). `note` is free text.
         `confirmation` = the ID only (must contain a digit); anything else is kept in the note with a warning.
+        `referred_by_contact_id` = the contact linked to this job whose referral was given; leave it out otherwise.
 
         C1 (application-spine review) — this is the SAME tool as before (`job_id`,
         `channel`, `note` still work unchanged), rewired onto the rich
@@ -1058,6 +1061,7 @@ def build_server(version: str = "") -> MCPServer:
                 answers=[applications_route.ReceiptAnswer(**a) for a in (answers or [])],
                 fields_filled=fields_filled or {}, cv_artifact_id=cv_artifact_id,
                 cover_letter_artifact_id=cover_letter_artifact_id, applied_at=applied_at,
+                referred_by_contact_id=referred_by_contact_id,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1097,7 +1101,10 @@ def build_server(version: str = "") -> MCPServer:
                 http_status=exc.status_code,
             )
             raise _tool_error(exc) from None
-        _audit("record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"])
+        _audit(
+            "record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"],
+            referred_by_contact_id=referred_by_contact_id,
+        )
         # The spine's url is site-relative; every other tool hands out the absolute one.
         resp = {**resp, "url": _application_url(application["id"])}
         reply: dict[str, Any] = {"job_id": job_id, **resp}
@@ -1431,25 +1438,24 @@ def build_server(version: str = "") -> MCPServer:
         contact_id: Optional[int] = None,
         channel: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Append one event to an application's history.
+        """Append an application event.
 
-        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; a repeat
-        message_id writes nothing.
+        `source` {kind, message_id, sender, subject, received_at} = the email; a repeat message_id is ignored.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        the furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is proof, not a 2nd one. Wrong
-        date: `applied` + occurred_at + corrects_event_id=<old id>.
-        `scheduled_at` (ISO-8601 + timezone) only on
-        interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
+        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
+        `source` is proof, not a 2nd one. Wrong date: `applied` + occurred_at + corrects_event_id=<old id>.
+        `scheduled_at` (ISO-8601 + tz) only on interview_requested/interview_scheduled.
+        `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
         Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`,
-        or the user says so) or outreach_replied; no application_id if cold.
+        or the user says), outreach_replied, contact_meeting|contact_call|contact_intro|referral_asked|
+        referral_given; no application_id if cold.
 
         Kit events:
         form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|
-        approved|written|guessed (key = kit key);
+        approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
@@ -1460,9 +1466,8 @@ def build_server(version: str = "") -> MCPServer:
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped}.
-        proof_text {text, page_host}; simulation {} = test app, never counted.
-        unqueued {reason?}; answer_corrected {key|question, was_source}.
-        Payloads, 403/409: get_recipe("rules"), Events."""
+        proof_text {text, page_host}; simulation {} = test app, not counted; unqueued {reason?};
+        answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
         if contact_id is not None:
@@ -1477,10 +1482,11 @@ def build_server(version: str = "") -> MCPServer:
                     "corrects_event_id/payload/scheduled_at are not supported for outreach (contact_id)",
                     contact_id=contact_id,
                 )
-            if event_type not in ("outreach_sent", "outreach_replied"):
+            if event_type not in applications_route.CONTACT_EVENT_ENTRY:
                 raise _refuse(
                     "record_event", 422,
-                    "event_type must be 'outreach_sent' or 'outreach_replied' when contact_id is given",
+                    f"event_type must be one of {', '.join(applications_route.CONTACT_EVENT_ENTRY)} "
+                    "when contact_id is given",
                     contact_id=contact_id,
                 )
             if not channel:
@@ -1493,7 +1499,7 @@ def build_server(version: str = "") -> MCPServer:
                 # for) has no application to post an event against, so this
                 # goes straight through the shared outreach door instead of
                 # the per-application record_event route.
-                entry = "sent" if event_type == "outreach_sent" else "reply"
+                entry = applications_route.CONTACT_EVENT_ENTRY[event_type]
                 try:
                     outreach_body = applications_route.RecordOutreachRequest(
                         entry=entry, channel=channel, text=detail, occurred_at=occurred_at,
@@ -1519,7 +1525,7 @@ def build_server(version: str = "") -> MCPServer:
                     "already_existed": resp["already_existed"], "scheduled_at": None,
                     "follow_up_on": resp["follow_up_on"],
                 }
-        if contact_id is None and event_type in ("outreach_sent", "outreach_replied"):
+        if contact_id is None and event_type in applications_route.CONTACT_EVENT_ENTRY:
             raise _refuse("record_event", 422, applications_route.OUTREACH_NEEDS_CONTACT, application_id=application_id)
         if application_id is None:
             raise _refuse(
@@ -1716,7 +1722,8 @@ def build_server(version: str = "") -> MCPServer:
         latest message, when it was sent/replied and on what channel, and a
         message count. `email` narrows to one person. Give `contact_id` for
         that ONE record in full: every message VERSION, every sent/reply
-        mark, and the detail-edit history. `reachable` = an email or LinkedIn URL is
+        mark, every meeting/call/intro/referral entry (`interactions`),
+        and the detail-edit history. `reachable` = an email or LinkedIn URL is
         saved; `source_url` = where they were found. `company` = only people you stored
         at that company (a contact with no company counts at its job's company)."""
         try:
@@ -1762,7 +1769,8 @@ def build_server(version: str = "") -> MCPServer:
         agency/direct, needs 5 sent; `signals` need 2 decided; ghosted is no answer, never a rejection;
         `rejection_reasons` are exact words, group them yourself), skill_gaps (the gaps you saved with
         save_fit, counted and tiered; needs 5 scored fits), sites (per form host: forms filled, applied,
-        blocked by reason, with n), or all. Every rate has its n; small_sample
+        blocked by reason, with n), referrals (referred vs not: reply and interview rates), or all.
+        Every rate has its n; small_sample
         is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:
             async with _request_db() as db:

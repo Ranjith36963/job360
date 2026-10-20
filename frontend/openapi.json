@@ -3378,6 +3378,13 @@
       },
       "ContactOutreachOut": {
         "properties": {
+          "interactions": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Interactions",
+            "type": "array"
+          },
           "last_reply": {
             "anyOf": [
               {
@@ -5810,6 +5817,16 @@
             "title": "Id",
             "type": "integer"
           },
+          "referred_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitReferredByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -6228,6 +6245,24 @@
           "why"
         ],
         "title": "KitMissingOut",
+        "type": "object"
+      },
+      "KitReferredByOut": {
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact_id",
+          "name"
+        ],
+        "title": "KitReferredByOut",
         "type": "object"
       },
       "KitSameJobOut": {
@@ -7090,7 +7125,7 @@
         "type": "object"
       },
       "OutreachEntryOut": {
-        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times).",
+        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times). Also a meeting/call/intro/referral entry (``follow_up_on``\nis set only on those).",
         "properties": {
           "channel": {
             "title": "Channel",
@@ -7103,6 +7138,17 @@
           "entry": {
             "title": "Entry",
             "type": "string"
+          },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
           },
           "id": {
             "title": "Id",
@@ -8849,6 +8895,17 @@
             ],
             "title": "Recorded By"
           },
+          "referred_by_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referred By Contact Id"
+          },
           "sent_at": {
             "title": "Sent At",
             "type": "string"
@@ -9182,6 +9239,17 @@
             "maxLength": 2000,
             "title": "Note",
             "type": "string"
+          },
+          "referred_by_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referred By Contact Id"
           }
         },
         "title": "RecordApplicationReceiptRequest",
@@ -9263,6 +9331,17 @@
           "receipt_id": {
             "title": "Receipt Id",
             "type": "integer"
+          },
+          "referred_by_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referred By Contact Id"
           },
           "sent_at": {
             "title": "Sent At",
@@ -11901,6 +11980,117 @@
         "title": "StatsReasonOut",
         "type": "object"
       },
+      "StatsReferralGroupOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "brought": {
+            "title": "Brought",
+            "type": "integer"
+          },
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "integer"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "brought",
+          "applied",
+          "replied",
+          "interview",
+          "offer",
+          "rejected",
+          "reply_rate",
+          "interview_rate",
+          "offer_rate",
+          "small_sample"
+        ],
+        "title": "StatsReferralGroupOut",
+        "type": "object"
+      },
+      "StatsReferralsOut": {
+        "description": "``stats(view=\"referrals\")``: referred vs not. Facts only, never a ranking.",
+        "properties": {
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "not_referred": {
+            "$ref": "#/components/schemas/StatsReferralGroupOut"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "referral_asked": {
+            "title": "Referral Asked",
+            "type": "integer"
+          },
+          "referred": {
+            "$ref": "#/components/schemas/StatsReferralGroupOut"
+          }
+        },
+        "required": [
+          "n",
+          "referred",
+          "not_referred",
+          "referral_asked",
+          "note"
+        ],
+        "title": "StatsReferralsOut",
+        "type": "object"
+      },
       "StatsResponse": {
         "properties": {
           "applications_truncated": {
@@ -12050,6 +12240,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/StatsPatternsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "referrals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsReferralsOut"
               },
               {
                 "type": "null"

@@ -54,6 +54,11 @@
     "unqueued",
     "submit_attempted",
     "submit_resolved",
-    "answer_corrected"
+    "answer_corrected",
+    "contact_meeting",
+    "contact_call",
+    "contact_intro",
+    "referral_asked",
+    "referral_given"
   ]
 }

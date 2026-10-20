@@ -220,7 +220,11 @@ is filled.
 the `cv_artifact_id` and `cover_letter_artifact_id` that were sent, and in
 `confirmation` the application ID or portal reference ONLY (it must contain a
 digit; anything else is kept in the note with a warning). This saves an
-immutable receipt. Name `cover_letter_artifact_id` only when the form took a letter; otherwise leave it out and the receipt says none was sent. Right after, put the thank-you page text in `record_event`
+immutable receipt. Name `cover_letter_artifact_id` only when the form took a letter; otherwise leave it out and the receipt says none was sent.
+`application.referred_by` {contact_id, name} in the kit = the person whose `referral_given` is recorded for
+this job: use that name for a "Were you referred?" / "Referred by" question, and pass the same contact_id as
+`referred_by_contact_id` to record_application. `referred_by` null = none recorded: ask the user, never guess.
+Right after, put the thank-you page text in `record_event`
 `proof_text` {text, page_host}, and a screenshot only if you can. Proof is one
 of: a confirmation email, the thank-you page text, or the application ID /
 portal reference; with none yet the application is "claimed, unverified".
@@ -400,6 +404,15 @@ answered; the one exception is "Automatic employer emails"). A person's reply NE
 itself. When you record `replied` on a job with `source.sender`, Job360 also marks
 the person replied if that sender is a contact on the same job you sent
 outreach to - do not record both.
+
+A meeting, call or intro with a person, or a referral you asked them for or they gave: record_event with
+contact_id + channel and event_type `contact_meeting`, `contact_call`, `contact_intro`, `referral_asked` or
+`referral_given`; channel is any of `call`, `video`, `in_person`, `linkedin`, `email`, `other`;
+`detail` = your notes, `occurred_at` = when it happened, `follow_up_on` = the next chase (a cold contact may
+have one too: it is kept on that entry). Record only what the user told you or their mail shows. These send
+nothing and never count as outreach sends. `referral_given` needs the contact linked to the job (add_contact
+with application_id first); the kit's `referred_by` and stats(view="referrals") read it. A wrong one:
+record_event `note` with `corrects_event_id` = its event id (the person's own history keeps the entry).
 
 ## Automatic employer emails
 
@@ -788,6 +801,9 @@ lesson_effect (rates before vs after each agreed lesson), followups (check-ins a
 - Ghosted counts as a negative outcome in calibration (`ghosted_counted_negative` says how many) but is
   "no answer" in the patterns view. Both are intended.
 - Company cards are facts, not verdicts. A silence can be an unlogged reply: ask the user.
+- `referrals`: applications with a recorded referral (a live `referral_given`, or a receipt's
+  `referred_by_contact_id`) vs without, each with counts, rates and small_sample; `n` = applications counted,
+  `referral_asked` = applications with a referral asked. Facts, not proof that referrals work.
 - Never skip a job, a company or a follow-up because of these numbers.
 
 ## Interview side (events, artifacts)
