@@ -85,7 +85,16 @@ _PAY_WINDOW = 120  # characters either side of an amount
 _NOT_PAY_WINDOW = 50  # how close an exclusion word must sit to veto an amount
 _PAY_SCAN_CAP = 100_000  # characters of the ad ever scanned
 _PAY_MATCH_CAP = 200  # amounts examined
+_BARE_PAY_MIN = 1000  # smallest amount that is pay on its own, with no pay word beside it
 _EVIDENCE_MAX = 160
+# a header-line separator: " - ", " | ", " · " or a bullet, beside whitespace
+_SEGMENT_END_RE = re.compile(r"(?:^|\s)[-–—|·•]$")
+_SEGMENT_START_RE = re.compile(r"[-–—|·•](?:\s|$)")
+_SEGMENT_MARKS = frozenset("-–—•·")
+# a header-line amount beside one of these (or under a heading with one) is a perk or a company figure
+_NOT_HEADER_PAY_RE = re.compile(
+    r"\b(?:bonus\w*|sign-?on|signing|relocation|budget|allowance|award|prize|grant|fee|contract|value|perks?"
+    r"|benefits?|founded)\b", re.IGNORECASE)
 _SPONSOR_RE = re.compile(r"\b(?:sponsor\w*|visas?)\b", re.IGNORECASE)
 
 
@@ -295,16 +304,60 @@ def _facts(text: str, evidence: str, s0: int, s1: int, period: Optional[str], se
     }
 
 
+def _is_bare_pay(text: str, ms: int) -> bool:
+    """A currency symbol or ISO code directly before an amount is pay with no pay
+    word when the amount is a whole segment of a header-like line ("... - Full
+    time - GBP 40,000 - 45,000"). Not pay: a figure inside a sentence ("Signing
+    bonus £5,000"), a lone amount line, a small one ("$20"), a scaled one
+    ("$5M") or a number-first match."""
+    if text[ms:ms + 1].isdigit():
+        return False
+    s0, s1 = _amount_bounds(text, ms)
+    bounds = parse_amount(text[s0:s1])
+    if bounds is None or bounds[1] < _BARE_PAY_MIN or text[s1:s1 + 1].isalpha():
+        return False
+    token = re.search(r"\d[\d,.]*", text[s0:s1])
+    if token and token.group().isdigit() and 1900 <= int(token.group()) <= 2100:
+        return False  # a year, not a salary
+    line_start = text.rfind("\n", 0, s0) + 1
+    line_end = text.find("\n", s1)
+    before = text[line_start:s0].rstrip()
+    after = text[s1:len(text) if line_end == -1 else line_end].lstrip()
+    if not (before or after) or before in _SEGMENT_MARKS or text[line_start:s0].lstrip().startswith("|"):
+        return False  # no header around the amount: a lone line, a bullet or a table row
+    above = text[text.rfind("\n", 0, max(line_start - 1, 0)) + 1:line_start]  # a heading like "Perks:"
+    if _NOT_HEADER_PAY_RE.search(above + text[line_start:s0] + after):
+        return False
+    return (not before or _SEGMENT_END_RE.search(before) is not None) and (
+        not after or _SEGMENT_START_RE.match(after) is not None)
+
+
 def pay_facts(description: str) -> Optional[dict[str, Any]]:
     """The advertised pay in the ad, or None. ``evidence`` is the sentence/line
     (whitespace-collapsed, <=160 chars). An amount counts only with a pay word in
-    its own sentence or line (<=120 chars each side), or as an INR pay unit (LPA,
-    lakh, ``₹12L``); an amount beside revenue / funding / billion words never
+    its own sentence or line (<=120 chars each side), as an INR pay unit (LPA,
+    lakh, ``₹12L``), or as a symbol / ISO code straight before an amount of 1,000
+    or more ("GBP 40,000 - 45,000"); an amount beside revenue / funding / billion words never
     counts. Next to it, as stated and never annualised: ``amount`` (the matched
     text), ``amount_span`` ([start, end) offsets in ``description``), ``min`` /
     ``max`` (ints, or None when not a plain number), ``period`` (annual / monthly /
     hourly / None), ``currency`` (ISO code or ``"UNKNOWN"``) and ``equity``."""
     text = (description or "")[:_PAY_SCAN_CAP]
+    found = _scan_money(text, bare=False)
+    if found:
+        return found
+    # an INR pay unit on its own (no currency symbol the money regex saw)
+    u = _PAY_UNIT_RE.search(text)
+    if u:
+        flat = " ".join(text[max(0, u.start() - 60):u.end() + 60].split())[:_EVIDENCE_MAX]
+        return _facts(text, flat, u.start(), u.end(), "annual", flat)
+    # last, so a stated salary always beats a header-line amount
+    return _scan_money(text, bare=True)
+
+
+def _scan_money(text: str, bare: bool) -> Optional[dict[str, Any]]:
+    """The first money match that is pay: with a pay word / unit, or (``bare``) a
+    header-line amount; None when there is none."""
     for i, m in enumerate(_MONEY_RE.finditer(text)):
         if i >= _PAY_MATCH_CAP:
             break
@@ -324,7 +377,10 @@ def pay_facts(description: str) -> Optional[dict[str, Any]]:
         if _NOT_PAY_RE.search(near):
             continue
         unit = _PAY_UNIT_RE.search(sentence)
-        if not (unit or _PAY_WORD_RE.search(sentence)):
+        if bare:
+            if not _is_bare_pay(text, ms):
+                continue
+        elif not (unit or _PAY_WORD_RE.search(sentence)):
             continue
         anchor = unit.start() if unit and not _PAY_WORD_RE.search(sentence) else pos
         flat = " ".join(sentence.split())
@@ -339,11 +395,6 @@ def pay_facts(description: str) -> Optional[dict[str, Any]]:
         stop = _SENTENCE_END_RE.search(after)
         period = compensation_period(after[:stop.start()] if stop else after, nearest=True)
         return _facts(text, flat, s0, s1, period or compensation_period(sentence), sentence)
-    # an INR pay unit on its own (no currency symbol the money regex saw)
-    u = _PAY_UNIT_RE.search(text)
-    if u:
-        flat = " ".join(text[max(0, u.start() - 60):u.end() + 60].split())[:_EVIDENCE_MAX]
-        return _facts(text, flat, u.start(), u.end(), "annual", flat)
     return None
 
 
