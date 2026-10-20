@@ -16,16 +16,6 @@ class LivezResponse(BaseModel):
     status: str
 
 
-class ReadyzChecks(BaseModel):
-    db: str
-    redis: str
-
-
-class ReadyzResponse(BaseModel):
-    status: str
-    checks: ReadyzChecks
-
-
 class StatusResponse(BaseModel):
     profile_exists: bool
 
