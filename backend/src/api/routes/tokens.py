@@ -13,6 +13,7 @@ from src.api.auth_deps import CurrentUser, email_verification_satisfied, require
 from src.core import settings
 from src.core.settings import DB_PATH
 from src.services.auth import api_tokens
+from src.services.auth.security_notices import send_security_notice
 from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(prefix="/tokens", tags=["tokens"])
@@ -73,6 +74,8 @@ async def create_token(
             status_code=409,
             detail=f"You already have {cap} active tokens. Revoke one to create another.",
         )
+    # Tell the owner a credential for an assistant now exists (never its value).
+    await send_security_notice(str(DB_PATH), user.id, "token_created", token_name=made["name"])
     return TokenCreated(**made)
 
 
