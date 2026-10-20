@@ -178,7 +178,8 @@ def test_read_seeds(tmp_path: Path):
 
 
 def test_company_rows_for_india_boards():
-    rows = [r for r in hk.load_companies(KIT_DIR / "companies.json") if r["ats"] in ("keka", "zohorecruit")]
+    rows = [r for r in hk.load_companies(KIT_DIR / "companies.json")
+            if r["ats"] in ("keka", "zohorecruit") and r.get("source") != "gulf-research"]  # Gulf rows: test_hunt_kit_gulf
     assert len(rows) > 100
     for r in rows:
         assert r["source"] == "commoncrawl" and r["token"] == r["board"] and r.get("country", "IN") == "IN"

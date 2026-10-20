@@ -1042,4 +1042,6 @@ ASKS_WHATS_NEW_MAX = int(os.getenv("ASKS_WHATS_NEW_MAX", "20"))  # open asks wha
 # install Chromium). One live browser costs ~300 MB of memory, hence the cap.
 BROWSER_AGENT_ENABLED = os.getenv("BROWSER_AGENT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
 BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
+# Live sign-in views (Settings -> Job sites) have their own cap, apart from the assistants' browsers.
+BROWSER_AGENT_MAX_LIVE = int(os.getenv("BROWSER_AGENT_MAX_LIVE", "2"))
 BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))

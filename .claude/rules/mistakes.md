@@ -50,6 +50,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Store only the token a PUBLIC careers page hands out today, never an archived one with more
   jobs: it may be an internal or referral site (2026-10-20: eClerx 559 archived vs 17 public).
 - After editing `companies.json`, run every test that reads it (`grep -l companies.json tests/`).
+- Rate limits are per SERVICE, not per subdomain: Workable and Recruitee 429 the whole ATS.
+  Worker briefs say "stop that ATS on the first 429", never "per host" (2026-10-20: 90 refusals).
 - A new doc's kind is LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED only; run
   `python scripts/doc_sync_check.py` before pushing a docs PR (2026-10-20: `SNAPSHOT` blocked #935).
 
