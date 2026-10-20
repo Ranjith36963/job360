@@ -551,6 +551,18 @@ async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) 
     return host if isinstance(host, str) and host else None
 
 
+async def latest_form_url(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
+    """The form PAGE the newest ``form_filled`` / ``form_swept`` that carries one was recorded on
+    (stored cleaned by ``settings_rules.clean_form_url``), or ``None`` (none recorded, or only
+    events from before slice 7). check_submit's ``form_page_mismatch`` and the approval fingerprint
+    read it here, and only here."""
+    for ev in await _events(db, user_id, application_id, ("form_filled", "form_swept")):
+        url = ev["payload"].get("form_url")
+        if isinstance(url, str) and url:
+            return url
+    return None
+
+
 async def gate_facts(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool,
     other_session_hold: Optional[tuple[str, str, str]] = None,
@@ -595,6 +607,7 @@ async def gate_facts(
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=form_host,
+        form_url=await latest_form_url(db, user_id, application_id),
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
@@ -711,6 +724,7 @@ async def submit_verdict(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
             form_check_missing=False, form_pages_incomplete=False,
             form_host=settings_rules.screen_form_url(form_url),
+            form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
             guessed_unverified=False,
         )
@@ -747,7 +761,9 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
-    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers"}),
+    "form_swept": frozenset({
+        "fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers", "form_url",
+    }),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
@@ -1002,6 +1018,13 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 problems.append(f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
         if "unreadable" in payload:
             _unreadable_list(payload["unreadable"], problems)
+        if "form_url" in payload:
+            url = payload["form_url"]
+            if settings_rules.clean_form_url(url if isinstance(url, str) else None) is None:
+                problems.append(
+                    "form_url must be one plain http(s) address of the form page: no user@ part, "
+                    "no % escapes or backslashes before the path, and an ASCII host name"
+                )
         _pages_problems(payload, problems)
     elif event_type == "form_checked":
         problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
@@ -1117,6 +1140,9 @@ async def _check_kit_event(
                 "or backslashes before the path, and an ASCII host name",
             )
         stored: dict[str, Any] = {"host": host, "fields_count": count, "by": actor}
+        page = settings_rules.clean_form_url(payload["form_url"])  # slice 7: the page, never a token
+        if page:
+            stored["form_url"] = page
         if "answers" in payload:
             stored["answers"] = clean_answers(payload["answers"])
         if "fields_skipped" in payload:
@@ -1151,6 +1177,12 @@ async def _check_kit_event(
             swept["answers"] = clean_answers(payload["answers"])
         if paged:
             swept["page"], swept["pages_total"] = payload["page"], payload["pages_total"]
+        if "form_url" in payload:  # slice 7: the page swept, cleaned (never a token or session id)
+            raw_url = payload["form_url"]
+            swept_page = settings_rules.clean_form_url(raw_url if isinstance(raw_url, str) else None)
+            if swept_page is None:
+                raise SpineError(422, "form_swept form_url must be one plain http(s) address of the form page")
+            swept["form_url"] = swept_page
         if "notes" in payload:
             raw_notes = payload["notes"]
             if not isinstance(raw_notes, str):

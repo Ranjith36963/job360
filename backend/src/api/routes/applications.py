@@ -2764,8 +2764,10 @@ async def submit_check(
     (``unknown_site``). The address is read strictly (``screen_form_url``): a
     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
-    than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
-    a stored yes clears neither. An unconfirmed email answers ``ask`` /
+    than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
+    host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
+    (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
+    clears none of them. An unconfirmed email answers ``ask`` /
     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
     ``get_application_kit``; 422 when malformed): another session's live kit hold
     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only

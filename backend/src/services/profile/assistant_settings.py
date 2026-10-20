@@ -60,6 +60,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
 from src.repositories import pgsync
+from src.services.applications.job_checks import _JOB_ID_KEYS, canonical_url
 from src.services.profile import edits as profile_edits
 from src.services.profile.models import (
     VALID_DAILY_CHECK_VALUES,
@@ -707,6 +708,10 @@ class SubmitFacts:
     # The host stored on the NEWEST ``form_filled`` (``None`` = none / unreadable).
     # check_submit's ``form_url`` must name the same host (``form_host_mismatch``).
     form_host: Optional[str] = None
+    # Gap roadmap slice 7: the :func:`clean_form_url` page stored on the newest ``form_filled`` /
+    # ``form_swept`` that carries one (``kit.latest_form_url``; ``None`` = none). check_submit's
+    # ``form_url`` must name the same host + path (``form_page_mismatch``).
+    form_url: Optional[str] = None
     # The account's email is confirmed (or REQUIRE_EMAIL_VERIFICATION is off).
     # ``kit.gate_facts`` always sets it from the caller; ``False`` asks
     # ``email_not_verified`` and a yes never clears it (2026-10-14).
@@ -760,7 +765,8 @@ REASONS: tuple[str, ...] = (
     "weekly_cap_reached", "pace_wait", "outside_hours", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
-    "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified", "held_by_other_session",
+    "form_not_recorded", "form_not_swept", "form_host_mismatch", "form_page_mismatch", "email_not_verified",
+    "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
     "type_first_pending", "below_score_line", "answer_guessed",
 )
@@ -864,6 +870,32 @@ def screen_form_url(raw: Optional[str]) -> Optional[str]:
     return host
 
 
+def clean_form_url(raw: Optional[str]) -> Optional[str]:
+    """The form PAGE address as stored on ``form_filled`` / ``form_swept`` and compared by
+    check_submit (gap roadmap slice 7): ``None`` unless :func:`screen_form_url` reads it, else
+    ``job_checks.canonical_url`` with only the job-id query keys kept (``_JOB_ID_KEYS``) -
+    https + host (``www.`` folded) + path; no fragment, token, ``code=`` or session id. A bare
+    host is read as https."""
+    if screen_form_url(raw) is None:
+        return None
+    text = (raw or "").strip()
+    cleaned = canonical_url(text if _SCHEME_RE.match(text) else f"https://{text}", only_keys=_JOB_ID_KEYS)
+    return cleaned or None
+
+
+def _same_form_page(a: str, b: str) -> bool:
+    """Two :func:`clean_form_url` addresses are the same form when the host matches and one path
+    is the other or extends it by whole segments: a multi-step form (``/apply`` then
+    ``/apply/review``) stays one page, while two jobs on one ATS (``/acme/111/apply`` vs
+    ``/acme/222/apply``) do not."""
+    pa, pb = urlsplit(a), urlsplit(b)
+    if pa.netloc != pb.netloc:
+        return False
+    x, y = pa.path.rstrip("/"), pb.path.rstrip("/")
+    short, long_ = (x, y) if len(x) <= len(y) else (y, x)
+    return long_ == short or long_.startswith(short + "/")
+
+
 def host_kind(host: Optional[str]) -> Literal["brand", "company", "invalid"]:
     """``brand`` when any whole label of ``host`` is an always-ask brand
     (``uk.indeed.com``, ``indeed.co.uk``, ``lnkd.in``); ``company`` for any other
@@ -929,6 +961,10 @@ def may_submit(
         ``unknown_site`` (a yes does NOT clear it)
     5e. ``form_url``'s host is not the host of the newest ``form_filled`` -> ask
         ``form_host_mismatch`` (a yes does NOT clear it)
+    5e2. both ``form_url`` and the stored page (``form_url`` fact) are known and are not the same
+        form (host differs, or neither path extends the other) -> ask ``form_page_mismatch`` (a yes
+        does NOT clear it: the yes was for the page that was filled; either side missing = no
+        stop, so older assistants keep working)
     5b2. the newest CV has save-time checks for numbers or terms not in the profile -> ask
         ``cv_unsupported_claims`` (inside ``_first_ask``, right after the duplicate ask; a yes clears it)
     5c. the fit score vs the user's score line (``line_side``): no line or no fit
@@ -948,7 +984,7 @@ def may_submit(
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
     ``user_approved``. Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
-    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e), ``email_not_verified`` (4d),
+    session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
     ``below_score_line`` (4a4) and ``answer_guessed`` (4e) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
@@ -1080,6 +1116,14 @@ def may_submit(
             "ask", "form_host_mismatch",
             "This address is not the site where the form was filled (form_filled). "
             "Do not submit; check the page, and ask the user.",
+        )
+    current = clean_form_url(site_host)
+    stored = clean_form_url(application.form_url)
+    if current and stored and not _same_form_page(current, stored):
+        return SubmitDecision(
+            "ask", "form_page_mismatch",
+            "This is not the page where the form was filled (form_filled / form_swept). "
+            "Do not submit; go back to that page, or fill and sweep this one, and ask the user.",
         )
     ask = _first_ask(cfg, application, screened, counts, override=override, auto=auto)
     if ask is None:

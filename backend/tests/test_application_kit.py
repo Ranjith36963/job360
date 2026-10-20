@@ -1253,7 +1253,7 @@ async def test_site_account_memory_has_no_room_for_a_password_and_spans_applicat
 
 
 @pytest.mark.asyncio
-async def test_form_filled_stores_the_host_not_the_url(authenticated_async_context, fixture_user_id):
+async def test_form_filled_stores_the_host_and_the_cleaned_page(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
@@ -1266,9 +1266,11 @@ async def test_form_filled_stores_the_host_not_the_url(authenticated_async_conte
             assert (await _event(client, app_id, "form_filled", bad)).status_code == 422, bad
         detail = (await client.get(f"/api/applications/{app_id}")).json()
         stored = [e for e in detail["events"] if e["event_type"] == "form_filled"]
+        # slice 7: the PAGE is stored too, cleaned - the token query and the fragment never are
         assert len(stored) == 1 and stored[0]["payload"] == {
-            "host": "careers.northwind.example", "fields_count": 12, "by": "web"}
-        assert "SECRET-IN-QUERY" not in json.dumps(detail)
+            "host": "careers.northwind.example", "fields_count": 12, "by": "web",
+            "form_url": "https://careers.northwind.example/apply/7"}
+        assert "SECRET-IN-QUERY" not in json.dumps(detail) and "frag" not in json.dumps(stored)
         assert detail["status"] == "considering"
 
 
@@ -1537,7 +1539,7 @@ def test_gate_form_not_swept_follows_form_not_recorded_and_keeps_the_rest_intact
 
 def test_form_swept_payload_keys_are_closed_and_pinned():
     assert kit_service.EVENT_PAYLOAD_KEYS["form_swept"] == frozenset(
-        {"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers"}
+        {"fields_checked", "fixed", "notes", "unreadable", "page", "pages_total", "answers", "form_url"}
     )
     assert "form_swept" in kit_service.KIT_EVENT_TYPES
 
@@ -1778,7 +1780,9 @@ async def test_form_host_mismatch_asks_even_with_yes(authenticated_async_context
         # the NEWEST form_filled names the host
         await _fill_and_sweep(client, app_id, "https://jobs.lever.co/northwind/1")
         assert await _submit_check(client, app_id, GREENHOUSE) == ("ask", "form_host_mismatch")
-        assert await _submit_check(client, app_id, "https://jobs.lever.co/x") == ("submit", "user_approved")
+        assert await _submit_check(client, app_id, "https://jobs.lever.co/northwind/1") == ("submit", "user_approved")
+        # same host, another page (slice 7)
+        assert await _submit_check(client, app_id, "https://jobs.lever.co/x") == ("ask", "form_page_mismatch")
 
 
 @pytest.mark.asyncio
@@ -1964,3 +1968,78 @@ async def test_send_approve_and_decline_refuse_once_applied_or_closed(
         assert (await client.post(f"/api/applications/{app_id}/send/decline")).status_code == 409
         closed = (await client.get(f"/api/applications/{app_id}")).json()
         assert [e["event_type"] for e in closed["events"]][-1] == "rejected"
+
+
+# -- Gap roadmap slice 7: the form PAGE the yes was given for ----------------------------------------------
+
+
+def test_clean_form_url_keeps_scheme_host_path_and_job_id_keys_only():
+    url = "https://WWW.Careers.Northwind.example/apply/7/?token=SECRET&code=abc&sid=s1&gh_jid=55&utm_source=x#frag"
+    assert rules.clean_form_url(url) == "https://careers.northwind.example/apply/7?gh_jid=55"
+    assert rules.clean_form_url("https://jobs.example.com/a;jsessionid=XYZ/b?jobId=9&session=1") == (
+        "https://jobs.example.com/a/b?jobId=9"
+    )
+    assert rules.clean_form_url("boards.greenhouse.io/northwind/jobs/7") == "https://boards.greenhouse.io/northwind/jobs/7"
+    for bad in ("javascript:alert(1)", "javascript://careers.northwind.example/x", "ftp://a.example.com/x", "", None):
+        assert rules.clean_form_url(bad) is None, bad
+    assert "form_page_mismatch" in rules.REASONS
+    assert list(rules.REASONS).index("form_page_mismatch") == list(rules.REASONS).index("form_host_mismatch") + 1
+
+
+def test_gate_form_page_mismatch_asks_and_a_yes_never_clears_it():
+    auto = _cfg(submit_mode="auto_when_sure")
+    filled = {"cv_seen": True, "form_url": "https://careers.northwind.example/apply/7"}
+    # the same page (another token, a fragment, a job-id key) passes exactly as before
+    assert _gate(auto, _facts(**filled)) == ("submit", "auto_when_sure")
+    same = FORM + "?token=other&gh_jid=1#top"
+    assert _gate(auto, _facts(**filled), url=same) == ("submit", "auto_when_sure")
+    # a later step of the SAME form (the path extends the filled one) is the same page
+    assert _gate(auto, _facts(**filled), url=FORM.rstrip("/") + "/review") == ("submit", "auto_when_sure")
+    # another path on the same host, or a page swept on another host: ask, even with the user's yes
+    other_path = "https://careers.northwind.example/apply/8"
+    assert _gate(auto, _facts(**filled), url=other_path) == ("ask", "form_page_mismatch")
+    assert _gate(_cfg(), _facts(approved=True, **filled), url=other_path) == ("ask", "form_page_mismatch")
+    elsewhere = {"cv_seen": True, "form_url": "https://jobs.lever.co/northwind/7"}
+    assert _gate(auto, _facts(**elsewhere)) == ("ask", "form_page_mismatch")
+    # nothing stored (events from before slice 7): no new stop
+    assert _gate(auto, _facts(cv_seen=True, form_url=None), url=other_path) == ("submit", "auto_when_sure")
+    # nothing sent: the old answer, unknown_site
+    assert _gate(auto, _facts(**filled), url="") == ("ask", "unknown_site")
+    # every stop still wins over the new ask
+    assert _gate(auto, _facts(form_swept=False, **filled), url=other_path) == ("stop", "form_not_swept")
+
+
+@pytest.mark.asyncio
+async def test_form_swept_stores_its_cleaned_page_and_check_submit_reads_the_newest(
+    authenticated_async_context, fixture_user_id
+):
+    from src.api.mcp_server import mcp_runtime
+
+    page2 = "https://careers.northwind.example/apply/8"  # another job on the same site
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _yes_without_cv(client, app_id)
+        filled = await _event(client, app_id, "form_filled", {"form_url": FORM + "?code=SECRET#x", "fields_count": 1})
+        assert filled.status_code == 201, filled.text
+        for bad in ("javascript:alert(1)", "https://a@evil.example/x", 7):
+            refused = await _event(client, app_id, "form_swept", {"fields_checked": 1, "fixed": 0, "form_url": bad})
+            assert refused.status_code == 422 and "form_url" in refused.text, bad
+        await _sweep(client, app_id)  # an old agent: no form_url on the sweep, the fill's page stands
+        assert await _submit_check(client, app_id, FORM) == ("submit", "user_approved")
+        assert await _submit_check(client, app_id, page2) == ("ask", "form_page_mismatch")
+        swept = await _event(client, app_id, "form_swept", {
+            "fields_checked": 12, "fixed": 0, "form_url": page2 + "?sessionid=SECRET&jobId=7#y"})
+        assert swept.status_code == 201, swept.text
+        detail = (await client.get(f"/api/applications/{app_id}")).json()
+        newest = [e for e in detail["events"] if e["event_type"] == "form_swept"][-1]
+        assert newest["payload"]["form_url"] == page2 + "?jobId=7"
+        assert "SECRET" not in json.dumps(detail)
+        assert await _submit_check(client, app_id, page2) == ("submit", "user_approved")
+        assert await _submit_check(client, app_id, FORM) == ("ask", "form_page_mismatch")
+        token = await _mint_token(client)
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            for url, want in ((page2, "user_approved"), (FORM, "form_page_mismatch")):
+                got = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": url}))
+                assert got["reason"] == want, (url, got)
