@@ -76,9 +76,17 @@ async def _mcp_get_job(user_id: str, job_id: int) -> dict:
     tool = mcp_server.build_server()._tool_manager.get_tool("get_job")
     mcp_server._current_user.set(mcp_server.CurrentUser(id=user_id, email="x@example.com"))
     try:
-        return await tool.fn(job_id=job_id)
+        out = await tool.fn(job_id=job_id)
     finally:
         mcp_server._current_user.set(None)
+    # Gap-audit #15: over MCP the ad text arrives fenced (the web route stays raw); check the
+    # fence, then compare what is inside it.
+    import re  # noqa: PLC0415
+
+    assert out["_untrusted"] == ["description"], out
+    m = re.fullmatch(r"<<untrusted-text ([0-9a-f]{8})>>\n(.*)\n<<end untrusted-text \1>>", out["description"], re.S)
+    assert m, out["description"]
+    return {**out, "description": m.group(2)}
 
 
 async def _brought_events(application_id: int) -> int:
