@@ -247,3 +247,16 @@ export function grantActive(count: unknown, until: unknown, now: Date = new Date
 export function grantText(count: unknown, until: string): string {
   return `Auto for my next ${String(count)} applications until ${historyWhen(until)}, then back to asking`;
 }
+
+/** One side of the settings' `auto_grant_scope` (gap roadmap slice 30). */
+export type GrantScopeCount = { count: number; hosts: string[]; no_host: number };
+
+/** What a grant covers, in plain words: "2 applications (sites: a.com, b.com)" - "" for none.
+ *  An application with no site yet is named too: the grant can never send it on its own. */
+export function scopeText(scope: GrantScopeCount | null | undefined): string {
+  if (!scope || scope.count <= 0) return "";
+  const apps = `${scope.count} application${scope.count === 1 ? "" : "s"}`;
+  const sites = scope.hosts.length ? ` (sites: ${scope.hosts.join(", ")})` : "";
+  const none = scope.no_host > 0 ? `, ${scope.no_host} with no site yet` : "";
+  return `${apps}${sites}${none}`;
+}

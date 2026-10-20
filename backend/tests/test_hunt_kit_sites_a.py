@@ -1,9 +1,13 @@
 """Offline tests for src/hunt_kit/kit_sites_a.py (fixtures only, no network).
 
 Fixture origins (all shaped like freehire's test data, nothing was fetched live; the hosts are unreachable from the build
-container): Djinni follows djinni_test.go (an ld+json ARRAY of JobPostings); WUZZUF follows testdata/wuzzuf/search_it.json and jobs_it.json; InfoJobs follows infojobs_test.go:20-35 (double-encoded
-__INITIAL_PROPS__); Instaffo follows instaffo.go (its tests are not used: the ld+json
-shape is the schema.org one).
+container): remote.com listing/posting flights follow remotedotcom_test.go:44-76 (jobsData inside other RSC content; the
+posting as a hex-length text row); Djinni follows djinni_test.go (an ld+json ARRAY of JobPostings); WORK180 follows
+testdata/work180_jobs_sitemap_au.xml and work180_detail_au.html (ld+json JobPosting plus the page's RSC "job" record);
+WUZZUF follows testdata/wuzzuf/search_it.json and jobs_it.json; InfoJobs follows infojobs_test.go:20-35 (double-encoded
+__INITIAL_PROPS__); Instaffo and JobiDanmark follow instaffo.go / jobdanmark.go (their tests are not used: the ld+json
+shape is the schema.org one); Deel follows testdata/deel_klarna.html (flight chunks, "$N" description reference); Dover
+follows dover_test.go:13-60.
 """
 from __future__ import annotations
 
@@ -29,6 +33,8 @@ JOB_KEYS = {"title", "company", "url", "location", "posted", "description", "sou
 @pytest.fixture(autouse=True)
 def _no_pause(monkeypatch):
     monkeypatch.setattr(ks, "PAUSE_S", 0)
+    monkeypatch.setattr(ks, "WORK180_PAUSE_S", 0)
+    monkeypatch.setattr(ks, "DOVER_PAUSE_S", 0)
 
 
 def _http(routes):
@@ -58,6 +64,101 @@ def _run(fn, http, queries=("engineer",), countries=("GB",), days=BIG):
     stats: dict = {}
     jobs = fn(list(queries), http, stats, days=days, countries=list(countries))
     return jobs, stats
+
+
+def _push(flight: str) -> str:
+    """A Next.js page whose one flight chunk is ``flight`` (self.__next_f.push([1,"..."]))."""
+    return ('<html><body><script>self.__next_f=self.__next_f||[];self.__next_f.push([0]);</script><script>'
+            f'self.__next_f.push([1,{json.dumps(flight)}])</script></body></html>')
+
+
+def _row(rid: str, body: str) -> str:
+    return "\n" + rid + ":T" + format(len(body.encode()), "x") + "," + body
+
+
+# ------------------------------------------------------------------------------------- remote.com
+RDC_JOBS = {"totalPages": 2, "jobs": [
+    {"status": "published", "slug": "senior-backend-engineer-123", "title": "Senior Backend Engineer",
+     "publishedAt": "2026-10-10T09:00:00Z", "employmentType": "full_time", "seniority": ["senior"],
+     "companyProfile": {"name": "Acme Labs", "slug": "acme-labs"},
+     "workplaceLocation": {"type": "remote", "city": "", "country": None},
+     "hiringLocation": {"type": "location", "includedLocations": [
+         {"type": "country", "value": {"code": "DEU", "name": "Germany"}},
+         {"type": "region", "value": {"code": "europe", "name": "Europe"}}]},
+     "compensation": {"minimum": 1000000, "maximum": 1500000, "frequency": "yearly", "currency": {"code": "USD"}}},
+    {"status": "published", "slug": "office-manager-9", "title": "Office Manager",
+     "companyProfile": {"name": "Beta", "slug": "beta"},
+     "workplaceLocation": {"type": "hybrid", "city": "Lisbon", "country": {"code": "PRT", "name": "Portugal"}}},
+    {"status": "draft", "slug": "x", "title": "Draft Engineer", "companyProfile": {"name": "C", "slug": "c"}},
+    {"status": "published", "slug": "no-company", "title": "Engineer", "companyProfile": {"name": "", "slug": "d"}},
+    {"status": "published", "slug": "tz-engineer", "title": "Platform Engineer", "publishedAt": "2026-10-11T00:00:00Z",
+     "companyProfile": {"name": "Gamma [EMEA]", "slug": "gamma"},
+     "hiringLocation": {"type": "timezone", "timezone": {"name": "Chicago"}}},
+]}
+
+
+def _rdc_list(jobs=RDC_JOBS):
+    return ('2:["$","div",null,{"children":[["$","$L16",null,{"jobsData":' + json.dumps(jobs)
+            + '}],["$","footer",null,{}]]}]')
+
+
+RDC_POSTING = json.dumps({"@context": "https://schema.org", "@type": "JobPosting",
+                          "description": "<p>Build reliable <b>APIs</b>.</p>"})
+
+
+def _rdc_detail(_url=""):
+    return 200, '0:["$","html",null,{}]' + _row("a", '{"@type":"BreadcrumbList","itemListElement":[]}') + _row("13", RDC_POSTING)
+
+
+def test_remotedotcom_happy_path():
+    http = _http({"remote.com/jobs/all?page=": (200, _rdc_list()),
+                  "remote.com/jobs/acme-labs/": _rdc_detail, "remote.com/jobs/gamma/": (404, None)})
+    jobs, stats = _run(ks.fetch_remotedotcom, http, countries=("GB",))
+    _check(jobs, "remotedotcom")
+    by = {j["title"]: j for j in jobs}
+    be = by["Senior Backend Engineer"]
+    assert be["url"] == "https://remote.com/jobs/acme-labs/senior-backend-engineer-123"
+    assert be["company"] == "Acme Labs" and be["location"] == "Germany, Europe" and be["remote"] is True
+    assert be["posted"] == "2026-10-10" and "Build reliable" in be["description"]
+    assert be["extra"]["employment_type"] == "full_time" and "title_only" not in be["extra"]
+    assert by["Platform Engineer"]["location"] == "Chicago timezone"  # the zone is a label, not a city
+    assert by["Platform Engineer"]["extra"].get("title_only") is True  # its detail answered 404
+    assert "Office Manager" not in by and "Draft Engineer" not in by  # query filter, status filter
+    assert all(c["headers"].get("RSC") == "1" and c["as_json"] is False for c in http.calls)
+    assert stats["tried"] == len(http.calls)
+
+
+def test_remotedotcom_runs_for_every_country_and_stops_on_last_page():
+    http = _http({"remote.com/jobs/all?page=": (200, _rdc_list())})
+    jobs, _ = _run(ks.fetch_remotedotcom, http, countries=())
+    assert jobs and len([c for c in http.calls if "all?page=" in c["url"]]) == 2  # totalPages 2
+
+
+def test_remotedotcom_hybrid_location_and_empty_and_non200():
+    jobs, _ = _run(ks.fetch_remotedotcom, _http({"all?page=": (200, _rdc_list())}), queries=("office manager",))
+    assert jobs[0]["location"] == "Lisbon, Portugal" and jobs[0]["remote"] is None
+    empty = _http({"all?page=": (200, _rdc_list({"totalPages": 1, "jobs": []}))})
+    assert _run(ks.fetch_remotedotcom, empty)[0] == [] and len(empty.calls) == 1
+    refused = _http({"all?page=": (403, None)})
+    assert _run(ks.fetch_remotedotcom, refused)[0] == [] and len(refused.calls) == 1  # first non-200 ends the run
+
+
+@pytest.mark.parametrize("body", [None, "", "garbage", '"jobsData":{"jobs":[{"slug":', '"jobsData":[1,2]', 5])
+def test_remotedotcom_garbage_never_raises(body):
+    jobs, _ = _run(ks.fetch_remotedotcom, _http({"all?page=": (200, body)}))
+    assert jobs == []
+
+
+def test_remotedotcom_http_raising_is_swallowed():
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    assert _run(ks.fetch_remotedotcom, boom)[0] == []
+
+
+def test_flight_text_row_is_cut_by_byte_length():
+    body = '{"description":"café, with a comma"}'
+    rows = ks._flight_rows('0:x' + _row("a", body) + _row("1f", "second"))
+    assert rows == {"a": body, "1f": "second"}
 
 
 # ------------------------------------------------------------------------------------------ Djinni
@@ -106,6 +207,79 @@ def test_djinni_urls_are_pinned_to_djinni_co():
                  "hiringOrganization": {"name": "Acme"}} for i, u in enumerate(bad, 1)]
     page = '<script type="application/ld+json">' + json.dumps(postings) + "</script>"
     assert _run(ks.fetch_djinni, _http({"page=": (200, page)}))[0] == []
+
+
+# ----------------------------------------------------------------------------------------- WORK180
+W180_SITEMAP = """<?xml version="1.0"?><urlset>
+<url><loc>https://work180.com/en-au/search/advertising-media-and-publishing</loc></url>
+<url><loc>https://work180.com/en-au/for-women/employer/queensland-fire-department/job/21552/auxiliary-firefighter---boulia</loc></url>
+<url><loc>https://work180.com/en-au/for-women/employer/transgrid/job/1083968/manager-business-improvement</loc></url>
+<url><loc>https://work180.com/en-gb/for-women/employer/other/job/5/engineer</loc></url>
+<url><loc>http://work180.com/en-au/for-women/employer/transgrid/job/77/engineer</loc></url>
+</urlset>"""
+
+
+def _w180_page(pid="1083968", expired=None, link="https://careers.transgrid.com.au/job/1368929566/", atype="EXTERNAL"):
+    ld = {"@context": "https://schema.org/", "@type": "JobPosting", "identifier": {"@type": "PropertyValue", "name": "Transgrid", "value": pid},
+          "title": "Manager, Business Improvement", "description": "<p>Lead <b>infrastructure</b> projects.</p>",
+          "datePosted": "2026-10-16T01:30:18.629954+00:00", "hiringOrganization": {"@type": "Organization", "name": "Transgrid"},
+          "jobLocation": [{"@type": "Place", "address": {"name": "Sydney, NSW, Australia", "addressLocality": "Sydney"}}],
+          "employmentType": ["FULL_TIME"]}
+    rec = {"locale": "en-au", "job": {"id": pid, "expired": expired, "applicationType": atype, "applicationLink": link,
+                                      "employer": {"slug": "transgrid", "name": "Transgrid"}}}
+    flight = "2f:" + json.dumps(["$", "$L35", None, rec], separators=(",", ":")) + "\n"
+    return (f'<html><head><script type="application/ld+json">{json.dumps(ld)}</script></head><body>'
+            f'<script>self.__next_f.push([1,{json.dumps(flight)}])</script></body></html>')
+
+
+def test_work180_happy_path_keeps_board_url_and_gates_by_country():
+    http = _http({"jobs-sitemap.xml": (200, W180_SITEMAP), "/job/1083968/": (200, _w180_page())})
+    jobs, _ = _run(ks.fetch_work180, http, queries=("manager",), countries=("AU",))
+    _check(jobs, "work180")
+    j = jobs[0]
+    assert j["company"] == "Transgrid" and j["url"].startswith("https://work180.com/en-au/")
+    assert j["extra"]["apply_url"] == "https://careers.transgrid.com.au/job/1368929566/"
+    assert j["extra"]["listed_on"].startswith("https://work180.com/en-au/") and j["location"] == "Sydney, NSW, Australia"
+    assert j["posted"] == "2026-10-16" and "infrastructure" in j["description"]
+    assert [c["url"] for c in http.calls][0] == "https://work180.com/en-au/jobs-sitemap.xml"
+    assert len(http.calls) == 2  # sitemap + the one posting whose slug matched; the other locale was never asked for
+    assert _run(ks.fetch_work180, _http({}), countries=("FR", "DE"))[0] == [] and True
+
+
+def test_work180_no_request_for_wrong_or_empty_countries():
+    for cs in ((), ("FR",), ("DE", "IN")):
+        http = _http({"jobs-sitemap.xml": (200, W180_SITEMAP)})
+        assert _run(ks.fetch_work180, http, countries=cs)[0] == [] and http.calls == []
+
+
+def test_work180_star_reads_all_three_regions_and_nz_shares_the_au_site():
+    http = _http({"jobs-sitemap.xml": (200, "<urlset></urlset>")})
+    _run(ks.fetch_work180, http, countries=("*",))
+    assert sorted(c["url"] for c in http.calls) == [f"https://work180.com/{loc}/jobs-sitemap.xml" for loc in ("en-au", "en-gb", "en-us")]
+    nz = _http({"jobs-sitemap.xml": (200, "<urlset></urlset>")})
+    _run(ks.fetch_work180, nz, countries=("NZ", "AU"))
+    assert len(nz.calls) == 1
+
+
+def test_work180_expired_wrong_id_and_email_application_and_failures():
+    sm = (200, W180_SITEMAP)
+    assert _run(ks.fetch_work180, _http({"jobs-sitemap.xml": sm, "/job/1083968/": (200, _w180_page(expired="2026-10-01"))}),
+                queries=("manager",), countries=("AU",))[0] == []
+    assert _run(ks.fetch_work180, _http({"jobs-sitemap.xml": sm, "/job/1083968/": (200, _w180_page(pid="999"))}),
+                queries=("manager",), countries=("AU",))[0] == []
+    mail = _run(ks.fetch_work180, _http({"jobs-sitemap.xml": sm, "/job/1083968/": (200, _w180_page(atype="EMAIL"))}),
+                queries=("manager",), countries=("AU",))[0]
+    assert mail[0]["url"].startswith("https://work180.com/en-au/for-women/employer/transgrid/job/1083968")
+    refused = _http({"jobs-sitemap.xml": (403, None)})
+    assert _run(ks.fetch_work180, refused, countries=("AU",))[0] == [] and len(refused.calls) == 1
+    first_refusal = _http({"jobs-sitemap.xml": sm, "/job/": (429, None)})
+    assert _run(ks.fetch_work180, first_refusal, queries=("engineer", "manager", "firefighter"), countries=("AU",))[0] == []
+    assert len(first_refusal.calls) == 2  # sitemap + the first posting page; the 429 ended the run
+
+
+@pytest.mark.parametrize("body", [None, "", "garbage", "<loc>https://work180.com/x</loc>", 3])
+def test_work180_garbage_never_raises(body):
+    assert _run(ks.fetch_work180, _http({"jobs-sitemap.xml": (200, body), "/job/": (200, body)}), countries=("AU", "GB"))[0] == []
 
 
 # ------------------------------------------------------------------------------------------ WUZZUF
@@ -274,6 +448,142 @@ def test_instaffo_gate_empty_non200_garbage_no_employer():
         assert _run(ks.fetch_instaffo, _http({"sitemap": (200, body)}), countries=("DE",))[0] == []
 
 
+# --------------------------------------------------------------------------------------- JobiDanmark
+JD_PAGE = {"totalPages": 1, "items": [
+    {"title": "Softwareudvikler", "companyName": "Novo A/S", "companyAddress": "Bagsvaerd", "url": "/job/softwareudvikler-1?utm=x",
+     "publishedDate": "07-10-2026"},
+    {"title": "Chauffoer", "companyName": "Bil ApS", "companyAddress": "Aarhus", "url": "/job/chauffoer-2", "publishedDate": "08-10-2026"},
+    {"title": "No employer", "companyName": "", "url": "/job/x"},
+]}
+
+
+def test_jobdanmark_happy_path_post_body_and_detail():
+    detail = _ld_page({"@type": "JobPosting", "description": "<p>Du skal <b>udvikle</b></p>", "datePosted": "2026-10-08"})
+    http = _http({"api/jobsearch/search/1": (200, JD_PAGE), "/job/softwareudvikler-1": (200, detail)})
+    jobs, _ = _run(ks.fetch_jobdanmark, http, queries=("softwareudvikler",), countries=("DK",))
+    _check(jobs, "jobdanmark")
+    j = jobs[0]
+    assert j["url"] == "https://jobdanmark.dk/job/softwareudvikler-1" and j["company"] == "Novo A/S"
+    assert j["location"] == "Bagsvaerd, Denmark" and j["posted"] == "2026-10-08" and "udvikle" in j["description"]
+    post = http.calls[0]
+    assert post["method"] == "POST" and json.loads(post["data"]) == {"jobTypes": [], "filters": [], "locationMode": "Text", "distance": 50}
+    assert len(http.calls) == 2  # totalPages 1: no page 2; the Chauffoer ad does not match and costs no detail
+
+
+def test_jobdanmark_list_date_fallback_gate_empty_non200_garbage():
+    jobs, _ = _run(ks.fetch_jobdanmark, _http({"search/1": (200, JD_PAGE)}), queries=("chauffoer",), countries=("DK",))
+    assert jobs[0]["posted"] == "2026-10-08" and jobs[0]["extra"]["title_only"] is True  # detail 404: list date, no body
+    for cs in ((), ("SE",), ("NO", "GB")):
+        http = _http({"search": (200, JD_PAGE)})
+        assert _run(ks.fetch_jobdanmark, http, countries=cs)[0] == [] and http.calls == []
+    assert _run(ks.fetch_jobdanmark, _http({"search": (200, {"items": []})}), countries=("DK",))[0] == []
+    refused = _http({"search": (429, None)})
+    assert _run(ks.fetch_jobdanmark, refused, countries=("DK",))[0] == [] and len(refused.calls) == 1
+    for body in (None, "x", [], {"items": "x"}, {"items": [1, None, {"url": 3}]}):
+        assert _run(ks.fetch_jobdanmark, _http({"search": (200, body)}), countries=("DK",))[0] == []
+
+
+# ---------------------------------------------------------------------------------------- Deel (ATS)
+def _deel_page(postings=None, desc_ref=True):
+    postings = postings if postings is not None else [
+        {"id": "5d3636f8-0712", "jobId": "j1", "title": "Customer Trust Consultant (Remote - Sweden)",
+         "richtextDescription": "$2" if desc_ref else "<p>inline</p>", "createdAt": "2026-10-05T10:00:00Z",
+         "job": {"jobLocations": [{"location": {"name": "Stockholm"}}, {"location": {"name": "Sweden"}}]}},
+        {"id": "", "title": "no id"},
+    ]
+    flight = ('8:["$","$L1f",null,{"careerPageSettings":{"id":"x","urlSlug":"klarna","preferredOrganizationName":"Klarna"},"jobPostings":'
+              + json.dumps(postings) + "}]" + _row("2", "<p>Resolve [EMEA] <b>issues</b>, fast</p>"))
+    return _push(flight)
+
+
+ROW = {"name": "Klarna", "ats": "deel", "token": "klarna"}
+
+
+def test_deel_happy_path_resolves_description_reference():
+    http = _http({"jobs.deel.com/klarna": (200, _deel_page())})
+    stats: dict = {}
+    jobs = ks.ATS_FETCHERS["deel"](ROW, http, stats)
+    assert len(jobs) == 1 and stats == {"tried": 1, "ok": 1, "jobs": 1}
+    j = jobs[0]
+    assert j["url"] == "https://jobs.deel.com/klarna/job-details/5d3636f8-0712/overview" and j["company"] == "Klarna"
+    assert j["location"] == "Stockholm, Sweden" and j["posted"] == "2026-10-05" and "Resolve [EMEA] issues" in j["description"]
+    assert j["remote"] is True and set(j) == JOB_KEYS and j["source"] == "deel" and j["board"] == "klarna"
+    assert http.calls[0]["url"] == "https://jobs.deel.com/klarna"
+    assert ks.ATS_FETCHERS["deel"](ROW, _http({"klarna": (200, _deel_page(desc_ref=False))}), {})[0]["description"] == "inline"
+
+
+def test_deel_empty_nonexistent_and_garbage():
+    stats: dict = {}
+    assert ks.ATS_FETCHERS["deel"](ROW, _http({"klarna": (200, _deel_page(postings=[]))}), stats) == []
+    assert stats["ok"] == 1  # a valid empty board is a success
+    for resp in ((404, None), (403, None), (200, None), (200, "<html></html>"), (200, 5), (200, _push('"jobPostings":[{"id":'))):
+        s: dict = {}
+        assert ks.ATS_FETCHERS["deel"](ROW, _http({"klarna": resp}), s) == [] and s.get("ok", 0) == 0
+    s = {}
+    assert ks.ATS_FETCHERS["deel"]({"name": "x", "token": "../etc"}, _http({}), s) == [] and s.get("tried") == 1
+
+
+# --------------------------------------------------------------------------------------- Dover (ATS)
+DOVER_SLUG = {"id": "72c2afbf-36e4-4eec-8d78-5d2600498018", "slug": "qompyl", "name": "Qompyl"}
+DOVER_JOB = {"id": "f9fd123e-e7ff-4bcc-a16a-bb8c47e591b5", "title": "Cloud Infra Engineer", "locations": [], "workplace_type": "REMOTE",
+             "is_published": True, "is_sample": False}
+DOVER_SAMPLE = {**DOVER_JOB, "id": "sample-1", "title": "Sample Job", "is_sample": True}
+DOVER_UNPUB = {**DOVER_JOB, "id": "unpub-1", "title": "Unpublished Job", "is_published": False}
+DOVER_ROW = {"name": "Qompyl", "ats": "dover", "token": "qompyl"}
+
+
+def _dover_detail(**kw):
+    d = {"id": DOVER_JOB["id"], "title": "Cloud Infra Engineer", "user_provided_description": "<p>Do <b>things</b></p>",
+         "locations": [{"location_type": "REMOTE", "location_option": {"display_name": "Germany", "location_type": "COUNTRY", "country": "DE"}}],
+         "workplace_type": "REMOTE", "active": True, "is_private": False, "visa_support": True,
+         "compensation": {"offers_equity": True, "employment_type": "FULL_TIME"}}
+    d.update(kw)
+    return 200, d
+
+
+def _dover_http(listing=None, detail=None):
+    return _http({"careers-page-slug/qompyl": (200, DOVER_SLUG),
+                  "careers-page/72c2afbf-36e4-4eec-8d78-5d2600498018/jobs": (200, listing or {"next": None, "results": [DOVER_JOB, DOVER_SAMPLE, DOVER_UNPUB]}),
+                  "inbound/application-portal-job/": detail or _dover_detail()})
+
+
+def test_dover_happy_path_resolves_lists_and_hydrates():
+    http = _dover_http()
+    stats: dict = {}
+    jobs = ks.ATS_FETCHERS["dover"](DOVER_ROW, http, stats)
+    assert len(jobs) == 1 and stats == {"tried": 1, "ok": 1, "jobs": 1}  # sample and unpublished never reach detail
+    j = jobs[0]
+    assert j["url"] == "https://app.dover.com/apply/qompyl/f9fd123e-e7ff-4bcc-a16a-bb8c47e591b5" and j["company"] == "Qompyl"
+    assert j["location"] == "Germany" and j["remote"] is True and set(j) == JOB_KEYS
+    assert "Do things" in j["description"] and "offers equity" in j["description"] and "sponsors a work visa" in j["description"]
+    assert [c["url"].split("/api/v1/")[1].split("/")[0] for c in http.calls] == ["careers-page-slug", "careers-page", "inbound"]
+
+
+def test_dover_inactive_private_title_gate_next_url_and_failures():
+    assert ks.ATS_FETCHERS["dover"](DOVER_ROW, _dover_http(detail=_dover_detail(active=False)), {}) == []
+    assert ks.ATS_FETCHERS["dover"](DOVER_ROW, _dover_http(detail=_dover_detail(is_private=True)), {}) == []
+    http = _dover_http()
+    jobs = ks.ATS_FETCHERS["dover"]({**DOVER_ROW, "title_ok": lambda t: False}, http, {})
+    assert len(jobs) == 1 and jobs[0]["description"] == "" and not any("inbound" in c["url"] for c in http.calls)
+    nxt = _dover_http(listing={"next": "https://evil.example/x", "results": [DOVER_JOB]})
+    assert len(ks.ATS_FETCHERS["dover"](DOVER_ROW, nxt, {})) == 1
+    assert not any("evil.example" in c["url"] for c in nxt.calls)
+    s: dict = {}
+    assert ks.ATS_FETCHERS["dover"](DOVER_ROW, _dover_http(listing={"next": None, "results": []}), s) == [] and s["ok"] == 1
+    for http in (_http({}), _http({"careers-page-slug": (404, None)}), _http({"careers-page-slug": (200, {"id": ""})}),
+                 _http({"careers-page-slug": (200, DOVER_SLUG), "jobs": (500, None)}),
+                 _http({"careers-page-slug": (200, DOVER_SLUG), "jobs": (200, {"results": "x"})}),
+                 _http({"careers-page-slug": (200, "garbage")})):
+        s = {}
+        assert ks.ATS_FETCHERS["dover"](DOVER_ROW, http, s) == [] and s.get("ok", 0) == 0
+
+
+def test_dover_detail_failure_keeps_listing_fields():
+    http = _dover_http(detail=(500, None))
+    jobs = ks.ATS_FETCHERS["dover"](DOVER_ROW, http, {})
+    assert len(jobs) == 1 and jobs[0]["description"] == "" and jobs[0]["remote"] is True
+
+
 # ------------------------------------------------------------------------------------------ countries
 def test_wanted_puts_the_users_countries_first_then_the_rest_for_star():
     assert ks._wanted(["SA", "GB", "*"], "EG", "SA", "AE") == ["SA", "EG", "AE"]
@@ -283,7 +593,8 @@ def test_wanted_puts_the_users_countries_first_then_the_rest_for_star():
 
 # ------------------------------------------------------------------------------------------ registry
 def test_registries_and_every_feed_survives_total_garbage():
-    assert set(ks.FEEDS) == {"djinni", "wuzzuf", "infojobs", "instaffo"}
+    assert set(ks.FEEDS) == {"remotedotcom", "djinni", "work180", "wuzzuf", "infojobs", "instaffo", "jobdanmark"}
+    assert set(ks.ATS_FETCHERS) == {"deel", "dover"}
     junk = _http({"": (200, {"data": [None, 1], "items": 3, "offers": "x"})})
     for fn in ks.FEEDS.values():
         jobs, stats = _run(fn, junk, countries=("*",))
@@ -299,20 +610,34 @@ def _core():
     return hk
 
 
-def test_every_feed_is_registered_in_the_core():
+def test_every_feed_and_board_type_is_registered_in_the_core():
     hk = _core()
     assert set(ks.FEEDS) <= set(hk.FEED_SOURCES) and "kit_sites_a" in hk.FEED_MODULES
     assert set(ks.FEEDS) <= set(hk.select_sources("default"))
     assert set(ks.FEEDS) <= set(hk._merged("FEEDS", hk.FEED_MODULES))
+    assert set(ks.ATS_FETCHERS) <= set(hk.BOARD_SOURCES) and "kit_sites_a" in hk.ATS_MODULES
+    assert set(ks.ATS_FETCHERS) <= set(hk._merged("ATS_FETCHERS", hk.ATS_MODULES))
     hosts = dict(hk._FEED_HOSTS)
     for host, feed in (("djinni.co", "djinni"), ("www.wuzzuf.net", "wuzzuf"), ("www.infojobs.net", "infojobs"),
-                       ("jobs.instaffo.com", "instaffo")):
+                       ("jobs.instaffo.com", "instaffo"), ("jobdanmark.dk", "jobdanmark"),
+                       ("remote.com", "remotedotcom"), ("work180.com", "work180")):
         assert hosts[feed].search(host), host
         assert hk.board_from_job_url(f"https://{host}/jobs/1")["kind"] != "ats"
     assert not any(rx.search("careers.globex.example") for _, rx in hk._FEED_HOSTS)
 
 
-# ------------------------------------------------------------------------- review findings (pinned hosts, once, paging)
+def test_deel_and_dover_links_resolve_to_a_board_token():
+    board = _core().board_from_job_url
+    deel = board("https://jobs.deel.com/klarna/job-details/5d3636f8-0712/overview")
+    assert (deel["kind"], deel["ats"], deel["token"]) == ("ats", "deel", "klarna")
+    assert board("https://jobs.deel.com/")["token"] == ""
+    for url in ("https://app.dover.com/jobs/qompyl", "https://app.dover.com/apply/Qompyl/f9fd123e-e7ff"):
+        dover = board(url)
+        assert (dover["kind"], dover["ats"], dover["token"]) == ("ats", "dover", "qompyl")
+    assert board("https://app.dover.com/")["token"] == "" and board("https://app.dover.com/jobs/")["token"] == ""
+
+
+# ------------------------------------------------------------------------- review findings (pinned hosts, once, pacing, paging)
 def _all_urls(http):
     return [c["url"] for c in http.calls]
 
@@ -348,16 +673,150 @@ def test_infojobs_pins_host_to_scheme_relative_www():
     assert all(u.startswith("https://www.infojobs.net/") for u in _all_urls(http))
 
 
+def test_jobdanmark_accepts_only_site_relative_paths():
+    items = [{"title": "Engineer " + n, "companyName": "Co " + n, "url": u, "publishedDate": "07-10-2026"} for n, u in (
+        ("a", "https://evil.example/job/a"), ("b", "http://jobdanmark.dk/job/b"), ("c", ".evil.net/x"), ("d", "@evil.net/x"),
+        ("e", "//evil.example/job/e"), ("f", "job/f"), ("g", "/job/g?utm=x"))]
+    http = _http({"search/1": (200, {"totalPages": 1, "items": items})})
+    jobs, _ = _run(ks.fetch_jobdanmark, http, countries=("DK",))
+    assert [j["url"] for j in jobs] == ["https://jobdanmark.dk/job/g"]
+    assert all(u.startswith("https://jobdanmark.dk/") for u in _all_urls(http))
+
+
 def test_feed_readers_send_every_request_once():
-    for fn, cs, needle in ((ks.fetch_djinni, ("GB",), "djinni"), (ks.fetch_wuzzuf, ("EG",), "wuzzuf"),
-                           (ks.fetch_infojobs, ("ES",), "infojobs"), (ks.fetch_instaffo, ("DE",), "instaffo")):
+    for fn, cs, needle in ((ks.fetch_remotedotcom, ("GB",), "remote.com"), (ks.fetch_djinni, ("GB",), "djinni"),
+                           (ks.fetch_work180, ("AU",), "work180"), (ks.fetch_wuzzuf, ("EG",), "wuzzuf"),
+                           (ks.fetch_infojobs, ("ES",), "infojobs"), (ks.fetch_instaffo, ("DE",), "instaffo"),
+                           (ks.fetch_jobdanmark, ("DK",), "jobdanmark")):
         http = _http({needle: (429, None)})
         assert _run(fn, http, countries=cs)[0] == []
         assert len(http.calls) == 1 and http.calls[0]["once"] is True, fn.__name__
 
 
 def test_feed_detail_requests_are_once_too():
-    http = _http({"jobs.instaffo.com/sitemap.xml": (200, INSTAFFO_INDEX), "sitemap-jobs-1.xml": (200, INSTAFFO_JOBS),
-                  "java-entwickler": (200, _ld_page(_insta_posting()))})
-    _run(ks.fetch_instaffo, http, queries=("java",), countries=("DE",))
-    assert len(http.calls) > 2 and all(c["once"] is True for c in http.calls)
+    cases = (
+        (ks.fetch_remotedotcom, ("GB",), ("engineer",),
+         {"remote.com/jobs/all?page=": (200, _rdc_list()), "remote.com/jobs/acme-labs/": _rdc_detail}),
+        (ks.fetch_instaffo, ("DE",), ("java",),
+         {"jobs.instaffo.com/sitemap.xml": (200, INSTAFFO_INDEX), "sitemap-jobs-1.xml": (200, INSTAFFO_JOBS),
+          "java-entwickler": (200, _ld_page(_insta_posting()))}),
+        (ks.fetch_work180, ("AU",), ("manager",),
+         {"jobs-sitemap.xml": (200, W180_SITEMAP), "/job/1083968/": (200, _w180_page())}),
+        (ks.fetch_jobdanmark, ("DK",), ("softwareudvikler",),
+         {"api/jobsearch/search/1": (200, JD_PAGE),
+          "/job/softwareudvikler-1": (200, _ld_page({"@type": "JobPosting", "description": "<p>x</p>"}))}),
+    )
+    for fn, cs, qs, routes in cases:
+        http = _http(routes)
+        jobs, _ = _run(fn, http, queries=qs, countries=cs)
+        assert jobs and len(http.calls) >= 2, fn.__name__  # a detail request really happened
+        assert all(c["once"] is True for c in http.calls), fn.__name__
+
+
+def test_flight_rows_hostile_lengths_stay_linear_and_never_overlap():
+    assert ks._flight_rows("x0:Tffffff," * 5000) == {}  # a declared length past the buffer is skipped, not copied
+    body = _row("b", "inner")
+    outer = ks._flight_rows(_row("a", body))
+    assert outer == {"a": body}  # the nested-looking row sits inside row a's bytes: not a second row
+    many = "".join(f"\nx{i:x}:Tffffff," for i in range(3000))
+    assert ks._flight_rows(many) == {}
+
+
+def test_work180_application_link_must_be_plain_https():
+    entry = {"id": "1083968", "url": "https://work180.com/en-au/for-women/employer/transgrid/job/1083968/x", "slug": "x"}
+    good = "https://careers.transgrid.com.au/job/1368929566/"
+    posted = ks.parse_work180_posting(_w180_page(link=good), entry)
+    assert posted["url"] == entry["url"] and posted["extra"]["apply_url"] == good  # never a foreign-host job url
+    evil = ks.parse_work180_posting(_w180_page(link="https://evil.example/x"), entry)
+    assert evil["url"].startswith("https://work180.com/")
+    for bad in ("http://careers.transgrid.com.au/job/1", "https://work180.com@evil.example/x", "http://user@evil.example/x",
+                "https://user:pw@evil.example/x", "https://evil.example:8443/x", "ftp://evil.example/x", "https://"):
+        assert ks.parse_work180_posting(_w180_page(link=bad), entry)["url"] == entry["url"], bad
+        assert "apply_url" not in ks.parse_work180_posting(_w180_page(link=bad), entry)["extra"], bad
+
+
+def test_remotedotcom_odd_seniority_does_not_drop_the_run():
+    rows = [dict(RDC_JOBS["jobs"][0], slug=f"s-{i}", seniority=v) for i, v in enumerate((3, {}, "senior", ["senior", "", "lead"]))]
+    jobs, _ = ks.parse_remotedotcom_listing(_rdc_list({"totalPages": 1, "jobs": rows}))[0], None
+    seniority = [j["extra"].get("seniority") for j in jobs]
+    assert len(jobs) == 4 and seniority == [None, None, None, ["senior", "lead"]]
+
+
+def test_work180_paces_every_request_including_sitemaps_and_the_second_region(monkeypatch):
+    clock = [100.0]
+    sleeps: list[float] = []
+
+    def pause(s):
+        sleeps.append(s)
+        clock[0] += s
+
+    monkeypatch.setattr(ks, "_pause", pause)
+    monkeypatch.setattr(ks, "_now", lambda: clock[0])
+    monkeypatch.setattr(ks, "WORK180_PAUSE_S", 5.0)
+    sm = lambda loc: (  # noqa: E731
+        f'<urlset><url><loc>https://work180.com/{loc}/for-women/employer/acme/job/7/engineer</loc></url>'
+        f'<url><loc>https://work180.com/{loc}/for-women/employer/acme/job/8/engineer</loc></url></urlset>')
+    stamps: list[float] = []
+
+    def route(url):
+        stamps.append(clock[0])
+        if "sitemap" in url:
+            return 200, sm("en-au" if "en-au" in url else "en-gb")
+        return 404, None
+
+    http = _http({"work180.com": route})
+    _run(ks.fetch_work180, http, countries=("AU", "GB"))
+    assert len(http.calls) == 6  # sitemap, 2 pages, sitemap, 2 pages
+    assert sleeps == [5.0] * 5  # before every request but the very first, sitemaps and the second region's first included
+    assert all(b - a >= 5.0 for a, b in zip(stamps, stamps[1:]))
+
+
+def test_work180_pacing_counts_time_already_elapsed(monkeypatch):
+    clock = [0.0]
+    sleeps: list[float] = []
+
+    def pause(s):
+        sleeps.append(s)
+        clock[0] += s
+
+    monkeypatch.setattr(ks, "_pause", pause)
+    monkeypatch.setattr(ks, "_now", lambda: clock[0])
+    monkeypatch.setattr(ks, "WORK180_PAUSE_S", 5.0)
+
+    def route(url):
+        clock[0] += 3.0  # each request itself takes 3 s
+        return (200, '<urlset><url><loc>https://work180.com/en-au/for-women/employer/a/job/7/engineer</loc></url></urlset>') \
+            if "sitemap" in url else (404, None)
+
+    _run(ks.fetch_work180, _http({"work180.com": route}), countries=("AU",))
+    assert sleeps == [2.0]
+
+
+def test_remotedotcom_filtered_out_page_does_not_end_the_walk():
+    filtered = {"totalPages": 3, "jobs": [{"status": "draft", "slug": "x", "title": "Draft", "companyProfile": {"name": "C", "slug": "c"}}]}
+    assert ks.parse_remotedotcom_listing(_rdc_list(filtered))[0] == [] and ks.parse_remotedotcom_listing(_rdc_list(filtered))[2] == 1
+    pages = {1: filtered, 2: filtered, 3: RDC_JOBS | {"totalPages": 3}}
+    http = _http({"remote.com/jobs/all?page=": lambda url: (200, _rdc_list(pages[int(url.rsplit("=", 1)[1])])),
+                  "remote.com/jobs/acme-labs/": _rdc_detail})
+    jobs, _ = _run(ks.fetch_remotedotcom, http)
+    assert len([c for c in http.calls if "all?page=" in c["url"]]) == 3
+    assert any(j["title"] == "Senior Backend Engineer" for j in jobs)
+    empty = _http({"remote.com/jobs/all?page=": (200, _rdc_list({"totalPages": 3, "jobs": []}))})
+    _run(ks.fetch_remotedotcom, empty)
+    assert len(empty.calls) == 1  # a truly empty page still ends the walk
+
+
+def test_jobdanmark_filtered_out_page_does_not_end_the_walk():
+    bad = {"totalPages": 3, "items": [{"title": "Engineer", "companyName": "", "url": "/job/x"},
+                                      {"title": "Engineer", "companyName": "Evil", "url": "https://evil.example/job/y"}]}
+    good = {"totalPages": 3, "items": [{"title": "Engineer", "companyName": "Novo", "url": "/job/z", "publishedDate": "07-10-2026"}]}
+    items, total, rows = ks.parse_jobdanmark_items(bad)
+    assert items == [] and total == 3 and rows == 2
+    pages = {1: bad, 2: bad, 3: good}
+    http = _http({"api/jobsearch/search/": lambda url: (200, pages[int(url.rsplit("/", 1)[1])])})
+    jobs, _ = _run(ks.fetch_jobdanmark, http, countries=("DK",))
+    assert len([c for c in http.calls if "search/" in c["url"]]) == 3
+    assert [j["url"] for j in jobs] == ["https://jobdanmark.dk/job/z"]
+    empty = _http({"search/": (200, {"totalPages": 3, "items": []})})
+    _run(ks.fetch_jobdanmark, empty, countries=("DK",))
+    assert len(empty.calls) == 1

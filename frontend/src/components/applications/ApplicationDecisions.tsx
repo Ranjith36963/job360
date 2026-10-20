@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { approveSend, clearDuplicate, declineSend, resolveBlocked, setAutofill } from "@/lib/api";
+import { approveSend, clearDuplicate, declineSend, resolveBlocked, setAutofill, submittedBlocked } from "@/lib/api";
 import type { ApplicationControls, DecisionMark } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { formatDate } from "@/lib/format-date";
@@ -28,7 +28,9 @@ function stamp(mark: DecisionMark): string {
  *  - Autofill / Don't autofill - may the assistant type into the form at all.
  *  - Not a duplicate, go ahead - shown only when Job360 flagged a duplicate.
  *  - Your assistant got stuck (S6) - shown at the top while a block is recorded
- *    (CAPTCHA, sign-in...), with who / when; "Mark resolved" clears it.
+ *    (CAPTCHA, sign-in...), with who / when; "Mark resolved" clears it, and
+ *    "I submitted it" also records the receipt (with the pasted confirmation)
+ *    when the person pressed Submit themselves.
  *
  * `newFillWaiting`: the assistant filled the form AFTER the last yes / no (the
  * Ready card is showing), so that old answer is not the current one.
@@ -54,6 +56,8 @@ export function ApplicationDecisions({
   changesSinceApproved?: number;
 }) {
   const [busy, setBusy] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [receiptId, setReceiptId] = useState<number | null>(null);
 
   async function run(action: () => Promise<ApplicationControls>, failure: string) {
     setBusy(true);
@@ -64,6 +68,15 @@ export function ApplicationDecisions({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function submittedByHand() {
+    await run(async () => {
+      const res = await submittedBlocked(applicationId, confirmation.trim());
+      setReceiptId(res.receipt_id);
+      setConfirmation("");
+      return res.controls;
+    }, "Couldn't record that you applied");
   }
 
   const cv = controls.cv ?? null;
@@ -98,16 +111,47 @@ export function ApplicationDecisions({
               {`Sign in once${blocked.page_host ? ` to ${blocked.page_host}` : ""} on Job sites`}
             </Link>
           )}
-          <button
-            type="button"
-            data-testid="blocked-resolve-button"
-            disabled={busy}
-            onClick={() => void run(() => resolveBlocked(applicationId), "Couldn't mark it resolved")}
-            className={`${BTN} self-start`}
-          >
-            Mark resolved
-          </button>
+          <label className={`${NOTE} flex flex-col gap-1`}>
+            Pressed Submit yourself? Paste the confirmation text (optional).
+            <textarea
+              data-testid="blocked-confirmation-text"
+              value={confirmation}
+              maxLength={200}
+              rows={2}
+              disabled={busy}
+              onChange={(e) => setConfirmation(e.target.value)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="blocked-i-submitted"
+              disabled={busy}
+              onClick={() => void submittedByHand()}
+              className={BTN}
+            >
+              I submitted it
+            </button>
+            <button
+              type="button"
+              data-testid="blocked-resolve-button"
+              disabled={busy}
+              onClick={() => void run(() => resolveBlocked(applicationId), "Couldn't mark it resolved")}
+              className={BTN}
+            >
+              Mark resolved
+            </button>
+          </div>
         </div>
+      )}
+      {receiptId !== null && (
+        <p data-testid="blocked-submitted-ok" className={NOTE}>
+          {`Recorded as applied — receipt #${receiptId}. `}
+          <a href="#proof" className="underline underline-offset-2">
+            Add a screenshot of the confirmation page
+          </a>
+        </p>
       )}
       {dupOpen && (
         <div data-testid="duplicate-warning" className="flex flex-col gap-1.5">
