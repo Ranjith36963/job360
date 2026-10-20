@@ -1136,6 +1136,9 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
 
     names = [r.get("name", "") for r in runs]
     still_running = any(r.get("status") != "completed" for r in runs)
+    analyses_running = sorted(str(r.get("name")) for r in runs
+                              if str(r.get("name") or "").startswith("Analyze (")
+                              and r.get("status") != "completed")
     for req in REQUIRED_CHECKS:
         # On a non-main base the reason above already says why this one is absent.
         # Saying it twice, once in a form the author cannot act on, is noise.
@@ -1195,6 +1198,18 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
                 f"FIX: re-run it (`gh run rerun <run-id> --failed`) and re-judge. If it keeps "
                 f"not finishing, the job is too slow or is hanging, and THAT is the bug -- do "
                 f"not raise the timeout to hide it — {url}".rstrip(" -"))
+        elif name == "CodeQL" and concl == "neutral" and analyses_running:
+            # AN EARLY `neutral` IS A WAIT (2026-10-20). Measured on #1041:
+            # `CodeQL` (github-advanced-security) completed neutral at 20:47:15
+            # while `Analyze (python)` was still in_progress and `Analyze
+            # (actions)` finished at 20:47:22; on #1012 the same check run was
+            # later rewritten to success. So neutral posted before every
+            # analysis has finished is "not decided yet", not a refusal. Once
+            # every Analyze job is done, a neutral CodeQL still refuses below.
+            reasons.append(
+                f"required check `{name}` has not finished: it reads neutral while "
+                f"{', '.join(analyses_running)} still run, and it is rewritten when they finish. "
+                f"FIX: wait for it, then re-judge.")
         elif required and concl != "success":
             url = r.get("html_url") or ""
             reasons.append(
@@ -3009,6 +3024,21 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
             for n in REQUIRED_CHECKS]
     _opt.append({"name": "Doc clutter (CURATE gear)", "status": "completed",
                  "conclusion": "skipped"})
+    # An early neutral CodeQL, posted while its Analyze jobs still run, is a WAIT
+    # (#1041, 2026-10-20); after every analysis finished, neutral still refuses.
+    _cq = [{"name": n, "status": "completed", "conclusion": "success"}
+           for n in REQUIRED_CHECKS if n != "CodeQL"]
+    _cq.append({"name": "CodeQL", "status": "completed", "conclusion": "neutral"})
+    _early = judge_check_runs(_cq + [{"name": "Analyze (python)", "status": "in_progress",
+                                      "conclusion": None}], len(_cq) + 1)
+    ok("a neutral CodeQL while an Analyze job still runs is a wait, not a refusal",
+       bool(_early) and all(any(m in r for m in _WAIT_MARKERS) for r in _early)
+       and not any("only `success` counts" in r for r in _early),
+       f"got {_early}", ["judge_check_runs"])
+    _late = judge_check_runs(_cq + [{"name": "Analyze (python)", "status": "completed",
+                                     "conclusion": "success"}], len(_cq) + 1)
+    ok("...but a neutral CodeQL after every analysis finished still refuses",
+       any("only `success` counts" in r for r in _late), f"got {_late}", ["judge_check_runs"])
     ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
        not judge_check_runs(_opt, len(_opt)),
        f"a correctly-skipped optional check blocked the PR: {judge_check_runs(_opt, len(_opt))}",
