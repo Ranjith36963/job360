@@ -31,6 +31,7 @@ Safety:
 from __future__ import annotations
 
 import json
+import secrets
 import socket
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -129,8 +130,10 @@ async def approved_waiting(db: Any, user_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in await cur.fetchall()]
 
 
-def message(rows: list[dict[str, Any]], site: str) -> str:
-    """The text the started session receives. Plain words; Job360's rules, never the user's chat."""
+def message(rows: list[dict[str, Any]], site: str, label: str) -> str:
+    """The text the started session receives. Plain words; Job360's rules, never the user's chat.
+
+    ``label`` is minted per start: two started sessions never share a browser or a kit hold."""
     listing = "\n".join(
         f"- application_id {r['id']}: {r.get('job_title') or 'a job'} at {r.get('job_company') or 'a company'}"
         for r in rows
@@ -139,10 +142,10 @@ def message(rows: list[dict[str, Any]], site: str) -> str:
         f"Job360: the user pressed Send on {site} for {len(rows)} application(s) and wants them submitted now.\n"
         f"{listing}\n\n"
         "For each, ONE at a time: get_recipe(\"apply\") and follow it with this application_id "
-        "(get_application_kit with one session label, fill the form, read every value back). "
+        f"(get_application_kit with session label `{label}`, fill the form, read every value back). "
         "Use your own browser, or Job360's `browser` tool if you have none (it already holds the user's saved "
-        "sign-ins; pass your session label on every browser call). Call check_submit right before the final "
-        "click and submit ONLY when it says `submit` "
+        "sign-ins). Use exactly that session label on get_application_kit, check_submit and every browser "
+        "call. Call check_submit right before the final click and submit ONLY when it says `submit` "
         "(this yes shows as user_approved), then record_application with proof. "
         "A CAPTCHA, a sign-in page or a question you cannot answer: record_event blocked and move on. "
         "Never type a password; never solve a CAPTCHA. "
@@ -217,8 +220,9 @@ async def fire(db: Any, user_id: str, *, site: str, resolve: ResolveFn) -> dict[
                     "detail": "The saved token can no longer be read: save the trigger again."}
         token = str(state.get("token") or "")
     host = screen_url(row["url"]).host
+    label = "send-" + secrets.token_hex(4)  # this start's own label: a second start never shares its browser
     try:
-        status, data = await _post(row["url"], headers_for(host, token), {"text": message(rows, site)}, resolve)
+        status, data = await _post(row["url"], headers_for(host, token), {"text": message(rows, site, label)}, resolve)
     except TriggerError as exc:
         await _remember(db, user_id, now, f"refused: {exc.reason}")
         return {"fired": False, "reason": exc.reason, "detail": exc.detail}

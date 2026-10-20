@@ -229,3 +229,32 @@ async def test_a_list_too_long_for_one_start_is_refused_not_cut(authenticated_as
             out = (await client.post("/api/assistant-trigger/fire")).json()
             assert not mocked.requests   # nothing was sent
         assert out["fired"] is False and out["reason"] == "too_many"
+
+
+@pytest.mark.asyncio
+async def test_each_start_names_its_own_session_label(authenticated_async_context, monkeypatch):
+    """Two starts (Send pressed twice, past the cool-down) get the same jobs: if both sessions picked
+    their own label they could pick the same one and share one browser and one kit hold."""
+    from datetime import timedelta
+
+    from src.services.browser_agent import trigger
+
+    texts: list[str] = []
+
+    def keep(url, **kw):
+        from aioresponses import CallbackResult
+        texts.append(kw["json"]["text"])
+        return CallbackResult(status=200, payload={"type": "routine_fire"})
+
+    start = trigger._now()
+    async with authenticated_async_context() as client:
+        await _bring_approved(client)
+        await client.put("/api/assistant-trigger", json={"url": FIRE, "token": TOKEN})
+        with aioresponses() as mocked:
+            mocked.post(FIRE, callback=keep, repeat=True)
+            for minutes in (0, 2):
+                monkeypatch.setattr(trigger, "_now", lambda m=minutes: start + timedelta(minutes=m))
+                assert (await client.post("/api/assistant-trigger/fire")).json()["fired"] is True
+    labels = [re.search(r"session label `(send-[0-9a-f]+)`", t) for t in texts]
+    assert all(labels), texts
+    assert labels[0].group(1) != labels[1].group(1)

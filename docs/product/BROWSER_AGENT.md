@@ -253,7 +253,9 @@ website calls `POST /api/assistant-trigger/fire` once after Send (or after all o
 assistant with the list of every job whose newest decision is your yes. **One start per click, never one per job**.
 A 60-second cool-down, claimed in the database before the call, means two presses at once start one session. A yes
 given inside that minute is not in the session that just started: the page says so, and **Start now** on the card
-sends every job still waiting on your yes.
+sends every job still waiting on your yes. Each start names its own session label (`send-` and 8 random hex
+characters) for the kit, `check_submit` and every browser call, so a second start never shares the first one's
+browser or kit hold.
 - **Claude routine (recommended, PC off):** make a routine on claude.ai/code/routines with the Job360 connector and
   the instructions the card gives you; add an **API trigger**, copy its URL and token into the card. Job360 calls
   `POST https://api.anthropic.com/v1/claude_code/routines/<trig_id>/fire` (`anthropic-version: 2023-06-01`,
