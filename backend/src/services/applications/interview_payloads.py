@@ -1,6 +1,7 @@
 """Feedback loop slice 4 (interview side): the checked payloads of the three new
 note events (``interview_session``, ``process_friction``, ``assessment``), the
-optional ``offer`` figures and the ``silence_confirmed`` note.
+optional ``offer`` figures and the ``silence_confirmed`` note; plus the optional
+interview details the web StatusMenu form sends (round/link/duration/location).
 
 Job360 stores and counts; the assistant reads transcripts, judges and tags. This
 module only VALIDATES. Wired in the record_event ROUTE (never mcp_server.py), so
@@ -15,6 +16,7 @@ import math
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urlsplit
 
 from src.services.applications import event_examples
 from src.services.applications.spine import SpineError
@@ -33,6 +35,12 @@ INPUT_SOURCES = ("transcript", "recall")  # debrief.md:38, :54
 GAP_STATUSES = ("gap", "solid", "strong")  # debrief.md:91
 SIGNALS = ("scope_ambiguity", "defensive_closure", "evaluator_gap", "process_signals", "protected_grounds")
 OFFER_PERIODS = ("year", "month", "week", "day", "hour")
+# Web StatusMenu form (gap roadmap slice 43): optional details on the interview events.
+SCHEDULED_EVENT_TYPES = ("interview_requested", "interview_scheduled")
+LINK_MAX = 500
+LOCATION_MAX = 200
+ROUND_TEXT_MAX = 60
+DURATION_MIN, DURATION_MAX = 5, 480
 
 ROLE_MAX = 120
 TAGS_MAX_ITEMS = 40
@@ -235,6 +243,36 @@ def _offer(payload: dict[str, Any], problems: list[str]) -> None:
         problems.append(f"offer_period must be one of {list(OFFER_PERIODS)}")
 
 
+def _drop_nulls(payload: dict[str, Any], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        if key in payload and payload[key] is None:
+            del payload[key]  # a null is "not given", never stored as a value
+
+
+def _interview_details(payload: dict[str, Any], problems: list[str]) -> None:
+    """Optional round / link / duration_minutes / location on interview_requested and interview_scheduled."""
+    _drop_nulls(payload, ("round", "link", "duration_minutes", "location"))
+    # Free text (the web form offers ROUNDS): these payloads were never checked
+    # before, so an agent's own wording ("panel") must keep working.
+    round_ = _str_field(payload, "round", ROUND_TEXT_MAX, problems)
+    if round_ is not None:
+        payload["round"] = round_
+    location = _str_field(payload, "location", LOCATION_MAX, problems)
+    if location is not None:
+        payload["location"] = location
+    if "link" in payload:
+        link = payload["link"]
+        parts = urlsplit(link.strip()) if isinstance(link, str) else None
+        if parts is None or len(link) > LINK_MAX or parts.scheme not in ("http", "https") or not parts.netloc:
+            problems.append(f"link must be an http:// or https:// URL of at most {LINK_MAX} characters")
+        else:
+            payload["link"] = link.strip()
+    if "duration_minutes" in payload:
+        minutes = payload["duration_minutes"]
+        if not _is_int(minutes) or not DURATION_MIN <= minutes <= DURATION_MAX:
+            problems.append(f"duration_minutes must be a whole number from {DURATION_MIN} to {DURATION_MAX}")
+
+
 def validate(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Pure: check one event's payload, return the cleaned payload (422 listing every problem)."""
     problems: list[str] = []
@@ -244,6 +282,8 @@ def validate(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         _friction(payload, problems)
     elif event_type == "assessment":
         _assessment(payload, problems)
+    elif event_type in SCHEDULED_EVENT_TYPES:
+        _interview_details(payload, problems)
     elif event_type == "offer":
         _offer(payload, problems)
     elif event_type == "note" and "silence_confirmed" in payload:
