@@ -1,19 +1,14 @@
-"""post-merge-watch verifies the deploy and rolls back only on a real signal (FC-009, 2026-10-20).
+"""post-merge-watch must not roll prod back on deploy noise (FC-009, 2026-10-03).
 
-Five rollbacks on noise (#722 #724 #725 on 2026-10-03, #910 #911 on 2026-10-19), and a
-"wait for the deploy" that the OLD container satisfied at 0 s. Ported from PR #728 and
-rebuilt around GET /api/version:
+Three rollbacks in one afternoon (#722, #724, #725; trip run 37131014974) were caused by
+3 Sentry issues - `ClientDisconnect` on /api/mcp and two `event loop blocked for 3.13s`,
+2 events and 0 users each - that the OLD container logs while Railway swaps it out.
+`scripts/fixtures/sentry_deploy_noise.json` holds those 3 issues as recorded.
 
-* `scripts/deploy_settle.py` waits until /api/version serves THIS sha; the old sha
-  still serving is a red "deploy never went live", never a pass.
-* `scripts/sentry_poll.py::decide` ignores issues first seen before the swap and the
-  known swap noise, and names the service each real error came from.
-* the workflow's own `decide` step (executed by bash) rolls back only on a real signal;
-  that drill needs pyyaml, so `scripts/drill_registry.py` runs it in ci.yml, not here.
-
-`scripts/drill_registry.py` runs the same worlds offline; these tests keep them in the
-backend suite. The negative controls matter as much as the noise cases: a filter that
-ignores everything would pass every "must not trip" case.
+These tests are the drill for `scripts/sentry_poll.py::decide` and
+`scripts/deploy_settle.py` (scripts/drill_registry.py runs the same cases offline). The
+negative controls matter as much: a filter that ignores everything would pass the noise
+cases, so errors that MUST still trip a rollback are asserted here too.
 """
 from __future__ import annotations
 
@@ -23,22 +18,18 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
-WORKFLOW = REPO / ".github" / "workflows" / "post-merge-watch.yml"
 
 
 def _load(name: str) -> ModuleType:
-    """Import a repo-root script (the root `scripts/` has no __init__.py).
-
-    Registered under a prefixed name, so a later test importing a real module
-    called `sentry_poll` or `deploy_settle` never gets this copy.
-    """
-    qualified = f"_post_merge_watch_{name}"
-    spec = importlib.util.spec_from_file_location(qualified, SCRIPTS / f"{name}.py")
+    """Import a repo-root script (the root `scripts/` has no __init__.py)."""
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[qualified] = mod  # dataclasses resolve their module through sys.modules
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -47,19 +38,19 @@ sp = _load("sentry_poll")
 ds = _load("deploy_settle")
 
 NOISE = json.loads((SCRIPTS / "fixtures" / "sentry_deploy_noise.json").read_text(encoding="utf-8"))["issues"]
-WATCH = sp.Knobs.from_env({"SENTRY_PRESET": "post-merge-watch"})
-LIVE = sp.parse_instant("2026-10-03T14:59:00Z")
-BACKEND = {"slug": "python-fastapi", "platform": "python"}
-FRONTEND = {"slug": "javascript-nextjs", "platform": "javascript-nextjs"}
+# The values post-merge-watch.yml sets for a push.
+WATCH = sp.Knobs(
+    min_events=5,
+    min_users=1,
+    noise_titles=("clientdisconnect", "event loop blocked"),
+    noise_escalate_events=20,
+)
+DEPLOY_CREATED = sp.parse_instant("2026-10-03T14:57:52Z")  # deploy 62f9a919, per `railway deployment list`
 
 
-def _issue(title: str, count: int, users: int, first: str = "2026-10-03T15:05:00Z",
-           project: dict | None = None) -> dict:
+def _issue(title: str, count: int, users: int, first: str = "2026-10-03T15:01:00Z") -> dict:
     return {"shortId": "X-1", "title": title, "count": str(count), "userCount": users,
-            "firstSeen": first, "culprit": "", "project": BACKEND if project is None else project}
-
-
-# ── Sentry: noise does not trip, real errors trip on the right service ─────────
+            "firstSeen": first, "culprit": ""}
 
 
 def test_fixture_is_the_three_real_issues() -> None:
@@ -67,110 +58,214 @@ def test_fixture_is_the_three_real_issues() -> None:
     assert all(i["count"] == "2" and i["userCount"] == 0 for i in NOISE)
 
 
-def test_recorded_swap_noise_does_not_trip_and_is_listed() -> None:
-    verdict = sp.decide([{**i, "project": BACKEND} for i in NOISE], WATCH, LIVE)
+def test_recorded_deploy_noise_does_not_trip() -> None:
+    verdict = sp.decide(NOISE, WATCH, DEPLOY_CREATED)
     assert verdict.tripped == []
-    assert len(verdict.ignored) == 3 and all(why for _, why in verdict.ignored)
+    assert len(verdict.ignored) == 3  # listed, never silently dropped
+    assert all(why for _, why in verdict.ignored)
 
 
-def test_the_old_rule_tripped_on_that_noise() -> None:
+def test_recorded_noise_tripped_under_the_old_rule() -> None:
     """The legacy defaults (every new issue trips) are what rolled prod back."""
     assert len(sp.decide(NOISE, sp.Knobs(), None).tripped) == 3
 
 
-def test_issue_first_seen_before_the_deploy_went_live_does_not_trip() -> None:
-    old = _issue("KeyError: 'id'", 50, 3, first="2026-10-03T14:00:00Z")
-    assert sp.decide([old], WATCH, LIVE).tripped == []
+# ── negative controls: these MUST still trip ────────────────────────────────
 
 
-def test_new_backend_error_trips_backend_only() -> None:
-    verdict = sp.decide([_issue("ValueError: boom", 2, 1)], WATCH, LIVE)
-    assert verdict.services == ["backend"]
+def test_error_with_a_user_trips() -> None:
+    assert sp.decide([_issue("ValueError: boom", 2, 1)], WATCH, DEPLOY_CREATED).tripped
 
 
-def test_new_frontend_error_trips_frontend_only() -> None:
-    """#911 rolled the BACKEND back for a frontend-test-only commit."""
-    verdict = sp.decide([_issue("TypeError: x", 3, 1, project=FRONTEND)], WATCH, LIVE)
-    assert verdict.services == ["frontend"]
+def test_noise_title_that_hurts_a_user_still_trips() -> None:
+    assert sp.decide([_issue("ClientDisconnect", 2, 1)], WATCH, DEPLOY_CREATED).tripped
 
 
-def test_noise_flood_and_unreadable_counts_still_trip() -> None:
-    assert sp.decide([_issue("ClientDisconnect", 20, 0)], WATCH, LIVE).tripped
-    unreadable = {"title": "?", "count": "n/a", "userCount": None, "project": BACKEND}
-    assert sp.decide([unreadable], WATCH, LIVE).tripped
+@pytest.mark.parametrize("title", ["ClientDisconnect", "event loop blocked for 3.13s"])
+def test_flood_of_a_noise_title_trips(title: str) -> None:
+    assert sp.decide([_issue(title, 20, 0)], WATCH, DEPLOY_CREATED).tripped
+    assert not sp.decide([_issue(title, 19, 0)], WATCH, DEPLOY_CREATED).tripped
 
 
-def test_issue_in_neither_project_is_ignored_and_missing_project_fails_toward_alarm() -> None:
-    other = _issue("Boom", 99, 9, project={"slug": "side-project", "platform": "go"})
-    assert sp.decide([other], WATCH, LIVE).tripped == []
-    assert sp.decide([_issue("Boom", 9, 1, project={})], WATCH, LIVE).services == [sp.ALL]
+def test_non_noise_error_with_enough_events_trips() -> None:
+    assert sp.decide([_issue("KeyError: 'id'", 5, 0)], WATCH, DEPLOY_CREATED).tripped
+    assert not sp.decide([_issue("KeyError: 'id'", 4, 0)], WATCH, DEPLOY_CREATED).tripped
 
 
-def test_nightly_poll_defaults_are_unchanged() -> None:
-    """external-health.yml shares the script: no preset = every new issue trips."""
-    assert sp.Knobs.from_env({}) == sp.Knobs()
-    assert sp.decide([_issue("x", 1, 0, project={"slug": "anything"})], sp.Knobs(), None).tripped
+def test_unreadable_counts_fail_toward_the_alarm() -> None:
+    assert sp.decide([{"title": "?", "count": "n/a", "userCount": None}], WATCH, DEPLOY_CREATED).tripped
 
 
-def test_sentry_drill_and_its_negative_control() -> None:
-    assert sp.drill() == 0
-    assert sp.drill(blind=True) == 1
+def test_mixed_batch_trips_on_the_real_one_and_lists_the_noise() -> None:
+    verdict = sp.decide([*NOISE, _issue("ValueError: boom", 3, 2)], WATCH, DEPLOY_CREATED)
+    assert [i["title"] for i, _ in verdict.tripped] == ["ValueError: boom"]
+    assert len(verdict.ignored) == 3
 
 
-# ── deploy identity: the old sha still serving is RED ──────────────────────────
+def test_issue_older_than_the_deploy_is_ignored_but_a_newer_one_is_not() -> None:
+    """Run 3 of the incident (deploy 15:42) tripped on issues first seen at 15:01."""
+    later = sp.parse_instant("2026-10-03T15:42:01Z")
+    assert not sp.decide(NOISE, sp.Knobs(), later).tripped
+    assert sp.decide([_issue("KeyError: 'id'", 1, 0, first="2026-10-03T15:50:00Z")], sp.Knobs(), later).tripped
 
 
-def test_old_sha_still_live_is_never_live() -> None:
-    clock = [0.0]
+def test_legacy_defaults_still_trip_everything() -> None:
+    """external-health.yml shares the script; its nightly poll must not get quieter."""
+    assert sp.decide([_issue("KeyError: 'id'", 1, 0)], sp.Knobs(), None).tripped
+
+
+# ── the script end to end: env knobs -> exit code ───────────────────────────
+
+
+def _run_main(monkeypatch: pytest.MonkeyPatch, issues: list[dict], **env: str) -> int:
+    monkeypatch.setattr(sp, "_get", lambda _url, _token: issues)
+    monkeypatch.setenv("SENTRY_API_TOKEN", "x")
+    for key in ("SENTRY_MIN_EVENTS", "SENTRY_MIN_USERS", "SENTRY_NOISE_TITLES",
+                "SENTRY_NOISE_ESCALATE_EVENTS", "SENTRY_SINCE"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    return sp.main()
+
+
+WATCH_ENV = {
+    "SENTRY_MIN_EVENTS": "5",
+    "SENTRY_NOISE_TITLES": "ClientDisconnect,event loop blocked",
+    "SENTRY_NOISE_ESCALATE_EVENTS": "20",
+    "SENTRY_SINCE": "2026-10-03T14:57:52Z",
+}
+
+
+def test_main_exits_0_on_the_recorded_noise(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _run_main(monkeypatch, NOISE, **WATCH_ENV) == 0
+    out = capsys.readouterr().out
+    assert "IGNORED" in out and "PYTHON-FASTAPI-W" in out  # visible, not hidden
+
+
+def test_main_exits_1_on_a_user_facing_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _run_main(monkeypatch, [*NOISE, _issue("ValueError: boom", 2, 1)], **WATCH_ENV) == 1
+
+
+def test_main_exits_1_on_a_noise_flood(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _run_main(monkeypatch, [_issue("ClientDisconnect", 40, 0)], **WATCH_ENV) == 1
+
+
+def test_main_with_no_knobs_is_the_old_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _run_main(monkeypatch, NOISE) == 1
+
+
+def test_main_bad_knob_is_a_loud_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _run_main(monkeypatch, NOISE, SENTRY_MIN_EVENTS="five") == 2
+    assert _run_main(monkeypatch, NOISE, SENTRY_SINCE="yesterday") == 2
+
+
+# ── deploy_settle: the wait must be for THIS commit's deploy ────────────────
+
+SHA = "41504c58755579fc1686cd23a578f8291a2086f7"
+OTHER = "62f9a919" + "0" * 32
+
+
+def _dep(status: str, commit: str) -> dict:
+    return {"id": f"d-{status}", "status": status, "createdAt": "2026-10-03T14:49:36.382Z",
+            "meta": {"commitHash": commit}}
+
+
+def test_old_container_answering_is_not_this_commit_being_live() -> None:
+    # What the 2026-10-03 deploy list looked like mid-roll: new one building, old one SUCCESS.
+    assert ds.assess([_dep("BUILDING", SHA), _dep("SUCCESS", OTHER)], SHA)[0] == "pending"
+    assert ds.assess([_dep("SUCCESS", OTHER)], SHA)[0] == "not_found"
+
+
+def test_success_for_this_sha_is_live() -> None:
+    assert ds.assess([_dep("SUCCESS", SHA), _dep("REMOVED", OTHER)], SHA)[0] == "live"
+
+
+def test_replaced_and_failed_deploys_are_named_not_waited_on() -> None:
+    assert ds.assess([_dep("SUCCESS", OTHER), _dep("REMOVED", SHA)], SHA)[0] == "superseded"
+    assert ds.assess([_dep("FAILED", SHA), _dep("SUCCESS", OTHER)], SHA)[0] == "failed"
+
+
+def test_settle_clock() -> None:
+    assert ds.settle_remaining(1000.0, None, 940.0, 300.0, 240.0) == 240.0  # saw SUCCESS 1 min ago
+    assert ds.settle_remaining(10000.0, 8200.0, None, 300.0, 240.0) == 0.0  # queued run, long settled
+    assert ds.settle_remaining(10000.0, 9940.0, None, 300.0, 240.0) == 480.0  # created 1 min ago
+
+
+# ── deploy_settle: /api/version must serve THIS sha before the deploy is judged (#997) ──
+
+NEWER = "c" * 40
+
+
+def _version(answers: list[str | None], descendants: frozenset[str] = frozenset()) -> tuple:
+    clock, calls = [0.0], [0]
+
+    def fetch(_url: str) -> str | None:
+        served = answers[min(calls[0], len(answers) - 1)]
+        calls[0] += 1
+        return served
 
     def sleep(s: float) -> None:
         clock[0] += s
 
-    out = ds.wait_for_sha("a" * 40, ["https://job360.uk/api/version"], 600, 60,
-                          fetch=lambda url: "b" * 40, is_ancestor=lambda a, b: False,
-                          diagnose=lambda: "failed", now=lambda: clock[0], sleep=sleep)
-    assert out["deploy_state"] == "never_live"
-    assert "never went live" in out["detail"]
+    return ds.wait_for_version(SHA, ["https://job360.uk/api/version"], 300, 60, fetch=fetch,
+                               is_ancestor=lambda _a, b: b in descendants,
+                               now=lambda: clock[0], sleep=sleep)
 
 
-def test_deploy_wait_worlds_and_their_negative_control() -> None:
-    """The workflow's decide-step worlds need pyyaml, so drill_registry runs those (ci.yml)."""
-    assert all(ok for _, ok in ds.wait_worlds())
-    assert not all(ok for _, ok in ds.wait_worlds(blind=True))
+def test_old_sha_served_all_wait_is_never_live() -> None:
+    assert _version([OTHER])[0] == "never_live"
+    assert _version([None])[0] == "never_live"  # route missing / no answer
 
 
-def test_a_newer_merge_missing_from_the_clone_or_superseded_by_railway_is_not_red() -> None:
-    """Merges land close together: a newer sha the run's clone lacks is fetched, and a
-    Railway 'superseded' at the timeout is superseded, never 'deploy never went live'."""
-    worlds = ds.git_worlds()  # real git on throwaway repos
-    assert worlds and all(ok for _, ok in worlds), worlds
-    clock = [0.0]
-    out = ds.wait_for_sha("a" * 40, ["https://job360.uk/api/version"], 120, 60,
-                          fetch=lambda url: "b" * 40, is_ancestor=lambda a, b: False,
-                          diagnose=lambda: "superseded", now=lambda: clock[0],
-                          sleep=lambda s: clock.__setitem__(0, clock[0] + s))
-    assert out["deploy_state"] == "superseded"
+def test_swap_to_this_sha_is_live_and_timed() -> None:
+    assert _version([OTHER, OTHER, SHA]) == ("live", SHA, 120.0)
+    assert _version([SHA]) == ("live", SHA, None)  # queued run: no swap watched
+    assert _version([SHA[:12]])[0] == "live"
 
 
-# ── wiring: the pieces are actually connected (plain text: no pyyaml in the backend) ──
+def test_newer_descendant_is_superseded_but_a_stranger_is_not() -> None:
+    assert _version([NEWER], frozenset({NEWER}))[0] == "superseded"
+    assert _version([NEWER])[0] == "never_live"
 
 
-def test_workflow_waits_on_api_version_at_the_domain_and_feeds_sentry_the_swap_time() -> None:
-    wf = WORKFLOW.read_text(encoding="utf-8")
-    assert "DOMAIN_URL: https://job360.uk" in wf
-    assert '--url "$DOMAIN_URL/api/version"' in wf
-    assert "SENTRY_PRESET: post-merge-watch" in wf
-    assert "LIVE_SINCE: ${{ steps.wait.outputs.since }}" in wf
-    # Sentry and the probes only judge a deploy that is actually serving.
-    assert wf.count("if: steps.wait.outputs.deploy_state == 'live'") == 2
-    # The old "any readyz 200 means deployed" wait is gone.
-    assert "wait for readyz to answer 200" not in wf
+def test_unknown_sha_degrades_instead_of_going_red() -> None:
+    assert _version(["unknown"])[0] == "unknown"
+    assert ds.wait_for_version(SHA, [], 0, 1)[0] == "not_asked"
 
 
-def test_railway_healthcheck_is_readyz_and_readyz_is_a_real_route() -> None:
-    cfg = json.loads((REPO / "backend" / "railway.json").read_text(encoding="utf-8"))
-    assert cfg["deploy"]["healthcheckPath"] == "/api/readyz"
-    from src.api.routes import health
+def _deploy(monkeypatch: pytest.MonkeyPatch, deps: list[dict] | Exception, served: str | None) -> dict:
+    import types
 
-    paths = {getattr(r, "path", "") for r in health.router.routes}
-    assert {"/readyz", "/version"} <= paths
+    class FakeRailwayError(Exception):
+        pass
+
+    def listing(_service: str) -> list[dict]:
+        if isinstance(deps, Exception):
+            raise deps
+        return deps
+
+    fake = types.SimpleNamespace(list_deployments=listing, RailwayCliMissingError=FakeRailwayError,
+                                 RailwayApiMalformedError=FakeRailwayError, RailwayApiError=FakeRailwayError)
+    if isinstance(deps, Exception):
+        fake.RailwayCliMissingError = type(deps)
+    monkeypatch.setitem(sys.modules, "rollback_gear", fake)
+    monkeypatch.setattr(ds, "fetch_version", lambda _url, timeout=15.0: served)
+    monkeypatch.setattr(ds.time, "sleep", lambda _s: None)
+    return ds.wait_for_deploy(SHA, "backend", 0, 0, 0, 0, ["https://job360.uk/api/version"], 0)
+
+
+def test_railway_live_but_old_sha_served_is_not_judged(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _deploy(monkeypatch, [_dep("SUCCESS", SHA)], OTHER)
+    assert out["deploy_state"] == "live"
+    assert out["version_state"] == "never_live" and out["judge"] == "false" and out["settled"] == "false"
+
+
+def test_no_railway_token_still_proves_the_served_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _deploy(monkeypatch, FileNotFoundError("railway"), SHA)
+    assert out["deploy_state"] == "unverifiable"
+    assert out["version_state"] == "live" and out["judge"] == "true" and out["settled"] == "true"
+
+
+def test_railway_live_and_this_sha_served_is_judged(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _deploy(monkeypatch, [_dep("SUCCESS", SHA)], SHA)
+    assert (out["deploy_state"], out["version_state"], out["judge"], out["settled"]) == ("live", "live", "true", "true")

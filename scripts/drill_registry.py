@@ -482,6 +482,16 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/mcp_text_budget.py", "--drill"],
         negative=[sys.executable, "scripts/mcp_text_budget.py", "--drill", "--break-checker", "LIMIT"],
     ),
+    # ── Test integrity (2026-10-20) ─────────────────────────────────────────
+    # ci.yml `test-integrity` and the offline-suite skip ratchet. The drill
+    # feeds 22 in-memory diffs that must go red (skip / delete / config, plus a
+    # skip over the ratchet baseline) and 12 harmless ones that must stay green.
+    # The negative blinds the SKIP check: the drill must then FAIL.
+    "scripts/test_integrity.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/test_integrity.py", "--drill"],
+        negative=[sys.executable, "scripts/test_integrity.py", "--drill", "--break-checker", "SKIP"],
+    ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/already_built.py": Guard(
         status="owed",
@@ -542,39 +552,27 @@ REGISTRY: dict[str, Guard] = {
     ),
     "scripts/sentry_poll.py": Guard(
         status="drilled",
-        # WAS `owed` since 2026-08-16 ("needs a recorded issue payload"). 2026-10-20
-        # (FC-009, from PR #728): the trip rule is the pure `decide()`, and the drill
-        # runs report() under the post-merge-watch preset on fixture worlds: the 3
-        # REAL 2026-10-03 noise issues and pre-deploy noise must NOT trip; a new
-        # backend error rolls back backend, a frontend one frontend only. The live
-        # urllib GET stays undrilled: a recorded response would rot.
+        # WAS `owed` since 2026-08-16 ("needs a recorded issue payload"). FC-009
+        # (2026-10-03): the trip rule is now the pure `decide()`, and the drill feeds
+        # it the 3 REAL noise issues that rolled prod back three times (they must NOT
+        # trip) plus controls that MUST (user-facing error, noise flood, unreadable
+        # counts). The live-API half stays undrilled on purpose: same urllib GET as
+        # before, and a recorded response would rot.
         drill=[sys.executable, "scripts/sentry_poll.py", "--drill"],
-        # NEGATIVE CONTROL: the rule swapped for "ignore everything"; the must-trip
-        # worlds then fail, so this must exit non-zero.
+        # NEGATIVE CONTROL: swaps the rule for "ignore everything"; the must-trip
+        # controls then fail, so this must exit non-zero.
         negative=[sys.executable, "scripts/sentry_poll.py", "--drill", "--blind"],
     ),
     "scripts/deploy_settle.py": Guard(
         status="drilled",
-        # 2026-10-20 (FC-009): post-merge-watch waits until /api/version serves THIS
-        # sha, not "any readyz 200", which the OLD container answers. Drill: the real
-        # wait loop on a fake clock/HTTP/git ("old sha still live" -> never_live), plus
-        # the workflow's own `decide` step executed by bash (never_live -> red, no
-        # rollback; frontend error -> frontend only).
+        # FC-009: waits for the deployment that carries THIS sha (not "any readyz
+        # 200", which the OLD container satisfies) and then lets the swap settle.
+        # The drill covers the pure assess()/settle_remaining(); the Railway call
+        # is rollback_gear.list_deployments, already drilled there. Since #997 it
+        # also runs wait_for_version() on a fake clock (old sha served -> never_live,
+        # newer descendant -> superseded); --blind there counts any answer as live.
         drill=[sys.executable, "scripts/deploy_settle.py", "--drill"],
-        # NEGATIVE CONTROL: any answer counts as live (the old rule); must exit non-zero.
         negative=[sys.executable, "scripts/deploy_settle.py", "--drill", "--blind"],
-    ),
-    # ── THE GUARD THIS PR WIRES UP (harness simplification slice 5, W1) ─────
-    # A guard and its declaration land together, always -- same rule as the
-    # lane.py/repairable.py/ssrf_drill.py pairs above. The WIP limit's pure
-    # decide() function: counts other open, non-draft, non-dependabot,
-    # non-revert PRs against the owner's limit, and exempts THIS PR from ever
-    # being parked if it is dependabot or a revert. Offline -- no gh, no
-    # network, and a negative control (0 open PRs -> never park) comes first.
-    "scripts/wip_gate.py": Guard(
-        status="drilled",
-        drill=[sys.executable, "scripts/wip_gate.py", "--drill"],
-        no_negative="inline check() calls over a pure decide()",
     ),
     "scripts/watchdog_check.py": Guard(
         status="drilled",

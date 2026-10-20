@@ -78,16 +78,18 @@ redeploy the previous SUCCESS build, then fix forward on a branch.
 
 ## Test-before-merge gate
 
-**Merge-gate floor: 1,586 collected, 0 failing.** A ratchet, not a claim about
+**Merge-gate floor: 4,350 collected, 0 failing.** A ratchet, not a claim about
 today's count — and now a pinned one: `backend/tests/test_suite_floor.py` re-measures
 and goes red the moment the floor sits above what the suite actually collects. Nothing
 did that before, which is how the 1,683 written here on 2026-09-07 outlived slice B
-deleting twenty LLM-only test files.
+deleting twenty LLM-only test files. Raised 2026-10-20 from 1,586 (it sat ~2,500 below
+the suite, so deleting hundreds of tests stayed green): `pytest --collect-only -q`
+measured 4,357 on c0cef280 (main), rounded down to the nearest 50.
 
 A PR is mergeable only when:
 
 - `cd backend && python -m pytest -q -p no:randomly` reports **0 failing** and
-  **>= 1,586 collected**.
+  **>= 4,350 collected**.
 - `pre-commit run --all-files` is clean.
 - CI is green on the PR branch.
 

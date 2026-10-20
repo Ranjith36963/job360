@@ -29,41 +29,34 @@ The backlog is a human triage decision; only NEW ones are an event. Alarming on
 the standing backlog every night is how a detector becomes noise, and a noisy
 detector gets muted, which is worse than no detector.
 
-WHAT "NEW" MEANS FOR A ROLLBACK (2026-10-20, FC-009; ported from PR #728).
-"First seen in the window" is not "caused by this deploy". post-merge-watch.yml
-rolled production back 5 times on noise (#722 #724 #725 on 2026-10-03: the OLD
-container's `ClientDisconnect` / `event loop blocked` on its way out, 2 events and
-0 users each; #910 #911 on 2026-10-19: a BACKEND rollback for a frontend-test-only
-commit). `decide()` is the pure rule that now separates a regression from noise:
+WHAT "NEW" MEANS FOR A ROLLBACK (added 2026-10-03, FC-009). "First seen in the
+window" is not "caused by this deploy": every container swap makes the OLD container
+log `ClientDisconnect` on /api/mcp and `event loop blocked for 3.1s` on its way out,
+and each is a brand-new Sentry issue with 2 events and 0 users. post-merge-watch.yml
+read them as a regression and rolled production back three times in one afternoon
+(#722, #724, #725). `decide()` is the pure rule that now separates a REGRESSION from
+deploy noise. Every knob is an env var; the DEFAULTS BELOW KEEP THE OLD BEHAVIOUR
+(every new issue trips) because external-health.yml shares this script for a nightly
+24h poll where a 2-event error must still be seen. post-merge-watch.yml opts in to
+the stricter values in its own header.
 
-    since    issues first seen BEFORE the deploy went live are not its fault
-    users    an issue touching >= min_users users ALWAYS trips
-    noise    known deploy-swap titles are ignored below a flood size
-    events   anything else trips at >= min_events
-    project  each issue is mapped to the service it came from (backend or
-             frontend), so a frontend error never rolls the backend back; an
-             issue in neither project is listed and ignored
-
-Unreadable counts or a missing project fail TOWARD the alarm. Ignored issues are
-listed, never hidden. The DEFAULTS KEEP THE OLD BEHAVIOUR (every new issue trips,
-no project filter) because external-health.yml shares this script for a nightly
-24 h poll. post-merge-watch.yml sets SENTRY_PRESET=post-merge-watch, which loads
-WATCH_PRESET below; any single knob can still be overridden by its env var:
-
-    SENTRY_SINCE                 ISO-8601 instant (the moment the deploy went live)
-    SENTRY_MIN_EVENTS            SENTRY_MIN_USERS
-    SENTRY_NOISE_TITLES          comma list, case-insensitive substrings
-    SENTRY_NOISE_ESCALATE_EVENTS a noise-titled issue still trips at this many events
-    SENTRY_SERVICE_PROJECTS      "backend=python,fastapi;frontend=javascript,nextjs"
-                                 substrings matched against project slug/platform
-    SENTRY_SERVICES_OUT          file to write the tripped services to (comma list)
+    SENTRY_MIN_EVENTS            ignore an issue with fewer events than this AND
+                                 fewer users than SENTRY_MIN_USERS        (default 1)
+    SENTRY_MIN_USERS             an issue touching >= this many users ALWAYS trips,
+                                 whatever its title or event count; 0 disables (default 1)
+    SENTRY_NOISE_TITLES          comma list of case-insensitive title substrings that
+                                 are known deploy shutdown/startup noise     (default empty)
+    SENTRY_NOISE_ESCALATE_EVENTS a noise-titled issue still trips once it has this
+                                 many events - a flood is not noise          (default 20)
+    SENTRY_SINCE                 ISO-8601 instant; issues first seen BEFORE it are
+                                 ignored (they predate the deploy under watch)
 
 CONTRACT (identical to product_assertions.py so the workflow shape is shared):
     exit 0  nothing new (after the filters above)
     exit 1  new unresolved issues -> raise
     exit 2  the poller itself is broken -> fail LOUD, never silently green
 
-    python scripts/sentry_poll.py --drill            # offline fixture worlds
+    python scripts/sentry_poll.py --drill            # offline: recorded 2026-10-03 noise
     python scripts/sentry_poll.py --drill --blind    # negative control: must exit 1
 """
 
@@ -75,7 +68,6 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,44 +86,18 @@ MAX_REPORTED = int(os.getenv("SENTRY_MAX_REPORTED", "15"))
 # poll -> issue -> triage chain can be exercised on purpose.
 FORCE_RED = os.getenv("SENTRY_FORCE_RED", "") == "1"
 
-
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sentry_deploy_noise.json"
 
-# The post-merge watch's values, in ONE place, exercised by --drill. 5 / 20 are
-# judgment, not measurement (#728); the project substrings are INFERRED from the
-# backend's short ids (PYTHON-FASTAPI-*) and the frontend's @sentry/nextjs SDK.
-WATCH_PRESET: dict[str, str] = {
-    "SENTRY_MIN_EVENTS": "5",
-    "SENTRY_MIN_USERS": "1",
-    "SENTRY_NOISE_TITLES": "ClientDisconnect,event loop blocked",
-    "SENTRY_NOISE_ESCALATE_EVENTS": "20",
-    "SENTRY_SERVICE_PROJECTS": "backend=python,fastapi;frontend=javascript,nextjs,node",
-}
-PRESETS = {"post-merge-watch": WATCH_PRESET}
 
-
-def _env_int(env: Mapping[str, str], name: str, default: int) -> int:
+def _env_int(name: str, default: int) -> int:
     """Read an int knob; a malformed value is a LOUD config error, never a silent default."""
-    raw = env.get(name, "").strip()
+    raw = os.getenv(name, "").strip()
     if not raw:
         return default
     try:
         return int(raw)
     except ValueError as exc:
         raise ValueError(f"{name}={raw!r} is not an integer") from exc
-
-
-def _service_projects(raw: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
-    out = []
-    for part in raw.split(";"):
-        if not part.strip():
-            continue
-        name, sep, subs = part.partition("=")
-        needles = tuple(x.strip().lower() for x in subs.split(",") if x.strip())
-        if not sep or not name.strip() or not needles:
-            raise ValueError(f"SENTRY_SERVICE_PROJECTS part {part!r} is not service=a,b")
-        out.append((name.strip(), needles))
-    return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -142,37 +108,24 @@ class Knobs:
     min_users: int = 1
     noise_titles: tuple[str, ...] = ()
     noise_escalate_events: int = 20
-    # () = no project filter and no attribution (the nightly poll's behaviour).
-    service_projects: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] | None = None) -> Knobs:
-        env = dict(os.environ if environ is None else environ)
-        preset = env.get("SENTRY_PRESET", "").strip()
-        if preset:
-            if preset not in PRESETS:
-                raise ValueError(f"SENTRY_PRESET={preset!r} is not one of {sorted(PRESETS)}")
-            env = {**PRESETS[preset], **{k: v for k, v in env.items() if v.strip()}}
-        raw = env.get("SENTRY_NOISE_TITLES", "")
+    def from_env(cls) -> "Knobs":
+        raw = os.getenv("SENTRY_NOISE_TITLES", "")
         return cls(
-            min_events=_env_int(env, "SENTRY_MIN_EVENTS", 1),
-            min_users=_env_int(env, "SENTRY_MIN_USERS", 1),
+            min_events=_env_int("SENTRY_MIN_EVENTS", 1),
+            min_users=_env_int("SENTRY_MIN_USERS", 1),
             noise_titles=tuple(t.strip().lower() for t in raw.split(",") if t.strip()),
-            noise_escalate_events=_env_int(env, "SENTRY_NOISE_ESCALATE_EVENTS", 20),
-            service_projects=_service_projects(env.get("SENTRY_SERVICE_PROJECTS", "")),
+            noise_escalate_events=_env_int("SENTRY_NOISE_ESCALATE_EVENTS", 20),
         )
 
 
 @dataclass
 class Decision:
-    """`tripped` justify a rollback (with the service each came from); `ignored` say why not."""
+    """`tripped` are the issues that justify a rollback; `ignored` carry the reason why not."""
 
-    tripped: list[tuple[dict, str, str]] = field(default_factory=list)
+    tripped: list[tuple[dict, str]] = field(default_factory=list)
     ignored: list[tuple[dict, str]] = field(default_factory=list)
-
-    @property
-    def services(self) -> list[str]:
-        return sorted({svc for _, _, svc in self.tripped})
 
 
 def _count(value: object) -> int | None:
@@ -192,73 +145,40 @@ def parse_instant(value: str) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-ALL = "all"  # an issue whose project cannot be read: every rollback service
+def classify(issue: dict, knobs: Knobs, since: datetime | None) -> tuple[bool, str]:
+    """(trips?, why) for ONE issue. Pure - no I/O.
 
-
-def service_of(issue: dict, knobs: Knobs) -> str | None:
-    """Which service an issue came from: a service name, ALL (unreadable), or None (neither)."""
-    if not knobs.service_projects:
-        return ALL
-    proj = issue.get("project")
-    hay = " ".join(
-        str(x).lower()
-        for x in (
-            proj.get("slug", "") if isinstance(proj, dict) else "",
-            proj.get("platform", "") if isinstance(proj, dict) else "",
-            issue.get("platform", ""),
-        )
-        if x
-    )
-    if not hay.strip():
-        return ALL
-    for name, needles in knobs.service_projects:
-        if any(n in hay for n in needles):
-            return name
-    return None
-
-
-def classify(issue: dict, knobs: Knobs, since: datetime | None) -> tuple[bool, str, str]:
-    """(trips?, why, service) for ONE issue. Pure - no I/O.
-
-    FAIL TOWARD THE ALARM: an unreadable count, timestamp or project can never be
-    the reason an issue is ignored. Ignoring needs positive evidence of noise.
+    FAIL TOWARD THE ALARM: an unreadable count or timestamp can never be the reason
+    an issue is ignored. Ignoring needs positive evidence of noise.
     """
-    svc = service_of(issue, knobs)
-    if svc is None:
-        proj = issue.get("project")
-        slug = proj.get("slug", "?") if isinstance(proj, dict) else "?"
-        return False, f"project '{slug}' is neither the backend nor the frontend", ""
     events = _count(issue.get("count"))
     users = _count(issue.get("userCount"))
     if events is None or users is None:
-        return True, "counts unreadable - failing toward the alarm", svc
+        return True, "counts unreadable - failing toward the alarm"
     if since is not None:
         first = parse_instant(str(issue.get("firstSeen", "")))
         if first is not None and first < since:
-            return False, f"first seen {first:%H:%M:%S}Z, before the deploy went live", svc
+            return False, f"first seen {first:%H:%M}Z, before the deploy under watch"
     if knobs.min_users > 0 and users >= knobs.min_users:
-        return True, f"affects {users} user(s)", svc
+        return True, f"affects {users} user(s)"
     title = str(issue.get("title", "")).lower()
     noisy = next((n for n in knobs.noise_titles if n in title), None)
     if noisy is not None:
         if events >= knobs.noise_escalate_events:
-            return True, f"'{noisy}' flood: {events} events >= {knobs.noise_escalate_events}", svc
+            return True, f"'{noisy}' flood: {events} events >= {knobs.noise_escalate_events}"
         return False, (f"known deploy noise '{noisy}': {events} event(s) < "
-                       f"{knobs.noise_escalate_events}, 0 users"), svc
+                       f"{knobs.noise_escalate_events}, 0 users")
     if events >= knobs.min_events:
-        return True, f"{events} events >= {knobs.min_events}", svc
-    return False, f"{events} event(s), {users} users: below min_events={knobs.min_events}", svc
+        return True, f"{events} events >= {knobs.min_events}"
+    return False, f"{events} event(s), {users} users: below min_events={knobs.min_events}"
 
 
 def decide(issues: list[dict], knobs: Knobs, since: datetime | None = None) -> Decision:
     """Split Sentry's new issues into the ones that trip a rollback and the ones that do not."""
     out = Decision()
     for it in issues:
-        trips, why, svc = classify(it, knobs, since)
-        if trips:
-            out.tripped.append((it, why, svc))
-        else:
-            out.ignored.append((it, why))
+        trips, why = classify(it, knobs, since)
+        (out.tripped if trips else out.ignored).append((it, why))
     return out
 
 
@@ -289,17 +209,13 @@ def main() -> int:
     # `statsPeriod` bounds the search window; `is:unresolved` excludes anything a
     # human has already triaged; `firstSeen:-Nh` makes it NEW rather than the
     # standing backlog.
-    params = {
-        "query": f"is:unresolved firstSeen:-{WINDOW_HOURS}h",
-        "statsPeriod": f"{WINDOW_HOURS}h",
-        "limit": str(MAX_REPORTED),
-    }
-    if os.getenv("SENTRY_PRESET", "").strip():
-        # The watch filters by first-seen AFTER the fetch, so ask for the newest
-        # first-seen issues first: pre-deploy issues must not fill the page and
-        # crowd out a new one (2026-10-20). The nightly poll keeps its order.
-        params["sort"] = "new"
-    q = urllib.parse.urlencode(params)
+    q = urllib.parse.urlencode(
+        {
+            "query": f"is:unresolved firstSeen:-{WINDOW_HOURS}h",
+            "statsPeriod": f"{WINDOW_HOURS}h",
+            "limit": str(MAX_REPORTED),
+        }
+    )
     url = f"{HOST}/api/0/organizations/{ORG}/issues/?{q}"
     try:
         issues = _get(url, token)
@@ -331,11 +247,7 @@ def main() -> int:
     except ValueError as exc:
         print(f"::error::bad poller configuration: {exc}")
         return 2
-    return report(issues, knobs, since, os.getenv("SENTRY_SERVICES_OUT", "").strip())
 
-
-def report(issues: list[dict], knobs: Knobs, since: datetime | None, services_out: str = "") -> int:
-    """Print the verdict for `issues` and return the exit code. The part --drill runs."""
     verdict = decide(issues, knobs, since)
     if len(issues) >= MAX_REPORTED:
         print(f"::warning::Sentry returned {len(issues)} issues = SENTRY_MAX_REPORTED; "
@@ -343,28 +255,25 @@ def report(issues: list[dict], knobs: Knobs, since: datetime | None, services_ou
     if knobs != Knobs() or since is not None:
         print(f"_Filters: min_events={knobs.min_events} min_users={knobs.min_users} "
               f"noise={list(knobs.noise_titles)} escalate_at={knobs.noise_escalate_events} "
-              f"projects={[n for n, _ in knobs.service_projects] or 'any'} "
               f"since={since.isoformat() if since else 'none'}_\n")
 
-    def table(rows: list[tuple[dict, str, str]], why_col: str) -> None:
-        print(f"| issue | project | events | users | first seen | culprit | {why_col} |")
-        print("|---|---|---|---|---|---|---|")
-        for it, why, svc in rows:
+    def table(rows: list[tuple[dict, str]], why_col: str) -> None:
+        print(f"| issue | events | users | first seen | culprit | {why_col} |")
+        print("|---|---|---|---|---|---|")
+        for it, why in rows:
             title = str(it.get("title", "?")).replace("|", "\\|")[:90]
             print(
-                f"| [{it.get('shortId','?')}]({it.get('permalink','')}) {title} | {svc or '-'} "
+                f"| [{it.get('shortId','?')}]({it.get('permalink','')}) {title} "
                 f"| {it.get('count','?')} | {it.get('userCount','?')} "
-                f"| {str(it.get('firstSeen',''))[:19]} | `{str(it.get('culprit',''))[:40]}` "
+                f"| {str(it.get('firstSeen',''))[:16]} | `{str(it.get('culprit',''))[:40]}` "
                 f"| {why} |"
             )
 
     if verdict.ignored:
         print(f"**{len(verdict.ignored)} new issue(s) IGNORED** (below the trip bar - listed, "
               "never hidden):\n")
-        table([(it, why, "") for it, why in verdict.ignored], "why ignored")
+        table(verdict.ignored, "why ignored")
         print()
-    if services_out:
-        Path(services_out).write_text(",".join(verdict.services), encoding="utf-8")
     if not verdict.tripped:
         print("Nothing new crossed the trip bar.")
         return 0
@@ -381,62 +290,46 @@ def report(issues: list[dict], knobs: Knobs, since: datetime | None, services_ou
 
 
 def drill(blind: bool = False) -> int:
-    """Offline fixture worlds, through the SAME preset + report() the watch uses.
+    """Offline self-test over the RECORDED 2026-10-03 noise plus negative controls.
 
-    `blind` swaps the rule for "ignore everything"; the must-trip worlds then fail,
-    which is how this drill proves it can still go red (drill_registry negative).
+    `blind` swaps the rule for one that ignores everything; the 'must trip' cases then
+    fail, which is how this drill proves it can still go red (drill_registry negative).
     """
-    import contextlib
-    import io
-    import tempfile
-
     recorded = json.loads(FIXTURE.read_text(encoding="utf-8"))["issues"]
-    knobs = Knobs.from_env({"SENTRY_PRESET": "post-merge-watch"})
-    live = parse_instant("2026-10-03T14:59:00Z")  # the moment /api/version showed the sha
-    be = {"slug": "python-fastapi", "platform": "python"}
-    fe = {"slug": "javascript-nextjs", "platform": "javascript-nextjs"}
+    knobs = Knobs(min_events=5, min_users=1, noise_titles=("clientdisconnect", "event loop blocked"),
+                  noise_escalate_events=20)
+    since = parse_instant("2026-10-03T14:49:36Z")
 
-    def issue(title: str, count: int, users: int, first: str = "2026-10-03T15:05:00Z",
-              project: dict | None = None) -> dict:
+    def issue(title: str, count: int, users: int, first: str = "2026-10-03T15:01:00Z") -> dict:
         return {"shortId": "X-1", "title": title, "count": str(count), "userCount": users,
-                "firstSeen": first, "culprit": "", "project": be if project is None else project}
+                "firstSeen": first, "culprit": ""}
 
-    def world(its: list[dict]) -> tuple[int, str]:
-        """(exit code, services written) of report() for one world."""
+    def rule(its: list[dict]) -> Decision:
         if blind:
-            knobs_ = Knobs(min_events=10**9, min_users=0, noise_titles=("",),
-                           noise_escalate_events=10**9, service_projects=(("x", ("\0",)),))
-        else:
-            knobs_ = knobs
-        with tempfile.TemporaryDirectory() as tmp:
-            out = os.path.join(tmp, "svc")
-            with contextlib.redirect_stdout(io.StringIO()):
-                code = report(its, knobs_, live, out)
-            return code, Path(out).read_text(encoding="utf-8")
+            return Decision(ignored=[(i, "blind") for i in its])
+        return decide(its, knobs, since)
 
-    with_project = [{**i, "project": be} for i in recorded]
     cases: list[tuple[str, bool]] = [
-        ("recorded 2026-10-03 swap noise (3 issues, 2 events, 0 users) -> no rollback",
-         world(with_project) == (0, "")),
-        ("noise BEFORE the deploy went live (50 events, first seen 14:00) -> no rollback",
-         world([issue("KeyError: 'id'", 50, 0, first="2026-10-03T14:00:00Z")]) == (0, "")),
-        ("new backend error after the deploy, 1 user -> rollback backend",
-         world([issue("ValueError: boom", 2, 1)]) == (1, "backend")),
-        ("new backend error after the deploy, 5 events 0 users -> rollback backend",
-         world([issue("KeyError: 'id'", 5, 0)]) == (1, "backend")),
-        ("new FRONTEND error -> rollback frontend only (the #911 shape)",
-         world([issue("TypeError: x is undefined", 3, 1, project=fe)]) == (1, "frontend")),
-        ("an issue in neither project -> listed, no rollback",
-         world([issue("Boom", 99, 9, project={"slug": "side-project", "platform": "go"})]) == (0, "")),
-        ("a ClientDisconnect flood (20 events) -> rollback",
-         world([issue("ClientDisconnect", 20, 0)]) == (1, "backend")),
-        ("unreadable counts fail toward the alarm",
-         world([{"title": "?", "count": "n/a", "userCount": None, "project": be}])[0] == 1),
-        ("missing project fails toward the alarm, all services",
-         world([issue("Boom", 9, 1, project={})]) == (1, ALL)),
+        ("recorded: the 3 real noise issues do NOT trip", not rule(recorded).tripped),
+        ("recorded: all 3 are reported as ignored, not dropped", len(rule(recorded).ignored) == 3),
+        ("control: an error touching 1 user MUST trip", bool(rule([issue("ValueError: x", 2, 1)]).tripped)),
+        ("control: a noise title with users>0 MUST trip",
+         bool(rule([issue("ClientDisconnect", 2, 1)]).tripped)),
+        ("control: a ClientDisconnect flood (20 events) MUST trip",
+         bool(rule([issue("ClientDisconnect", 20, 0)]).tripped)),
+        ("control: an 'event loop blocked' flood MUST trip",
+         bool(rule([issue("event loop blocked for 3.13s", 25, 0)]).tripped)),
+        ("control: a non-noise error with 5 events, 0 users MUST trip",
+         bool(rule([issue("KeyError: 'id'", 5, 0)]).tripped)),
+        ("control: unreadable counts fail toward the alarm",
+         bool(rule([{"title": "?", "count": "n/a", "userCount": None}]).tripped)),
+        ("control: a mid-level noise burst (7 events) stays ignored",
+         not rule([issue("ClientDisconnect", 7, 0)]).tripped),
+        ("since: an issue first seen before the deploy is ignored",
+         not rule([issue("KeyError: 'id'", 50, 0, first="2026-10-03T14:00:00Z")]).tripped),
     ]
-    print("DRILL - sentry_poll must ignore deploy noise and still trip on real errors, "
-          "on the right service." + ("  [BLIND: rule swapped for 'ignore everything']" if blind else ""))
+    print("DRILL - sentry_poll.decide() must ignore deploy noise and still trip on real errors."
+          + ("  [BLIND: rule swapped for 'ignore everything']" if blind else ""))
     for name, ok in cases:
         print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
     failed = [n for n, ok in cases if not ok]
