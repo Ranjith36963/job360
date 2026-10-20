@@ -15,14 +15,17 @@ the SAME contact: the second add returns the first row
 (``already_existed: true``), no second row, no second event (R2). A COLD
 contact (no ``application_id``) dedupes the same way but scoped to the
 USER instead of an application (migration 0046's partial unique index) and
-appends no event (there is no job timeline to write to). Without an email
-there is no identity, so every add is a new row.
+appends no event (there is no job timeline to write to). Without an email,
+the same normalised CURRENT linkedin_url, else the same CURRENT name (linked:
+unless both sides carry different LinkedIn URLs; cold: only when neither side
+has one), in the same scope (application, or the user's cold contacts), is
+the same contact.
 
 No update, no delete at runtime on ``application_contacts``,
 ``contact_outreach`` or ``contact_edits`` (S12 — grep-guarded by
 ``tests/test_slice4_contacts.py::test_contacts_are_append_only``, the same
 pattern ``test_application_spine.py`` uses for events/artifacts). Editing a
-contact's own fields (name/role/email/linkedin_url/notes) appends a
+contact's own fields (name/role/email/linkedin_url/notes/found_via/source_url) appends a
 ``contact_edits`` row instead of touching the base row — the CURRENT value
 of a field is its newest edit, or the base row's value if never edited; the
 full history ("was X") is every edit plus the base value, oldest first.
@@ -150,6 +153,49 @@ def _validate_found_via(raw: Optional[str]) -> Optional[str]:
     return slug
 
 
+def _validate_source_url(raw: Optional[str]) -> Optional[str]:
+    """The page the assistant found this person on. ``None``/blank -> ``None``
+    (rule #29). Stored only, never fetched (M2)."""
+    if raw is None or not raw.strip():
+        return None
+    value = safe_log_value(raw.strip())
+    if len(value) > settings.CONTACT_SOURCE_URL_MAX_CHARS:
+        raise SpineError(
+            422, f"source_url exceeds CONTACT_SOURCE_URL_MAX_CHARS ({settings.CONTACT_SOURCE_URL_MAX_CHARS} chars)"
+        )
+    if not value.startswith(("https://", "http://")):
+        raise SpineError(422, "source_url must start with http:// or https://")
+    return value
+
+
+def linkedin_identity_key(url: str) -> str:
+    """The ONE normalisation used by add_contact's dedupe, the lock key and
+    list_people's grouping: trim, lower-case, http:// -> https://, drop the
+    query and fragment, strip trailing '/', and collapse www./country
+    subdomains of linkedin.com to linkedin.com. '' stays ''."""
+    u = (url or "").strip().lower()
+    if not u:
+        return ""
+    if u.startswith("http://"):
+        u = "https://" + u[len("http://"):]
+    u = u.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    scheme, sep, rest = u.partition("://")
+    host, slash, path = rest.partition("/")
+    if host.endswith(".linkedin.com"):
+        host = "linkedin.com"
+    return f"{scheme}{sep}{host}{slash}{path}"
+
+
+def name_identity_key(name: str) -> str:
+    """lower(name) with inner whitespace collapsed."""
+    return " ".join((name or "").split()).lower()
+
+
+def is_reachable(row: dict[str, Any]) -> bool:
+    """A way to reach this person is saved: CURRENT email or linkedin_url non-empty."""
+    return bool((row.get("email") or "").strip() or (row.get("linkedin_url") or "").strip())
+
+
 def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -161,6 +207,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         "notes": row.get("notes") or "",
         # None when unset (rule #29) — never a default source.
         "found_via": row.get("found_via") or None,
+        "source_url": row.get("source_url") or None,
         "added_by": row["added_by"],
         "created_at": row["created_at"],
     }
@@ -196,7 +243,7 @@ async def _find_contact_by_current_email(
         params.append(exclude_contact_id)
     cur = await db._db.execute(
         f"SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, ac.found_via, "  # noqa: S608
-        f"ac.added_by, ac.created_at FROM application_contacts ac "
+        f"ac.source_url, ac.added_by, ac.created_at FROM application_contacts ac "
         f"LEFT JOIN ("
         f"  SELECT contact_id, value FROM ("
         f"    SELECT contact_id, value, ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY id DESC) AS rn "
@@ -231,6 +278,75 @@ async def _lock_email_scope(db: JobDatabase, user_id: str, application_id: Optio
     )
 
 
+def _identity_lock_keys(user_id: str, application_id: Optional[int], li_key: str, nm_key: str) -> list[str]:
+    scope = str(application_id) if application_id is not None else "cold"  # same scoping as _email_lock_key
+    keys = [f"{user_id}:{scope}:name:{nm_key}"]
+    if li_key:
+        keys.append(f"{user_id}:{scope}:li:{li_key}")
+    return sorted(keys)  # one global order, so two callers can never deadlock
+
+
+async def _lock_identity_scope(
+    db: JobDatabase, user_id: str, application_id: Optional[int], li_key: str, nm_key: str
+) -> None:
+    """Advisory xact locks for a no-email add: MUST be the first statement in
+    its transaction. Two calls that could match each other always share at
+    least one key, so check-then-write is serialised."""
+    for key in _identity_lock_keys(user_id, application_id, li_key, nm_key):
+        await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (key,))
+
+
+async def _find_contact_by_current_identity(
+    db: JobDatabase, application_id: Optional[int], user_id: str, li_key: str, nm_key: str
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """No-email identity: the first (lowest id) contact in scope whose CURRENT
+    linkedin_url key equals ``li_key``, else whose CURRENT name key equals
+    ``nm_key`` (linked scope: unless both sides carry different LinkedIn URLs;
+    cold scope: only when neither side carries one). CURRENT = newest
+    ``contact_edits`` row, else the base row. Email is deliberately not
+    compared."""
+    cold = application_id is None
+    scope_sql = "ac.user_id = ? AND ac.application_id IS NULL" if cold else "ac.user_id = ? AND ac.application_id = ?"
+    params: list[Any] = [user_id, user_id] if cold else [user_id, user_id, application_id]
+    cur = await db._db.execute(
+        f"SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, ac.found_via, "  # noqa: S608
+        f"ac.source_url, ac.added_by, ac.created_at, le.cur_name, le.cur_linkedin "
+        f"FROM application_contacts ac "
+        f"LEFT JOIN ("
+        f"  SELECT contact_id, "
+        f"         MAX(CASE WHEN field = 'name' THEN value END) AS cur_name, "
+        f"         MAX(CASE WHEN field = 'linkedin_url' THEN value END) AS cur_linkedin "
+        f"  FROM ("
+        f"    SELECT contact_id, field, value, "
+        f"           ROW_NUMBER() OVER (PARTITION BY contact_id, field ORDER BY id DESC) AS rn "
+        f"    FROM contact_edits WHERE user_id = ? AND field IN ('name', 'linkedin_url')"
+        f"  ) t WHERE rn = 1 GROUP BY contact_id"
+        f") le ON le.contact_id = ac.id "
+        f"WHERE {scope_sql} ORDER BY ac.id ASC",
+        params,
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    keyed = []
+    for r in rows:
+        cur_li = linkedin_identity_key(r["cur_linkedin"] if r["cur_linkedin"] is not None else r["linkedin_url"])
+        cur_nm = name_identity_key(r["cur_name"] if r["cur_name"] is not None else r["name"])
+        base = {k: v for k, v in r.items() if k not in ("cur_name", "cur_linkedin")}
+        keyed.append((base, cur_li, cur_nm))
+    if li_key:
+        for base, cur_li, _ in keyed:
+            if cur_li == li_key:
+                return base, "linkedin_url"
+    for base, cur_li, cur_nm in keyed:
+        if cur_nm != nm_key:
+            continue
+        if cold:
+            if not li_key and not cur_li:
+                return base, "name"
+        elif not li_key or not cur_li or cur_li == li_key:
+            return base, "name"
+    return None, None
+
+
 async def _count_contacts(db: JobDatabase, application_id: int) -> int:
     cur = await db._db.execute(
         "SELECT COUNT(*) FROM application_contacts WHERE application_id = ?", (application_id,)
@@ -260,6 +376,7 @@ async def _create_contact_with_deferred_email(
     notes: str,
     occurred_at: str,
     found_via: Optional[str] = None,
+    source_url: Optional[str] = None,
 ) -> dict[str, Any]:
     """The rare recovery path ``add_contact`` falls into when the base-row
     UNIQUE index collides with a STALE identity — a different, still-existing
@@ -276,9 +393,9 @@ async def _create_contact_with_deferred_email(
     async with db._db.transaction():
         cur = await db._db.execute(
             "INSERT INTO application_contacts "
-            "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, application_id, name, role, "", linkedin_url, notes, found_via, actor, now),
+            "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, source_url, added_by, "
+            " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, application_id, name, role, "", linkedin_url, notes, found_via, source_url, actor, now),
         )
         contact_id = int(cur.lastrowid or 0)
         # Bug fix (coordinator review, 2026-09-26) — `is_initial=TRUE` marks
@@ -307,10 +424,10 @@ async def _create_contact_with_deferred_email(
     base_row = {
         "id": contact_id, "application_id": application_id, "name": name, "role": role,
         "email": "", "linkedin_url": linkedin_url, "notes": notes, "found_via": found_via,
-        "added_by": actor, "created_at": now,
+        "source_url": source_url, "added_by": actor, "created_at": now,
     }
     view = await _full_contact_view(db, user_id, base_row)
-    return {"contact": view, "already_existed": False, "event_id": event_id}
+    return {"contact": view, "already_existed": False, "event_id": event_id, "matched_on": None}
 
 
 async def add_contact(
@@ -326,6 +443,7 @@ async def add_contact(
     notes: str = "",
     occurred_at: Optional[str] = None,
     found_via: Optional[str] = None,
+    source_url: Optional[str] = None,
 ) -> dict[str, Any]:
     """R1/R2 — add a contact (idempotent on lower/trim email) and, for a
     LINKED contact, append the ``contact_added`` event naming it.
@@ -340,8 +458,9 @@ async def add_contact(
     first, then the ownership lookup for a LINKED contact (S1 — a
     foreign/unknown application id reads as 404 with the SAME detail
     ``get_application`` uses, no existence oracle), then the idempotency
-    check (which bypasses the cap — the same email answering 200 is not a
-    new row), then the cap itself (S4), then the per-user rate limit (S7),
+    check (which bypasses the cap — the same person answering 200 is not a
+    new row; on BOTH the email and the no-email path the lookup comes before
+    the cap and the rate limit), then the cap itself (S4), then the per-user rate limit (S7),
     then the write.
 
     THE BUDGET IS SPENT ON A WRITE, NOT ON A LOOKUP. The rate limit sits
@@ -363,6 +482,7 @@ async def add_contact(
     clean_linkedin = _validate_linkedin_url(linkedin_url)
     clean_notes = _validate_notes(notes)
     clean_found_via = _validate_found_via(found_via)
+    clean_source_url = _validate_source_url(source_url)
     occurred = parse_occurred_at(occurred_at)
 
     if application_id is not None:
@@ -371,38 +491,57 @@ async def add_contact(
             raise SpineError(404, "application not found")
 
     if not clean_email:
-        # No email = no identity, so no possible collision and no lock is
-        # needed — every call is unconditionally a new row.
-        if application_id is not None:
-            count = await _count_contacts(db, application_id)
-            if count >= settings.CONTACTS_PER_APPLICATION_MAX:
-                raise SpineError(
-                    409,
-                    f"contact cap reached; CONTACTS_PER_APPLICATION_MAX is "
-                    f"{settings.CONTACTS_PER_APPLICATION_MAX}",
-                )
-        else:
-            count = await _count_unlinked_contacts(db, user_id)
-            if count >= settings.CONTACTS_UNLINKED_MAX:
-                raise SpineError(
-                    409, f"cold-contact cap reached; CONTACTS_UNLINKED_MAX is {settings.CONTACTS_UNLINKED_MAX}"
-                )
-        key = f"add_contact:{user_id}"
-        if not rate_limit.check_and_record(
-            key, max_in_window=settings.CONTACTS_MAX_PER_HOUR, window_seconds=3600
-        ):
-            raise SpineError(429, "contact rate limit exceeded; try again in an hour")
-
+        # No email: the same normalised CURRENT linkedin_url, else the same
+        # CURRENT name (see _find_contact_by_current_identity), in the same
+        # scope is the same contact. Lookup under advisory locks, before the
+        # cap and the rate limit.
+        li_key = linkedin_identity_key(clean_linkedin)
+        nm_key = name_identity_key(clean_name)
         now = datetime.now(timezone.utc).isoformat()
         event_id: Optional[int] = None
         async with db._db.transaction():
+            await _lock_identity_scope(db, user_id, application_id, li_key, nm_key)
+            existing, matched_on = await _find_contact_by_current_identity(
+                db, application_id, user_id, li_key, nm_key
+            )
+            if existing is not None:
+                get_audit_logger().info(
+                    "contact_already_existed",
+                    extra={
+                        "event": "contact_already_existed", "application_id": application_id,
+                        "contact_id": existing["id"], "matched_on": matched_on,
+                    },
+                )
+                view = await _full_contact_view(db, user_id, existing)
+                return {"contact": view, "already_existed": True, "event_id": None, "matched_on": matched_on}
+
+            if application_id is not None:
+                count = await _count_contacts(db, application_id)
+                if count >= settings.CONTACTS_PER_APPLICATION_MAX:
+                    raise SpineError(
+                        409,
+                        f"contact cap reached; CONTACTS_PER_APPLICATION_MAX is "
+                        f"{settings.CONTACTS_PER_APPLICATION_MAX}",
+                    )
+            else:
+                count = await _count_unlinked_contacts(db, user_id)
+                if count >= settings.CONTACTS_UNLINKED_MAX:
+                    raise SpineError(
+                        409, f"cold-contact cap reached; CONTACTS_UNLINKED_MAX is {settings.CONTACTS_UNLINKED_MAX}"
+                    )
+            key = f"add_contact:{user_id}"
+            if not rate_limit.check_and_record(
+                key, max_in_window=settings.CONTACTS_MAX_PER_HOUR, window_seconds=3600
+            ):
+                raise SpineError(429, "contact rate limit exceeded; try again in an hour")
+
             cur = await db._db.execute(
                 "INSERT INTO application_contacts "
-                "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, source_url, "
+                " added_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, application_id, clean_name, clean_role, "", clean_linkedin, clean_notes,
-                    clean_found_via, actor, now,
+                    clean_found_via, clean_source_url, actor, now,
                 ),
             )
             contact_id = int(cur.lastrowid or 0)
@@ -417,16 +556,17 @@ async def add_contact(
             "contact_added",
             extra={
                 "event": "contact_added", "application_id": application_id, "contact_id": contact_id,
-                "has_email": False, "name_chars": len(clean_name),
+                "has_email": False, "has_linkedin": bool(clean_linkedin),
+                "has_source_url": clean_source_url is not None, "name_chars": len(clean_name),
             },
         )
         base_row = {
             "id": contact_id, "application_id": application_id, "name": clean_name, "role": clean_role,
             "email": "", "linkedin_url": clean_linkedin, "notes": clean_notes, "found_via": clean_found_via,
-            "added_by": actor, "created_at": now,
+            "source_url": clean_source_url, "added_by": actor, "created_at": now,
         }
         view = await _full_contact_view(db, user_id, base_row)
-        return {"contact": view, "already_existed": False, "event_id": event_id}
+        return {"contact": view, "already_existed": False, "event_id": event_id, "matched_on": None}
 
     # Bug fix (coordinator review, 2026-09-26) — clean_email is set, so an
     # identity IS at stake: hold the advisory xact lock for (user, scope,
@@ -449,7 +589,7 @@ async def add_contact(
                 },
             )
             view = await _full_contact_view(db, user_id, existing)
-            return {"contact": view, "already_existed": True, "event_id": None}
+            return {"contact": view, "already_existed": True, "event_id": None, "matched_on": "email"}
 
         if application_id is not None:
             count = await _count_contacts(db, application_id)
@@ -486,11 +626,11 @@ async def add_contact(
             async with db._db.transaction():
                 cur = await db._db.execute(
                     "INSERT INTO application_contacts "
-                    "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, "
-                    " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, source_url, "
+                    " added_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user_id, application_id, clean_name, clean_role, clean_email,
-                        clean_linkedin, clean_notes, clean_found_via, actor, now,
+                        clean_linkedin, clean_notes, clean_found_via, clean_source_url, actor, now,
                     ),
                 )
                 contact_id = int(cur.lastrowid or 0)
@@ -509,10 +649,11 @@ async def add_contact(
             existing = await _find_contact_by_current_email(db, application_id, user_id, clean_email)
             if existing is not None:
                 view = await _full_contact_view(db, user_id, existing)
-                return {"contact": view, "already_existed": True, "event_id": None}
+                return {"contact": view, "already_existed": True, "event_id": None, "matched_on": "email"}
             return await _create_contact_with_deferred_email(
                 db, user_id, application_id, actor, name=clean_name, role=clean_role, email=clean_email,
                 linkedin_url=clean_linkedin, notes=clean_notes, occurred_at=occurred, found_via=clean_found_via,
+                source_url=clean_source_url,
             )
 
     get_audit_logger().info(
@@ -525,10 +666,10 @@ async def add_contact(
     base_row = {
         "id": contact_id, "application_id": application_id, "name": clean_name, "role": clean_role,
         "email": clean_email, "linkedin_url": clean_linkedin, "notes": clean_notes, "found_via": clean_found_via,
-        "added_by": actor, "created_at": now,
+        "source_url": clean_source_url, "added_by": actor, "created_at": now,
     }
     view = await _full_contact_view(db, user_id, base_row)
-    return {"contact": view, "already_existed": False, "event_id": event_id}
+    return {"contact": view, "already_existed": False, "event_id": event_id, "matched_on": None}
 
 
 async def get_owned_contact(db: JobDatabase, user_id: str, contact_id: int) -> Optional[dict[str, Any]]:
@@ -536,7 +677,8 @@ async def get_owned_contact(db: JobDatabase, user_id: str, contact_id: int) -> O
     foreign or unknown id reads as None (the route turns that into 404 —
     ``"contact not found"``, never 403)."""
     cur = await db._db.execute(
-        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at "
+        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, source_url, "
+        "added_by, created_at "
         "FROM application_contacts WHERE id = ? AND user_id = ?",
         (contact_id, user_id),
     )
@@ -552,7 +694,8 @@ async def list_contacts(
     ``include_text=False`` (export_history only — every other caller keeps
     the default) strips outreach message/sent/reply text."""
     cur = await db._db.execute(
-        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at "
+        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, source_url, "
+        "added_by, created_at "
         "FROM application_contacts WHERE user_id = ? AND application_id = ? ORDER BY id ASC",
         (user_id, application_id),
     )
@@ -619,6 +762,7 @@ async def update_contact(
     linkedin_url: Optional[str] = None,
     notes: Optional[str] = None,
     found_via: Optional[str] = None,
+    source_url: Optional[str] = None,
 ) -> dict[str, Any]:
     """Owner decision, 2026-09-25 — contacts ARE editable, but the base row
     stays append-only (S12): each provided field appends one ``contact_edits``
@@ -644,6 +788,8 @@ async def update_contact(
     if found_via is not None:
         # '' clears it (stored as the edit value '', read back as None).
         given["found_via"] = _validate_found_via(found_via) or ""
+    if source_url is not None:
+        given["source_url"] = _validate_source_url(source_url) or ""  # '' clears it
     if not given:
         raise SpineError(422, "at least one field must be given")
 
@@ -1068,8 +1214,8 @@ async def _full_contact_view(
         field_edits = edits.get(field, [])
         if field_edits:
             view[field] = field_edits[-1]["value"]
-            if field == "found_via":
-                view[field] = view[field] or None  # a cleared found_via reads as unset
+            if field in ("found_via", "source_url"):
+                view[field] = view[field] or None  # a cleared value reads as unset
         # Bug fix (coordinator review, 2026-09-26) — the deferred-email
         # creation-time edit (`is_initial=True`) IS the real starting value;
         # fold it into the base entry instead of listing the base row's own
@@ -1092,6 +1238,7 @@ async def _full_contact_view(
                            for e in rest)
         ]
     view["edit_history"] = history
+    view["reachable"] = is_reachable(view)
     rows = await _outreach_rows(db, contact_id)
     view["outreach"] = _outreach_view(rows, include_text=include_text)
     return view
@@ -1101,7 +1248,7 @@ def _group_key(row: dict[str, Any]) -> str:
     email = (row.get("email") or "").strip().lower()
     if email:
         return f"email:{email}"
-    linkedin = (row.get("linkedin_url") or "").strip()
+    linkedin = linkedin_identity_key(row.get("linkedin_url") or "")
     if linkedin:
         return f"linkedin:{linkedin}"
     return f"row:{row['id']}"
@@ -1133,6 +1280,8 @@ def _apply_current_fields(row: dict[str, Any], edits: dict[str, str]) -> None:
             row[field] = edits[field]
     if "found_via" in edits:
         row["found_via"] = edits["found_via"] or None
+    if "source_url" in edits:
+        row["source_url"] = edits["source_url"] or None
 
 
 async def _contacts_by_current_email(db: JobDatabase, user_id: str, email: str) -> list[dict[str, Any]]:
@@ -1143,7 +1292,7 @@ async def _contacts_by_current_email(db: JobDatabase, user_id: str, email: str) 
     clean = email.strip().lower()
     cur = await db._db.execute(
         "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, ac.found_via, "
-        "ac.added_by, ac.created_at, a.job_title, a.job_company "
+        "ac.source_url, ac.added_by, ac.created_at, a.job_title, a.job_company "
         "FROM application_contacts ac LEFT JOIN applications a ON a.id = ac.application_id "
         "LEFT JOIN ("
         "  SELECT contact_id, value FROM ("
@@ -1213,7 +1362,7 @@ async def list_people(
         # instead of silently dropping the tail.
         cur = await db._db.execute(
             "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, ac.found_via, "
-            "ac.added_by, ac.created_at, a.job_title, a.job_company "
+            "ac.source_url, ac.added_by, ac.created_at, a.job_title, a.job_company "
             "FROM application_contacts ac LEFT JOIN applications a ON a.id = ac.application_id "
             "WHERE ac.user_id = ? ORDER BY ac.id DESC LIMIT ?",
             (user_id, settings.LIST_PEOPLE_MAX + 1),
@@ -1264,6 +1413,8 @@ async def list_people(
                 "linkedin_url": primary.get("linkedin_url") or "",
                 "notes": primary.get("notes") or "",
                 "found_via": primary.get("found_via") or None,
+                "source_url": primary.get("source_url") or None,
+                "reachable": any(is_reachable(r) for r in group_rows),
                 "jobs": jobs,
                 "message_count": summary["message_count"],
                 "last_sent": summary["last_sent"],
@@ -1284,7 +1435,8 @@ async def list_unlinked_contacts_page(
     id`` is INCLUSIVE — a page cut short by the byte budget re-offers its
     first un-included row next time by naming that row's own id."""
     cur = await db._db.execute(
-        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at "
+        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, source_url, "
+        "added_by, created_at "
         "FROM application_contacts WHERE user_id = ? AND application_id IS NULL AND id >= ? "
         "ORDER BY id ASC LIMIT ?",
         (user_id, after_id, limit),

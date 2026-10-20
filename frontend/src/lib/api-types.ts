@@ -419,9 +419,11 @@ export interface paths {
         put?: never;
         /**
          * Add Contact
-         * @description 201 for a new contact, 200 (``already_existed: true``) for the same
-         *     email seen again on this application (R2) — the status code is set
-         *     dynamically since the same call can legitimately answer either.
+         * @description 201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
+         *     for the same person seen again on this application (R2): same email, else
+         *     (no email) same normalised LinkedIn URL, else same name unless both carry
+         *     different LinkedIn URLs. The status code is set dynamically since the
+         *     same call can legitimately answer either.
          */
         post: operations["add_contact_api_applications__application_id__contacts_post"];
         delete?: never;
@@ -1616,7 +1618,9 @@ export interface paths {
          * @description Owner decision, 2026-09-25 — a person with no job yet (cold
          *     networking), or a linked one when ``application_id`` is given. Same
          *     idempotency/cap/rate-limit rules as the per-application route, just
-         *     scoped to the USER instead of an application when there is none.
+         *     scoped to the USER instead of an application when there is none. Cold
+         *     scope without an email: same LinkedIn URL, else same name only when
+         *     neither side has a LinkedIn URL. ``source_url`` is stored, never fetched.
          */
         post: operations["add_person_api_contacts_post"];
         delete?: never;
@@ -2901,6 +2905,8 @@ export interface components {
              * @default
              */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** AddContactResponse */
         AddContactResponse: {
@@ -2911,6 +2917,8 @@ export interface components {
             contact_id: number;
             /** Event Id */
             event_id: number | null;
+            /** Matched On */
+            matched_on?: string | null;
         };
         /**
          * AddPersonRequest
@@ -2950,6 +2958,8 @@ export interface components {
              * @default
              */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /**
          * AgentEditOut
@@ -4086,8 +4096,15 @@ export interface components {
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
             /** Role */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** ContactOutreachOut */
         ContactOutreachOut: {
@@ -5571,8 +5588,15 @@ export interface components {
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
             /** Role */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** PersonJobOut */
         PersonJobOut: {
@@ -5608,10 +5632,17 @@ export interface components {
             name: string;
             /** Notes */
             notes: string;
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
             /** Replied */
             replied: boolean;
             /** Role */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** PracticeRunOut */
         PracticeRunOut: {
@@ -6816,7 +6847,8 @@ export interface components {
         /**
          * StatsContactFoundViaGroupOut
          * @description Owner decision 2026-10-04 — per current contact ``found_via``: how
-         *     many contacts, how many had an outreach marked sent / a reply recorded,
+         *     many contacts, how many are ``reachable`` (CURRENT email or LinkedIn URL
+         *     saved), how many had an outreach marked sent / a reply recorded,
          *     and ``reply_rate`` = contacts with both / contacts with a sent mark
          *     (``null`` when nothing was sent).
          */
@@ -6831,6 +6863,11 @@ export interface components {
             outreach_replied: number;
             /** Outreach Sent */
             outreach_sent: number;
+            /**
+             * Reachable
+             * @default 0
+             */
+            reachable: number;
             /** Reply Rate */
             reply_rate: number | null;
         };
@@ -7551,6 +7588,8 @@ export interface components {
             notes?: string | null;
             /** Role */
             role?: string | null;
+            /** Source Url */
+            source_url?: string | null;
         };
         /**
          * UpdateJobFactsRequest

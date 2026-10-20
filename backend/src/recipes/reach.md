@@ -10,8 +10,8 @@ Print this checklist and tick each step:
 2. **Check first:** `list_people` so you never add someone twice.
 3. **Record them:** `add_contact` with the `application_id`, their `role`,
    and `found_via` - where you found them: `company_site`, `linkedin`,
-   `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Put any detail
-   (the page, the post) in `notes`.
+   `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Pass the page as
+   `source_url`; other detail in `notes`.
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
    `email`, `linkedin` or `other`). This is a draft.

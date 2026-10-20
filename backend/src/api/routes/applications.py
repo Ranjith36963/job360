@@ -295,6 +295,7 @@ class AddContactRequest(BaseModel):
     # Owner decision 2026-10-04 — where this person was found; closed set
     # CONTACT_FOUND_VIA, checked by contacts._validate_found_via at call time.
     found_via: Optional[str] = None
+    source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -589,6 +590,9 @@ class ContactOut(BaseModel):
     notes: str
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; null = unset.
     found_via: Optional[str] = None
+    source_url: Optional[str] = None
+    # Derived, never stored: an email or LinkedIn URL is saved.
+    reachable: bool = False
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
@@ -1267,6 +1271,7 @@ class AddContactResponse(BaseModel):
     contact_id: int
     already_existed: bool
     event_id: Optional[int]
+    matched_on: Optional[str] = None  # "email" | "linkedin_url" | "name" when already_existed; null on a create
 
 
 class AddPersonRequest(AddContactRequest):
@@ -1296,6 +1301,7 @@ class UpdateContactRequest(BaseModel):
     notes: Optional[str] = None
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; "" clears it.
     found_via: Optional[str] = None
+    source_url: Optional[str] = None  # "" clears it
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1344,6 +1350,8 @@ class PersonOut(BaseModel):
     linkedin_url: str
     notes: str
     found_via: Optional[str] = None
+    source_url: Optional[str] = None
+    reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
     last_sent: Optional[OutreachEntryOut]
@@ -1447,13 +1455,15 @@ class StatsKeyedGroupOut(BaseModel):
 
 class StatsContactFoundViaGroupOut(BaseModel):
     """Owner decision 2026-10-04 — per current contact ``found_via``: how
-    many contacts, how many had an outreach marked sent / a reply recorded,
+    many contacts, how many are ``reachable`` (CURRENT email or LinkedIn URL
+    saved), how many had an outreach marked sent / a reply recorded,
     and ``reply_rate`` = contacts with both / contacts with a sent mark
     (``null`` when nothing was sent)."""
 
     key: Optional[str]
     label: str
     contacts: int
+    reachable: int = 0
     outreach_sent: int
     outreach_replied: int
     reply_rate: Optional[float]
@@ -2094,14 +2104,17 @@ async def add_contact(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """201 for a new contact, 200 (``already_existed: true``) for the same
-    email seen again on this application (R2) — the status code is set
-    dynamically since the same call can legitimately answer either."""
+    """201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
+    for the same person seen again on this application (R2): same email, else
+    (no email) same normalised LinkedIn URL, else same name unless both carry
+    different LinkedIn URLs. The status code is set dynamically since the
+    same call can legitimately answer either."""
     try:
         result = await contacts_service.add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
+            source_url=body.source_url,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2125,12 +2138,15 @@ async def add_person(
     """Owner decision, 2026-09-25 — a person with no job yet (cold
     networking), or a linked one when ``application_id`` is given. Same
     idempotency/cap/rate-limit rules as the per-application route, just
-    scoped to the USER instead of an application when there is none."""
+    scoped to the USER instead of an application when there is none. Cold
+    scope without an email: same LinkedIn URL, else same name only when
+    neither side has a LinkedIn URL. ``source_url`` is stored, never fetched."""
     try:
         result = await contacts_service.add_contact(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
+            source_url=body.source_url,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2154,7 +2170,7 @@ async def update_contact(
         return await contacts_service.update_contact(
             db, user.id, contact_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, found_via=body.found_via,
+            notes=body.notes, found_via=body.found_via, source_url=body.source_url,
         )
     except SpineError as exc:
         _raise(exc)
