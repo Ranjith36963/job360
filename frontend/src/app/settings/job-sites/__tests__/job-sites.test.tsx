@@ -73,6 +73,34 @@ describe("Job sites", () => {
     await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "click", x: 640, y: 450 }));
   });
 
+  it("refreshes the picture only while the tab is shown, and stops after Keep", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<JobSitesPage />);
+      fireEvent.change(await screen.findByLabelText(/sign-in page/i), { target: { value: "https://jobs.acme.com" } });
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+      await screen.findByTestId("live-view");
+      const shots = () => browserLive.mock.calls.filter(([a]) => a.action === "shot").length;
+
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(shots()).toBe(1);
+
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      await vi.advanceTimersByTimeAsync(4600);
+      expect(shots()).toBe(1); // a hidden tab does not keep the browser busy
+      visibility.mockRestore();
+
+      browserLive.mockResolvedValue({ ...SHOT, kept: { "jobs.acme.com": 2 } });
+      fireEvent.click(screen.getByRole("button", { name: /keep me signed in/i }));
+      await waitFor(() => expect(success).toHaveBeenCalled());
+      const afterKeep = shots();
+      await vi.advanceTimersByTimeAsync(4600);
+      expect(shots()).toBe(afterKeep);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("forgets a saved site", async () => {
     getBrowserSignIns.mockResolvedValue({
       enabled: true, sites: [{ site_host: "jobs.acme.com", cookie_count: 2, updated_at: "2026-10-19T10:00:00Z" }],
