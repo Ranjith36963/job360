@@ -7117,6 +7117,28 @@
       "ProfileEditIn": {
         "additionalProperties": false,
         "properties": {
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index"
+          },
+          "op": {
+            "default": "set",
+            "enum": [
+              "set",
+              "append",
+              "upsert",
+              "remove_at"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -7264,6 +7286,11 @@
             "additionalProperties": true,
             "title": "Preferences",
             "type": "object"
+          },
+          "profile_edit_id": {
+            "default": 0,
+            "title": "Profile Edit Id",
+            "type": "integer"
           },
           "skill_esco": {
             "additionalProperties": {
@@ -12608,6 +12635,17 @@
             "minItems": 1,
             "title": "Edits",
             "type": "array"
+          },
+          "expected_profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Profile Version"
           }
         },
         "required": [
@@ -20256,7 +20294,7 @@
         ]
       },
       "patch": {
-        "description": "Apply 1..N agent edits to the caller's profile as one atomic overlay write.\n\nR12 \u2014 the same function REST and MCP call: the MCP `update_profile` tool\ninvokes this route function directly with the resolved user (the pattern\nevery other MCP tool in `mcp_server.py` already uses), so there is\nexactly one place this logic can drift.\n\nAll-or-nothing (S12): every edit is validated before anything is\nwritten \u2014 one bad path or value means the whole call 422s and NOTHING\nchanges. A user with no profile row yet gets an empty base created first\n(R8) so the overlay has something to sit on. The response carries the\nfull merged profile (`GET /profile`'s own shape) so the caller sees the\neffect without a second round trip.\n\nThe audit line for this action names PATHS and the actor only \u2014 never a\nvalue (S3): an edit can carry a name, an email fragment inside `about_me`,\nor anything else the agent chose to write, and none of that belongs in a\nlog line.",
+        "description": "Apply 1..N agent edits to the caller's profile as one atomic overlay write.\n\nR12 \u2014 the same function REST and MCP call: the MCP `update_profile` tool\ninvokes this route function directly with the resolved user (the pattern\nevery other MCP tool in `mcp_server.py` already uses), so there is\nexactly one place this logic can drift.\n\nAll-or-nothing (S12): every edit is validated before anything is\nwritten \u2014 one bad path or value means the whole call 422s and NOTHING\nchanges. A user with no profile row yet gets an empty base created first\n(R8) so the overlay has something to sit on. The response carries the\nfull merged profile (`GET /profile`'s own shape) so the caller sees the\neffect without a second round trip.\n\nThe audit line for this action names PATHS and the actor only \u2014 never a\nvalue (S3): an edit can carry a name, an email fragment inside `about_me`,\nor anything else the agent chose to write, and none of that belongs in a\nlog line.\n\nGap 4 (slice 26) - two assistants writing one profile: the whole call runs\nunder the user's profile-write lock, so `expected_profile_version` (409\n`stale_profile` when another write landed since) and the item ops (applied\nto the CURRENT list) are checked against exactly what gets written.",
         "operationId": "update_profile_api_profile_patch",
         "parameters": [
           {

@@ -21,6 +21,7 @@ module's code ever runs (S3).
 """
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional, Union
@@ -2966,15 +2967,22 @@ async def record_event(
         # cleared, auto-cleared (an overdue date + a status event), replay-
         # derived (a correction), or unchanged — so there is nothing left to
         # patch here (coordinator review, 2026-09-25).
-        result = await spine.append_event(
-            db, user_id=user.id, application_id=application_id, event_type=body.event_type,
-            detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
-            corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
-            follow_up_on=follow_up_on_arg,
-            # Weak spot #4: a repeat `applied` (e.g. the confirmation email) is
-            # stored as the submission-confirmation note, never a second applied.
-            repeat_applied_as_confirmation=True,
+        # G338: `submit_attempted` is a claim - the row lock, the 409 checks and the append are
+        # one transaction, so of two sessions that both passed check_submit only one may click.
+        claim: contextlib.AbstractAsyncContextManager[Any] = (
+            kit_service.submit_claim(db, user, application_id)
+            if body.event_type == "submit_attempted" else contextlib.nullcontext()
         )
+        async with claim:
+            result = await spine.append_event(
+                db, user_id=user.id, application_id=application_id, event_type=body.event_type,
+                detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
+                corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
+                follow_up_on=follow_up_on_arg,
+                # Weak spot #4: a repeat `applied` (e.g. the confirmation email) is
+                # stored as the submission-confirmation note, never a second applied.
+                repeat_applied_as_confirmation=True,
+            )
         if body.event_type == "replied" and source and source.get("sender"):
             # The sender is a person we sent outreach to on this job: mark them
             # replied too (a new outreach_replied entry; old events untouched).

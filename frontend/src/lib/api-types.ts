@@ -2143,6 +2143,11 @@ export interface paths {
          *     value (S3): an edit can carry a name, an email fragment inside `about_me`,
          *     or anything else the agent chose to write, and none of that belongs in a
          *     log line.
+         *
+         *     Gap 4 (slice 26) - two assistants writing one profile: the whole call runs
+         *     under the user's profile-write lock, so `expected_profile_version` (409
+         *     `stale_profile` when another write landed since) and the item ops (applied
+         *     to the CURRENT list) are checked against exactly what gets written.
          */
         patch: operations["update_profile_api_profile_patch"];
         trace?: never;
@@ -5728,6 +5733,14 @@ export interface components {
         };
         /** ProfileEditIn */
         ProfileEditIn: {
+            /** Index */
+            index?: number | null;
+            /**
+             * Op
+             * @default set
+             * @enum {string}
+             */
+            op: "set" | "append" | "upsert" | "remove_at";
             /** Path */
             path: string;
             /** Remember */
@@ -5807,6 +5820,11 @@ export interface components {
             preferences: {
                 [key: string]: unknown;
             };
+            /**
+             * Profile Edit Id
+             * @default 0
+             */
+            profile_edit_id: number;
             /**
              * Skill Esco
              * @default {}
@@ -7648,6 +7666,8 @@ export interface components {
         UpdateProfileRequest: {
             /** Edits */
             edits: components["schemas"]["ProfileEditIn"][];
+            /** Expected Profile Version */
+            expected_profile_version?: number | null;
         };
         /**
          * UpdateProfileResponse

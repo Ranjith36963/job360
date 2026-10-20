@@ -25,11 +25,13 @@ token, a link, CV text or an answer value.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
 import secrets
 import unicodedata
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit
@@ -731,6 +733,53 @@ async def submit_unconfirmed(db: JobDatabase, user_id: str, application_id: int)
     retracted = {int(dict(r)["corrects_event_id"]) for r in await cur.fetchall()}
     rows = [r for r in rows if not (r["event_type"] == "applied" and int(r["id"]) in retracted)]
     return bool(rows) and rows[0]["event_type"] == "submit_attempted"
+
+
+SUBMIT_CLAIM_REFUSALS = {
+    "unconfirmed": "submit_already_started: a submit was already started on this application and has no outcome "
+    "yet. Do not click Submit: read the page; if nothing confirms it went, record blocked and tell the user.",
+    "receipt": "submit_already_started: this application already has a receipt (it was sent). Do not click Submit.",
+    "status": "submit_already_started: this application is no longer considering. Do not click Submit.",
+}
+
+
+@contextlib.asynccontextmanager
+async def submit_claim(db: JobDatabase, user: CurrentUser, application_id: int) -> AsyncIterator[None]:
+    """G338: recording ``submit_attempted`` is a compare-and-set CLAIM. The application row is
+    locked, then the claim is refused (409) while a submit is unconfirmed (:func:`submit_unconfirmed`,
+    the same rule check_submit stops on), once a receipt exists, or when the status is not
+    ``considering``. The caller appends the event inside this block, so two sessions that both
+    passed check_submit queue on the lock and only the first may click."""
+    async with db._db.transaction():
+        cur = await db._db.execute(
+            "SELECT status FROM applications WHERE id = ? AND user_id = ? FOR UPDATE", (application_id, user.id)
+        )
+        row = await cur.fetchone()
+        if row is None:
+            raise SpineError(404, "application not found")
+        cur = await db._db.execute(
+            "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
+            (application_id, user.id),
+        )
+        has_receipt = await cur.fetchone() is not None
+        reason = ""
+        if await submit_unconfirmed(db, user.id, application_id):
+            reason = "unconfirmed"
+        elif has_receipt:
+            reason = "receipt"
+        elif dict(row)["status"] != "considering":
+            reason = "status"
+        if reason:
+            get_audit_logger().warning(
+                "submit_claim_refused",
+                extra={
+                    "event": "submit_claim_refused", "user_id": safe_log_value(user.id),
+                    "actor": safe_log_value(actor_for(user)), "application_id": int(application_id),
+                    "reason": reason, "status": 409, "result": "refused",
+                },
+            )
+            raise SpineError(409, SUBMIT_CLAIM_REFUSALS[reason])
+        yield
 
 
 async def _new_site(db: JobDatabase, user_id: str, application_id: int, host: Optional[str]) -> bool:
