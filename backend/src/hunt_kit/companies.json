@@ -6344,5 +6344,12 @@
 {"name":"The University of Hong Kong","ats":"pageup","board":"932","source":"career-ops"},
 {"name":"Bank of China (Hong Kong)","ats":"pageup","board":"798","source":"career-ops"},
 {"name":"Oklahoma State University","ats":"pageup","board":"1216/en-us","source":"career-ops"},
-{"name":"Simera","ats":"freshteam","board":"simera-talent","source":"freehire"}
+{"name":"Simera","ats":"freshteam","board":"simera-talent","source":"freehire"},
+{"name":"IDIAP","ats":"werecruit","board":"en/idiap","source":"freehire"},
+{"name":"Axiom Services","ats":"werecruit","board":"fr/axiom-services","source":"freehire"},
+{"name":"Broadpeak","ats":"werecruit","board":"en/broadpeak","source":"freehire"},
+{"name":"Wantapply","ats":"wantapply","board":"global","source":"freehire"},
+{"name":"FineCasual","ats":"workstream","board":"965a796b","source":"freehire"},
+{"name":"Sarku Japan","ats":"workstream","board":"a8f9405b","source":"freehire"},
+{"name":"Chick-fil-A","ats":"workstream","board":"004a7767","source":"freehire"}
 ]

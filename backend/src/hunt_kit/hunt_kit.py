@@ -118,6 +118,9 @@ BOARD_SOURCES = (
     "mindsight",
     "pageup",
     "freshteam",
+    "werecruit",
+    "wantapply",
+    "workstream",
 )
 FEED_SOURCES = (
     "freehire",
@@ -1711,8 +1714,11 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
-# ats -> token part used as the name (comeet slug/uid, pageup id[/locale])
-_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0}
+# ats -> token part used as the name (comeet slug/uid, pageup id[/locale], werecruit lang/slug)
+_PATH_TOKEN = {
+    "successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0,
+    "werecruit": 1,
+}
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:
