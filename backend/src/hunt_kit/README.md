@@ -80,7 +80,8 @@ some Zoho Recruit sites list no description either, so open the link to read the
 and Trakstar (`trakstar`), mostly European employers (rows with `source` `freehire`). Each is read with a few
 requests per board; the first refusal ends that board.
 `kit_ats_misc2.py` adds OpenCATS portals (`opencats`), Odoo recruitment sites (`odoo`), recruiting-solutions.org
-(`recruitingsolutions`) and the TeamEx marketplace (`teamex`).
+(`recruitingsolutions`), the TeamEx marketplace (`teamex`), the Wantapply aggregator (`wantapply`, read from its wantapply.cy
+mirror), werecruit and Workstream (`workstream`).
 Detail-page readers in this file have their own small request caps.
 `kit_ats_misc1.py` adds ten more board types: Betterteam (`betterteam:tenant`), CATS (`catsone:host`, e.g. `sphereinc.catsone.com`), ClinchTalent (`clinch:host`, a career-site host), Crelate (`crelate:slug:orgId` in `companies.json`), eRecruiter (the 32-hex cfg of its widget), gr8people (`gr8people:host`), HR-Manager (`hrmanager:alias`), iSmartRecruit (`ismartrecruit:domain_code`), Loxo (`loxo:host/slug`) and Mindsight (`mindsight:slug`). They read public career pages; a handful of ads per board get a detail page for the description.
 `kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), PageUp People (`pageup`, the
@@ -171,7 +172,8 @@ Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT
 `manatal:slug` (`careers-page.com/slug`), `talentadore:token` (the career-site widget's feed token),
 `traffit:tenant` (`tenant.traffit.com`), `trakstar:tenant` (`tenant.hire.trakstar.com`),
 `opencats:host[/path]` (`careers.boomit.pt/careers`), `odoo:careers-host`,
-`recruitingsolutions:key` (the customerId, e.g. `riv-prod`), `teamex:global`,
+`recruitingsolutions:key` (the customerId, e.g. `riv-prod`), `teamex:global`, `wantapply:global`,
+`werecruit:locale/tenant` (`careers.werecruit.io/en/idiap`), `workstream:8hex` (`www.workstream.us/j/8hex`),
 `keka:tenant` (`tenant.keka.com/careers`), `zohorecruit:tenant` (`tenant.zohorecruit.in`, then `.com` is tried;
 a `companies.json` row may set `"tld": "com"`), `gem:id`
 (`jobs.gem.com/id`), `join:slug` (`join.com/companies/slug`), `deel:slug` (`jobs.deel.com/slug`), `dover:slug` (`app.dover.com/jobs/slug`). Cornerstone sites that need a session cookie return no ads.
