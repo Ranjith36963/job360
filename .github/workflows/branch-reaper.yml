@@ -2,7 +2,7 @@
 #
 # WHY A SEPARATE HALF
 #   A GitHub Action cannot delete a folder on somebody's laptop. Local worktrees
-#   are reaped by .claude/hooks/worktree-reaper.sh; this reaps remote branches.
+#   are reaped by scripts/worktree_reaper.py; this reaps remote branches.
 #   Neither substitutes for the other, and building only this one is why every
 #   previous attempt left 98 worktrees on disk.
 #
