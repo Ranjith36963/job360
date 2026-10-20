@@ -1675,3 +1675,17 @@ def test_chromium_launches_with_webrtc_kept_behind_the_proxy(monkeypatch):
     args = launched["args"]
     assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in args
     assert "--proxy-server=http://127.0.0.1:1" in args
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_opening_three_different_pages_is_no_repeat(pool):
+    """Live run: three opens of three different job pages were warned as 'the same open 3 times'."""
+    from src.services.browser_agent.agent import run
+
+    for n in (1, 2, 3):
+        assert "repeat_warning" not in await run(pool, "u1", "open", url=f"http://jobs.example/form?job={n}")
+    for _ in range(2):
+        await run(pool, "u1", "open", url="http://jobs.example/form?job=1")
+    assert "3 times in a row" in (await run(pool, "u1", "open", url="http://jobs.example/form?job=1"))["repeat_warning"]
