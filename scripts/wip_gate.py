@@ -199,18 +199,19 @@ def pick_unpark(open_prs: list[dict[str, Any]], limit: int,
     NOTHING USED TO UNPARK (2026-10-20). A park only ever ended by hand, so a
     parked PR stayed out of the merge cage's sight forever, and with
     `merge-cage` a required check it could never merge, however green it was.
-    A human-only PR is never picked: unparking it frees nothing for anyone.
+    A parked HUMAN-ONLY PR always comes back, whatever the count: it holds no
+    slot, and while parked it is missing from the owner's daily digest, the
+    one place that tells him it waits on his hand. That happens when a PR is
+    parked before its lane label lands (#980, parked by this very gate).
     """
-    free = limit - sum(1 for p in open_prs if _holds_slot(p, human_only))
-    if free <= 0:
-        return []
     parked = sorted(
-        (p for p in open_prs
-         if _is_parked(p.get("labels")) and not p.get("isDraft")
-         and not _is_human_only(p.get("labels"), human_only)),
+        (p for p in open_prs if _is_parked(p.get("labels")) and not p.get("isDraft")),
         key=lambda p: p.get("number") or 0,
     )
-    return [p["number"] for p in parked[:free]]
+    owners = [p["number"] for p in parked if _is_human_only(p.get("labels"), human_only)]
+    free = max(limit - sum(1 for p in open_prs if _holds_slot(p, human_only)), 0)
+    rest = [p["number"] for p in parked if not _is_human_only(p.get("labels"), human_only)]
+    return sorted(owners + rest[:free])
 
 
 def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int,
@@ -263,6 +264,13 @@ def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int,
             "count": 0,
             "why": f"PR #{this_pr} is exempt: its branch (`{this_head}`) is an "
             "emergency revert, and an emergency revert must never be parked.",
+        }
+    if _is_human_only(this_labels, human_only):
+        return {
+            "park": False,
+            "count": 0,
+            "why": f"PR #{this_pr} is exempt: its lane only merges by the owner's "
+            "hand, so it holds no WIP slot and parking it would only hide it.",
         }
 
     blockers = [p for p in open_prs
@@ -511,10 +519,15 @@ def _drill() -> int:
     P = "wip:parked"
     prs = [pr(10), pr(11, labels=["lane:harness-owner"]), pr(14, labels=[P]),
            pr(12, labels=[P]), pr(13, labels=[P, "lane:harness-owner"]), pr(15, labels=[P])]
-    check("2 free slots -> the 2 oldest parked, skipping the human-only one",
-          pick_unpark(prs, limit=3, human_only=ho), [12, 14])
+    check("2 free slots -> the 2 oldest parked, plus the human-only one",
+          pick_unpark(prs, limit=3, human_only=ho), [12, 13, 14])
     check("queue full -> nothing is unparked",
           pick_unpark([pr(1), pr(2), pr(3, labels=[P])], limit=2, human_only=ho), [])
+    check("queue full -> a parked human-only PR still comes back",
+          pick_unpark([pr(1), pr(2), pr(3, labels=[P, "lane:harness-owner"])],
+                      limit=2, human_only=ho), [3])
+    v = decide([pr(1, labels=["lane:harness-owner"]), pr(2), pr(3)], this_pr=1, limit=2, human_only=ho)
+    check("a human-only PR is never parked, even AT the limit", v["park"], False)
     check("a parked draft is never unparked",
           pick_unpark([pr(1, draft=True, labels=[P])], limit=2, human_only=ho), [])
 
