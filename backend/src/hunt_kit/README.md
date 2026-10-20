@@ -80,9 +80,12 @@ some Zoho Recruit sites list no description either, so open the link to read the
 and Trakstar (`trakstar`), mostly European employers (rows with `source` `freehire`). Each is read with a few
 requests per board; the first refusal ends that board.
 `kit_ats_misc1.py` adds Betterteam (`betterteam:tenant`), CATS (`catsone:host`, e.g. `sphereinc.catsone.com`), ClinchTalent (`clinch:host`, a career-site host) and Crelate (`crelate:slug:orgId` in `companies.json`). They read public career pages; a handful of ads per board get a detail page for the description.
-`kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), Comeet (`comeet`, `slug/companyUID`)
-and HiBob (`hibob`, the tenant of `tenant.careers.hibob.com`). These boards are unofficial public endpoints: a board that
-refuses scripts is skipped, and the first refusal ends that board.
+`kit_ats_extra.py` adds Avature (`avature`, the career-site host; listing only, no description), PageUp People (`pageup`, the
+institution number from `careers.pageuppeople.com/<number>/`), Comeet (`comeet`, `slug/companyUID`), HiBob (`hibob`, the tenant of
+`tenant.careers.hibob.com`) and Freshteam (`freshteam`, the tenant
+of `tenant.freshteam.com`). These boards are unofficial public endpoints: a board that refuses scripts is skipped, and the first
+refusal ends that board. Dayforce is not read: its listing needs a cookie-based CSRF pair that the kit's plain requests cannot
+send, so a `jobs.dayforcehcm.com` link is reported as unsupported.
 
 India: many Indian employers post on Keka Hire and Zoho Recruit, not on the boards above. The
 `keka` and `zohorecruit` rows in `companies.json` (`source` `commoncrawl`, `country` `IN` when most

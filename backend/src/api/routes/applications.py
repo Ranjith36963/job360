@@ -2208,7 +2208,8 @@ async def outreach_check(
 ) -> dict[str, Any]:
     """THE one gate before pressing Send on an outreach email (feature 10).
 
-    Reads the user's settings, this contact's facts and the saved message
+    Reads the user's settings (``assistant_settings.outreach_send`` decides send vs
+    ask; the Gmail mode never does), this contact's facts and the saved message
     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
     kind="outreach"`` created), plus today's recorded sends, then answers
     through ``settings_rules.may_send_outreach`` - the same function for this
@@ -2226,9 +2227,7 @@ async def outreach_check(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
-    verdict = settings_rules.may_send_outreach(
-        cfg, facts, counts, now, inbox_mode=profile.preferences.daily_check or ""
-    )
+    verdict = settings_rules.may_send_outreach(cfg, facts, counts, now)
     # Never the email address, the message text or the company name: ids and closed codes only.
     get_audit_logger().info(
         "outreach_check",
