@@ -116,6 +116,8 @@ Startup boards (`kit_startups.py`): Wellfound (`wellfound`, role pages; behind C
 
 South-East Asia (`kit_asia.py`; unofficial site endpoints, so a site that refuses scripts is skipped): Glints (`glints`: ID SG MY VN, searched by title) and Kalibrr (`kalibrr`: PH ID, searched by title, full posting text included). At most 24 requests per site per run; the first refusal or CAPTCHA page ends that site.
 
+More niche sites (`kit_sites_b.py`; unofficial site endpoints, so a site that refuses scripts is skipped): Airswift (`airswift`, oil, gas and engineering; its sitemap, then at most 8 ad pages 15 seconds apart, because the site answers 429 to anything faster), Brief's careers page (`briefhq`, one request) and Functional Works (`functionalworks`, functional-programming jobs, one request). Every ad names its own employer; a place that names a country you did not choose is dropped, a remote ad is kept. At most 30 requests per site per run; the first refusal or CAPTCHA page ends that site.
+
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
 - Jooble: get a free key at https://jooble.org/api/about . Set `JOOBLE_KEY`. Jooble gives short snippets.
@@ -245,7 +247,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_niche.py` niche boards
+- `kit_ats.py` and `kit_ats_more.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
