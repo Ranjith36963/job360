@@ -22,10 +22,12 @@ import {
   WEEKLY_CAP_MAX,
   grantActive,
   grantText,
+  historyWhen,
   hoursOf,
   isoToLocalInput,
   localInputToIso,
   numText,
+  scopeText,
   settingEffective,
 } from "@/lib/assistant-tab";
 import { cn } from "@/lib/utils";
@@ -157,6 +159,10 @@ export function BatchRuleRows({
   const savedGrantCount = view.auto_grant_count?.value;
   const savedGrantUntil = String(view.auto_grant_until?.value ?? "");
   const grantOn = grantActive(savedGrantCount, savedGrantUntil);
+  // Slice 30: a grant covers only the queue the user sees here when they confirm it.
+  const scope = view.auto_grant_scope;
+  const queueNow = scope?.queue;
+  const covered = scopeText(scope?.granted);
   const numInput = (
     testid: string,
     label: string,
@@ -499,7 +505,12 @@ export function BatchRuleRows({
             )}
             {mode === "while" && (
               <div className="mt-2 flex flex-col gap-2">
-                {grantOn && <span className="text-[12.5px] text-muted-foreground">{grantText(savedGrantCount, savedGrantUntil)}.</span>}
+                {grantOn && (
+                  <span data-testid="auto-grant-on" className="text-[12.5px] text-muted-foreground">
+                    {grantText(savedGrantCount, savedGrantUntil)}.
+                    {covered && ` It covers the ${covered} that were in your queue when you said yes.`}
+                  </span>
+                )}
                 <span className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
                   Auto for my next
                   {numInput(
@@ -542,11 +553,17 @@ export function BatchRuleRows({
                 </span>
                 {confirmGrant && (
                   <span className="flex flex-wrap items-center gap-2 text-[13px]">
-                    Let your assistant apply on its own for your next {grantCount} applications?
+                    <span data-testid="auto-grant-scope">
+                      {queueNow && queueNow.count === 0
+                        ? "Your queue is empty, so nothing would be sent on its own. Queue the jobs first."
+                        : `Auto-submit the ${scopeText(queueNow) || "applications"} in your queue now, at most ${grantCount}, ` +
+                          `until ${historyWhen(localInputToIso(grantUntil))}? Jobs you queue later, or whose form ` +
+                          "moves to another site, will still ask you."}
+                    </span>
                     <button
                       type="button"
                       data-testid="auto-grant-confirm"
-                      disabled={busy}
+                      disabled={busy || queueNow?.count === 0}
                       onClick={saveGrant}
                       className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
                     >

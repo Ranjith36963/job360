@@ -360,6 +360,8 @@ DENY_REASONS: dict[str, str] = {
     "backend/src/services/auth/**": f"authentication — the owner merges it. {_OWNER_MERGES}",
     "backend/src/api/routes/account*.py":
         f"account management — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/core/settings.py":
+        f"settings flags change production behaviour for every user. {_OWNER_MERGES}",
     "backend/migrations/**":
         "schema change — irreversible against live data: a Railway rollback restores "
         "the previous IMAGE, not the previous SCHEMA. Every migration ships with its "
@@ -492,8 +494,6 @@ WATCHED_RISKS: dict[str, str] = {
     "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
     "**/railway.json": f"infrastructure decision. {_WATCHED}",
     "**/*.env*": f"secrets and configuration. {_WATCHED}",
-    "backend/src/core/settings.py":
-        f"flags here change production behaviour globally. {_WATCHED}",
     # ── dependency manifests ─────────────────────────────────────────────────
     # The cage has no semver awareness, and a manifest runs postinstall scripts
     # on the build host. `dependabot-auto.yml` still owns the bump decision and
@@ -1051,7 +1051,7 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
         n = int(f.get("additions", 0)) + int(f.get("deletions", 0))
         name = str(f.get("filename", ""))
         recorded = (_FIXTURE_DIR in f"/{name}") and name.lower().endswith(_RECORDED_EXT)
-        # A generated file (openapi.json, api-types.ts, GENERATED.md) is written by a
+        # A generated file (openapi.json, api-types.ts) is written by a
         # script, not read by a reviewer. EXACT paths from the policy only, and the
         # discount is reported in the verdict like the fixture one.
         if recorded or name in GENERATED_FILES:
@@ -1199,12 +1199,23 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
                        f"FIX: teach merge_cage.py to paginate.")
 
     names = [r.get("name", "") for r in runs]
+    still_running = any(r.get("status") != "completed" for r in runs)
+    analyses_running = sorted(str(r.get("name")) for r in runs
+                              if str(r.get("name") or "").startswith("Analyze (")
+                              and r.get("status") != "completed")
     for req in REQUIRED_CHECKS:
         # On a non-main base the reason above already says why this one is absent.
         # Saying it twice, once in a form the author cannot act on, is noise.
         if base_ref != MAIN_BRANCH and req in MAIN_ONLY_CHECKS:
             continue
-        if not any(req == n for n in names):
+        if not any(req == n for n in names) and still_running:
+            # Measured on #1037/#1038 (2026-10-20): judged a minute after a push,
+            # CodeQL had simply not been posted yet, and the advice "stale base,
+            # update the branch" sent the reader the wrong way. Still a wait.
+            reasons.append(
+                f"required check `{req}` has not started yet — other checks on this commit are "
+                f"still running. FIX: wait; the next run re-judges.")
+        elif not any(req == n for n in names):
             reasons.append(
                 f"required check `{req}` did not run — it cannot pass by being absent. This is "
                 f"almost always a stale base: the PR was branched before that check existed. "
@@ -1251,6 +1262,18 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
                 f"FIX: re-run it (`gh run rerun <run-id> --failed`) and re-judge. If it keeps "
                 f"not finishing, the job is too slow or is hanging, and THAT is the bug -- do "
                 f"not raise the timeout to hide it — {url}".rstrip(" -"))
+        elif name == "CodeQL" and concl == "neutral" and analyses_running:
+            # AN EARLY `neutral` IS A WAIT (2026-10-20). Measured on #1041:
+            # `CodeQL` (github-advanced-security) completed neutral at 20:47:15
+            # while `Analyze (python)` was still in_progress and `Analyze
+            # (actions)` finished at 20:47:22; on #1012 the same check run was
+            # later rewritten to success. So neutral posted before every
+            # analysis has finished is "not decided yet", not a refusal. Once
+            # every Analyze job is done, a neutral CodeQL still refuses below.
+            reasons.append(
+                f"required check `{name}` has not finished: it reads neutral while "
+                f"{', '.join(analyses_running)} still run, and it is rewritten when they finish. "
+                f"FIX: wait for it, then re-judge.")
         elif required and concl != "success":
             url = r.get("html_url") or ""
             reasons.append(
@@ -1362,7 +1385,13 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
             if base_ref != MAIN_BRANCH and name in MAIN_ONLY_CHECKS:
                 continue
             run = by_name.get(name)
-            if run is None:
+            if run is None and any(r.get("status") != "completed" for r in runs):
+                # Not posted yet while other checks still run (2026-10-20, #1029:
+                # judged at 21:40, `Backend (Python 3.12)` passed at 21:51). A wait.
+                reasons.append(
+                    f"tag `{tag}` needs `{name}`, which has not started yet — other checks on "
+                    f"this commit are still running. FIX: wait; the next run re-judges.")
+            elif run is None:
                 reasons.append(
                     f"tag `{tag}` needs `{name}` and that check never ran on this PR. A tag "
                     f"cannot be earned by absence. FIX: rebase onto main so the workflow "
@@ -1609,15 +1638,20 @@ def ground_problem(expected_sha: str, actual_sha: str) -> str | None:
     having compared a value to itself, which is exactly the class of lie this file
     exists to stop. So say so instead of pretending.
     """
+    # BOTH ANSWERS ARE A WAIT, NOT A REFUSAL (2026-10-20). Measured on #1007:
+    # judged at 16:46:12, eleven seconds after `main` moved at 16:45:57. GitHub
+    # recomputes a PR's merge commit after its base moves and reports
+    # `merge_commit_sha: null` meanwhile, so the cage "could not tell which
+    # commit" and posted `failure` on a PR with nothing wrong in it. Neither an
+    # empty sha nor a moved one is the PR's fault, and both settle on their own.
     if not expected_sha or not actual_sha:
-        return ("I cannot tell which commit I am standing on, so I cannot say whether these "
-                "numbers belong to this PR. FIX: run the ratchets from a checkout of "
-                "`refs/pull/<PR>/merge`.")
+        return ("GitHub has not computed this PR's merge commit yet (it recomputes after "
+                "`main` moves), so the merge tree has not settled yet and I cannot say whether "
+                "these numbers belong to this PR. FIX: wait; the next run re-judges.")
     if expected_sha != actual_sha:
         return (f"these numbers were measured on `{actual_sha[:8]}`, not on this PR's merge "
-                f"commit `{expected_sha[:8]}` — comparing them would answer a question about "
-                f"a different tree. FIX: measure from a checkout of `refs/pull/<PR>/merge`, or "
-                f"drop --baseline and accept that the ratchet cage did not run.")
+                f"commit `{expected_sha[:8]}` — `main` moved while I was judging, so the merge "
+                f"tree has not settled yet. FIX: wait; the next run re-judges.")
     return None
 
 
@@ -1749,7 +1783,7 @@ def check_ratchets(base_values: dict | None, expected_sha: str = "",
     if any(r.get("scope") == "tree" for r in RATCHETS):
         problem = ground_problem(expected_sha, head_sha(tree))
         if problem:
-            return Verdict("RATCHET", "fail", [f"ratchet comparison refused: {problem}"],
+            return Verdict("RATCHET", "fail", [f"ratchet comparison waits: {problem}"],
                            claim="no quality number went backwards")
 
     compared = 0
@@ -1835,6 +1869,13 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
         # The head is read BEFORE the files and checked again after every cage,
         # so a push mid-judgement cannot put this verdict on a diff it never read.
         pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
+        # `merge_commit_sha` is null while GitHub recomputes the merge after the
+        # base moves; reading the PR is what asks it to. Ask a few more times.
+        for _ in range(3):
+            if pr_json.get("merge_commit_sha"):
+                break
+            time.sleep(5)
+            pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
         files_raw = gh(["api", f"repos/{REPO}/pulls/{pr}/files?per_page={PER_PAGE}"])
         files_json = json.loads(files_raw)
         files = [f["filename"] for f in files_json]
@@ -1941,7 +1982,8 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
 # can wait on it: a `merge-cage` commit status. Once the owner makes it a
 # required check, a PR stays queued and GitHub holds it until this says
 # `success`. "Still waiting" is `pending`, a real refusal is `failure`; both hold.
-_WAIT_MARKERS = ("has not finished", "cannot pass by being absent")
+_WAIT_MARKERS = ("has not finished", "cannot pass by being absent", "has not settled yet",
+                 "has not started yet")
 # THE OWNER'S TURN IS NOT A FAILURE (owner, 2026-10-20). A PR only the owner may
 # merge (the cage's own files, migrations, auth, a deletion) used to post a red
 # `failure` even when every check was green, so every one of them looked broken
@@ -2356,8 +2398,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
                "backend/src/api/routes/profile.py",
                "docker-compose.prod.yml",
                "frontend/package.json",
-               "docs/product/product_design_rules.md",
-               "backend/src/core/settings.py"]
+               "docs/product/product_design_rules.md"]
     still_denied = [f for f in flipped if check_paths([f]).status != "pass"]
     ok("the product's sharp end is machine-mergeable now, under the watcher",
        not still_denied,
@@ -2605,6 +2646,15 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("a required check that is absent is refused",
         judge_check_runs(done[1:], len(done) - 1), "cannot pass by being absent",
         ["judge_check_runs"])
+    # Absent while others still run is "not started yet", a wait, never "stale base"
+    # (#1037/#1038, 2026-10-20: CodeQL had not been posted a minute after a push).
+    _running = done[1:-1] + [dict(done[-1], status="in_progress", conclusion=None)]
+    _absent_early = judge_check_runs(_running, len(_running))
+    red("a required check absent while others still run has not started yet",
+        _absent_early, "has not started yet", ["judge_check_runs"])
+    ok("...and it is not called a stale base",
+       not any("stale base" in r for r in _absent_early),
+       f"got {_absent_early}", ["judge_check_runs"])
     red("a failing check is refused",
         judge_check_runs(done[:-1] + [{"name": "CodeQL", "status": "completed",
                                        "conclusion": "failure", "output": {}}], len(done)),
@@ -2873,6 +2923,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        bool(ground_problem("a" * 40, "b" * 40)) and bool(ground_problem("", "b" * 40))
        and ground_problem("a" * 40, "a" * 40) is None,
        "a comparison against the wrong tree was allowed to stand", ["ground_problem"])
+    # ...and it HOLDS as a wait, never a failure: an unsettled merge tree is
+    # GitHub's timing, not the PR's fault (#1007, 2026-10-20).
+    for _exp, _act in (("", "b" * 40), ("a" * 40, "b" * 40)):
+        _gv = Verdict("RATCHET", "fail", [f"ratchet comparison waits: {ground_problem(_exp, _act)}"])
+        ok(f"an unsettled merge tree is a wait, not a failure ({'empty' if not _exp else 'moved'})",
+           status_for(False, [_gv])[0] == "pending",
+           f"got {status_for(False, [_gv])}", ["ground_problem", "status_for"])
 
     # ── THE WHOLE CAGE, END TO END, WITH A FAKE GITHUB ────────────────────────
     # check_proof and check_review were never drilled — the two cages that talk to
@@ -3057,6 +3114,21 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
             for n in REQUIRED_CHECKS]
     _opt.append({"name": "Doc clutter (CURATE gear)", "status": "completed",
                  "conclusion": "skipped"})
+    # An early neutral CodeQL, posted while its Analyze jobs still run, is a WAIT
+    # (#1041, 2026-10-20); after every analysis finished, neutral still refuses.
+    _cq = [{"name": n, "status": "completed", "conclusion": "success"}
+           for n in REQUIRED_CHECKS if n != "CodeQL"]
+    _cq.append({"name": "CodeQL", "status": "completed", "conclusion": "neutral"})
+    _early = judge_check_runs(_cq + [{"name": "Analyze (python)", "status": "in_progress",
+                                      "conclusion": None}], len(_cq) + 1)
+    ok("a neutral CodeQL while an Analyze job still runs is a wait, not a refusal",
+       bool(_early) and all(any(m in r for m in _WAIT_MARKERS) for r in _early)
+       and not any("only `success` counts" in r for r in _early),
+       f"got {_early}", ["judge_check_runs"])
+    _late = judge_check_runs(_cq + [{"name": "Analyze (python)", "status": "completed",
+                                     "conclusion": "success"}], len(_cq) + 1)
+    ok("...but a neutral CodeQL after every analysis finished still refuses",
+       any("only `success` counts" in r for r in _late), f"got {_late}", ["judge_check_runs"])
     ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
        not judge_check_runs(_opt, len(_opt)),
        f"a correctly-skipped optional check blocked the PR: {judge_check_runs(_opt, len(_opt))}",
@@ -3210,6 +3282,19 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        bool(judge_tags(_prod_req, _verify_skipped)),
        "a skipped job was allowed to prove something — a skip proves nothing, "
        "which is the entire point of a tag", T)
+
+    # #1029 (2026-10-20): the cage judged before `Backend (Python 3.12)` was posted
+    # and called it "never ran" -- a red on a PR whose every check later passed.
+    _ci_early = [r for r in _full if r["name"] != TAG_CHECKS["ci"][0]] + \
+        [{"name": "offline-suite-still-going", "status": "in_progress", "conclusion": None}]
+    _early_tags = judge_tags(_prod_req, _ci_early)
+    ok("a tag check not posted yet while others still run is a WAIT, not 'never ran'",
+       bool(_early_tags) and all(any(m in r for m in _WAIT_MARKERS) for r in _early_tags),
+       f"got {_early_tags}", T)
+    _ci_gone = [r for r in _full if r["name"] != TAG_CHECKS["ci"][0]]
+    ok("...but a tag check absent after everything finished still says it never ran",
+       any("never ran" in r for r in judge_tags(_prod_req, _ci_gone)),
+       f"got {judge_tags(_prod_req, _ci_gone)}", T)
 
     _verify_pending = [r for r in _full if not r["name"].startswith("verify")] + \
         [{"name": TAG_CHECKS["verify"][0], "status": "in_progress", "conclusion": None}]

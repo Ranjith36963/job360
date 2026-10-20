@@ -208,14 +208,6 @@ lanes:
       - "docs/README.md"
       - "backend/README.md"
       - "frontend/README.md"
-      # docs/GENERATED.md is machine-written (`gen_doc_blocks.py --write`) and
-      # machine-proven (`--check` is a required gate), so it is the harness's
-      # own record. Until 2026-09-19 it matched NO lane, and every product PR
-      # that added a route or a test file regenerated it and escalated to
-      # harness_owner -- the owner merged product PRs by hand for that alone
-      # (#588). Harness is the LOWEST precedence, so a product PR that also
-      # regenerates it still rides the product lane.
-      - "docs/GENERATED.md"
       # ── ROOT MARKDOWN, NAMED ONE BY ONE. NOT `*.md`. ──────────────────────
       # `*.md` sat here and looked harmless. It was not -- but the reason
       # written down here was WRONG, and being wrong about the mechanism is why
@@ -417,7 +409,6 @@ lanes:
       - "**/railway.json"
       - "**/*docker-compose*"
       - "**/*Dockerfile*"
-      - "backend/src/core/settings.py"   # flags change prod behaviour globally
       # dependency manifests run postinstall scripts on the build host;
       # dependabot-auto.yml already owns the safe subset of this decision
       - "**/package.json"
@@ -470,6 +461,7 @@ lanes:
   product_human:
     paths:
       - "backend/migrations/**"
+      - "backend/src/core/settings.py"   # flags change prod behaviour globally (owner, 2026-10-20)
       - "backend/src/api/routes/auth.py"
       - "backend/src/services/auth/**"
       - "backend/src/api/routes/account*.py"
@@ -740,7 +732,6 @@ size:
   generated:
     - frontend/openapi.json
     - frontend/src/lib/api-types.ts
-    - docs/GENERATED.md
 
 # ── Ratchets ───────────────────────────────────────────────────────────────
 # A ratchet is a number that may HOLD or IMPROVE and may never get worse.

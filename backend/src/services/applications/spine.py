@@ -1707,7 +1707,7 @@ async def record_receipt(
             "possible_duplicate",
             extra={
                 "event": "possible_duplicate", "user_id": safe_log_value(user_id),
-                "application_id": application_id, "receipt_id": receipt_id,
+                "application_id": int(application_id), "receipt_id": int(receipt_id),
                 "flag": safe_log_value(possible_duplicate, max_len=40),
                 "actor": safe_log_value(recorded_by, max_len=80), "result": "ok",
             },

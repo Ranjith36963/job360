@@ -2172,6 +2172,17 @@
           "auto_grant_count": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "auto_grant_scope": {
+            "$ref": "#/components/schemas/GrantScopeOut",
+            "default": {
+              "queue": {
+                "count": 0,
+                "hosts": [],
+                "no_host": 0
+              },
+              "unscoped": false
+            }
+          },
           "auto_grant_until": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2326,6 +2337,37 @@
           "mode"
         ],
         "title": "AutofillRequest",
+        "type": "object"
+      },
+      "BlockedSubmittedOut": {
+        "description": "\"I submitted it\": the new receipt's id plus the refreshed decision state.",
+        "properties": {
+          "controls": {
+            "$ref": "#/components/schemas/ApplicationControlsOut"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "controls"
+        ],
+        "title": "BlockedSubmittedOut",
+        "type": "object"
+      },
+      "BlockedSubmittedRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Confirmation",
+            "type": "string"
+          }
+        },
+        "title": "BlockedSubmittedRequest",
         "type": "object"
       },
       "Body_clear_profile_section_api_profile_clear_post": {
@@ -4958,6 +5000,61 @@
           "grants"
         ],
         "title": "GrantListResponse",
+        "type": "object"
+      },
+      "GrantScopeCount": {
+        "description": "How many applications, their distinct form hosts, and how many have no host yet.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "hosts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Hosts",
+            "type": "array"
+          },
+          "no_host": {
+            "default": 0,
+            "title": "No Host",
+            "type": "integer"
+          }
+        },
+        "title": "GrantScopeCount",
+        "type": "object"
+      },
+      "GrantScopeOut": {
+        "description": "Gap roadmap slice 30 - what an \"Auto for a while\" grant covers. ``queue``: what a grant\nconfirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the\ngrant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from\nbefore snapshots, covering every application until it ends.",
+        "properties": {
+          "granted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GrantScopeCount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue": {
+            "$ref": "#/components/schemas/GrantScopeCount",
+            "default": {
+              "count": 0,
+              "hosts": [],
+              "no_host": 0
+            }
+          },
+          "unscoped": {
+            "default": false,
+            "title": "Unscoped",
+            "type": "boolean"
+          }
+        },
+        "title": "GrantScopeOut",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -7781,6 +7878,16 @@
           "grounded": {
             "title": "Grounded",
             "type": "boolean"
+          },
+          "source": {
+            "default": "none",
+            "enum": [
+              "profile",
+              "ad",
+              "none"
+            ],
+            "title": "Source",
+            "type": "string"
           },
           "text": {
             "title": "Text",
@@ -14565,6 +14672,91 @@
           }
         },
         "summary": "Resolve Blocked",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/blocked/submitted": {
+      "post": {
+        "description": "\"I submitted it\" - the user got past the block and pressed Submit themselves:\nrecords ``unblocked`` {resolution: user_did_it} (as \"Mark resolved\" does) and the\nreceipt (``recorded_by`` web, the pasted confirmation), in ONE transaction. 409 when\nnothing is blocked, or when the application already has a receipt or is no longer\n``considering`` (check_submit's ``already_applied``); nothing is written then.\nSession only; assistants use ``record_event`` + ``record_application``.",
+        "operationId": "submitted_blocked_api_applications__application_id__blocked_submitted_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockedSubmittedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedSubmittedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submitted Blocked",
         "tags": [
           "applications"
         ]
@@ -22344,7 +22536,7 @@
     },
     "/api/tailor/{job_id}/{doc_kind}/provenance": {
       "get": {
-        "description": "Per-line provenance for the newest saved version: which lines are the\nuser's OWN facts (grounded in their CV + the job ad) and which were added.\nDeterministic, no LLM \u2014 shown before download so the user can verify what is\nreal (guardrail #2).",
+        "description": "Per-line provenance for the newest saved version: which lines are the\nuser's OWN facts (grounded in their profile), which only echo the job ad\n(``source=\"ad\"``: employer context, never a candidate fact) and which were added.\nDeterministic, no LLM \u2014 shown before download so the user can verify what is\nreal (guardrail #2).",
         "operationId": "provenance_api_tailor__job_id___doc_kind__provenance_get",
         "parameters": [
           {
