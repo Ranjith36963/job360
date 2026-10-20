@@ -332,7 +332,7 @@ _G_H3 = re.compile(r"<h3\b[^>]*>([^<]+)</h3>")
 _G_LINE = re.compile(r'<p class="l103df">([\s\S]*?)</p>')
 _G_ARIA = re.compile(r'\baria-label="Learn more about ([^"]+)"')
 _G_MORE = re.compile(r"^\+\d+ more$")
-_G_SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.S)
+_G_SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.S | re.I)
 _G_DATA = re.compile(r"data:(\[.*?\]), sideChannel", re.S)
 
 
