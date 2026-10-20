@@ -1056,3 +1056,20 @@ BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
 # Live sign-in views (Settings -> Job sites) have their own cap, apart from the assistants' browsers.
 BROWSER_AGENT_MAX_LIVE = int(os.getenv("BROWSER_AGENT_MAX_LIVE", "2"))
 BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))
+
+
+# -- Migration safety (gap roadmap slice 20). Migrations auto-apply on boot and
+# every merge to main deploys, so one bad migration must fail fast, not stall
+# production. migrations/runner.py issues SET LOCAL lock_timeout / statement_timeout
+# inside each migration's own transaction (0 = Postgres "no limit"). Before applying
+# pending migrations it copies every existing table their up.sql alters, drops,
+# updates, deletes from or truncates into the `migration_snapshots` schema as
+# `<table>__<migration_id>`, skipping tables over the row cap. Snapshots never run in
+# test mode (pg.TEST_MODE), whatever this flag says.
+MIGRATION_LOCK_TIMEOUT_S = int(os.getenv("MIGRATION_LOCK_TIMEOUT_S", "5"))
+MIGRATION_STATEMENT_TIMEOUT_S = int(os.getenv("MIGRATION_STATEMENT_TIMEOUT_S", "120"))
+MIGRATION_SNAPSHOTS_ENABLED = _env_flag("MIGRATION_SNAPSHOTS_ENABLED", True)
+MIGRATION_SNAPSHOT_MAX_ROWS = int(os.getenv("MIGRATION_SNAPSHOT_MAX_ROWS", "200000"))
+# Snapshots hold whole tables (users, applications, receipts), outside the erasure
+# path, so they must not outlive the backups: every up() drops those older than this.
+MIGRATION_SNAPSHOT_RETENTION_DAYS = int(os.getenv("MIGRATION_SNAPSHOT_RETENTION_DAYS", "14"))
