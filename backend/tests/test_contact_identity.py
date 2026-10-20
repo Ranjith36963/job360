@@ -331,7 +331,6 @@ async def test_stats_by_contact_found_via_counts_reachable(authenticated_async_c
 
 @pytest.mark.asyncio
 async def test_mcp_add_contact_dedupes_and_carries_source_url(authenticated_async_context):
-    pytest.importorskip("mcp")
     import httpx2
     from mcp.client import Client
     from mcp.client.streamable_http import streamable_http_client
@@ -376,7 +375,6 @@ async def test_mcp_add_contact_dedupes_and_carries_source_url(authenticated_asyn
 
 @pytest.mark.asyncio
 async def test_add_contact_description_no_longer_promises_duplicates():
-    pytest.importorskip("mcp")
     from src.api.mcp_server import build_server
 
     tools = {t.name: t for t in await build_server().list_tools()}
