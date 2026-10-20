@@ -17,6 +17,16 @@ logger = logging.getLogger("job360.observability")
 
 # H4 — request headers that must NEVER reach Sentry (credentials / session).
 _SENSITIVE_HEADERS = frozenset({"cookie", "authorization", "set-cookie"})
+# The framework's own frames hold the raw request body under names no scrubber knows (FastAPI's
+# request handler keeps it as ``body_bytes``): a password, a sign-in, a start token. Their locals go.
+_FRAMEWORK_MODULES = ("fastapi.", "starlette.")
+
+
+def _drop_framework_frame_vars(event: dict[str, Any]) -> None:
+    for value in (event.get("exception") or {}).get("values") or []:
+        for frame in ((value or {}).get("stacktrace") or {}).get("frames") or []:
+            if isinstance(frame, dict) and str(frame.get("module") or "").startswith(_FRAMEWORK_MODULES):
+                frame.pop("vars", None)
 
 
 def _strip_password_fields(obj: Any) -> None:
@@ -32,8 +42,8 @@ def _strip_password_fields(obj: Any) -> None:
 
 
 def _scrub_pii(event: Any, _hint: Any) -> Any:
-    """Strip auth headers, cookies, request bodies, and password fields before an
-    event leaves the box (H4).
+    """Strip auth headers, cookies, request bodies (the framework frames' locals too),
+    and password fields before an event leaves the box (H4).
 
     Belt-and-suspenders on top of ``send_default_pii=False``: bodies may hold
     passwords / CV text; the Cookie header holds the session token. Never raises —
@@ -55,6 +65,8 @@ def _scrub_pii(event: Any, _hint: Any) -> Any:
             req.pop("cookies", None)
             if "data" in req:
                 req["data"] = "[redacted]"
+        if isinstance(event, dict):
+            _drop_framework_frame_vars(event)
         _strip_password_fields(event)
     except Exception:  # noqa: BLE001 — scrubbing must never break error reporting
         return event
@@ -104,6 +116,7 @@ def init_sentry(*, component: str = "api") -> bool:
 
     import sentry_sdk
     from sentry_sdk.integrations.logging import ignore_logger
+    from sentry_sdk.scrubber import EventScrubber
 
     sentry_sdk.init(
         dsn=dsn,
@@ -117,6 +130,9 @@ def init_sentry(*, component: str = "api") -> bool:
         # Never read a request body before the handler runs (bodies are
         # redacted anyway; this also stops the SDK buffering large uploads).
         max_request_body_size="never",
+        # Frame locals are scrubbed at every depth, not only top-level names: a token inside a dict local
+        # (request headers, a decrypted sign-in state, FastAPI's parsed body) is caught too.
+        event_scrubber=EventScrubber(recursive=True),
     )
     sentry_sdk.set_tag("component", component)
     # The positive half. Without it, "Sentry is quiet" is unfalsifiable: you
