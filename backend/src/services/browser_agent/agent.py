@@ -284,7 +284,7 @@ async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
             )
     await page.keyboard.press(key)
     await _settle(page)
-    return await look(s)
+    return await look(s, after_action=True)
 
 
 # Workday answers longer than this are filled, not keyed: keying 3,000 characters takes over a minute.
@@ -478,14 +478,24 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:n] + "…"
 
 
-def _within_size(elements: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    """The elements that fit in ``MAX_ELEMENTS_CHARS`` (as JSON), and how many did not."""
-    size = 0
-    for i, e in enumerate(elements):
-        size += len(json.dumps(e)) + 2
-        if size > MAX_ELEMENTS_CHARS:
-            return elements[:i], len(elements) - i
-    return elements, 0
+def _within_size(
+    elements: list[dict[str, Any]], places: list[tuple[float, bool]]
+) -> tuple[list[dict[str, Any]], int, int]:
+    """The elements that fit in ``MAX_ELEMENTS_CHARS`` (as JSON), and how many did not, above and
+    below the screen. The ones farthest from the screen go first, the biggest first at the same
+    distance (a long option list before a button): the on-screen submit stays."""
+    sizes = [len(json.dumps(e)) + 2 for e in elements]
+    size, drop, above, below = sum(sizes), set(), 0, 0
+    for i in sorted(range(len(elements)), key=lambda i: (places[i][0], sizes[i], i), reverse=True):
+        if size <= MAX_ELEMENTS_CHARS:
+            break
+        drop.add(i)
+        size -= sizes[i]
+        if places[i][1]:
+            above += 1
+        else:
+            below += 1
+    return [e for i, e in enumerate(elements) if i not in drop], above, below
 
 
 def _wrap_untrusted(text: str) -> str:
@@ -525,13 +535,25 @@ async def _site_warnings(page: Any, site: str) -> list[str]:
     return out
 
 
-async def look(s: Session) -> dict[str, Any]:
+def _load_failed(page: Any, after_action: bool) -> dict[str, Any]:
+    """Chromium's own error page: never an empty "ok". After an action it is the action's answer
+    (a raise would lose what the action did, like a submit that went)."""
+    if not after_action:
+        raise BrowserError("error", "load_failed", "The last page did not load. Open it again or try another link.")
+    return {
+        "status": "error", "reason": "load_failed", "url": _clip(page.url, MAX_URL),
+        "detail": "The page did not load after that action.",
+    }
+
+
+async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     """Read the page: the visible controls nearest the screen (with a ref to act on), how many more
     there are above and below, and the page text inside an untrusted-content marker."""
     page = _live_page(s)
-    if page.url.startswith("chrome-error://"):  # Chromium's own error page: never an empty "ok"
-        raise BrowserError("error", "load_failed", "The last page did not load. Open it again or try another link.")
+    if page.url.startswith("chrome-error://"):
+        return _load_failed(page, after_action)
     elements: list[dict[str, Any]] = []
+    places: list[tuple[float, bool]] = []
     texts: list[str] = []
     frame_urls: list[str] = []
     has_password = False
@@ -548,11 +570,22 @@ async def look(s: Session) -> dict[str, Any]:
         if read >= MAX_FRAMES or not shown[i]:
             continue
         budget = MAX_ELEMENTS - (FRAME_ELEMENT_FLOOR if embeds else 0) if i == 0 else MAX_ELEMENTS - len(elements)
-        snap = await _read_frame(frame, budget, main=i == 0)
+        try:
+            snap = await _read_frame(frame, budget, main=i == 0)
+        except BrowserError:
+            if page.url.startswith("chrome-error://"):  # the read failed because the error page came
+                return _load_failed(page, after_action)
+            raise
         if snap is None:
             continue
         read += 1
-        elements.extend(snap.get("elements") or [])
+        got = snap.get("elements") or []
+        elements.extend(got)
+        # Each element's distance from the screen and whether it is above it, for the size cut.
+        where = snap.get("places") or []
+        if len(where) != len(got):
+            where = [(0, False)] * len(got)
+        places.extend((float(d), bool(a)) for d, a in where)
         if snap.get("text"):
             texts.append(snap["text"])
         has_password = has_password or bool(snap.get("has_password_box"))
@@ -560,8 +593,12 @@ async def look(s: Session) -> dict[str, Any]:
         below += int(snap.get("omitted_below") or 0)
     # Every frame's URL counts for the CAPTCHA check, including the frames past the cap and hidden ones.
     frame_urls.extend(f.url for f in page.frames[MAX_FRAMES_CHECKED:])
-    elements, cut = _within_size(elements)
-    below += cut
+    # Chromium switches to its error page a moment after a failed load: check again after the reads.
+    if page.url.startswith("chrome-error://"):
+        return _load_failed(page, after_action)
+    elements, cut_above, cut_below = _within_size(elements, places)
+    above += cut_above
+    below += cut_below
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
@@ -772,7 +809,7 @@ async def _act(
         page = _live_page(s)
         await page.go_back()
         await _settle(page)
-        return await look(s)
+        return await look(s, after_action=True)
     if action == "key":
         return await _press(s, ref, text)
     if action == "scroll":
@@ -781,7 +818,7 @@ async def _act(
         page = _live_page(s)
         await page.mouse.wheel(0, 800 if text == "down" else -800)
         await _settle(page)
-        return await look(s)
+        return await look(s, after_action=True)
 
     frame, loc = await _find(s, ref)
     kind = await _kind(loc)
@@ -845,7 +882,12 @@ async def _act(
             s.dead_clicks.clear()
         else:
             s.dead_clicks[ref] = s.dead_clicks.get(ref, 0) + 1
-        out = await look(s)
+        try:
+            out = await look(s, after_action=True)
+        except BrowserError as exc:
+            if not submitted:
+                raise
+            out = exc.as_dict()  # the submit went: the answer must still say so
         out["page_changed"] = changed
         if not changed and not submitted:
             out["next"] = (
@@ -854,7 +896,11 @@ async def _act(
         if submitted:
             s.submit_refused = bool(out.get("site_refused"))
             out["submit_clicked"] = True
-            if out.get("site_refused"):
+            if out.get("status") == "error":
+                out["next"] = (
+                    "The page after the submit did not load. Do NOT submit again: record blocked and tell the user."
+                )
+            elif out.get("site_refused"):
                 out["next"] = (
                     "The site says it did NOT take the application (site_refused). Read the page text for "
                     "which fields, and fix them. check_submit holds a second submit until the user marks this "
@@ -887,7 +933,7 @@ async def _act(
                 "Type plain text only: line breaks only into a multi-line box, never tabs or other control keys.",
             )
         typed = await _type_into(loc, text)
-        out = await look(s)
+        out = await look(s, after_action=True)
         out["typed_matches"] = typed == text
         return out
 
@@ -900,7 +946,7 @@ async def _act(
 
     if action == "choose":
         await _choose(s, loc, text)
-        return await look(s)
+        return await look(s, after_action=True)
 
     if action == "tick":
         try:
@@ -911,7 +957,7 @@ async def _act(
                 raise BrowserError(
                     "error", "tick_failed", "That box did not change. Call look and click its label instead."
                 ) from None
-        return await look(s)
+        return await look(s, after_action=True)
 
     # action == "upload"
     if doc_kind not in ("cv", "cover_letter"):
@@ -942,10 +988,10 @@ async def _act(
                 ) from None
             await chooser.set_files(path)
     await _settle(page)
-    out = await look(s)
+    out = await look(s, after_action=True)
     # A site can take the file and still show an error (Greenhouse): believe the file name on the page.
-    out["upload_confirmed"] = name in out["text"] or any(
-        name in str(e.get("value") or "") for e in out["elements"] if e.get("type") == "file"
+    out["upload_confirmed"] = name in out.get("text", "") or any(
+        name in str(e.get("value") or "") for e in out.get("elements", []) if e.get("type") == "file"
     )
     return out
 
