@@ -605,8 +605,9 @@ async def password_reset_confirm(
 ) -> Response:
     """Validate the token and set the new password.
 
-    On success: 204, and every existing session for that user is revoked
-    (forces re-login on all devices — security best practice after reset).
+    On success: 204, and every existing session, agent token and OAuth grant
+    for that user is revoked (forces re-login on all devices and reconnection
+    of every assistant — security best practice after reset).
     The caller's session cookie is cleared too so the API response itself
     can't accidentally land the caller into the just-reset account.
 
