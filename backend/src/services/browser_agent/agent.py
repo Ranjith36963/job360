@@ -11,8 +11,9 @@ click. This module only carries the action out, inside the hard lines in
   ``check_submit`` every assistant uses) says ``submit``, and records
   ``submit_attempted`` first;
 * every request the page makes is screened by the SSRF guard;
-* no downloads, no service workers, one live browser per user, closed when
-  idle, and at most ``max_sessions`` at once.
+* no downloads, no service workers, one browser per user (and a separate one
+  for the user's own sign-in view), closed when idle, and at most
+  ``max_sessions`` at once.
 
 Playwright is imported lazily (rule #16) and is an optional dependency
 (``pip install .[browser]``); without it every action answers ``off``.
@@ -119,6 +120,8 @@ class Session:
     submit_refused: bool = False
     # The last few (action, ref, text), for the repeat warning.
     recent: list[tuple[str, str, str]] = field(default_factory=list)
+    # A live sign-in view closes at this time (monotonic) however busy it is; None = no limit.
+    closes_at: Optional[float] = None
 
 
 class BrowserPool:
@@ -176,10 +179,11 @@ class BrowserPool:
             return self._browser
 
     async def reap(self) -> None:
-        """Close every session idle longer than ``idle_s``."""
+        """Close every session idle longer than ``idle_s``, and every live view past its lifetime."""
         now = time.monotonic()
         for user_id, s in list(self._sessions.items()):
-            if now - s.last_used > self.idle_s and not s.lock.locked():
+            expired = s.closes_at is not None and now > s.closes_at
+            if (now - s.last_used > self.idle_s or expired) and not s.lock.locked():
                 await self.close(user_id)
 
     async def get(
@@ -242,7 +246,8 @@ class BrowserPool:
         if s is None:
             return False
         try:
-            await s.context.close()
+            async with s.lock:  # never under an action in flight: it finishes first
+                await s.context.close()
         except Exception:  # noqa: BLE001 - a dead context is already closed
             logger.debug("browser_agent context close failed", exc_info=True)
         return True
@@ -1025,9 +1030,19 @@ async def _act(
 # (routes/browser.py uses require_session_user): an assistant can never drive
 # these. What the user types goes straight to the page and is never logged,
 # stored or returned. Keep = save what the SITE chose to remember (sign_ins.py).
+# The live view is its own browser (live_key), never the one the assistant's
+# token drives: the assistant cannot see the sign-in, and the user cannot take
+# over or close the assistant's half-filled form.
 
 LIVE_ACTIONS = ("start", "shot", "click", "type", "key", "scroll", "keep", "cancel")
 LIVE_KEYS = frozenset({"Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"})
+# A live view closes this long after Start, however busy: a tab left open cannot hold a browser forever.
+LIVE_MAX_SECONDS = 15 * 60
+
+
+def live_key(user_id: str) -> str:
+    """The pool slot of a user's live sign-in view (it counts against ``max_sessions`` like any browser)."""
+    return f"live:{user_id}"
 # The site the user started signing in on, per user: Keep saves it (and where the sign-in ended up).
 _live_hosts: dict[str, str] = {}
 
@@ -1063,12 +1078,17 @@ async def live(
         raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(LIVE_ACTIONS) + ".")
     if action == "cancel":
         _live_hosts.pop(user_id, None)
-        return {"status": "ok", "closed": await pool.close(user_id)}
-    s = await pool.get(user_id, create=action == "start", load_state=load_state)
+        return {"status": "ok", "closed": await pool.close(live_key(user_id))}
+    s = await pool.get(live_key(user_id), create=action == "start", load_state=load_state)
     if s is None:
         raise BrowserError("refused", "no_browser", "Start again: type the job site's address and press Start.")
+    if s.closes_at is None:
+        s.closes_at = time.monotonic() + LIVE_MAX_SECONDS
+    # The page refreshes its picture every 1.5 s: only the user's own steps keep the view open.
+    by_user = action != "shot"
     async with s.lock:
-        s.last_used = time.monotonic()
+        if by_user:
+            s.last_used = time.monotonic()
         page = _live_page(s)
         try:
             if action == "start":
@@ -1117,7 +1137,8 @@ async def live(
             first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
             raise BrowserError("error", "browser_error", first) from None
         finally:
-            s.last_used = time.monotonic()
+            if by_user:
+                s.last_used = time.monotonic()
 
 
 # ── The process-wide pool ─────────────────────────────────────────────────────
