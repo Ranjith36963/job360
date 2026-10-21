@@ -1936,7 +1936,7 @@ def build_server(version: str = "") -> MCPServer:
         site_refused = fix the fields; neither = never click again. `site` = that site's tips;
         page_changed false = do not repeat. Follow get_recipe("forms") and get_recipe("ats") for the rest.
         Pass your `session` on every call: another session gets busy (browser_in_use).
-        Close when done: one browser per user, closed after 10 idle minutes."""
+        Close when done: one browser per user, closed after 10 idle minutes or a Job360 update; reopen."""
         try:
             body = browser_route.BrowserActionRequest.model_validate(
                 {
