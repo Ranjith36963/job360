@@ -22,15 +22,36 @@ CLI missing, API error, deploy not found in time) it says so LOUDLY in `deploy_s
 and the workflow degrades to a plain SETTLE_MINUTES sleep; the readyz probe and the
 Sentry rules stay the only things that can trip a rollback.
 
+THE SERVED SHA (2026-10-20, PR #997). Railway's SUCCESS says the new deployment is
+healthy; it does not say the domain serves it. With `--version-url` (repeatable; the
+workflow passes https://job360.uk/api/version, then the backend's own URL) the script
+also polls GET /api/version (backend/src/api/routes/health.py, which serves Railway's
+RAILWAY_GIT_COMMIT_SHA) until it reports THIS sha, and the settle clock then starts
+from when it first saw the new sha. `version_state`:
+
+    live         a URL served this sha.
+    superseded   a NEWER commit (a descendant; fetched if the clone lacks it) serves.
+                 Its own run watches it; `judge=false`, so this run neither samples
+                 nor rolls back someone else's deploy.
+    never_live   the wait ran out while the OLD sha was served (or nothing answered).
+                 `judge=false`: sampling now would judge the old code, and a rollback
+                 would undo the deployment that is still good. The workflow goes RED.
+    unknown      every answer was "unknown" (RAILWAY_GIT_COMMIT_SHA unset): the route
+                 cannot tell, so the run degrades to the Railway-only behaviour above.
+    not_asked    no --version-url given.
+
+Still never a rollback: never_live is an alarm the workflow raises, not a trip.
+
 Prints `key=value` lines on stdout (append to $GITHUB_OUTPUT); logs go to stderr.
 
     DEPLOY_SERVICE        Railway service to look at              (default backend)
     DEPLOY_WAIT_MINUTES   max wait for SUCCESS                    (default 10)
+    DEPLOY_VERSION_WAIT_MINUTES  max wait for /api/version = sha  (default 5)
     SETTLE_MINUTES        quiet time after SUCCESS                (default 5)
     DEPLOY_BUILD_MINUTES  build-time estimate, see above          (default 4)
     DEPLOY_POLL_SECONDS   poll cadence                            (default 15)
 
-    python scripts/deploy_settle.py --sha <sha>
+    python scripts/deploy_settle.py --sha <sha> [--version-url URL ...]
     python scripts/deploy_settle.py --drill            # offline
     python scripts/deploy_settle.py --drill --blind    # negative control: must exit 1
 """
@@ -38,9 +59,13 @@ Prints `key=value` lines on stdout (append to $GITHUB_OUTPUT); logs go to stderr
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import subprocess
 import sys
 import time
+import urllib.request
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -111,9 +136,112 @@ def _env_float(name: str, default: float) -> float:
     return float(raw) if raw else default
 
 
+def same_sha(a: str, b: str) -> bool:
+    """Full or abbreviated (>= 7 hex) SHAs naming the same commit."""
+    a, b = a.strip().lower(), b.strip().lower()
+    n = min(len(a), len(b))
+    return n >= 7 and a[:n] == b[:n]
+
+
+def version_state(served: str | None, sha: str, is_ancestor: Callable[[str, str], bool]) -> str:
+    """One /api/version answer judged against `sha`. Pure. None = no answer.
+
+    -> live | superseded | unknown | waiting
+    """
+    if not served:
+        return "waiting"  # the old container without the route, or a blip
+    if served == "unknown":
+        return "unknown"
+    if same_sha(served, sha):
+        return "live"
+    if is_ancestor(sha, served):
+        return "superseded"
+    return "waiting"  # the OLD sha (or one we cannot place) is still serving
+
+
+def fetch_version(url: str, timeout: float = 15.0) -> str | None:
+    """The sha `url` serves, "unknown", or None on any failure (logged)."""
+    headers = {"Cache-Control": "no-cache", "User-Agent": "post-merge-watch"}
+    req = urllib.request.Request(url, headers=headers)  # noqa: S310 - fixed https URLs from the workflow
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 - fixed https URLs from the workflow
+            body = json.loads(r.read().decode("utf-8") or "{}")
+    except Exception as exc:  # noqa: BLE001 - any failure is "no answer", never a crash
+        log(f"  {url} -> {type(exc).__name__}: {exc}")
+        return None
+    served = str(body.get("sha", "") if isinstance(body, dict) else "").strip().lower()
+    # Only a hex sha or "unknown" is passed on: these values reach $GITHUB_OUTPUT.
+    if served == "unknown" or (7 <= len(served) <= 40 and all(c in "0123456789abcdef" for c in served)):
+        return served
+    return None
+
+
+def _git(args: list[str]) -> int:
+    try:
+        proc = subprocess.run(["git", *args], capture_output=True, timeout=60, check=False)  # noqa: S603, S607
+        return proc.returncode
+    except (OSError, subprocess.TimeoutExpired):
+        return -1
+
+
+def git_is_ancestor(older: str, newer: str) -> bool:
+    """True when `older` is an ancestor of `newer`. The run's clone predates any merge
+    made during the wait, so a missing object (exit 128) means fetch and ask again,
+    never "not a descendant"."""
+    ask = ["merge-base", "--is-ancestor", older, newer]
+    rc = _git(ask)
+    if rc not in (0, 1):
+        log(f"  {newer[:12]} is not in this clone; fetching it")
+        _git(["fetch", "--quiet", "origin", "main"])
+        rc = _git(ask)
+        if rc not in (0, 1):
+            _git(["fetch", "--quiet", "origin", newer])
+            rc = _git(ask)
+    return rc == 0
+
+
+def wait_for_version(
+    sha: str,
+    urls: list[str],
+    wait_s: float,
+    poll_s: float,
+    *,
+    fetch: Callable[[str], str | None] = fetch_version,
+    is_ancestor: Callable[[str, str], bool] = git_is_ancestor,
+    now: Callable[[], float] = time.time,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[str, str, float | None]:
+    """Poll the URLs until one serves `sha` (or a descendant), or `wait_s` passes.
+
+    -> (version_state, what was last served, when the new sha was first seen - None
+    when the very first poll already saw it, i.e. no swap was watched).
+    """
+    if not urls:
+        return "not_asked", "", None
+    deadline = now() + wait_s
+    saw_other = False
+    last = ""
+    all_unknown = True
+    while True:
+        for url in urls:
+            served = fetch(url)
+            verdict = version_state(served, sha, is_ancestor)
+            last = served or "no answer"
+            log(f"[version] {url} -> {last} ({verdict})")
+            if verdict in ("live", "superseded"):
+                return verdict, last, (now() if saw_other else None)
+            if verdict != "unknown":
+                all_unknown = False
+        saw_other = True
+        if now() >= deadline:
+            return ("unknown" if all_unknown else "never_live"), last, None
+        sleep(poll_s)
+
+
 def wait_for_deploy(sha: str, service: str, wait_s: float, settle_s: float, build_s: float,
-                    poll_s: float) -> dict[str, str]:
-    """Poll Railway; return the outputs. Never raises on a Railway failure."""
+                    poll_s: float, version_urls: list[str] | None = None,
+                    version_wait_s: float = 300.0) -> dict[str, str]:
+    """Poll Railway, then /api/version; return the outputs. Never raises on a Railway failure."""
     import rollback_gear as rg  # same Railway door the undo uses
 
     deadline = time.time() + wait_s
@@ -124,7 +252,8 @@ def wait_for_deploy(sha: str, service: str, wait_s: float, settle_s: float, buil
             state, dep = assess(rg.list_deployments(service), sha)
         except (rg.RailwayCliMissingError, rg.RailwayApiMalformedError, rg.RailwayApiError) as exc:
             log(f"::warning::cannot ask Railway about {service}: {exc}")
-            return {"deploy_state": "unverifiable", "deploy_created_at": ""}
+            state, dep = "unverifiable", None
+            break
         log(f"[deploy] {service} sha={sha[:8]} -> {state}")
         if state in ("pending", "not_found"):
             seen_pending = True
@@ -135,25 +264,32 @@ def wait_for_deploy(sha: str, service: str, wait_s: float, settle_s: float, buil
     created = ""
     if dep is not None:
         created = str(dep.get("createdAt") or "")
-    if state != "live":
-        if state in ("pending", "not_found"):
-            state = "timeout"
+    if state in ("pending", "not_found"):
+        state = "timeout"
+
+    # Railway already said this commit will not serve: one look, not a full wait.
+    v_wait = 0.0 if state in ("failed", "skipped") else version_wait_s
+    v_state, v_served, v_seen = wait_for_version(sha, version_urls or [], v_wait, poll_s,
+                                                 fetch=fetch_version, is_ancestor=git_is_ancestor)
+    out = {"deploy_state": state, "deploy_created_at": created, "version_state": v_state,
+           "version_served": v_served, "judge": "true", "settled": "false"}
+    if v_state in ("never_live", "superseded"):
+        out["judge"] = "false"
+        log(f"::warning::/api/version: {v_state} (last served {v_served}) - this run will not judge the deploy.")
+        return out
+    if state != "live" and v_state != "live":
         log(f"::warning::deploy of {sha[:8]} is '{state}' - not waiting for a settle.")
-        return {"deploy_state": state, "deploy_created_at": created}
+        return out
 
     created_dt = parse_instant(created)
     now = time.time()
-    remaining = settle_remaining(
-        now,
-        created_dt.timestamp() if created_dt else None,
-        now if seen_pending else None,
-        settle_s,
-        build_s,
-    )
+    seen = v_seen if v_seen is not None else (now if seen_pending and state == "live" else None)
+    remaining = settle_remaining(now, created_dt.timestamp() if created_dt else None, seen, settle_s, build_s)
     if remaining > 0:
         log(f"[deploy] live; settling {remaining:.0f}s so the container swap's shutdown noise ends")
         time.sleep(remaining)
-    return {"deploy_state": "live", "deploy_created_at": created}
+    out["settled"] = "true"
+    return out
 
 
 def drill(blind: bool = False) -> int:
@@ -184,6 +320,44 @@ def drill(blind: bool = False) -> int:
         ("settle: created 1 min ago, already SUCCESS -> assume build ended 4 min after create: 8 min left",
          settle_remaining(10000.0, 9940.0, None, 300.0, 240.0) == 480.0),
     ]
+
+    def v(answers: list[str | None], descendants: frozenset[str] = frozenset()) -> tuple[str, str, float | None]:
+        """wait_for_version on a fake clock: one answer per poll, the last one repeats."""
+        clock, calls = [0.0], [0]
+
+        def fetch(_url: str) -> str | None:
+            served = answers[min(calls[0], len(answers) - 1)]
+            calls[0] += 1
+            return sha if blind and served else served  # BLIND: "it answered, so it is live"
+
+        def sleep(s: float) -> None:
+            clock[0] += s
+
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            return wait_for_version(sha, ["https://job360.uk/api/version"], 300, 60, fetch=fetch,
+                                    is_ancestor=lambda _a, b: b in descendants,
+                                    now=lambda: clock[0], sleep=sleep)
+
+    newer = "c" * 40
+    cases += [
+        ("version: old sha served the whole wait -> never_live (the old container's 200 is not a deploy)",
+         v([other])[0] == "never_live"),
+        ("version: old sha, then this sha -> live, swap time recorded",
+         v([other, other, sha])[0] == "live" and v([other, other, sha])[2] == 120.0),
+        ("version: this sha on the first look (queued run) -> live, no swap time",
+         v([sha]) == ("live", sha, None)),
+        ("version: abbreviated sha still names this commit", v([sha[:12]])[0] == "live"),
+        ("version: a newer descendant serves -> superseded, not judged",
+         v([newer], frozenset({newer}))[0] == "superseded"),
+        ("version: an unrelated newer-looking sha is NOT a descendant -> never_live",
+         v([newer])[0] == "never_live"),
+        ("version: route missing (no answer) all wait -> never_live", v([None])[0] == "never_live"),
+        ("version: 'unknown' every time -> unknown (route cannot tell, degrade)",
+         v(["unknown"])[0] == "unknown"),
+        ("version: no URL given -> not_asked", wait_for_version(sha, [], 0, 1)[0] == "not_asked"),
+    ]
     print("DRILL - deploy_settle must wait for THIS sha's deploy, not any 200."
           + ("  [BLIND: assess() always says live]" if blind else ""))
     for name, ok in cases:
@@ -198,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sha", help="commit under watch (default $GITHUB_SHA)")
     ap.add_argument("--drill", action="store_true")
     ap.add_argument("--blind", action="store_true", help="with --drill: negative control")
+    ap.add_argument("--version-url", action="append", default=[],
+                    help="GET /api/version URL to poll for the served sha (repeatable, tried in order)")
     args = ap.parse_args(argv)
     if args.drill:
         return drill(args.blind)
@@ -213,6 +389,8 @@ def main(argv: list[str] | None = None) -> int:
             _env_float("SETTLE_MINUTES", 5) * 60,
             _env_float("DEPLOY_BUILD_MINUTES", 4) * 60,
             _env_float("DEPLOY_POLL_SECONDS", 15),
+            args.version_url,
+            _env_float("DEPLOY_VERSION_WAIT_MINUTES", 5) * 60,
         )
     except ValueError as exc:
         print(f"::error::bad deploy_settle configuration: {exc}", file=sys.stderr)

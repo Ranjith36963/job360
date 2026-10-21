@@ -26,6 +26,7 @@ vi.mock("@/lib/api", () => ({
   // mounting the whole page in these unrelated tests never throws.
   me: (...args: unknown[]) => mockMe(...args),
   setTimezone: (...args: unknown[]) => mockSetTimezone(...args),
+  setAnalyticsConsent: vi.fn(),
   resendVerificationEmail: (...args: unknown[]) => mockResendVerificationEmail(...args),
   // CalendarFeedSection also lives on this page - stub it so mounting never throws.
   getCalendarFeed: () => Promise.resolve({ exists: false, created_at: null }),

@@ -25,7 +25,7 @@ job360/
 │   ├── data/                         # Runtime (gitignored). NO jobs.db — the store is Postgres; `core.settings.DB_PATH` is a connection selector `repositories.pg.connect` maps to a schema, not a file
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: repo facts above)
 │   ├── src/
-│   │   ├── cli.py                    # Click CLI: api, setup-profile
+│   │   ├── cli.py                    # Click CLI — `python -m src.cli --help` for the commands
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE constraint, still used by a brought ad
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, route modules (counts: repo facts above)
 │   │   │   └── routes/               # `ls` it for the module list; `grep -n '@router' routes/*.py` for the routes
@@ -188,10 +188,7 @@ Profile extraction infers a candidate's seniority band from job titles
 
 ## API Routes
 
-Every endpoint the app declares. Generated, so it cannot disagree with the
-routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
-
-For the full list, read the routers: `grep -n '@router\.' backend/src/api/routes/*.py`, or open `http://localhost:8000/docs` with the backend running.
+Read the routers: `grep -n '@router\.' backend/src/api/routes/*.py`, or open `http://localhost:8000/docs` with the backend running.
 
 ## Configuration
 

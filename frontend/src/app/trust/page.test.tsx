@@ -20,13 +20,16 @@ describe("TrustPage", () => {
     }
   });
 
-  it("discloses unmasked session replay plainly with the sample rates", () => {
+  it("discloses masked, opt-in session replay plainly with the sample rates", () => {
     render(<TrustPage />);
     const replay = screen.getByTestId("trust-replay").textContent ?? "";
-    expect(replay).toMatch(/records your screen/i);
-    expect(replay).toMatch(/CV text/);
+    expect(replay).toMatch(/records your screen only if you turn on/i);
+    expect(replay).toMatch(/Help improve\s+Job360/);
+    expect(replay).toMatch(/off by default/);
+    expect(replay).toMatch(/all text and media on screen are hidden/);
+    expect(replay).not.toMatch(/not masked/);
     expect(replay).toMatch(/10%/);
-    expect(replay).toMatch(/every session that hits an error/);
+    expect(replay).toMatch(/every session\s+that hits an error/);
   });
 
   it("states hosting as the privacy page does and never claims EU hosting", () => {
