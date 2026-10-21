@@ -67,6 +67,17 @@
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -98,6 +109,17 @@
               }
             ],
             "title": "Event Id"
+          },
+          "matched_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched On"
           }
         },
         "required": [
@@ -169,6 +191,17 @@
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -2203,6 +2236,17 @@
           "auto_grant_count": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "auto_grant_scope": {
+            "$ref": "#/components/schemas/GrantScopeOut",
+            "default": {
+              "queue": {
+                "count": 0,
+                "hosts": [],
+                "no_host": 0
+              },
+              "unscoped": false
+            }
+          },
           "auto_grant_until": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -2238,6 +2282,9 @@
             },
             "title": "Notes",
             "type": "array"
+          },
+          "outreach_send": {
+            "$ref": "#/components/schemas/SettingFieldOut"
           },
           "pause_reason": {
             "$ref": "#/components/schemas/SettingFieldOut"
@@ -2292,6 +2339,7 @@
           "paused_until",
           "pause_reason",
           "auto_employer_emails",
+          "outreach_send",
           "paused",
           "practice_run"
         ],
@@ -2353,6 +2401,37 @@
           "mode"
         ],
         "title": "AutofillRequest",
+        "type": "object"
+      },
+      "BlockedSubmittedOut": {
+        "description": "\"I submitted it\": the new receipt's id plus the refreshed decision state.",
+        "properties": {
+          "controls": {
+            "$ref": "#/components/schemas/ApplicationControlsOut"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "controls"
+        ],
+        "title": "BlockedSubmittedOut",
+        "type": "object"
+      },
+      "BlockedSubmittedRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Confirmation",
+            "type": "string"
+          }
+        },
+        "title": "BlockedSubmittedRequest",
         "type": "object"
       },
       "Body_clear_profile_section_api_profile_clear_post": {
@@ -3195,9 +3274,25 @@
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
           },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -3730,6 +3825,13 @@
             },
             "title": "Ghosted Now",
             "type": "array"
+          },
+          "interviews": {
+            "$ref": "#/components/schemas/InterviewAgenda",
+            "default": {
+              "just_passed": [],
+              "upcoming": []
+            }
           },
           "latest_event_recorded_at": {
             "anyOf": [
@@ -4980,6 +5082,61 @@
         "title": "GrantListResponse",
         "type": "object"
       },
+      "GrantScopeCount": {
+        "description": "How many applications, their distinct form hosts, and how many have no host yet.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "hosts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Hosts",
+            "type": "array"
+          },
+          "no_host": {
+            "default": 0,
+            "title": "No Host",
+            "type": "integer"
+          }
+        },
+        "title": "GrantScopeCount",
+        "type": "object"
+      },
+      "GrantScopeOut": {
+        "description": "Gap roadmap slice 30 - what an \"Auto for a while\" grant covers. ``queue``: what a grant\nconfirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the\ngrant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from\nbefore snapshots, covering every application until it ends.",
+        "properties": {
+          "granted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GrantScopeCount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue": {
+            "$ref": "#/components/schemas/GrantScopeCount",
+            "default": {
+              "count": 0,
+              "hosts": [],
+              "no_host": 0
+            }
+          },
+          "unscoped": {
+            "default": false,
+            "title": "Unscoped",
+            "type": "boolean"
+          }
+        },
+        "title": "GrantScopeOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -5053,6 +5210,73 @@
           "inbox_checked_at"
         ],
         "title": "InboxCheckedOut",
+        "type": "object"
+      },
+      "InterviewAgenda": {
+        "description": "``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose\napplication has no outcome event yet (ask the user how it went).",
+        "properties": {
+          "just_passed": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InterviewAgendaItem"
+            },
+            "title": "Just Passed",
+            "type": "array"
+          },
+          "upcoming": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InterviewAgendaItem"
+            },
+            "title": "Upcoming",
+            "type": "array"
+          }
+        },
+        "title": "InterviewAgenda",
+        "type": "object"
+      },
+      "InterviewAgendaItem": {
+        "description": "One live interview in the agenda read (services/applications/agenda.py).",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "duration_minutes": {
+            "default": 60,
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "link": {
+            "default": "",
+            "title": "Link",
+            "type": "string"
+          },
+          "round": {
+            "default": "",
+            "title": "Round",
+            "type": "string"
+          },
+          "scheduled_at": {
+            "title": "Scheduled At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "company",
+          "title",
+          "scheduled_at"
+        ],
+        "title": "InterviewAgendaItem",
         "type": "object"
       },
       "JobFactsOut": {
@@ -6880,9 +7104,25 @@
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
           },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -6992,6 +7232,11 @@
             "title": "Notes",
             "type": "string"
           },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
           "replied": {
             "title": "Replied",
             "type": "boolean"
@@ -6999,6 +7244,17 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -7767,6 +8023,16 @@
           "grounded": {
             "title": "Grounded",
             "type": "boolean"
+          },
+          "source": {
+            "default": "none",
+            "enum": [
+              "profile",
+              "ad",
+              "none"
+            ],
+            "title": "Source",
+            "type": "string"
           },
           "text": {
             "title": "Text",
@@ -10188,7 +10454,7 @@
         "type": "object"
       },
       "StatsContactFoundViaGroupOut": {
-        "description": "Owner decision 2026-10-04 \u2014 per current contact ``found_via``: how\nmany contacts, how many had an outreach marked sent / a reply recorded,\nand ``reply_rate`` = contacts with both / contacts with a sent mark\n(``null`` when nothing was sent).",
+        "description": "Owner decision 2026-10-04 \u2014 per current contact ``found_via``: how\nmany contacts, how many are ``reachable`` (CURRENT email or LinkedIn URL\nsaved), how many had an outreach marked sent / a reply recorded,\nand ``reply_rate`` = contacts with both / contacts with a sent mark\n(``null`` when nothing was sent).",
         "properties": {
           "contacts": {
             "title": "Contacts",
@@ -10215,6 +10481,11 @@
           },
           "outreach_sent": {
             "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "reachable": {
+            "default": 0,
+            "title": "Reachable",
             "type": "integer"
           },
           "reply_rate": {
@@ -12555,6 +12826,17 @@
               }
             ],
             "title": "Role"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "title": "UpdateContactRequest",
@@ -12781,6 +13063,19 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VersionResponse": {
+        "properties": {
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      },
       "WhatsNewApplicationOut": {
         "properties": {
           "id": {
@@ -12921,6 +13216,13 @@
             },
             "title": "Events",
             "type": "array"
+          },
+          "interviews": {
+            "$ref": "#/components/schemas/InterviewAgenda",
+            "default": {
+              "just_passed": [],
+              "upcoming": []
+            }
           },
           "next_after_id": {
             "anyOf": [
@@ -13165,6 +13467,23 @@
                 }
               ],
               "title": "Priority"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agenda",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agenda"
             }
           },
           {
@@ -14553,6 +14872,91 @@
         ]
       }
     },
+    "/api/applications/{application_id}/blocked/submitted": {
+      "post": {
+        "description": "\"I submitted it\" - the user got past the block and pressed Submit themselves:\nrecords ``unblocked`` {resolution: user_did_it} (as \"Mark resolved\" does) and the\nreceipt (``recorded_by`` web, the pasted confirmation), in ONE transaction. 409 when\nnothing is blocked, or when the application already has a receipt or is no longer\n``considering`` (check_submit's ``already_applied``); nothing is written then.\nSession only; assistants use ``record_event`` + ``record_application``.",
+        "operationId": "submitted_blocked_api_applications__application_id__blocked_submitted_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockedSubmittedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedSubmittedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submitted Blocked",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}/calendar.ics": {
       "get": {
         "description": "One application's interview and follow-up, as a download (Add to calendar).",
@@ -14628,7 +15032,7 @@
     },
     "/api/applications/{application_id}/contacts": {
       "post": {
-        "description": "201 for a new contact, 200 (``already_existed: true``) for the same\nemail seen again on this application (R2) \u2014 the status code is set\ndynamically since the same call can legitimately answer either.",
+        "description": "201 for a new contact, 200 (``already_existed: true``, ``matched_on``)\nfor the same person seen again on this application (R2): same email, else\n(no email) same normalised LinkedIn URL, else same name unless both carry\ndifferent LinkedIn URLs. The status code is set dynamically since the\nsame call can legitimately answer either.",
         "operationId": "add_contact_api_applications__application_id__contacts_post",
         "parameters": [
           {
@@ -18958,7 +19362,7 @@
     },
     "/api/contacts": {
       "post": {
-        "description": "Owner decision, 2026-09-25 \u2014 a person with no job yet (cold\nnetworking), or a linked one when ``application_id`` is given. Same\nidempotency/cap/rate-limit rules as the per-application route, just\nscoped to the USER instead of an application when there is none.",
+        "description": "Owner decision, 2026-09-25 \u2014 a person with no job yet (cold\nnetworking), or a linked one when ``application_id`` is given. Same\nidempotency/cap/rate-limit rules as the per-application route, just\nscoped to the USER instead of an application when there is none. Cold\nscope without an email: same LinkedIn URL, else same name only when\nneither side has a LinkedIn URL. ``source_url`` is stored, never fetched.",
         "operationId": "add_person_api_contacts_post",
         "parameters": [
           {
@@ -19224,7 +19628,7 @@
     },
     "/api/contacts/{contact_id}/outreach-check": {
       "get": {
-        "description": "THE one gate before pressing Send on an outreach email (feature 10).\n\nReads the user's settings, this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
+        "description": "THE one gate before pressing Send on an outreach email (feature 10).\n\nReads the user's settings (``assistant_settings.outreach_send`` decides send vs\nask; the Gmail mode never does), this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
         "operationId": "outreach_check_api_contacts__contact_id__outreach_check_get",
         "parameters": [
           {
@@ -22403,7 +22807,7 @@
     },
     "/api/tailor/{job_id}/{doc_kind}/provenance": {
       "get": {
-        "description": "Per-line provenance for the newest saved version: which lines are the\nuser's OWN facts (grounded in their CV + the job ad) and which were added.\nDeterministic, no LLM \u2014 shown before download so the user can verify what is\nreal (guardrail #2).",
+        "description": "Per-line provenance for the newest saved version: which lines are the\nuser's OWN facts (grounded in their profile), which only echo the job ad\n(``source=\"ad\"``: employer context, never a candidate fact) and which were added.\nDeterministic, no LLM \u2014 shown before download so the user can verify what is\nreal (guardrail #2).",
         "operationId": "provenance_api_tailor__job_id___doc_kind__provenance_get",
         "parameters": [
           {
@@ -22691,6 +23095,28 @@
         "summary": "Revoke Token",
         "tags": [
           "tokens"
+        ]
+      }
+    },
+    "/api/version": {
+      "get": {
+        "description": "The commit this process was deployed from (2026-10-20).\n\npost-merge-watch.yml polls this until it reports the merge SHA, so \"deployed\"\nmeans THIS commit is serving, not that the old container still answers 200\n(readyz and /health cannot tell the two apart). Railway injects\nRAILWAY_GIT_COMMIT_SHA on every GitHub deploy, and a rollback restores the old\ndeployment's variables, so after a rollback this reports the old SHA. Public and\ndata-free: the SHA is already public on GitHub. ``no-store`` so no proxy can\nserve an old SHA after the swap.",
+        "operationId": "version_api_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Version",
+        "tags": [
+          "health"
         ]
       }
     },

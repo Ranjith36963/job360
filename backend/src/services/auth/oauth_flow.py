@@ -31,6 +31,7 @@ from src.core import settings
 from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.auth import oauth_clock
+from src.services.auth.security_notices import send_security_notice
 from src.utils.logger import get_audit_logger
 
 ACCESS_TOKEN_PREFIX = "j360a_"  # noqa: S105 — a public display prefix, not a secret
@@ -232,6 +233,7 @@ async def decide_authorization_request(
             (user_id, req.client_id),
         )
         grant_row = await grant_cur.fetchone()
+        new_grant = grant_row is None
         if grant_row is not None:
             grant_id = int(grant_row["id"])
         else:
@@ -261,6 +263,9 @@ async def decide_authorization_request(
         )
         await db.commit()
 
+    if new_grant:
+        # After the commit, so a failed mail can never undo the grant; the helper never raises.
+        await send_security_notice(db_path, user_id, "oauth_grant", client_name=req.client_name)
     return build_redirect_url(req.redirect_uri, {"code": code, "state": req.state})
 
 

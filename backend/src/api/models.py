@@ -16,6 +16,10 @@ class LivezResponse(BaseModel):
     status: str
 
 
+class VersionResponse(BaseModel):
+    sha: str
+
+
 class StatusResponse(BaseModel):
     profile_exists: bool
 
@@ -247,6 +251,25 @@ class SetupProgressOut(BaseModel):
     next: str = "targets"
 
 
+class GrantScopeCount(BaseModel):
+    """How many applications, their distinct form hosts, and how many have no host yet."""
+
+    count: int = 0
+    hosts: list[str] = []
+    no_host: int = 0
+
+
+class GrantScopeOut(BaseModel):
+    """Gap roadmap slice 30 - what an "Auto for a while" grant covers. ``queue``: what a grant
+    confirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the
+    grant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from
+    before snapshots, covering every application until it ends."""
+
+    queue: GrantScopeCount = GrantScopeCount()
+    granted: Optional[GrantScopeCount] = None
+    unscoped: bool = False
+
+
 class AssistantSettingsView(BaseModel):
     """The assistant settings, as the web and MCP ``get_profile`` read them.
 
@@ -266,9 +289,11 @@ class AssistantSettingsView(BaseModel):
     apply_hours: SettingFieldOut
     auto_grant_count: SettingFieldOut
     auto_grant_until: SettingFieldOut
+    auto_grant_scope: GrantScopeOut = GrantScopeOut()
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut
+    outreach_send: SettingFieldOut
     paused: bool
     inbox_mode: str = ""
     check_every: str = ""
@@ -504,6 +529,26 @@ class DoctorSilentItem(BaseModel):
     confirmed: bool
 
 
+class InterviewAgendaItem(BaseModel):
+    """One live interview in the agenda read (services/applications/agenda.py)."""
+
+    application_id: int
+    company: str
+    title: str
+    scheduled_at: str
+    round: str = ""
+    link: str = ""
+    duration_minutes: int = 60
+
+
+class InterviewAgenda(BaseModel):
+    """``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose
+    application has no outcome event yet (ask the user how it went)."""
+
+    upcoming: list[InterviewAgendaItem] = []
+    just_passed: list[InterviewAgendaItem] = []
+
+
 class DoctorSilentBlock(BaseModel):
     """Feedback loop slice 4: interviews with silence past ``courtesy_days`` (read-only)."""
 
@@ -537,6 +582,7 @@ class DoctorResponse(BaseModel):
     ghosted_now: list[int] = []
     auto_emails: DoctorAutoEmails = DoctorAutoEmails()
     silent_after_interview: DoctorSilentBlock = DoctorSilentBlock()
+    interviews: InterviewAgenda = InterviewAgenda()
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""

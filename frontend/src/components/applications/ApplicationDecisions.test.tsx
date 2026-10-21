@@ -11,8 +11,10 @@ const declineSend = vi.fn();
 const setAutofill = vi.fn();
 const clearDuplicate = vi.fn();
 const resolveBlocked = vi.fn();
+const submittedBlocked = vi.fn();
 vi.mock("@/lib/api", () => ({
   resolveBlocked: (...a: unknown[]) => resolveBlocked(...a),
+  submittedBlocked: (...a: unknown[]) => submittedBlocked(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: (...a: unknown[]) => declineSend(...a),
@@ -279,6 +281,39 @@ describe("Your assistant got stuck (blocked record)", () => {
     fireEvent.click(screen.getByTestId("blocked-resolve-button"));
     await waitFor(() => expect(resolveBlocked).toHaveBeenCalledWith(7));
     expect(onChanged).toHaveBeenCalledWith(after);
+    expect(submittedBlocked).not.toHaveBeenCalled();
+  });
+
+  it("I submitted it sends the pasted confirmation, hands back the controls and names the receipt", async () => {
+    submittedBlocked.mockReset();
+    const after = controls({ blocked: null });
+    submittedBlocked.mockResolvedValue({ receipt_id: 42, controls: after });
+    const onChanged = vi.fn();
+    const { rerender } = render(
+      <ApplicationDecisions applicationId={7} controls={controls({ blocked: BLOCKED })} onChanged={onChanged} />
+    );
+    expect(screen.queryByTestId("blocked-submitted-ok")).toBeNull();
+    fireEvent.change(screen.getByTestId("blocked-confirmation-text"), { target: { value: "  APP-48213 \n" } });
+    fireEvent.click(screen.getByTestId("blocked-i-submitted"));
+    await waitFor(() => expect(submittedBlocked).toHaveBeenCalledWith(7, "APP-48213"));
+    expect(onChanged).toHaveBeenCalledWith(after);
+    expect(resolveBlocked).not.toHaveBeenCalled();
+    // The block is gone once the page re-reads; the note stays.
+    rerender(<ApplicationDecisions applicationId={7} controls={after} onChanged={onChanged} />);
+    expect(screen.queryByTestId("blocked-state")).toBeNull();
+    expect(screen.getByTestId("blocked-submitted-ok").textContent).toMatch(/^Recorded as applied — receipt #42\./);
+    expect(screen.getByRole("link", { name: /screenshot of the confirmation page/ }).getAttribute("href")).toBe("#proof");
+  });
+
+  it("I submitted it with nothing pasted sends an empty confirmation; a refusal shows no receipt", async () => {
+    submittedBlocked.mockReset();
+    submittedBlocked.mockRejectedValue(new Error("This application is already recorded as applied."));
+    const onChanged = vi.fn();
+    render(<ApplicationDecisions applicationId={7} controls={controls({ blocked: BLOCKED })} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId("blocked-i-submitted"));
+    await waitFor(() => expect(submittedBlocked).toHaveBeenCalledWith(7, ""));
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("blocked-submitted-ok")).toBeNull();
   });
 
   it("shows the detail line only when there is detail", () => {

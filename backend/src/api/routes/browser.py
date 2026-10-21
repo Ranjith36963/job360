@@ -97,6 +97,7 @@ def _gate_and_files(
             ) from None
 
     async def _files(kind: str) -> tuple[str, bytes]:
+        from src.services.applications import kit as applications_kit  # noqa: PLC0415
         from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415 - fpdf2 is heavy
 
         async with _db() as db:
@@ -106,7 +107,9 @@ def _gate_and_files(
                 "refused", "no_document", f"No {kind} is saved for this application: save_artifact first."
             )
         pdf = await render_document_pdf(user.id, kind, row.get("text") or "")
-        return ("CV.pdf" if kind == "cv" else "Cover_letter.pdf"), pdf
+        # The file name an employer sees: the kit's own name for this PDF, else the plain default.
+        stem = await applications_kit.named_stem(user.id, kind)
+        return (f"{stem}.pdf" if stem else "CV.pdf" if kind == "cv" else "Cover_letter.pdf"), pdf
 
     async def _proof(image: bytes) -> None:
         # The site's confirmation page, kept as this application's proof screenshot (S7).
@@ -190,7 +193,7 @@ async def browser_action(
 _BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed"}
 HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. Finish it with your own assistant's browser when your computer is on "
-    "(Claude in Chrome, Gemini in Chrome, ChatGPT agent), or sign in once on Settings, Job sites."
+    "(Claude in Chrome, Gemini in Chrome, ChatGPT's own browser), or sign in once on Settings, Job sites."
 )
 
 

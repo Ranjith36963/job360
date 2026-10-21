@@ -388,6 +388,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/blocked/submitted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submitted Blocked
+         * @description "I submitted it" - the user got past the block and pressed Submit themselves:
+         *     records ``unblocked`` {resolution: user_did_it} (as "Mark resolved" does) and the
+         *     receipt (``recorded_by`` web, the pasted confirmation), in ONE transaction. 409 when
+         *     nothing is blocked, or when the application already has a receipt or is no longer
+         *     ``considering`` (check_submit's ``already_applied``); nothing is written then.
+         *     Session only; assistants use ``record_event`` + ``record_application``.
+         */
+        post: operations["submitted_blocked_api_applications__application_id__blocked_submitted_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/calendar.ics": {
         parameters: {
             query?: never;
@@ -419,9 +444,11 @@ export interface paths {
         put?: never;
         /**
          * Add Contact
-         * @description 201 for a new contact, 200 (``already_existed: true``) for the same
-         *     email seen again on this application (R2) — the status code is set
-         *     dynamically since the same call can legitimately answer either.
+         * @description 201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
+         *     for the same person seen again on this application (R2): same email, else
+         *     (no email) same normalised LinkedIn URL, else same name unless both carry
+         *     different LinkedIn URLs. The status code is set dynamically since the
+         *     same call can legitimately answer either.
          */
         post: operations["add_contact_api_applications__application_id__contacts_post"];
         delete?: never;
@@ -1658,7 +1685,9 @@ export interface paths {
          * @description Owner decision, 2026-09-25 — a person with no job yet (cold
          *     networking), or a linked one when ``application_id`` is given. Same
          *     idempotency/cap/rate-limit rules as the per-application route, just
-         *     scoped to the USER instead of an application when there is none.
+         *     scoped to the USER instead of an application when there is none. Cold
+         *     scope without an email: same LinkedIn URL, else same name only when
+         *     neither side has a LinkedIn URL. ``source_url`` is stored, never fetched.
          */
         post: operations["add_person_api_contacts_post"];
         delete?: never;
@@ -1727,7 +1756,8 @@ export interface paths {
          * Outreach Check
          * @description THE one gate before pressing Send on an outreach email (feature 10).
          *
-         *     Reads the user's settings, this contact's facts and the saved message
+         *     Reads the user's settings (``assistant_settings.outreach_send`` decides send vs
+         *     ask; the Gmail mode never does), this contact's facts and the saved message
          *     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
          *     kind="outreach"`` created), plus today's recorded sends, then answers
          *     through ``settings_rules.may_send_outreach`` - the same function for this
@@ -2849,7 +2879,8 @@ export interface paths {
         /**
          * Provenance
          * @description Per-line provenance for the newest saved version: which lines are the
-         *     user's OWN facts (grounded in their CV + the job ad) and which were added.
+         *     user's OWN facts (grounded in their profile), which only echo the job ad
+         *     (``source="ad"``: employer context, never a candidate fact) and which were added.
          *     Deterministic, no LLM — shown before download so the user can verify what is
          *     real (guardrail #2).
          */
@@ -2892,6 +2923,34 @@ export interface paths {
         post?: never;
         /** Revoke Token */
         delete: operations["revoke_token_api_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Version
+         * @description The commit this process was deployed from (2026-10-20).
+         *
+         *     post-merge-watch.yml polls this until it reports the merge SHA, so "deployed"
+         *     means THIS commit is serving, not that the old container still answers 200
+         *     (readyz and /health cannot tell the two apart). Railway injects
+         *     RAILWAY_GIT_COMMIT_SHA on every GitHub deploy, and a rollback restores the old
+         *     deployment's variables, so after a rollback this reports the old SHA. Public and
+         *     data-free: the SHA is already public on GitHub. ``no-store`` so no proxy can
+         *     serve an old SHA after the swap.
+         */
+        get: operations["version_api_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2960,6 +3019,8 @@ export interface components {
              * @default
              */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** AddContactResponse */
         AddContactResponse: {
@@ -2970,6 +3031,8 @@ export interface components {
             contact_id: number;
             /** Event Id */
             event_id: number | null;
+            /** Matched On */
+            matched_on?: string | null;
         };
         /**
          * AddPersonRequest
@@ -3009,6 +3072,8 @@ export interface components {
              * @default
              */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /**
          * AgentEditOut
@@ -3722,6 +3787,17 @@ export interface components {
             apply_min_score: components["schemas"]["SettingFieldOut"];
             auto_employer_emails: components["schemas"]["SettingFieldOut"];
             auto_grant_count: components["schemas"]["SettingFieldOut"];
+            /**
+             * @default {
+             *       "queue": {
+             *         "count": 0,
+             *         "hosts": [],
+             *         "no_host": 0
+             *       },
+             *       "unscoped": false
+             *     }
+             */
+            auto_grant_scope: components["schemas"]["GrantScopeOut"];
             auto_grant_until: components["schemas"]["SettingFieldOut"];
             below_line: components["schemas"]["SettingFieldOut"];
             /**
@@ -3743,6 +3819,7 @@ export interface components {
              * @default []
              */
             notes: string[];
+            outreach_send: components["schemas"]["SettingFieldOut"];
             pause_reason: components["schemas"]["SettingFieldOut"];
             /** Paused */
             paused: boolean;
@@ -3794,6 +3871,23 @@ export interface components {
              * @enum {string}
              */
             mode: "allow" | "deny";
+        };
+        /**
+         * BlockedSubmittedOut
+         * @description "I submitted it": the new receipt's id plus the refreshed decision state.
+         */
+        BlockedSubmittedOut: {
+            controls: components["schemas"]["ApplicationControlsOut"];
+            /** Receipt Id */
+            receipt_id: number;
+        };
+        /** BlockedSubmittedRequest */
+        BlockedSubmittedRequest: {
+            /**
+             * Confirmation
+             * @default
+             */
+            confirmation: string;
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -4155,8 +4249,15 @@ export interface components {
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
             /** Role */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** ContactOutreachOut */
         ContactOutreachOut: {
@@ -4397,6 +4498,13 @@ export interface components {
              * @default []
              */
             ghosted_now: number[];
+            /**
+             * @default {
+             *       "just_passed": [],
+             *       "upcoming": []
+             *     }
+             */
+            interviews: components["schemas"]["InterviewAgenda"];
             /** Latest Event Recorded At */
             latest_event_recorded_at?: string | null;
             /** Missing */
@@ -4922,6 +5030,50 @@ export interface components {
             /** Grants */
             grants: components["schemas"]["OAuthGrantOut"][];
         };
+        /**
+         * GrantScopeCount
+         * @description How many applications, their distinct form hosts, and how many have no host yet.
+         */
+        GrantScopeCount: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /**
+             * Hosts
+             * @default []
+             */
+            hosts: string[];
+            /**
+             * No Host
+             * @default 0
+             */
+            no_host: number;
+        };
+        /**
+         * GrantScopeOut
+         * @description Gap roadmap slice 30 - what an "Auto for a while" grant covers. ``queue``: what a grant
+         *     confirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the
+         *     grant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from
+         *     before snapshots, covering every application until it ends.
+         */
+        GrantScopeOut: {
+            granted?: components["schemas"]["GrantScopeCount"] | null;
+            /**
+             * @default {
+             *       "count": 0,
+             *       "hosts": [],
+             *       "no_host": 0
+             *     }
+             */
+            queue: components["schemas"]["GrantScopeCount"];
+            /**
+             * Unscoped
+             * @default false
+             */
+            unscoped: boolean;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -4953,6 +5105,52 @@ export interface components {
             application_ids: number[];
             /** Inbox Checked At */
             inbox_checked_at: string;
+        };
+        /**
+         * InterviewAgenda
+         * @description ``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose
+         *     application has no outcome event yet (ask the user how it went).
+         */
+        InterviewAgenda: {
+            /**
+             * Just Passed
+             * @default []
+             */
+            just_passed: components["schemas"]["InterviewAgendaItem"][];
+            /**
+             * Upcoming
+             * @default []
+             */
+            upcoming: components["schemas"]["InterviewAgendaItem"][];
+        };
+        /**
+         * InterviewAgendaItem
+         * @description One live interview in the agenda read (services/applications/agenda.py).
+         */
+        InterviewAgendaItem: {
+            /** Application Id */
+            application_id: number;
+            /** Company */
+            company: string;
+            /**
+             * Duration Minutes
+             * @default 60
+             */
+            duration_minutes: number;
+            /**
+             * Link
+             * @default
+             */
+            link: string;
+            /**
+             * Round
+             * @default
+             */
+            round: string;
+            /** Scheduled At */
+            scheduled_at: string;
+            /** Title */
+            title: string;
         };
         /** JobFactsOut */
         JobFactsOut: {
@@ -5662,8 +5860,15 @@ export interface components {
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
             /** Role */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** PersonJobOut */
         PersonJobOut: {
@@ -5699,10 +5904,17 @@ export interface components {
             name: string;
             /** Notes */
             notes: string;
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
             /** Replied */
             replied: boolean;
             /** Role */
             role: string;
+            /** Source Url */
+            source_url?: string | null;
         };
         /** PracticeRunOut */
         PracticeRunOut: {
@@ -6100,6 +6312,12 @@ export interface components {
         ProvenanceSegment: {
             /** Grounded */
             grounded: boolean;
+            /**
+             * Source
+             * @default none
+             * @enum {string}
+             */
+            source: "profile" | "ad" | "none";
             /** Text */
             text: string;
         };
@@ -6927,7 +7145,8 @@ export interface components {
         /**
          * StatsContactFoundViaGroupOut
          * @description Owner decision 2026-10-04 — per current contact ``found_via``: how
-         *     many contacts, how many had an outreach marked sent / a reply recorded,
+         *     many contacts, how many are ``reachable`` (CURRENT email or LinkedIn URL
+         *     saved), how many had an outreach marked sent / a reply recorded,
          *     and ``reply_rate`` = contacts with both / contacts with a sent mark
          *     (``null`` when nothing was sent).
          */
@@ -6942,6 +7161,11 @@ export interface components {
             outreach_replied: number;
             /** Outreach Sent */
             outreach_sent: number;
+            /**
+             * Reachable
+             * @default 0
+             */
+            reachable: number;
             /** Reply Rate */
             reply_rate: number | null;
         };
@@ -7662,6 +7886,8 @@ export interface components {
             notes?: string | null;
             /** Role */
             role?: string | null;
+            /** Source Url */
+            source_url?: string | null;
         };
         /**
          * UpdateJobFactsRequest
@@ -7752,6 +7978,11 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** VersionResponse */
+        VersionResponse: {
+            /** Sha */
+            sha: string;
+        };
         /** WhatsNewApplicationOut */
         WhatsNewApplicationOut: {
             /** Id */
@@ -7801,6 +8032,13 @@ export interface components {
             applications: components["schemas"]["WhatsNewApplicationOut"][];
             /** Events */
             events: components["schemas"]["WhatsNewEventOut"][];
+            /**
+             * @default {
+             *       "just_passed": [],
+             *       "upcoming": []
+             *     }
+             */
+            interviews: components["schemas"]["InterviewAgenda"];
             /** Next After Id */
             next_after_id: number | null;
             /** Next Since */
@@ -7897,6 +8135,7 @@ export interface operations {
                 in_flight?: boolean;
                 queued?: boolean;
                 priority?: string | null;
+                agenda?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -8474,6 +8713,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submitted_blocked_api_applications__application_id__blocked_submitted_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockedSubmittedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockedSubmittedOut"];
                 };
             };
             /** @description Validation Error */
@@ -12541,6 +12819,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    version_api_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionResponse"];
                 };
             };
         };

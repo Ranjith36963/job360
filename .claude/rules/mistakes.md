@@ -21,8 +21,15 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   only; CI runs the full suite.
 - Before every backend push: `ruff check .` and `python scripts/mypy_ratchet.py`.
 - After merging main into a PR: never chain past a conflict; regenerate
-  `docs/GENERATED.md` and frontend types; re-run `test_recipes` (70-line recipe cap)
+  frontend types; re-run `test_recipes` (70-line recipe cap)
   and `test_outreach_people` (MCP tool count).
+- Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict,
+  gate the merged tree, commit. A script hides the merge from the commit-gate hook.
+- Run the gate as its own command and read its PASS line; never `gate && git commit` (the hook misses it).
+- Resolve a conflict per hunk; `git checkout --ours/--theirs <file>` also drops the other side's clean hunks.
+- A child PR's squash merge ships its stacked base too: diff the base against main, close it as shipped.
+- A stacked worker's first step merges its base branch: worktree agents start from origin/main.
+- After merging main into a PR that changes MCP tool parameters, re-pin TOOLS_REV to main's + 1.
 - Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
   GitHub merges it when the required checks (13; 14 once `merge-cage` is added) are green. Never leave finished work unpushed.
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
@@ -35,6 +42,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   until then it still withdraws, so re-arm after CI is green. Never hand-merge past a red or pending `merge-cage` unless the owner said so for that PR.
   Only the owner turns it off (repository variable `AUTO_MERGE=off`).
 - Read CI failures from the job summary, not the log tail (Postgres noise).
+- Never run `scripts/ruleset_gate.py --live` on a branch: it rewrites the ruleset snapshot.
+  Run `git status` before every `git add -A` (2026-10-20: an 8,495-line snapshot rode #952).
 - Pull enough of a failing CI log to reach pytest's summary (`get_job_logs` tail_lines ≥ 600;
   the noise is printed after it) before any slower route, like re-running the suite locally.
 - After editing any MCP tool description or the server instructions, run

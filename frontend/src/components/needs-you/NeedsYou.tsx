@@ -251,7 +251,7 @@ async function waitingRequests(): Promise<WaitingRequest[]> {
   try {
     const view = await getAssistantSettings();
     const line = settingScore(view.apply_min_score);
-    return view.waiting.map((r) => ({ ...r, current_score_line: line }));
+    return view.waiting.map((r) => ({ ...r, current_score_line: line, grant_queue: view.auto_grant_scope?.queue ?? null }));
   } catch {
     return [];
   }
