@@ -49,7 +49,7 @@ Variables → edit → redeploy happens automatically.
 
 | Table | What's in it | Sensitivity |
 |---|---|---|
-| `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences | **HIGH — this is the crown jewels** |
+| `user_profiles`, `user_profile_versions`, `profile_edits`, `assistant_setting_requests` | enumerate the categories off the dataclasses, never from memory: `services/profile/models.CVData` / `UserPreferences` / `UserInfo` / `AssistantSettings`. `UserInfo.equality` is **special-category data** under UK GDPR — say so on the ICO form | **HIGH — this is the crown jewels** |
 | `tailored_documents` | tailored CVs / cover letters (legacy — nothing writes it since decision 28, 2026-09-21; the live ones are `application_artifacts`) | **HIGH** |
 | `users` | email addresses, argon2id password hashes, timezone | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
 | `applications`, `application_events`, `application_artifacts`, `application_receipts` | job-hunt activity (who applied where, and the exact CV sent) | Medium — sensitive in context (current employer must not learn) |
