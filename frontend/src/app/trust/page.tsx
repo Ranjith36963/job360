@@ -88,15 +88,16 @@ export default function TrustPage() {
             </li>
             <li>Request logs and error traces.</li>
           </ul>
-          {/* Source: frontend/src/instrumentation-client.ts (replayIntegration maskAllText:false, blockAllMedia:false; replaysSessionSampleRate 0.1; replaysOnErrorSampleRate 1.0). */}
+          {/* Source: frontend/src/lib/sentry-replay.ts (maskAllText:true, blockAllMedia:true; added only when /api/auth/me analytics_consent is true) + instrumentation-client.ts (replaysSessionSampleRate 0.1; replaysOnErrorSampleRate 1.0). */}
           <p
             className="mt-3 rounded-md border border-border p-3 text-foreground"
             data-testid="trust-replay"
           >
-            Job360 records your screen while you use it, including your CV
-            text, through Sentry session replay. It is used for fixing
-            problems. It records 10% of sessions, and every session that hits
-            an error. Text and media on screen are not masked.
+            Job360 records your screen only if you turn on &ldquo;Help improve
+            Job360&rdquo; in Settings. It is off by default. The recordings are
+            masked: all text and media on screen are hidden. When on, Sentry
+            session replay records 10% of sessions, and every session
+            that hits an error, to help us fix problems.
           </p>
         </section>
 

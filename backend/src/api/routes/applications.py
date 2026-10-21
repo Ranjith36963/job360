@@ -303,6 +303,7 @@ class AddContactRequest(BaseModel):
     # Owner decision 2026-10-04 — where this person was found; closed set
     # CONTACT_FOUND_VIA, checked by contacts._validate_found_via at call time.
     found_via: Optional[str] = None
+    source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -597,6 +598,9 @@ class ContactOut(BaseModel):
     notes: str
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; null = unset.
     found_via: Optional[str] = None
+    source_url: Optional[str] = None
+    # Derived, never stored: an email or LinkedIn URL is saved.
+    reachable: bool = False
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
@@ -1203,6 +1207,20 @@ class AutofillRequest(BaseModel):
     mode: Literal["allow", "deny"]
 
 
+class BlockedSubmittedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The confirmation the user pasted (optional); the same cap as the receipt route's.
+    confirmation: str = Field("", max_length=200)
+
+
+class BlockedSubmittedOut(BaseModel):
+    """"I submitted it": the new receipt's id plus the refreshed decision state."""
+
+    receipt_id: int
+    controls: ApplicationControlsOut
+
+
 class TypeFirstAnswer(BaseModel):
     question: str
     answer: str
@@ -1277,6 +1295,7 @@ class AddContactResponse(BaseModel):
     contact_id: int
     already_existed: bool
     event_id: Optional[int]
+    matched_on: Optional[str] = None  # "email" | "linkedin_url" | "name" when already_existed; null on a create
 
 
 class AddPersonRequest(AddContactRequest):
@@ -1306,6 +1325,7 @@ class UpdateContactRequest(BaseModel):
     notes: Optional[str] = None
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; "" clears it.
     found_via: Optional[str] = None
+    source_url: Optional[str] = None  # "" clears it
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1354,6 +1374,8 @@ class PersonOut(BaseModel):
     linkedin_url: str
     notes: str
     found_via: Optional[str] = None
+    source_url: Optional[str] = None
+    reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
     last_sent: Optional[OutreachEntryOut]
@@ -1457,13 +1479,15 @@ class StatsKeyedGroupOut(BaseModel):
 
 class StatsContactFoundViaGroupOut(BaseModel):
     """Owner decision 2026-10-04 — per current contact ``found_via``: how
-    many contacts, how many had an outreach marked sent / a reply recorded,
+    many contacts, how many are ``reachable`` (CURRENT email or LinkedIn URL
+    saved), how many had an outreach marked sent / a reply recorded,
     and ``reply_rate`` = contacts with both / contacts with a sent mark
     (``null`` when nothing was sent)."""
 
     key: Optional[str]
     label: str
     contacts: int
+    reachable: int = 0
     outreach_sent: int
     outreach_replied: int
     reply_rate: Optional[float]
@@ -2107,14 +2131,17 @@ async def add_contact(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """201 for a new contact, 200 (``already_existed: true``) for the same
-    email seen again on this application (R2) — the status code is set
-    dynamically since the same call can legitimately answer either."""
+    """201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
+    for the same person seen again on this application (R2): same email, else
+    (no email) same normalised LinkedIn URL, else same name unless both carry
+    different LinkedIn URLs. The status code is set dynamically since the
+    same call can legitimately answer either."""
     try:
         result = await contacts_service.add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
+            source_url=body.source_url,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2138,12 +2165,15 @@ async def add_person(
     """Owner decision, 2026-09-25 — a person with no job yet (cold
     networking), or a linked one when ``application_id`` is given. Same
     idempotency/cap/rate-limit rules as the per-application route, just
-    scoped to the USER instead of an application when there is none."""
+    scoped to the USER instead of an application when there is none. Cold
+    scope without an email: same LinkedIn URL, else same name only when
+    neither side has a LinkedIn URL. ``source_url`` is stored, never fetched."""
     try:
         result = await contacts_service.add_contact(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
+            source_url=body.source_url,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2167,7 +2197,7 @@ async def update_contact(
         return await contacts_service.update_contact(
             db, user.id, contact_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, found_via=body.found_via,
+            notes=body.notes, found_via=body.found_via, source_url=body.source_url,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2760,6 +2790,80 @@ async def resolve_blocked(
     except SpineError as exc:
         _raise(exc)
     return await _controls(db, user, application_id)
+
+
+def _submitted_refused(user: CurrentUser, application_id: int, status: int, reason: str) -> HTTPException:
+    get_audit_logger().warning(
+        "blocked_submitted_refused",
+        extra={
+            "event": "blocked_submitted_refused", "user_id": safe_log_value(user.id),
+            "application_id": int(application_id), "status": int(status), "reason": safe_log_value(reason, max_len=40),
+            "result": "refused",
+        },
+    )
+    return HTTPException(status_code=status, detail={
+        "not_blocked": "This application is not waiting on you, so there is nothing to mark.",
+        "already_applied": "This application is already recorded as applied. Nothing new was written.",
+    }[reason])
+
+
+@router.post(
+    "/applications/{application_id}/blocked/submitted", response_model=BlockedSubmittedOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def submitted_blocked(
+    application_id: int,
+    body: BlockedSubmittedRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"I submitted it" - the user got past the block and pressed Submit themselves:
+    records ``unblocked`` {resolution: user_did_it} (as "Mark resolved" does) and the
+    receipt (``recorded_by`` web, the pasted confirmation), in ONE transaction. 409 when
+    nothing is blocked, or when the application already has a receipt or is no longer
+    ``considering`` (check_submit's ``already_applied``); nothing is written then.
+    Session only; assistants use ``record_event`` + ``record_application``."""
+    if await spine.get_owned_application(db, user.id, application_id) is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    try:
+        async with db._db.transaction():
+            # Lock the row first: a double click queues here and the second sees the first's receipt.
+            await db._db.execute(
+                "SELECT id FROM applications WHERE id = ? AND user_id = ? FOR UPDATE", (application_id, user.id)
+            )
+            app_row = await spine.get_owned_application(db, user.id, application_id)
+            cur = await db._db.execute(
+                "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
+                (application_id, user.id),
+            )
+            if app_row is None or app_row["status"] != "considering" or await cur.fetchone() is not None:
+                raise _submitted_refused(user, application_id, 409, "already_applied")
+            block = await blocked_service.open_block(db, user.id, application_id)
+            if block is None:
+                raise _submitted_refused(user, application_id, 409, "not_blocked")
+            stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
+            now = datetime.now(timezone.utc).isoformat()
+            await blocked_service.record(db, user, application_id, "unblocked", stored, occurred_at=now)
+            # The form's host says where it was sent: a company's own form is company_site;
+            # a job-board brand (Indeed, LinkedIn...) is left unsaid (rule #29), never guessed.
+            host = settings_rules.parse_site_host(block["page_host"]) if block["page_host"] else None
+            channel = "company_site" if settings_rules.host_kind(host) == "company" else ""
+            receipt = await spine.record_receipt(
+                db, user_id=user.id, application_id=application_id, recorded_by="web", channel=channel,
+                note=f"You submitted this yourself after your assistant got stuck ({block['reason_label']}).",
+                confirmation=body.confirmation.strip(), applied_at=now,
+            )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
+    get_audit_logger().info(
+        "blocked_submitted",
+        extra={
+            "event": "blocked_submitted", "user_id": safe_log_value(user.id), "application_id": int(application_id),
+            "receipt_id": int(receipt["receipt_id"]), "channel": safe_log_value(channel, max_len=40), "result": "ok",
+        },
+    )
+    return {"receipt_id": receipt["receipt_id"], "controls": await _controls(db, user, application_id)}
 
 
 @router.get(

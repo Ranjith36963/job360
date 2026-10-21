@@ -442,7 +442,7 @@ def test_wttj_happy_path_filters_by_country():
     assert j["location"] == "Paris, France, Remote" and j["remote"] is True
     assert j["extra"]["salary_min"] == 55000 and j["extra"]["salary_max"] == 70000
     assert j["extra"]["salary_currency"] == "EUR" and jobs[1]["extra"]["salary_max"] == 55000
-    assert j["posted"] == (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    assert j["posted"] == datetime.fromtimestamp(NOW - 86400, timezone.utc).strftime("%Y-%m-%d")  # same clock as NOW
     assert http.calls[0]["url"] == "https://www.welcometothejungle.com/api/env"
     c = http.calls[1]
     assert c["url"] == "https://AB12CD34-dsn.algolia.net/1/indexes/wttj_jobs_production_en/query"

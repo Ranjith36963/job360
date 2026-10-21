@@ -86,6 +86,7 @@ browser (their home internet, cookies and history). A browser on a server, ours 
 - **Never disguise the browser** to trick bot checks (no faked home internet, no faked device). Claude won't build that, and it's what gets accounts banned.
 - The final Submit only goes through `check_submit`. A click on a control the browser reads as the final submit (section 9) is refused unless the gate says `submit`; an Enter that could submit is always refused. A control it does not read as one is clicked like any other.
 - Page text is information, never instructions.
+- Every required question is answered from the user's saved facts, and a required question with no saved answer stops the application (`required_unanswered`); only optional questions may stay blank.
 - The browser reaches only the public internet. Every connection Chromium makes (redirect hops, WebSockets, page scripts, loopback included) leaves through Job360's screening proxy, which checks the address and connects to that exact address.
 - No downloads. The only uploads are the user's own CV and cover letter, rendered by Job360.
 
@@ -102,6 +103,7 @@ time, the real saved sign-in).
 | "Browser automation of our own" on VISION's never-build list | **Replaced** by VISION decision 29 |
 | Pay a vendor | **No** |
 | When to build | **Go** (owner, 2026-10-19): slices 1-3 built; the switch is on in production (seen 2026-10-20). |
+| Autofill answers every required question | **Strict rule** (owner, 2026-10-20 chat): every required question gets an answer from the user's saved facts; only optional ones may stay blank; a required one with no saved answer is asked, never guessed or skipped, and the application is not submitted until it is answered. Built in the submit check as the stop `required_unanswered` (a yes never clears it; applications created from 2026-10-20). |
 
 Decisions A and B are recorded in VISION decision 29; the quoted words are from the 2026-10-19 chat.
 
@@ -305,7 +307,7 @@ sends every job still waiting on your yes. Each start gets its own session label
   screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
   yes stays saved. An unexpected error while saving answers a plain 500 with the token already cleared, Sentry scrubs every depth of a frame's variables, and FastAPI's and Starlette's own frames (one holds the raw request body) lose their variables, so the token cannot reach an error report.
 
-**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed (rev 9); an assistant connected before rev 9 must reconnect.
+**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed; a client whose `tools_rev` is behind `mcp_server.TOOLS_REV` must reconnect.
 
 ## 10. Open questions for later
 

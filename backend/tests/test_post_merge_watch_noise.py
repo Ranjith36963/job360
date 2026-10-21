@@ -189,3 +189,83 @@ def test_settle_clock() -> None:
     assert ds.settle_remaining(1000.0, None, 940.0, 300.0, 240.0) == 240.0  # saw SUCCESS 1 min ago
     assert ds.settle_remaining(10000.0, 8200.0, None, 300.0, 240.0) == 0.0  # queued run, long settled
     assert ds.settle_remaining(10000.0, 9940.0, None, 300.0, 240.0) == 480.0  # created 1 min ago
+
+
+# ── deploy_settle: /api/version must serve THIS sha before the deploy is judged (#997) ──
+
+NEWER = "c" * 40
+
+
+def _version(answers: list[str | None], descendants: frozenset[str] = frozenset()) -> tuple:
+    clock, calls = [0.0], [0]
+
+    def fetch(_url: str) -> str | None:
+        served = answers[min(calls[0], len(answers) - 1)]
+        calls[0] += 1
+        return served
+
+    def sleep(s: float) -> None:
+        clock[0] += s
+
+    return ds.wait_for_version(SHA, ["https://job360.uk/api/version"], 300, 60, fetch=fetch,
+                               is_ancestor=lambda _a, b: b in descendants,
+                               now=lambda: clock[0], sleep=sleep)
+
+
+def test_old_sha_served_all_wait_is_never_live() -> None:
+    assert _version([OTHER])[0] == "never_live"
+    assert _version([None])[0] == "never_live"  # route missing / no answer
+
+
+def test_swap_to_this_sha_is_live_and_timed() -> None:
+    assert _version([OTHER, OTHER, SHA]) == ("live", SHA, 120.0)
+    assert _version([SHA]) == ("live", SHA, None)  # queued run: no swap watched
+    assert _version([SHA[:12]])[0] == "live"
+
+
+def test_newer_descendant_is_superseded_but_a_stranger_is_not() -> None:
+    assert _version([NEWER], frozenset({NEWER}))[0] == "superseded"
+    assert _version([NEWER])[0] == "never_live"
+
+
+def test_unknown_sha_degrades_instead_of_going_red() -> None:
+    assert _version(["unknown"])[0] == "unknown"
+    assert ds.wait_for_version(SHA, [], 0, 1)[0] == "not_asked"
+
+
+def _deploy(monkeypatch: pytest.MonkeyPatch, deps: list[dict] | Exception, served: str | None) -> dict:
+    import types
+
+    class FakeRailwayError(Exception):
+        pass
+
+    def listing(_service: str) -> list[dict]:
+        if isinstance(deps, Exception):
+            raise deps
+        return deps
+
+    fake = types.SimpleNamespace(list_deployments=listing, RailwayCliMissingError=FakeRailwayError,
+                                 RailwayApiMalformedError=FakeRailwayError, RailwayApiError=FakeRailwayError)
+    if isinstance(deps, Exception):
+        fake.RailwayCliMissingError = type(deps)
+    monkeypatch.setitem(sys.modules, "rollback_gear", fake)
+    monkeypatch.setattr(ds, "fetch_version", lambda _url, timeout=15.0: served)
+    monkeypatch.setattr(ds.time, "sleep", lambda _s: None)
+    return ds.wait_for_deploy(SHA, "backend", 0, 0, 0, 0, ["https://job360.uk/api/version"], 0)
+
+
+def test_railway_live_but_old_sha_served_is_not_judged(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _deploy(monkeypatch, [_dep("SUCCESS", SHA)], OTHER)
+    assert out["deploy_state"] == "live"
+    assert out["version_state"] == "never_live" and out["judge"] == "false" and out["settled"] == "false"
+
+
+def test_no_railway_token_still_proves_the_served_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _deploy(monkeypatch, FileNotFoundError("railway"), SHA)
+    assert out["deploy_state"] == "unverifiable"
+    assert out["version_state"] == "live" and out["judge"] == "true" and out["settled"] == "true"
+
+
+def test_railway_live_and_this_sha_served_is_judged(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _deploy(monkeypatch, [_dep("SUCCESS", SHA)], SHA)
+    assert (out["deploy_state"], out["version_state"], out["judge"], out["settled"]) == ("live", "live", "true", "true")

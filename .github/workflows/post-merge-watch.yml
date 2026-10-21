@@ -58,7 +58,8 @@ name: Post-merge watch (the eyes after the merge)
 #   SETTLE_MINUTES                5   quiet time after THIS commit's deploy reports
 #                                     SUCCESS before the watch window starts.
 #   DEPLOY_WAIT_MINUTES          10   longest wait for that SUCCESS (job budget: 6 min
-#                                     readyz + 10 + 5 settle + 15 watch < 40 min).
+#                                     readyz + 10 + 5 version + 5 settle + 15 watch < 50 min).
+#   DEPLOY_VERSION_WAIT_MINUTES   5   longest wait for /api/version to serve THIS sha.
 #   DEPLOY_BUILD_MINUTES          4   estimate used when a queued run finds the deploy
 #                                     already SUCCESS (Railway gives no SUCCESS time).
 # The trip rule itself is the pure `decide()` in scripts/sentry_poll.py. Ignored
@@ -192,11 +193,13 @@ jobs:
     name: Watch prod after the merge
     needs: policy
     runs-on: ubuntu-latest
-    # 50, was 40: Step 1b adds up to 10 min (deploy wait) + 5 min (settle) ahead of
-    # the 15 min watch and the up-to-6 min readyz wait. See the header.
+    # 50, was 40: Step 1b adds up to 10 min (deploy wait) + 5 min (/api/version) + 5 min (settle)
+    # ahead of the 15 min watch and the up-to-6 min readyz wait. See the header.
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # deploy_settle asks git whether a served sha is newer than ours
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
@@ -247,6 +250,14 @@ jobs:
       # It can only WAIT and REPORT, never trip: if Railway cannot be asked it
       # says so (`deploy_state`), the workflow falls back to a plain sleep, and the
       # readyz probe + Sentry rules stay the only trip paths.
+      #
+      # THE SERVED SHA (PR #997): it then polls GET /api/version on job360.uk (the
+      # backend's own URL as fallback) until it serves $GITHUB_SHA. This runs with
+      # or without RAILWAY_TOKEN. `judge=false` when the old sha was still served at
+      # the end of the wait (`version_state=never_live`: Steps 2-3 would sample the
+      # old code and a rollback would undo the good deployment, so they are skipped
+      # and the run ends RED "deploy never went live", no rollback) or when a newer
+      # commit already serves (`superseded`: its own run judges it; green).
       - name: "Step 1b — wait for this commit's deploy to be SUCCESS, then settle"
         id: settle
         if: steps.wait.outputs.live == 'true'
@@ -254,19 +265,34 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           DEPLOY_SERVICE: backend
           DEPLOY_WAIT_MINUTES: "10"
+          DEPLOY_VERSION_WAIT_MINUTES: "5"
           DEPLOY_BUILD_MINUTES: "4"
           SETTLE_MINUTES: ${{ inputs.settle_minutes || '5' }}
+          READYZ_URL: ${{ needs.policy.outputs.readyz_url }}
         run: |
           set +e
           if [ -n "$RAILWAY_TOKEN" ]; then
             npm i -g @railway/cli --silent 2>&1 | tail -3
-            python scripts/deploy_settle.py --sha "$GITHUB_SHA" > settle.out
-            code=$?
-            cat settle.out >> "$GITHUB_OUTPUT"
-          else
-            code=1
           fi
-          if [ "$code" -ne 0 ] || ! grep -q '^deploy_state=live$' settle.out 2>/dev/null; then
+          # Without the CLI the Railway half reports `unverifiable`; the version half still runs.
+          python scripts/deploy_settle.py --sha "$GITHUB_SHA" \
+            --version-url "https://job360.uk/api/version" \
+            --version-url "${READYZ_URL%/readyz}/version" > settle.out
+          code=$?
+          grep -vE '^(judge|version_state|version_served)=' settle.out >> "$GITHUB_OUTPUT"
+          # Named here so every reader of these outputs sees their producer. A script
+          # that died before printing them reads as "judge as before" (judge=true).
+          judge=$(sed -n 's/^judge=//p' settle.out | tail -1)
+          version_state=$(sed -n 's/^version_state=//p' settle.out | tail -1)
+          version_served=$(sed -n 's/^version_served=//p' settle.out | tail -1)
+          echo "judge=${judge:-true}" >> "$GITHUB_OUTPUT"
+          echo "version_state=${version_state:-unverifiable}" >> "$GITHUB_OUTPUT"
+          echo "version_served=${version_served}" >> "$GITHUB_OUTPUT"
+          if [ "$judge" = "false" ]; then
+            echo "::warning::not judging this deploy: version_state=$version_state (last served $version_served)."
+            exit 0
+          fi
+          if [ "$code" -ne 0 ] || ! grep -q '^settled=true$' settle.out 2>/dev/null; then
             # Not verified. Never silent: say it, then settle blind so the swap
             # noise window still passes before the watch starts.
             echo "::warning::could not confirm this commit's deploy is SUCCESS (RAILWAY_TOKEN missing, Railway unreachable, or deploy not live in time) - settling for ${SETTLE_MINUTES} min blind."
@@ -283,6 +309,7 @@ jobs:
       # noise, N in a row is a trend.
       - name: "Step 2 — watch readyz + frontend for the policy's watch window"
         id: probe
+        if: steps.settle.outputs.judge != 'false'
         run: |
           set +e
           readyz="${{ needs.policy.outputs.readyz_url }}"
@@ -333,6 +360,7 @@ jobs:
       # so this can only OVER-report, never miss something inside the window.
       - name: "Step 3 — Sentry: any NEW unresolved issue since the merge?"
         id: sentry
+        if: steps.settle.outputs.judge != 'false'
         env:
           SENTRY_API_TOKEN: ${{ secrets.SENTRY_API_TOKEN || secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_WINDOW_HOURS: "1"
@@ -377,7 +405,11 @@ jobs:
       # ── DECIDE ─────────────────────────────────────────────────────────
       - name: Decide the verdict
         id: decide
+        env:
+          JUDGE: ${{ steps.settle.outputs.judge }}
         run: |
+          # judged=false: the merged sha never served, or a newer one did (Step 1b).
+          echo "judged=$([ "$JUDGE" = "false" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
           tripped="false"
           reasons=()
           services=()
@@ -576,6 +608,7 @@ jobs:
             echo "- \`readyz\` (${{ needs.policy.outputs.readyz_url }}) — every ${{ needs.policy.outputs.poll_seconds }}s for ${{ needs.policy.outputs.watch_minutes }} min; trips at ${{ needs.policy.outputs.readyz_non_200 }} consecutive non-200"
             echo "- \`frontend\` (${{ needs.policy.outputs.frontend_url }}) — same cadence; trips at ${{ needs.policy.outputs.frontend_non_200 }} consecutive non-200"
             echo "- deploy identity — \`${{ steps.settle.outputs.deploy_state || 'not reached' }}\` (live = Railway reported THIS commit's deploy SUCCESS, then ${IN_SETTLE_MINUTES} min settle; anything else = the settle was blind)"
+            echo "- served sha — \`${{ steps.settle.outputs.version_state || 'not reached' }}\` (last served \`${{ steps.settle.outputs.version_served || '-' }}\`; live = /api/version served THIS commit; never_live = the old sha was still served, the run is RED and nothing was judged or rolled back; superseded = a newer commit serves, its own run judges it)"
             if [ "${{ steps.sentry.outputs.watched }}" = "true" ]; then
               echo "- Sentry — new unresolved issues since the deploy that cleared the noise filter (min events ${IN_SENTRY_MIN_EVENTS} or any user; known deploy noise ignored below ${IN_SENTRY_NOISE_ESCALATE} events; ignored issues are listed in Step 3's output, not hidden)"
             fi
@@ -640,7 +673,7 @@ jobs:
       # this one is the quiet "it landed and it is fine" line, which belongs in
       # log-github-ci and nowhere louder.
       - name: "Slack — merged, watched, and still standing"
-        if: always() && steps.decide.outcome == 'success' && steps.decide.outputs.tripped != 'true' && steps.mode.outputs.dry_run != 'true'
+        if: always() && steps.decide.outcome == 'success' && steps.decide.outputs.tripped != 'true' && steps.mode.outputs.dry_run != 'true' && steps.decide.outputs.judged != 'false'
         uses: ./.github/actions/slack
         with:
           channel: log-github-ci
@@ -665,4 +698,13 @@ jobs:
         if: always() && steps.decide.outputs.tripped == 'true'
         run: |
           echo "::error::post-merge-watch TRIPPED — ${{ steps.decide.outputs.trip_reason }}"
+          exit 1
+
+      # The merged commit never served (PR #997): RED, never a rollback — the
+      # deployment still serving is the last good one. No Slack step keys off this,
+      # so it can sit last; the step summary above already says why.
+      - name: Fail the run if the deploy never went live
+        if: always() && steps.settle.outputs.version_state == 'never_live'
+        run: |
+          echo "::error::deploy never went live: /api/version still served ${{ steps.settle.outputs.version_served }}, not ${{ github.sha }}. Nothing was judged or rolled back."
           exit 1

@@ -684,6 +684,10 @@ class SubmitCounts:
     user_tz: str = "UTC"
     # Bulk-apply R1: ``applied`` events since the current auto grant began (see :func:`grant_info`).
     applied_since_grant: int = 0
+    # Gap roadmap slice 30: what the current grant covers - ``{application_id: form host}`` snapshotted
+    # from the user's queue when they confirmed it on the web (``grant_scope.py``); ``{}`` = nothing.
+    # ``None`` = a grant confirmed before snapshots existed: it covers every application until it ends.
+    grant_scope: Optional[dict[int, Optional[str]]] = None
 
 
 @dataclass(frozen=True)
@@ -725,6 +729,9 @@ class SubmitFacts:
     # Weak spot #1b (c): an application created after the cut-off (``kit.FORM_CHECK_REQUIRED_FROM``)
     # has no ``form_checked`` event yet (``form_check_missing``). Older applications are never flagged.
     form_check_missing: bool = False
+    # Owner rule 2026-10-20: the newest ``form_checked`` of a page still lists a REQUIRED question with no
+    # saved answer (``required_unanswered``). Optional questions may stay blank; required ones never.
+    required_unanswered: bool = False
     # The latest saved fit score for this application (``None`` = no fit yet).
     # Compared with the user's score line by :func:`line_side` (rule 5c).
     fit_score: Optional[int] = None
@@ -775,6 +782,9 @@ class SubmitFacts:
     # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
     # ``approved`` is then False; the ask the gate would give is answered as ``approval_stale``.
     approval_stale: Optional[str] = None
+    # Gap roadmap slice 30: the application's id, matched against the grant's scope
+    # (``SubmitCounts.grant_scope``). ``None`` is never in a scope.
+    application_id: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -796,7 +806,8 @@ REASONS: tuple[str, ...] = (
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "form_page_mismatch", "email_not_verified",
     "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
-    "type_first_pending", "below_score_line", "answer_guessed", "approval_stale",
+    "type_first_pending", "below_score_line", "answer_guessed", "approval_stale", "required_unanswered",
+    "grant_scope",
 )
 
 # What each ``approval_stale`` part means, in the words the ask shows the user.
@@ -975,6 +986,9 @@ def may_submit(
         fewer fields than the newest ``form_checked`` listed questions -> stop ``form_count_mismatch``
     4c3. an application created after ``kit.FORM_CHECK_REQUIRED_FROM`` has no ``form_checked`` -> stop
         ``form_check_missing`` (older in-flight applications are exempt)
+    4c3b. the newest ``form_checked`` of a page lists a REQUIRED question with no answer -> stop
+        ``required_unanswered`` (owner rule 2026-10-20; a yes does NOT clear it; only a new ``form_checked``
+        after the user answered does)
     4c4. a multi-page form has a page 1..N with no ``form_swept`` newer than its ``form_checked`` -> stop
         ``form_pages_incomplete`` (older single-page applications are unchanged; a yes does not clear it)
     4d2. a ``submit_attempted`` with no later surviving ``applied`` or web ``submit_resolved`` -> stop
@@ -1013,6 +1027,8 @@ def may_submit(
     7. Indeed / LinkedIn style site -> ask ``ask_always_site``
     8. the mode (the job's override, else ``submit_mode`` - or auto while a counted ``auto_grant`` is active:
        now before ``auto_grant_until`` and fewer than ``auto_grant_count`` applied since it began) is ``confirm`` -> ask
+       (``grant_scope`` when a grant is active but does not cover this application: it was not in the user's
+       queue when they confirmed the grant, or its form host is not the one snapshotted then - slice 30)
     9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``
     10. first application since auto-submit was turned on -> ask ``practice_run``
     10b. auto mode and the form host has no earlier applied application -> ask ``new_site_first_time``
@@ -1096,6 +1112,14 @@ def may_submit(
             "tell the user about any knockouts, record_event form_checked, sweep again "
             "and call check_submit again.",
         )
+    if application.required_unanswered:
+        return SubmitDecision(
+            "stop", "required_unanswered",
+            "The form has a required question with no saved answer. Never leave a required question blank "
+            "and never guess: ask_user for every missing required answer (one message), save the answer, "
+            "run check_form again, record a new form_checked (with missing_required), fill, sweep, and "
+            "call check_submit again. Optional questions may stay blank.",
+        )
     if application.form_pages_incomplete:
         return SubmitDecision(
             "stop", "form_pages_incomplete",
@@ -1115,7 +1139,10 @@ def may_submit(
             "the user confirms it on Job360 first, or submits this one themselves.",
         )
     override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
-    base_mode = AUTO_SUBMIT_MODE if grant_active(cfg, counts, now) else cfg.submit_mode
+    granted = grant_active(cfg, counts, now)
+    # Slice 30: a grant makes only the applications it covers auto; any other one keeps the user's own mode.
+    outside_grant = granted and not grant_covers(counts.grant_scope, application)
+    base_mode = AUTO_SUBMIT_MODE if granted and not outside_grant else cfg.submit_mode
     mode = override or base_mode
     auto = mode == AUTO_SUBMIT_MODE
     if application.duplicate_job and auto:
@@ -1165,7 +1192,10 @@ def may_submit(
             "This is not the page where the form was filled (form_filled / form_swept). "
             "Do not submit; go back to that page, or fill and sweep this one, and ask the user.",
         )
-    ask = _first_ask(cfg, application, screened, counts, override=override, auto=auto)
+    ask = _first_ask(
+        cfg, application, screened, counts, override=override, auto=auto,
+        outside_grant=outside_grant and cfg.submit_mode != AUTO_SUBMIT_MODE,
+    )
     if ask is None:
         return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
     if application.approved:
@@ -1190,6 +1220,35 @@ def grant_active(cfg: EffectiveSettings, counts: SubmitCounts, now: datetime) ->
     if cfg.auto_grant_count is None or not cfg.auto_grant_until:
         return False
     return _grant_not_over(cfg.auto_grant_until, now) and counts.applied_since_grant < cfg.auto_grant_count
+
+
+def grant_covers(scope: Optional[dict[int, Optional[str]]], application: SubmitFacts) -> bool:
+    """Gap roadmap slice 30: the active grant covers this application - it was in the user's queue
+    when they confirmed the grant AND its form host now is the host snapshotted then. A snapshot with
+    no host never matches (a host that appears later is another site the user never saw). ``scope``
+    ``None`` = a grant from before snapshots: covers everything until it ends. Pure."""
+    if scope is None:
+        return True
+    app_id = application.application_id
+    if app_id is None or app_id not in scope:
+        return False
+    host = scope[app_id]
+    return host is not None and host == application.form_host
+
+
+def _grant_scope_ask(scope: Optional[dict[int, Optional[str]]], application: SubmitFacts) -> SubmitDecision:
+    """The ``grant_scope`` ask: the user's grant does not cover this application."""
+    n = len(scope or {})
+    what = (
+        "its form is now on another site than when they said yes"
+        if application.application_id in (scope or {})
+        else "this one was not among them"
+    )
+    return SubmitDecision(
+        "ask", "grant_scope",
+        f"Auto was turned on for the {n} application{'' if n == 1 else 's'} in the user's queue when they said "
+        f"yes; {what}. Fill the form, stop before submit and ask yes.",
+    )
 
 
 def _zone(name: str) -> ZoneInfo:
@@ -1253,8 +1312,10 @@ def _first_ask(
     *,
     override: Optional[str],
     auto: bool,
+    outside_grant: bool = False,
 ) -> Optional[SubmitDecision]:
-    """The first reason to ASK, in rule order, or ``None`` when nothing asks."""
+    """The first reason to ASK, in rule order, or ``None`` when nothing asks. ``outside_grant``: an
+    active grant does not cover this application, so the user's own confirm asks as ``grant_scope``."""
     if application.duplicate_job:
         return SubmitDecision(
             "ask", "duplicate_job",
@@ -1300,6 +1361,8 @@ def _first_ask(
                 "ask", "job_override_confirm",
                 "This job is set to confirm. Fill the form, stop before submit and ask yes.",
             )
+        if outside_grant:
+            return _grant_scope_ask(counts.grant_scope, application)
         return SubmitDecision(
             "ask", "submit_mode_confirm", "Submit mode is confirm. Fill the form, stop before submit and ask yes."
         )
@@ -1473,43 +1536,61 @@ def _applied_after(conn: Any, user_id: str, since: Optional[str]) -> int:
     return int(cnt[0]) if cnt else 0
 
 
+def _grant_began(conn: Any, user_id: str) -> tuple[Optional[str], Optional[int]]:
+    """``(set_at, row id)`` of the ``auto_grant_until`` row the current counted grant began at, or
+    ``(None, None)`` with no history. A new grant begins when the end is set while none was in force
+    (cleared, or already over), or when it is moved LATER (see :func:`grant_info`)."""
+    rows = conn.execute(
+        "SELECT id, value, set_at FROM profile_edits WHERE user_id = ? AND path = ? ORDER BY id",
+        (user_id, AUTO_GRANT_UNTIL_PATH),
+    ).fetchall()
+    began: Optional[str] = None
+    began_id: Optional[int] = None
+    current = ""
+    for row_id, raw, set_at in rows:
+        try:
+            value = json.loads(raw) if raw is not None else None
+        except ValueError:
+            value = None
+        text = value if isinstance(value, str) else ""
+        if not text:
+            current = ""
+            continue
+        try:
+            set_time = parse_iso_with_offset(str(set_at))
+        except ValueError:
+            set_time = datetime.min.replace(tzinfo=timezone.utc)
+        over = not _grant_not_over(current, set_time)
+        if over or _grant_until_rank(text) > _grant_until_rank(current):
+            began, began_id = str(set_at), int(row_id)
+        current = text
+    return began, began_id
+
+
 def grant_info(user_id: str) -> tuple[Optional[str], int]:
     """``(began_at, applied_since)`` of the counted auto grant (bulk-apply R1) - DERIVED from the
     ``auto_grant_until`` history, never stored. A new grant begins when the end is set while none was in force
     (cleared, or already over), or when it is moved LATER. A shorter end or any change of the count does not
     restart the count, so a "safer" edit can never free more auto applications. ``(None, n)`` = no history:
     every real applied counts (the safe direction). Read from the overlay rows, oldest first."""
+    began, used, _scope = grant_state(user_id)
+    return began, used
+
+
+def grant_state(user_id: str) -> tuple[Optional[str], int, Optional[dict[int, Optional[str]]]]:
+    """:func:`grant_info` plus the grant's scope (slice 30, ``grant_scope.scope_for``), on ONE connection."""
+    from src.services.profile import grant_scope  # noqa: PLC0415 - grant_scope imports this module
+
     with pgsync.connect(str(settings.DB_PATH)) as conn:
-        rows = conn.execute(
-            "SELECT value, set_at FROM profile_edits WHERE user_id = ? AND path = ? ORDER BY id",
-            (user_id, AUTO_GRANT_UNTIL_PATH),
-        ).fetchall()
-        began: Optional[str] = None
-        current = ""
-        for raw, set_at in rows:
-            try:
-                value = json.loads(raw) if raw is not None else None
-            except ValueError:
-                value = None
-            text = value if isinstance(value, str) else ""
-            if not text:
-                current = ""
-                continue
-            try:
-                set_time = parse_iso_with_offset(str(set_at))
-            except ValueError:
-                set_time = datetime.min.replace(tzinfo=timezone.utc)
-            over = not _grant_not_over(current, set_time)
-            if over or _grant_until_rank(text) > _grant_until_rank(current):
-                began = str(set_at)
-            current = text
+        began, began_id = _grant_began(conn, user_id)
         # Every real `applied` recorded since the grant began, with NO simulation or correction
         # exclusion (security review 2026-10-18): relabelling a submit must never give a slot back.
         cnt = conn.execute(
             "SELECT COUNT(*) FROM application_events WHERE user_id = ? AND event_type = 'applied' AND recorded_at > ?",
             (user_id, began or ""),
         ).fetchone()
-        return began, int(cnt[0]) if cnt else 0
+        scope = grant_scope.scope_for(conn, user_id, began, began_id)
+        return began, int(cnt[0]) if cnt else 0, scope
 
 
 def practice_info(user_id: str) -> tuple[Optional[str], int]:
@@ -1705,7 +1786,7 @@ async def load_submit_counts(
     )
     last = await last_applied_at(db, user_id)
     tz = await _user_timezone(db, user_id)
-    _began, grant_applied = grant_info(user_id)
+    _began, grant_applied, scope = grant_state(user_id)
     company = 0
     if application_id is not None:
         days = window_days if window_days is not None else settings.ASSISTANT_COMPANY_CAP_DEFAULT_DAYS
@@ -1713,6 +1794,7 @@ async def load_submit_counts(
     return SubmitCounts(
         submitted_today=submitted, applied_since_auto_on=applied_since, company_applied_in_window=company,
         submitted_this_week=week, last_applied_at=last, user_tz=tz, applied_since_grant=grant_applied,
+        grant_scope=scope,
     )
 
 
@@ -1856,13 +1938,16 @@ def build_settings_view(
     waiting: list[dict[str, Any]],
     practice: tuple[Optional[str], int],
     now: Optional[datetime] = None,
+    grant_scope: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """The one read model of the settings, used by ``GET /api/profile`` (top-level
     ``assistant_settings``), ``GET /api/assistant-settings`` and MCP ``get_profile``
     (top-level ``settings``): each field raw + effective, ``paused``, the three
     ALIASED preference values (``inbox_mode``, ``check_every``, ``notes``), the
     practice-run state and the waiting requests. ``waiting`` rows come from
-    ``setting_requests.list_waiting`` (already non-expired)."""
+    ``setting_requests.list_waiting`` (already non-expired). ``grant_scope`` is
+    ``grant_scope.scope_view`` (slice 30): what a grant confirmed now would cover, and what
+    the grant in force covers; ``None`` reads as an empty queue and no grant."""
     when = now if now is not None else datetime.now(timezone.utc)
     raw = profile.assistant_settings
     eff = effective(raw)
@@ -1885,6 +1970,9 @@ def build_settings_view(
         "auto_grant_until": {
             "value": raw.auto_grant_until,
             "effective": effective_path_value(AUTO_GRANT_UNTIL_PATH, raw.auto_grant_until, when),
+        },
+        "auto_grant_scope": grant_scope or {
+            "queue": {"count": 0, "hosts": [], "no_host": 0}, "granted": None, "unscoped": False,
         },
         "paused_until": {
             "value": raw.paused_until,
