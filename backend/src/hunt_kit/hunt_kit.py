@@ -142,6 +142,11 @@ BOARD_SOURCES = (
     "careerspage",
     "jobboardly",
     "jobappnetwork",
+    "factorial",
+    "jobylon",
+    "peopleforce",
+    "talenthr",
+    "talentlyft",
 )
 FEED_SOURCES = (
     "freehire",
@@ -2737,12 +2742,17 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("recruiterflow", re.compile(r"^recruiterflow\.com$")),
     ("deel", re.compile(r"^jobs\.deel\.com$")),
     ("dover", re.compile(r"^app\.dover\.com$")),
+    # factorial: the board token is the whole host
+    ("factorial", re.compile(r"^([a-z0-9-]+\.(?:factorial\.it|factorialhr\.(?:com|pt|com\.br)))$")),
+    ("peopleforce", re.compile(r"^([a-z0-9-]+)\.peopleforce\.io$")),
+    ("talenthr", re.compile(r"^jobs\.talenthr\.io$")),
+    ("talentlyft", re.compile(r"^([a-z0-9-]+)\.talentlyft\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|trakstar\.com|homerun\.co|factorialhr\.com)$", re.I)
+    r"dayforcehcm\.com|homerun\.co)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2799,8 +2809,8 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
         elif ats == "join":  # https://join.com/companies/<slug>/...
             tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
-        elif ats == "manatal":  # https://www.careers-page.com/<slug>/job/<hash> or https://<slug>.careers-page.com/jobs/<n>
-            sub = m.group(1) or ""
+        elif ats in ("manatal", "talenthr"):  # careers-page.com/<slug>/..., <slug>.careers-page.com, talenthr.io/<slug>
+            sub = (m.group(1) or "") if ats == "manatal" else ""
             if sub and sub != "www":
                 tok = sub if sub.lower() not in _SLUG_BLOCK else ""
             else:
