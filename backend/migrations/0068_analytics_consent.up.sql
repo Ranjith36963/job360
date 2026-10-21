@@ -1,4 +1,9 @@
--- 0067_analytics_consent: a stored, per-user analytics consent (gap roadmap slice 4).
+-- 0068_analytics_consent: a stored, per-user analytics consent (gap roadmap slice 4).
+--
+-- RENUMBERED from 0067 (2026-10-21): #987 had already merged 0067_contact_source_url, so
+-- main held two 0067s and doc_sync_check refused the duplicate prefix. A database that ran
+-- it as 0067_analytics_consent runs it once more under this name; IF NOT EXISTS makes that
+-- a no-op, and `runner status` lists the old name as "applied (orphan)".
 --
 -- WHY. Until now the only consent choice lived in the browser (the PostHog
 -- banner, frontend/src/lib/consent.ts), so the backend could not ask "did this
