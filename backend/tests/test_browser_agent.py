@@ -2050,3 +2050,74 @@ def test_the_reason_record_is_bounded(_fresh_reasons, monkeypatch):
     for i in range(10):
         agent._note_closed(f"u{i}", "idle")  # noqa: SLF001
     assert list(agent._CLOSE_REASONS) == ["u7", "u8", "u9"]  # noqa: SLF001
+
+
+# ── Upload reads the file AFTER the change event (Greenhouse, Ashby) ──────────
+
+SLOW_UPLOAD = """<!doctype html><html><head><title>Upload - Acme</title></head><body>
+<label for="plain">Resume file</label><input id="plain" type="file">
+<label for="cv">Resume</label><input id="cv" type="file" style="display:none">
+<button type="button" id="attach" onclick="document.getElementById('cv').click()">Attach</button>
+<div id="status"></div>
+<script>
+  for (const id of ['plain', 'cv']) {
+    document.getElementById(id).addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      await new Promise(r => setTimeout(r, 300));   // the site reads the file later, as Ashby does
+      try {
+        const buf = await file.arrayBuffer();
+        await fetch('/up', {method: 'POST', body: buf});
+        document.getElementById('status').textContent = file.name + ' ' + buf.byteLength;
+      } catch (err) { document.getElementById('status').textContent = 'Upload failed'; }
+    });
+  }
+</script></body></html>"""
+
+
+@pytest.fixture
+async def slow_upload_site():
+    from aiohttp import web
+
+    got: list[bytes] = []
+
+    async def page(_):
+        return web.Response(text=SLOW_UPLOAD, content_type="text/html")
+
+    async def up(request):
+        got.append(await request.read())
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/upload", page)
+    app.router.add_post("/up", up)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1], got  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+@pytest.mark.parametrize("control", ["Attach", "Resume file"])
+async def test_upload_sends_the_exact_bytes_the_site_reads_late(slow_upload_site, control):
+    from src.services.browser_agent.agent import BrowserPool, run
+
+    port, got = slow_upload_site
+    data = b"%PDF-1.4 exact bytes \x00\x01\xff"
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(port))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/upload")
+
+        async def pdf(kind):
+            return "Ada_CV.pdf", data
+
+        page = await run(pool, "u1", "upload", ref=_ref(page, control), doc_kind="cv", files=pdf)
+        assert page["upload_confirmed"] is True
+        assert got == [data]
+        s = pool._sessions["u1"]  # noqa: SLF001
+        assert await s.page.locator("#status").inner_text() == f"Ada_CV.pdf {len(data)}"
+    finally:
+        await pool.shutdown()
