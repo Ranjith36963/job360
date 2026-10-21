@@ -735,3 +735,28 @@ async def test_a_version_restore_by_an_assistant_cannot_drop_a_never_apply_compa
         web = await client.post(f"/api/profile/versions/{oldest}/restore")
         assert web.status_code == 200, web.text
         assert web.json()["preferences"]["avoid_companies"] == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Owner rule 2026-10-20 (strict): every REQUIRED question is answered; only optional ones may stay blank
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_a_required_question_with_no_answer_stops_and_a_yes_never_clears_it():
+    stop = _verdict(_facts(required_unanswered=True))
+    assert (stop.decision, stop.reason) == ("stop", "required_unanswered")
+    assert "never guess" in stop.detail and "Optional questions may stay blank" in stop.detail
+    yes = _verdict(_facts(required_unanswered=True, approved=True))
+    assert (yes.decision, yes.reason) == ("stop", "required_unanswered")
+    confirm = _verdict(_facts(required_unanswered=True, approved=True), _eff(submit_mode="confirm"))
+    assert (confirm.decision, confirm.reason) == ("stop", "required_unanswered")
+
+
+def test_required_unanswered_sits_after_the_form_stops_and_before_the_asks():
+    assert "required_unanswered" in rules.REASONS
+    assert _verdict(_facts(required_unanswered=True, form_swept=False)).reason == "form_not_swept"
+    assert _verdict(_facts(required_unanswered=True, form_check_missing=True)).reason == "form_check_missing"
+    # a stop is never softened to the email ask
+    assert _verdict(_facts(required_unanswered=True, email_verified=False)).reason == "required_unanswered"
+    assert _verdict(_facts(required_unanswered=True), _eff(paused_until="until_resumed")).reason == "paused"
+    assert _verdict(_facts()).reason == "auto_when_sure"

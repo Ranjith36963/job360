@@ -472,7 +472,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
           </section>
 
-          <section data-testid="section-proof" className={`order-3 ${SECTION} lg:order-none`}>
+          <section id="proof" data-testid="section-proof" className={`order-3 ${SECTION} lg:order-none`}>
             <ProofDropZone applicationId={detail.id} />
           </section>
 

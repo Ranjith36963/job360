@@ -176,9 +176,12 @@ _SOURCE_FIELDS = (
 )
 
 
-def profile_source_text(profile: Any) -> str:
+def profile_source_text(profile: Any, *, include_targets: bool = True) -> str:
     """Everything the user's OWN profile says: CV + LinkedIn raw text, dated positions,
-    projects, education, certifications, skills, GitHub languages/topics/frameworks."""
+    projects, education, certifications, skills, GitHub languages/topics/frameworks.
+
+    ``include_targets=False`` leaves out ``target_job_titles``: those are roles the user
+    WANTS, not roles they held, so they cannot vouch for a CV line (provenance view)."""
     cv = getattr(profile, "cv_data", None)
     if cv is None:
         return ""
@@ -187,7 +190,8 @@ def profile_source_text(profile: Any) -> str:
         parts.extend(_flat(getattr(cv, name, None)))
     prefs = getattr(profile, "preferences", None)
     if prefs is not None:
-        for name in ("additional_skills", "about_me", "target_job_titles"):
+        names = ("additional_skills", "about_me") + (("target_job_titles",) if include_targets else ())
+        for name in names:
             parts.extend(_flat(getattr(prefs, name, None)))
     return "\n".join(parts)
 
