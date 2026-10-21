@@ -18,6 +18,7 @@ import {
   AuthUnknownError,
 } from "@/lib/api";
 import type { User } from "@/lib/api";
+import { syncReplayConsent } from "@/lib/sentry-replay";
 
 // ---------------------------------------------------------------------------
 // Context shape
@@ -134,6 +135,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Sentry Session Replay runs ONLY for a signed-in user who turned on "Help
+  // improve Job360" (gap roadmap slice 4). Signed out, not yet known, or
+  // withdrawn → stopped. See src/lib/sentry-replay.ts.
+  const replayConsent = user?.analytics_consent === true;
+  useEffect(() => {
+    void syncReplayConsent(replayConsent).catch(() => {
+      // Replay is diagnostics only; a failure here must never break the app.
+    });
+  }, [replayConsent]);
 
   // Re-validate when the window regains focus (tab switch, alt-tab)
   useEffect(() => {
