@@ -2885,6 +2885,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Version
+         * @description The commit this process was deployed from (2026-10-20).
+         *
+         *     post-merge-watch.yml polls this until it reports the merge SHA, so "deployed"
+         *     means THIS commit is serving, not that the old container still answers 200
+         *     (readyz and /health cannot tell the two apart). Railway injects
+         *     RAILWAY_GIT_COMMIT_SHA on every GitHub deploy, and a rollback restores the old
+         *     deployment's variables, so after a rollback this reports the old SHA. Public and
+         *     data-free: the SHA is already public on GitHub. ``no-store`` so no proxy can
+         *     serve an old SHA after the swap.
+         */
+        get: operations["version_api_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/whats-new": {
         parameters: {
             query?: never;
@@ -7828,6 +7856,11 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** VersionResponse */
+        VersionResponse: {
+            /** Sha */
+            sha: string;
+        };
         /** WhatsNewApplicationOut */
         WhatsNewApplicationOut: {
             /** Id */
@@ -12627,6 +12660,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    version_api_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionResponse"];
                 };
             };
         };

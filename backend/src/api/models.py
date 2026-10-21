@@ -16,6 +16,10 @@ class LivezResponse(BaseModel):
     status: str
 
 
+class VersionResponse(BaseModel):
+    sha: str
+
+
 class StatusResponse(BaseModel):
     profile_exists: bool
 

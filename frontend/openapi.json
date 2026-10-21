@@ -12881,6 +12881,19 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VersionResponse": {
+        "properties": {
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      },
       "WhatsNewApplicationOut": {
         "properties": {
           "id": {
@@ -22824,6 +22837,28 @@
         "summary": "Revoke Token",
         "tags": [
           "tokens"
+        ]
+      }
+    },
+    "/api/version": {
+      "get": {
+        "description": "The commit this process was deployed from (2026-10-20).\n\npost-merge-watch.yml polls this until it reports the merge SHA, so \"deployed\"\nmeans THIS commit is serving, not that the old container still answers 200\n(readyz and /health cannot tell the two apart). Railway injects\nRAILWAY_GIT_COMMIT_SHA on every GitHub deploy, and a rollback restores the old\ndeployment's variables, so after a rollback this reports the old SHA. Public and\ndata-free: the SHA is already public on GitHub. ``no-store`` so no proxy can\nserve an old SHA after the swap.",
+        "operationId": "version_api_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Version",
+        "tags": [
+          "health"
         ]
       }
     },

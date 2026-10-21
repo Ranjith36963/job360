@@ -570,7 +570,9 @@ REGISTRY: dict[str, Guard] = {
         # FC-009: waits for the deployment that carries THIS sha (not "any readyz
         # 200", which the OLD container satisfies) and then lets the swap settle.
         # The drill covers the pure assess()/settle_remaining(); the Railway call
-        # is rollback_gear.list_deployments, already drilled there.
+        # is rollback_gear.list_deployments, already drilled there. Since #997 it
+        # also runs wait_for_version() on a fake clock (old sha served -> never_live,
+        # newer descendant -> superseded); --blind there counts any answer as live.
         drill=[sys.executable, "scripts/deploy_settle.py", "--drill"],
         negative=[sys.executable, "scripts/deploy_settle.py", "--drill", "--blind"],
     ),
