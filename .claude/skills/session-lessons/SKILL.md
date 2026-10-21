@@ -225,6 +225,12 @@ Apify web-fetch tool, before you build. Never cite from memory.
   stop it because the command did not start with `git commit`. The same tree passed the gate
   right after. **Rule:** a gate step is its own command: read its PASS line, then run
   `git commit` as a separate command; a helper must exit with the gate's own code.
+- 2026-10-21: slice 4 (#964) and #987 each added migration 0067 from the same main and merged three
+  minutes apart, both green. The runner keys on the full stem, so production applied both, but
+  `doc_sync_check` refuses a duplicate prefix: drift-check went red on every PR and the mutation test
+  called every doc guard blind. Fixed by renumbering in #1071. **Rule:** a PR that adds a migration
+  merges main right before it merges and checks `ls backend/migrations` for its number; after any
+  merge that adds a migration, renumber the open PRs whose migrations now collide.
 - 2026-10-15: pushes failed CI on the mypy ratchet and, after merging main, on
   the recipe line cap and MCP tool count. **Rule:** run the ratchet
   (`cd backend && python scripts/mypy_ratchet.py`) before every backend push, and
