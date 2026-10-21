@@ -246,11 +246,13 @@ def test_every_editable_path_is_a_declared_dataclass_field():
 
     from src.core import settings
     from src.services.profile import edits
-    from src.services.profile.models import CVData, UserPreferences
+    from src.services.profile.models import AssistantSettings, CVData, UserInfo, UserPreferences
 
     declared = {
         "cv_data": {f.name for f in dataclasses.fields(CVData)},
         "preferences": {f.name for f in dataclasses.fields(UserPreferences)},
+        "user_info": {f.name for f in dataclasses.fields(UserInfo)},  # the memory head (2026-10-08)
+        "assistant_settings": {f.name for f in dataclasses.fields(AssistantSettings)},  # S2 (2026-10-08)
     }
     for path in edits.editable_paths():
         head, _, field = path.partition(".")
@@ -292,10 +294,10 @@ async def test_wrong_type_is_422(authenticated_async_context, fixture_user_id):
 async def test_closed_set_preference_lists_allowed_values(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        resp = await _patch(client, {"path": "preferences.work_arrangement", "value": "office"})
+        resp = await _patch(client, {"path": "preferences.work_arrangement", "value": "moon"})
         assert resp.status_code == 422, resp.text
         assert "remote" in resp.text and "hybrid" in resp.text and "onsite" in resp.text
-        resp = await _patch(client, {"path": "preferences.experience_level", "value": "graduate"})
+        resp = await _patch(client, {"path": "preferences.experience_level", "value": "wizard"})
         assert resp.status_code == 422, resp.text
         assert "entry" in resp.text and "executive" in resp.text
         ok = await _patch(client, {"path": "preferences.work_arrangement", "value": " Hybrid "})
@@ -558,3 +560,32 @@ async def test_mcp_update_profile_and_get_profile(authenticated_async_context, f
 
             bad = await mcp.call_tool("update_profile", {"edits": [{"path": "cv_data.raw_text", "value": "x"}]})
             assert bad.is_error and "422" in bad.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_inbox_mode_and_frequency_closed_sets(
+    authenticated_async_context, fixture_user_id
+):
+    """Owner decision 2026-10-03 — daily_check is the inbox mode: auto / ask /
+    paused plus the legacy scheduled / declined; preferences.check_every
+    accepts "3h"/"6h"/"12h"/"24h"/"" only."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        for value in ("auto", "ask", "paused", "scheduled", "declined", ""):
+            ok = await _patch(client, {"path": "preferences.daily_check", "value": value})
+            assert ok.status_code == 200, ok.text
+            got = (await client.get("/api/profile")).json()["preferences"]["daily_check"]
+            assert got == value
+        for bad_value in ("on", "maybe"):
+            bad = await _patch(client, {"path": "preferences.daily_check", "value": bad_value})
+            assert bad.status_code == 422, bad.text
+
+        for value in ("3h", "6h", "12h", "24h"):
+            ok = await _patch(client, {"path": "preferences.check_every", "value": value})
+            assert ok.status_code == 200, ok.text
+            assert (await client.get("/api/profile")).json()["preferences"]["check_every"] == value
+        bad = await _patch(client, {"path": "preferences.check_every", "value": "5h"})
+        assert bad.status_code == 422, bad.text
+        unset = await _patch(client, {"path": "preferences.check_every", "value": ""})
+        assert unset.status_code == 200, unset.text
+        assert (await client.get("/api/profile")).json()["preferences"]["check_every"] == ""

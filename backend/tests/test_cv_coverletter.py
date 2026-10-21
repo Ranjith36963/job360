@@ -272,6 +272,35 @@ async def test_provenance_marks_the_users_own_facts(authenticated_async_context,
 
 
 @pytest.mark.asyncio
+async def test_provenance_labels_a_line_copied_from_the_ad_as_from_ad(authenticated_async_context, monkeypatch):
+    """Gap-audit #17: the job ad can give employer context but never a candidate fact.
+    A CV line lifted from the ad is NOT grounded; it is labelled source="ad"."""
+    import src.api.routes.tailor as tailor
+    monkeypatch.setattr(tailor, "load_profile", _fake_load_profile)
+    ad = {**_AD, "description": "You bring 5+ years of Kubernetes operating clusters in production."}
+    cv = (
+        "Built fraud models at Acme.\n"
+        "5+ years of Kubernetes operating clusters in production\n"
+        "Won the Nobel Prize in Chemistry."
+    )
+
+    async with authenticated_async_context() as client:
+        job_id, app_id = await _bring(client, ad)
+        await _save(client, app_id, "cv", cv)
+        prov = await client.get(f"/api/tailor/{job_id}/cv/provenance")
+
+    assert prov.status_code == 200, prov.text
+    by_text = {s["text"]: s for s in prov.json()}
+    assert by_text["Built fraud models at Acme."]["source"] == "profile"
+    assert by_text["Built fraud models at Acme."]["grounded"] is True
+    ad_line = by_text["5+ years of Kubernetes operating clusters in production"]
+    assert ad_line["grounded"] is False
+    assert ad_line["source"] == "ad"
+    assert by_text["Won the Nobel Prize in Chemistry."]["source"] == "none"
+    assert by_text["Won the Nobel Prize in Chemistry."]["grounded"] is False
+
+
+@pytest.mark.asyncio
 async def test_documents_are_user_scoped(authenticated_async_context, fixture_user_id):
     """Privacy/IDOR (rule #25): the tailor resolves the application from the
     CALLER, so another user's job reads as 404, never as their documents."""
@@ -298,3 +327,47 @@ async def test_tailor_requires_auth(authenticated_async_context):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
             resp = await anon.get(f"/api/tailor/{job_id}")
     assert resp.status_code == 401
+
+
+def test_letter_without_letterhead_is_flagged():
+    """Letters print verbatim, so the letterhead + date must be in the text: warn
+    (never block) when the first lines carry no contact line or no date."""
+    from src.services.applications import cv_checks as cc
+
+    def codes(kind: str, text: str, profile=None) -> set[str]:
+        return {c["code"] for c in cc.check_text(kind, text, profile)}
+
+    bare = "Dear Hiring Manager,\n\nI am writing to apply for the ML Engineer role.\n\nYours sincerely,\nJane Doe"
+    full = (
+        "Jane Doe\n07700 900123 | jane@example.com | London\n15 October 2026\n\nAcme AI\n\n"
+        "Dear Hiring Manager,\n\nI am writing to apply.\n\nYours sincerely,\nJane Doe"
+    )
+    assert "letter_no_header" in codes("cover_letter", bare)
+    assert "letter_no_header" not in codes("cover_letter", full)
+    # Contact but no date, and date but no contact, are both flagged.
+    assert "letter_no_header" in codes("cover_letter", full.replace("15 October 2026\n", ""))
+    assert "letter_no_header" in codes("cover_letter", full.replace("07700 900123 | jane@example.com | London", "London"))
+    # A date or phone in the BODY (below "Dear") is not a letterhead; a date is not a phone.
+    assert "letter_no_header" in codes(
+        "cover_letter", "Dear Hiring Manager,\nSince March 2021 I have led teams; call me on 07700 900123.\nJane"
+    )
+    assert "letter_no_header" in codes(
+        "cover_letter", "Jane Doe\n2026-10-15\n\nAcme Ltd\nDear Hiring Manager,\nI am applying.\nRegards, Jane"
+    )
+    # A numeric date followed by a numbered address line is not a phone number.
+    assert "letter_no_header" in codes(
+        "cover_letter", "Jane Doe\n15.10.2026\n\n10 Downing Street\nDear Sir,\nI am applying."
+    )
+    # CV kind never gets it.
+    assert "letter_no_header" not in codes("cv", bare)
+
+    # With a profile, the contact must be THIS user's email / phone.
+    from src.services.profile.models import UserInfo
+
+    class _P:
+        cv_data = None
+        user_info = UserInfo(contact={"email": "me@mine.example", "phone": "+44 7700 900123"})
+
+    assert "letter_no_header" not in codes("cover_letter", full, _P())
+    other = full.replace("jane@example.com", "x@y.example").replace("07700 900123", "01234 567890")
+    assert "letter_no_header" in codes("cover_letter", other, _P())

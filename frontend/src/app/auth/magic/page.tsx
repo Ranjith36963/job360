@@ -72,7 +72,7 @@ function MagicBody() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-red-400">{error}</p>
+      <p className="text-sm text-danger">{error}</p>
       <Button render={<Link href="/login" />} className="w-full" variant="secondary">
         Back to login
       </Button>
@@ -82,10 +82,10 @@ function MagicBody() {
 
 export default function MagicLinkPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Sign in</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Sign in</CardTitle>
           <CardDescription>Completing your passwordless sign-in.</CardDescription>
         </CardHeader>
         <CardContent>

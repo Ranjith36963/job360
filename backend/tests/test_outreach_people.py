@@ -547,7 +547,10 @@ async def test_bug1_mcp_save_artifact_cold_wrong_kind_is_422(authenticated_async
 
 
 @pytest.mark.asyncio
-async def test_bug1_mcp_tools_list_is_still_19(authenticated_async_context):
+async def test_bug1_mcp_tools_list_has_no_extra_tools(authenticated_async_context):
+    # The outreach fix added no tool. The exact set lives in
+    # tests/test_mcp_server.py::EXPECTED_TOOLS; this count moves with it
+    # (19 -> 20: `get_recipe`, /run 360 recipes, 2026-10-02).
     pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
@@ -556,7 +559,7 @@ async def test_bug1_mcp_tools_list_is_still_19(authenticated_async_context):
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             listed = await mcp.list_tools()
-            assert len(listed.tools) == 19
+            assert len(listed.tools) == 33  # 26 -> 29: check_outreach, doctor + report_missing_tool; 30: check_form (weak spot #1); 31: mark_inbox_checked (Gmail check); 32: check_auto_email; 33: browser (decision 29)
 
 
 # ── Bug 2 [P1] — list_people / add_contact ignored contact edits ───────────
@@ -1009,3 +1012,213 @@ async def test_bug4r2_deferred_email_history_has_no_empty_entry(authenticated_as
         assert history_after[0]["value"] == "stale-r2@x.example"
         assert history_after[1]["value"] == "final-r2@x.example"
         assert patched.json()["email"] == "final-r2@x.example"
+
+
+@pytest.mark.asyncio
+async def test_outreach_events_carry_contact_name_on_timeline_and_whats_new(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        added = await client.post(
+            f"/api/applications/{app_id}/contacts", json={"name": "Jordan Lee", "email": "jordan@x.example"}
+        )
+        contact_id = added.json()["contact"]["id"]
+        for et in ("outreach_sent", "outreach_replied"):
+            r = await client.post(
+                f"/api/applications/{app_id}/events",
+                json={"event_type": et, "contact_id": contact_id, "channel": "email"},
+            )
+            assert r.status_code == 201, r.text
+
+        detail = await client.get(f"/api/applications/{app_id}")
+        outreach = [e for e in detail.json()["events"] if e["event_type"].startswith("outreach_")]
+        assert len(outreach) == 2
+        assert all(e["payload"]["contact_name"] == "Jordan Lee" for e in outreach)
+
+        wn = await client.get("/api/whats-new", params={"since": "2000-01-01T00:00:00Z"})
+        assert wn.status_code == 200, wn.text
+        wn_out = [e for e in wn.json()["events"] if e["event_type"].startswith("outreach_")]
+        assert wn_out and all(e["payload"]["contact_name"] == "Jordan Lee" for e in wn_out)
+
+
+@pytest.mark.asyncio
+async def test_contact_name_is_never_resolved_from_another_users_contact(authenticated_async_context):
+    from src.services.applications.spine import _attach_contact_names
+
+    class _Cur:
+        async def fetchall(self):
+            return []
+
+    class _Conn:
+        args = None
+
+        async def execute(self, sql, params):
+            _Conn.args = params
+            return _Cur()
+
+    class _Db:
+        _db = _Conn()
+
+    events = [{"payload": {"contact_id": 7}}]
+    await _attach_contact_names(_Db(), "user-a", events)
+    assert _Conn.args[0] == "user-a"  # scoped to the caller
+    assert "contact_name" not in events[0]["payload"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# S16 - LinkedIn connection-note limit (warn only)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_LI_BASE = "I build data pipelines in Python and dbt at Northwind and would value a short chat. "
+
+
+def _li(n: int) -> str:
+    text = (_LI_BASE * 10)[:n]
+    assert len(text) == n
+    return text
+
+
+def _seed_profile(user_id: str) -> None:
+    """A base profile the way extraction writes it (copied from test_preference_memory)."""
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
+
+    profile = UserProfile(
+        cv_data=CVData(
+            raw_text="Python data engineer. dbt, Snowflake, Airflow.",
+            name="Ada Lovelace",
+            location="London",
+            skills=["Python", "dbt"],
+            job_titles=["Data Engineer"],
+        ),
+        preferences=UserPreferences(target_job_titles=["Data Engineer"]),
+    )
+    save_profile(profile, user_id, source_action="cv_upload")
+
+
+async def _linked_contact(client: AsyncClient) -> tuple[int, int]:
+    app_id = await _bring(client)
+    resp = await client.post(f"/api/applications/{app_id}/contacts", json={"name": "Priya Shah"})
+    assert resp.status_code == 201, resp.text
+    return app_id, int(resp.json()["contact"]["id"])
+
+
+async def _save_linked(client: AsyncClient, app_id: int, cid: int, channel: str, text: str):
+    return await client.post(
+        f"/api/applications/{app_id}/artifacts",
+        json={"kind": "outreach", "contact_id": cid, "channel": channel, "text": text},
+    )
+
+
+def _codes(body: dict) -> list[str]:
+    return [c["code"] for c in body.get("checks", [])]
+
+
+@pytest.mark.asyncio
+async def test_linked_linkedin_note_over_200_warns_and_still_saves(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id, cid = await _linked_contact(client)
+        text = _li(201)
+        resp = await _save_linked(client, app_id, cid, "linkedin", text)
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["chars"] == 201
+        hits = [c for c in body["checks"] if c["code"] == "linkedin_note_too_long"]
+        assert len(hits) == 1
+        assert "201 characters" in hits[0]["detail"]
+
+        people = await client.get(f"/api/people?contact_id={cid}")
+        assert people.status_code == 200, people.text
+        assert text in people.text
+
+        email = await _save_linked(client, app_id, cid, "email", _li(400))
+        assert email.status_code == 201, email.text
+        assert "linkedin_note_too_long" not in _codes(email.json())
+
+
+@pytest.mark.asyncio
+async def test_linkedin_premium_raises_the_limit_to_300(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        patched = await client.patch(
+            "/api/profile", json={"edits": [{"path": "preferences.linkedin_premium", "value": True}]}
+        )
+        assert patched.status_code == 200, patched.text
+        assert (await client.get("/api/profile")).json()["preferences"]["linkedin_premium"] is True
+        app_id, cid = await _linked_contact(client)
+        ok = await _save_linked(client, app_id, cid, "linkedin", _li(250))
+        assert ok.status_code == 201, ok.text
+        assert "linkedin_note_too_long" not in _codes(ok.json())
+        long = await _save_linked(client, app_id, cid, "linkedin", _li(301))
+        assert long.status_code == 201, long.text
+        hits = [c for c in long.json()["checks"] if c["code"] == "linkedin_note_too_long"]
+        assert len(hits) == 1
+        assert "allows 300" in hits[0]["detail"]
+
+
+@pytest.mark.asyncio
+async def test_linkedin_premium_must_be_a_boolean(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        resp = await client.patch(
+            "/api/profile", json={"edits": [{"path": "preferences.linkedin_premium", "value": "yes"}]}
+        )
+        assert resp.status_code == 422, resp.text
+        assert "must be a boolean" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_linkedin_premium_survives_web_save_and_preferences_clear(
+    authenticated_async_context, fixture_user_id
+):
+    import json
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        patched = await client.patch(
+            "/api/profile", json={"edits": [{"path": "preferences.linkedin_premium", "value": True}]}
+        )
+        assert patched.status_code == 200, patched.text
+        resp = await client.post(
+            "/api/profile/preferences",
+            data={"preferences": json.dumps({"preferred_locations": ["Leeds"], "linkedin_premium": False})},
+        )
+        assert resp.status_code == 200, resp.text
+        assert (await client.get("/api/profile")).json()["preferences"]["linkedin_premium"] is True
+
+        resp = await client.post("/api/profile/clear", data={"section": "preferences"})
+        assert resp.status_code == 200, resp.text
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert prefs["linkedin_premium"] is True
+        assert prefs["preferred_locations"] == []
+
+        resp = await client.post("/api/profile/clear", data={"section": "all"})
+        assert resp.status_code == 200, resp.text
+        assert (await client.get("/api/profile")).json()["preferences"]["linkedin_premium"] is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_save_artifact_linkedin_note_warns_on_cold_and_linked(authenticated_async_context):
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        cold = await _add_person(client, email="cold-li@x.example")
+        cold_id = cold.json()["contact"]["id"]
+        app_id, linked_id = await _linked_contact(client)
+        token = await _mint_token(client)
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            result = await mcp.call_tool(
+                "save_artifact",
+                {"kind": "outreach", "contact_id": cold_id, "channel": "linkedin", "text": _li(201)},
+            )
+            assert "linkedin_note_too_long" in _codes(_mcp_payload(result))
+            result = await mcp.call_tool(
+                "save_artifact",
+                {
+                    "kind": "outreach", "application_id": app_id, "contact_id": linked_id,
+                    "channel": "linkedin", "text": _li(201),
+                },
+            )
+            assert "linkedin_note_too_long" in _codes(_mcp_payload(result))

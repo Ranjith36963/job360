@@ -1,0 +1,657 @@
+"""Job checks - deterministic FACTS about the one job the user's assistant brought.
+
+Product rule 4: Job360 never searches, ranks, scores or recommends jobs and has
+no LLM. These checks only report what the stored ad literally contains (word
+count, link host, dates, a currency amount, the word "sponsor"). They are shown
+on that job only and never used to sort or filter a list. Wording is facts, not
+verdicts - nothing here says "ghost", "scam" or "risk".
+
+Patterns adapted from open-source projects (MIT):
+* word-count completeness bands - Gsync/jobsync src/lib/jobs/descriptionCompleteness.ts
+* canonical URL key (host fold, tracking params dropped) - Gsync/jobsync src/lib/jobs/jobDedupe.ts
+* official-ATS host match with look-alike defence - MadsLorentzen/ai-job-search
+  .claude/commands/apply.md (exact apex or ``.<apex>`` suffix only)
+* salary-present regex idea - speedyapply/JobSpy jobspy/util.py (presence only here)
+* "facts, not verdicts" wording - career-ops-hq/career-ops company-history.mjs
+"""
+from __future__ import annotations
+
+import re
+from datetime import date, datetime
+from typing import Any, Mapping, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from src.core import settings
+
+# Query keys that only track the click, never pick the job (plus every ``utm_*``).
+_TRACKING_KEYS = frozenset({
+    "gclid", "fbclid", "ref", "trackingid", "refid", "msclkid", "mc_cid", "mc_eid", "_hsenc", "_hsmi",
+})
+
+_CUR =r"(?:USD|EUR|GBP|CAD|AUD|CHF|INR|SGD|AED)"
+# An amount of money. Every quantifier is bounded or single, so the scan is linear.
+_MONEY_RE = re.compile(
+    rf"(?:[$€£₹¥]\s?\d|\b{_CUR}\s?\d|\d\s?{_CUR}\b|\d\s?k\s?(?:/|per\s)?\s?(?:yr|year|annum)\b)",
+    re.IGNORECASE,
+)
+# INR amounts that are pay by nature (a salary unit, not a company figure).
+_PAY_UNIT_RE = re.compile(
+    r"(?:\d[\d,.]{0,12}\s?(?:lpa|lakhs?)\b|₹\s?\d[\d,.]{0,12}\s?(?:l|lac|lakhs?)\b)",
+    re.IGNORECASE,
+)
+# Pay-context words: a money amount counts as pay only with one of these nearby.
+_PAY_WORD_RE = re.compile(
+    r"(?:\b(?:salary|salaries|pay|paid|compensation|ctc|lpa|lakhs?|annum|p\.a|annual|annually|yearly"
+    r"|hourly|ote|base|stipend|range|package|wage|wages)\b"
+    r"|\bper\s(?:year|month|hour|week|day)\b|\ba\s(?:year|month)\b"
+    r"|/\s?(?:yr|year|month|mo|hr|hour)\b|\bk\s?per\b)",
+    re.IGNORECASE,
+)
+# Company-figure words: an amount right next to one of these is not pay.
+_NOT_PAY_RE = re.compile(
+    r"\b(?:revenue|transactions?|funding|funded|raised|raises|valuation|valued|billions?|arr|gmv"
+    r"|markets?|customers?|series\s[a-f])\b",
+    re.IGNORECASE,
+)
+# Pay facts (amount extent, period, currency, equity). Every quantifier is bounded.
+_SYM = r"[$€£₹¥]"
+_NUM = r"\d[\d,.]{0,15}(?:[ \u00a0]\d{3}\b){0,3}"
+_AMOUNT_RE = re.compile(
+    rf"(?:{_SYM}\s{{0,3}}|\b{_CUR}\s{{0,3}})?{_NUM}(?:\s{{0,3}}k\b)?"
+    rf"(?:\s{{0,3}}(?:-|–|—|to)\s{{0,3}}(?:{_SYM}\s{{0,3}}|\b{_CUR}\s{{0,3}})?{_NUM}(?:\s{{0,3}}k\b)?)?"
+    rf"(?:\s{{0,3}}{_CUR}\b|\s{{0,3}}(?:lpa|lakhs?|lacs?)\b|(?<=\d)L\b)?"
+    rf"(?:\s{{0,3}}(?:/|per\s)\s{{0,3}}(?:yr|year|annum|month|mo|hour|hr)\b)?"
+    rf"(?:\s{{0,3}}{_CUR}\b)?",
+    re.IGNORECASE,
+)
+_ISO_RE = re.compile(rf"\b{_CUR}\b")  # case-SENSITIVE on purpose (salary-gap.mjs:312)
+_LAKH_RE = re.compile(r"(?:\blpa\b|\blakhs?\b|\blacs?\b|(?<=\d)L\b)", re.IGNORECASE)
+_ANNUAL_RE = re.compile(
+    r"(?:/\s*(?:year|yr)\b|\bper\s+(?:year|annum)\b|\bannual(?:ly)?\b|\byearly\b"
+    r"|\ba\s+year\b|\bp\.a\b|\blpa\b|\blakhs?\b)", re.IGNORECASE)
+_MONTHLY_RE = re.compile(r"(?:/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b|\ba\s+month\b)", re.IGNORECASE)
+_HOURLY_RE = re.compile(r"(?:/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b|\ban\s+hour\b)", re.IGNORECASE)
+# Whitespace runs are bounded ({0,3}), never `\s*`: an unbounded `\s*` in front of an alternation or beside an
+# optional group backtracks quadratically on a long run of spaces (CodeQL py/polynomial-redos).
+_PERIOD_STRIP_RE = re.compile(
+    r"\s{0,3}(?:/\s{0,3}(?:year|yr|month|mo|hour|hr)|per\s{1,3}(?:year|annum|month|hour)|a\s{1,3}year|p\.a\.?"
+    r"|annual(?:ly)?|yearly|monthly|hourly)\s{0,3}$", re.IGNORECASE)
+_CUR_EDGE_RE = re.compile(rf"(?:^\s{{0,3}}{_CUR}\s{{0,3}}|\s{{0,3}}{_CUR}\s{{0,3}}$)", re.IGNORECASE)
+_RANGE_RE = re.compile(r"^([\d.,]+)\s{0,3}(k)?\s{0,3}(?:[-–—]|to)\s{0,3}([\d.,]+)\s{0,3}(k)?$", re.IGNORECASE)
+_SINGLE_RE = re.compile(r"^([\d.,]+)\s{0,3}(k)?$", re.IGNORECASE)
+_EQUITY_RE = re.compile(r"\b(?:equity|stock\s+options?|rsus?|shares)\b", re.IGNORECASE)
+_PLUS_PCT_RE = re.compile(r"\s?\+\s?\d+(?:\.\d+)?\s?%")
+_PERIOD_WINDOW = 40  # characters after the amount read for its period
+_SENTENCE_END_RE = re.compile(r"[.!?;](?=\s)|\n")
+_PAY_WINDOW = 120  # characters either side of an amount
+_NOT_PAY_WINDOW = 50  # how close an exclusion word must sit to veto an amount
+_PAY_SCAN_CAP = 100_000  # characters of the ad ever scanned
+_PAY_MATCH_CAP = 200  # amounts examined
+_BARE_PAY_MIN = 1000  # smallest amount that is pay on its own, with no pay word beside it
+_EVIDENCE_MAX = 160
+# a header-line separator: " - ", " | ", " · " or a bullet, beside whitespace
+_SEGMENT_END_RE = re.compile(r"(?:^|\s)[-–—|·•]$")
+_SEGMENT_START_RE = re.compile(r"[-–—|·•](?:\s|$)")
+_SEGMENT_MARKS = frozenset("-–—•·")
+# a header-line amount beside one of these (or under a heading with one) is a perk or a company figure
+_NOT_HEADER_PAY_RE = re.compile(
+    r"\b(?:bonus\w*|sign-?on|signing|relocation|budget|allowance|award|prize|grant|fee|contract|value|perks?"
+    r"|benefits?|founded)\b", re.IGNORECASE)
+_SPONSOR_RE = re.compile(r"\b(?:sponsor\w*|visas?)\b", re.IGNORECASE)
+
+
+def word_count(text: str) -> int:
+    """Whitespace-separated words."""
+    return len(text.split()) if text and text.strip() else 0
+
+
+# Query keys that NAME a job. Used only for the DISPLAY form of a link (``redact_url_for_display``: what an
+# agent is shown, never what is stored or navigated). ATS cases checked 2026-10-20: Workday, Lever, Ashby,
+# SmartRecruiters and iCIMS carry the id in the path; Greenhouse on a company page ``gh_jid``; LinkedIn
+# ``currentJobId``; Indeed ``jk``; Taleo ``job``; SuccessFactors ``career_job_req_id``; Civil Service Jobs ``jcode``.
+_JOB_ID_KEYS = frozenset({
+    "jk", "vjk", "gh_jid", "currentjobid", "jobid", "job_id", "jid", "id", "req", "reqid",
+    "job", "ashby_jid", "career_job_req_id", "req_id", "requisitionid", "jobreqid", "jcode",
+})
+# A job id is short and plain. A long or odd value under an allowed key could still be a token: drop it.
+_SAFE_ID_VALUE = re.compile(r"[\w.~\-]{1,64}")
+
+# Query keys that are secrets whatever their value (a token of an account, a signed link, a password).
+_ALWAYS_SECRET_KEYS = frozenset({
+    "access_token", "id_token", "refresh_token", "password", "pwd", "passwd", "secret", "otp", "pin", "magic",
+    "nonce", "signature", "sig", "apikey", "api_key", "jsessionid", "phpsessid", "sessionid", "session_id",
+    "session", "auth", "authorization", "code",
+})
+_SECRET_PREFIXES = ("x-amz-", "x-goog-")
+# Keys that are a secret only when the value LOOKS random. ``token=4567890`` (Greenhouse's embed link, the
+# numeric job id) and ``state=CA`` are not secrets; a 32-char hex token is.
+_MAYBE_SECRET_KEYS = frozenset({"token", "sid", "key", "hash", "state", "ticket", "login"})
+# Hosts where a "maybe" key carries the job and is never dropped. Civil Service Jobs: the advert link is
+# ``/csr/index.cgi?SID=<base64 of pageclass=Jobs&...&jcode=1912345&...>``. Easy to extend.
+_HOST_KEEP: dict[str, frozenset[str]] = {"civilservicejobs.service.gov.uk": frozenset({"sid"})}
+_FRAGMENT_MAX = 64
+
+
+def _looks_random(value: str) -> bool:
+    """A long value with both a letter and a digit, or a very long one: a session id, not a job id."""
+    if len(value) >= 32:
+        return True
+    return len(value) >= 16 and any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
+
+
+def _host_keeps(host: str, key: str) -> bool:
+    return any(
+        (host == h or host.endswith("." + h)) and key in keys for h, keys in _HOST_KEEP.items()
+    )
+
+
+def _drops_from_stored(key: str, value: str, host: str = "") -> bool:
+    """Whether one ``key=value`` piece of a link is dropped from the STORED form: a tracking key, an
+    always-secret key, or a maybe-secret key whose value looks random (unless the host's job rides in it)."""
+    k = key.lower()
+    if k.startswith("utm_") or k in _TRACKING_KEYS:
+        return True
+    if k in _ALWAYS_SECRET_KEYS or k.startswith(_SECRET_PREFIXES):
+        return True
+    return k in _MAYBE_SECRET_KEYS and not _host_keeps(host, k) and _looks_random(value)
+
+
+def _link_core(url: str) -> Optional[tuple[str, str, str, str, str, str]]:
+    """``(scheme, host, port-suffix, path, raw query, raw fragment)`` of an http(s) link, or None. The user
+    info and ``;param`` path parameters (``;jsessionid=``) are left out."""
+    raw = (url or "").strip()
+    if not raw:
+        return None
+    try:
+        parts = urlsplit(raw)
+        host = (parts.hostname or "").lower().rstrip(".")
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    if not host or scheme not in ("http", "https"):
+        return None
+    if ":" in host:  # an IPv6 literal lost its brackets in ``hostname``
+        host = f"[{host}]"
+    suffix = f":{port}" if port and port != (443 if scheme == "https" else 80) else ""
+    path = "/".join(seg.split(";", 1)[0] for seg in parts.path.split("/"))
+    return scheme, host, suffix, path, parts.query, parts.fragment
+
+
+def _query_pairs(query: str) -> list[tuple[str, str, str]]:
+    """``(raw segment, key, value)`` for each ``&``-separated piece of a query string."""
+    out = []
+    for seg in query.split("&"):
+        if not seg:
+            continue
+        pair = parse_qsl(seg, keep_blank_values=True)
+        k, v = pair[0] if pair else (seg, "")
+        out.append((seg, k, v))
+    return out
+
+
+def _sub_pieces(query: str) -> list[list[tuple[str, str, str]]]:
+    """Each ``&`` piece split again on ``;`` (some servers read ``;`` as a separator, so ``a=1;token=x``
+    holds a token): ``[(raw sub-piece, key, value), ...]`` per ``&`` piece."""
+    out = []
+    for seg in query.split("&"):
+        subs = []
+        for sub in seg.split(";"):
+            if not sub:
+                continue
+            pair = parse_qsl(sub, keep_blank_values=True)
+            k, v = pair[0] if pair else (sub, "")
+            subs.append((sub, k, v))
+        if subs:
+            out.append(subs)
+    return out
+
+
+def _stored_query(query: str, host: str) -> str:
+    """The query minus every dropped piece, original order and spelling; ``;`` sub-pieces are decided one by
+    one and the kept ones rejoined with ``;``."""
+    kept = []
+    for subs in _sub_pieces(query):
+        keep = [sub for sub, k, v in subs if not _drops_from_stored(k, v, host)]
+        if keep:
+            kept.append(";".join(keep))
+    return "&".join(kept)
+
+
+def _stored_fragment(fragment: str, host: str) -> str:
+    """The fragment is kept (BrassRing's ``#jobDetails=1234567_5313`` names the job) unless it is longer than
+    ``_FRAGMENT_MAX`` or any ``key=value`` in it is a secret (``#access_token=...``); then all of it goes."""
+    if not fragment or len(fragment) > _FRAGMENT_MAX:
+        return ""
+    for subs in _sub_pieces(fragment.replace("?", "&")):
+        for sub, k, v in subs:
+            if "=" in sub and _drops_from_stored(k, v, host):
+                return ""
+    return fragment
+
+
+def redact_url(url: str) -> str:
+    """The form of a link that is STORED (apply_url): scheme + host + path + query + fragment, minus anything
+    that could be a secret. Dropped: user info, ``;jsessionid``-style path parameters, tracking keys
+    (``utm_*``, gclid, fbclid ...), always-secret keys (``access_token``, ``code``, ``otp``, ``signature``,
+    ``x-amz-*`` ...) and maybe-secret keys (``token``, ``sid``, ``key``, ``hash``, ``state`` ...) whose value
+    looks random (so ``token=4567890`` stays; Civil Service Jobs' ``SID`` always stays). Every ``;`` piece is
+    judged alone. The fragment stays unless it holds a secret key or is over 64 chars. Every other key stays,
+    in its original order and spelling: real ATS links need them (``jcode=``, ``company=``, ``for=``). ''
+    for a blank or non-http(s) link. Gap-audit #18."""
+    got = _link_core(url)
+    if got is None:
+        return ""
+    scheme, host, suffix, path, query, fragment = got
+    return urlunsplit((scheme, host + suffix, path, _stored_query(query, host), _stored_fragment(fragment, host)))
+
+
+def redact_url_for_display(url: str) -> str:
+    """The form of an address SHOWN to an agent (never stored, never navigated): scheme + host + path + only
+    the query keys that name a job (``_JOB_ID_KEYS``, short plain values). A non-http(s) page
+    (``about:blank``, ``chrome-error://...``) keeps scheme, host and path and loses query and fragment."""
+    if not url:
+        return ""
+    got = _link_core(url)
+    if got is not None:
+        scheme, host, suffix, path, query, _ = got
+        kept = [
+            (k, v) for _, k, v in _query_pairs(query) if k.lower() in _JOB_ID_KEYS and _SAFE_ID_VALUE.fullmatch(v)
+        ]
+        return urlunsplit((scheme, host + suffix, path, urlencode(kept), ""))
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return ""
+    if parts.scheme.lower() in ("", "http", "https", "data", "javascript", "blob"):
+        return ""
+    return urlunsplit((parts.scheme.lower(), parts.netloc.rsplit("@", 1)[-1], parts.path, "", ""))
+
+
+def canonical_url(url: str, *, only_keys: Optional[frozenset[str]] = None) -> str:
+    """One stable key for "the same ad link": lower-case host (``www.`` folded), the fragment dropped, the
+    stored-form drop rule applied to the query (``redact_url``: tracking keys, secret keys), remaining pieces
+    sorted, trailing slash dropped. Other keys stay, so two jobs that differ only by an unknown key
+    (``?posting=5`` / ``?posting=6``) or by Civil Service Jobs' ``SID`` never compare equal. ``''`` for a
+    blank or unparseable link. Compared on read - nothing is stored. An OLD row stored with its full link
+    and a NEW row stored redacted compare equal.
+
+    ``only_keys`` turns the query rule into an ALLOW-list (a form page address that IS
+    stored, ``assistant_settings.clean_form_url``): only those keys (lower-cased) with a
+    value are kept (path parameters such as ``;jsessionid=...`` are always dropped), so a
+    token, ``code=`` or session id can never be stored."""
+    got = _link_core(url)
+    if got is None:
+        return ""
+    _, host, suffix, path, query, _ = got
+    if only_keys is not None:
+        pairs = sorted((k, v) for _, k, v in _query_pairs(query) if k.lower() in only_keys and v.strip())
+    else:
+        pairs = sorted(
+            (k, v) for subs in _sub_pieces(query) for _, k, v in subs if not _drops_from_stored(k, v, host)
+        )
+    return urlunsplit(("https", host.removeprefix("www.") + suffix, path.rstrip("/"), urlencode(pairs), ""))
+
+
+# A link names ONE job when it carries a job id: a long number, a UUID-like
+# token, or a known job-id query key. Board roots and careers home pages do not.
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_JOB_ID_SEGMENT = re.compile(rf"(?:^|[/_-])(?:\d{{4,}}|{_UUID})(?:$|[/_-])", re.I)
+
+
+def is_job_specific_url(url: str) -> bool:
+    """True when ``url`` identifies a single job (see the two patterns above)."""
+    try:
+        parts = urlsplit((url or "").strip())
+    except ValueError:
+        return False
+    if _JOB_ID_SEGMENT.search(parts.path or ""):
+        return True
+    return any(k.lower() in _JOB_ID_KEYS and v.strip() for k, v in parse_qsl(parts.query))
+
+
+def apply_host(url: str) -> str:
+    """The real host of ``url`` ('' when it is not an http(s) link). ``urlsplit``
+    takes everything after the LAST ``@`` as the host, so
+    ``https://greenhouse.io@evil.com/`` reads as ``evil.com``."""
+    try:
+        parts = urlsplit((url or "").strip())
+        host = (parts.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+    return host if parts.scheme.lower() in ("http", "https") else ""
+
+
+def _is_or_under(host: str, apex: str) -> bool:
+    return host == apex or host.endswith("." + apex)
+
+
+def _is_indeed(host: str) -> bool:
+    labels = host.split(".")
+    if len(labels) >= 2 and labels[-2] == "indeed" and len(labels[-1]) >= 2:
+        return True  # indeed.com, uk.indeed.com, indeed.de
+    return len(labels) >= 3 and labels[-3] == "indeed" and labels[-2] in ("co", "com") and len(labels[-1]) == 2
+
+
+def classify_host(host: str) -> str:
+    """``official_ats`` | ``job_board`` | ``unknown``. STRICT: the host must BE
+    the vendor domain or end with ``.<domain>``. ``evil-greenhouse.io`` and
+    ``greenhouse.io.evil.com`` are ``unknown``."""
+    if not host:
+        return "unknown"
+    if any(_is_or_under(host, a) for a in settings.OFFICIAL_ATS_HOSTS):
+        return "official_ats"
+    if any(_is_or_under(host, b) for b in settings.JOB_BOARD_HOSTS) or _is_indeed(host):
+        return "job_board"
+    return "unknown"
+
+
+def parse_day(value: Optional[str]) -> Optional[date]:
+    """``YYYY-MM-DD`` (a longer ISO stamp is cut to its date) or None."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _canon_separators(num: str) -> str:
+    """Port of career-ops salary-gap.mjs:169-196 ``canonicalizeSeparators``: with
+    both ``,`` and ``.`` the LAST is the decimal point; with one, exactly three
+    digits after it read as grouping ("35.000", "123,684"), else a decimal."""
+    last_comma, last_dot = num.rfind(","), num.rfind(".")
+    if last_comma != -1 and last_dot != -1:
+        decimal = "," if last_comma > last_dot else "."
+        grouping = "." if decimal == "," else ","
+        return num.replace(grouping, "").replace(decimal, ".", 1)
+    sep = "," if last_comma != -1 else "." if last_dot != -1 else None
+    if sep is None:
+        return num
+    return re.sub(rf"(\d)\{sep}(?=\d{{3}}(?!\d))", r"\1", num).replace(sep, ".", 1)
+
+
+def _to_num(num: str, k: bool) -> Optional[float]:
+    try:
+        n = float(_canon_separators(num))
+    except ValueError:
+        return None
+    return n * 1000 if k else n
+
+
+def parse_amount(span: str) -> Optional[tuple[int, int]]:
+    """Port of career-ops salary-gap.mjs:204-235 ``parseAmount``: ``(min, max)``
+    of an amount span, or None when it is not a plain number or range. Period
+    words, currency symbols and a currency token are stripped first; NOTHING is
+    annualised (the reference leaves other periods to the caller, :207-208).
+    Lakh / LPA spans and "M" amounts return None: the reference has no such unit
+    (NOT IN REFERENCE), so we never scale them."""
+    s = (span or "").strip()
+    if not s or _LAKH_RE.search(s):
+        return None
+    s = _PERIOD_STRIP_RE.sub("", s).strip()
+    s = re.sub(r"[€$£¥₹]", "", s)
+    s = re.sub(r"(?<=\d)[  ](?=\d{3}\b)", "", s)  # "70 000" -> 70000 (NOT IN REFERENCE)
+    s = _CUR_EDGE_RE.sub("", s).strip()
+    s = _PERIOD_STRIP_RE.sub("", s).strip()
+    m = _RANGE_RE.match(s)
+    if m:
+        lo = _to_num(m.group(1), bool(m.group(2) or m.group(4)))
+        hi = _to_num(m.group(3), bool(m.group(4) or m.group(2)))
+        if lo is None or hi is None:
+            return None
+        return int(round(min(lo, hi))), int(round(max(lo, hi)))
+    m = _SINGLE_RE.match(s)
+    if m:
+        v = _to_num(m.group(1), bool(m.group(2)))
+        return None if v is None else (int(round(v)), int(round(v)))
+    return None
+
+
+def compensation_period(text: str, nearest: bool = False) -> Optional[str]:
+    """Port of career-ops salary-gap.mjs:239-245 ``compensationPeriod``: annual /
+    monthly / hourly, or None - an unknown period is never guessed (:244). Added
+    (NOT IN REFERENCE): "a year", "p.a.", "LPA", "lakh" (annual), "a month",
+    "an hour"."""
+    hits = [(rx.search(text), name) for rx, name in
+            ((_ANNUAL_RE, "annual"), (_MONTHLY_RE, "monthly"), (_HOURLY_RE, "hourly"))]
+    found = [(m.start(), name) for m, name in hits if m]
+    if not found:
+        return None
+    # `nearest`: the period word closest to the amount; else the reference's
+    # annual > monthly > hourly order (:241-243).
+    return min(found)[1] if nearest else found[0][1]
+
+
+def _currency_of(span: str) -> str:
+    """ISO code beside the amount. The reference takes the first standalone
+    UPPERCASE 3-letter token, case-sensitive on purpose (salary-gap.mjs:312-317);
+    we limit it to our ISO set and fall back to the symbols GBP / EUR / INR
+    (NOT IN REFERENCE; the reference drops symbols, :217). "$" and "¥" are never
+    mapped (many currencies): ``"UNKNOWN"`` as :317."""
+    iso = _ISO_RE.search(span)
+    if iso:
+        return iso.group(0)
+    for sym, code in (("£", "GBP"), ("€", "EUR"), ("₹", "INR")):
+        if sym in span:
+            return code
+    return "UNKNOWN"
+
+
+def _amount_bounds(text: str, ms: int) -> tuple[int, int]:
+    """Char offsets of the whole amount (range, symbol / ISO token, k, lakh) for a
+    money match starting at ``ms``. Bounded scans only, so it stays linear."""
+    start = ms
+    if text[start:start + 1].isdigit():  # the `\d CUR` / `\dk yr` forms start mid-number
+        back = 0
+        while start > 0 and back < 16 and text[start - 1] in "0123456789,.":
+            start -= 1
+            back += 1
+        while start < ms and text[start] in ",.":
+            start += 1
+    m = _AMOUNT_RE.match(text, start)
+    end = m.end() if m else ms + 1
+    while end > start and text[end - 1] in " ,.":
+        end -= 1
+    return start, end
+
+
+def _facts(text: str, evidence: str, s0: int, s1: int, period: Optional[str], sentence: str) -> dict[str, Any]:
+    amount = text[s0:s1]
+    bounds = parse_amount(amount)
+    equity = bool(_EQUITY_RE.search(sentence)) or bool(_PLUS_PCT_RE.match(text, s1))
+    return {
+        "evidence": evidence, "amount": amount, "amount_span": [s0, s1],
+        "min": bounds[0] if bounds else None, "max": bounds[1] if bounds else None,
+        "period": period, "currency": _currency_of(amount), "equity": equity,
+    }
+
+
+def _is_bare_pay(text: str, ms: int) -> bool:
+    """A currency symbol or ISO code directly before an amount is pay with no pay
+    word when the amount is a whole segment of a header-like line ("... - Full
+    time - GBP 40,000 - 45,000"). Not pay: a figure inside a sentence ("Signing
+    bonus £5,000"), a lone amount line, a small one ("$20"), a scaled one
+    ("$5M") or a number-first match."""
+    if text[ms:ms + 1].isdigit():
+        return False
+    s0, s1 = _amount_bounds(text, ms)
+    bounds = parse_amount(text[s0:s1])
+    if bounds is None or bounds[1] < _BARE_PAY_MIN or text[s1:s1 + 1].isalpha():
+        return False
+    token = re.search(r"\d[\d,.]*", text[s0:s1])
+    if token and token.group().isdigit() and 1900 <= int(token.group()) <= 2100:
+        return False  # a year, not a salary
+    line_start = text.rfind("\n", 0, s0) + 1
+    line_end = text.find("\n", s1)
+    before = text[line_start:s0].rstrip()
+    after = text[s1:len(text) if line_end == -1 else line_end].lstrip()
+    if not (before or after) or before in _SEGMENT_MARKS or text[line_start:s0].lstrip().startswith("|"):
+        return False  # no header around the amount: a lone line, a bullet or a table row
+    above = text[text.rfind("\n", 0, max(line_start - 1, 0)) + 1:line_start]  # a heading like "Perks:"
+    if _NOT_HEADER_PAY_RE.search(above + text[line_start:s0] + after):
+        return False
+    return (not before or _SEGMENT_END_RE.search(before) is not None) and (
+        not after or _SEGMENT_START_RE.match(after) is not None)
+
+
+def pay_facts(description: str) -> Optional[dict[str, Any]]:
+    """The advertised pay in the ad, or None. ``evidence`` is the sentence/line
+    (whitespace-collapsed, <=160 chars). An amount counts only with a pay word in
+    its own sentence or line (<=120 chars each side), as an INR pay unit (LPA,
+    lakh, ``₹12L``), or as a symbol / ISO code straight before an amount of 1,000
+    or more ("GBP 40,000 - 45,000"); an amount beside revenue / funding / billion words never
+    counts. Next to it, as stated and never annualised: ``amount`` (the matched
+    text), ``amount_span`` ([start, end) offsets in ``description``), ``min`` /
+    ``max`` (ints, or None when not a plain number), ``period`` (annual / monthly /
+    hourly / None), ``currency`` (ISO code or ``"UNKNOWN"``) and ``equity``."""
+    text = (description or "")[:_PAY_SCAN_CAP]
+    found = _scan_money(text, bare=False)
+    if found:
+        return found
+    # an INR pay unit on its own (no currency symbol the money regex saw)
+    u = _PAY_UNIT_RE.search(text)
+    if u:
+        flat = " ".join(text[max(0, u.start() - 60):u.end() + 60].split())[:_EVIDENCE_MAX]
+        return _facts(text, flat, u.start(), u.end(), "annual", flat)
+    # last, so a stated salary always beats a header-line amount
+    return _scan_money(text, bare=True)
+
+
+def _scan_money(text: str, bare: bool) -> Optional[dict[str, Any]]:
+    """The first money match that is pay: with a pay word / unit, or (``bare``) a
+    header-line amount; None when there is none."""
+    for i, m in enumerate(_MONEY_RE.finditer(text)):
+        if i >= _PAY_MATCH_CAP:
+            break
+        ms, me = m.start(), m.end()
+        left = text[max(0, ms - _PAY_WINDOW):ms]
+        right = text[me:me + _PAY_WINDOW]
+        cut = 0
+        for prev_end in _SENTENCE_END_RE.finditer(left):
+            cut = prev_end.end()
+        left = left[cut:]
+        next_end = _SENTENCE_END_RE.search(right)
+        if next_end:
+            right = right[:next_end.start()]
+        sentence = left + m.group(0) + right
+        pos = len(left)
+        near = sentence[max(0, pos - _NOT_PAY_WINDOW):pos + len(m.group(0)) + _NOT_PAY_WINDOW]
+        if _NOT_PAY_RE.search(near):
+            continue
+        unit = _PAY_UNIT_RE.search(sentence)
+        if bare:
+            if not _is_bare_pay(text, ms):
+                continue
+        elif not (unit or _PAY_WORD_RE.search(sentence)):
+            continue
+        anchor = unit.start() if unit and not _PAY_WORD_RE.search(sentence) else pos
+        flat = " ".join(sentence.split())
+        if len(flat) > _EVIDENCE_MAX:
+            # centre the cut on the amount so the figure stays in the evidence
+            anchor_flat = len(" ".join(sentence[:anchor].split()))
+            start = max(0, min(anchor_flat - _EVIDENCE_MAX // 2, len(flat) - _EVIDENCE_MAX))
+            flat = flat[start:start + _EVIDENCE_MAX]
+        s0, s1 = _amount_bounds(text, ms)
+        # the period word usually follows the amount: read that stretch first
+        after = text[s0:s1 + _PERIOD_WINDOW]
+        stop = _SENTENCE_END_RE.search(after)
+        period = compensation_period(after[:stop.start()] if stop else after, nearest=True)
+        return _facts(text, flat, s0, s1, period or compensation_period(sentence), sentence)
+    return None
+
+
+def pay_evidence(description: str) -> str:
+    """The evidence sentence of ``pay_facts``, or ``''``."""
+    facts = pay_facts(description)
+    return facts["evidence"] if facts else ""
+
+
+def job_checks(
+    description: str,
+    apply_url: str,
+    posted_at: Optional[str],
+    employer_published_at: Optional[str],
+    today: date,
+) -> list[dict[str, Any]]:
+    """The checks, each ``{"code", "ok" (bool|None), "reason"}`` plus a ``value``
+    (and ``host``) where one helps. ``ok`` None = nothing to say. Never raises."""
+    out: list[dict[str, Any]] = []
+
+    words = word_count(description)
+    if words < settings.JOB_CHECK_PARTIAL_MIN_WORDS:
+        band, why = "title_only", f"{words} words - this is a title or a teaser; fetch the full ad before tailoring."
+    elif words < settings.JOB_CHECK_FULL_MIN_WORDS:
+        band, why = "partial", f"{words} words - the ad looks cut short; fetch the full ad before tailoring."
+    else:
+        band, why = "full", f"{words} words - the ad text looks complete."
+    out.append({"code": "description_completeness", "ok": band == "full", "reason": why, "value": band})
+
+    host = apply_host(apply_url)
+    kind = classify_host(host)
+    if not host:
+        out.append({"code": "apply_host", "ok": None, "value": "unknown", "host": "",
+                    "reason": "No apply link was given."})
+    elif kind == "official_ats":
+        out.append({"code": "apply_host", "ok": True, "value": kind, "host": host,
+                    "reason": f"{host} is a known employer ATS host."})
+    elif kind == "job_board":
+        out.append({"code": "apply_host", "ok": False, "value": kind, "host": host,
+                    "reason": f"{host} is a job board; the employer's own posting is the better source."})
+    else:
+        out.append({"code": "apply_host", "ok": None, "value": kind, "host": host,
+                    "reason": f"{host} is not a known ATS or job board; tell the user which site the link goes to."})
+
+    posted, employer = parse_day(posted_at), parse_day(employer_published_at)
+    newest = max((d for d in (posted, employer) if d), default=None)
+    if newest is None:
+        out.append({"code": "ad_age_days", "ok": None, "value": None, "reason": "No posting date was given."})
+    else:
+        age = (today - newest).days
+        out.append({"code": "ad_age_days", "ok": None, "value": age,
+                    "reason": f"Newest date given is {newest.isoformat()}, {age} days ago."})
+    if posted and employer:
+        gap = abs((posted - employer).days)
+        reposted = gap > settings.JOB_CHECK_REPOST_GAP_DAYS
+        if reposted:
+            why = (
+                f"The listing says {posted.isoformat()} but the employer's posting says "
+                f"{employer.isoformat()} ({gap} days apart): reposted."
+            )
+        elif gap == 0:
+            why = f"Listing and employer dates match ({posted.isoformat()})."
+        else:
+            side = "after" if posted > employer else "before"
+            why = (
+                f"Listing {posted.isoformat()} is {gap} days {side} the employer's "
+                f"{employer.isoformat()} (normal indexing lag)."
+            )
+        out.append({"code": "reposted", "ok": not reposted, "value": reposted, "reason": why})
+
+    facts = pay_facts(description)
+    if facts:
+        per = facts["period"] or "not stated"
+        cur = facts["currency"] if facts["currency"] != "UNKNOWN" else "not stated"
+        out.append({"code": "pay_advertised", "ok": True, "value": True, **facts,
+                    "reason": f'The ad advertises pay: "{facts["evidence"]}" '
+                              f"(period: {per}, currency: {cur}; as advertised, not annualised)"})
+    else:
+        out.append({"code": "pay_advertised", "ok": False, "value": False, "evidence": "", "amount": None,
+                    "amount_span": None, "min": None, "max": None, "period": None, "currency": None,
+                    "equity": None,
+                    "reason": "No pay (an amount next to a salary or pay word) appears in the ad text."})
+    spon = bool(_SPONSOR_RE.search(description or ""))
+    out.append({"code": "sponsorship_mentioned", "ok": spon, "value": spon,
+                "reason": "The ad text mentions sponsorship or visas - read what it says." if spon
+                else "The ad text does not mention sponsorship or visas."})
+    return out
+
+
+def checks_for_application(app_row: Mapping[str, Any], description: Optional[str] = None) -> list[dict[str, Any]]:
+    """Checks for one stored application row (``SELECT *``). ``description``
+    overrides the application's snapshot when the caller holds the catalog text."""
+    text = description if description is not None else str(app_row.get("job_description_snapshot") or "")
+    return job_checks(
+        text, str(app_row.get("job_url") or ""),
+        app_row.get("ad_posted_at"), app_row.get("employer_published_at"), date.today(),
+    )

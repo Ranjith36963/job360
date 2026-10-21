@@ -1,19 +1,13 @@
 import type { ReactNode } from "react";
 
 /**
- * Shared page width for every signed-in page below the nav bar.
+ * Shared page padding for every signed-in page.
  *
- * Owner decision (2026-09-25): pages left big empty space because widths
- * differed page to page — navbar `max-w-7xl` (Navbar.tsx), profile
- * `max-w-6xl`, applications/application/bring/connect all `max-w-3xl`. This
- * uses EXACTLY the navbar's max width and horizontal padding
- * (`max-w-7xl mx-auto px-4 sm:px-6` — see Navbar.tsx) so a page's left and
- * right edges line up with the menu above it.
- *
- * Forms and other content that should stay narrow for readability (Bring a
- * job, the Connect token/OAuth forms) sit inside this container in their own
- * `max-w-3xl` block, left-aligned to the container — not a second, narrower
- * centred wrapper.
+ * Redesign slice 1: content no longer sits in a boxed `max-w-7xl` column. It
+ * fills the area to the right of the sidebar, with comfortable side padding
+ * (`px-6 lg:px-10`). A readable max width belongs only on pure text pages
+ * (legal pages carry their own `max-w-3xl`); forms and cards that need to stay
+ * narrow put a `max-w-*` block inside this container, left-aligned.
  */
 export function PageContainer({
   children,
@@ -23,7 +17,7 @@ export function PageContainer({
   className?: string;
 }) {
   return (
-    <div className={`mx-auto max-w-7xl px-4 sm:px-6 ${className}`.trim()}>
+    <div className={`w-full px-6 lg:px-10 ${className}`.trim()}>
       {children}
     </div>
   );

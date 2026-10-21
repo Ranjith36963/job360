@@ -28,7 +28,10 @@ name: Finding watch (a finding wakes the fixer)
 # while every dashboard is green.
 #
 # WHAT IT DOES: counts unresolved review threads and failed checks on a PR, and
-# if there are any, dispatches `pr-repair.yml` at it. That is all. It never
+# if any of them is something the fixer can act on (`scripts/repairable.py
+# triage`), dispatches `pr-repair.yml` at it; if there are findings but none the
+# fixer can touch, it says so once on the PR and labels it `autofix:needs-human`
+# instead. That is all. It never
 # merges, never pushes, never edits code -- it rings a bell that already had no
 # rope.
 #
@@ -53,13 +56,21 @@ name: Finding watch (a finding wakes the fixer)
 # wired, this file dispatches the fixer, the fixer pushes, the push wakes this
 # file, forever -- an infinite loop that spends real money.
 #   1. NEVER re-dispatch for a commit the fixer itself wrote (author check).
-#   2. NEVER dispatch while ANY pr-repair run is already queued or running.
-#      Deliberately not branch-scoped: a dispatched run records the ref it was
-#      dispatched on, never the branch it repairs, so a branch-scoped query
-#      answers 0 every time and the guard would never fire.
+#   2. NEVER dispatch while a pr-repair run for THIS PR is queued or running,
+#      nor again for a head sha + findings a run already judged
+#      (`scripts/fixer_gate.py`, reading pr-repair's `run-name`; 2026-10-19).
+#      This file is the ONE place that dispatches the fixer: pr-shepherd
+#      dispatches this file, not pr-repair.
 #   3. A HARD ATTEMPT CEILING recorded as a label on the PR. After
 #      MAX_ATTEMPTS the loop stops, says so on the PR, and waits for a human.
-#      A loop without a stop is not a loop, it is a leak.
+#      A loop without a stop is not a loop, it is a leak. THE LABEL COUNTS REAL
+#      ATTEMPTS, NOT DISPATCHES: `pr-repair.yml` writes `autofix:attempt-N` when
+#      a run actually starts work; this file only READS it (see GUARD 3).
+#   4. (2026-10-02) ONLY DISPATCH FOR WORK THE FIXER CAN DO. A finding is
+#      "fixable" only when `scripts/repairable.py triage` says so: an unresolved,
+#      NOT-outdated thread on a file the repair cage allows, or a `failure` /
+#      `timed_out` check that code can fix. Everything else is for a human, and
+#      is said once on the PR (`autofix:needs-human`) instead of being retried.
 #
 # HONESTY RULE (same as dependabot-auto and pr-shepherd): every PR this file
 # looks at gets one line in the job summary -- acted on or left alone, with the
@@ -141,6 +152,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The Slack action below is a LOCAL composite action, so the job needs the
+      # repo on disk. It is checked out at the DEFAULT BRANCH, never the PR's
+      # ref: this workflow also runs on `pull_request` events, and the action
+      # holds SLACK_BOT_TOKEN, so it must be the trusted copy of the action.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch || 'main' }}
+          persist-credentials: false
+
       - name: Which PRs am I looking at
         id: scope
         env:
@@ -173,7 +193,29 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # THE DEFAULT BRANCH'S COPY OF THE CAGE, NEVER THE PR'S. On a `pull_request`
+      # event a bare checkout would be the PR's merge ref, i.e. the PR would
+      # supply the code that decides what the fixer may touch. Same rule as
+      # pr-repair's "Fetch the repair cage" step and auto-merge's checkouts.
+      # `repairable.py` is the ONE matcher for "may the fixer edit this file";
+      # reusing it is what stops this doorbell ringing for a file the cage would
+      # then refuse (PRs #665/#666/#679: threads on `.github/`).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.scope.outputs.prs != ''
+        with:
+          ref: ${{ github.event.repository.default_branch || 'main' }}
+          persist-credentials: false
+          # FULL checkout, not sparse: a cone-mode sparse list cannot name a
+          # file (`.github/merge-policy.yml` -> "is not a directory", exit 128,
+          # run 37062829468) and would also drop `.github/actions/slack`, which
+          # the alert steps below need. The default branch is trusted; full is fine.
+
+      - name: Install the cage's one dependency
+        if: steps.scope.outputs.prs != ''
+        run: python -m pip install --quiet pyyaml
+
       - name: Count the findings, and wake the fixer where there are any
+        id: sweep
         if: steps.scope.outputs.prs != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -185,6 +227,12 @@ jobs:
           name="${GH_REPO##*/}"
 
           echo "### Finding watch" >> "$GITHUB_STEP_SUMMARY"
+
+          # PRs that crossed INTO "exhausted" during THIS sweep (the label is
+          # the once-only marker). The Slack step below reads them; a composite
+          # action cannot be called from inside this loop.
+          exhausted_file="${RUNNER_TEMP:-/tmp}/finding-watch-exhausted.txt"
+          : > "$exhausted_file"
 
           # One line per PR, always. `note` is called on every exit path below.
           note() { echo "- **#$1** — $2" >> "$GITHUB_STEP_SUMMARY"; }
@@ -218,12 +266,6 @@ jobs:
 
             [ "$state" = "OPEN" ]        || { note "$pr" "is $state — left alone"; exit 0; }
             [ "$draft" = "false" ]       || { note "$pr" "is a draft — drafts are left alone"; exit 0; }
-            # A PR labeled `wip:parked` (scripts/wip_gate.py) opted itself out
-            # of the queue on purpose, same as a draft — waking the fixer for
-            # it would repair a PR the owner has not even let compete for a
-            # merge slot yet.
-            echo "$meta" | jq -e '[.labels[].name]|any(.=="wip:parked")' >/dev/null \
-              && { note "$pr" "is parked by the WIP limit — left alone"; exit 0; }
             # A fork PR is a stranger's code. pr-repair refuses it anyway (G1);
             # not dispatching means the refusal never has to be the safety net.
             [ "$headowner" = "$owner" ]  || { note "$pr" "comes from a fork ($headowner) — never dispatched"; exit 0; }
@@ -264,15 +306,20 @@ jobs:
             # Unresolved review threads (GraphQL — the ONLY API that can express
             # resolution; the REST comments endpoint has no such field and was
             # wrong in both directions when merge_cage used it).
-            threads=$(gh api graphql -f query='
+            # `isOutdated` + `path` + `id` are read so `repairable.py triage` can
+            # tell a thread the fixer can act on from one it cannot (outdated:
+            # the code it points at already changed; SELF path: the cage refuses
+            # it). Unresolved is still the raw set; "fixable" is decided below.
+            tdir="$RUNNER_TEMP/fw-$pr"; mkdir -p "$tdir"
+            gh api graphql -f query='
               query($owner:String!,$name:String!,$number:Int!){
                 repository(owner:$owner,name:$name){
                   pullRequest(number:$number){
-                    reviewThreads(first:100){ nodes{ isResolved } }
+                    reviewThreads(first:100){ nodes{ id isResolved isOutdated path } }
                   }
                 }
               }' -f owner="$owner" -f name="$name" -F number="$pr" \
-              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length') || {
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]' > "$tdir/threads.json" || {
               note "$pr" "the review-thread query FAILED — not dispatching, because 'I could not look' is not 'nothing to fix'."
               exit 0
             }
@@ -294,85 +341,101 @@ jobs:
               note "$pr" "could not read the head SHA — skipped this round"
               exit 0
             }
-            red=$(gh api "repos/$GH_REPO/commits/$sha/check-runs?per_page=100" \
-              --jq '[.check_runs[]|select(.status=="completed" and (.conclusion|IN("failure","timed_out","cancelled","action_required")))]|length') || {
+            gh api "repos/$GH_REPO/commits/$sha/check-runs?per_page=100" \
+              --jq '[.check_runs[]|{name,status,conclusion}]' > "$tdir/checks.json" || {
               note "$pr" "the check-run query FAILED — not dispatching on a picture I could not see."
               exit 0
             }
 
-            if [ "$threads" -eq 0 ] && [ "$red" -eq 0 ]; then
+            # ── RAW vs FIXABLE (2026-10-02) ──────────────────────────────────
+            # RAW is everything that is open: unresolved threads plus checks
+            # that are `failure` / `timed_out` / `cancelled` / `action_required`.
+            # FIXABLE is the part the fixer can act on, decided by the same
+            # `repairable.py` that cages its edits (default-branch copy, see the
+            # checkout step). Fails CLOSED: if the classifier cannot run, nothing
+            # is dispatched and the PR says why.
+            tri=$(python3 scripts/repairable.py --threads-json "$tdir/threads.json" --checks-json "$tdir/checks.json") || {
+              note "$pr" "the fixable/unfixable classifier FAILED — not dispatching blind."
+              echo "::error::scripts/repairable.py triage failed for PR #$pr"
+              exit 0
+            }
+            raw=$(echo "$tri"     | jq -r .raw)
+            fixable=$(echo "$tri" | jq -r .fixable)
+            threads=$(echo "$tri" | jq -r .threads.fixable)   # fixable threads
+            red=$(echo "$tri"     | jq -r '.checks.fixable|length')   # fixable red checks
+            why=$(echo "$tri"     | jq -r .explanation)
+            has_label() { echo "$meta" | jq -e --arg L "$1" '[.labels[].name]|any(.==$L)' >/dev/null 2>&1; }
+            # Labels are written through the REST labels endpoint, which creates
+            # a missing label; `gh pr edit --add-label` errors on one.
+            add_label() { gh api -X POST "repos/$GH_REPO/issues/$pr/labels" -f "labels[]=$1" >/dev/null; }
+            drop_label() { gh api -X DELETE "repos/$GH_REPO/issues/$pr/labels/${1//:/%3A}" >/dev/null 2>&1 || true; }
+
+            if [ "$raw" -eq 0 ]; then
+              # Nothing open any more: the "needs a human" marker is stale. Drop
+              # it so a LATER unfixable finding can be announced again.
+              if has_label "autofix:needs-human"; then drop_label "autofix:needs-human"; fi
               note "$pr" "clean — 0 unresolved review threads, 0 failed checks. Nothing to fix."
+              exit 0
+            fi
+
+            # ── NOTHING THE FIXER CAN DO: SAY SO ONCE, DO NOT DISPATCH ───────
+            # PRs #665/#666/#679/#703 each burned three "attempts" in ~2 minutes
+            # on exactly this: threads on `.github/`, threads on code that had
+            # already changed, red checks caused by `main` or a reviewer that
+            # never finished. The fixer looked, changed nothing, and that was
+            # recorded as a failure. The label is the once-only marker: while it
+            # is on, this is silent. The daily digest lists labelled PRs.
+            if [ "$fixable" -eq 0 ]; then
+              if has_label "autofix:needs-human"; then
+                note "$pr" "needs a human (already flagged) — nothing the fixer can act on: $why"
+                exit 0
+              fi
+              # Label FIRST: if it cannot be written, stay quiet rather than
+              # repeat the comment every 30 minutes.
+              if ! add_label "autofix:needs-human"; then
+                note "$pr" "nothing the fixer can act on, but \`autofix:needs-human\` could not be written — not commenting (it would repeat): $why"
+                echo "::error::could not write autofix:needs-human on PR #$pr"
+                exit 0
+              fi
+              gh pr comment "$pr" --body "**Finding watch:** nothing here is something the auto-fixer can act on, so it was not started: $why. This one wants a human; it will appear in the morning digest. (The label \`autofix:needs-human\` keeps this comment from repeating; it is removed when the PR is clean.)" || true
+              note "$pr" "**needs a human, fixer NOT dispatched** — $why"
               exit 0
             fi
 
             # ── GUARD 1: never chase the fixer's own commit ──────────────────
             last=$(gh api "repos/$GH_REPO/commits/$sha" --jq '.commit.author.name' 2>/dev/null || echo "")
             if [ "$last" = "pr-repair-loop" ] && [ "$red" -eq 0 ]; then
-              note "$pr" "$threads unresolved thread(s), but the newest commit is the fixer's own and CI is not red — waiting for the review to catch up rather than dispatching again."
+              note "$pr" "$threads fixable thread(s), but the newest commit is the fixer's own and CI is not red — waiting for the review to catch up rather than dispatching again."
               exit 0
             fi
 
-            # ── GUARD 2: one fixer at a time, full stop ──────────────────────
-            # NOT `--branch "$branch"`. A workflow_dispatch run records the ref
-            # it was DISPATCHED ON — the default branch — never the PR branch it
-            # was asked to repair. So the branch-scoped query returned 0 every
-            # single time and this guard could not fire at all: the doorbell
-            # would have started a second, third and fourth fixer on the same PR
-            # while the first was still running. Caught by CodeRabbit on PR #380
-            # before it ever ran, which is the only reason this is not a story
-            # about a runaway.
+            # ── GUARD 2: one fixer run per PR per distinct problem ───────────
+            # Decided by `scripts/fixer_gate.py`, right before the bell below
+            # (after the ceiling, so an exhausted PR is still announced).
             #
-            # `pr-repair.yml` carries `concurrency: group: pr-repair` — ONE run
-            # repo-wide, everything else queues behind it. So "is any pr-repair
-            # busy?" is exactly the right question, and it is one this API can
-            # actually answer.
-            # EVERY ACTIVE RUN, NOT TWO NAMED STATUSES, AND FAIL CLOSED.
-            # `queued`/`in_progress` are not the whole set — `waiting`,
-            # `requested` and `pending` are also runs that have not finished, and
-            # `waiting` is exactly the state a GITHUB_TOKEN-triggered run parks
-            # in here. Counting "not completed" cannot miss a status GitHub adds
-            # later. `--limit 20` could also age an active run off the list, so
-            # this reads the API with a full page and no client-side cap. And
-            # `|| echo 0` is gone: a failed lookup used to mean "nobody is busy",
-            # i.e. the runaway guard failed OPEN — the one direction it must
-            # never fail. (CodeRabbit, PR #380.)
-            # PER PR, NOT REPO-WIDE (changed 2026-08-27). This used to count
-            # every unfinished pr-repair run anywhere and refuse if there was
-            # one. Combined with pr-repair's own global concurrency lock it
-            # starved the queue: a repair takes 18.7-21.5 min (measured over 10
-            # runs, avg 19.8) and this sweep sees it every 30, so one busy
-            # repair silently dropped every other PR that round, with nothing
-            # retrying them and no ordering to make it fair. Four PRs waited
-            # 16-36 hours behind that on 2026-08-25/26.
+            # REFUTED 2026-10-19: "a duplicate dispatch is harmless because
+            # pr-repair's concurrency group queues it". The group cancels all
+            # but ONE pending run -- and that one always starts the second the
+            # running one ends. Measured 22:47Z-01:22Z: 71 dispatches, all from
+            # this file (54 on check_suite: semgrep, code scanning and one suite
+            # per Actions workflow, 6-9 per push), 48 cancelled in the queue,
+            # 21 real ~35-minute runs, 0 fixes pushed; 4 second runs on the SAME
+            # head the first had just judged, 3 on a PR that had merged since.
+            # PR #891: 27 dispatches for 6 head commits.
             #
-            # WHY THERE IS NO PER-PR BUSY CHECK HERE, AND WHY THAT IS SAFE.
-            #
-            # The obvious fix was to filter the same query by this PR's branch.
-            # It does not work and it fails OPEN, which is worse than the bug it
-            # replaces: pr-repair is started by `workflow_dispatch`, so every one
-            # of its runs reports `head_branch: main` regardless of which PR it
-            # is repairing — verified across the last 22 runs, all `main`. The
-            # runs API does not expose `inputs`, so the PR number a run is
-            # working on is not readable from here at all. A branch filter would
-            # therefore match nothing, count 0 every time, and wave through a
-            # second agent onto a branch that already has one.
-            #
-            # So the serialisation moved to where it can be exact: pr-repair now
-            # declares `concurrency: group: pr-repair-${{ inputs.pr }}` with
-            # `cancel-in-progress: false`. GitHub itself queues a second run for
-            # the same PR behind the first — that is enforced by the platform,
-            # not by a poll that can be stale by the time it is read.
-            #
-            # A duplicate dispatch is now harmless rather than forbidden: it
-            # waits, and when it starts, GUARD 1 above (newest commit is the
-            # fixer's own and CI is not red) or pr-repair's own "nothing to
-            # push" arm makes it a no-op. Cheaper than starving three PRs to
-            # avoid one wasted runner, which is what the repo-wide check did.
+            # The per-PR busy check was missing because a pr-repair run did not
+            # say which PR it was for (head_branch is always `main`, the runs
+            # API has no inputs). pr-repair.yml now has a `run-name` naming the
+            # PR, head sha and findings fingerprint, and the gate reads it. The
+            # history of the old global check and why it starved the queue
+            # (2026-08-25/26) is in git log; the gate is per PR, so it cannot.
 
             # ── GUARD 3: the hard ceiling ────────────────────────────────────
             # Recorded as a label so the count survives this run, the next run,
             # and a workflow edit. A counter that lives in a workflow's memory
-            # is a counter that resets every time it matters.
+            # is a counter that resets every time it matters. THIS FILE ONLY
+            # READS IT: `pr-repair.yml` adds `autofix:attempt-N` when a run
+            # really starts work, so the count is real attempts, not dispatches.
             attempt=0
             for n in $(seq 1 20); do
               if echo "$meta" | jq -e --arg L "autofix:attempt-$n" '.labels[]|select(.name==$L)' >/dev/null 2>&1; then
@@ -383,8 +446,16 @@ jobs:
             if [ "$next" -gt "${MAX_ATTEMPTS}" ]; then
               note "$pr" "**stopped at the ceiling** — the fixer has already had $attempt goes and the findings are still there ($threads thread(s), $red red check(s)). This one needs a human."
               if ! gh pr view "$pr" --json labels --jq '.labels[].name' | grep -qx "autofix:exhausted"; then
-                gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
-                gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null || true
+                # LABEL FIRST, and only a SUCCESSFUL label lets the comment and the
+                # Slack alert happen. The label is the once-only marker: if writing
+                # it failed, the next sweep would see no label and alert again --
+                # forever. A failed write is a loud warning and a silent retry.
+                if gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null; then
+                  gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
+                  echo "$pr" >> "$exhausted_file"
+                else
+                  echo "::warning::PR #$pr reached the auto-fix ceiling but the autofix:exhausted label could not be written; not alerting (would repeat every sweep). Will retry next sweep."
+                fi
               fi
               exit 0
             fi
@@ -395,27 +466,101 @@ jobs:
             # nothing (GitHub's recursion rule — this repo has been bitten by it
             # four separate times), which is exactly why the wake-up is a
             # dispatch and not a label.
-            # THE LABEL GOES ON AFTER THE DISPATCH SUCCEEDS, NOT BEFORE.
-            # Labelling first means three FAILED dispatches reach the ceiling and
-            # the PR is told "the fixer has had 3 attempts" when it ran zero
-            # times -- a counter measuring the attempt to try rather than the
-            # try. (CodeRabbit, PR #380.)
-            if gh workflow run pr-repair.yml -f pr="$pr"; then
-              # THE LABEL IS THE COUNTER, SO A LOST WRITE IS A BROKEN CEILING.
-              # This was `2>/dev/null || true`. The label is the ONLY thing
-              # carrying the attempt count to the next run, so silently losing
-              # the write means the count never rises, the ceiling never trips,
-              # and the fix→push→fix loop runs forever — the exact leak guard 3
-              # exists to stop, defeated by the one line allowed to fail quietly.
-              # (CodeRabbit, PR #380.)
-              if ! gh pr edit "$pr" --add-label "autofix:attempt-$next"; then
-                note "$pr" "**dispatched, but the attempt label could not be written** — the ceiling cannot count this one, so watch it by hand."
-                echo "::error::could not record autofix:attempt-$next on PR #$pr — the attempt ceiling is not counting"
-              fi
-              note "$pr" "**fixer dispatched** (attempt $next/${MAX_ATTEMPTS}) — $threads unresolved review thread(s), $red failed check(s)."
+            # NO ATTEMPT LABEL IS WRITTEN HERE ANY MORE (2026-10-02). It used to
+            # be added right after the dispatch succeeded, which counted a
+            # dispatch that pr-repair's concurrency group then CANCELLED in the
+            # queue (PRs #665/#666/#679/#703: three labels in ~2 minutes, at
+            # most two real runs). `pr-repair.yml` now writes
+            # `autofix:attempt-N` at the start of real work, so a run that never
+            # starts never counts. The ceiling above still reads the labels.
+            #
+            # The PR has fixable work again, so a stale "needs a human" marker
+            # is dropped: if unfixable findings remain after this attempt, they
+            # are announced afresh.
+            #
+            # GUARD 2 (see above). FAIL CLOSED both ways: if the run list cannot
+            # be read, or the gate cannot decide, nothing is dispatched -- "I
+            # could not look" is not "nobody is busy". One page of the newest
+            # 100 runs: an active run is at most ~45 minutes old, so it is on it.
+            echo "$tri" > "$tdir/triage.json"
+            gh api "repos/$GH_REPO/actions/workflows/pr-repair.yml/runs?per_page=100" \
+              --jq '[.workflow_runs[]|{id,status,conclusion,display_title}]' > "$tdir/repair-runs.json" || {
+              note "$pr" "could not list pr-repair runs — fixer NOT dispatched (head \`${sha:0:12}\`), because 'I could not look' is not 'nobody is busy'."
+              echo "fixer gate: PR #$pr head ${sha:0:12}: skipped — pr-repair run list unreadable"
+              exit 0
+            }
+            gate=$(python3 scripts/fixer_gate.py --pr "$pr" --sha "$sha" --attempt "$attempt" \
+                     --triage-json "$tdir/triage.json" --runs-json "$tdir/repair-runs.json") || {
+              note "$pr" "the fixer gate FAILED — fixer NOT dispatched (head \`${sha:0:12}\`)."
+              echo "::error::scripts/fixer_gate.py failed for PR #$pr"
+              exit 0
+            }
+            decision=$(echo "$gate" | jq -r .decision)
+            reason=$(echo "$gate"   | jq -r .reason)
+            fp=$(echo "$gate"       | jq -r .findings)
+            echo "fixer gate: PR #$pr head ${sha:0:12} findings $fp: $decision — $reason"
+            if [ "$decision" != "dispatch" ]; then
+              note "$pr" "fixer NOT dispatched (head \`${sha:0:12}\`, findings \`$fp\`) — $reason"
+              exit 0
+            fi
+
+            if has_label "autofix:needs-human"; then drop_label "autofix:needs-human"; fi
+            if gh workflow run pr-repair.yml -f pr="$pr" -f head_sha="$sha" -f findings="$fp" -f attempt="$attempt"; then
+              note "$pr" "**fixer dispatched** (head \`${sha:0:12}\`, findings \`$fp\`; real attempts so far: $attempt/${MAX_ATTEMPTS}; pr-repair records the next one when it starts work) — $threads fixable review thread(s), $red fixable red check(s)."
             else
               note "$pr" "needs the fixer ($threads thread(s), $red red check(s)) but \`workflow dispatch\` FAILED — start \`pr-repair.yml\` by hand for this PR."
               echo "::error::could not dispatch pr-repair.yml for PR #$pr"
             fi
            ) || note "$pr" "the sweep hit an error while looking at this one (see the log) - every other PR was still checked"
           done
+
+          # Hand the newly-exhausted PRs to the Slack step (numbers only — they
+          # come from `gh pr list`/event payloads and were matched ^[0-9]+$).
+          if [ -s "$exhausted_file" ]; then
+            nums=$(sort -un "$exhausted_file" | paste -sd, -)
+            count=$(sort -un "$exhausted_file" | wc -l | tr -d ' ')
+            links=$(sort -un "$exhausted_file" | while read -r n; do echo "https://github.com/$GH_REPO/pull/$n"; done | paste -sd' ' -)
+            if [ "$count" = "1" ]; then
+              slack_title="PR #$nums: auto-fix gave up after ${MAX_ATTEMPTS} tries — needs you"
+            else
+              slack_title="PRs #${nums//,/, #}: auto-fix gave up after ${MAX_ATTEMPTS} tries — needs you"
+            fi
+            {
+              echo "exhausted=yes"
+              echo "slack_title=$slack_title"
+              echo "links=$links"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # The fixer hit its attempt ceiling: a human has to look. Fires ONLY on the
+      # transition into exhausted — the sweep above adds the `autofix:exhausted`
+      # label the first time and never lists the PR again, so this is once per
+      # PR, not once per 30-minute sweep.
+      - name: Slack — the auto-fixer gave up
+        if: always() && steps.sweep.outputs.exhausted == 'yes'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: ${{ steps.sweep.outputs.slack_title }}
+          body: |
+            What happened: the auto-fixer tried ${{ env.MAX_ATTEMPTS }} times and the review comments or failed checks are still there.
+            What to do: read the PR and fix it yourself, or close it. To give the fixer another go, remove the autofix:attempt labels.
+            Link: ${{ steps.sweep.outputs.links }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # Rule B (scripts/check_alert_paths.py): the alert above keys off an output
+      # the sweep only writes if it reaches its last lines. If the sweep dies
+      # half way, say THAT — to the muted log, because this runs every 30 minutes.
+      - name: Slack — the finding sweep itself broke
+        if: always() && steps.sweep.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: warn
+          title: "Finding watch: the sweep itself failed"
+          body: |
+            What happened: the 30-minute sweep that wakes the PR fixer stopped with an error, so a PR that gave up may not have been announced.
+            What to do: open the run and read the red step. Nothing else needed if the next sweep is green.
+            Link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

@@ -25,6 +25,26 @@ function makeEvent(overrides: Partial<ApplicationEvent> = {}): ApplicationEvent 
 }
 
 describe("Timeline", () => {
+  it("shows who recorded each event in plain words", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({ id: 1, recorded_by: "web" }),
+          makeEvent({ id: 2, recorded_by: "agent:Claude" }),
+          makeEvent({ id: 3, recorded_by: "token:My laptop" }),
+          makeEvent({ id: 4, recorded_by: "system" }),
+        ]}
+      />,
+    );
+    const marks = screen.getAllByTestId("event-actor").map((m) => m.textContent);
+    expect(marks).toEqual([
+      "recorded by you",
+      "recorded by your assistant (via Claude)",
+      "recorded by your assistant (via My laptop)",
+      "recorded by Job360",
+    ]);
+  });
+
   it("renders the sender and subject for an event with a source, and no anchor", () => {
     render(
       <Timeline
@@ -60,5 +80,38 @@ describe("Timeline", () => {
     );
 
     expect(screen.getByText(/scheduled for/i)).toBeInTheDocument();
+  });
+
+  it("shows an offer's stored figures in plain words", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({
+            event_type: "offer",
+            payload: { offer_amount: 85000, offer_currency: "GBP", offer_period: "year" },
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("event-offer").textContent).toBe("Offer: 85,000 GBP per year");
+  });
+
+  it("shows an interview's round, length and place, and nothing for a bare offer", () => {
+    render(
+      <Timeline
+        events={[
+          makeEvent({
+            id: 1,
+            event_type: "interview_scheduled",
+            payload: { round: "system-design", duration_minutes: 45, location: "Leeds office" },
+          }),
+          makeEvent({ id: 2, event_type: "offer", payload: {} }),
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("event-interview").textContent).toBe("System design · 45 min · Leeds office");
+    expect(screen.queryByTestId("event-offer")).toBeNull();
   });
 });

@@ -19,6 +19,11 @@ applied migration on ``down()``.
 Versions that have been applied are recorded in a ``_schema_migrations`` table
 with ``(id, applied_at)`` columns. ``id`` is the ``NNNN_name`` stem.
 
+Before pending migrations run on a real database, the tables they change are
+copied into the ``migration_snapshots`` schema; snapshots are kept 14 days
+(``MIGRATION_SNAPSHOT_RETENTION_DAYS``), the same idea as the 30-day backups
+(docs/product/RUNBOOK-backups.md), and pruned by every ``up()``.
+
 Usage
 -----
 Library::
@@ -37,14 +42,187 @@ CLI::
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import psycopg
+
+from src.core import settings
 from src.repositories import pg
+from src.utils.logger import get_logger
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent
+logger = get_logger("migrations.runner")
+
+# Pre-migration snapshots (gap roadmap slice 20) land here, never on a search_path.
+SNAPSHOT_SCHEMA = "migration_snapshots"
+
+# Statements that change or remove an existing table's rows or shape. Matched
+# anywhere (not only at a statement start) so CTEs and DO blocks count too; a
+# keyword that follows instead (ON UPDATE CASCADE, DO UPDATE SET, FOR UPDATE OF)
+# is dropped by _NOT_TABLE, and a name that is no table is dropped by the
+# existence check. Over-capturing costs one extra copy; missing a table costs data.
+_IDENT = r'(?:"[^"]+"|\w+)'
+_QUALIFIED = rf"{_IDENT}(?:\s*\.\s*{_IDENT})?"
+_RE_TOUCHED = re.compile(
+    r"\b(?:ALTER\s+TABLE|DROP\s+TABLE|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?)\s+"
+    r"(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?"
+    rf"({_QUALIFIED}(?:\s*,\s*{_QUALIFIED})*)",
+    re.IGNORECASE,
+)
+_NOT_TABLE = {"set", "of", "on", "cascade", "restrict", "no", "skip", "nowait", "only", "if", "table"}
+# The only snapshot names the prune step will interpolate into DROP TABLE.
+_RE_SNAPSHOT_NAME = re.compile(r"^[a-z0-9_]{1,63}$")
+
+
+def touched_tables(sql: str) -> list[str]:
+    """Tables an up.sql alters, drops, updates, deletes from or truncates (lower-cased, in order).
+
+    Comments are stripped first. A schema prefix is dropped (the runner snapshots
+    from the connection's own schema); quotes are removed.
+    """
+    body = "\n".join(_split_sql_statements(sql))
+    found: list[str] = []
+    for m in _RE_TOUCHED.finditer(body):
+        for ref in m.group(1).split(","):
+            name = ref.strip().split(".")[-1].strip().strip('"').lower()
+            if name and name not in _NOT_TABLE and name not in found:
+                found.append(name)
+    return found
+
+
+def _snapshot_name(table: str, stem: str) -> str:
+    """``<table>__<migration_id>``, shortened to the migration number past Postgres' 63-byte limit."""
+    name = f"{table}__{stem}"
+    if len(name) <= 63:
+        return name
+    return f"{table[:50]}__{stem.split('_', 1)[0]}"
+
+
+def _snapshots_enabled() -> bool:
+    """On for a real database unless MIGRATION_SNAPSHOTS_ENABLED=false; never in test mode."""
+    return settings.MIGRATION_SNAPSHOTS_ENABLED and not pg.TEST_MODE
+
+
+async def _set_local_timeouts(db: pg.Connection) -> None:
+    """Bound one migration transaction: a lock wait or a statement past its limit aborts it.
+
+    SET LOCAL lasts until the enclosing transaction ends, so nothing leaks onto the
+    connection after COMMIT/ROLLBACK. Values are ints from settings (0 = no limit).
+    """
+    await db.execute(f"SET LOCAL lock_timeout = '{int(settings.MIGRATION_LOCK_TIMEOUT_S)}s'")
+    await db.execute(f"SET LOCAL statement_timeout = '{int(settings.MIGRATION_STATEMENT_TIMEOUT_S)}s'")
+
+
+async def _snapshot_pending_tables(db: pg.Connection, pending: list[tuple[str, str]]) -> list[str]:
+    """Copy every existing table each pending migration touches into ``SNAPSHOT_SCHEMA``.
+
+    ``pending`` is ``[(stem, up_sql)]``. Returns the snapshot names made. A table
+    over ``MIGRATION_SNAPSHOT_MAX_ROWS`` is skipped (logged); an existing snapshot is
+    kept (it is the older pre-migration copy). Any error propagates, so no migration
+    runs without the snapshots it was promised.
+    """
+    made: list[str] = []
+    cap = int(settings.MIGRATION_SNAPSHOT_MAX_ROWS)
+    index_ready = False
+    for stem, sql in pending:
+        for table in touched_tables(sql):
+            cur = await db.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = current_schema() AND table_name = ?",
+                (table,),
+            )
+            if await cur.fetchone() is None:
+                continue
+            snap = _snapshot_name(table, stem)
+            async with db.transaction():
+                await _set_local_timeouts(db)
+                # `table` is a name information_schema just confirmed, not user input.
+                count_sql = f'SELECT count(*) FROM (SELECT 1 FROM "{table}" LIMIT ?) s'  # noqa: S608
+                cur = await db.execute(count_sql, (cap + 1,))
+                row = await cur.fetchone()
+                rows = int(row[0]) if row else 0
+                if rows > cap:
+                    logger.warning(
+                        "migration_snapshot_skipped",
+                        extra={"event": "migration_snapshot_skipped", "migration": stem, "table": table,
+                               "reason": f"more than {cap} rows (MIGRATION_SNAPSHOT_MAX_ROWS)"},
+                    )
+                    continue
+                if not index_ready:
+                    await _ensure_snapshot_index(db)
+                    index_ready = True
+                await db.execute(
+                    f'CREATE TABLE IF NOT EXISTS "{SNAPSHOT_SCHEMA}"."{snap}" AS TABLE "{table}"'
+                )
+                # Same transaction as the copy: a snapshot never exists without its
+                # index row, so the prune step below can always find it.
+                await db.execute(
+                    f'INSERT INTO "{SNAPSHOT_SCHEMA}"._taken (snapshot, migration, source_table, rows) '  # noqa: S608
+                    "VALUES (?, ?, ?, ?) ON CONFLICT (snapshot) DO NOTHING",
+                    (snap, stem, table, rows),
+                )
+            made.append(snap)
+            logger.info(
+                "migration_snapshot",
+                extra={"event": "migration_snapshot", "migration": stem, "table": table,
+                       "snapshot": f"{SNAPSHOT_SCHEMA}.{snap}", "rows": rows},
+            )
+    return made
+
+
+async def _ensure_snapshot_index(db: pg.Connection) -> None:
+    """The snapshot schema and its ``_taken`` index (one row per snapshot table)."""
+    await db.execute(f'CREATE SCHEMA IF NOT EXISTS "{SNAPSHOT_SCHEMA}"')
+    await db.execute(
+        f'CREATE TABLE IF NOT EXISTS "{SNAPSHOT_SCHEMA}"._taken ('
+        "snapshot TEXT PRIMARY KEY, migration TEXT, source_table TEXT, rows INTEGER, "
+        "taken_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+    )
+
+
+async def _prune_snapshots(db: pg.Connection) -> list[str]:
+    """Drop every snapshot older than ``MIGRATION_SNAPSHOT_RETENTION_DAYS`` and its index row.
+
+    Snapshots copy whole tables (users, applications, receipts) outside the
+    erasure path, so a deleted account must not live on in them. Names come only
+    from ``_taken`` and are interpolated only after matching ``_RE_SNAPSHOT_NAME``;
+    a row that fails it is logged and left alone. Returns the names dropped.
+    """
+    cur = await db.execute("SELECT to_regclass(?)", (f'"{SNAPSHOT_SCHEMA}"._taken',))
+    row = await cur.fetchone()
+    if row is None or row[0] is None:
+        return []
+    cur = await db.execute(
+        f'SELECT snapshot, migration FROM "{SNAPSHOT_SCHEMA}"._taken '  # noqa: S608 — module constant
+        "WHERE taken_at < now() - make_interval(days => ?) ORDER BY snapshot",
+        (int(settings.MIGRATION_SNAPSHOT_RETENTION_DAYS),),
+    )
+    dropped: list[str] = []
+    for snap, migration in await cur.fetchall():
+        if not _RE_SNAPSHOT_NAME.match(snap or ""):
+            logger.warning(
+                "migration_snapshot_prune_refused",
+                extra={"event": "migration_snapshot_prune_refused", "migration": migration,
+                       "reason": "snapshot name fails the strict name check"},
+            )
+            continue
+        async with db.transaction():
+            await _set_local_timeouts(db)
+            await db.execute(f'DROP TABLE IF EXISTS "{SNAPSHOT_SCHEMA}"."{snap}"')
+            await db.execute(f'DELETE FROM "{SNAPSHOT_SCHEMA}"._taken WHERE snapshot = ?', (snap,))  # noqa: S608
+        dropped.append(snap)
+        logger.info(
+            "migration_snapshot_pruned",
+            extra={"event": "migration_snapshot_pruned", "migration": migration,
+                   "snapshot": f"{SNAPSHOT_SCHEMA}.{snap}",
+                   "retention_days": int(settings.MIGRATION_SNAPSHOT_RETENTION_DAYS)},
+        )
+    return dropped
 
 
 async def _ensure_table(db: pg.Connection) -> None:
@@ -105,6 +283,32 @@ async def _resync_identity_sequences(db: pg.Connection) -> int:
         )
         fixed += 1
     return fixed
+
+
+# Advisory-lock key for ``up()``: a fixed constant so every concurrent booter of
+# the production schema (``public``) serializes on the same lock.
+MIGRATION_LOCK_KEY = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
+
+
+async def _migration_lock_key(db: pg.Connection) -> int:
+    """The advisory-lock key that serializes booters of THIS connection's schema.
+
+    Production always runs in ``public`` and always gets ``MIGRATION_LOCK_KEY``,
+    exactly as before. Test mode gives every test its own schema (``t_*`` /
+    ``mem_*``, ``pg.schema_for_path``); an advisory lock is database-wide, so
+    one shared key made every pytest-xdist worker queue behind every other
+    worker's full migration run although they never touch the same schema
+    (measured 2026-10-19: three of four workers parked on ``pg_advisory_lock``).
+    Two booters of the SAME schema still get the same key, so the race the lock
+    exists to close is still closed.
+    """
+    cur = await db.execute("SELECT current_schema()")
+    row = await cur.fetchone()
+    schema = row[0] if row else "public"
+    if schema == "public":
+        return MIGRATION_LOCK_KEY
+    digest = hashlib.md5(f"migrations:{schema}".encode(), usedforsecurity=False).digest()
+    return int.from_bytes(digest[:7], "big")  # 56 bits: positive, fits a bigint
 
 
 async def _applied_ids(db: pg.Connection) -> list[str]:
@@ -217,28 +421,38 @@ async def up(
     """
     mdir = migrations_dir or MIGRATIONS_DIR
     applied_now: list[str] = []
-    # Advisory-lock key: a fixed constant so all concurrent booters (FastAPI
-    # lifespan + ARQ worker) serialize on the same lock. Postgres has no
+    # Advisory-lock key (``_migration_lock_key``): one per schema, so all
+    # concurrent booters of a schema serialize on the same lock. Postgres has no
     # "database is locked" — this just prevents two processes running the same
     # migration body at once. Each migration now runs in its OWN BEGIN/COMMIT
     # (transactional migrations, docs/fable/02) so it applies atomically; the
     # session-level advisory lock is held across those transactions. Idempotency
     # comes from ON CONFLICT DO NOTHING on the _schema_migrations INSERT plus the
     # re-read under the lock.
-    lock_key = 0x30B360C0DE  # arbitrary stable 64-bit-ish int
     async with pg.connect(db_path) as db:
+        lock_key = await _migration_lock_key(db)
         # Acquire the lock BEFORE creating the migrations table so concurrent
         # booters don't race on CREATE TABLE (also non-atomic in Postgres).
         await db.execute("SELECT pg_advisory_lock(?)", (lock_key,))
         try:
             await _ensure_table(db)
             applied_set = set(await _applied_ids(db))
+            # Retention runs on every boot, pending or not (GDPR: see _prune_snapshots).
+            if _snapshots_enabled():
+                await _prune_snapshots(db)
+            pending: list[tuple[str, str]] = []
             for stem, _up_file in _discover_pairs(mdir):
                 if stem in applied_set:
                     if target is not None and stem == target:
                         break
                     continue
-                sql = (mdir / f"{stem}.up.sql").read_text()
+                pending.append((stem, (mdir / f"{stem}.up.sql").read_text()))
+                if target is not None and stem == target:
+                    break
+            # Slice 20: copy what the pending migrations will change BEFORE any runs.
+            if pending and _snapshots_enabled():
+                await _snapshot_pending_tables(db, pending)
+            for stem, sql in pending:
                 # One explicit transaction per migration body (finding H2): the
                 # body AND its _schema_migrations bookkeeping INSERT commit
                 # atomically. On ANY error the whole body rolls back and the stem
@@ -249,17 +463,29 @@ async def up(
                 # advisory lock above already serialises concurrent booters, so a
                 # genuine duplicate now surfaces loudly instead of masking a
                 # partially-applied state.
-                async with db.transaction():
-                    await _apply_up_sql(db, sql)
-                    await db.execute(
-                        "INSERT INTO _schema_migrations(id, applied_at) "
-                        "VALUES (?, ?) ON CONFLICT DO NOTHING",
-                        (stem, datetime.now(timezone.utc).isoformat()),
+                #
+                # Slice 20: SET LOCAL lock/statement timeouts bound the transaction, so
+                # a migration queued behind a live lock, or one that runs too long, is
+                # cancelled and rolled back instead of stalling the booting deploy.
+                try:
+                    async with db.transaction():
+                        await _set_local_timeouts(db)
+                        await _apply_up_sql(db, sql)
+                        await db.execute(
+                            "INSERT INTO _schema_migrations(id, applied_at) "
+                            "VALUES (?, ?) ON CONFLICT DO NOTHING",
+                            (stem, datetime.now(timezone.utc).isoformat()),
+                        )
+                except Exception as exc:
+                    timed_out = isinstance(exc, (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled))
+                    logger.error(
+                        "migration_failed",
+                        extra={"event": "migration_failed", "migration": stem, "timed_out": timed_out,
+                               "error_type": type(exc).__name__, "error": str(exc)[:500]},
                     )
+                    raise
                 applied_set.add(stem)
                 applied_now.append(stem)
-                if target is not None and stem == target:
-                    break
             # Rebuild migrations copy explicit ids, which leaves identity sequences
             # behind MAX(id) → the next insert would collide (docs/fable/02 D3).
             #
@@ -316,6 +542,7 @@ async def down(
         # One transaction: the schema change and the bookkeeping row commit
         # together or not at all.
         async with db.transaction():
+            await _set_local_timeouts(db)  # same bounds as up() (slice 20)
             await db.executescript(sql)
             await db.execute("DELETE FROM _schema_migrations WHERE id = ?", (last,))
         return last

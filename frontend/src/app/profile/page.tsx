@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import posthog from "posthog-js";
 import { User, AlertCircle, History } from "lucide-react";
@@ -13,6 +13,11 @@ import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer"
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { LessonsList } from "@/components/profile/LessonsList";
+import { AssistantTab } from "@/components/profile/AssistantTab";
+import { JobPriority } from "@/components/profile/JobPriority";
+import { MemoryTab } from "@/components/profile/MemoryTab";
+import { SetupTab } from "@/components/profile/SetupProgress";
+import { ProfileHeader, ProfileTabs, useProfileTab } from "@/components/profile/ProfileTabs";
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
   getProfile,
@@ -140,7 +145,8 @@ function headerLine(profile: ProfileResponse | null): string {
 
 // ── Page component ──────────────────────────────────────────
 
-export default function ProfilePage() {
+/** The CV tab: today's Profile page (the tab row sits under its header). */
+function CvTab() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -297,44 +303,32 @@ export default function ProfilePage() {
   const assistantPrefCount = countAssistantPreferenceEdits(agentEdits);
 
   return (
-    <div className="relative">
-      {/* ── Ambient glow ─────────────────────────────── */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-      >
-        <div className="absolute -top-[20%] left-1/2 h-[600px] w-[800px] -translate-x-1/2 rounded-full bg-primary/[0.10] blur-[120px]" />
-        <div className="absolute top-[30%] -left-[10%] h-[500px] w-[500px] rounded-full bg-primary/[0.07] blur-[100px]" />
-        <div className="absolute top-[50%] -right-[10%] h-[400px] w-[400px] rounded-full bg-primary/[0.05] blur-[100px]" />
-      </div>
-
-      <PageContainer className="relative py-8 lg:py-12">
+    <div>
+      <PageContainer className="py-8 lg:py-12">
         {/* ── Header ───────────────────────────────────── */}
-        <div className="animate-fade-in-up stagger-1 mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
-                <User className="h-5 w-5 text-primary" />
-              </div>
+        <div className="mb-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <User className="mt-2 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
               <div>
-                <h1 className="font-heading text-2xl font-bold tracking-tight sm:text-3xl">
-                  <span className="text-gradient-lime">Profile</span>
+                <h1 className="font-heading text-4xl font-normal tracking-tight">
+                  Profile
                 </h1>
                 {/* Owner decision, 2026-09-24: ONE line, naming what is
                     actually missing (reusing the same six completeness
                     inputs the old %/"Almost there" meter scored) instead of
                     a percentage nobody could act on. */}
-                <p className="text-sm text-muted-foreground">{oneLineStatus}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{oneLineStatus}</p>
                 {/* Optional inputs — a quiet line, never "to finish". */}
                 {extras.length > 0 && (
-                  <p className="text-xs text-muted-foreground/70">
+                  <p className="text-xs text-faint">
                     You can also add: {extras.join(", ")}
                   </p>
                 )}
                 {assistantPrefCount > 0 && (
                   <a
                     href="#preferences"
-                    className="block text-xs text-primary underline-offset-2 hover:underline"
+                    className="block text-xs text-brand underline-offset-2 hover:underline"
                   >
                     {assistantPrefCount === 1
                       ? "1 preference set by your assistant"
@@ -377,9 +371,12 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        <ProfileTabs />
+        <div className="mb-6" />
+
         {/* ── Error banner ────────────────────────────── */}
         {error && (
-          <div className="animate-fade-in-up mb-6 flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
             <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-destructive">
@@ -394,17 +391,17 @@ export default function ProfilePage() {
         {loadingProfile ? (
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
             <div className="space-y-6">
-              <div className="glass-card rounded-xl p-6">
+              <div className="rounded-xl border border-border bg-card p-6">
                 <Skeleton className="h-10 w-40 mb-4" />
                 <Skeleton className="h-40 w-full rounded-xl" />
               </div>
-              <div className="glass-card rounded-xl p-6">
+              <div className="rounded-xl border border-border bg-card p-6">
                 <Skeleton className="h-8 w-32 mb-4" />
                 <Skeleton className="h-10 w-full mb-3" />
                 <Skeleton className="h-10 w-full" />
               </div>
             </div>
-            <div className="glass-card rounded-xl p-6">
+            <div className="rounded-xl border border-border bg-card p-6">
               <Skeleton className="h-10 w-40 mb-6" />
               {Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="mb-4">
@@ -419,16 +416,22 @@ export default function ProfilePage() {
           <div className="space-y-6">
             {/* Two-column layout */}
             <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-              {/* Left column: CV + Enrichment */}
-              <CVUpload
-                onUpload={handleCVUpload}
-                onLinkedinUpload={handleLinkedinUpload}
-                onGithubEnrich={handleGithubEnrich}
-                onClearSection={handleClear}
-                profile={profile?.summary ?? null}
-                cvDetail={profile?.cv_detail ?? null}
-                loading={loadingProfile}
-              />
+              {/* Left column: CV + Enrichment, then Job priority in the space under it */}
+              <div className="space-y-6">
+                <CVUpload
+                  onUpload={handleCVUpload}
+                  onLinkedinUpload={handleLinkedinUpload}
+                  onGithubEnrich={handleGithubEnrich}
+                  onClearSection={handleClear}
+                  profile={profile?.summary ?? null}
+                  cvDetail={profile?.cv_detail ?? null}
+                  loading={loadingProfile}
+                />
+                <JobPriority
+                  rightToWork={(profile?.user_info as Record<string, unknown> | undefined)?.right_to_work}
+                  onSaved={setProfile}
+                />
+              </div>
 
               {/* Right column: Preferences */}
               <PreferencesForm
@@ -477,27 +480,22 @@ export default function ProfilePage() {
               const GROUPS: {
                 key: string;
                 label: string;
-                chip: string;
               }[] = [
                 {
                   key: "cv",
                   label: "From your CV",
-                  chip: "bg-score-high/10 text-score-high",
                 },
                 {
                   key: "linkedin",
                   label: "From LinkedIn",
-                  chip: "bg-sky-500/10 text-sky-400",
                 },
                 {
                   key: "github",
                   label: "From GitHub",
-                  chip: "bg-violet-500/10 text-violet-400",
                 },
                 {
                   key: "preferences",
                   label: "Added by you",
-                  chip: "bg-yellow-500/10 text-yellow-500",
                 },
               ];
               // THE one skill count, from the backend (skill_tiering.
@@ -531,10 +529,10 @@ export default function ProfilePage() {
                 Boolean(profile?.cv_detail);
               if (alreadyShownByCVViewer) return null;
               return (
-                <div className="animate-fade-in-up glass-card rounded-xl p-6">
-                  <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
+                <div className="rounded-xl border border-border bg-card p-6">
+                  <h2 className="font-heading text-lg font-normal mb-1 text-foreground">
                     Your Skills{" "}
-                    <span className="text-muted-foreground">({total})</span>
+                    <span className="font-mono tabular-nums text-muted-foreground">({total})</span>
                   </h2>
                   <p className="mb-4 text-xs text-muted-foreground">
                     Everything we found, grouped by where it came from.
@@ -545,15 +543,15 @@ export default function ProfilePage() {
                       if (items.length === 0) return null;
                       return (
                         <div key={g.key}>
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          <p className="mb-2 font-mono text-[11px] uppercase tracking-wider text-faint">
                             {g.label}{" "}
-                            <span className="opacity-60">({items.length})</span>
+                            <span className="tabular-nums">({items.length})</span>
                           </p>
                           <ul className="flex flex-wrap gap-1.5">
                             {items.map((skill) => (
                               <li
                                 key={`${g.key}-${skill}`}
-                                className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${g.chip}`}
+                                className="rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground"
                               >
                                 {skill}
                               </li>
@@ -580,5 +578,27 @@ export default function ProfilePage() {
         onRestore={fetchProfile}
       />
     </div>
+  );
+}
+
+/** Profile has four tabs, picked by `?tab=` (CV when absent). Only the open
+ *  tab mounts, so the CV page's fetches stay off the other tabs. */
+function ProfileRouter() {
+  const tab = useProfileTab();
+  if (tab === "cv") return <CvTab />;
+  return (
+    <PageContainer className="py-8 lg:py-12">
+      <ProfileHeader />
+      <ProfileTabs />
+      {tab === "memory" ? <MemoryTab /> : tab === "assistant" ? <AssistantTab /> : <SetupTab />}
+    </PageContainer>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={null}>
+      <ProfileRouter />
+    </Suspense>
   );
 }

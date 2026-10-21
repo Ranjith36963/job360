@@ -63,6 +63,39 @@ describe("middleware — backend outage (F4)", () => {
     expect(res.headers.get("set-cookie") ?? "").toMatch(/job360_session=;/);
   });
 
+  it.each([429, 500, 503])(
+    "a %i from /api/auth/me does NOT bounce to login or delete the cookie",
+    async (status) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(null, { status }))
+      );
+      const res = await middleware(protectedRequest());
+      // Same service-unavailable path as an outage: cookie kept, marker set.
+      const location = new URL(res.headers.get("location")!);
+      expect(location.searchParams.get("error")).toBe("service_unavailable");
+      expect(res.headers.get("set-cookie") ?? "").not.toMatch(/job360_session=;/);
+    }
+  );
+
+  it("/stats is protected: no cookie bounces to login", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(new NextRequest("http://localhost:3000/stats"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("/people is protected: no cookie bounces to login", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(new NextRequest("http://localhost:3000/people"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("lets a verified session through", async () => {
     vi.stubGlobal(
       "fetch",

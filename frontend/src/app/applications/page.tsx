@@ -12,7 +12,7 @@ export default function ApplicationsPage() {
     <PageContainer className="flex flex-col gap-6 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-heading text-2xl font-bold">Your applications</h1>
+          <h1 className="font-heading text-2xl font-medium">Your applications</h1>
           <p className="text-muted-foreground">
             Every job you&apos;ve brought, its status, and its whole history.
           </p>
@@ -21,10 +21,20 @@ export default function ApplicationsPage() {
           href="/bring"
           className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
         >
-          Bring a job
+          Jobs in
         </Link>
       </div>
       <ApplicationList />
+      <p className="text-xs text-muted-foreground">
+        <Link
+          href="/settings/account#your-data"
+          data-testid="applications-download-all"
+          className="underline"
+        >
+          Download everything
+        </Link>{" "}
+        you have stored here as one file.
+      </p>
     </PageContainer>
   );
 }

@@ -1,0 +1,14 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    env:
+      FIX_RESULT: ${{ needs.fix.result }}
+    steps:
+      - name: route
+        run: |
+          if [ "$FIX_RESULT" = "success" ] && [ "$X" = "true" ]; then
+            mode=ship
+          elif [ "$FIX_RESULT" = "failure" ]; then
+            mode=fix-failed
+          fi

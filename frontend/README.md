@@ -1,5 +1,5 @@
 # Job360 Frontend
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 
 Next.js 16 + React 19 web app for Job360. A thin screen over the FastAPI
 backend's routes. Job360 never sources or ranks jobs — the seeker's own agent
@@ -7,7 +7,7 @@ finds the job; Job360 remembers it.
 
 ## Prerequisites
 
-- Node 20+ (LTS)
+- Node 22 (LTS; the Docker image and CI both run 22)
 - npm (bundled with Node). pnpm or yarn also work — lockfile is npm.
 
 ## Install
@@ -20,16 +20,9 @@ npm install
 ## Environment
 
 `.env*` is gitignored (`frontend/.gitignore`), so a fresh clone has no
-`.env.local`. Create it:
-
-```bash
-# frontend/.env.local
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-Point it at whatever host and port the FastAPI backend is running on.
-`NEXT_PUBLIC_*` vars are inlined into the client bundle at build time, so a
-rebuild is needed after changing them.
+`.env.local`. Copy `.env.local.example` and read its comments before setting
+anything — they say which vars must stay UNSET for local dev, and what breaks
+when they are not.
 
 ## Run
 
@@ -55,12 +48,9 @@ server. Counts are not written down here — measure them.
 
 ## Cross-wiring with the backend
 
-1. The backend must be running on the URL in `NEXT_PUBLIC_API_URL`
-   (default `http://localhost:8000`). See
-   [`../backend/README.md`](../backend/README.md).
-2. The backend's `FRONTEND_ORIGIN` env var must include this frontend's
-   origin (default `http://localhost:3000`). Without it, the browser blocks
-   the API calls at the CORS preflight.
+Browser calls go to this app's own origin and are proxied; the target is
+`BACKEND_ORIGIN` in `next.config.ts`. The backend's own browser-origin
+allow-list is read in `api.main`.
 
 ## Further reading
 

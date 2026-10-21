@@ -8,8 +8,10 @@ const PROTECTED_PATHS = [
   "/bring",
   "/receipts",
   "/applications",
+  "/people",
+  "/stats",
+  "/needs-you",
   "/settings",
-  "/admin",
   "/oauth",
 ];
 
@@ -68,7 +70,10 @@ export async function middleware(request: NextRequest) {
       // never cache an auth check
       cache: "no-store",
     });
-    if (!verify.ok) return bounceToLogin();
+    // ONLY a definite 401 means "this session is dead". A 429 / 5xx is the
+    // backend struggling — treat it like an outage (below): keep the cookie.
+    if (verify.status === 401) return bounceToLogin();
+    if (!verify.ok) throw new Error(`auth verify failed: ${verify.status}`);
   } catch {
     // Backend unreachable: fail CLOSED (docs/fable/03 F4) — an UNVERIFIED
     // session must not grant access to a protected page. Deliberately DIFFERENT

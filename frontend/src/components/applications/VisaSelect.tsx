@@ -80,7 +80,7 @@ export function VisaSelect({
     return (
       <div>
         <div className="flex items-center justify-between gap-2">
-          <p data-testid="visa-summary" className="text-sm text-muted-foreground">
+          <p data-testid="visa-summary" className="text-[13px] text-muted-foreground">
             {summary}
             {visa.country ? ` · ${visa.country}` : ""}
           </p>
@@ -88,6 +88,7 @@ export function VisaSelect({
             type="button"
             size="sm"
             variant="outline"
+            className="border-border bg-card"
             data-testid="visa-edit"
             onClick={() => setEditing(true)}
           >
@@ -100,13 +101,13 @@ export function VisaSelect({
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-faint">
         What the ad says about sponsorship. Job360 never guesses — leave it as
         &quot;Ad says nothing&quot; unless the ad says.
       </p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <div className="space-y-1">
-          <Label htmlFor="visa-select-signal" className="text-xs font-medium">
+          <Label htmlFor="visa-select-signal" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             Sponsorship
           </Label>
           <select
@@ -114,7 +115,7 @@ export function VisaSelect({
             data-testid="visa-select"
             value={signal}
             onChange={(e) => setSignal(e.target.value)}
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+            className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
           >
             <option value="unknown">Ad says nothing</option>
             <option value="sponsors">Sponsors visas</option>
@@ -122,7 +123,7 @@ export function VisaSelect({
           </select>
         </div>
         <div className="space-y-1">
-          <Label htmlFor="visa-select-country" className="text-xs font-medium">
+          <Label htmlFor="visa-select-country" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             Country
           </Label>
           <Input
@@ -135,7 +136,7 @@ export function VisaSelect({
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="visa-select-detail" className="text-xs font-medium">
+          <Label htmlFor="visa-select-detail" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             The ad&apos;s sentence
           </Label>
           <Input
@@ -154,7 +155,7 @@ export function VisaSelect({
           data-testid="visa-save"
           disabled={saving}
           onClick={() => void save()}
-          className="self-start"
+          className="self-start bg-foreground text-background hover:bg-foreground/90"
         >
           {saving ? "Saving…" : "Save"}
         </Button>
@@ -165,7 +166,7 @@ export function VisaSelect({
           data-testid="visa-cancel"
           disabled={saving}
           onClick={cancel}
-          className="self-start"
+          className="self-start border-border bg-card"
         >
           Cancel
         </Button>

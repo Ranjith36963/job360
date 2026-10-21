@@ -1,10 +1,15 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { getApplicationArtifact, getArtifactDiff } from "@/lib/api";
+import { downloadApplicationArtifact, getApplicationArtifact, getArtifactDiff } from "@/lib/api";
+import type { TailorFormat } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { CopyButton } from "@/components/applications/CopyButton";
 import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as ArtifactDiffData } from "@/lib/api";
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
 import { formatDate } from "@/lib/format-date";
+import { CvSeenButton } from "@/components/applications/CvSeenButton";
+import type { ApplicationControls } from "@/lib/api";
 
 /** Plain words for who/what made a version (owner decision 6, 2026-09-24):
  * `web:tailor` -> "Made on the website", `agent:<Name>` -> "Written by
@@ -15,6 +20,43 @@ function describeMadeBy(madeBy: string): string {
   if (madeBy === "web:tailor") return "Made on the website";
   if (madeBy.startsWith("agent:")) return `Written by ${madeBy.slice("agent:".length)}`;
   return madeBy;
+}
+
+/** Whose opinion the ATS score is: the assistant that saved the version —
+ * never Job360's (it has no LLM and scores nothing). */
+function opinionOwner(madeBy: string): string {
+  if (madeBy.startsWith("agent:")) {
+    const name = madeBy.slice("agent:".length).trim();
+    if (name) return `${name}'s opinion`;
+  }
+  return "your assistant's opinion";
+}
+
+/** "ATS 82 (Claude's opinion)", the notes folded under it. Nothing when the
+ * assistant gave no score (rule #29: empty stays silent). */
+function AtsOpinion({ artifact }: { artifact: ApplicationArtifact }) {
+  if (artifact.ats_score == null) return null;
+  const head = (
+    <>
+      <span className="font-mono tabular-nums text-foreground">ATS {artifact.ats_score}</span>
+      <span className="ml-1.5 text-muted-foreground">({opinionOwner(artifact.made_by)})</span>
+    </>
+  );
+  const notes = artifact.ats_notes?.trim();
+  return (
+    <div data-testid="artifact-ats" className="mt-1 text-xs">
+      {notes ? (
+        <details>
+          <summary className="cursor-pointer">{head}</summary>
+          <p className="mt-1 whitespace-pre-wrap border-l border-border pl-2 text-muted-foreground">
+            {notes}
+          </p>
+        </details>
+      ) : (
+        <p>{head}</p>
+      )}
+    </div>
+  );
 }
 
 /** Approximate page count from a character count — chars/3000, minimum 1
@@ -39,10 +81,15 @@ export function ArtifactVersions({
   applicationId,
   artifacts,
   receipts = [],
+  controls = null,
+  onControls,
 }: {
   applicationId: number;
   artifacts: ApplicationArtifact[];
   receipts?: ApplicationReceiptEntry[];
+  /** S3: the decision state. When given, the LATEST CV shows "I've checked this CV". */
+  controls?: ApplicationControls | null;
+  onControls?: (next: ApplicationControls) => void;
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const [texts, setTexts] = useState<Record<number, string>>({});
@@ -52,6 +99,7 @@ export function ArtifactVersions({
   const [diff, setDiff] = useState<ArtifactDiffData | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   const appliedIds = new Set<number>();
   for (const receipt of receipts) {
@@ -80,6 +128,38 @@ export function ArtifactVersions({
       }
     },
     [applicationId, openId, texts]
+  );
+
+  /** The version's full text — already loaded, else fetched once. */
+  const textOf = useCallback(
+    async (artifact: ApplicationArtifact): Promise<string> => {
+      if (artifact.text != null) return artifact.text;
+      if (texts[artifact.id] != null) return texts[artifact.id];
+      const full = await getApplicationArtifact(applicationId, artifact.id);
+      const text = full.text ?? "";
+      setTexts((prev) => ({ ...prev, [artifact.id]: text }));
+      return text;
+    },
+    [applicationId, texts]
+  );
+
+  const download = useCallback(
+    async (artifact: ApplicationArtifact, fmt: TailorFormat) => {
+      setDownloadingId(artifact.id);
+      try {
+        await downloadApplicationArtifact(
+          applicationId,
+          artifact.id,
+          fmt,
+          `${artifact.kind.replace(/_/g, "-")}-v${artifact.version_no}`
+        );
+      } catch (err) {
+        toast.apiError(err, "Download failed");
+      } finally {
+        setDownloadingId(null);
+      }
+    },
+    [applicationId]
   );
 
   // Every diff fetch is numbered; a response that is not the newest request
@@ -149,59 +229,93 @@ export function ArtifactVersions({
   for (const list of byKind.values()) list.sort((a, b) => a.version_no - b.version_no);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
       {[...byKind.entries()].map(([kind, versions]) => (
         <div key={kind}>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {kind.replace("_", " ")}
+          <p className="mb-1 font-mono text-[11px] uppercase tracking-wider text-faint">
+            {kind.replace(/_/g, " ")}
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col">
             {versions.map((artifact) => {
               const applied = appliedIds.has(artifact.id);
               const others = versions.filter((v) => v.id !== artifact.id);
               return (
-                <div key={artifact.id} data-testid="artifact-version" className="glass-card rounded-lg p-3">
-                  <div className="flex w-full items-center justify-between gap-2 text-sm font-medium">
+                <div key={artifact.id} data-testid="artifact-version" className="border-t border-border py-2.5 first:border-t-0">
+                  <div className="flex w-full items-center justify-between gap-3 text-sm">
                     <button type="button" onClick={() => void open(artifact)} className="min-w-0 flex-1 text-left">
-                      <span data-testid="artifact-version-label">v{artifact.version_no}</span>
+                      <span data-testid="artifact-version-label" className="font-mono tabular-nums">
+                        v{artifact.version_no}
+                      </span>
                       {applied && (
                         <span
                           data-testid="artifact-applied-badge"
-                          className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
+                          className="ml-2 font-mono text-[11px] text-brand"
                         >
                           Applied
                         </span>
                       )}
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      <span className="ml-2 text-[12.5px] text-muted-foreground">
                         {describeMadeBy(artifact.made_by)} · {pageCount(artifact.chars)}
                       </span>
                     </button>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="shrink-0 font-mono text-xs tabular-nums text-faint">
                       {formatDate(artifact.created_at)}
                     </span>
                     <button
                       type="button"
                       data-testid="artifact-compare"
                       onClick={() => void compare(artifact)}
-                      className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                      className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                     >
                       {compareId === artifact.id ? "Close" : "Compare"}
                     </button>
                   </div>
+                  {(kind === "cv" || kind === "cover_letter") && (
+                    <div className="mt-1 flex items-center gap-3">
+                      <CopyButton getText={() => textOf(artifact)} testId="artifact-copy" />
+                      {kind === "cv" && controls?.cv?.artifact_id === artifact.id && (
+                        <CvSeenButton
+                          applicationId={applicationId}
+                          artifactId={artifact.id}
+                          seen={controls.cv.seen ?? null}
+                          onChanged={onControls}
+                        />
+                      )}
+                      {downloadingId === artifact.id ? (
+                        <span data-testid="artifact-downloading" className="text-xs text-muted-foreground">
+                          Downloading…
+                        </span>
+                      ) : (
+                        (["docx", "pdf"] as const).map((fmt) => (
+                          <button
+                            key={fmt}
+                            type="button"
+                            data-testid={`artifact-download-${fmt}`}
+                            disabled={downloadingId !== null}
+                            onClick={() => void download(artifact, fmt)}
+                            className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                          >
+                            {fmt === "docx" ? "Word" : "PDF"}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  <AtsOpinion artifact={artifact} />
                   {openId === artifact.id && (
-                    <div className="mt-2 whitespace-pre-wrap rounded-md bg-muted/30 p-3 text-sm">
+                    <div className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-sm">
                       {loadingId === artifact.id ? "Loading…" : texts[artifact.id]}
                     </div>
                   )}
                   {compareId === artifact.id && (
                     <div className="mt-2">
-                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <label className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-wider text-faint">
                         Compare with
                         <select
                           data-testid="artifact-compare-base"
                           value={against}
                           onChange={(e) => void changeBase(artifact.id, e.target.value)}
-                          className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                          className="rounded-md border border-border bg-background px-2 py-1 font-sans text-xs normal-case tracking-normal text-foreground"
                         >
                           <option value="">
                             {kind === "cv" ? "Original CV (your profile)" : "The version before this"}

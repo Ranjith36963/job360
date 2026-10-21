@@ -66,7 +66,6 @@ Wait for `Ready in …`. If `:3000` is busy, a server is already up — reuse it
 - **State:** a fresh account has no jobs, so empty states are expected. To see populated UI you need jobs in the DB (see Backend "seed" note) — don't mistake a correct empty state for a bug.
 
 **Known benign console noise** (do NOT chase these as bugs):
-- Dark-mode **hydration mismatch** on `<html className="dark">` — the Next.js dev "1 Issue" badge. Cosmetic.
 - `GET /api/auth/me` → **401** when logged out — that's the auth check working.
 - `GET /api/profile` → **404** for a brand-new user — means "no profile yet", expected.
 
@@ -110,9 +109,7 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
 **Unblock it.**
 - The fastest way to exercise the product path end-to-end is `POST /api/jobs/bring`
   (or the `/bring` UI form) with a job-ad URL or pasted text — there is no source
-  pipeline to run standalone anymore (`backend/src/cli.py`'s own module docstring
-  says so: slice 5 deleted `run`/`status`/`view`/`sources`; the CLI only has `api`
-  and `setup-profile`).
+  pipeline to run standalone anymore (slice 5 deleted `run`/`status`/`view`/`sources`).
 - Add temporary structured logs Claude can grep to prove a branch executed.
 
 ---
@@ -149,11 +146,7 @@ evidence), severity, and the fix.
 These cost real time the first time. Reading them here saves the next run.
 
 - **Postgres must be up before anything boots.** The dev DB is a container on
-  host port 5433 (`docker-compose.dev.yml`); if it is down the API and the whole
-  test suite fail at startup/collection with
-  `connection to server at "127.0.0.1", port 5433 failed`. That exact error also
-  killed the nightly `live-e2e` workflow for 25 consecutive nights because CI had
-  no Postgres service. Start the container first.
+  host port 5433 (`docker-compose.dev.yml`). Start it first.
   (The two SQLite gotchas that used to live here — a stale `data/jobs.db` and an
   aiosqlite thread holding the file lock — are obsolete: SQLite is gone.)
 - **Auth needs secrets in the root `.env`.** Registration creates the user row, then fails
@@ -177,7 +170,7 @@ These cost real time the first time. Reading them here saves the next run.
 - **CV extraction blocks the upload.** `routes/profile.upload_cv` awaits the two-pass extraction and returns the populated profile in the 200 (`tests/test_profile_upload.py::test_dedicated_cv_route_accepts_pdf`) — give the request a long client timeout, and don't poll for skills that already landed.
 - **The columns a profile write touches are `services/profile/storage.save_profile`'s** — read them there before querying `user_profiles` by hand.
 - **Login is brute-force-locked**, and the throttle key is (email, client IP) — read `api.routes.auth.login`, caps in `core.settings.LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS`. So from one sweeping machine a deliberately-failed email stays locked even with the right password: use a **throwaway email** for the lockout test, or a later legit login reads as a false 429.
-- **Minting an agent token needs a browser session, not a verified email.** An unverified user mints fine (`tests/test_token_mint_gate.py::test_an_unverified_session_can_still_mint_a_token`); the 403 you can actually hit is `session_required`, from a token trying to mint a token. The gated routes are the ones declaring `Depends(require_verified_user)` — grep that exact form, never the qualified name (every route imports the bare symbol, so `api.auth_deps.require_verified_user` matches nothing); today only `routes/tailor.py` declares it. CV upload does NOT, so do not expect a 403 there.
+- **Minting a personal agent token needs a browser session AND a verified email** (`tests/test_token_mint_gate.py::test_unverified_cannot_mint_token`; the `REQUIRE_EMAIL_VERIFICATION=false` escape hatch still allows it). A token trying to mint a token gets `session_required`. OAuth connect is not gated on verification. Which routes DO demand a verified email is asserted in `tests/test_verified_email_gate_surface.py::test_verified_email_gate_covers_exactly_the_expected_routes` — read its `EXPECTED` set, don't grep for the gate (it is declared two ways, and only the dependency tree sees both). CV upload is not among them, so do not expect a 403 there.
 
 ## Tools this skill uses
 

@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-09-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 # Breach Runbook — the 72-hour plan
 
 **Read this top-to-bottom the moment you suspect a breach.** Do the steps in

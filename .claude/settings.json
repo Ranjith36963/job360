@@ -20,6 +20,10 @@
       "Bash(npm run lint:*)",
       "Bash(npm run test:unit:*)",
       "Bash(npm run build:*)",
+      "Bash(git add -A -- backend frontend)",
+      "Bash(bash scripts/agent-gate.sh)",
+      "Bash(bash scripts/agent-gate.sh --full)",
+      "Bash(bash .claude/hooks/review-stamp.sh)",
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(head:*)",
@@ -43,7 +47,7 @@
       "Bash(cat .env)",
       "Bash(cat .env:*)",
       "Bash(cat *.env)",
-      "Bash(cat *.env:*)",
+      "Bash(cat *.env*)",
       "Bash(gh secret list:*)",
       "Bash(vercel env pull:*)",
       "Bash(heroku config:*)",
@@ -81,28 +85,27 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-edit-lint.sh",
+            "timeout": 60,
+            "shell": "bash",
+            "statusMessage": "linting the edited file..."
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/claude-md-proposal.sh",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/session-context.sh"
-          },
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/worktree-reaper.sh",
-            "timeout": 15,
+            "command": "bash .claude/hooks/stop-quality-gate.sh",
+            "timeout": 30,
             "shell": "bash"
           }
         ]

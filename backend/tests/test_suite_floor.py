@@ -24,9 +24,9 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 CONTRIBUTING = BACKEND.parent / "CONTRIBUTING.md"
 
-# Matches the merge-gate wording in CONTRIBUTING.md: "1,586 collected".
+# Matches the merge-gate wording in CONTRIBUTING.md: "4,350 collected".
 _FLOOR = re.compile(r"([\d,]{3,})\s+collected")
-# pytest's own `-q --collect-only` summary line: "1586 tests collected in 3.23s".
+# pytest's own `-q --collect-only` summary line: "4357 tests collected in 11.28s".
 _COLLECTED = re.compile(r"(\d+)\s+tests? collected")
 
 

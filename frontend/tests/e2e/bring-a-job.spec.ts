@@ -131,7 +131,7 @@ test.describe("Bring a job", () => {
     // --- 1. Paste the ad -------------------------------------------------
     await page.goto("/bring");
     await expect(page).not.toHaveURL(/\/login/);
-    await expect(page.getByRole("heading", { name: "Bring a job" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Jobs in" })).toBeVisible();
 
     const bringBtn = page.getByRole("button", { name: /bring this job/i });
     await expect(bringBtn).toBeDisabled(); // title, company, ad are required
@@ -167,13 +167,13 @@ test.describe("Bring a job", () => {
     await expect(page.getByRole("heading", { name: /ask your assistant/i })).toBeVisible();
   });
 
-  test("empty receipts page points to Bring a job", async ({ page, context }) => {
+  test("empty receipts page points to Jobs in", async ({ page, context }) => {
     await context.addCookies([SESSION_COOKIE]);
     await page.route("**/api/receipts**", (route) =>
       route.fulfill(json({ receipts: [], total: 0 }))
     );
     await page.goto("/receipts");
     await expect(page.getByText("No receipts yet")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("link", { name: /Bring a job/ })).toHaveAttribute("href", "/bring");
+    await expect(page.getByRole("link", { name: /Jobs in/ })).toHaveAttribute("href", "/bring");
   });
 });

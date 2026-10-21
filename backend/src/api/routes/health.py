@@ -1,31 +1,53 @@
 """Health and status endpoints."""
 
+import asyncio
 import logging
 import os
+import re
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
+from psycopg_pool import PoolTimeout
 
-from src.api.dependencies import get_request_db
 from src.api.models import (
     HealthResponse,
     LivezResponse,
-    ReadyzChecks,
-    ReadyzResponse,
     StatusResponse,
+    VersionResponse,
 )
+from src.core import settings
 from src.core.tenancy import DEFAULT_TENANT_ID
-from src.repositories.database import JobDatabase
+from src.repositories import pg, pool
 from src.services.profile.storage import profile_exists
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
+# A git SHA and nothing else: never echo an env value that does not look like one.
+_SHA = re.compile(r"[0-9a-f]{7,40}")
+
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     return HealthResponse(status="ok", version="1.0.0")
+
+
+@router.get("/version", response_model=VersionResponse)
+async def version(response: Response) -> VersionResponse:
+    """The commit this process was deployed from (2026-10-20).
+
+    post-merge-watch.yml polls this until it reports the merge SHA, so "deployed"
+    means THIS commit is serving, not that the old container still answers 200
+    (readyz and /health cannot tell the two apart). Railway injects
+    RAILWAY_GIT_COMMIT_SHA on every GitHub deploy, and a rollback restores the old
+    deployment's variables, so after a rollback this reports the old SHA. Public and
+    data-free: the SHA is already public on GitHub. ``no-store`` so no proxy can
+    serve an old SHA after the swap.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    raw = os.getenv("RAILWAY_GIT_COMMIT_SHA", "").strip().lower()
+    return VersionResponse(sha=raw if _SHA.fullmatch(raw) else "unknown")
 
 
 @router.get("/livez", response_model=LivezResponse)
@@ -40,73 +62,59 @@ async def livez() -> LivezResponse:
 
 @router.get("/readyz")
 async def readyz() -> JSONResponse:
-    """Readiness probe — checks real dependencies before accepting traffic.
+    """Readiness probe: can the request path get a DB connection right now?
 
-    Checks:
-      * db   — trivial ``SELECT 1`` through the pg connection layer.
-      * redis — ping via redis-py. Skipped (not failed) when REDIS_URL unset.
+    Production borrows a connection from the SAME pool ``get_request_db`` uses
+    (``repositories/pool.py``), waiting at most ``READYZ_POOL_TIMEOUT_S``, and
+    runs ``SELECT 1`` under the same bound. A pinned pool (every connection
+    held) or an unreachable database answers 503, which is what Railway's deploy
+    healthcheck (``backend/railway.json``) and the uptime probe need to see.
 
-    Returns 200 ``{status:"ready", ...}`` when all checks pass,
-    503 ``{status:"not ready", ...}`` when any required check fails.
+    200 ``{"status": "ready", "pool": {size, idle, used, waiting, max}}``
+    503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}``
+
+    Test mode has no request-path pool (``get_request_db`` opens a fresh
+    connection per request there), so the probe opens one the same way and
+    ``pool`` is null. Redis is no longer checked: the service was deleted
+    2026-09-02 and the auth rate limiter falls back without it.
     """
-    checks: dict[str, str] = {}
-    healthy = True
-
-    # --- Postgres check ---------------------------------------------------
+    timeout = settings.READYZ_POOL_TIMEOUT_S
+    pool_stats: dict[str, int] | None = None
     try:
-        from src.repositories import pg
+        if pg.TEST_MODE:
+            async with pg.connect() as conn:
+                await asyncio.wait_for(conn.execute("SELECT 1"), timeout)
+        else:
+            request_pool = await pool.get_pool()
+            async with pool.acquire(request_pool, timeout=timeout) as conn:
+                await asyncio.wait_for(conn.execute("SELECT 1"), timeout)
+            pool_stats = pool.stats(request_pool)
+    except PoolTimeout as exc:
+        return _not_ready("pool_timeout", exc)
+    except Exception as exc:  # any DB failure must answer 503, never a 500
+        return _not_ready("db_error", exc)
+    return JSONResponse(content={"status": "ready", "pool": pool_stats}, status_code=200)
 
-        async with pg.connect() as conn:
-            await conn.execute("SELECT 1")
-        checks["db"] = "ok"
-    except Exception as exc:
-        logger.warning("readyz: db check failed: %s", exc)
-        checks["db"] = "error"
-        healthy = False
 
-    # --- Redis check ------------------------------------------------------
-    redis_url = os.getenv("REDIS_URL", "")
-    if not redis_url:
-        checks["redis"] = "skipped"
-    else:
-        try:
-            import redis.asyncio as aioredis  # noqa: PLC0415
-
-            # redis-py ships py.typed but `from_url` itself carries no
-            # annotations, so strict mode flags the call, not the import.
-            r = aioredis.from_url(redis_url, socket_connect_timeout=2)
-            await r.ping()
-            await r.aclose()
-            checks["redis"] = "ok"
-        except ImportError:
-            # redis package not installed; treat as skipped rather than error.
-            # Redis is optional here — it backs the shared auth rate limiter
-            # (services/auth/rate_limit.py), which falls back to an in-process
-            # window when it is absent.
-            logger.info("readyz: redis-py not installed, skipping Redis check")
-            checks["redis"] = "skipped"
-        except Exception as exc:
-            logger.warning("readyz: redis check failed: %s", exc)
-            checks["redis"] = "error"
-            healthy = False
-
-    status_code = 200 if healthy else 503
-    body = ReadyzResponse(
-        status="ready" if healthy else "not ready",
-        checks=ReadyzChecks(**checks),
+def _not_ready(reason: str, exc: BaseException) -> JSONResponse:
+    # The body carries only the reason; the log adds the error class. Neither
+    # carries the DSN or the driver's message (which can name the host).
+    logger.warning(
+        "readyz_not_ready",
+        extra={"event": "readyz_not_ready", "reason": reason, "error": type(exc).__name__},
     )
-    return JSONResponse(content=body.model_dump(), status_code=status_code)
+    return JSONResponse(content={"status": "not_ready", "reason": reason}, status_code=503)
 
 
 @router.get("/status", response_model=StatusResponse)
-async def status(db: JobDatabase = Depends(get_request_db)) -> StatusResponse:
-    """How much is stored, and has this deployment been set up at all.
+async def status() -> StatusResponse:
+    """Has this deployment been set up at all.
 
     Slice 5 (#483) took the source counters and the last-run block off this
-    response: nothing fetches jobs any more, so there is no run to report.
+    response; the public-audit fix then removed ``jobs_total`` — a public
+    endpoint must not reveal how many ads the shared catalog holds.
     """
     return StatusResponse(
-        jobs_total=await db.count_jobs(),
         # Public /health endpoint reports "has the single-tenant deployment
         # been set up?". Checking DEFAULT_TENANT_ID preserves CLI-era semantics
         # — per-user existence checks belong inside authenticated routes.

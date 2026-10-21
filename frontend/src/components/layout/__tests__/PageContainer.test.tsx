@@ -1,43 +1,33 @@
 /**
- * Owner decision (2026-09-25): every signed-in page shares ONE width —
- * exactly the navbar's max width and horizontal padding — so page edges
- * line up with the menu above them. This pins PageContainer to those exact
- * classes and guards against the navbar's width drifting away from it
- * unnoticed.
+ * Redesign slice 1: signed-in content is no longer boxed at `max-w-7xl`. It
+ * fills the area right of the sidebar with comfortable side padding
+ * (`px-6 lg:px-10`). This pins that behaviour: no max-width cap on the
+ * container, the new padding, and caller classes preserved.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { Navbar } from "@/components/layout/Navbar";
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/applications",
-}));
+const MAX_W_RE = /\bmax-w-/;
 
-vi.mock("@/components/layout/AuthProvider", () => ({
-  useAuth: () => ({ user: null, loading: false, logout: vi.fn() }),
-}));
-
-const SHARED_WIDTH_CLASSES = ["mx-auto", "max-w-7xl", "px-4", "sm:px-6"];
-
-describe("PageContainer — shared page width", () => {
-  it("uses exactly the navbar's max width and horizontal padding", () => {
+describe("PageContainer — full width beside the sidebar", () => {
+  it("fills the available width with px-6 lg:px-10 padding and no max-width box", () => {
     render(
       <PageContainer>
         <p>content</p>
       </PageContainer>
     );
 
-    const content = screen.getByText("content");
-    const container = content.parentElement;
-    expect(container).not.toBeNull();
-    for (const cls of SHARED_WIDTH_CLASSES) {
-      expect(container!.className).toContain(cls);
+    const container = screen.getByText("content").parentElement!;
+    for (const cls of ["w-full", "px-6", "lg:px-10"]) {
+      expect(container).toHaveClass(cls);
     }
+    expect(container.className).not.toMatch(MAX_W_RE);
+    expect(container).not.toHaveClass("mx-auto");
   });
 
-  it("keeps caller classes alongside the shared width", () => {
+  it("keeps caller classes alongside the shared padding", () => {
     render(
       <PageContainer className="flex flex-col gap-6 py-8">
         <p>content</p>
@@ -45,17 +35,8 @@ describe("PageContainer — shared page width", () => {
     );
 
     const container = screen.getByText("content").parentElement!;
-    for (const cls of [...SHARED_WIDTH_CLASSES, "flex", "flex-col", "gap-6", "py-8"]) {
-      expect(container.className).toContain(cls);
-    }
-  });
-
-  it("matches the navbar's own max-width classes (edges line up)", () => {
-    render(<Navbar />);
-    const nav = screen.getByRole("banner").firstElementChild;
-    expect(nav).not.toBeNull();
-    for (const cls of SHARED_WIDTH_CLASSES) {
-      expect(nav!.className).toContain(cls);
+    for (const cls of ["px-6", "lg:px-10", "flex", "flex-col", "gap-6", "py-8"]) {
+      expect(container).toHaveClass(cls);
     }
   });
 });

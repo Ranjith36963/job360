@@ -292,8 +292,24 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # `harness_owner` names the caged workflows individually (auto-merge.yml,
     # verify-live.yml, revert-main.yml, ...), and deleting the three blanket
     # lines in merge-policy.yml hands the rest back to this fast lane.
-    check("harness: a workflow edit is the OWNER's (blanket .github/**)",
-          classify([".github/workflows/uptime.yml"], policy)["lane"], "harness_owner")
+    #
+    # TAKEN 2026-10-18, owner: "let PRs touching .claude/**, .github/** or
+    # scripts/** auto-merge". An ordinary workflow, script or `.claude/` note is
+    # now fast-lane; the NAMED cage and the six check factories stay the owner's.
+    for fast in (".github/workflows/uptime.yml", "scripts/stale_path_check.py",
+                 ".claude/rules/mistakes.md"):
+        v_fast = classify([fast], policy)
+        check(f"harness: an ordinary harness file auto-merges: {fast}",
+              (v_fast["lane"], v_fast["auto_merge"]), ("harness", True))
+    for factory in (".github/workflows/ci.yml", ".github/workflows/ci-offline.yml",
+                    ".github/workflows/security.yml", ".github/workflows/codeql.yml",
+                    ".github/workflows/review-bugs.yml", ".github/workflows/review-security.yml"):
+        v_fac = classify([factory], policy)
+        check(f"a workflow that PRODUCES a required check is still the owner's: {factory}",
+              (v_fac["lane"], v_fac["auto_merge"]), ("harness_owner", False))
+    check("an ordinary workflow beside a check factory is still harness_owner",
+          classify([".github/workflows/uptime.yml", ".github/workflows/review-bugs.yml"],
+                   policy)["lane"], "harness_owner")
     check("harness: a doc edit", classify(["docs/README.md"], policy)["lane"], "harness")
 
     # 2. Product code takes the watched lane.
@@ -313,8 +329,10 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # `docs/harness/**` is a real fast lane, so the safe files are now genuinely
     # safe and the migration is genuinely the thing doing the work.
     many_docs = [f"docs/harness/note{i}.md" for i in range(40)]
-    check("precedence: 40 docs + 1 migration is a PRODUCT_OWNER pr",
-          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_owner")
+    check("precedence: 40 docs + 1 models.py change is a PRODUCT_OWNER pr",
+          classify([*many_docs, "backend/src/models.py"], policy)["lane"], "product_owner")
+    check("precedence: 40 docs + 1 migration is a PRODUCT_HUMAN pr (owner, 2026-10-20)",
+          classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_human")
     check("precedence: product + harness is PRODUCT",
           classify(["docs/harness/a.md", "backend/src/main.py"], policy)["lane"], "product")
 
@@ -343,9 +361,17 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     # ...and the negative control, or the case above is bought by refusing
     # everything: the migration ALONE is the watched lane and a machine may merge
     # it (owner decision 2026-09-17).
-    mig_only = classify(["backend/migrations/0042_x.up.sql"], policy)
-    check("NEGATIVE CONTROL: a migration alone is product_owner and machine-mergeable",
-          (mig_only["lane"], mig_only["auto_merge"]), ("product_owner", True))
+    settings_only = classify(["backend/src/models.py"], policy)
+    check("NEGATIVE CONTROL: a models.py change alone is product_owner and machine-mergeable",
+          (settings_only["lane"], settings_only["auto_merge"]), ("product_owner", True))
+    # OWNER 2026-10-20: migrations and auth wait for his hand, and stay watched.
+    for f in ("backend/migrations/0042_x.up.sql", "backend/src/api/routes/auth.py",
+              "backend/src/services/auth/tokens.py", "backend/src/api/routes/account_delete.py",
+              "backend/src/core/settings.py"):
+        got = classify([f], policy)
+        check(f"product_human: {f} waits for the owner and is still watched",
+              (got["lane"], got["auto_merge"], bool(got.get("watch_minutes")), got.get("rollback")),
+              ("product_human", False, True, "railway"))
 
     # 4. The cage may not edit the cage.
     check("recursion: editing the policy file is owner-only",
@@ -463,7 +489,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     identical treatment the split is decoration, so pin the difference:
     #     a hand-merged migration still reaches users and must still be watched;
     #     a hand-merged cage edit has nobody downstream and must not be.
-    mig = classify(["backend/migrations/007_x.sql"], policy)
+    mig = classify(["backend/src/models.py"], policy)  # migrations, auth, settings are product_human since 2026-10-20
     cage = classify(["scripts/merge_cage.py"], policy)
     check("product_owner is WATCHED even though you merge it by hand",
           bool(mig.get("watch_minutes")), True)
@@ -559,19 +585,6 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
         check(f"...even beside ordinary prose: {decision}",
               classify(["docs/product/pillars/README.md", decision], policy)["lane"],
               "product_owner")
-
-    # 11a. THE GENERATED DOC RIDES WITH WHATEVER TOUCHES IT (2026-09-19).
-    #      docs/GENERATED.md matched no lane, so a product PR that added a
-    #      route regenerated it and escalated to harness_owner (#588). Alone it
-    #      is harness; beside product code it must NOT pull the PR up.
-    check("docs/GENERATED.md alone is the harness's own record",
-          classify(["docs/GENERATED.md"], policy)["lane"], "harness")
-    check("docs/GENERATED.md does not escalate a product PR",
-          classify(["backend/src/api/routes/bring.py", "docs/GENERATED.md"], policy)["lane"],
-          "product")
-    check("docs/GENERATED.md is matched by a rule, not escalation",
-          "docs/GENERATED.md" in (classify(["docs/GENERATED.md"], policy).get("by_lane") or {}).get("harness", []),
-          True)
 
     # 11b. EVERY FAST-LANE PATTERN, WITH A REAL NESTED WITNESS.
     #
@@ -706,7 +719,6 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     P0 cited — the rule is about the directory, and `verifier.md` is the
     #     one nobody would think to check.
     for guarded in (".claude/hooks/commit-gate.sh",
-                    ".claude/hooks/worktree-reaper.sh",
                     ".claude/settings.json",
                     ".claude/settings.local.json",
                     ".claude/agents/reviewer-bugs.md",

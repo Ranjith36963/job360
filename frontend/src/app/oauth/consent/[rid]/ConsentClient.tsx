@@ -102,7 +102,7 @@ export function ConsentClient({ rid }: { rid: string }) {
 
   if (state === "error" || !consent) {
     return (
-      <p className="text-sm text-red-400" role="alert">
+      <p className="text-sm text-danger" role="alert">
         {error ?? "Something went wrong. Please try again."}
       </p>
     );

@@ -74,6 +74,8 @@ backend/data/experiment/
 
 # Per-tree test-gate stamp (scripts/agent-gate.sh) - never committable
 .claude/gate-stamp
+.claude/review-stamp
+.claude/QUALITY-GATE-OFF
 
 # One-time step-verification receipts (transient, regenerated per run - never committable)
 .claude/step-*-verified.txt
@@ -104,3 +106,6 @@ graphify-out/
 # docs/harness/maintenance/claude-md-proposals.md by a designated session, via PR.
 docs/maintenance/inbox/
 .scratch/
+
+# hunt kit runtime cache (downloaded company universe; never committed)
+backend/src/hunt_kit/universe_cache/

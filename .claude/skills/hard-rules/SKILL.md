@@ -5,7 +5,7 @@ description: >-
   production or corrupt data when violated. Consult BEFORE editing schema,
   the application spine, MCP tools, auth routes, or profile extraction.
 ---
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 
 # Hard Rules
 
@@ -18,17 +18,10 @@ Nothing here is weaker for being a skill. It loads when the work touches it.
 ## Mission rules (2026-09-03 — `docs/product/VISION.md` wins over everything below)
 
 - **M1. The user brings the job; we never source, rank or recommend** (product rule 4). Never add a source, a scorer, a feed, or a "recommended for you". The old sourcing/scoring pipeline was deleted 2026-09-05 (slice 5, #483) — do not rebuild it.
-- **M2. The agent thinks, Job360 remembers** (product rule 5). Before adding a feature ask: *could Claude Code / ChatGPT do this with its own tools?* If yes, expose a **store** tool, not a **do** tool. No Gmail readers, no fit judges, no outreach writers of our own. The one exception is the web fallback for a human at a browser, who has no fetch of their own: `POST /jobs/fetch-url` (slice 3) fetches a job-ad URL and pre-fills `/bring`'s form — never an MCP tool (an agent already has fetch), pinned by `tests/test_url_fetch.py::test_no_mcp_tool_fetches_a_url`. It is Job360's outbound-to-an-arbitrary-URL surface, guarded by `backend/src/services/fetch/guard.py` — drilled ten ways by `scripts/ssrf_drill.py` (declared `drilled` in `scripts/drill_registry.py`); a guard nobody has watched go red is decoration. (The notification-channel webhook guard this once shared a pattern with was deleted with the channels feature — this is now the only such surface; check this one deny list when a new private/reserved range needs denying.)
+- **M2. The agent thinks, Job360 remembers** (product rule 5). Before adding a feature ask: *could Claude Code / ChatGPT do this with its own tools?* If yes, expose a **store** tool, not a **do** tool. No Gmail readers, no fit judges, no outreach writers of our own. The one exception is the web fallback for a human at a browser, who has no fetch of their own: `POST /jobs/fetch-url` (slice 3) fetches a job-ad URL and pre-fills `/bring`'s form — never an MCP tool (an agent already has fetch), pinned by `tests/test_url_fetch.py::test_no_mcp_tool_fetches_a_url`. Every surface that opens a caller-supplied URL screens through `services/fetch/guard` and nowhere else; the surfaces are enumerated — and a new one made to fail until it is registered — by `tests/test_outbound_surfaces.py`. Drilled by `scripts/ssrf_drill.py` (`drilled` in `scripts/drill_registry.py`); a guard nobody has watched go red is decoration.
 - **M3. One door for history: `record_event`** — fixed event types (VISION.md), free text, `recorded_by`. Every artifact version is kept forever with `made_by` + `profile_version`. A receipt is append-only. Nothing rewrites history. **Built in slice 2 (application spine):** `application_events` + `application_artifacts` (migration `0037_application_spine`) — no runtime code in `backend/src/` may `UPDATE`/`DELETE` either table (guard: `tests/test_application_spine.py::test_events_are_append_only`, a grep over `backend/src/`); `applications.status`/`stage` are the one cache SLOT that IS updated (S7 — a slot is not history). `application_receipts.application_id` is set at INSERT time, never backfilled by an UPDATE (guard: `tests/test_receipts.py::test_receipts_are_append_only`).
 - **M4. Free, pull, consent-first** (product rule 6). No credits, no paywall, no push. Agents connect over MCP with OAuth 2.1; personal `j360_…` tokens stay as the fallback.
-- **M5. Every MCP tool = the same per-user route the web uses** (#12/#25 apply) and every new route gate must be re-applied in `backend/src/api/mcp_server.py` — parity is by hand, there is no shared gate.
-
-The sourcing-era pipeline (search, scoring, dedup, enrichment, embeddings) was
-deleted 2026-09-05 (slice 5, #483) along with the rules that only guarded it.
-Two of those rules guarded facts that outlived the deletion and moved up into
-the index below unchanged: dedup-key normalization (still used by a brought
-job) and the digest notification path (dead code, kept only so nobody
-resurrects it by accident).
+- **M5. Every MCP tool = the same per-user route the web uses** (#12/#25 apply) and every new route gate must be re-applied in `backend/src/api/mcp_server.py` — there is no shared gate; `tests/test_mcp_gate_parity.py` is what catches a gate applied to the route and not the tool.
 
 ## Still binding
 
@@ -44,7 +37,7 @@ An index of the 14 hard rules, one line each. Where a test guards a rule, the te
 26. **Account-mgmt routes (password/email/delete) MUST verify the current password BEFORE the mutation, then `response.delete_cookie("job360_session")`** (forces re-login).
 
 ### Heavy imports
-16. **Never import `sentence_transformers`, `chromadb`, `rapidfuzz` or `sklearn` at module top level** — top-level costs 150 ms – 2 s per pytest collection. Not even "just for typing". Guard, over `backend/src/` only: `backend/tests/test_heavy_imports_stay_lazy.py`.
+16. **Never import `sentence_transformers`, `chromadb`, `rapidfuzz` or `sklearn` at module top level** — top-level costs 150 ms – 2 s per pytest collection. Not even "just for typing". Guarded by `backend/tests/test_heavy_imports_stay_lazy.py`, which scans `backend/src/` only.
 
 ### Extraction must be data-driven
 28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** *(Owner rule, non-negotiable.)* **Banned:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict or denylist — hand-typed maps overfit one CV. **ESCO is inert scaffolding, never built or shipped** — never cite it as running. Its two gates are `core.settings.ESCO_SKILL_NORMALISATION_ENABLED` (the live flag — read the comment above the constant, which records why `SEMANTIC_ENABLED` is the dead old name and is deliberately not read as a fallback) and `services.profile.skill_normalizer.is_available()`.

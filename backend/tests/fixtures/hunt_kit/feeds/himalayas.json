@@ -1,0 +1,97 @@
+{
+ "comments": "21/08/2026: Cursor pagination is now available and is the preferred way to page through the feed. Pass the nextCursor value from each response back as ?cursor=. It is faster than offset and will never return the same job twice. The offset parameter is deprecated and will be removed in a future release. 13/03/2026: The API has been updated to include the companySlug field in the response.",
+ "updatedAt": 1791922180,
+ "offset": 0,
+ "limit": 5,
+ "totalCount": 125419,
+ "nextCursor": "MjAyNi0xMC0xM1QyMDowNzoxOS4zMDM1NThafDI0MDEyMzk",
+ "jobs": [
+  {
+   "title": "Battery Specialist B2B Phone Sales Representative",
+   "excerpt": "Battery Specialist B2B Phone Sales RepresentativePosition Type: Remote, Full-Time Working Hours: U.",
+   "companyName": "Pavago",
+   "companySlug": "pavago",
+   "companyLogo": "https://cdn-images.himalayas.app/q1g70vrjd2dhofu56e7xj9wodx8e",
+   "employmentType": "Full Time",
+   "minSalary": null,
+   "maxSalary": null,
+   "salaryPeriod": "annual",
+   "seniority": [
+    "Mid-level"
+   ],
+   "currency": null,
+   "locationRestrictions": [
+    "South Africa"
+   ],
+   "timezoneRestrictions": [
+    2
+   ],
+   "categories": [
+    "B2B-Sales-Representative",
+    "Phone-Sales-Representative",
+    "Inside-Sales-Representative",
+    "Account-Executive",
+    "Business-Development-Representative",
+    "Remote-Phone-Sales-Representative",
+    "B2B-Sales-Specialist",
+    "Electronics-Sales-Representative",
+    "Sales"
+   ],
+   "parentCategories": [
+    "Sales"
+   ],
+   "description": "<h3>Battery Specialist B2B Phone Sales Representative</h3><p><strong>Position Type:</strong> Remote, Full-Time<br><strong>Working Hours:</strong> U.S Business Hours</p><h3>About the Role</h3><p>We\u2019re looking for a driven, results-oriented B2B Phone Sales Representative to build and grow commercial accounts across Oahu, Hawaii. In this role, you\u2019ll use outbound calling to connect with business decision-makers, understand their battery and power needs, and recommend suitable product solutions.</p><p>You\u2019ll manage the full sales cycle, from prospecting and qualification to closing and account development. This role is ideal for a disciplined salesperson who takes ownership of their pipeline, works independently, and is motivated by compensation tied directly to performance.</p><h3>What You\u2019ll Own</h3><h3>Outbound Prospecting &amp; Lead Generation</h3><ul>\n<li>Make high-volume outbound calls to identify and qualify prospective commercial clients across Oahu.</li>\n<li>Build a consistent pipeline through structured outreach, follow-ups, and callbacks.</li>\n<li>Navigate gatekeepers and connect with key business decision-makers.</li>\n</ul><h3>Needs Assessment &amp; Solution Selling</h3><ul>\n<li>Conduct discovery conversations to understand customers\u2019 battery and power requirements.</li>\n<li>Recommend suitable products based on each customer's needs.</li>\n<li>Communicate product value clearly and build buyer confidence.</li>\n</ul><h3>Account Development &amp; Retention</h3><ul>\n<li>Convert qualified prospects into active commercial accounts.</li>\n<li>Build long-term relationships that encourage repeat business and retention.</li>\n<li>Maintain regular contact with existing accounts to identify new opportunities.</li>\n</ul><h3>Salesforce &amp; Pipeline Management</h3><ul>\n<li>Use Salesforce daily to log calls, track activities, manage pipeline stages, and maintain accurate account records.</li>\n<li>Keep follow-ups organized and pipeline forecasts reliable.</li>\n<li>Monitor account progress and identify potential risks or opportunities.</li>\n</ul><h3>Revenue &amp; Performance Ownership</h3><ul>\n<li>Take responsibility for the gross profit generated across your book of business.</li>\n<li>Focus on winning and retaining accounts that contribute to long-term growth.</li>\n<li>Communicate pipeline progress, account updates, and potential challenges to leadership.</li>\n</ul><h3>Required Experience &amp; Skills</h3><ul>\n<li>3+ years of B2B sales experience, including closing accounts and managing customer relationships over the phone.</li>\n<li>Proficiency in Salesforce for daily activity tracking, pipeline management, and account records.</li>\n<li>Experience managing the full outbound sales cycle, from prospecting and qualification to presentation and closing.</li>\n<li>Strong phone communication, rapport-building, objection-handling, and follow-up skills.</li>\n<li>Ability to work independently, maintain consistent outreach, and take ownership of sales results.</li>\n<li>Resilience and persistence when handling rejection or slow sales periods.</li>\n<li>Ability to communicate account updates and pipeline risks proactively.</li>\n</ul><h3>Nice to Have</h3><ul>\n<li>Experience selling technical, industrial, battery, or power-related products.</li>\n<li>Familiarity with commercial accounts and consultative B2B sales.</li>\n<li>Experience building a customer base through cold calling and long-term account management.</li>\n</ul><h3>What Makes You a Strong Fit</h3><ul>\n<li>You take ownership of your pipeline and treat your book of business like a business of your own.</li>\n<li>You follow a consistent prospecting routine and don't rely on reminders to complete follow-ups.</li>\n<li>You build trust with decision-makers and understand how to turn initial conversations into lasting business relationships.</li>\n<li>You stay motivated through rejection and remain disciplined when results fluctuate.</li>\n<li>You communicate proactively and take responsibility for your performance.</li>\n<li>You\u2019re motivated by a compensation structure that rewards the accounts you win and maintain.</li>\n</ul><h3>What Success Looks Like</h3><ul>\n<li>A consistent pipeline of qualified commercial prospects across Oahu.</li>\n<li>New commercial accounts secured through outbound sales efforts.</li>\n<li>Strong account retention and repeat business.</li>\n<li>Accurate Salesforce records and reliable pipeline visibility.</li>\n<li>Sustainable gross profit growth across your book of business.</li>\n</ul><h3>Typical Day</h3><p>Your day begins by reviewing your Salesforce queue and prioritizing follow-ups, callbacks, and new prospects. You\u2019ll spend much of the morning making outbound calls, qualifying business needs, and moving prospects through the sales pipeline.</p><p>Afternoons may focus on account maintenance, follow-up conversations, CRM updates, and planning the next day's outreach. You\u2019ll work independently while checking in with your manager on pipeline health and sales strategy.</p><h3>Compensation Structure</h3><p>The compensation package includes a base salary plus performance-based profit sharing. You\u2019ll earn a percentage of the gross profit generated by the accounts you secure and maintain, creating an opportunity for your earnings to grow with your results.</p><h3>Interview Process</h3><ol>\n<li>Application Review</li>\n<li>Spark Hire Intro Video</li>\n<li>Client Interview</li>\n<li>Offer &amp; Onboarding</li>\n</ol><p>Originally posted on <a href=\"https://himalayas.app\">Himalayas</a></p>",
+   "pubDate": 1791922180,
+   "expiryDate": 1797106178,
+   "applicationLink": "https://himalayas.app/companies/pavago/jobs/battery-specialist-b2b-phone-sales-representative",
+   "guid": "https://himalayas.app/companies/pavago/jobs/battery-specialist-b2b-phone-sales-representative"
+  },
+  {
+   "title": "Senior Director, Financial Operations and Actuarial Strategy - Emory Health Plan",
+   "excerpt": "Discover Your Career at Emory UniversityEmory University is a leading research university that fosters excellence and attracts world-class talent to innovate today and prepare leaders for the future.",
+   "companyName": "Emory University",
+   "companySlug": "emory-university",
+   "companyLogo": "https://cdn-images.himalayas.app/4uo7g1od1i7iczqf8sb6oy9paiib",
+   "employmentType": "Full Time",
+   "minSalary": null,
+   "maxSalary": null,
+   "salaryPeriod": "annual",
+   "seniority": [
+    "Director",
+    "Executive"
+   ],
+   "currency": null,
+   "locationRestrictions": [
+    "United States"
+   ],
+   "timezoneRestrictions": [
+    -10,
+    -9,
+    -8,
+    -7,
+    -6,
+    -5,
+    14
+   ],
+   "categories": [
+    "Director-of-Finance",
+    "Actuarial-Director",
+    "Financial-Operations-Director",
+    "Health-Plan-Director",
+    "Healthcare-Finance-Director",
+    "Senior-Director-Actuarial",
+    "Remote-Senior-Director-Of-Actuarial-Strategy",
+    "Senior-Director-Healthcare-Reimbursement-Operations",
+    "Senior-Director-Healthcare-Payment-Operations"
+   ],
+   "parentCategories": [
+    "Finance"
+   ],
+   "description": "<h3>Discover Your Career at <a href=\"https://himalayas.app/companies/emory-university\">Emory University</a>\n</h3><a href=\"https://himalayas.app/companies/emory-university\">Emory University</a> is a leading research university that fosters excellence and attracts world-class talent to innovate today and prepare leaders for the future. We welcome candidates who can contribute to the excellence of our academic community.<h3>Description</h3><p> Senior Director, Financial Operations and Actuarial Strategy owns the financial infrastructure, controls, and operational oversight that enables sound financial management of EHP's medical, pharmacy, and administrative costs. </p><h3>KEY RESPONSIBILITIES:</h3><ul>\n<li>Responsible for building and sustaining the financial operating systems, reporting cadences, budget processes, vendor financial controls, and regulatory compliance frameworks that support EHP's growth, governance, and fiduciary obligations as a large self-funded health plan. </li>\n<li>Owns EHP's vendor financial management function.</li>\n<li> Manages and directs the execution of Third Party Administrator (TPA) and Pharmacy Benefits Manager (PBM) invoice reconciliation, payment accuracy controls, and payment integrity oversight.</li>\n<li> Oversees financial performance of key vendors with substantial annual administrative spend, tracking contract compliance, unit cost trends, and administrative fee performance against contractual terms. </li>\n<li>Leads contract financial review and interpretation across all vendor and provider agreements, flagging financial risk and ensuring alignment with budget assumptions. </li>\n<li>Supports the senior leadership in strategic TPA, PBM, and stop-loss carrier contract negotiations with accurate, current financial performance data.</li>\n<li> Owns EHP's regulatory compliance function in partnership with third-party compliance advisors and internal legal and compliance leadership.</li>\n<li>Maintains EHP's compliance program for applicable self-funded plan regulations, including ERISA, HIPAA, ACA, and the Consolidated Appropriations Act (CAA) transparency and Mental Health Parity requirements. </li>\n<li>Oversees preparation and timely submission of all required regulatory filings and any applicable state filings. </li>\n<li>Coordinates internal and external audit processes, maintains compliance documentation and internal controls, and builds toward direct regulatory expertise as EHP's compliance function matures.</li>\n<li> Serves as an informed financial partner to senior leadership on actuarial and complex financial matters, including incurred but not reported (IBNR) reserve management, claims lag analysis, and pharmacy rebate accounting. </li>\n<li>Develops and maintains EHP's IBNR reserve reporting and reconciliation process, validating lag assumptions and reserve estimates against the plan's reserve fund in partnership with external actuaries. </li>\n<li>Owns the accounting methodology for pharmacy rebate accruals, claims runout, and other complex reserve items.</li>\n<li> Participates in the annual rate-setting and pricing process, providing financial data inputs, grounding actuarial assumptions in operational and claims experience, and contributing informed financial judgment to the pricing analysis led by senior leadership. </li>\n<li>Provides financial data inputs for stop-loss program reporting and benefits design financial modeling. </li>\n<li>Manages and develops a team, and, as EHP scales, hires and directs additional staff to support reserve, compliance, and senior leadership modeling needs. </li>\n<li>Provides clear direction, professional development, and performance management for all direct reports. </li>\n<li>Performs related responsibilities as required. </li>\n</ul><h3>MINIMUM QUALIFICATIONS:</h3><ul>\n<li> Bachelor's degree in accounting, finance, health administration, business administration, or a related field required and 9+ years of progressive experience in health plan finance, managed care finance, or related healthcare financial operations, with demonstrated depth in financial controls, reporting, and accounting. </li>\n<li>CPA or equivalent accounting credential strongly preferred. </li>\n<li>Master's degree in business administration, health administration, or a related field preferred.</li>\n</ul><p>NOTE: Tasks related to this position can be performed remotely with only occasional supported visits to an <a href=\"https://himalayas.app/companies/emory-university\">Emory University</a> location.  Emory reserves the right to change this status with notice to employee.</p><h3>Additional Details</h3><p>Emory is an equal opportunity employer, and qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, disability, protected veteran status or other characteristics protected by state or federal law. <a href=\"https://himalayas.app/companies/emory-university\">Emory University</a> does not discriminate in admissions, educational programs, or employment, including recruitment, hiring, promotions, transfers, discipline, terminations, wage and salary administration, benefits, and training. Students, faculty, and staff are assured of participation in university programs and in the use of facilities without such discrimination. <a href=\"https://himalayas.app/companies/emory-university\">Emory University</a> complies with Section 503 of the Rehabilitation Act of 1973, the Vietnam Era Veteran's Readjustment Assistance Act, and applicable executive orders, federal and state regulations regarding nondiscrimination, equal opportunity, and affirmative action (for protected veterans and individuals with disabilities). Inquiries regarding this policy should be directed to the <a href=\"https://himalayas.app/companies/emory-university\">Emory University</a> Department of Equity and Civil Rights Compliance, 201 Dowman Drive, Administration Building, Atlanta, GA 30322. Telephone: 404-727-9867 (V) | 404-712-2049 (TDD).<a href=\"https://himalayas.app/companies/emory-university\">Emory University</a> is committed to ensuring equal access and providing reasonable accommodations to qualified individuals with disabilities upon request. To request this document in an alternate format or to seek a reasonable accommodation, please contact the Department of Accessibility Services at  or call 404-727-9877 (Voice) | 404-712-2049 (TDD). We kindly ask that requests be made at least seven business days in advance to allow adequate time for coordination.</p><p>Originally posted on <a href=\"https://himalayas.app\">Himalayas</a></p>",
+   "pubDate": 1791922141,
+   "expiryDate": 1797106140,
+   "applicationLink": "https://himalayas.app/companies/emory-university/jobs/senior-director-financial-operations-and-actuarial-strategy-emory-health-plan",
+   "guid": "https://himalayas.app/companies/emory-university/jobs/senior-director-financial-operations-and-actuarial-strategy-emory-health-plan"
+  }
+ ]
+}

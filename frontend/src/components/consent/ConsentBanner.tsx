@@ -81,16 +81,19 @@ export function ConsentBanner() {
   return (
     <div
       ref={bannerRef}
+      data-print-hide
       role="dialog"
       aria-modal="false"
       aria-label="Analytics cookie consent"
-      className="fixed inset-x-0 bottom-0 z-50 border-t bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background p-4"
     >
       <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
-          We&apos;d like to use analytics to understand how Job360 is used and improve
-          it. This is optional — Job360 works exactly the same either way, and we
-          never record your session or your CV content.
+          Job360 keeps a full record of your job hunt: your CV, every version,
+          and what you and your assistant do. Accept or Decline below controls
+          optional analytics (PostHog); Job360 works the same either way. Masked
+          screen recordings of errors happen only if you turn on &ldquo;Help
+          improve Job360&rdquo; in Settings.
         </p>
         <div className="flex shrink-0 gap-2">
           {/* Same size + weight as Accept: rejecting must be no harder. */}

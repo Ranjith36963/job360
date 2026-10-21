@@ -1,11 +1,12 @@
 """FastAPI application for Job360 backend."""
 
 import asyncio
+import contextlib
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 # psycopg async requires the selector event loop on Windows (the default
 # ProactorEventLoop never signals socket readiness for libpq -> the DB lifespan
@@ -30,13 +31,25 @@ from src.api.middleware import (
 )
 from src.api.routes import (
     applications,
+    asks,
+    assistant_settings,
+    assistant_trigger,
     auth,
     bring,
+    browser,
+    calendar,
     client_log,
+    doctor,
+    files,
     health,
+    hunt_kit,
+    morning_check,
     oauth,
     profile,
+    proof,
+    ready_to_send,
     receipts,
+    recipes,
     tailor,
     tokens,
     well_known,
@@ -44,7 +57,8 @@ from src.api.routes import (
 from src.core import settings
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.repositories import pg, pool
-from src.utils.logger import setup_audit_logger, setup_logging
+from src.services.auth.sessions import drain_session_touches
+from src.utils.logger import AccessPathRedactFilter, setup_audit_logger, setup_logging
 from src.utils.loop_guard import start_loop_watchdog
 
 
@@ -100,6 +114,16 @@ def _init_sentry() -> None:
     init_sentry(component="api")
 
 
+def _start_browser_reaper() -> Optional[asyncio.Task[None]]:
+    """The browser agent's idle sweep: a browser left open is closed after BROWSER_AGENT_IDLE_SECONDS
+    even when no request comes. Only when the agent is on; the import is lazy and starts no Chromium."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        return None
+    from src.services.browser_agent.agent import reap_forever  # noqa: PLC0415
+
+    return asyncio.create_task(reap_forever(), name="browser-idle-sweep")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Sentry init moved to MODULE scope (below, before `app = FastAPI(...)`) —
@@ -112,6 +136,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(LOG_LEVEL)
     setup_audit_logger()
     logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    # S3 - a file-link token rides in /api/files/<token>; keep it out of uvicorn's own access line.
+    _uvicorn_access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, AccessPathRedactFilter) for f in _uvicorn_access.filters):
+        _uvicorn_access.addFilter(AccessPathRedactFilter())
     # Fail fast in production when required env vars are absent (no-op in dev).
     validate_required_env()
     # OAuth R1: the discovery documents advertise SITE_BASE_URL as the issuer.
@@ -140,6 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # LOOP_WATCHDOG_ENABLED (default on); forced OFF under pytest, where the
     # instant-asyncio.sleep fixture would turn the sampler into a busy-spin.
     watchdog = start_loop_watchdog()
+    reaper = _start_browser_reaper()
     # MCP: the SDK session manager needs a running task group for the life of
     # the process (src/api/mcp_server.py). Tests enter mcp_runtime() themselves
     # because the auth fixture replaces this lifespan with a no-op.
@@ -149,6 +178,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if watchdog is not None:
             watchdog.cancel()
+        if reaper is not None:
+            reaper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reaper
+        # Background session `last_seen` touches (FC-008): finish or cancel
+        # them before the DB closes. Bound: up to 2 s waiting, then up to 1 s
+        # more for the cancelled ones to unwind, so at most ~3 s in total.
+        await drain_session_touches(timeout=2.0)
+        # The browser agent's Chromium, if one was ever started (a no-op otherwise).
+        from src.services.browser_agent.agent import shutdown_pool  # noqa: PLC0415
+
+        await shutdown_pool()
     await close_db()
     # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).
     await pool.close_pool()
@@ -164,7 +205,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # inside init_sentry, so this is a no-op in dev/tests.
 _init_sentry()
 
-app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan)
+def _docs_urls(is_prod: bool) -> dict[str, str | None]:
+    """Interactive docs + schema are dev/CI only.
+
+    In production /docs, /redoc and /openapi.json were open to the world and
+    listed every route. ``app.openapi()`` still works offline (frontend
+    ``gen:types`` calls it directly, not over HTTP), so disabling the URLs
+    does not affect type generation.
+    """
+    if is_prod:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+
+
+_docs = _docs_urls(_is_prod_env())
+app = FastAPI(
+    title="Job360 API", version="1.0.0", lifespan=lifespan,
+    docs_url=_docs["docs_url"], redoc_url=_docs["redoc_url"], openapi_url=_docs["openapi_url"],
+)
+if _is_prod_env():
+    logging.getLogger(__name__).info("api docs/openapi endpoints disabled (production)")
 
 # Gap E — log every unhandled exception (traceback + request_id) into data/logs/.
 register_exception_logging(app)
@@ -207,6 +267,20 @@ app.include_router(profile.router, prefix="/api")
 app.include_router(bring.router, prefix="/api")
 app.include_router(receipts.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
+app.include_router(proof.router, prefix="/api")  # S7: PUBLIC token upload + per-user proof routes
+app.include_router(files.router, prefix="/api")  # PUBLIC token download for application-kit file links (S3)
+app.include_router(calendar.router, prefix="/api")  # PUBLIC token .ics feed + session-only feed management (0058)
+# run 360 recipes — the playbooks a connected assistant follows (owner plan 2026-10-01)
+app.include_router(recipes.router, prefix="/api")
+# PUBLIC static hunt kit the user's own assistant runs (owner 2026-10-13; Job360 still never searches)
+app.include_router(hunt_kit.router, prefix="/api")
+app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
+app.include_router(doctor.router, prefix="/api")  # agent doctor + report_missing_tool (feature 7)
+app.include_router(browser.router, prefix="/api")  # the Job360 browser agent (decision 29), off by default
+app.include_router(assistant_trigger.router, prefix="/api")  # Send starts my assistant (session only)
+app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
+app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
+app.include_router(ready_to_send.router, prefix="/api")  # approval cards for Ready to send (S5d)
 # Batch 2 — auth
 app.include_router(auth.router, prefix="/api")
 # Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)

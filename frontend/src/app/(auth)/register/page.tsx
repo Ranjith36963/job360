@@ -81,7 +81,7 @@ function RegisterForm() {
           {...register("email")}
         />
         {errors.email && (
-          <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="email-error" className="text-sm text-danger">{errors.email.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -95,14 +95,14 @@ function RegisterForm() {
           {...register("password")}
         />
         {errors.password && (
-          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-danger">{errors.password.message}</p>
         )}
         <p className="text-xs text-muted-foreground">
           Minimum 8 characters. We hash with argon2id — never store plaintext.
         </p>
       </div>
       {serverError && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {serverError}
         </p>
       )}
@@ -119,10 +119,12 @@ function RegisterForm() {
 
 export default function RegisterPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Create your Job360 account</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">
+            <h1>Create your Job360 account</h1>
+          </CardTitle>
           <CardDescription>
             Upload your CV next — it becomes the memory your assistant works from.
           </CardDescription>
@@ -133,7 +135,7 @@ export default function RegisterPage() {
           </Suspense>
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link href="/login" className="underline">
+            <Link href="/login" className="text-foreground underline">
               Sign in
             </Link>
           </p>

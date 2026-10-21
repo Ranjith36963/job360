@@ -135,13 +135,52 @@ async function mockBackend(page: Page) {
     })
   );
 
-  await page.route("**/api/applications?**", (route) =>
+  // The signed-in Home also reads what-changed, the open asks and the counts
+  // (redesign slice 2). Registered BEFORE the applications route below.
+  await page.route("**/api/whats-new**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ applications: [applicationSummary(status)], total: 1 }),
+      body: JSON.stringify({
+        now: "2026-09-05T00:00:00Z",
+        since: "2026-08-29T00:00:00Z",
+        events: [],
+        applications: [],
+        next_since: "2026-09-05T00:00:00Z",
+        next_after_id: null,
+        truncated: false,
+        open_asks: [],
+      }),
     })
   );
+  await page.route("**/api/asks**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ asks: [], open_count: 0 }),
+    })
+  );
+  await page.route("**/api/applications/stats", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        overall: { brought: 1, applied: status === "applied" ? 1 : 0, replied: 0, interview: 0 },
+      }),
+    })
+  );
+
+  await page.route("**/api/applications?**", (route) => {
+    // Nothing is due in this story: the Home "Due" list asks with due=true.
+    const due = new URL(route.request().url()).searchParams.get("due") === "true";
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        due ? { applications: [], total: 0 } : { applications: [applicationSummary(status)], total: 1 }
+      ),
+    });
+  });
 
   await page.route(`**/api/applications/${APPLICATION_ID}`, (route) => {
     if (route.request().method() !== "GET") return route.fallback();
@@ -188,9 +227,11 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await context.addCookies([SESSION_COOKIE]);
     await mockBackend(page);
 
-    await page.goto("/");
+    // Home no longer lists applications (owner, 2026-10-19); the full list is
+    // /applications.
+    await page.goto("/applications");
 
-    // The brought application is on the signed-in home, status "considering".
+    // The brought application is listed, status "considering".
     await expect(page.getByText(/data engineer/i).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/considering/i).first()).toBeVisible();
 
@@ -210,8 +251,9 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await page.getByTestId("mark-applied-confirm").click();
     await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
 
-    // The list reflects the same change — reload the home page.
-    await page.goto("/");
+    // Home no longer lists applications (owner, 2026-10-19) — the full list
+    // lives on /applications. The same change shows there.
+    await page.goto("/applications");
     await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
     // ...and the list row no longer offers a Mark Applied button at all.
     await expect(

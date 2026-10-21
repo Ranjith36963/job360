@@ -36,7 +36,7 @@ THE FOUR CAGES, AND WHY EACH IS NEEDED
     SIZE     how much change at once            (blast radius by volume)
     PATH     what a change is allowed to touch  (blast radius by subject)
     PROOF    the checks really ran and passed   (is green real?)
-    REVIEW   no unresolved review thread        (is the comment answered?)
+    REVIEW   reviewers ran; no thread left open (did anyone look? is it answered?)
     RATCHET  the numbers did not get worse      (no slow decay)
 
 All must pass. Any doubt REFUSES — the default is to ask the owner, never to
@@ -66,6 +66,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -329,7 +330,7 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 # lane. Drilled in `scripts/lane.py`: "a migration AND a workflow file is
 # harness_owner, never machine-merged" — put this tuple back the old way and that
 # case goes red.
-LANES: tuple[str, ...] = ("harness_owner", "product_owner", "product", "harness")
+LANES: tuple[str, ...] = ("harness_owner", "product_human", "product_owner", "product", "harness")
 
 # pattern -> the sentence printed when it refuses. Keys MUST exist in the policy
 # as the path of an `auto_merge: false` lane, and `check_lists()` refuses a key
@@ -346,12 +347,60 @@ LANES: tuple[str, ...] = ("harness_owner", "product_owner", "product", "harness"
 # keeps this one honest.
 #
 # What is left here is exactly `harness_owner`: the robot's own rulebook.
+_CAGE_ESCAPE = ("part of the harness that judges this very PR — an agent editing its "
+                f"own guards is how a cage is escaped. {_OWNER_MERGES}")
+_CHECK_FACTORY = ("a workflow that PRODUCES a required check — the ruleset trusts the check's "
+                  "NAME, so a machine hollowing out the job behind it is how a cage is escaped. "
+                  + _OWNER_MERGES)
+
 DENY_REASONS: dict[str, str] = {
+    # ── OWNER 2026-10-20: migrations and auth wait for his hand again ────────
+    # "Only migration, auth ... for those things harness owner should come."
+    "backend/src/api/routes/auth.py": f"authentication — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/services/auth/**": f"authentication — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/api/routes/account*.py":
+        f"account management — the owner merges it. {_OWNER_MERGES}",
+    "backend/src/core/settings.py":
+        f"settings flags change production behaviour for every user. {_OWNER_MERGES}",
+    "backend/migrations/**":
+        "schema change — irreversible against live data: a Railway rollback restores "
+        "the previous IMAGE, not the previous SCHEMA. Every migration ships with its "
+        f"`.down.sql`. {_OWNER_MERGES}",
     # ── the harness must not quietly edit its own cage ───────────────────────
-    ".github/**": "part of the harness that judges this very PR — an agent editing its "
-                  f"own guards is how a cage is escaped. {_OWNER_MERGES}",
-    "scripts/**": "part of the harness that judges this very PR — an agent editing its "
-                  f"own guards is how a cage is escaped. {_OWNER_MERGES}",
+    # `.github/**` and `scripts/**` were blanket keys here until 2026-10-18,
+    # when the owner moved both blankets to the `harness` lane ("let PRs
+    # touching .claude/**, .github/** or scripts/** auto-merge"). What stays
+    # denied is the NAMED cage in `harness_owner`, each with its own sentence.
+    **{p: _CAGE_ESCAPE for p in (
+        ".github/merge-policy.yml",
+        "scripts/merge_cage.py",
+        "scripts/lane.py",
+        "scripts/data_only.py",
+        "scripts/drill_registry.py",
+        "scripts/rollback_gear.py",
+        "scripts/revert_gear.py",
+        "scripts/cage_blockers.py",
+        "scripts/gate_wiring_check.py",
+        "scripts/agent-gate.sh",
+        "backend/scripts/mypy_ratchet.py",
+        ".github/workflows/auto-merge.yml",
+        ".github/workflows/verify-live.yml",
+        ".github/workflows/revert-main.yml",
+        ".github/workflows/post-merge-watch.yml",
+        ".github/workflows/triage.yml",
+        ".github/workflows/pr-repair.yml",
+        ".github/workflows/finding-watch.yml",
+        ".github/workflows/security-watch.yml",
+    )},
+    # The six workflows behind the 13 required contexts of `main-production-gate`.
+    **{p: _CHECK_FACTORY for p in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/ci-offline.yml",
+        ".github/workflows/security.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/review-bugs.yml",
+        ".github/workflows/review-security.yml",
+    )},
     # ── `.claude/`: the half that RUNS, not the half that is READ ────────────
     # `.claude/**` used to sit here whole. The daily truth-check routine edits
     # `.claude/skills/**/*.md` and `.claude/agents/*.md` every day, and the
@@ -430,10 +479,6 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/models.py":
         f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_WATCHED}",
     # ── users: identity, sessions, anything that can lock someone out ────────
-    "backend/src/api/routes/auth.py": f"authentication — a user decision. {_WATCHED}",
-    "backend/src/services/auth/**": f"authentication — a user decision. {_WATCHED}",
-    "backend/src/api/routes/account*.py":
-        f"account management — a user decision. {_WATCHED}",
     "backend/src/services/notifications/**":
         f"sends real messages to real people. {_WATCHED}",
     # This one was denied on its PATH precisely because a path cage cannot tell a
@@ -445,17 +490,10 @@ WATCHED_RISKS: dict[str, str] = {
     "backend/src/api/routes/profile.py":
         f"a per-user API route — rules #12/#25. {_WATCHED}",
     # ── infrastructure ───────────────────────────────────────────────────────
-    "backend/migrations/**":
-        f"schema change — irreversible against live data. {_WATCHED} "
-        "NOTE: a Railway rollback restores the previous IMAGE, not the previous "
-        "SCHEMA. The watcher can undo the deploy; only a down-migration undoes the "
-        "table. Hard rule: every migration ships with its `.down.sql`.",
     "**/*docker-compose*": f"infrastructure decision. {_WATCHED}",
     "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
     "**/railway.json": f"infrastructure decision. {_WATCHED}",
     "**/*.env*": f"secrets and configuration. {_WATCHED}",
-    "backend/src/core/settings.py":
-        f"flags here change production behaviour globally. {_WATCHED}",
     # ── dependency manifests ─────────────────────────────────────────────────
     # The cage has no semver awareness, and a manifest runs postinstall scripts
     # on the build host. `dependabot-auto.yml` still owns the bump decision and
@@ -699,8 +737,69 @@ R_OK, R_ABSENT, R_ERROR = "ok", "absent", "error"
 # concluded SUCCESS.
 NEW_ALERT_RE = re.compile(r"(\d+)\s+new\s+alert", re.I)
 
-MAX_CHANGED_FILES = 40
-MAX_CHANGED_LINES = 1200
+# ONE SIZE CAP, READ FROM THE POLICY (2026-10-19). This file said 1200 while
+# merge-policy.yml said 1500, and nobody could say which number ran. The policy
+# is now the only place the numbers live. A missing or malformed `size:` refuses
+# at import, like every other policy read in this file: no cap is not "no limit".
+def _load_size() -> tuple[int, int, frozenset[str]]:
+    """(max_files, max_lines, generated paths) from `size:` in the policy. Missing or bad -> SystemExit."""
+    import yaml
+
+    try:
+        size = (yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8")) or {}).get("size")
+    except Exception as exc:
+        raise SystemExit(f"merge_cage: could not read `size:` from {POLICY_PATH.name}: {exc}") from exc
+    if not isinstance(size, dict):
+        raise SystemExit(f"merge_cage: {POLICY_PATH.name} has no `size:` mapping, so there is no "
+                         f"cap and nothing may merge unattended.")
+    try:
+        files, lines = int(size["max_files"]), int(size["max_lines"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"merge_cage: `size:` in {POLICY_PATH.name} needs integer max_files and "
+                         f"max_lines ({exc}).") from exc
+    gen = size.get("generated") or []
+    if not isinstance(gen, list) or not all(isinstance(g, str) and g and "*" not in g for g in gen):
+        raise SystemExit(f"merge_cage: `size.generated` in {POLICY_PATH.name} must be a list of "
+                         f"exact file paths. No globs: a pattern is a bypass waiting for a file.")
+    return files, lines, frozenset(gen)
+
+
+MAX_CHANGED_FILES, MAX_CHANGED_LINES, GENERATED_FILES = _load_size()
+
+
+def _load_data_cap() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
+    """(max_data_lines, data_extensions, data_paths) from `size:`. Absent means no
+    wider cap for data (it counts as code, as before); present but malformed refuses."""
+    import yaml
+
+    size = (yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8")) or {}).get("size") or {}
+    if "max_data_lines" not in size:
+        return MAX_CHANGED_LINES, (), ()
+    exts = size.get("data_extensions") or []
+    paths = size.get("data_paths") or []
+    try:
+        cap = int(size["max_data_lines"])
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"merge_cage: `size.max_data_lines` must be an integer ({exc}).") from exc
+    if cap < MAX_CHANGED_LINES or not isinstance(exts, list) or not all(
+            isinstance(e, str) and e.startswith(".") for e in exts):
+        raise SystemExit("merge_cage: `size.max_data_lines` must be >= max_lines and "
+                         "`size.data_extensions` a list like ['.json'].")
+    if not isinstance(paths, list) or not all(
+            isinstance(x, str) and x.endswith("/") and "*" not in x and not x.startswith("/")
+            for x in paths):
+        raise SystemExit("merge_cage: `size.data_paths` must be folder prefixes ending in '/', "
+                         "no globs: a pattern is a bypass waiting for a file.")
+    return cap, tuple(e.lower() for e in exts), tuple(paths)
+
+
+MAX_DATA_LINES, DATA_EXTENSIONS, DATA_PATHS = _load_data_cap()
+_LOCKFILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "uv.lock")
+
+# The commit status the arm posts, and the check run the CI workflows add to wake
+# the arm when they finish. See status_for() and auto-merge.yml.
+STATUS_CONTEXT = "merge-cage"
+WAKE_JOB = "Wake the merge cage"
 PER_PAGE = 100
 
 # EXACT check-run names, matched by EQUALITY. These were substrings, and a
@@ -718,6 +817,10 @@ REQUIRED_CHECKS = [
     "Frontend (Node 20)",
     "Chain wires (harness)",
     "CodeQL",
+    # 2026-10-20: ci.yml `test-integrity` (scripts/test_integrity.py) is red when
+    # a PR adds a skip / xfail / .only, removes a test, or edits test config. A
+    # machine may not merge that; it is NOT in the ruleset, so the owner can.
+    "test-integrity",
 ]
 
 # Checks that STRUCTURALLY CANNOT EXIST on a PR whose base is not `main`.
@@ -948,33 +1051,70 @@ def review_surface(files_json: list[dict]) -> tuple[int, int]:
         n = int(f.get("additions", 0)) + int(f.get("deletions", 0))
         name = str(f.get("filename", ""))
         recorded = (_FIXTURE_DIR in f"/{name}") and name.lower().endswith(_RECORDED_EXT)
-        if recorded:
+        # A generated file (openapi.json, api-types.ts) is written by a
+        # script, not read by a reviewer. EXACT paths from the policy only, and the
+        # discount is reported in the verdict like the fixture one.
+        if recorded or name in GENERATED_FILES:
             exempt += n
         else:
             read += n
     return read, exempt
 
 
+def data_lines(files_json: list[dict]) -> int:
+    """How many of the counted lines are DATA (owner, 2026-10-20). Pure.
+
+    Data: a data extension AND a path under `size.data_paths`, not under `.github/`,
+    not a lockfile, and not already exempt as a fixture or generated file (those are
+    not counted at all). The path rule is why `package.json` or `requirements.txt`
+    can never ride the wider cap."""
+    n = 0
+    for f in files_json:
+        name = str(f.get("filename", ""))
+        low = name.lower()
+        if (not DATA_EXTENSIONS or not low.endswith(DATA_EXTENSIONS)
+                or not name.startswith(DATA_PATHS)
+                or name.startswith(".github/") or low.rsplit("/", 1)[-1] in _LOCKFILES
+                or name in GENERATED_FILES
+                or ((_FIXTURE_DIR in f"/{name}") and low.endswith(_RECORDED_EXT))):
+            continue
+        n += int(f.get("additions", 0)) + int(f.get("deletions", 0))
+    return n
+
+
 def check_size(n_files: int, n_lines: int, deletions: list[str],
-               exempt_lines: int = 0) -> Verdict:
+               exempt_lines: int = 0, data: int = 0) -> Verdict:
+    """SIZE: within the policy's file and line caps, and no file deleted. Generated lines are reported, not counted."""
     reasons: list[str] = []
-    if deletions:
+    # OWNER, 2026-10-20: deleting a file waits for him only when the file is his
+    # -- migrations, auth, the cage's own rules and policies (the DENY paths). A
+    # deleted ordinary file merges like any other change; the PATH cage already
+    # names a deleted owner file, and this says plainly that it was a deletion.
+    owner_deletions = [d for d in deletions if any(path_matches(d, pat) for pat, _ in DENY)]
+    if owner_deletions:
         reasons.append(
-            f"deletes {len(deletions)} file(s) ({', '.join(deletions[:3])}) — a machine must "
-            f"not delete unsupervised. {_OWNER_MERGES}")
+            f"deletes {len(owner_deletions)} owner-only file(s) "
+            f"({', '.join(owner_deletions[:3])}) — a machine must not delete these "
+            f"unsupervised. {_OWNER_MERGES}")
     if n_files > MAX_CHANGED_FILES:
         reasons.append(
             f"{n_files} files changed (cap {MAX_CHANGED_FILES}) — a change this wide is a "
             f"judgement call by size alone. FIX: split it into PRs under the cap, or the "
             f"owner merges it by hand.")
-    if n_lines > MAX_CHANGED_LINES:
+    code = n_lines - data
+    if code > MAX_CHANGED_LINES:
         reasons.append(
-            f"{n_lines} lines changed (cap {MAX_CHANGED_LINES}) — same reason. FIX: split it "
+            f"{code} lines of code changed (cap {MAX_CHANGED_LINES}) — same reason. FIX: split it "
             f"into PRs under the cap, or the owner merges it by hand.")
+    if n_lines > MAX_DATA_LINES:
+        reasons.append(
+            f"{n_lines} lines changed in all, {data} of them data (cap {MAX_DATA_LINES}) — same "
+            f"reason. FIX: split it into PRs under the cap, or the owner merges it by hand.")
     return Verdict("SIZE", "fail" if reasons else "pass", reasons,
                    claim=(f"small enough to reason about ({n_files} files, "
                           f"{n_lines} lines to read"
-                          + (f" + {exempt_lines} recorded-fixture lines not counted"
+                          + (f", {data} of them data" if data else "")
+                          + (f" + {exempt_lines} recorded-fixture or generated lines not counted"
                              if exempt_lines else "") + ")"))
 
 
@@ -1015,7 +1155,10 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
     security.yml really did run. Naming the reason is the whole fix.
     """
     before = len(runs)
-    runs = without_own_run(runs)
+    # The CI workflows' last job only dispatches this arm. It is still running for
+    # a few seconds when the arm judges, and waiting on it would be waiting on the
+    # thing that woke us. Exact name, like every check name here.
+    runs = [r for r in without_own_run(runs) if r.get("name") != WAKE_JOB]
     total_count -= before - len(runs)
     reasons: list[str] = []
     cannot = ", ".join(sorted(MAIN_ONLY_CHECKS))
@@ -1056,12 +1199,23 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
                        f"FIX: teach merge_cage.py to paginate.")
 
     names = [r.get("name", "") for r in runs]
+    still_running = any(r.get("status") != "completed" for r in runs)
+    analyses_running = sorted(str(r.get("name")) for r in runs
+                              if str(r.get("name") or "").startswith("Analyze (")
+                              and r.get("status") != "completed")
     for req in REQUIRED_CHECKS:
         # On a non-main base the reason above already says why this one is absent.
         # Saying it twice, once in a form the author cannot act on, is noise.
         if base_ref != MAIN_BRANCH and req in MAIN_ONLY_CHECKS:
             continue
-        if not any(req == n for n in names):
+        if not any(req == n for n in names) and still_running:
+            # Measured on #1037/#1038 (2026-10-20): judged a minute after a push,
+            # CodeQL had simply not been posted yet, and the advice "stale base,
+            # update the branch" sent the reader the wrong way. Still a wait.
+            reasons.append(
+                f"required check `{req}` has not started yet — other checks on this commit are "
+                f"still running. FIX: wait; the next run re-judges.")
+        elif not any(req == n for n in names):
             reasons.append(
                 f"required check `{req}` did not run — it cannot pass by being absent. This is "
                 f"almost always a stale base: the PR was branched before that check existed. "
@@ -1108,6 +1262,18 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
                 f"FIX: re-run it (`gh run rerun <run-id> --failed`) and re-judge. If it keeps "
                 f"not finishing, the job is too slow or is hanging, and THAT is the bug -- do "
                 f"not raise the timeout to hide it — {url}".rstrip(" -"))
+        elif name == "CodeQL" and concl == "neutral" and analyses_running:
+            # AN EARLY `neutral` IS A WAIT (2026-10-20). Measured on #1041:
+            # `CodeQL` (github-advanced-security) completed neutral at 20:47:15
+            # while `Analyze (python)` was still in_progress and `Analyze
+            # (actions)` finished at 20:47:22; on #1012 the same check run was
+            # later rewritten to success. So neutral posted before every
+            # analysis has finished is "not decided yet", not a refusal. Once
+            # every Analyze job is done, a neutral CodeQL still refuses below.
+            reasons.append(
+                f"required check `{name}` has not finished: it reads neutral while "
+                f"{', '.join(analyses_running)} still run, and it is rewritten when they finish. "
+                f"FIX: wait for it, then re-judge.")
         elif required and concl != "success":
             url = r.get("html_url") or ""
             reasons.append(
@@ -1159,9 +1325,19 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
 
 TAG_CHECKS: dict[str, tuple[str, ...]] = {
     "ci": ("Backend (Python 3.12)", "Frontend (Node 20)", "offline-suite", "frontend-e2e"),
+    # `reviewer-security` (.github/workflows/review-security.yml, 2026-10-02):
+    # the Claude security reviewer. Fails on any P0/P1 finding. Without it here
+    # a PR whose security review went red could still be machine-merged.
     "security": ("gitleaks (secret scan)", "bandit (python static analysis)",
-                 "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL"),
-    "verify": ("verify / backend", "verify / frontend"),
+                 "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL",
+                 "reviewer-security"),
+    # The eyes, AND the two ci-offline.yml jobs they defer to. Since 2026-10-19
+    # (CI audit) `verify / backend` and `verify / frontend` do not re-run Q1-Q3
+    # or Playwright when ci_scope.py says offline-suite / frontend-e2e already
+    # run them on this same tree; they record that instead. Naming those two
+    # here keeps `verify` self-contained: it is never earned by a deferral to
+    # a job that did not pass.
+    "verify": ("verify / backend", "verify / frontend", "offline-suite", "frontend-e2e"),
     "drill": ("Chain wires (harness)",),
     # The `reviewer-bugs` check (.github/workflows/review-bugs.yml) — the R3
     # bug-hunting reviewer, wired to CI 2026-09-11. Fails on any P0/P1 finding;
@@ -1209,7 +1385,13 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
             if base_ref != MAIN_BRANCH and name in MAIN_ONLY_CHECKS:
                 continue
             run = by_name.get(name)
-            if run is None:
+            if run is None and any(r.get("status") != "completed" for r in runs):
+                # Not posted yet while other checks still run (2026-10-20, #1029:
+                # judged at 21:40, `Backend (Python 3.12)` passed at 21:51). A wait.
+                reasons.append(
+                    f"tag `{tag}` needs `{name}`, which has not started yet — other checks on "
+                    f"this commit are still running. FIX: wait; the next run re-judges.")
+            elif run is None:
                 reasons.append(
                     f"tag `{tag}` needs `{name}` and that check never ran on this PR. A tag "
                     f"cannot be earned by absence. FIX: rebase onto main so the workflow "
@@ -1327,50 +1509,80 @@ def judge_threads(nodes: list[dict], has_next: bool) -> list[str]:
 # normalised into one shape, so the judge below is one pure function over one
 # list whatever the source was.
 REVIEWER_CHECK = "CodeRabbit"
-REVIEW_SKIPPED_RE = re.compile(r"review\s+skipped", re.IGNORECASE)
+# WHO COUNTS AS "A REVIEWER LOOKED" — CHANGED 2026-10-19 (the owner: "Option 1
+# and 2"). CodeRabbit's free tier gives this repository one review an hour,
+# shared by every PR, and it never reviews here on its own (fewer than 10
+# stars). With it as the evidence, every push waited in that queue and
+# auto-merge stalled for hours. The evidence is now our own two reviewers:
+# required checks on `main`, run on every push of every non-draft PR, no
+# hourly limit, and both FAIL (never pass) when they cannot run — a missing
+# token or an agent that posts no verdict is a red check. Their one silent
+# pass is a docs-only diff, which they skip on purpose.
+#
+# CodeRabbit stays installed as an OPTIONAL reviewer: anyone can still ask it
+# with `@coderabbitai review`. Its threads still block through `judge_threads`
+# like anyone's, and a review it has STARTED must finish first, so its findings
+# cannot land after the merge. Skipped, rate-limited or absent: no wait.
+REVIEWER_CHECKS = ("reviewer-bugs", "reviewer-security")
+# DEPENDABOT IS REVIEWED BY ITS OWN LOOP (2026-10-20). review-*.yml skip a
+# Dependabot run on purpose: GitHub gives it no secrets, and its diff is a
+# lockfile. `dependabot-auto.yml` merges patch/minor bumps once every check is
+# green and leaves majors to the owner. Since `merge-cage` became a required
+# check, the cage read that designed skip as "the reviewer did not pass" and
+# every Dependabot PR sat red (#1040). For this author only, a SKIPPED reviewer
+# is the designed outcome; a failed or missing one still refuses, and the cage
+# never queues a Dependabot PR itself, so the major/minor call stays with
+# dependabot-auto.yml.
+DEPENDABOT = "dependabot[bot]"
 
 
-def judge_review_evidence(check_runs: list[dict]) -> list[str]:
+def judge_review_evidence(check_runs: list[dict], author: str = "") -> list[str]:
     """Pure half: did a reviewer really look at this PR?
 
     Takes the check-run shape (`name`, `status`, `conclusion`, `output.title`);
     commit statuses are normalised into it by `review_evidence()` below, so this
     function needs no network and the drill can feed it the real shapes.
 
-    EVERY entry named `{REVIEWER_CHECK}` must be completed and must NOT say
-    "Review skipped". Judging all of them rather than "the newest" is the
-    fail-CLOSED direction: `?filter=latest` already collapses re-runs, so a
-    second entry is an oddity, and an oddity must not be the thing that decides
-    a merge. Exact-name matching, never a substring — B21 is the case where
-    `Frontend` matched `frontend-e2e` and an absent check looked present.
+    EVERY entry named in `REVIEWER_CHECKS` must exist, be completed and be a
+    `success`; a `{REVIEWER_CHECK}` entry only has to be completed. Judging all
+    entries rather than "the newest" is the fail-CLOSED direction:
+    `?filter=latest` already collapses re-runs, so a second entry is an oddity,
+    and an oddity must not be the thing that decides a merge. Exact-name
+    matching, never a substring — B21 is the case where `Frontend` matched
+    `frontend-e2e` and an absent check looked present.
     """
     check_runs = without_own_run(check_runs)
-    seen = [r for r in check_runs if (r.get("name") or "") == REVIEWER_CHECK]
-    if not seen:
-        return [
-            f"no reviewer has looked at this PR: there is no `{REVIEWER_CHECK}` result on its "
-            f"head commit at all, so 'no unresolved review threads' means 'nobody looked', not "
-            f"'nothing was found'. An empty finding list from a reviewer that never ran is not "
-            f"a review. "
-            f"FIX: enable CodeRabbit reviews for this repository (app settings), or wait for it "
-            f"to run, then re-judge."]
-
     reasons: list[str] = []
-    for r in seen:
-        title = str((r.get("output") or {}).get("title") or "")
-        if r.get("status") != "completed":
+    for name in REVIEWER_CHECKS:
+        seen = [r for r in check_runs if (r.get("name") or "") == name]
+        if not seen:
             reasons.append(
-                f"no reviewer has looked at this PR yet: `{REVIEWER_CHECK}` has not finished "
-                f"({r.get('status')}). A review in progress has proved nothing. "
+                f"no reviewer has looked at this PR yet: `{name}` has not finished — there is "
+                f"no `{name}` result on its head commit at all, so 'no unresolved review "
+                f"threads' means 'nobody looked', not 'nothing was found'. "
+                f"FIX: wait for it to run (every push of a non-draft PR starts it), then re-judge.")
+            continue
+        for r in seen:
+            if r.get("status") != "completed":
+                reasons.append(
+                    f"no reviewer has looked at this PR yet: `{name}` has not finished "
+                    f"({r.get('status')}). A review in progress has proved nothing. "
+                    f"FIX: wait for it to finish, then re-judge.")
+            elif r.get("conclusion") == "skipped" and author == DEPENDABOT:
+                continue  # the designed skip; see DEPENDABOT above
+            elif r.get("conclusion") != "success":
+                reasons.append(
+                    f"`{name}` did not pass ({r.get('conclusion')}): either it found a P0/P1 "
+                    f"problem or it could not review at all, and neither is a review that "
+                    f"cleared this PR. FIX: read its comments on the PR, fix or answer them, "
+                    f"and push so it runs again.")
+    for r in check_runs:
+        if (r.get("name") or "") == REVIEWER_CHECK and r.get("status") != "completed":
+            reasons.append(
+                f"`{REVIEWER_CHECK}` is reviewing this PR and has not finished "
+                f"({r.get('status')}). It is optional, but a review someone asked for must "
+                f"finish before the merge, or its findings arrive after it. "
                 f"FIX: wait for it to finish, then re-judge.")
-        elif REVIEW_SKIPPED_RE.search(title):
-            reasons.append(
-                f"no reviewer has looked at this PR: {REVIEWER_CHECK} reported \"{title}\" — a "
-                f"SKIPPED review produces no findings, and no findings is exactly what an "
-                f"answered review looks like from the outside. This cage will not tell the two "
-                f"apart by guessing the permissive one. "
-                f"FIX: enable CodeRabbit reviews for this repository (app settings), or wait for "
-                f"it to run, then re-judge.")
     return reasons
 
 
@@ -1381,8 +1593,7 @@ def review_evidence(pr: int) -> list[dict]:
     (measured 2026-09-11) and a cage that reads one endpoint cannot see the
     other. A status has no `status`/`conclusion`/`output` fields, so it is
     mapped: `pending` -> not completed, everything else -> completed with the
-    state as the conclusion and the DESCRIPTION as the title, which is where
-    "Review skipped: ..." is actually written.
+    state as the conclusion and the DESCRIPTION as the title.
     """
     sha = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".head.sha"])
     runs = list(json.loads(
@@ -1403,11 +1614,10 @@ def review_evidence(pr: int) -> list[dict]:
 def check_review(pr: int) -> Verdict:
     """Unresolved review THREADS, and proof a reviewer actually looked.
 
-    Never the status tick as a PASS: CodeRabbit runs with
-    `fail_commit_status: false`, so its tick is structurally incapable of saying
-    no. What IS read from it is the sentence it prints — a tick that cannot fail
-    can still confess "Review skipped", and that confession is evidence of
-    absence, which is a different claim from a green tick.
+    The proof is our own reviewers' checks (`REVIEWER_CHECKS`), never
+    CodeRabbit's tick: it runs with `fail_commit_status: false`, so its tick is
+    structurally incapable of saying no. CodeRabbit is optional; its threads
+    still count, and a review it has started must finish.
     """
     owner, _, name = REPO.partition("/")
     raw = gh(["api", "graphql", "-f", f"query={_THREADS_QUERY}",
@@ -1415,7 +1625,11 @@ def check_review(pr: int) -> Verdict:
     threads = (json.loads(raw)["data"]["repository"]["pullRequest"]["reviewThreads"])
     reasons = judge_threads(threads.get("nodes") or [],
                             bool((threads.get("pageInfo") or {}).get("hasNextPage")))
-    reasons += judge_review_evidence(review_evidence(pr))
+    try:  # an unreadable author is "not Dependabot": the strict side
+        author = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".user.login"]).strip()
+    except Exception:  # noqa: BLE001
+        author = ""
+    reasons += judge_review_evidence(review_evidence(pr), author)
     return Verdict("REVIEW", "fail" if reasons else "pass", reasons,
                    claim="a reviewer really looked, and nobody is still waiting on an answer")
 
@@ -1440,15 +1654,20 @@ def ground_problem(expected_sha: str, actual_sha: str) -> str | None:
     having compared a value to itself, which is exactly the class of lie this file
     exists to stop. So say so instead of pretending.
     """
+    # BOTH ANSWERS ARE A WAIT, NOT A REFUSAL (2026-10-20). Measured on #1007:
+    # judged at 16:46:12, eleven seconds after `main` moved at 16:45:57. GitHub
+    # recomputes a PR's merge commit after its base moves and reports
+    # `merge_commit_sha: null` meanwhile, so the cage "could not tell which
+    # commit" and posted `failure` on a PR with nothing wrong in it. Neither an
+    # empty sha nor a moved one is the PR's fault, and both settle on their own.
     if not expected_sha or not actual_sha:
-        return ("I cannot tell which commit I am standing on, so I cannot say whether these "
-                "numbers belong to this PR. FIX: run the ratchets from a checkout of "
-                "`refs/pull/<PR>/merge`.")
+        return ("GitHub has not computed this PR's merge commit yet (it recomputes after "
+                "`main` moves), so the merge tree has not settled yet and I cannot say whether "
+                "these numbers belong to this PR. FIX: wait; the next run re-judges.")
     if expected_sha != actual_sha:
         return (f"these numbers were measured on `{actual_sha[:8]}`, not on this PR's merge "
-                f"commit `{expected_sha[:8]}` — comparing them would answer a question about "
-                f"a different tree. FIX: measure from a checkout of `refs/pull/<PR>/merge`, or "
-                f"drop --baseline and accept that the ratchet cage did not run.")
+                f"commit `{expected_sha[:8]}` — `main` moved while I was judging, so the merge "
+                f"tree has not settled yet. FIX: wait; the next run re-judges.")
     return None
 
 
@@ -1580,7 +1799,7 @@ def check_ratchets(base_values: dict | None, expected_sha: str = "",
     if any(r.get("scope") == "tree" for r in RATCHETS):
         problem = ground_problem(expected_sha, head_sha(tree))
         if problem:
-            return Verdict("RATCHET", "fail", [f"ratchet comparison refused: {problem}"],
+            return Verdict("RATCHET", "fail", [f"ratchet comparison waits: {problem}"],
                            claim="no quality number went backwards")
 
     compared = 0
@@ -1663,6 +1882,16 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
     verdicts: list[Verdict] = []
     meta: dict = {}
     try:
+        # The head is read BEFORE the files and checked again after every cage,
+        # so a push mid-judgement cannot put this verdict on a diff it never read.
+        pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
+        # `merge_commit_sha` is null while GitHub recomputes the merge after the
+        # base moves; reading the PR is what asks it to. Ask a few more times.
+        for _ in range(3):
+            if pr_json.get("merge_commit_sha"):
+                break
+            time.sleep(5)
+            pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
         files_raw = gh(["api", f"repos/{REPO}/pulls/{pr}/files?per_page={PER_PAGE}"])
         files_json = json.loads(files_raw)
         files = [f["filename"] for f in files_json]
@@ -1670,7 +1899,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
         # The cap counts what a reviewer READS -- recorded fixtures are reported
         # separately rather than folded in. See review_surface().
         changed_lines, exempt_lines = review_surface(files_json)
-        pr_json = json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"]))
+        changed_data = data_lines(files_json)
         # A MISSING base ref is not `main`. Defaulting an unknown base to the one
         # value that unlocks the full check list would be the permissive guess,
         # and the permissive guess is what this file exists to refuse. An empty
@@ -1678,9 +1907,17 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
         base_ref = ((pr_json.get("base") or {}).get("ref")) or ""
         meta = {"files": len(files), "lines": changed_lines,
                 "fixture_lines": exempt_lines,
+                "data_lines": changed_data,
                 "title": pr_json.get("title") or f"PR #{pr}",
+                "author": ((pr_json.get("user") or {}).get("login")) or "",
                 "base": base_ref,
-                "merge_sha": pr_json.get("merge_commit_sha") or ""}
+                "merge_sha": pr_json.get("merge_commit_sha") or "",
+                # The commit this verdict is about. The arm posts the `merge-cage`
+                # status on THIS sha, never on whatever the head is by then.
+                "head_sha": ((pr_json.get("head") or {}).get("sha")) or "",
+                # A PR that changes `.github/` can carry a workflow able to post
+                # `merge-cage` itself, so the arm never HOLDS one it refused.
+                "touches_github": any(f.startswith(".github/") for f in files)}
     except Exception as exc:
         # A cage that cannot see the change must never approve it.
         return False, [Verdict("READ", "fail", [
@@ -1691,7 +1928,8 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
     if truncation:
         verdicts.append(Verdict("READ", "fail", truncation))
 
-    verdicts.append(check_size(len(files), changed_lines, deletions, exempt_lines))
+    verdicts.append(check_size(len(files), changed_lines, deletions, exempt_lines,
+                               meta.get("data_lines", 0)))
     verdicts.append(check_paths(files))
 
     for name, fn in (("PROOF", lambda p: check_proof(p, base_ref)), ("REVIEW", check_review)):
@@ -1735,7 +1973,84 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
             f"the RATCHET cage could not run ({type(exc).__name__}: {exc}) — refusing. "
             f"FIX: run `python scripts/merge_cage.py --measure` and fix whatever it reports."]))
 
+    # THE HEAD MUST NOT MOVE WHILE IT IS JUDGED (CodeRabbit on #912).
+    try:
+        head_now = ((json.loads(gh(["api", f"repos/{REPO}/pulls/{pr}"])).get("head") or {})
+                    .get("sha")) or ""
+    except Exception as exc:
+        head_now = f"unreadable ({type(exc).__name__})"
+    if head_now != meta.get("head_sha"):
+        verdicts.append(Verdict("READ", "fail", [
+            f"the head moved while I judged it ({str(meta.get('head_sha'))[:7]} -> "
+            f"{head_now[:7]}), so this verdict may describe a diff I never read. FIX: nothing; "
+            f"the new head gets its own run."]))
+
     return (not any(v.blocks for v in verdicts)), verdicts, meta
+
+
+# ── THE VERDICT AS A REQUIRED CHECK (2026-10-19) ────────────────────────────
+# Measured on 27 PRs merged 17-19 October: 2 merged by auto-merge cleanly. The
+# arm judged each PR about a minute after it opened, read "has not finished" as
+# a refusal, withdrew it from the queue, and nothing woke it again when CI went
+# green (GitHub does not fire `check_suite` for Actions' own suites). So every
+# green PR waited for a hand merge, and the hand merges walked past this cage.
+#
+# The fix is to stop toggling GitHub's queue and say the verdict where GitHub
+# can wait on it: a `merge-cage` commit status. Once the owner makes it a
+# required check, a PR stays queued and GitHub holds it until this says
+# `success`. "Still waiting" is `pending`, a real refusal is `failure`; both hold.
+_WAIT_MARKERS = ("has not finished", "cannot pass by being absent", "has not settled yet",
+                 "has not started yet")
+# THE OWNER'S TURN IS NOT A FAILURE (owner, 2026-10-20). A PR only the owner may
+# merge (the cage's own files, migrations, auth, a deletion) used to post a red
+# `failure` even when every check was green, so every one of them looked broken
+# and every hand merge walked past a red X. It is `pending` now -- still holding
+# GitHub's queue (a required check only passes on `success`), but yellow, saying
+# whose turn it is. A real refusal anywhere in the list still posts `failure`.
+_OWNER_MARKERS = ("so he merges it by hand", "merge it yourself")
+
+
+def status_for(allowed: bool, verdicts: list[Verdict]) -> tuple[str, str]:
+    """(state, description) for the `merge-cage` commit status. Pure."""
+    if allowed:
+        return "success", "every cage passed"
+    blocks = blocks_of(verdicts) or ["refused, and no reason was recorded"]
+    waiting = [b for b in blocks if any(m in b for m in _WAIT_MARKERS)]
+    owners = [b for b in blocks if b not in waiting and any(m in b for m in _OWNER_MARKERS)]
+    real = [b for b in blocks if b not in waiting and b not in owners]
+    if real:
+        return "failure", real[0][:140]
+    if waiting:
+        return "pending", ("waiting: " + waiting[0])[:140]
+    return "pending", ("the owner merges this by hand: " + owners[0])[:140]
+
+
+def requires_context(rules: object, context: str) -> bool:
+    """Does this `GET /rules/branches/<b>` answer require `context`? Pure.
+
+    Anything unreadable is False, which keeps the old withdraw behaviour: the
+    direction that cannot let a refused PR through.
+    """
+    if not isinstance(rules, list):
+        return False
+    for rule in rules:
+        if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+            continue
+        for check in ((rule.get("parameters") or {}).get("required_status_checks") or []):
+            if isinstance(check, dict) and check.get("context") == context:
+                return True
+    return False
+
+
+def merge_cage_required(base_ref: str) -> bool:
+    """Does `base_ref`'s ruleset require the `merge-cage` status? Any doubt -> False (withdraw)."""
+    if not base_ref:
+        return False
+    try:
+        return requires_context(json.loads(gh(["api", f"repos/{REPO}/rules/branches/{base_ref}"])),
+                                STATUS_CONTEXT)
+    except Exception:
+        return False
 
 
 def blocks_of(verdicts: list[Verdict]) -> list[str]:
@@ -1983,6 +2298,8 @@ DECISION_PATH = [
     # THE ANNOUNCE DECISION. On the decision path because an alert path that
     # spams is an alert path that gets muted, and a muted path protects nothing.
     "judge_transition", "transition_message",
+    # THE VERDICT GITHUB WAITS ON, and whether it is wired to hold anything.
+    "status_for", "requires_context",
     "as_reading", "measured_tree", "capability_gap",
     "page_was_full", "path_matches", "check_lists", "blocks_of", "plain_english", "decide",
     "slack",  # the announce path: a verdict nobody hears is a verdict that did not happen
@@ -2061,7 +2378,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # widen the allow side to `.claude/**` and the reds below go green, which is
     # the drill doing its job.
     red("a git hook is refused — an agent may not edit its own exam",
-        check_paths([".claude/hooks/worktree-reaper.sh"]), "cage is escaped", P)
+        check_paths([".claude/hooks/commit-gate.sh"]), "cage is escaped", P)
     red("the agent's own permissions file is refused",
         check_paths([".claude/settings.json"]), "authorisation", P)
 
@@ -2095,18 +2412,20 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # go red — which is correct: the policy and its drill have to say the same
     # thing, and that is the whole reason both lists come from one file.
     flipped = ["backend/src/services/skill_matcher.py",
-               "backend/src/api/routes/auth.py",
                "backend/src/api/routes/profile.py",
                "docker-compose.prod.yml",
                "frontend/package.json",
-               "backend/migrations/0042_x.up.sql",
-               "docs/product/product_design_rules.md",
-               "backend/src/core/settings.py"]
+               "docs/product/product_design_rules.md"]
     still_denied = [f for f in flipped if check_paths([f]).status != "pass"]
     ok("the product's sharp end is machine-mergeable now, under the watcher",
        not still_denied,
        f"`product_owner` is flipped in the policy but the cage still refuses: {still_denied}",
        P)
+    # OWNER 2026-10-20: migrations and auth left the flip and wait for his hand.
+    for owner_only in ("backend/migrations/0042_x.up.sql", "backend/src/api/routes/auth.py",
+                       "backend/src/services/auth/session.py", "backend/src/api/routes/account_x.py"):
+        red(f"migrations and auth are the owner's to merge: {owner_only}",
+            check_paths([owner_only]), "merges it by hand", P)
     # The witness moved on 2026-08-26 and the invariant did not. It used to be
     # `backend/src/some_new_module.py`, which was only "unrecognised" because
     # the cage's hand-typed ALLOW list had never heard of `backend/src/**` —
@@ -2284,8 +2603,10 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     #        recursive deny this commit introduced, and a new deny with no nested
     #        witness is how the 2026-08-20 rewrite nearly lost every slash-free
     #        rule it was fixing.
-    nested = [("scripts/deep/nested/tool.py", "cage is escaped"),
-              (".github/workflows/sub/x.yml", "cage is escaped"),
+    #        2026-10-18: `scripts/**` and `.github/**` moved to the `harness`
+    #        lane (owner), so they witness nothing any more. `.claude/agents/**`
+    #        is the other recursive deny still standing.
+    nested = [(".claude/agents/deep/nested/judge.md", "cage is escaped"),
               (".claude/hooks/lib/deep/helper.sh", "cage is escaped"),
               ("backend/deep/nested/CLAUDE.md", "circular")]
     missed = [f for f, needle in nested
@@ -2324,8 +2645,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        v_safe.status == "pass", f"the cage refused a change it should allow: {v_safe.reasons}", P)
 
     # ── CAGE: SIZE ───────────────────────────────────────────────────────────
-    red("deleting a file is refused",
-        check_size(1, 10, ["backend/src/x.py"]), "must not delete", ["check_size"])
+    red("deleting an owner-only file (the policy) is refused",
+        check_size(1, 10, [".github/merge-policy.yml"]), "must not delete", ["check_size"])
+    red("deleting an owner-only file (the cage itself) is refused",
+        check_size(1, 10, ["scripts/merge_cage.py"]), "must not delete", ["check_size"])
+    ok("NEGATIVE CONTROL: deleting an ordinary file is not an owner decision (owner, 2026-10-20)",
+       check_size(1, 10, ["backend/src/x.py", "docs/old.md"]).status == "pass",
+       f"got {check_size(1, 10, ['backend/src/x.py', 'docs/old.md']).reasons}", ["check_size"])
     red("a change too wide to reason about is refused",
         check_size(999, 10, []), "judgement call by size", ["check_size"])
 
@@ -2337,6 +2663,15 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("a required check that is absent is refused",
         judge_check_runs(done[1:], len(done) - 1), "cannot pass by being absent",
         ["judge_check_runs"])
+    # Absent while others still run is "not started yet", a wait, never "stale base"
+    # (#1037/#1038, 2026-10-20: CodeQL had not been posted a minute after a push).
+    _running = done[1:-1] + [dict(done[-1], status="in_progress", conclusion=None)]
+    _absent_early = judge_check_runs(_running, len(_running))
+    red("a required check absent while others still run has not started yet",
+        _absent_early, "has not started yet", ["judge_check_runs"])
+    ok("...and it is not called a stale base",
+       not any("stale base" in r for r in _absent_early),
+       f"got {_absent_early}", ["judge_check_runs"])
     red("a failing check is refused",
         judge_check_runs(done[:-1] + [{"name": "CodeQL", "status": "completed",
                                        "conclusion": "failure", "output": {}}], len(done)),
@@ -2427,31 +2762,67 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # `CodeRabbit | success | "Review skipped: manual review required for this
     # OSS repository"` and NO review threads at all. So `judge_threads` returned
     # [] and the cage called it "no reviewer is still waiting on an answer".
-    _rev_looked = {"name": REVIEWER_CHECK, "status": "completed", "conclusion": "success",
-                   "output": {"title": "3 files reviewed, 1 comment posted"}}
+    # Since 2026-10-19 the evidence is our own reviewers (`REVIEWER_CHECKS`) and
+    # CodeRabbit is optional; the CodeRabbit shapes below are read live the same
+    # day (#902, #912, #917, #918): `pending | Review in progress`, then within
+    # seconds `success | Review rate limited` or `Review skipped`.
+    # The two names are written out, not read from REVIEWER_CHECKS: a drill built
+    # from the constant it tests stays green when someone shortens the constant.
+    _ours = [{"name": n, "status": "completed", "conclusion": "success", "output": {}}
+             for n in ("reviewer-bugs", "reviewer-security")]
     _rev_skipped = {"name": REVIEWER_CHECK, "status": "completed", "conclusion": "success",
                     "output": {"title": "Review skipped: manual review required for this "
                                         "OSS repository"}}
-    _rev_running = {"name": REVIEWER_CHECK, "status": "in_progress", "conclusion": None,
-                    "output": {"title": ""}}
+    _rev_limited = {"name": REVIEWER_CHECK, "status": "completed", "conclusion": "success",
+                    "output": {"title": "Review rate limited"}}
+    _rev_running = {"name": REVIEWER_CHECK, "status": "in_progress", "conclusion": "pending",
+                    "output": {"title": "Review in progress"}}
     RE = ["judge_review_evidence"]
     # THE CASE THAT MATTERS: this is the negative control that pins the vacuous
-    # pass. Delete the skipped-title branch and THIS goes red while every
-    # thread-based case above stays green — which is exactly how the hole lived.
-    red("THE VACUOUS PASS: a SKIPPED review is refused, not read as 'nothing found'",
+    # pass. A skipped CodeRabbit and zero threads, with our reviewers absent, is
+    # still nobody looking — and still refused.
+    red("THE VACUOUS PASS: no reviewer result is refused, even beside a SKIPPED CodeRabbit",
         judge_review_evidence(done + [_rev_skipped]), "no reviewer has looked", RE)
-    red("a PR no reviewer result exists for at all is refused",
-        judge_review_evidence(done), "no reviewer has looked", RE)
-    red("a review still running is not evidence that anyone looked",
-        judge_review_evidence(done + [_rev_running]), "has not finished", RE)
-    ok("NEGATIVE CONTROL (a real review that found things and finished passes)",
-       not judge_review_evidence(done + [_rev_looked]),
-       f"a genuinely reviewed PR was refused: {judge_review_evidence(done + [_rev_looked])}", RE)
+    red("a PR with only ONE of our reviewers on it is refused",
+        judge_review_evidence(done + _ours[:1]), "reviewer-security", RE)
+    red("our reviewer still running is not evidence that anyone looked",
+        judge_review_evidence(done + [_ours[0], {**_ours[1], "status": "in_progress"}]),
+        "has not finished", RE)
+    red("our reviewer that FAILED (a P0/P1, or it could not run) is refused",
+        judge_review_evidence(done + [_ours[0], {**_ours[1], "conclusion": "failure"}]),
+        "did not pass", RE)
+    _ours_skipped = [{**r, "conclusion": "skipped"} for r in _ours]
+    ok("a Dependabot PR whose reviewers SKIPPED by design passes (dependabot-auto owns it)",
+       not judge_review_evidence(done + _ours_skipped, DEPENDABOT),
+       f"got {judge_review_evidence(done + _ours_skipped, DEPENDABOT)}", RE)
+    red("...but the same skip on anyone else's PR is still refused",
+        judge_review_evidence(done + _ours_skipped, "someone"), "did not pass", RE)
+    red("...and a Dependabot PR whose reviewer FAILED is still refused",
+        judge_review_evidence(done + [_ours[0], {**_ours[1], "conclusion": "failure"}],
+                              DEPENDABOT), "did not pass", RE)
+    red("...and a Dependabot PR with no reviewer result at all is still refused",
+        judge_review_evidence(done, DEPENDABOT), "no reviewer has looked", RE)
+    ok("NEGATIVE CONTROL (both our reviewers finished green, no CodeRabbit at all: passes)",
+       not judge_review_evidence(done + _ours),
+       f"a genuinely reviewed PR was refused: {judge_review_evidence(done + _ours)}", RE)
+    ok("CodeRabbit is OPTIONAL: skipped or rate-limited beside our reviewers is no wait",
+       not judge_review_evidence(done + _ours + [_rev_skipped])
+       and not judge_review_evidence(done + _ours + [_rev_limited]),
+       "CodeRabbit's hourly limit is gating merges again (the owner removed that, 2026-10-19)",
+       RE)
+    red("...but a CodeRabbit review someone asked for must finish before the merge",
+        judge_review_evidence(done + _ours + [_rev_running]), "is reviewing this PR", RE)
+    ok("...and waiting on it, or on our reviewers, is a WAIT, not a final failure",
+       all(status_for(False, [Verdict("REVIEW", "fail", judge_review_evidence(done + runs))])[0]
+           == "pending"
+           for runs in ([*_ours, _rev_running], [_ours[0], {**_ours[1], "status": "queued"}],
+                        _ours[:1])),
+       "a reviewer that is still working was posted as a final failure", RE + ["status_for"])
     # A reviewer is matched by EXACT name — B21's lesson, applied before it bites
-    # here: a substring match would let `CodeRabbit (experimental)` or
-    # `pre-CodeRabbit` stand in for the reviewer the owner's gate names.
+    # here: a substring match would let `reviewer-bugs (old)` or
+    # `pre-reviewer-security` stand in for the reviewer the owner's gate names.
     ok("a similarly-named check cannot stand in for the reviewer",
-       bool(judge_review_evidence(done + [{**_rev_looked, "name": "CodeRabbit-lite"}])),
+       bool(judge_review_evidence(done + [{**r, "name": r["name"] + "-lite"} for r in _ours])),
        "a check whose name merely CONTAINS the reviewer's satisfied the evidence test", RE)
 
     # ── CAGE: RATCHET ────────────────────────────────────────────────────────
@@ -2580,6 +2951,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        bool(ground_problem("a" * 40, "b" * 40)) and bool(ground_problem("", "b" * 40))
        and ground_problem("a" * 40, "a" * 40) is None,
        "a comparison against the wrong tree was allowed to stand", ["ground_problem"])
+    # ...and it HOLDS as a wait, never a failure: an unsettled merge tree is
+    # GitHub's timing, not the PR's fault (#1007, 2026-10-20).
+    for _exp, _act in (("", "b" * 40), ("a" * 40, "b" * 40)):
+        _gv = Verdict("RATCHET", "fail", [f"ratchet comparison waits: {ground_problem(_exp, _act)}"])
+        ok(f"an unsettled merge tree is a wait, not a failure ({'empty' if not _exp else 'moved'})",
+           status_for(False, [_gv])[0] == "pending",
+           f"got {status_for(False, [_gv])}", ["ground_problem", "status_for"])
 
     # ── THE WHOLE CAGE, END TO END, WITH A FAKE GITHUB ────────────────────────
     # check_proof and check_review were never drilled — the two cages that talk to
@@ -2592,9 +2970,12 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         # (measured on PRs #538/#543/#544, 2026-09-11), so the fake GitHub has to
         # answer both endpoints or `check_review` is being drilled against a
         # shape GitHub never sends.
-        def _statuses(description: str) -> str:
-            return json.dumps({"state": "success", "statuses": [
-                {"context": REVIEWER_CHECK, "state": "success", "description": description}]})
+        def _statuses(description: str, state: str = "success") -> str:
+            return json.dumps({"state": state, "statuses": [
+                {"context": REVIEWER_CHECK, "state": state, "description": description}]})
+
+        # Our reviewers are check runs on the same listing as the required checks.
+        runs = done + _ours
 
         def fake_gh(a: list[str]) -> str:
             joined = " ".join(a)
@@ -2604,9 +2985,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
             if a[-1] == ".head.sha":
                 return "d" * 40
             if "check-runs" in joined:
-                return json.dumps({"total_count": len(done), "check_runs": done})
+                return json.dumps({"total_count": len(runs), "check_runs": runs})
             if joined.endswith("/status"):
-                return _statuses("3 files reviewed, 1 comment posted")
+                return _statuses("Review completed")
             raise RuntimeError(f"the drill did not expect: {joined}")
         globals()["gh"] = fake_gh
         v_proof = check_proof(1)
@@ -2617,21 +2998,41 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
            v_rev.status == "pass", f"{v_rev.status}: {v_rev.reasons}", ["check_review"])
 
         # B26 END TO END, THROUGH THE REAL WRAPPER AND THE REAL ENDPOINTS.
-        # Same PR, same zero unresolved threads, one field different: the
-        # reviewer says it skipped. Before 2026-09-11 this was a PASS — the exact
-        # state every live PR in this repo is in today.
+        # Same PR, same zero unresolved threads, our reviewers absent and
+        # CodeRabbit saying it skipped. Before 2026-09-11 this was a PASS.
         def skipped_gh(a: list[str]) -> str:
-            if " ".join(a).endswith("/status"):
+            j = " ".join(a)
+            if "check-runs" in j:
+                return json.dumps({"total_count": len(done), "check_runs": done})
+            if j.endswith("/status"):
                 return _statuses("Review skipped: manual review required for this OSS repository")
             return fake_gh(a)
 
         globals()["gh"] = skipped_gh
         v_vacuous = check_review(1)
-        ok("THE VACUOUS PASS, END TO END: no threads + a SKIPPED review is a REFUSAL",
+        ok("THE VACUOUS PASS, END TO END: no threads + no reviewer result is a REFUSAL",
            v_vacuous.status == "fail"
            and any("no reviewer has looked" in r for r in v_vacuous.reasons),
            f"{v_vacuous.status}: {v_vacuous.reasons} — 'nobody looked' was read as "
            f"'nothing found', which is the whole hole", ["check_review"])
+
+        # CodeRabbit optional, end to end: rate-limited is no wait; reviewing is.
+        def coderabbit_gh(description: str, state: str):
+            def _gh(a: list[str]) -> str:
+                if " ".join(a).endswith("/status"):
+                    return _statuses(description, state)
+                return fake_gh(a)
+            return _gh
+        globals()["gh"] = coderabbit_gh("Review rate limited", "success")
+        v_limited = check_review(1)
+        globals()["gh"] = coderabbit_gh("Review in progress", "pending")
+        v_running = check_review(1)
+        ok("a RATE-LIMITED CodeRabbit is no wait; one still REVIEWING is, end to end",
+           v_limited.status == "pass" and v_running.status == "fail"
+           and any("is reviewing this PR" in r for r in v_running.reasons),
+           f"limited={v_limited.status}:{v_limited.reasons} "
+           f"running={v_running.status}:{v_running.reasons}",
+           ["check_review", "judge_review_evidence"])
         globals()["gh"] = fake_gh
         # `done` is the REQUIRED_CHECKS list, which is not the same set as the
         # tag checks — so a harness lane whose `ci` tag names jobs this fake
@@ -2741,6 +3142,21 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
             for n in REQUIRED_CHECKS]
     _opt.append({"name": "Doc clutter (CURATE gear)", "status": "completed",
                  "conclusion": "skipped"})
+    # An early neutral CodeQL, posted while its Analyze jobs still run, is a WAIT
+    # (#1041, 2026-10-20); after every analysis finished, neutral still refuses.
+    _cq = [{"name": n, "status": "completed", "conclusion": "success"}
+           for n in REQUIRED_CHECKS if n != "CodeQL"]
+    _cq.append({"name": "CodeQL", "status": "completed", "conclusion": "neutral"})
+    _early = judge_check_runs(_cq + [{"name": "Analyze (python)", "status": "in_progress",
+                                      "conclusion": None}], len(_cq) + 1)
+    ok("a neutral CodeQL while an Analyze job still runs is a wait, not a refusal",
+       bool(_early) and all(any(m in r for m in _WAIT_MARKERS) for r in _early)
+       and not any("only `success` counts" in r for r in _early),
+       f"got {_early}", ["judge_check_runs"])
+    _late = judge_check_runs(_cq + [{"name": "Analyze (python)", "status": "completed",
+                                     "conclusion": "success"}], len(_cq) + 1)
+    ok("...but a neutral CodeQL after every analysis finished still refuses",
+       any("only `success` counts" in r for r in _late), f"got {_late}", ["judge_check_runs"])
     ok("an OPTIONAL check that skipped is still green (a path filter is not a failure)",
        not judge_check_runs(_opt, len(_opt)),
        f"a correctly-skipped optional check blocked the PR: {judge_check_runs(_opt, len(_opt))}",
@@ -2806,8 +3222,31 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        "the extension alone was enough to exempt a file", ["review_surface"])
 
     _v_ex = check_size(3, 900, [], exempt_lines=2120)
+    # B22b — DATA GETS THE WIDER CAP, CODE DOES NOT (owner, 2026-10-20).
+    _dc = [{"filename": "backend/src/hunt_kit/companies.json", "additions": 2400, "deletions": 0},
+           {"filename": "backend/tests/test_hunt_kit_gulf.py", "additions": 400, "deletions": 0}]
+    ok("2,400 data lines + 400 code lines fit under the data cap",
+       data_lines(_dc) == 2400 and check_size(2, 2800, [], 0, data_lines(_dc)).status == "pass",
+       f"data={data_lines(_dc)}", ["data_lines", "check_size"])
+    ok("1,200 lines of CODE still fail, whatever the data cap",
+       check_size(1, 1200, [], 0, 0).status == "fail", "code rode the data cap", ["check_size"])
+    ok("data past the total cap fails",
+       check_size(2, MAX_DATA_LINES + 1, [], 0, MAX_DATA_LINES - 100).status == "fail",
+       "the data cap had no ceiling", ["check_size"])
+    _not_data = [{"filename": ".github/workflows/x.yml", "additions": 500, "deletions": 0},
+                 {"filename": "frontend/package-lock.json", "additions": 500, "deletions": 0},
+                 {"filename": "backend/src/x.py", "additions": 500, "deletions": 0},
+                 # reviewer-security P2 on #1014: data extension, but NOT in a data folder
+                 {"filename": "frontend/package.json", "additions": 500, "deletions": 0},
+                 {"filename": "backend/requirements.txt", "additions": 500, "deletions": 0},
+                 {"filename": "docker-compose.prod.yml", "additions": 500, "deletions": 0},
+                 # a data folder name inside another path does not count: prefix only
+                 {"filename": "frontend/backend/data/x.json", "additions": 500, "deletions": 0}]
+    ok("a workflow, a lockfile, a .py, package.json, requirements.txt and a compose file are never data",
+       data_lines(_not_data) == 0, f"got {data_lines(_not_data)}", ["data_lines"])
+
     ok("the discount is SAID OUT LOUD, never silent",
-       "recorded-fixture lines not counted" in (_v_ex.claim or ""),
+       "recorded-fixture or generated lines not counted" in (_v_ex.claim or ""),
        "an exemption nobody can see is indistinguishable from a hole", ["check_size"])
 
     # B21 — A REQUIRED CHECK IS MATCHED BY EXACT NAME, AND THE DANGEROUS
@@ -2830,6 +3269,20 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("...and a skipped OPTIONAL check with a similar name still does not block",
        not judge_check_runs(_rs(_opt_skip), len(_opt_skip)),
        "an optional skip was mistaken for a required one", ["judge_check_runs"])
+
+    # B23 — TEST INTEGRITY (2026-10-20). A PR that switched a test off, deleted
+    #       one or edited test config is red on `test-integrity`; a machine may
+    #       not merge it, and an ABSENT one (a branch from before the job) is
+    #       refused too -- the guard cannot pass by not running.
+    _ti_red = [p for p in _all_req if p[0] != "test-integrity"] + [("test-integrity", "failure")]
+    ok("a failed `test-integrity` (a skipped / deleted test) blocks a machine merge",
+       any("test-integrity" in r for r in judge_check_runs(_rs(_ti_red), len(_ti_red))),
+       "a PR that weakened its own tests was machine-mergeable", ["judge_check_runs"])
+    _ti_gone = [p for p in _all_req if p[0] != "test-integrity"]
+    ok("...and a MISSING `test-integrity` blocks too",
+       any("`test-integrity` did not run" in r
+           for r in judge_check_runs(_rs(_ti_gone), len(_ti_gone))),
+       "a PR with no test-integrity verdict was machine-mergeable", ["judge_check_runs"])
 
     # ── THE TAGS CAGE ────────────────────────────────────────────────────────
     # The PRODUCT lane requires `verify`, and `verify-live.yml` is NOT one of
@@ -2857,6 +3310,19 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        bool(judge_tags(_prod_req, _verify_skipped)),
        "a skipped job was allowed to prove something — a skip proves nothing, "
        "which is the entire point of a tag", T)
+
+    # #1029 (2026-10-20): the cage judged before `Backend (Python 3.12)` was posted
+    # and called it "never ran" -- a red on a PR whose every check later passed.
+    _ci_early = [r for r in _full if r["name"] != TAG_CHECKS["ci"][0]] + \
+        [{"name": "offline-suite-still-going", "status": "in_progress", "conclusion": None}]
+    _early_tags = judge_tags(_prod_req, _ci_early)
+    ok("a tag check not posted yet while others still run is a WAIT, not 'never ran'",
+       bool(_early_tags) and all(any(m in r for m in _WAIT_MARKERS) for r in _early_tags),
+       f"got {_early_tags}", T)
+    _ci_gone = [r for r in _full if r["name"] != TAG_CHECKS["ci"][0]]
+    ok("...but a tag check absent after everything finished still says it never ran",
+       any("never ran" in r for r in judge_tags(_prod_req, _ci_gone)),
+       f"got {judge_tags(_prod_req, _ci_gone)}", T)
 
     _verify_pending = [r for r in _full if not r["name"].startswith("verify")] + \
         [{"name": TAG_CHECKS["verify"][0], "status": "in_progress", "conclusion": None}]
@@ -3028,14 +3494,17 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
             if a[-1] == ".head.sha":
                 return "d" * 40
             if "check-runs" in j:
-                return json.dumps({"total_count": len(done), "check_runs": done})
+                # A PR that was REALLY reviewed: our two reviewers finished green.
+                # Without them the "ALLOW IS REACHABLE" case below could only ever
+                # be reached by a PR nobody had looked at, which this cage refuses.
+                return json.dumps({"total_count": len(done) + len(_ours),
+                                   "check_runs": done + _ours})
             if j.endswith("/status"):
-                # A PR that was REALLY reviewed. Without this the "ALLOW IS
-                # REACHABLE" case below could only ever be reached by a PR nobody
-                # had looked at, which is no longer a PR this cage allows.
+                # CodeRabbit as it really reads on most PRs here: it did not look.
+                # Optional, so it must not stand between this PR and ALLOW.
                 return json.dumps({"state": "success", "statuses": [
                     {"context": REVIEWER_CHECK, "state": "success",
-                     "description": "3 files reviewed, 1 comment posted"}]})
+                     "description": "Review rate limited"}]})
             if "/files" in j:
                 return json.dumps([{"filename": "docs/README.md", "status": "modified",
                                     "additions": 3, "deletions": 1}])
@@ -3262,7 +3731,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         withdraw_auto_merge(1)
     finally:
         subprocess.run = _saved2  # type: ignore[assignment]
-    _out_argv = _seen_out[0] if _seen_out else []
+    # The withdrawal now reads the queue state first, so select the command by
+    # name rather than by position (same reason as the `--auto` case above).
+    _out_argv = next((c for c in _seen_out if "--disable-auto" in c), [])
     ok("a refusal can take a PR back OUT of the queue",
        "--disable-auto" in _out_argv,
        f"the command was {_out_argv} — without `--disable-auto` a PR queued while it "
@@ -3290,6 +3761,45 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("...and withdrawing a PR that was never queued is a no-op, not an error",
        _ok_nq and _was_nq == QUEUE_ABSENT,
        f"it reported ok={_ok_nq} previous={_was_nq!r} with: {_detail_nq}",
+       ["withdraw_auto_merge"])
+
+    # B21b — THE WITHDRAWAL REPORTS ONLY A REAL queued -> not-queued TRANSITION.
+    #        `gh pr merge --disable-auto` exits 0 on a PR that was never queued, so
+    #        trusting its exit code posted "taken back OUT of the merge queue" for
+    #        PRs that were never in it (#703: 6 posts in 35 min, #659: 7). Fake gh:
+    #        `.auto_merge` is read from the api call; the disable call always
+    #        exits 0, exactly like the real one.
+    def _withdraw_with(auto_merge_flag: str) -> tuple[tuple[bool, str, str], bool]:
+        calls: list[list[str]] = []
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def _fake(cmd, *_a, **_k):  # noqa: ANN001, ANN202 - a drill stub
+            calls.append(list(cmd))
+            _r = _R()
+            _r.stdout = auto_merge_flag if "api" in cmd else "auto-merge disabled"
+            return _r
+
+        _saved_w = subprocess.run
+        try:
+            subprocess.run = _fake  # type: ignore[assignment]
+            _res = withdraw_auto_merge(1)
+        finally:
+            subprocess.run = _saved_w  # type: ignore[assignment]
+        return _res, any("--disable-auto" in c for c in calls)
+
+    _res_never, _disabled_never = _withdraw_with("null")
+    _res_queued, _disabled_queued = _withdraw_with('{"enabled_by":{"login":"x"}}')
+    ok("a never-queued PR yields no withdraw report (no Slack), a queued PR still does",
+       _res_never[0] and _res_never[2] == QUEUE_ABSENT and not _disabled_never
+       and judge_transition(_res_never[2], "refuse") is None
+       and _res_queued[0] and _res_queued[2] == QUEUE_QUEUED and _disabled_queued
+       and judge_transition(_res_queued[2], "refuse") == ("withdrawn", CHANNEL_DECIDE),
+       f"never-queued -> {_res_never} disable-called={_disabled_never}; "
+       f"queued -> {_res_queued} disable-called={_disabled_queued}",
        ["withdraw_auto_merge"])
 
     # ── THE ARM SPEAKS, AND ONLY ON A TRANSITION ─────────────────────────────
@@ -3331,6 +3841,98 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        and f"https://github.com/{REPO}/pull/7" in _msg_w,
        f"queued={_msg_q[:120]!r} withdrawn={_msg_w[:120]!r}",
        ["transition_message", "plain_english", "blocks_of"])
+
+    # ── THE VERDICT AS A REQUIRED CHECK (2026-10-19) ─────────────────────────
+    ST = ["status_for", "blocks_of"]
+    _wait = Verdict("PROOF", "fail", ["`offline-suite` has not finished (in_progress). FIX: wait."])
+    _absent = Verdict("PROOF", "fail", ["required check `CodeQL` did not run — it cannot pass "
+                                        "by being absent. FIX: wait."])
+    _real = Verdict("SIZE", "fail", ["4000 lines changed (cap 1200) — same reason."])
+    ok("an allowed PR posts merge-cage = success",
+       status_for(True, [Verdict("PATH", "pass", [], claim="x")])[0] == "success",
+       f"got {status_for(True, [])}", ST)
+    ok("checks still running post PENDING, not failure (the arm is waiting, not refusing)",
+       status_for(False, [_wait, _absent])[0] == "pending",
+       f"got {status_for(False, [_wait, _absent])}", ST)
+    ok("one real refusal among waits posts FAILURE and names the real reason",
+       status_for(False, [_wait, _real]) == ("failure", _real.reasons[0][:140]),
+       f"got {status_for(False, [_wait, _real])}", ST)
+    _owner = Verdict("PATH", "fail", [f"`.github/merge-policy.yml` — {_CAGE_ESCAPE}"])
+    _lane = Verdict("LANE", "fail", [("this PR is in the `product_human` lane ... FIX: nothing an "
+                                      "agent can do. Read the file named above and merge it yourself.")])
+    ok("an owner-only PR with every check green posts PENDING (his turn), never a red failure",
+       status_for(False, [_owner, _lane])[0] == "pending"
+       and "owner merges this by hand" in status_for(False, [_owner, _lane])[1],
+       f"got {status_for(False, [_owner, _lane])}", ST)
+    ok("...an owner-only PR still waiting on CI says it is WAITING first",
+       status_for(False, [_owner, _wait]) == ("pending", ("waiting: " + _wait.reasons[0])[:140]),
+       f"got {status_for(False, [_owner, _wait])}", ST)
+    ok("...and a real refusal beside the owner's turn is still a FAILURE",
+       status_for(False, [_owner, _real]) == ("failure", _real.reasons[0][:140]),
+       f"got {status_for(False, [_owner, _real])}", ST)
+    ok("NEGATIVE CONTROL: the owner's turn is never SUCCESS -- GitHub must not merge it",
+       status_for(False, [_owner])[0] != "success", f"got {status_for(False, [_owner])}", ST)
+    ok("a cage that did not run is a FAILURE, never a wait",
+       status_for(False, [Verdict("RATCHET", "not_checked", [])])[0] == "failure",
+       f"got {status_for(False, [Verdict('RATCHET', 'not_checked', [])])}", ST)
+    _rules = [{"type": "pull_request", "parameters": {}},
+              {"type": "required_status_checks", "parameters": {"required_status_checks": [
+                  {"context": "offline-suite"}, {"context": "merge-cage"}]}}]
+    ok("the arm HOLDS only when the ruleset really requires merge-cage",
+       requires_context(_rules, "merge-cage")
+       and not requires_context(_rules[:1], "merge-cage")
+       and not requires_context(_rules, "merge-cage-not")
+       and not requires_context({"message": "Not Found"}, "merge-cage")
+       and not requires_context(None, "merge-cage"),
+       "requires_context answered yes for a ruleset that does not require merge-cage",
+       ["requires_context"])
+    _gen = min(GENERATED_FILES) if GENERATED_FILES else ""
+    _rs_read, _rs_ex = review_surface(
+        [{"filename": _gen, "additions": 500, "deletions": 0},
+         {"filename": _gen + ".py", "additions": 7, "deletions": 0}])
+    ok("a generated file from the policy is not counted; a look-alike path is",
+       bool(_gen) and (_rs_read, _rs_ex) == (7, 500),
+       f"generated={_gen!r} read={_rs_read} exempt={_rs_ex}", ["check_size"])
+    _wake = done + [{"name": WAKE_JOB, "status": "in_progress", "conclusion": None, "output": {}}]
+    ok("the CI job that wakes the arm is never something the arm waits on",
+       not any(WAKE_JOB in r for r in judge_check_runs(_wake, len(_wake))),
+       f"{judge_check_runs(_wake, len(_wake))}", ["judge_check_runs"])
+
+    # ── HOLD vs WITHDRAW, end to end through main() (CodeRabbit on #912) ─────
+    # A held PR is still queued, so Slack must not hear "taken out" on every
+    # sweep; and a PR that changes `.github/` can post its own `merge-cage`, so
+    # a refusal must still take it out of the queue.
+    import contextlib as _ctx
+    import io as _io
+    import tempfile as _tf
+    _saved = {k: globals()[k] for k in ("decide", "withdraw_auto_merge", "request_auto_merge",
+                                        "merge_cage_required", "slack")}
+    _calls: list[str] = []
+
+    def _run_arm(touches_github: bool) -> list[str]:
+        _calls.clear()
+        _meta = {"files": 1, "lines": 2, "base": "main", "head_sha": "abc1234", "title": "t",
+                 "touches_github": touches_github}
+        globals()["decide"] = lambda *a, **k: (False, [_wait], dict(_meta))
+        globals()["withdraw_auto_merge"] = lambda pr: (_calls.append("withdraw"), (True, "off", QUEUE_QUEUED))[1]
+        globals()["request_auto_merge"] = lambda pr: (_calls.append("arm"), (True, "on", QUEUE_QUEUED))[1]
+        globals()["merge_cage_required"] = lambda base: True
+        globals()["slack"] = lambda chan, text: (_calls.append("slack"), True)[1]
+        with _tf.TemporaryDirectory() as td, _ctx.redirect_stdout(_io.StringIO()), \
+                _ctx.redirect_stderr(_io.StringIO()):
+            lane_f = Path(td) / "lane.json"
+            lane_f.write_text(json.dumps({"lane": "product", "auto_merge": True}), encoding="utf-8")
+            main(["5", "--queue", "--lane", str(lane_f), "--slack"])
+        return list(_calls)
+
+    try:
+        _held, _wf = _run_arm(False), _run_arm(True)
+    finally:
+        globals().update(_saved)
+    ok("a held PR stays armed and Slack is told nothing (no false 'taken out')",
+       _held == ["arm"], f"calls {_held}", ["status_for"])
+    ok("a refused PR that changes .github/ is withdrawn, never held",
+       "withdraw" in _wf and "arm" not in _wf, f"calls {_wf}", ["status_for"])
 
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
@@ -3395,10 +3997,14 @@ def _swallowed_lane_probe() -> list[str]:
     `scripts/**` sat in the `harness` lane as auto-mergeable while the cage
     denied every path under it. Nothing went red for the cage's whole life, so
     the guard that now catches it needs a witness of its own.
+
+    2026-10-18: the owner moved `scripts/**` to `harness` for real, so it no
+    longer contradicts anything. Same shape against a whole-directory deny
+    that still exists: `.claude/agents/**` declared fast while it is denied.
     """
     saved = list(ALLOW)
     try:
-        ALLOW.append("scripts/**")   # the real historic contradiction, verbatim
+        ALLOW.append(".claude/agents/**")
         return check_lists()
     finally:
         ALLOW[:] = saved
@@ -3571,11 +4177,15 @@ def request_auto_merge(pr: int) -> tuple[bool, str, str]:
 def withdraw_auto_merge(pr: int) -> tuple[bool, str, str]:
     """Take a PR OUT of GitHub's auto-merge queue. Returns (ok, detail, was).
 
-    `was` is the previous state, and it comes from GITHUB'S OWN ANSWER rather
-    than from a second API call: "auto-merge is not enabled" IS the statement
-    that the PR was never queued, so a refusal that changed nothing can be told
-    apart from one that pulled a PR back out. No extra request, no second place
-    for the fact to live.
+    `was` is the previous state, and it is READ FROM GITHUB BEFORE ACTING
+    (`auto_merge_state`, the same before-picture `request_auto_merge` takes).
+    `gh pr merge --disable-auto` exits 0 even when nothing was queued, so its
+    exit code can NOT say whether a PR was pulled back out: trusting it reported
+    "queued" for a PR that never was, and the arm re-judged that PR every few
+    minutes and posted ":warning: taken back OUT of the merge queue" each time
+    (PR #703: 6 posts in 35 minutes; #659: 7). Only a real queued -> not-queued
+    transition may report `queued`; a PR that was never queued returns `absent`
+    without touching GitHub, and red -> red stays silent.
 
     THE GAP THIS CLOSES, AND WHY IT WAS THE LAST FAIL-OPEN IN THE CHAIN.
 
@@ -3600,12 +4210,19 @@ def withdraw_auto_merge(pr: int) -> tuple[bool, str, str]:
     error. A cleanup that fails loudly when the thing is already clean gets
     switched off.
     """
+    was = auto_merge_state(pr)
+    if was == QUEUE_ABSENT:
+        # Never queued: nothing to withdraw, nothing to report. The disable call
+        # is skipped on purpose — it "succeeds" on a PR that was never queued.
+        return True, "was not queued — nothing to withdraw", QUEUE_ABSENT
     proc = subprocess.run(
         ["gh", "pr", "merge", str(pr), "--disable-auto"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
     )
     if proc.returncode == 0:
-        return True, (proc.stdout or "auto-merge disabled").strip()[:300], QUEUE_QUEUED
+        # `was` is queued (a real transition) or unknown (GitHub would not
+        # answer — stays unknown so the announcer speaks rather than hides it).
+        return True, (proc.stdout or "auto-merge disabled").strip()[:300], was
     said = (proc.stderr or proc.stdout or "no output").strip()
     low = said.lower()
     if "auto-merge is not enabled" in low or "does not have auto-merge" in low:
@@ -3653,6 +4270,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="hand the PR to GitHub's auto-merge queue if every cage allows it "
                          "AND its lane says a machine may decide it. Requires --lane: queuing "
                          "without knowing the lane is shipping without knowing who gets hurt.")
+    ap.add_argument("--commit-status", metavar="FILE",
+                    help="write the `merge-cage` commit status (state, description, sha) as "
+                         "JSON for the workflow to post with GITHUB_TOKEN. Not posted from "
+                         "here: a status posted with the owner's token wakes this arm again.")
     ap.add_argument("--lane", metavar="FILE",
                     help="the lane verdict JSON written by `python scripts/lane.py --json`")
     ap.add_argument("--baseline", help="JSON of ratchet values measured on the PR's base")
@@ -3791,7 +4412,40 @@ def main(argv: list[str] | None = None) -> int:
         # can know it, so it stays `unknown` for a run that did not touch the
         # queue at all — and a run that changed nothing announces nothing.
         queue_state = QUEUE_UNKNOWN
-        if args.queue and not allowed:
+        # THE OWNER'S SWITCH (2026-10-19). Repository variable AUTO_MERGE: `off`
+        # stops every machine merge — nothing is queued and anything queued is
+        # taken back. Anything else (or unset) is on. Only the owner sets it.
+        switch_off = os.environ.get("AUTO_MERGE_SWITCH", "on").strip().lower() == "off"
+        if args.queue and switch_off:
+            print(f"SWITCHED OFF: the owner set AUTO_MERGE=off, so PR #{args.pr} is not queued "
+                  f"and is taken out of the queue if it was in it.")
+            allowed_to_queue = False
+        elif meta.get("author") == DEPENDABOT:
+            # dependabot-auto.yml owns the merge: patch/minor it merges, majors
+            # it leaves to the owner. The cage only posts its verdict.
+            print(f"DEPENDABOT: PR #{args.pr} is merged by dependabot-auto.yml, not queued here.")
+            allowed_to_queue = False
+        else:
+            allowed_to_queue = allowed
+        # HOLD, DON'T WITHDRAW, once GitHub itself waits on this verdict. With
+        # `merge-cage` required, a refused PR cannot merge while it stays queued,
+        # so the arm keeps auto-merge ON for every PR its lane lets a machine
+        # decide ("always on" — the owner, 2026-10-19), and it lands the moment
+        # a later run says yes. Until the owner adds that rule, the old
+        # withdrawal still runs. NEVER for a PR that changes `.github/`: a
+        # workflow in it can post `merge-cage = success` with its own token, so
+        # for that PR a refusal must still take it out (CodeRabbit on #912).
+        held = bool(args.queue and not allowed and not switch_off
+                    and not meta.get("touches_github")
+                    and merge_cage_required(str(meta.get("base") or "")))
+        if held:
+            print(f"HELD: PR #{args.pr} is held by `{STATUS_CONTEXT}`, a required check on "
+                  f"`{meta.get('base')}`; GitHub cannot merge it until a later run says it passes.")
+            if (lane_verdict or {}).get("auto_merge") and meta.get("author") != DEPENDABOT:
+                ok_arm, detail_arm, _ = request_auto_merge(args.pr)
+                print(f"ALWAYS ON: auto-merge {'is on' if ok_arm else 'could not be turned on'} "
+                      f"for PR #{args.pr} — {detail_arm}")
+        if args.queue and (switch_off or not allowed) and not held:
             ok_out, detail_out, queue_state = withdraw_auto_merge(args.pr)
             if ok_out:
                 print(f"WITHDRAWN: PR #{args.pr} is not allowed, so it is out of GitHub's "
@@ -3804,7 +4458,7 @@ def main(argv: list[str] | None = None) -> int:
                       f"`gh pr merge {args.pr} --disable-auto`.", file=sys.stderr)
                 print(f"::error::could not withdraw PR #{args.pr} from the auto-merge queue "
                       f"after the cage refused it")
-        if args.queue and allowed:
+        if args.queue and allowed_to_queue:
             ok_queue, detail, queue_state = request_auto_merge(args.pr)
             if ok_queue:
                 queued = True
@@ -3846,6 +4500,10 @@ def main(argv: list[str] | None = None) -> int:
                       "the queue (no --queue), so there was nothing to announce.")
             elif allowed and queued:
                 move = judge_transition(queue_state, "allow")
+            elif held:
+                # Held is not a transition: the PR is still queued, GitHub waits.
+                print(f"SLACK: PR #{args.pr} is held by `{STATUS_CONTEXT}`, still queued; "
+                      f"nothing to announce.")
             elif not allowed:
                 move = judge_transition(queue_state, "refuse")
             if move is not None:
@@ -3860,7 +4518,7 @@ def main(argv: list[str] | None = None) -> int:
                     print("REFUSING TO PROCEED: the owner could not be told.", file=sys.stderr)
                     return EXIT_CANNOT_TELL_OWNER
                 print(f"SLACK: told #{chan} that PR #{args.pr} was {kind}.")
-            elif args.queue:
+            elif args.queue and not held:
                 print(f"SLACK: nothing changed (previous queue state: {queue_state}), so "
                       f"nothing was said — red -> red is the noise that mutes a channel.")
 
@@ -3868,6 +4526,13 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.advise).write_text(advice_markdown(args.pr, meta, allowed, verdicts),
                                          encoding="utf-8")
             print(f"advice written to {args.advise} (label: {advice_label(allowed)})")
+
+        if args.commit_status:
+            state, description = status_for(allowed, verdicts)
+            Path(args.commit_status).write_text(json.dumps({
+                "state": state, "description": description,
+                "sha": meta.get("head_sha", ""), "context": STATUS_CONTEXT}), encoding="utf-8")
+            print(f"STATUS: {STATUS_CONTEXT} = {state} — {description}")
 
         if args.verdict_json:
             Path(args.verdict_json).write_text(json.dumps({

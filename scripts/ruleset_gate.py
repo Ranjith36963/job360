@@ -414,12 +414,34 @@ def fetch_ruleset(repo: str = REPO_SLUG, ruleset_id: int = RULESET_ID) -> tuple[
     ), raw
 
 
+# A COMMIT STATUS SATISFIES A REQUIRED CONTEXT TOO (2026-10-20). `merge-cage` is
+# a status, not a check-run, and it became required that morning. Reading only
+# check-runs made it DEAD_CONTEXT on every commit, so the next `--live` refresh
+# would have turned `Chain wires` red on every PR. A status carries no app id; it
+# carries the account that posted it, and a status posted with the workflow's
+# GITHUB_TOKEN is GitHub Actions' (the app the rule pins).
+STATUS_APPS = {"github-actions[bot]": 15368}
+
+
+def _statuses_as_runs(statuses: list[dict]) -> tuple[CheckRun, ...]:
+    """The newest status per context, as a CheckRun. The API lists newest first,
+    and only the newest one decides the context; the older ones would read as
+    AMBIGUOUS_CONTEXT duplicates."""
+    seen: dict[str, CheckRun] = {}
+    for st in statuses:
+        if st["context"] not in seen:
+            creator = (st.get("creator") or {}).get("login") or ""
+            seen[st["context"]] = CheckRun(st["context"], STATUS_APPS.get(creator), st.get("state"))
+    return tuple(seen.values())
+
+
 def _runs_for(repo: str, sha: str) -> tuple[CheckRun, ...]:
     data = _gh(f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
-    return tuple(
+    runs = tuple(
         CheckRun(cr["name"], (cr.get("app") or {}).get("id"), cr.get("conclusion"))
         for cr in data.get("check_runs", [])
     )
+    return runs + _statuses_as_runs(_gh(f"repos/{repo}/commits/{sha}/statuses?per_page=100"))
 
 
 def newest_merged_first(prs: list[dict]) -> list[dict]:
@@ -579,7 +601,8 @@ STEP 4 — PROVE IT IS ON, rather than assuming the PUT did what you meant:
 def _mk(names, *, app=15368, conclusion="success", label="PR #1", pr=True, author="human", number=1):
     return Observation(
         sha=f"{number:040d}", label=label, is_pr_head=pr, number=number, author=author,
-        runs=tuple(CheckRun(n, app, conclusion) if isinstance(n, str) else CheckRun(*n) for n in names),
+        runs=tuple(CheckRun(n, app, conclusion) if isinstance(n, str)
+                   else n if isinstance(n, CheckRun) else CheckRun(*n) for n in names),
     )
 
 
@@ -700,6 +723,24 @@ def self_drill() -> int:
     results.append(("PR-gate scope mutes the live queue but still fails on a dead context",
                     scoped_ok and scoped_strict,
                     f"queue-muted={not blocking(q, 'ruleset')} dead-still-red={scoped_strict}"))
+
+    # 16. A required context that only a COMMIT STATUS reports (merge-cage) is
+    #     alive, pinned to Actions when github-actions[bot] posted it, and its
+    #     superseded statuses are not duplicates.
+    st = _statuses_as_runs([
+        {"context": "merge-cage", "state": "success", "creator": {"login": "github-actions[bot]"}},
+        {"context": "merge-cage", "state": "failure", "creator": {"login": "github-actions[bot]"}},
+        {"context": "CodeRabbit", "state": "success", "creator": {"login": "coderabbitai[bot]"}},
+    ])
+    cage = world([_mk(G + list(st), number=i, label=f"PR #{i}") for i in range(1, 9)])
+    expect_quiet("a required context posted as a commit status is alive, not dead",
+                 analyze(rs(G + ["merge-cage"]), cage))
+    results.append(("a status keeps only its newest state, pinned to the app that posted it",
+                    st[:2] == (CheckRun("merge-cage", 15368, "success"), CheckRun("CodeRabbit", None, "success")),
+                    f"read {st}"))
+    # ...and a status from any other account still cannot satisfy an Actions pin.
+    expect("a status posted by another app does not satisfy an Actions-pinned context",
+           analyze(rs(G + ["CodeRabbit"]), cage), "WRONG_APP")
 
     # 15. safe_to_enable must not be a rubber stamp.
     ok_clean = safe_to_enable(analyze(rs(G), healthy))
