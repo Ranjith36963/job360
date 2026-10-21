@@ -12,6 +12,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -266,7 +267,8 @@ def test_jobylon_happy_path_company_is_the_employer_and_empty_company_dropped():
     urls = [c[0] for c in http.calls]
     assert urls[:2] == ["https://emp.jobylon.com/sitemap.xml", "https://emp.jobylon.com/sitemap-jobs.xml"]
     assert urls[2].endswith("/jobs/369523-acme-engineer/")  # newest id first
-    assert not any("evil.example.com" in u or "/companies/" in u for u in urls)
+    assert {urlsplit(u).hostname for u in urls} == {"emp.jobylon.com"}  # the off-site sitemap entry is never fetched
+    assert not any("/companies/" in u for u in urls)
 
 
 def test_jobylon_title_ok_cap_empty_and_failures():
