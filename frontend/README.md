@@ -1,5 +1,5 @@
 # Job360 Frontend
-<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-10-21 by the daily truth check -->
 
 Next.js 16 + React 19 web app for Job360. A thin screen over the FastAPI
 backend's routes. Job360 never sources or ranks jobs — the seeker's own agent
@@ -43,8 +43,7 @@ npm run type-check             # tsc --noEmit (no emit, type-only)
 ```
 
 Unit tests live alongside their subject files (`*.test.tsx` next to
-`*.tsx`). E2E specs live in `tests/e2e/` and run against a started dev
-server. Counts are not written down here — measure them.
+`*.tsx`). Counts are not written down here — measure them.
 
 ## Cross-wiring with the backend
 
