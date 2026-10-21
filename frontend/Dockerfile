@@ -1,5 +1,10 @@
 # ─── Stage 1: install ALL deps (including dev) for the build ───────────────
-FROM node:20-alpine AS builder
+# Node 22 on all three stages (2026-10-20): Node 20 reached end of life 2026-04-30,
+# and CI (actions/setup-node, every workflow) already runs 22, so the image now
+# builds and runs on the same major that type-check, lint, vitest and build ran
+# on. Tag, not digest: dependabot.yml has no docker ecosystem, so a digest pin
+# would never be bumped; backend/Dockerfile pins python:3.12-slim by tag too.
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -29,13 +34,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # ─── Stage 2: production node_modules only ──────────────────────────────────
-FROM node:20-alpine AS prod-deps
+FROM node:22-alpine AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ─── Stage 3: minimal runner image ──────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
