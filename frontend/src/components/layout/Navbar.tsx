@@ -14,6 +14,7 @@ import {
   isProtectedPath,
   isSettingsActive,
 } from "@/components/layout/nav-links";
+import { PauseButton } from "@/components/layout/TopBar";
 import { NeedsYouBadge, useOpenAsks } from "@/components/layout/useOpenAsks";
 import { cn } from "@/lib/utils";
 
@@ -98,6 +99,7 @@ export function Navbar() {
 
         {/* Drawer — hidden while the session is still resolving, because it
             would have nothing to put in it. */}
+        {signedIn && !loading && <PauseButton className="ml-auto mr-2 md:hidden" />}
         {!loading && (
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger

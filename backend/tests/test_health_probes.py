@@ -1,16 +1,20 @@
-"""Tests for /livez, /readyz, and validate_required_env().
+"""Tests for /livez, /version, /readyz, and validate_required_env().
 
 TDD for the Phase 2 ops-hardening health probes.
 """
 
-import sys
-import types
-from unittest.mock import AsyncMock, MagicMock, patch
+import logging
+import os
+from unittest.mock import patch
 
+import psycopg
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.api.main import app
+from src.core import settings
+from src.repositories import pg
+from src.repositories import pool as poolmod
 
 # ---------------------------------------------------------------------------
 # /livez — liveness probe (dependency-free)
@@ -40,135 +44,147 @@ async def test_livez_succeeds_even_when_db_is_broken():
 
 
 # ---------------------------------------------------------------------------
-# /readyz — readiness probe
+# /version — the deployed commit (post-merge-watch.yml polls it, 2026-10-20)
+# ---------------------------------------------------------------------------
+
+_SHA = "e5323944" + "ab" * 16
+
+
+async def _get_version():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.get("/api/version")
+
+
+@pytest.mark.asyncio
+async def test_version_reports_the_railway_commit_sha(monkeypatch):
+    """Value, not just the key: the SHA Railway injected is what comes back."""
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", _SHA.upper())
+    resp = await _get_version()
+    assert resp.status_code == 200
+    assert resp.json() == {"sha": _SHA}
+    # A cached SHA after the container swap would be exactly the lie this route ends.
+    assert resp.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_version_is_unknown_when_railway_did_not_set_it(monkeypatch):
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    resp = await _get_version()
+    assert resp.status_code == 200
+    assert resp.json() == {"sha": "unknown"}
+
+
+@pytest.mark.asyncio
+async def test_version_never_echoes_a_value_that_is_not_a_sha(monkeypatch):
+    """Public route: whatever lands in the variable, only a hex SHA is ever served."""
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "postgres://user:secret@db/x")
+    resp = await _get_version()
+    assert resp.json() == {"sha": "unknown"}
+    assert "secret" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_version_needs_no_session_and_no_database(monkeypatch):
+    """Anonymous, and data-free: it must answer even with the DB gone."""
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", _SHA)
+    with patch("src.repositories.pg.connect") as mock_connect:
+        mock_connect.side_effect = RuntimeError("DB is gone")
+        resp = await _get_version()
+    assert resp.status_code == 200
+    assert resp.json() == {"sha": _SHA}
+    mock_connect.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# /readyz — readiness probe (Railway's deploy healthcheck since slice 21)
 # ---------------------------------------------------------------------------
 
 
+async def _get_readyz():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.get("/api/readyz")
+
+
 @pytest.mark.asyncio
-async def test_readyz_returns_200_when_db_ok(monkeypatch):
-    """Healthy DB + no Redis URL -> 200 with db:ok, redis:skipped."""
-    monkeypatch.delenv("REDIS_URL", raising=False)
-
-    # Patch pg.connect() to succeed with a mock that allows ``SELECT 1``.
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock(return_value=None)
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=False)
-
-    with patch("src.repositories.pg.connect", return_value=mock_conn):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/readyz")
-
+async def test_readyz_test_mode_runs_select_1_on_the_real_db():
+    """Test mode has no request-path pool: a real fresh connection, pool null."""
+    resp = await _get_readyz()
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "ready"
-    assert data["checks"]["db"] == "ok"
-    assert data["checks"]["redis"] == "skipped"
+    assert resp.json() == {"status": "ready", "pool": None}
 
 
 @pytest.mark.asyncio
-async def test_readyz_returns_503_when_db_fails(monkeypatch):
-    """DB error -> 503 with db:error."""
-    monkeypatch.delenv("REDIS_URL", raising=False)
+async def test_readyz_returns_200_with_stats_from_the_request_pool(monkeypatch):
+    """Production branch: borrows from the SAME pool get_request_db uses."""
+    monkeypatch.setattr(pg, "TEST_MODE", False)
+    await poolmod.close_pool()
+    try:
+        resp = await _get_readyz()
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "ready"
+        stats = body["pool"]
+        # The probe returned its connection, and nothing else holds one.
+        assert stats["size"] >= 1
+        assert stats["idle"] == stats["size"]
+        assert stats["used"] == 0
+        assert stats["waiting"] == 0
+        assert stats["max"] == int(os.getenv("DB_POOL_MAX_SIZE", "10"))
+        # And it really was the app-wide singleton the request path uses.
+        assert poolmod._pool is not None
+        assert poolmod.stats(poolmod._pool)["size"] == stats["size"]
+    finally:
+        await poolmod.close_pool()
 
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock(side_effect=RuntimeError("connection refused"))
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("src.repositories.pg.connect", return_value=mock_conn):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/readyz")
+@pytest.mark.asyncio
+async def test_readyz_returns_503_pool_timeout_when_the_pool_is_pinned(monkeypatch, caplog):
+    """Every pooled connection held -> 503 within the timeout, not a hang."""
+    p = poolmod.build_pool(pg.DEFAULT_DSN, min_size=1, max_size=1)
+    await p.open()
+    await p.wait()
+    monkeypatch.setattr(pg, "TEST_MODE", False)
+    monkeypatch.setattr(poolmod, "_pool", p)
+    monkeypatch.setattr(settings, "READYZ_POOL_TIMEOUT_S", 0.3)
+    try:
+        with caplog.at_level(logging.WARNING, logger="src.api.routes.health"):
+            async with poolmod.acquire(p):  # pin the only connection
+                resp = await _get_readyz()
+        assert resp.status_code == 503
+        assert resp.json() == {"status": "not_ready", "reason": "pool_timeout"}
+        logged = [r for r in caplog.records if getattr(r, "event", "") == "readyz_not_ready"]
+        assert [r.reason for r in logged] == ["pool_timeout"]
+        assert logged[0].error == "PoolTimeout"
+    finally:
+        await p.close()
 
+
+@pytest.mark.asyncio
+async def test_readyz_returns_503_db_error_without_leaking_the_dsn(monkeypatch):
+    """A DB failure answers 503 db_error; the driver's message stays out of the body."""
+
+    async def _broken_pool():
+        raise psycopg.OperationalError(
+            "connection to server at db.internal failed: password=hunter2"
+        )
+
+    monkeypatch.setattr(pg, "TEST_MODE", False)
+    monkeypatch.setattr(poolmod, "get_pool", _broken_pool)
+    resp = await _get_readyz()
     assert resp.status_code == 503
-    data = resp.json()
-    assert data["status"] == "not ready"
-    assert data["checks"]["db"] == "error"
+    assert resp.json() == {"status": "not_ready", "reason": "db_error"}
+    assert "hunter2" not in resp.text and "db.internal" not in resp.text
 
 
 @pytest.mark.asyncio
-async def test_readyz_redis_skipped_when_url_unset(monkeypatch):
-    """When REDIS_URL is absent, redis check is 'skipped' (not 'error')."""
-    monkeypatch.delenv("REDIS_URL", raising=False)
-
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock(return_value=None)
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=False)
-
-    with patch("src.repositories.pg.connect", return_value=mock_conn):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/readyz")
-
-    assert resp.json()["checks"]["redis"] == "skipped"
-
-
-def _fake_redis_modules(mock_redis_client) -> dict:
-    """Build a fake ``redis`` / ``redis.asyncio`` entry for sys.modules.
-
-    We can't ``patch("redis.asyncio.from_url", ...)`` when redis isn't
-    installed because ``patch`` tries to import the module first.  Instead
-    we inject a minimal fake into ``sys.modules`` so the ``import redis.asyncio``
-    inside health.py finds our mock.
-    """
-    fake_aioredis = MagicMock()
-    fake_aioredis.from_url.return_value = mock_redis_client
-
-    fake_redis = types.ModuleType("redis")
-    fake_redis.asyncio = fake_aioredis  # type: ignore[attr-defined]
-
-    return {"redis": fake_redis, "redis.asyncio": fake_aioredis}
-
-
-@pytest.mark.asyncio
-async def test_readyz_redis_ok_when_url_set_and_ping_succeeds(monkeypatch):
-    """When REDIS_URL is set and Redis pings OK, check is 'ok'."""
-    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
-
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock(return_value=None)
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=False)
-
-    mock_redis = AsyncMock()
-    mock_redis.ping = AsyncMock(return_value=True)
-    mock_redis.aclose = AsyncMock(return_value=None)
-
-    with patch("src.repositories.pg.connect", return_value=mock_conn):
-        with patch.dict(sys.modules, _fake_redis_modules(mock_redis)):
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.get("/api/readyz")
-
-    assert resp.status_code == 200
-    assert resp.json()["checks"]["redis"] == "ok"
-
-
-@pytest.mark.asyncio
-async def test_readyz_redis_error_when_ping_fails(monkeypatch):
-    """When REDIS_URL is set but Redis is unreachable, check is 'error' and status is 503."""
-    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
-
-    mock_conn = AsyncMock()
-    mock_conn.execute = AsyncMock(return_value=None)
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=False)
-
-    mock_redis = AsyncMock()
-    mock_redis.ping = AsyncMock(side_effect=ConnectionRefusedError("no redis"))
-    mock_redis.aclose = AsyncMock(return_value=None)
-
-    with patch("src.repositories.pg.connect", return_value=mock_conn):
-        with patch.dict(sys.modules, _fake_redis_modules(mock_redis)):
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.get("/api/readyz")
-
+async def test_readyz_returns_503_when_db_fails_in_test_mode():
+    """Test-mode branch: a failing fresh connection is a 503 too, never a 500."""
+    with patch("src.repositories.pg.connect", side_effect=RuntimeError("connection refused")):
+        resp = await _get_readyz()
     assert resp.status_code == 503
-    assert resp.json()["checks"]["redis"] == "error"
+    assert resp.json() == {"status": "not_ready", "reason": "db_error"}
 
 
 # ---------------------------------------------------------------------------

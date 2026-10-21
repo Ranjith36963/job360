@@ -1,0 +1,13 @@
+[
+ {"id": "144374", "title": "  ML Engineer  ", "description": "<div><strong>About &amp; us</strong></div><p>Build models.</p>",
+  "departmentName": "AI", "experience": "3-6 years", "jobType": 2,
+  "jobLocations": [{"id": 1, "name": "Bangalore", "city": "Bangalore", "state": "Karnataka", "countryCode": "IN", "countryName": "India"},
+                   {"id": 2, "name": "Pune", "city": "Pune", "state": "Maharashtra", "countryCode": "IN"}],
+  "publishedOn": "2026-10-14T05:52:17.523Z"},
+ {"id": 200, "title": "Data Scientist", "description": null, "jobType": "Remote",
+  "jobLocations": [], "publishedOn": "not a date"},
+ {"id": "301", "title": "LLM Engineer", "jobLocations": [{"city": "Remote", "countryCode": "IN"}], "publishedOn": "2026-10-01"},
+ {"id": "abc", "title": "Bad id"},
+ {"id": "400", "title": ""},
+ "not a job"
+]

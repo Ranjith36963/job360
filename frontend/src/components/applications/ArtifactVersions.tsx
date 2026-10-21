@@ -8,6 +8,8 @@ import { CopyButton } from "@/components/applications/CopyButton";
 import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as ArtifactDiffData } from "@/lib/api";
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
 import { formatDate } from "@/lib/format-date";
+import { CvSeenButton } from "@/components/applications/CvSeenButton";
+import type { ApplicationControls } from "@/lib/api";
 
 /** Plain words for who/what made a version (owner decision 6, 2026-09-24):
  * `web:tailor` -> "Made on the website", `agent:<Name>` -> "Written by
@@ -79,10 +81,15 @@ export function ArtifactVersions({
   applicationId,
   artifacts,
   receipts = [],
+  controls = null,
+  onControls,
 }: {
   applicationId: number;
   artifacts: ApplicationArtifact[];
   receipts?: ApplicationReceiptEntry[];
+  /** S3: the decision state. When given, the LATEST CV shows "I've checked this CV". */
+  controls?: ApplicationControls | null;
+  onControls?: (next: ApplicationControls) => void;
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const [texts, setTexts] = useState<Record<number, string>>({});
@@ -144,7 +151,7 @@ export function ArtifactVersions({
           applicationId,
           artifact.id,
           fmt,
-          `${artifact.kind.replace("_", "-")}-v${artifact.version_no}`
+          `${artifact.kind.replace(/_/g, "-")}-v${artifact.version_no}`
         );
       } catch (err) {
         toast.apiError(err, "Download failed");
@@ -226,7 +233,7 @@ export function ArtifactVersions({
       {[...byKind.entries()].map(([kind, versions]) => (
         <div key={kind}>
           <p className="mb-1 font-mono text-[11px] uppercase tracking-wider text-faint">
-            {kind.replace("_", " ")}
+            {kind.replace(/_/g, " ")}
           </p>
           <div className="flex flex-col">
             {versions.map((artifact) => {
@@ -266,6 +273,14 @@ export function ArtifactVersions({
                   {(kind === "cv" || kind === "cover_letter") && (
                     <div className="mt-1 flex items-center gap-3">
                       <CopyButton getText={() => textOf(artifact)} testId="artifact-copy" />
+                      {kind === "cv" && controls?.cv?.artifact_id === artifact.id && (
+                        <CvSeenButton
+                          applicationId={applicationId}
+                          artifactId={artifact.id}
+                          seen={controls.cv.seen ?? null}
+                          onChanged={onControls}
+                        />
+                      )}
                       {downloadingId === artifact.id ? (
                         <span data-testid="artifact-downloading" className="text-xs text-muted-foreground">
                           Downloading…

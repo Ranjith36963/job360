@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { ExternalLink } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 
 // Legal link slots — content (privacy policy, terms) populated in Batch 4 launch readiness
 const LEGAL_LINKS: { label: string; href: string }[] = [
   { label: "Privacy", href: "/privacy" },
+  { label: "Trust", href: "/trust" },
   { label: "Terms", href: "/terms" },
   { label: "Contact", href: "/contact" },
 ];
@@ -32,16 +32,6 @@ export function Footer() {
               {label}
             </Link>
           ))}
-          <a
-            href="https://github.com/Ranjith36963/job360"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            aria-label="Job360 on GitHub"
-          >
-            <ExternalLink className="h-3 w-3" aria-hidden="true" />
-            GitHub
-          </a>
         </nav>
 
         <p className="text-xs text-muted-foreground">

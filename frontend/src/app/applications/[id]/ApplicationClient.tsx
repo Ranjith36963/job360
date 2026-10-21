@@ -4,8 +4,20 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
-import { ASKS_CHANGED_EVENT, getApplication, listAsks, recordApplicationReceipt } from "@/lib/api";
-import type { ApplicationDetail, Ask, VisaShape } from "@/lib/api";
+import {
+  getApplication,
+  getApplicationControls,
+  getReadyToSend,
+  recordApplicationReceipt,
+  releaseHold,
+} from "@/lib/api";
+import type { ApplicationControls, ApplicationDetail, Ask, ReadyCardData, VisaShape } from "@/lib/api";
+import { ReadyCard } from "@/components/needs-you/ReadyCard";
+import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
+import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
+import { BatchButton } from "@/components/applications/BatchButton";
+import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
+import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
 import { AlignmentPanel } from "@/components/applications/AlignmentPanel";
@@ -15,11 +27,13 @@ import { Receipts } from "@/components/applications/Receipts";
 import { NoteForm } from "@/components/applications/NoteForm";
 import { LessonForm } from "@/components/applications/LessonForm";
 import { JobFacts } from "@/components/applications/JobFacts";
+import { PayAdvertised } from "@/components/applications/PayAdvertised";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
 import { FollowUpField } from "@/components/applications/FollowUpField";
 import { AskCard } from "@/components/needs-you/NeedsYou";
+import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { STATUS_LABEL, whoLabel } from "@/lib/event-labels";
 import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -40,6 +54,8 @@ const STAGE_TONE: Record<string, StageTone> = {
   interview_scheduled: "go",
   interview_done: "go",
   offer: "go",
+  hired: "go",
+  offer_declined: "quiet",
 };
 
 const STAGE_TEXT: Record<StageTone, string> = {
@@ -79,6 +95,12 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   const [marking, setMarking] = useState(false);
   const [markConfirming, setMarkConfirming] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // S3: the state behind the four decision buttons. A failed read leaves them
+  // hidden (nothing is shown that was not read).
+  const [controls, setControls] = useState<ApplicationControls | null>(null);
+  // S5d: this application's "ready to send" card, when the assistant filled the
+  // form and no yes / no has come after it. A failed read shows no card.
+  const [ready, setReady] = useState<{ card: ReadyCardData; paused: boolean } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -87,6 +109,18 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
       setError(null);
     } catch {
       setError("Could not load this application.");
+    }
+    try {
+      setControls(await getApplicationControls(applicationId));
+    } catch {
+      setControls(null);
+    }
+    try {
+      const r = await getReadyToSend({ applicationId });
+      const card = r.items.find((c) => c.application_id === applicationId);
+      setReady(card ? { card, paused: r.paused } : null);
+    } catch {
+      setReady(null);
     }
   }, [applicationId]);
 
@@ -98,13 +132,24 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   // sidebar badge the fresh open count (same as the Needs-you page).
   const reloadAfterAsk = useCallback(async () => {
     await load();
-    try {
-      const r = await listAsks("open");
-      window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: r.open_count }));
-    } catch {
-      // The badge corrects itself on its next load.
-    }
+    // Re-count everything the badge counts (questions, waiting changes, ready to send).
+    await announceOpenCount();
   }, [load]);
+
+  // Weak spot #3 wave 2: the user frees an application a crashed/closed assistant session
+  // still holds. Posts once, then re-reads so the banner follows the stored state.
+  const [releasing, setReleasing] = useState(false);
+  const release = useCallback(async () => {
+    setReleasing(true);
+    try {
+      await releaseHold(applicationId);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not release this application.");
+    } finally {
+      setReleasing(false);
+    }
+  }, [applicationId, load]);
 
   const markApplied = useCallback(async () => {
     setMarking(true);
@@ -153,7 +198,12 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
   const openAsks: Ask[] = (detail.asks ?? []).filter((a) => a.status === "open" && !a.withdrawn_at);
   const tone = STAGE_TONE[detail.status] ?? "quiet";
+  const cvChanges = changesSinceApprovedCv(detail.events, detail.artifacts);
+  // The one table (lib/application-actions) decides which buttons show.
+  const actions = allowedActions(detail.status, { hasReceipt: detail.receipts.length > 0 });
   const place = detail.job.job_location;
+  const unconfirmed = submitUnconfirmed(detail.events);
+  const queued = isQueued(detail.events);
 
   return (
     <PageContainer className="flex flex-col gap-8 py-8">
@@ -191,12 +241,36 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             found_on: detail.job.found_on ?? null,
           }}
         />
-        {!detail.job.catalog_present && (
-          <p className="mt-1 text-xs text-muted-foreground/70">
-            This listing is no longer in the catalog — the snapshot above is what it read when you brought it.
-          </p>
-        )}
+        <PayAdvertised pay={detail.job.pay_advertised} />
       </header>
+
+      {unconfirmed && <SubmitUnconfirmedBanner applicationId={detail.id} onChanged={reloadAfterAsk} />}
+
+      {detail.hold && (
+        <section
+          data-testid="app-hold"
+          className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p>
+            {detail.hold.unsure
+              ? "Another session of your assistant may be working on this application."
+              : `Another assistant session (${detail.hold.held_by}${
+                  detail.hold.session ? ` / ${detail.hold.session}` : ""
+                }) is working this application until ${formatDateTime(detail.hold.until)}.`}
+            {detail.stage ? ` ${detail.stage}` : ""}
+          </p>
+          {!detail.hold.unsure && (
+            <button
+              type="button"
+              onClick={() => void release()}
+              disabled={releasing}
+              className="self-start rounded-full bg-warning px-3 py-1 text-xs font-medium text-background disabled:opacity-60"
+            >
+              {releasing ? "Releasing…" : "Release"}
+            </button>
+          )}
+        </section>
+      )}
 
       {openAsks.length > 0 && (
         <section aria-labelledby="app-asks" data-testid="app-asks" className="flex flex-col gap-3">
@@ -231,9 +305,15 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             <AlignmentPanel applicationId={detail.id} refreshKey={detail.updated_at} />
           </section>
 
-          <section data-testid="section-documents" className={`order-4 ${SECTION} lg:order-none`}>
+          <section id="section-documents" data-testid="section-documents" className={`order-4 ${SECTION} lg:order-none`}>
             <h2 className={`mb-3 ${LABEL}`}>Documents</h2>
-            <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
+            <ArtifactVersions
+              applicationId={detail.id}
+              artifacts={detail.artifacts}
+              receipts={detail.receipts}
+              controls={controls}
+              onControls={setControls}
+            />
             <div className="mt-4">
               {!hasCvArtifact && (
                 <p className="mb-2 text-xs text-muted-foreground">
@@ -297,7 +377,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 forever, with no way left to create a receipt. The real gate
                 is simpler and survives every status: show it whenever there
                 is no receipt yet. */}
-            {detail.receipts.length === 0 &&
+            {actions.includes("mark_applied") &&
               (!markConfirming ? (
                 <button
                   type="button"
@@ -333,6 +413,9 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                   </button>
                 </div>
               ))}
+            {detail.status === "considering" && (
+              <BatchButton applicationId={detail.id} queued={queued} onRecorded={load} />
+            )}
             {detail.job.job_url && (
               <a
                 href={detail.job.job_url}
@@ -344,6 +427,34 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               </a>
             )}
             <FollowUpField applicationId={detail.id} followUpOn={detail.follow_up_on ?? null} onRecorded={load} />
+            {(detail.interview_at || detail.follow_up_on) && (
+              <a
+                href={`/api/applications/${detail.id}/calendar.ics`}
+                download
+                data-testid="add-to-calendar"
+                className="text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Add to calendar
+              </a>
+            )}
+            {ready && actions.includes("ready_card") && (
+              <div className="w-full">
+                <ReadyCard card={ready.card} paused={ready.paused} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} />
+              </div>
+            )}
+            {controls && (
+              <ApplicationDecisions
+                applicationId={detail.id}
+                controls={controls}
+                status={detail.status}
+                changesSinceApproved={cvChanges}
+                newFillWaiting={ready !== null}
+                onChanged={(next) => {
+                  setControls(next);
+                  void load();
+                }}
+              />
+            )}
             <VisaBadge
               signal={visa.signal}
               needsSponsorship={visa.needs_sponsorship}
@@ -359,6 +470,10 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           <section data-testid="section-visa" className={`order-3 ${SECTION} lg:order-none`}>
             <h2 className={`mb-3 ${LABEL}`}>Visa / sponsorship</h2>
             <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
+          </section>
+
+          <section id="proof" data-testid="section-proof" className={`order-3 ${SECTION} lg:order-none`}>
+            <ProofDropZone applicationId={detail.id} />
           </section>
 
           <section data-testid="section-people" className={`order-6 ${SECTION} lg:order-none`}>

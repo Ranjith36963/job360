@@ -89,9 +89,11 @@ export function ConsentBanner() {
     >
       <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
-          We&apos;d like to use analytics to understand how Job360 is used and improve
-          it. This is optional — Job360 works exactly the same either way, and we
-          never record your session or your CV content.
+          Job360 keeps a full record of your job hunt: your CV, every version,
+          and what you and your assistant do. Accept or Decline below controls
+          optional analytics (PostHog); Job360 works the same either way. Masked
+          screen recordings of errors happen only if you turn on &ldquo;Help
+          improve Job360&rdquo; in Settings.
         </p>
         <div className="flex shrink-0 gap-2">
           {/* Same size + weight as Accept: rejecting must be no harder. */}

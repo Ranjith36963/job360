@@ -34,6 +34,7 @@ _AD_REMOTE = {
     "apply_url": "https://anywhere.example/jobs/2",
     "description": "Build agents. Fully remote across the US.",
 }
+_NO_DATES = {"ad_posted_at": None, "employer_published_at": None}  # the two ad dates (0054), unset
 _AD_BARE = {
     "title": "Data Scientist",
     "company": "Quiet Ltd",
@@ -119,7 +120,9 @@ async def test_ats_is_only_for_cv_and_cover_letter(authenticated_async_context):
         app_id = (await _bring(client, _AD_FR))["application_id"]
         ok = await _save(client, app_id, kind="cover_letter", text="Dear team", ats_score=70)
         assert ok.status_code == 201, ok.text
-        for kind in ("answers", "outreach"):
+        # "outreach" without a contact_id now refuses earlier (test_lifecycle_mcp_fixes.py); the ATS refusal
+        # for outreach WITH a contact lives in spine.validate_ats, shared by both branches.
+        for kind in ("answers",):
             resp = await _save(client, app_id, kind=kind, text="x", ats_notes="n/a")
             assert resp.status_code == 422, (kind, resp.text)
             assert "ats_score/ats_notes are only allowed" in resp.json()["detail"]
@@ -237,11 +240,11 @@ async def test_job_facts_can_be_fixed_later(authenticated_async_context):
 
         resp = await client.patch(f"/api/applications/{app_id}/job", json={"country": "de", "remote": True})
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": "linkedin"}
+        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": "linkedin", **_NO_DATES}
 
         # An explicit null clears one field; the others are left alone.
         resp = await client.patch(f"/api/applications/{app_id}/job", json={"found_on": None})
-        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": None}
+        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": None, **_NO_DATES}
 
         job = (await _detail(client, app_id))["job"]
         assert (job["country"], job["remote"], job["found_on"]) == ("DE", True, None)
@@ -279,6 +282,54 @@ async def test_job_facts_are_per_user_never_on_the_shared_catalog_row(authentica
         conn.close()
 
 
+@pytest.mark.asyncio
+async def test_update_job_apply_url_is_per_user(authenticated_async_context):
+    """A dead aggregator link is replaced by the employer's, on THIS user's
+    application only; the shared catalog row and another user's kit keep the
+    original. Only http(s) with a host; "" is refused, never a clear."""
+    from httpx import ASGITransport
+
+    from src.api.main import app
+    from tests.test_preference_memory import _second_user_session_cookie
+
+    new_url = "https://careers.parisien.example/ml-engineer-1"
+    async with authenticated_async_context() as client:
+        a_app = (await _bring(client, _AD_FR))["application_id"]
+        path = f"/api/applications/{a_app}/job"
+        for bad in ("ftp://x", "", "   ", "not a url", "https://", "http://[bad", "https://x.example/" + "a" * 2049):
+            resp = await client.patch(path, json={"apply_url": bad})
+            assert resp.status_code == 422, (bad, resp.text)
+        kit0 = (await client.get(f"/api/applications/{a_app}/kit")).json()
+        assert kit0["job"]["apply_url"] == _AD_FR["apply_url"], "refused values change nothing"
+
+        resp = await client.patch(path, json={"apply_url": new_url})
+        assert resp.status_code == 200, resp.text
+        kit = (await client.get(f"/api/applications/{a_app}/kit")).json()
+        assert kit["job"]["apply_url"] == new_url
+
+        # Re-bringing the ORIGINAL ad (a job alert repeats it) is the same
+        # posting, never a 409 "different posting".
+        again = await client.post("/api/jobs/bring", json=_AD_FR)
+        assert again.status_code == 200, again.text
+        assert again.json()["application_id"] == a_app
+        # A re-titled repost of an ORIGINAL job-specific link still merges into the same job.
+        board = {**_AD_FR, "company": "Boardco", "apply_url": "https://boards.greenhouse.io/boardco/jobs/12345"}
+        b_id = (await _bring(client, board))["application_id"]
+        moved = await client.patch(f"/api/applications/{b_id}/job", json={"apply_url": "https://boardco.example/careers/1"})
+        assert moved.status_code == 200, moved.text
+        repost = await client.post("/api/jobs/bring", json={**board, "title": board["title"] + " (Repost)"})
+        assert repost.status_code == 200, repost.text
+        assert repost.json()["application_id"] == b_id
+
+    cookie = await _second_user_session_cookie("apply-url-b@example.com")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", cookies={"job360_session": cookie}
+    ) as other:
+        b_app = (await _bring(other, _AD_FR))["application_id"]
+        kit_b = (await other.get(f"/api/applications/{b_app}/kit")).json()
+        assert kit_b["job"]["apply_url"] == _AD_FR["apply_url"], "user B keeps the original link"
+
+
 # ── 3b. Receipt channel closed set ───────────────────────────────────────────
 
 
@@ -293,6 +344,7 @@ def test_receipt_channel_normalisers():
     assert normalize_receipt_channel("Company website") == "company_site"
     assert normalize_receipt_channel("Indeed") == "job_board"
     assert normalize_receipt_channel("carrier pigeon") == "other"
+    assert normalize_receipt_channel("ATS form") == "company_site"
     # Legacy reading: same map, anything else → other, empty → None.
     assert receipt_channel_key("Company Site") == "company_site"
     assert receipt_channel_key("LinkedIn") == "linkedin_easy_apply"
@@ -427,7 +479,7 @@ async def test_stats_by_contact_found_via(authenticated_async_context):
     by = _by_key(groups)
     assert set(by) == {"linkedin", "event", None}, "the edit overlay wins over the base row"
     assert by["linkedin"] == {
-        "key": "linkedin", "label": "linkedin", "contacts": 2, "outreach_sent": 2,
+        "key": "linkedin", "label": "linkedin", "contacts": 2, "reachable": 0, "outreach_sent": 2,
         "outreach_replied": 1, "reply_rate": 0.5,
     }
     assert by["event"]["contacts"] == 1 and by["event"]["outreach_sent"] == 0 and by["event"]["reply_rate"] is None
@@ -514,8 +566,12 @@ def test_instructions_and_recipes_tell_the_assistant_about_the_new_params():
     from src.api.mcp_server import INSTRUCTIONS
     from src.api.routes.recipes import load_recipe
 
+    # S4 (2026-10-09): the job-fact words moved into the `rules` recipe ("Job
+    # facts"); INSTRUCTIONS points at it.
+    rules = load_recipe("rules").text
     for word in ("ats_score", "ats_notes", "found_via", "country", "remote", "found_on", "update_job"):
-        assert word in INSTRUCTIONS, word
+        assert word in rules, word
+    assert 'get_recipe("rules")' in INSTRUCTIONS
     apply = load_recipe("apply").text
     assert "ats_score" in apply and "ats_notes" in apply and "EVERY CV" in apply
     assert "linkedin_easy_apply" in apply
@@ -523,3 +579,26 @@ def test_instructions_and_recipes_tell_the_assistant_about_the_new_params():
     hunt = load_recipe("hunt").text
     assert "`country`" in hunt and "`remote`" in hunt and "`found_on`" in hunt
     assert "found_on" in load_recipe("setup").text
+
+
+def test_ats_form_alias_maps_to_company_channel():
+    from src.services.applications.spine import normalize_receipt_channel
+
+    for raw in ("ats_form", "ats", "application_form", "Workday", "greenhouse", "lever", "ashby", "SmartRecruiters"):
+        assert normalize_receipt_channel(raw) == "company_site", raw
+
+
+@pytest.mark.asyncio
+async def test_unknown_channel_reply_warns_stored_as_other(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client, _AD_FR))["application_id"]
+        odd = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "carrier pigeon"})).json()
+        assert odd["channel"] == "other" and odd["channel_given"] == "carrier pigeon"
+        # The receipt also says (by design) that no cover letter was sent; that is not a channel warning.
+        channel_warnings = [w for w in odd["warnings"] if "channel" in w]
+        assert len(channel_warnings) == 1
+        assert "'carrier pigeon'" in channel_warnings[0] and "stored as 'other'" in channel_warnings[0]
+        assert "company_site" in channel_warnings[0]
+        ok = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "ats_form"})).json()
+        assert ok["channel"] == "company_site" and ok["channel_given"] == "ats_form"
+        assert not [w for w in ok["warnings"] if "channel" in w]

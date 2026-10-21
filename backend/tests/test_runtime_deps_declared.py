@@ -22,6 +22,7 @@ else:  # backend supports 3.10+; tomllib is 3.11+
 
 BACKEND = Path(__file__).resolve().parent.parent
 SRC = BACKEND / "src"
+HUNT_KIT = SRC / "hunt_kit"
 
 # import name -> distribution name, only where they differ.
 IMPORT_TO_DIST = {
@@ -45,6 +46,7 @@ ALLOWED_UNDECLARED = {
     "tomli": "only imported on Python < 3.11 (dep_file_parser.py)",
     "numpy": "optional; import wrapped in try/except (skill_normalizer.py)",
     "sentence-transformers": "optional extra; import wrapped in try/except (skill_normalizer.py)",
+    "playwright": "optional `browser` extra; import wrapped in try/except ImportError (browser_agent/agent.py)",
 }
 
 
@@ -62,6 +64,12 @@ def _third_party_imports() -> dict[str, str]:
     local = {p.name.removesuffix(".py") for p in SRC.iterdir()} | {"src", "migrations", "api"}
     found: dict[str, str] = {}
     for path in SRC.rglob("*.py"):
+        # src/hunt_kit/ is a standalone download the USER's assistant runs on the
+        # user's machine (routes/hunt_kit.py only serves its bytes). The server never
+        # imports it, so its own imports (its sibling modules)
+        # are not server runtime dependencies. Guarded by test_hunt_kit_not_imported.
+        if HUNT_KIT in path.parents:
+            continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Import):
                 names = [a.name.split(".")[0] for a in node.names]

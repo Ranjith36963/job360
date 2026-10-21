@@ -1,30 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { STATUS_LABEL, EVENT_LABEL, eventLabel, whoLabel } from "./event-labels";
 
-// The closed sets from backend/src/core/settings.py — kept in sync by hand
-// (there is no shared schema to import across the language boundary); a
-// vocabulary edit there should also edit these two lists.
-const APPLICATION_STATUS_EVENT_TYPES = [
-  "brought",
-  "applied",
-  "replied",
-  "interview_requested",
-  "interview_scheduled",
-  "interview_done",
-  "offer",
-  "rejected",
-  "withdrawn",
-  "ghosted",
-];
+// The closed sets from backend/src/core/settings.py, via a checked-in JSON that
+// backend/tests/test_event_types_json_matches_settings.py pins to the settings
+// tuples. A new backend event type fails that backend test until the JSON is
+// regenerated, and then fails the label test below until it has a label.
+import eventTypes from "./event-types.json";
 
-const APPLICATION_NOTE_EVENT_TYPES = [
-  "fit_judged",
-  "artifact_saved",
-  "contact_added",
-  "outreach_sent",
-  "note",
-  "lesson",
-];
+const APPLICATION_STATUS_EVENT_TYPES: string[] = eventTypes.status;
+const APPLICATION_NOTE_EVENT_TYPES: string[] = eventTypes.note;
 
 describe("STATUS_LABEL", () => {
   it("has a label for every status a status event can produce", () => {
@@ -36,11 +20,52 @@ describe("STATUS_LABEL", () => {
   });
 });
 
+describe("answered event label", () => {
+  it("says it is the user's answer, via the assistant, when the payload has user_words", () => {
+    const payload = { ask_id: 1, answer: "Two months", user_words: "two months" };
+    expect(eventLabel({ event_type: "answered", payload, recorded_by: "agent:Claude" })).toBe(
+      "Your answer (via Claude)",
+    );
+    expect(eventLabel({ event_type: "answered", payload, recorded_by: "token:agent" })).toBe(
+      "Your answer (via agent)",
+    );
+  });
+  it("keeps the plain label without user_words", () => {
+    expect(
+      eventLabel({ event_type: "answered", payload: { ask_id: 1, answer: "x" }, recorded_by: "web" }),
+    ).toBe("You answered a question");
+  });
+});
+
 describe("EVENT_LABEL", () => {
   it("has a label for every note-family event type", () => {
     for (const type of APPLICATION_NOTE_EVENT_TYPES) {
       expect(EVENT_LABEL[type]).toBeTruthy();
     }
+  });
+});
+
+describe("automatic employer email labels", () => {
+  it("labels the four new event types in plain words", () => {
+    expect(eventLabel({ event_type: "checkin_sent" })).toBe("Check-in email sent to the employer");
+    expect(eventLabel({ event_type: "feedback_asked" })).toBe("Asked the employer for feedback");
+    expect(eventLabel({ event_type: "feedback_followup_sent" })).toBe("Follow-up email sent to the employer");
+    expect(eventLabel({ event_type: "auto_email_skipped" })).toBe("Automatic email skipped");
+  });
+});
+
+describe("event labels are plain words", () => {
+  it("no note-family label is the raw event name", () => {
+    for (const type of APPLICATION_NOTE_EVENT_TYPES) {
+      expect(eventLabel({ event_type: type })).not.toBe(type);
+      expect(eventLabel({ event_type: type })).not.toContain("_");
+    }
+  });
+  it("labels the kit trail in the seeker's words", () => {
+    expect(eventLabel({ event_type: "kit_read" })).toBe("Assistant opened your application kit");
+    expect(eventLabel({ event_type: "form_swept" })).toBe("Form double-checked before sending");
+    expect(eventLabel({ event_type: "submit_declined" })).toBe("You said don't send");
+    expect(eventLabel({ event_type: "proof_text" })).toBe("Saved the confirmation page text");
   });
 });
 
@@ -53,6 +78,9 @@ describe("eventLabel", () => {
     expect(eventLabel({ event_type: "interview_scheduled" })).toBe("Status → Interview scheduled");
     expect(eventLabel({ event_type: "interview_done" })).toBe("Status → Interview done");
     expect(eventLabel({ event_type: "offer" })).toBe("Status → Offer");
+    expect(eventLabel({ event_type: "hired" })).toBe("Status → Hired");
+    expect(eventLabel({ event_type: "offer_declined" })).toBe("Status → Offer declined");
+    expect(eventLabel({ event_type: "post_mortem" })).toBe("Post-mortem: what to learn from this");
     expect(eventLabel({ event_type: "rejected" })).toBe("Status → Rejected");
     expect(eventLabel({ event_type: "withdrawn" })).toBe("Status → Withdrawn");
     expect(eventLabel({ event_type: "ghosted" })).toBe("Status → Ghosted");
@@ -65,6 +93,8 @@ describe("eventLabel", () => {
     expect(eventLabel({ event_type: "outreach_sent" })).toBe("Outreach sent");
     expect(eventLabel({ event_type: "note" })).toBe("Note");
     expect(eventLabel({ event_type: "lesson" })).toBe("Lesson");
+    expect(eventLabel({ event_type: "blocked" })).toBe("Assistant got stuck");
+    expect(eventLabel({ event_type: "unblocked" })).toBe("Unblocked");
   });
 
   it("falls back to the raw event_type string for an unknown type", () => {

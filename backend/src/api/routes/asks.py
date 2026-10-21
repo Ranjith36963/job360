@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
@@ -40,6 +40,7 @@ class AnswerAskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer: str
+    user_words: str = Field(default="", max_length=2000)
 
 
 class ListAsksResponse(BaseModel):
@@ -86,7 +87,24 @@ async def answer_ask(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        return await asks_service.answer_ask(db, user.id, ask_id, body.answer, actor_for(user))
+        return await asks_service.answer_ask(db, user.id, ask_id, body.answer, actor_for(user), body.user_words)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post("/asks/{ask_id}/confirm", response_model=AskOut, dependencies=AUTH_FIRST)
+async def confirm_ask(
+    ask_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The user confirms a relayed chat answer. Web session only: an assistant
+    can never confirm for the user, so there is deliberately no MCP tool."""
+    if actor_for(user) != "web":
+        raise HTTPException(status_code=403, detail="only you can confirm this, on Job360")
+    try:
+        return await asks_service.confirm_ask(db, user.id, ask_id)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

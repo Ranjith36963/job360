@@ -16,12 +16,17 @@ vi.mock("@/lib/api", () => ({
   listAsks: (...args: unknown[]) => listAsks(...args),
   answerAsk: (...args: unknown[]) => answerAsk(...args),
   withdrawAsk: vi.fn(),
+  // The badge counts asks + waiting setting changes + ready to send (S5d).
+  getAssistantSettings: vi.fn().mockResolvedValue({ waiting: [{ id: 1 }], paused: false }),
+  getReadyToSend: vi.fn().mockResolvedValue({ paused: false, total: 2, unflagged: 2, items: [] }),
   recordApplicationReceipt: vi.fn(),
   setApplicationVisa: vi.fn(),
   addContact: vi.fn(),
   recordApplicationEvent: vi.fn(),
   getApplicationArtifact: vi.fn(),
   getArtifactDiff: vi.fn(),
+  // S3: the decision buttons read this on mount; a failed read hides them.
+  getApplicationControls: vi.fn().mockRejectedValue(new Error("not mocked")),
 }));
 
 const ask = (over: Record<string, unknown> = {}) => ({
@@ -149,7 +154,7 @@ describe("ApplicationClient frame", () => {
     expect(screen.queryByRole("heading", { name: "Needs you" })).toBeNull();
   });
 
-  it("answering reloads the application and announces the fresh open count", async () => {
+  it("answering reloads the application and announces the fresh full count (asks + waiting + ready)", async () => {
     getApplication.mockResolvedValueOnce(detail({ asks: [ask()] })).mockResolvedValue(detail({ asks: [] }));
     answerAsk.mockResolvedValue(ask({ status: "answered", answer: "Yes" }));
     listAsks.mockResolvedValue({ asks: [], open_count: 0 });
@@ -162,7 +167,7 @@ describe("ApplicationClient frame", () => {
     fireEvent.click(screen.getByTestId("ask-save"));
     fireEvent.click(await screen.findByTestId("ask-answer-confirm"));
 
-    await waitFor(() => expect(seen).toEqual([0]));
+    await waitFor(() => expect(seen).toEqual([3]));
     expect(answerAsk).toHaveBeenCalledWith(7, "Yes");
     expect(getApplication).toHaveBeenCalledTimes(2);
     expect(listAsks).toHaveBeenCalledWith("open");

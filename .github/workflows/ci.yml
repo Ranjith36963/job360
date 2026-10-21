@@ -32,8 +32,15 @@ jobs:
   #
   # scripts/ci_scope.py answers `docs` / `frontend` / `full` from the changed
   # files, most restrictive wins, unknown is full, empty is full, and anything
-  # that is not a pull_request (push to main, schedule, dispatch) is full
-  # without looking -- main is production.
+  # that is not a pull_request (push to main, dispatch) is full unless it
+  # PROVES `tested` -- main is production.
+  #
+  # `tested` (CI audit 2026-10-19): a push to main skips the heavy steps ONLY
+  # when ci_scope.py proves the PR that produced this merge commit has the same
+  # tree, every required check on its head is green, and a successful run of
+  # THIS workflow uploaded `ci-tested-tree-<tree>` (only a `full` decision
+  # uploads it, named after the tree that run checked out). Anything else is
+  # `full`. See the docstring of scripts/ci_scope.py.
   #
   # JOBS BELOW ARE NEVER SKIPPED, ONLY THEIR STEPS. The ruleset on main and
   # scripts/merge_cage.py require checks BY NAME; a skipped job never reports
@@ -42,6 +49,13 @@ jobs:
     name: Scope (which checks this diff needs)
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    # Read-only lookups for the `tested` proof. Job-level, so no other job
+    # gains anything.
+    permissions:
+      contents: read
+      actions: read        # this workflow's earlier runs and their marker artifact
+      checks: read         # the required checks on the PR head
+      pull-requests: read  # which PR produced the pushed merge commit
     outputs:
       scope: ${{ steps.decide.outputs.scope }}
     steps:
@@ -58,9 +72,77 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --print-scope --summary)
+          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --workflow ci.yml --print-scope --summary)
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
+      # THE PROOF A LATER `tested` READS. Only a `full` decision writes it, and
+      # its name is the tree this run checked out (on a PR: the merge ref).
+      - name: Record the tree this full run tests
+        id: tree
+        if: steps.decide.outputs.scope == 'full'
+        run: |
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          printf 'tree=%s\nsha=%s\nevent=%s\nrun=%s\n' "$tree" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" "$GITHUB_RUN_ID" > tested-tree.txt
+      - name: Upload the full-scope marker
+        if: steps.decide.outputs.scope == 'full'
+        # A lost marker only makes a later main push run `full`. It must never fail
+        # `scope`: a red scope SKIPS the required jobs, and the ruleset passes skipped.
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ci-tested-tree-${{ steps.tree.outputs.tree }}
+          path: tested-tree.txt
+          retention-days: 7
+          overwrite: true
+
+  # ─── Test integrity: no PR goes green by running fewer tests ──────────────
+  # 2026-10-20. Coding agents judged by a suite learn to skip, delete or
+  # de-configure the failing test (METR 2025-06-05; Anthropic 2025-11-26). Only
+  # pr-repair.yml and issue-fix.yml checked their own agent's diff; an ordinary
+  # PR had nothing. scripts/test_integrity.py reads `git diff base...head` and
+  # names every added skip / xfail / .only / no-cover, every test removed with
+  # no replacement, and every edit to conftest / pytest / vitest / playwright
+  # config. Any finding is red. merge_cage.py requires this check, so a machine
+  # cannot merge it; the owner reads the report and can merge by hand (it is
+  # not in the ruleset).
+  #
+  # The judge is the BASE branch's copy when it has one, so a PR cannot blind
+  # the guard that judges it. No `needs: scope`: a red scope must not skip it.
+  # Steps run only on pull_request; on a push the job reports success at once.
+  test-integrity:
+    name: test-integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0   # base...head needs the merge base
+      - name: No test was skipped, deleted or re-configured
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          judge=scripts/test_integrity.py
+          if git cat-file -e "$BASE_SHA:scripts/test_integrity.py" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/test_integrity.py" > "$RUNNER_TEMP/test_integrity.py"
+            judge="$RUNNER_TEMP/test_integrity.py"
+            echo "judging with the base branch's copy of scripts/test_integrity.py"
+          fi
+          set +e
+          python "$judge" --base "$BASE_SHA" --head "$HEAD_SHA" | tee "$RUNNER_TEMP/integrity.txt"
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "### test-integrity"
+            echo '```'
+            awk '!/^::/ && n++ < 80' "$RUNNER_TEMP/integrity.txt"   # one reader, no SIGPIPE
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
@@ -69,37 +151,10 @@ jobs:
     timeout-minutes: 30
     needs: [scope]
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: job360
-          POSTGRES_PASSWORD: job360dev
-          POSTGRES_DB: job360
-        options: >-
-          --health-cmd "pg_isready -U job360 -d job360"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
+    # No Postgres / Redis services (removed 2026-10-20): since pytest moved to
+    # offline-suite this job is ruff + mypy, both static, and the two idle
+    # containers cost ~20 s on every run, docs PRs included (CI audit D2).
     env:
-      # Exported so tests CAN use Postgres once the migration lands.
-      # Existing tests use SQLite via conftest.py fixtures and are unaffected
-      # by this env var being present.
-      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
-      REDIS_URL: redis://localhost:6379
       # Minimal secrets for auth tests (injected by conftest.py too, but set
       # here so any integration smoke-tests that read .env also have them).
       SESSION_SECRET: ci-test-secret-not-used-in-prod
@@ -114,14 +169,25 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements*.lock.txt
+
+      # WHAT SHIPS IS WHAT WAS TESTED (2026-10-20). The prod image and both
+      # backend CI jobs install from backend/requirements*.lock.txt with
+      # --require-hashes, so a pyproject edit the locks do not follow would ship
+      # the app without its new dependency (--no-deps) or with a pin outside the
+      # declared range. This names the drift before the install hides it.
+      - name: Backend locks match pyproject (scripts/check_py_lock.py)
+        if: needs.scope.outputs.scope == 'full'
+        run: python scripts/check_py_lock.py
 
       - name: Install backend (with dev extras)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install --require-hashes -r requirements-dev.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip check
 
       - name: Lint (ruff)
         if: needs.scope.outputs.scope == 'full'
@@ -134,10 +200,11 @@ jobs:
         working-directory: backend
         run: python -m ruff check .
 
-      - name: Tests (offline suite)
-        if: needs.scope.outputs.scope == 'full'
-        working-directory: backend
-        run: python -m pytest -q -p no:randomly
+      # The full backend pytest runs ONCE per PR, in `offline-suite`
+      # (ci-offline.yml) - the same command, env and services. It ran here too
+      # until 2026-10-19: ~26 runner-minutes per PR spent re-running an
+      # identical suite (CI audit). This job is lint + types; offline-suite is
+      # the tests, and both stay required contexts in the ruleset.
 
       - name: Type-check (mypy ratchet)
         if: needs.scope.outputs.scope == 'full'
@@ -151,6 +218,20 @@ jobs:
         # against the version that produced it.
         working-directory: backend
         run: python scripts/mypy_ratchet.py
+
+      # Build the SAME image Railway builds, as the Frontend job does for its
+      # own (2026-10-20: nothing built backend/Dockerfile before a deploy did).
+      # Both variants: the default, and BROWSER_AGENT_ENABLED=1, whose hashed
+      # browser-lock install is a separate RUN. The default layers are reused,
+      # so the second build pays only for Playwright + Chromium. Then the image
+      # proves its installed set is consistent and the app imports.
+      - name: Docker image builds (backend/Dockerfile)
+        if: needs.scope.outputs.scope == 'full'
+        run: |
+          docker build --quiet -t job360-backend-ci backend
+          docker run --rm job360-backend-ci sh -c 'pip check && python -c "import main"'
+          docker build --quiet --build-arg BROWSER_AGENT_ENABLED=1 -t job360-backend-browser-ci backend
+          docker run --rm job360-backend-browser-ci sh -c 'pip check && python -c "import playwright.async_api"'
 
   # ─── The chain checks itself ───────────────────────────────────────────────
   chain:
@@ -295,11 +376,17 @@ jobs:
         run: python scripts/review_debt.py --drill
 
       # The guard on the one route that makes outbound requests to a URL a
-      # stranger chose (docs/plans/2026-09-04-url-fetch/spec.md). Ten
+      # stranger chose (backend/src/services/fetch/guard.py). Ten
       # mutations, each a real SSRF bypass, plus a negative control.
       - name: The SSRF guard can still fail
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/ssrf_drill.py --drill
+
+      # Claude Code truncates MCP text at 2,048 characters (anthropics/claude-code#81268);
+      # the live-server half of this guard is backend/tests/test_mcp_text_budget.py.
+      - name: The MCP text budget guard can still fail
+        if: needs.scope.outputs.scope == 'full'
+        run: python scripts/mcp_text_budget.py --drill
 
       - name: Every guard declares its drill
         if: needs.scope.outputs.scope == 'full'
@@ -346,7 +433,11 @@ jobs:
         run: ./actionlint -shellcheck= -pyflakes= -color .github/workflows/*.yml
 
   # ─── Frontend ──────────────────────────────────────────────────────────────
+  # Steps run on an explicit list of scopes, never `!= 'docs'`: a negation
+  # would also admit `tested` (and any scope word added later).
   frontend:
+    # 2026-10-20: this job runs Node 22 (setup-node below). The name stays "Node 20":
+    # renaming a required check is an owner ruleset action.
     name: Frontend (Node 20)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -354,10 +445,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        if: needs.scope.outputs.scope != 'docs'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         with:
           node-version: "22"
           cache: npm
@@ -368,31 +459,31 @@ jobs:
       # It exists mainly for the local commit gate (scripts/agent-gate.sh), which
       # runs against installed node_modules and cannot see a pruned lock (#503).
       - name: Lockfile sync (scripts/check_lock_sync.py)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         run: python scripts/check_lock_sync.py frontend
 
       - name: Install frontend deps
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm ci
 
       - name: Type-check (tsc)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm run type-check
 
       - name: Lint (ESLint)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm run lint
 
       - name: Unit tests (vitest)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npx vitest run
 
       - name: Build (next build)
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm run build
 
@@ -404,61 +495,5 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         run: docker build --quiet -t job360-frontend-ci frontend
 
-  # ── Make this loop LOUD ───────────────────────────────────────────────────
-  # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
-  # it alone had issue plumbing. live-e2e then failed 8 consecutive nights
-  # unnoticed over a 6-line config gap. A watcher nobody reads is worse than no
-  # watcher, so every scheduled loop now produces an OBJECT with a lifecycle:
-  # fail -> open/comment one deduped issue; pass -> auto-close it.
-  # Deliberately silent on pull_request: a red PR is already visible in the PR,
-  # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
-  notify:
-    name: Report failure as an issue
-    needs: [backend, frontend, chain]
-    if: >-
-      always() && (github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      issues: write
-      actions: write # to wake the triage loop (gh workflow run triage.yml)
-    steps:
-      - name: Open, update or close the tracking issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          title="Loop RED: ci (main) is failing"
-          num=$(gh issue list --state open --json number,title \
-                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
-            {
-              echo "\`ci.yml\` failed on **${{ github.event_name }}** (\`${{ github.ref_name }}\`)."
-              echo
-              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              echo "- Commit: \`${{ github.sha }}\`"
-            } > notify-body.md
-            if [ -z "$num" ]; then
-              # LABEL + HAND OFF. Until 2026-08-03 this line was the end of the road:
-              # the issue was created with GITHUB_TOKEN, which raises NO `issues:
-              # opened` event (GitHub blocks that recursion), carried no `harness`
-              # label, and dispatched nothing — so no loop ever diagnosed it and no
-              # email was sent. The alarm rang into an empty room. Proven live:
-              # issue #190 (security RED) opened and auto-closed with zero
-              # diagnosis; #185 sat unread for days. Seven loops shared this bug.
-              new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
-              n="${new##*/}"
-              if gh workflow run triage.yml -f issue="$n"; then
-                echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
-              else
-                echo "::warning::issue #$n raised but triage could not be woken - diagnose by hand"
-              fi
-            else
-              gh issue comment "$num" --body-file notify-body.md
-            fi
-          elif [ -n "$num" ]; then
-            gh issue close "$num" \
-              --comment "Green again in run ${{ github.run_id }}. (auto-close)"
-          fi
+  # Failures on main / on the schedule are reported as an issue by loop-red.yml
+  # (one workflow_run watcher, so PRs no longer show a 'skipping' row for it).

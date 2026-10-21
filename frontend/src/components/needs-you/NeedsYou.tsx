@@ -3,8 +3,15 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ASKS_CHANGED_EVENT, answerAsk, listAsks, withdrawAsk } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
+import { MorningCheck } from "./MorningCheck";
+import { ReadyToSend } from "./ReadyToSend";
+import { BatchApplyPanel } from "./BatchApplyPanel";
+import { SettingRequestCard } from "./SettingRequestCard";
+import type { WaitingRequest } from "./SettingRequestCard";
+import { settingScore } from "@/lib/assistant-tab";
+import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -86,12 +93,35 @@ export function AskCard({
 
       {mode === "answered" && !editing && (
         <div className="flex flex-col gap-1 rounded-lg bg-muted/30 p-3">
+          {ask.relayed_from_chat && ask.user_words ? (
+            <p className="whitespace-pre-wrap text-sm" data-testid="ask-relayed-from-chat">
+              You said (via {whoLabel(ask.answered_by ?? "").name}): {ask.user_words}
+            </p>
+          ) : null}
           <p className="whitespace-pre-wrap text-sm">{ask.answer}</p>
           <p className="text-xs text-muted-foreground" data-testid="ask-provenance">
             {ask.answered_by_user
               ? "You answered on Job360"
               : "Your assistant recorded your answer from chat"}
           </p>
+          {ask.relayed_from_chat &&
+            (ask.confirmed_at ? (
+              <p className="text-xs font-medium" data-testid="ask-confirmed">
+                You confirmed
+              </p>
+            ) : (
+              <div>
+                <button
+                  type="button"
+                  data-testid="confirm-relayed"
+                  disabled={busy}
+                  onClick={() => void run(() => confirmAsk(ask.id), "Could not confirm this answer.")}
+                  className={confirmBtn}
+                >
+                  {busy ? "Confirming…" : "Confirm"}
+                </button>
+              </div>
+            ))}
           <div>
             <button
               type="button"
@@ -215,24 +245,48 @@ export function AskCard({
   );
 }
 
+/** The requests waiting for the user's OK. Best-effort: a failed read just
+ *  shows none, it never blocks the questions. */
+async function waitingRequests(): Promise<WaitingRequest[]> {
+  try {
+    const view = await getAssistantSettings();
+    const line = settingScore(view.apply_min_score);
+    return view.waiting.map((r) => ({ ...r, current_score_line: line, grant_queue: view.auto_grant_scope?.queue ?? null }));
+  } catch {
+    return [];
+  }
+}
+
 function announce(openCount: number) {
   window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
 }
 
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
+  // Setting changes an assistant asked for, waiting for the user's OK (S2).
+  const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The badge counts the questions, the changes waiting for an OK AND what is ready to send.
+  const [askCount, setAskCount] = useState(0);
+  // null until Ready to send has answered (0 if its read failed): announcing
+  // before then would drop the ready count from the badge for a moment.
+  const [readyTotal, setReadyTotal] = useState<number | null>(null);
 
   const apply = useCallback(
-    (o: Awaited<ReturnType<typeof listAsks>>, a: Awaited<ReturnType<typeof listAsks>>) => {
+    (
+      o: Awaited<ReturnType<typeof listAsks>>,
+      a: Awaited<ReturnType<typeof listAsks>>,
+      w: WaitingRequest[],
+    ) => {
       setOpen(o.asks);
       setAnswered(a.asks);
+      setWaiting(w);
       setMoreAnswered(a.asks.length >= PAGE);
       setError(null);
-      announce(o.open_count);
+      setAskCount(o.open_count + w.length);
     },
     [],
   );
@@ -241,8 +295,8 @@ export function NeedsYou() {
   // screen and the error shows above them with a retry.
   const load = useCallback(async () => {
     try {
-      const [o, a] = await Promise.all([listAsks("open"), listAsks("answered")]);
-      apply(o, a);
+      const [o, a, w] = await Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()]);
+      apply(o, a, w);
     } catch {
       setError("Could not load your questions.");
     }
@@ -250,9 +304,9 @@ export function NeedsYou() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listAsks("open"), listAsks("answered")])
-      .then(([o, a]) => {
-        if (!cancelled) apply(o, a);
+    Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()])
+      .then(([o, a, w]) => {
+        if (!cancelled) apply(o, a, w);
       })
       .catch(() => {
         if (!cancelled) setError("Could not load your questions.");
@@ -261,6 +315,10 @@ export function NeedsYou() {
       cancelled = true;
     };
   }, [apply]);
+
+  useEffect(() => {
+    if (open !== null && readyTotal !== null) announce(askCount + readyTotal);
+  }, [open, askCount, readyTotal]);
 
   async function loadOlder() {
     setLoadingMore(true);
@@ -291,7 +349,10 @@ export function NeedsYou() {
   }
 
   return (
-    <div className="flex max-w-3xl flex-col gap-8">
+    <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
+    <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
+      <MorningCheck />
+      <ReadyToSend onTotal={setReadyTotal} />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -300,13 +361,25 @@ export function NeedsYou() {
           </button>
         </div>
       )}
+      {waiting.length > 0 && (
+        <section aria-labelledby="waiting-ok" className="flex flex-col gap-3">
+          <h2 id="waiting-ok" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+            Waiting for your OK
+          </h2>
+          <ul className="flex flex-col gap-3" data-testid="waiting-for-ok">
+            {waiting.map((r) => (
+              <SettingRequestCard key={r.id} request={r} onChanged={load} />
+            ))}
+          </ul>
+        </section>
+      )}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
         <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Waiting for you
         </h2>
         {open.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
-            Nothing needs you right now.
+            {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
         ) : (
           <ul className="flex flex-col gap-3">
@@ -342,6 +415,8 @@ export function NeedsYou() {
           )}
         </section>
       )}
+    </div>
+    <BatchApplyPanel />
     </div>
   );
 }

@@ -53,22 +53,24 @@ describe("AppShell", () => {
 
     const side = screen.getByTestId("app-sidebar");
     const labels = [
+      "Needs you",
       "Home",
       "Profile",
       "Jobs in",
       "Applications",
+      "People",
       "Stats",
-      "Needs you",
       "Receipts",
       "Connect your assistant",
     ];
     const hrefs = [
+      "/needs-you",
       "/",
       "/profile",
       "/bring",
       "/applications",
+      "/people",
       "/stats",
-      "/needs-you",
       "/receipts",
       "/settings/connect",
     ];
@@ -86,7 +88,7 @@ describe("AppShell", () => {
     expect(screen.getByText("page body")).toBeInTheDocument();
   });
 
-  it("the Home link is first and active only on exactly /", () => {
+  it("Needs you is first, Home second; Home is active only on exactly /", () => {
     mockAuth.user = { email: "someone@example.com" };
     for (const [path, homeActive] of [
       ["/", true],
@@ -102,9 +104,10 @@ describe("AppShell", () => {
       );
       const side = screen.getByTestId("app-sidebar");
       const links = within(within(side).getByRole("navigation", { name: "Main navigation" })).getAllByRole("link");
-      expect(links[0]).toHaveAccessibleName("Home");
-      if (homeActive) expect(links[0]).toHaveAttribute("aria-current", "page");
-      else expect(links[0]).not.toHaveAttribute("aria-current");
+      expect(links[0]).toHaveAccessibleName(/^Needs you/);
+      expect(links[1]).toHaveAccessibleName("Home");
+      if (homeActive) expect(links[1]).toHaveAttribute("aria-current", "page");
+      else expect(links[1]).not.toHaveAttribute("aria-current");
       unmount();
     }
   });

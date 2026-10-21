@@ -19,6 +19,8 @@ Verified 2026-07-27: `meta.commitHash` equalled `origin/main` HEAD exactly, and 
 
 > **`/api/health` cannot answer this.** It returns a hardcoded `{"status":"ok","version":"1.0.0"}` with no commit SHA. Timestamp correlation is the only alternative signal and it fails silently on a rollback or a failed build — so use the deploy API, not the clock.
 
+> **`GET https://job360.uk/api/version` can** (since 2026-10-20): it returns `{"sha": "<RAILWAY_GIT_COMMIT_SHA>"}` from the process actually serving, or `"unknown"` if Railway did not set it. `post-merge-watch.yml` waits on it after every merge and goes red "deploy never went live" if the merge SHA never appears. (Railway's backend healthcheck has been `/api/readyz` since #960, so a deploy whose DB check fails never takes traffic and `/api/version` keeps reporting the old SHA.)
+
 ### If you ever need to deploy WITHOUT the GitHub link
 
 The manual `railway up` recipe further down still works, but it is the fallback path, not the normal one. Do not use it while the GitHub link is active — a manual upload and an auto-deploy can race and leave services on different commits.
@@ -30,9 +32,10 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 > - **Frontend:** https://frontend-production-c608f.up.railway.app
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
 >
-> `/readyz` is `api.routes.health.readyz`: it checks Postgres, and reports Redis as
-> `skipped` — never `ok` — whenever `REDIS_URL` is unset, which it is now that the
-> Redis service is gone.
+> Railway's deploy healthcheck is `backend/railway.json`'s `healthcheckPath`; what
+> answers it is `api.routes.health.readyz`. The probes are mounted under `/api`
+> (`api.main`'s `include_router`), so every live path carries that prefix, and the
+> codes and bodies are pinned by `backend/tests/test_health_probes.py`.
 
 ## 🟢 What's already done (no action needed)
 - Backend + frontend **Dockerfiles** and **`docker-compose.prod.yml`** — read the
@@ -40,7 +43,7 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 - App runs on **Postgres**. (Test count deliberately not quoted here — measure it:
   `cd backend && python -m pytest --collect-only -q | tail -1`. The
   merge-gate floor lives in one place, `CONTRIBUTING.md`, and only there.)
-- **`/health`, `/livez`, `/readyz`** + **env validation at boot** (fail-fast on missing prod secrets).
+- **The health probes** (`api/routes/health.py`, mounted under `/api`) + **env validation at boot** (fail-fast on missing prod secrets).
 - **Nightly encrypted DB backup** — `.github/workflows/db-backup.yml`; restore procedure in `RUNBOOK-backups.md`.
 
 ## First-time provisioning (HISTORICAL — already done 2026-07-02)
@@ -75,6 +78,6 @@ railway domain --service frontend    # → public site URL
 ```
 
 ## Verify after deploy
-- `curl https://<backend-url>/livez` → 200; `/readyz` → 200 with `db: ok`.
+- `curl https://<backend-url>/api/livez` and `/api/readyz` → 200 (`backend/tests/test_health_probes.py` pins both).
 - Register + upload CV on the live frontend; confirm a row in the managed Postgres.
 - Sentry receives a test error; PostHog receives a pageview.

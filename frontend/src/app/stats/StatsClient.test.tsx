@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { StatsClient, formatRate } from "./StatsClient";
+import { StatsClient, blockedText, formatRate } from "./StatsClient";
 import type { StatsResponse } from "@/lib/api";
 
 const getStats = vi.fn();
@@ -70,6 +70,19 @@ describe("StatsClient", () => {
     expect(screen.getByText(/Job360 only counts/)).toBeInTheDocument();
   });
 
+  it("shows the score line card with counts only, and 'Not set' when no line", async () => {
+    getStats.mockResolvedValue(stats({ score_line: { line: 75, above: 3, below: 2, unscored: 1 } } as never));
+    const { unmount } = render(<StatsClient />);
+    const card = await screen.findByTestId("stats-score-line");
+    for (const t of ["Your score line", "75", "At or above", "3", "Below", "2", "No score", "1"]) {
+      expect(card).toHaveTextContent(t);
+    }
+    unmount();
+    getStats.mockResolvedValue(stats({ score_line: { line: null, above: 0, below: 0, unscored: 4 } } as never));
+    render(<StatsClient />);
+    expect(await screen.findByTestId("stats-score-line")).toHaveTextContent("Not set");
+  });
+
   it("renders each section with rows, plain labels, rates, dashes and Not set", async () => {
     getStats.mockResolvedValue(stats());
     render(<StatsClient />);
@@ -116,5 +129,36 @@ describe("StatsClient", () => {
       expect(screen.getByTestId("stats-error")).toHaveTextContent("Couldn't load this — refresh to try again.")
     );
     expect(screen.queryByTestId("stats-overall")).toBeNull();
+  });
+});
+
+describe("StatsClient sites block", () => {
+  const sites = {
+    applications_without_host: 0, hosts: 1, note: "Counts per form host.", truncated: false,
+    sites: [{ host: "boards.greenhouse.io", n: 4, forms_filled: 3, applied: 2, blocked: { login_wall: 2, captcha: 1 }, blocked_total: 3 }],
+  };
+
+  it("asks for the sites view and shows a facts-only table", async () => {
+    getStats.mockResolvedValue(stats({ sites } as never));
+    render(<StatsClient />);
+    const section = await screen.findByTestId("stats-section-sites");
+    expect(getStats).toHaveBeenCalledWith("sites");
+    const row = within(section).getByTestId("stats-site-row");
+    expect(row).toHaveTextContent("boards.greenhouse.io");
+    expect(row).toHaveTextContent("Login wall 2, Captcha 1");
+    for (const h of ["Site", "Applications (n)", "Forms filled", "Applied", "Blocked"]) {
+      expect(within(section).getByText(h)).toBeInTheDocument();
+    }
+  });
+
+  it("shows no table without a sites block", async () => {
+    getStats.mockResolvedValue(stats({ sites: null } as never));
+    render(<StatsClient />);
+    await screen.findByTestId("stats-overall");
+    expect(screen.queryByTestId("stats-section-sites")).toBeNull();
+  });
+
+  it("blockedText lists reasons by count", () => {
+    expect(blockedText({ captcha: 1, login_wall: 2, none: 0 })).toBe("Login wall 2, Captcha 1");
   });
 });

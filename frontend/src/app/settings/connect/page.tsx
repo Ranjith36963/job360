@@ -44,6 +44,7 @@ import {
   copyText,
   mcpUrl,
 } from "@/components/connect/ConnectSteps";
+import { SendStartsAssistantCard } from "@/components/connect/SendStartsAssistantCard";
 
 // ---------------------------------------------------------------------------
 // Connect your assistant — the page that gets a user's own AI assistant
@@ -254,11 +255,12 @@ const MODE_OPTIONS: { value: InboxMode; label: string }[] = [
 
 /** Values `preferences.check_every` can hold (backend
  *  `VALID_CHECK_EVERY_VALUES`; "" = not set = once a day — 2026-10-03). */
-export type CheckEveryState = "" | "3h" | "6h" | "12h" | "24h";
+export type CheckEveryState = "" | "1h" | "3h" | "6h" | "12h" | "24h";
 
-type EveryValue = "3h" | "6h" | "12h" | "24h";
+type EveryValue = "1h" | "3h" | "6h" | "12h" | "24h";
 
 const CHECK_EVERY_OPTIONS: { value: EveryValue; label: string }[] = [
+  { value: "1h", label: "Every hour" },
   { value: "3h", label: "Every 3 hours" },
   { value: "6h", label: "Every 6 hours" },
   { value: "12h", label: "Every 12 hours" },
@@ -278,9 +280,9 @@ export function dailyCheckStatusLine(
   connected: boolean | null
 ): string | null {
   if (state === "auto" || state === "scheduled") {
-    return "Your assistant reads Gmail for your open applications, records what happened, and sends the outreach messages it wrote.";
+    return "Your assistant reads Gmail for your open applications and records what happened.";
   }
-  if (state === "ask") return "Your assistant asks you before each Gmail check and only drafts messages.";
+  if (state === "ask") return "Your assistant asks you before each Gmail check.";
   if (state === "paused") return "Off — your assistant reads nothing.";
   if (state === "declined") {
     return "You said no — your assistant won't ask again.";
@@ -816,6 +818,7 @@ export default function ConnectAgentPage() {
       );
       const every = profile.preferences?.check_every;
       setCheckEvery(
+        every === "1h" ||
         every === "3h" || every === "6h" || every === "12h" || every === "24h"
           ? every
           : ""
@@ -947,6 +950,7 @@ export default function ConnectAgentPage() {
           onCheckEveryChange={onCheckEveryChange}
           modeSaving={savingMode}
         />
+        <SendStartsAssistantCard />
         <ConnectedAppsCard
           grants={grants}
           loading={grantsLoading}

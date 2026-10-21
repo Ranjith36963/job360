@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 # Contributing to Job360
 
 Thanks for helping improve Job360. This guide covers the conventions you need to
@@ -78,20 +78,20 @@ redeploy the previous SUCCESS build, then fix forward on a branch.
 
 ## Test-before-merge gate
 
-**Merge-gate floor: 1,586 collected, 0 failing.** A ratchet, not a claim about
+**Merge-gate floor: 4,350 collected, 0 failing.** A ratchet, not a claim about
 today's count — and now a pinned one: `backend/tests/test_suite_floor.py` re-measures
 and goes red the moment the floor sits above what the suite actually collects. Nothing
 did that before, which is how the 1,683 written here on 2026-09-07 outlived slice B
-deleting twenty LLM-only test files.
+deleting twenty LLM-only test files. Raised 2026-10-20 from 1,586 (it sat ~2,500 below
+the suite, so deleting hundreds of tests stayed green): `pytest --collect-only -q`
+measured 4,357 on c0cef280 (main), rounded down to the nearest 50.
 
 A PR is mergeable only when:
 
 - `cd backend && python -m pytest -q -p no:randomly` reports **0 failing** and
-  **>= 1,586 collected**.
+  **>= 4,350 collected**.
 - `pre-commit run --all-files` is clean.
 - CI is green on the PR branch.
-- At least one reviewer has approved (or owner self-approval on
-  trivial `docs/*` / `chore/*`).
 
 If the suite was green before your change and is red after, your change is the
 regression — fix it, do not merge around it.
@@ -143,9 +143,8 @@ For docs, start at [`docs/README.md`](docs/README.md).
 
 **Doc drift is fixed by deleting or generating, never by rewording.** A doc
 sentence that contradicts the code gets deleted, replaced by a pointer to a
-symbol name, or pinned by a named test; a countable fact is generated from the
-code into [`docs/GENERATED.md`](docs/GENERATED.md) by
-`scripts/gen_doc_blocks.py` and CI fails if the file disagrees. Rewording a
+symbol name, or pinned by a named test; a countable fact is not written down
+at all: measure it (`ls`, `grep -c`, `python -m pytest --collect-only -q`). Rewording a
 claim to be accurate only resets its expiry date, which is why fifteen
 consecutive nightly doc-drift runs never reached zero. (Was ADR-0006; the ADR
 folder was deleted 2026-09-12 and this paragraph is the rule's home.)

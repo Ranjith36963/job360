@@ -183,6 +183,14 @@ REGISTRY: dict[str, Guard] = {
     #
     # All six are `drilled` -- each --drill asserts real cases and was run under
     # CI conditions. NOT claimed: that they fail under MUTATION (issue #359).
+    "scripts/backup_checks.py": Guard(
+        status="drilled",
+        # Decides whether a restored nightly dump kept every row, and whether the
+        # newest backup in R2 is under 36 h old (gap 7, G410).
+        drill=[sys.executable, "scripts/backup_checks.py", "drill"],
+        # NEGATIVE CONTROL: both checks blinded to pass everything; must exit 1.
+        negative=[sys.executable, "scripts/backup_checks.py", "drill", "--blind"],
+    ),
     "scripts/merge_cage.py": Guard(
         status="drilled",
         # Decides what may reach production without the owner. Its drill refuses a
@@ -245,6 +253,18 @@ REGISTRY: dict[str, Guard] = {
         # the very agent CI is judging.
         drill=[sys.executable, "scripts/repairable.py", "--drill"],
         no_negative="the cases are inline assertions over a pure predicate",
+    ),
+    "scripts/fixer_gate.py": Guard(
+        status="drilled",
+        # The ONE door to `pr-repair.yml` (finding-watch.yml calls it; pr-shepherd
+        # goes through finding-watch). Refuses a dispatch while a pr-repair run
+        # for the same PR is not completed, or for a head sha + findings a run
+        # already judged. Born from 141 dispatches in 3.7 days (PR #891: 27 for 6
+        # heads). The drill replays #891's 27 recorded requests (-> 2) and #894's
+        # (-> 1); `--blind` switches both refusals off, so the replay and the
+        # skip cases must go RED.
+        drill=[sys.executable, "scripts/fixer_gate.py", "--drill"],
+        negative=[sys.executable, "scripts/fixer_gate.py", "--drill", "--blind"],
     ),
     "scripts/stale_path_check.py": Guard(
         status="drilled",
@@ -342,6 +362,19 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/check_lock_sync.py", "--drill"],
         no_negative="the drill mutates a copy of the lock inline; blinding it means a flag that skips that "
                       "edit",
+    ),
+    "scripts/check_py_lock.py": Guard(
+        status="drilled",
+        # The backend twin (2026-10-20): the prod image and CI install ONLY the
+        # hashed backend/requirements*.lock.txt, so a pyproject edit the locks
+        # do not follow ships without its dependency. Drill breaks copies of
+        # pyproject + locks five ways (hallucinated name added, floor raised,
+        # dependency removed, hashes stripped, dev lock drifted) and demands
+        # each rule fires; the untouched copy must stay green.
+        drill=[sys.executable, "scripts/check_py_lock.py", "--drill"],
+        # NEGATIVE CONTROL: MISSING switched off, so the drill must FAIL.
+        # Verified exit 1 for every rule on the commit that added this line.
+        negative=[sys.executable, "scripts/check_py_lock.py", "--drill", "--break-checker", "MISSING"],
     ),
     "scripts/check_workflow_slack_wiring.py": Guard(
         status="drilled",
@@ -459,6 +492,27 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/ssrf_drill.py", "--drill"],
         no_negative="ten inline mutations against an injected resolver",
     ),
+    # ── S4 playbooks: the MCP text budget ───────────────────────────────────
+    # Claude Code silently truncates server instructions and every tool
+    # description at 2,048 characters (anthropics/claude-code#81268). The
+    # drill plants a 2,001-character text and demands it is named, then a
+    # 2,000-character one that must pass. The negative blinds the limit check:
+    # the drill must then FAIL, which proves it can still go red.
+    "scripts/mcp_text_budget.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/mcp_text_budget.py", "--drill"],
+        negative=[sys.executable, "scripts/mcp_text_budget.py", "--drill", "--break-checker", "LIMIT"],
+    ),
+    # ── Test integrity (2026-10-20) ─────────────────────────────────────────
+    # ci.yml `test-integrity` and the offline-suite skip ratchet. The drill
+    # feeds 22 in-memory diffs that must go red (skip / delete / config, plus a
+    # skip over the ratchet baseline) and 12 harmless ones that must stay green.
+    # The negative blinds the SKIP check: the drill must then FAIL.
+    "scripts/test_integrity.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/test_integrity.py", "--drill"],
+        negative=[sys.executable, "scripts/test_integrity.py", "--drill", "--break-checker", "SKIP"],
+    ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/already_built.py": Guard(
         status="owed",
@@ -498,17 +552,6 @@ REGISTRY: dict[str, Guard] = {
         "always-green with no signal",
         since="2026-08-25",
     ),
-    "scripts/gen_doc_blocks.py": Guard(
-        status="drilled",
-        # Generation, not detection: it writes the countable facts INTO the doc
-        # from code, so those cannot drift at all. Two failure paths, both
-        # watched going red by hand before this entry was written — a wrong
-        # value inside the block, and DELETING the marker (a block quietly
-        # going back to being hand-written, which is the sneakier one).
-        drill=[sys.executable, "scripts/gen_doc_blocks.py"],
-        no_negative="its drill IS the generator's check mode; a negative means planting a wrong value and "
-                      "restoring it, i.e. a mutation harness of its own",
-    ),
     "scripts/provider_probe.py": Guard(
         status="owed",
         reason="calls a live credential endpoint; a drill needs a recorded 401/422 "
@@ -518,21 +561,28 @@ REGISTRY: dict[str, Guard] = {
         since="2026-08-16",
     ),
     "scripts/sentry_poll.py": Guard(
-        status="owed",
-        reason="reads the live Sentry API; needs a recorded issue payload",
-        since="2026-08-16",
-    ),
-    # ── THE GUARD THIS PR WIRES UP (harness simplification slice 5, W1) ─────
-    # A guard and its declaration land together, always -- same rule as the
-    # lane.py/repairable.py/ssrf_drill.py pairs above. The WIP limit's pure
-    # decide() function: counts other open, non-draft, non-dependabot,
-    # non-revert PRs against the owner's limit, and exempts THIS PR from ever
-    # being parked if it is dependabot or a revert. Offline -- no gh, no
-    # network, and a negative control (0 open PRs -> never park) comes first.
-    "scripts/wip_gate.py": Guard(
         status="drilled",
-        drill=[sys.executable, "scripts/wip_gate.py", "--drill"],
-        no_negative="inline check() calls over a pure decide()",
+        # WAS `owed` since 2026-08-16 ("needs a recorded issue payload"). FC-009
+        # (2026-10-03): the trip rule is now the pure `decide()`, and the drill feeds
+        # it the 3 REAL noise issues that rolled prod back three times (they must NOT
+        # trip) plus controls that MUST (user-facing error, noise flood, unreadable
+        # counts). The live-API half stays undrilled on purpose: same urllib GET as
+        # before, and a recorded response would rot.
+        drill=[sys.executable, "scripts/sentry_poll.py", "--drill"],
+        # NEGATIVE CONTROL: swaps the rule for "ignore everything"; the must-trip
+        # controls then fail, so this must exit non-zero.
+        negative=[sys.executable, "scripts/sentry_poll.py", "--drill", "--blind"],
+    ),
+    "scripts/deploy_settle.py": Guard(
+        status="drilled",
+        # FC-009: waits for the deployment that carries THIS sha (not "any readyz
+        # 200", which the OLD container satisfies) and then lets the swap settle.
+        # The drill covers the pure assess()/settle_remaining(); the Railway call
+        # is rollback_gear.list_deployments, already drilled there. Since #997 it
+        # also runs wait_for_version() on a fake clock (old sha served -> never_live,
+        # newer descendant -> superseded); --blind there counts any answer as live.
+        drill=[sys.executable, "scripts/deploy_settle.py", "--drill"],
+        negative=[sys.executable, "scripts/deploy_settle.py", "--drill", "--blind"],
     ),
     "scripts/watchdog_check.py": Guard(
         status="drilled",

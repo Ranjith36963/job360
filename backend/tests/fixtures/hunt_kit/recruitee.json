@@ -1,0 +1,206 @@
+{
+ "offers": [
+  {
+   "position": 1645,
+   "options_cover_letter": "off",
+   "locations_question_required": true,
+   "location_question_visible": false,
+   "country": "Netherlands",
+   "state_name": "Noord-Holland",
+   "experience_code": "experienced",
+   "locations": [
+    {
+     "id": 39979,
+     "name": "Amsterdam",
+     "state": "Noord-Holland",
+     "country": "Netherlands",
+     "city": "Amsterdam",
+     "translations": {
+      "en": {
+       "name": "Amsterdam",
+       "city": "Amsterdam",
+       "postal_code": null,
+       "street": null,
+       "note": null
+      }
+     },
+     "country_code": "NL",
+     "state_code": "NH",
+     "postal_code": null,
+     "street": null,
+     "note": null
+    }
+   ],
+   "options_cv": "off",
+   "requirements": "<ul><li><p>Proven experience in product management, with a track record of owning a product or significant features from concept to launch and beyond.</p></li><li><p><span style=\"color:#5A5F72\">Experience in either P</span>ayments, AI, Business, Wealth, Stocks, Crypto, Savings, Credit, FinCrime &amp; Security, International Expansion, Growth, UX, Retention, or Propositions<span style=\"color:#5A5F72\"> is a major plus.</span></p></li><li><p><span style=\"color:#5A5F72\">A deep, user-obse</span>ssed ",
+   "postal_code": null,
+   "options_title": "off",
+   "education_code": "bachelor_degree",
+   "salary": {
+    "max": null,
+    "min": null,
+    "period": null,
+    "currency": null
+   },
+   "employment_type_code": "fulltime_permanent",
+   "location": "Amsterdam, Noord-Holland, Netherlands",
+   "guid": "n4moa",
+   "city": "Amsterdam",
+   "options_photo": "off",
+   "options_salutation": "off",
+   "min_hours": 40,
+   "close_at": null,
+   "created_at": "2026-10-13 10:46:23 UTC",
+   "country_code": "NL",
+   "min_hours_per_week": "40",
+   "tags": [],
+   "options_phone": "required",
+   "max_hours": 40,
+   "published_at": "2026-10-13 10:58:56 UTC",
+   "state_code": "NH",
+   "updated_at": "2026-10-13 10:58:56 UTC",
+   "description": "<p>At bunq, we're not just building a banking app; we're reshaping how people around the world experience financial freedom. As a (Senior) Product Owner at bunq, you are the driving force behind a core piece of our user's experience. Your mission is to own your product, understand our users (Eva) inside and out, and ship beautiful, effective features that make their lives easy. </p><p style=\"min-height: 1.7em;\"></p><p><strong>We have several exciting and immediate openings within our Product sec",
+   "on_site": false,
+   "company_name": "bunq",
+   "category_code": "banking",
+   "remote": false,
+   "max_hours_per_week": "40",
+   "cover_image": null,
+   "locations_question_type": "single_choice",
+   "highlight": null,
+   "id": 2781634,
+   "careers_url": "https://careers.bunq.com/o/senior-product-owner-1",
+   "sharing_image": null,
+   "sharing_title": "(Senior) Product Owner",
+   "title": "(Senior) Product Owner",
+   "careers_apply_url": "https://careers.bunq.com/o/senior-product-owner-1/c/new",
+   "status": "published",
+   "hybrid": true,
+   "locations_question": "What is your preferred work location?",
+   "slug": "senior-product-owner-1",
+   "department": "Product"
+  },
+  {
+   "position": 1642,
+   "options_cover_letter": "off",
+   "locations_question_required": true,
+   "location_question_visible": true,
+   "country": "Netherlands",
+   "state_name": "Noord-Holland",
+   "experience_code": "experienced",
+   "locations": [
+    {
+     "id": 39979,
+     "name": "Amsterdam",
+     "state": "Noord-Holland",
+     "country": "Netherlands",
+     "city": "Amsterdam",
+     "translations": {
+      "en": {
+       "name": "Amsterdam",
+       "city": "Amsterdam",
+       "postal_code": null,
+       "street": null,
+       "note": null
+      }
+     },
+     "country_code": "NL",
+     "state_code": "NH",
+     "postal_code": null,
+     "street": null,
+     "note": null
+    },
+    {
+     "id": 39977,
+     "name": "Istanbul",
+     "state": "\u0130stanbul",
+     "country": "T\u00fcrkiye",
+     "city": "\u0130stanbul",
+     "translations": {
+      "en": {
+       "name": "Istanbul",
+       "city": "\u0130stanbul",
+       "postal_code": null,
+       "street": null,
+       "note": null
+      }
+     },
+     "country_code": "TR",
+     "state_code": "34",
+     "postal_code": null,
+     "street": null,
+     "note": null
+    },
+    {
+     "id": 39967,
+     "name": "Sofia",
+     "state": "Sofia (stolitsa)",
+     "country": "Bulgaria",
+     "city": "Sofia",
+     "translations": {
+      "en": {
+       "name": "Sofia",
+       "city": "Sofia",
+       "postal_code": null,
+       "street": null,
+       "note": null
+      }
+     },
+     "country_code": "BG",
+     "state_code": "22",
+     "postal_code": null,
+     "street": null,
+     "note": null
+    }
+   ],
+   "options_cv": "off",
+   "requirements": "<ul><li><p>You lead independently across multiple compliance domains, making quality, redesign, and escalation calls without waiting for supervision.</p></li><li><p>You have strong regulatory and compliance judgment at scale in TF/sanctions and transaction monitoring, where a wrong call has real regulatory consequences.</p></li><li><p>You spot risks early and close them before they become problems, and you can show us when you did.</p></li><li><p>You have an AI-native, process-simplification min",
+   "postal_code": null,
+   "options_title": "off",
+   "education_code": "bachelor_degree",
+   "salary": {
+    "max": null,
+    "min": null,
+    "period": null,
+    "currency": null
+   },
+   "employment_type_code": "fulltime_permanent",
+   "location": "Amsterdam, Noord-Holland, Netherlands",
+   "guid": "ektd9",
+   "city": "Amsterdam",
+   "options_photo": "off",
+   "options_salutation": "off",
+   "min_hours": 40,
+   "close_at": null,
+   "created_at": "2026-10-12 12:11:18 UTC",
+   "country_code": "NL",
+   "min_hours_per_week": "40",
+   "tags": [],
+   "options_phone": "required",
+   "max_hours": 40,
+   "published_at": "2026-10-12 13:59:52 UTC",
+   "state_code": "NH",
+   "updated_at": "2026-10-12 15:32:50 UTC",
+   "description": "<p>At bunq, we\u2019re on a mission to truly make life easy for our user. Part of that is keeping her safe: stopping criminals while making sure clean users are never held up, flagged, or offboarded for nothing. To lead this, we\u2019re looking for a Transaction Review Lead to join our team.</p><p>As Transaction Review Lead, you\u2019ll own bunq\u2019s line against money laundering, terrorist financing, and sanctions evasion, across both Transaction Filtering Review and Transaction Monitoring Review. You\u2019ll bring t",
+   "on_site": false,
+   "company_name": "bunq",
+   "category_code": "banking",
+   "remote": false,
+   "max_hours_per_week": "40",
+   "cover_image": null,
+   "locations_question_type": "single_choice",
+   "highlight": null,
+   "id": 2780064,
+   "careers_url": "https://careers.bunq.com/o/transaction-review-lead-5",
+   "sharing_image": null,
+   "sharing_title": "Transaction Review Lead",
+   "title": "Transaction Review Lead",
+   "careers_apply_url": "https://careers.bunq.com/o/transaction-review-lead-5/c/new",
+   "status": "published",
+   "hybrid": true,
+   "locations_question": "What is your preferred work location?",
+   "slug": "transaction-review-lead-5",
+   "department": "Growth"
+  }
+ ]
+}

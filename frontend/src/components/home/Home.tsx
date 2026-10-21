@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ASKS_CHANGED_EVENT, getStats, listAsks } from "@/lib/api";
+import { getStats, listAsks } from "@/lib/api";
 import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { ApplicationRows } from "@/components/applications/ApplicationList";
+import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { AskCard } from "@/components/needs-you/NeedsYou";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
+import { HomeAssistantNotes } from "@/components/home/HomeAssistantNotes";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
+import { SetupCard } from "@/components/profile/SetupProgress";
 import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
 import {
   FEED_LIMIT,
@@ -49,10 +51,6 @@ const linkBtn =
   "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
 
 const subscribeNever = () => () => {};
-
-function announce(openCount: number) {
-  window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
-}
 
 export function Home() {
   // Client-only: the date and the last-visit stamp belong to this browser, so
@@ -151,7 +149,9 @@ export function Home() {
     try {
       const r = await listAsks("open");
       setAsks({ status: "ok", value: { asks: r.asks, openCount: r.open_count } });
-      announce(r.open_count);
+      // The badge also counts waiting setting changes and Ready to send (S5d):
+      // re-count all of it, never announce the questions alone.
+      void announceOpenCount();
     } catch {
       // Keep what is on screen; the next full load will correct it.
     }
@@ -204,6 +204,8 @@ export function Home() {
         className={`grid gap-10 ${showRail ? "min-[1000px]:grid-cols-[minmax(0,1fr)_332px] min-[1000px]:gap-0" : ""}`}
       >
         <div className="flex min-w-0 flex-col gap-10 min-[1000px]:pr-10">
+          <HomeAssistantNotes />
+
           <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
             <div className="min-w-0 flex-1 basis-80">
               <p className="font-mono text-xs text-faint" data-testid="home-date">
@@ -273,20 +275,6 @@ export function Home() {
               </button>
             </div>
           )}
-          {apps.status === "loading" && (
-            <p className="text-sm text-muted-foreground">Loading your applications…</p>
-          )}
-          {apps.status === "ok" && apps.value.list.length > 0 && (
-            <section aria-labelledby="home-apps" data-testid="home-apps">
-              <div className="mb-1 flex items-baseline justify-between gap-3">
-                <h2 id="home-apps" className={LABEL}>
-                  Applications
-                </h2>
-                <span className="font-mono text-xs text-faint">{apps.value.total}</span>
-              </div>
-              <ApplicationRows applications={apps.value.list} />
-            </section>
-          )}
         </div>
 
         {showRail && (
@@ -294,6 +282,7 @@ export function Home() {
             data-testid="home-rail"
             className="flex min-w-0 flex-col gap-7 border-t border-border pt-8 min-[1000px]:border-l min-[1000px]:border-t-0 min-[1000px]:pl-8 min-[1000px]:pt-0"
           >
+            <SetupCard />
             {stats.status === "ok" && <CountsBlock overall={stats.value} />}
             <DueBlock due={dueList} />
             <FeedBlock items={feedItems} />

@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-10-05 by README rewrite (current product state) -->
+<!-- doc: LIVING | last-verified: 2026-10-20 by /sync -->
 
 **The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt.**
 
@@ -19,7 +19,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 ```
 
 1. **Connect your assistant** once — Settings → Connect gives the address `https://job360.uk/api/mcp`. Connector apps (Claude.ai is proven end to end; ChatGPT-style connectors use the same flow) sign in with OAuth 2.1; CLI clients like Claude Code use a personal token (`j360_…`, shown once, stored hashed).
-2. **Type `/run 360`.** The assistant fetches the setup recipe from Job360, reads your CV, fills your profile, asks to connect Gmail, and offers the inbox check.
+2. **Type `run 360`.** The assistant fetches the setup recipe from Job360, reads your CV, fills your profile, asks to connect Gmail, and offers the inbox check.
 3. **Hunt and apply.** The assistant searches with its own tools, brings each job it judges a fit, writes a tailored CV + cover letter, and stops before Submit. You say yes; it records the application and Job360 freezes a receipt.
 4. **Follow up.** On its schedule the assistant reads Gmail, records replies, interviews and rejections against the right application, sends the outreach emails it wrote (Auto mode only), and tells you what is due and what has gone quiet.
 5. **Look back any time.** Ask your assistant "how is my hunt going?" or "tell me everything about the Mistral application" — it reads it all from Job360. Or open the web app.
@@ -27,7 +27,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 ## What is live today
 
 ### For your assistant (MCP server at `/api/mcp`)
-- **Recipes — `/run 360` and friends.** Step-by-step playbooks the assistant fetches with `get_recipe`: setup, hunt, research, apply, prep, reach, daily, review (`backend/src/recipes/`).
+- **Recipes — `run 360` and friends.** Step-by-step playbooks the assistant fetches with `get_recipe`; which ones exist, and the order a new user runs them in, is `api/routes/recipes.RECIPE_NAMES` (text in `backend/src/recipes/`).
 - **Profile** — `get_profile` returns the raw CV / LinkedIn / GitHub text plus the structured fields; the assistant writes skills, dated work history, projects, targets and preferences back with `update_profile`. Every agent edit is kept with its author and can be taken back.
 - **Bring a job** — `bring_job` stores the ad (link or pasted text) and births one **Application**, with the job's country, remote flag and where it was found.
 - **Fit and visa** — the assistant's own verdict, stored with `save_fit` (Job360 never computes a score).
@@ -38,7 +38,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 - **Needs you** — when the assistant would have to guess, it calls `ask_user`; you answer once, on the web or in chat, and every assistant reads the answer.
 - **Inbox check** — your choice, stored in Job360 so every assistant obeys it:
   **Auto** (reads Gmail for your open applications, records what happened, sends the outreach emails it wrote) · **Ask me first** (asks before each check, only drafts) · **Off**.
-  How often: every 3, 6 or 12 hours, or once a day.
+  How often: the choices are `services/profile/models.VALID_CHECK_EVERY_VALUES`.
 - **Read-back** — `get_application` (one job, everything), `export_history` (the whole hunt), `stats`, `list_people`, `list_receipts`, `whats_new`.
 
 ### For you (web app at job360.uk)
@@ -61,10 +61,10 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 
 Two deployables on one Postgres database:
 
-- **`backend/`** — FastAPI (Python 3.12 in prod). Product path: `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`: one Application, append-only events, versioned artifacts, frozen receipts) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding every step. `src/repositories/pg.py` is the single database door. Migrations apply automatically on boot.
+- **`backend/`** — FastAPI (Python 3.12 in prod). Product path: `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`: one Application, append-only events, versioned artifacts, frozen receipts) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding every step. Migrations apply automatically on boot.
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind 4, a thin screen over the same routes.
 
-The deep reference (directory tree, schema, dependencies) is [`ARCHITECTURE.md`](./ARCHITECTURE.md). Code-verified counts (routes, migrations, workflows) live in [`docs/GENERATED.md`](./docs/GENERATED.md) — never copy a count from prose. Interactive API docs: `http://localhost:8000/docs` when the backend runs.
+The deep reference (directory tree, schema, dependencies) is [`ARCHITECTURE.md`](./ARCHITECTURE.md). Counts (routes, migrations, workflows) are never written down: measure it (`ls`, `grep -c`, `python -m pytest --collect-only -q`). Interactive API docs: `http://localhost:8000/docs` when the backend runs.
 
 ## Quick start (local)
 
@@ -76,7 +76,7 @@ cd job360
 docker compose -f docker-compose.dev.yml up -d postgres
 
 # Config
-cp .env.example .env          # DATABASE_URL, FRONTEND_ORIGIN, SITE_BASE_URL, RESEND_API_KEY
+cp .env.example .env          # then fill it in
 
 # Backend — FastAPI on :8000, MCP at /api/mcp
 cd backend
@@ -103,7 +103,7 @@ The backend suite runs on a real Postgres, schema per test, with HTTP mocked by 
 
 ## Deployment
 
-`main` is production: every merge auto-deploys the `backend`, `frontend` and `Postgres` services on Railway. CI on every pull request runs the full backend and frontend suites, security scans, and two AI reviewers (bugs and security); a pull request merges only when all of them are green. System email (magic links, password reset) goes through Resend on `job360.uk`.
+`main` is production: every merge auto-deploys the `backend`, `frontend` and `Postgres` services on Railway. System email (magic links, password reset) goes through Resend on `job360.uk`.
 
 ## Contributing
 

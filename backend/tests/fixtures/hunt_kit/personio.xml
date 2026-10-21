@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<workzag-jobs>
+
+<position>
+    <id>2834894</id>
+    <office>Berlin - Berliner Straße 80, 13189 Berlin</office>
+    <department>Support</department>
+    <recruitingCategory>Permanent Employee (Support)</recruitingCategory>
+    <name>Customer Support Agent FRA/ENG (all genders)</name>
+    <jobDescriptions>
+        <jobDescription>
+            <name>Our Vision</name>
+            <value>
+                <![CDATA[<span style="font-size:15px;">At Cardmarket, people come first.<br><br>Our goal is to create a workplace where everyone feels safe, appreciated, and inspired. A place where you enjoy coming to work and feel good about heading home at the end of the day.<br><br>Open communication is at the heart of our culture. Only by talking openly about challenges, big or small, can we find solutions together. C]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Your Responsibilities</name>
+            <value>
+                <![CDATA[<ul><li style="font-size:15px;">You support Cardmarket users with a wide range of inquiries and operational topics. Your primary responsibility is to resolve customer requests and provide assistance in writing, mainly in French and English</li><li style="font-size:15px;">You are often the first point of contact between Cardmarket and its users. Through your daily interactions with our community, y]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Your profile</name>
+            <value>
+                <![CDATA[<ul><li style="font-size:15px;">You speak fluent <strong>French (C2)</strong> and <strong>English (C1)</strong> and ideally Spanish (B1) and/or German (B1)?</li><li style="font-size:15px;">Are you interested in trading card games and do you already have experience with online marketplaces (ideally even with Cardmarket)?</li><li style="font-size:15px;">Do you like working in a solution-oriented way]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Why us?</name>
+            <value>
+                <![CDATA[<span style="font-family:Arial, Helvetica, sans-serif;font-size:15px;">Imagine a workplace where passion, trust, and personal responsibility are part of everyday working life.<br>A place where people enjoy coming together, sharing ideas, laughing together, while at the same time working with a high level of professionalism.That’s exactly what you’ll find at Cardmarket.</span><br><span style="font-]]>
+            </value>
+        </jobDescription>
+    </jobDescriptions>
+    <employmentType>permanent</employmentType>
+    <seniority>experienced</seniority>
+    <schedule>full-time</schedule>
+    <yearsOfExperience>2-5</yearsOfExperience>
+    <occupation>general_and_other_customer_support_and_client_care</occupation>
+    <occupationCategory>customer_support_and_client_care</occupationCategory>
+    <createdAt>2026-10-08T15:50:42+00:00</createdAt>
+    <salaryInformation>
+        <min>33000.00</min>
+        <currencySymbol>€</currencySymbol>
+        <currencyCode>EUR</currencyCode>
+        <type>yearly</type>
+    </salaryInformation>
+</position>
+<position>
+    <id>2824450</id>
+    <office>Berlin - Berliner Straße 80, 13189 Berlin</office>
+    <department>Support</department>
+    <recruitingCategory>Permanent Employee (Support)</recruitingCategory>
+    <name>Customer Support Agent GER/ENG (all genders)</name>
+    <jobDescriptions>
+        <jobDescription>
+            <name>Our Vision</name>
+            <value>
+                <![CDATA[<span style="font-size:15px;">At Cardmarket, people come first.<br><br>Our goal is to create a workplace where everyone feels safe, appreciated, and inspired. A place where you enjoy coming to work and feel good about heading home at the end of the day.<br><br>Open communication is at the heart of our culture. Only by talking openly about challenges, big or small, can we find solutions together. C]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Your Responsibilities</name>
+            <value>
+                <![CDATA[<ul><li style="font-size:15px;">You support Cardmarket users with a wide range of inquiries and operational topics. Your primary responsibility is to resolve customer requests and provide assistance in writing, mainly in German and English</li><li style="font-size:15px;">You are often the first point of contact between Cardmarket and its users. Through your daily interactions with our community, y]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Your profile</name>
+            <value>
+                <![CDATA[<ul><li style="font-size:15px;">You speak fluent <strong>German (C2)</strong> and <strong>English (C1)</strong> and ideally French (B1) and/or Spanish (B1)?</li><li style="font-size:15px;">Do you like trading card games and are you familiar with online trading (on Cardmarket if possible)? </li><li style="font-size:15px;">Do you like working in a solution-oriented way and helping others? </li><li s]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Why us?</name>
+            <value>
+                <![CDATA[<span style="font-family:Arial, Helvetica, sans-serif;font-size:15px;">Imagine a workplace where passion, trust, and personal responsibility are part of everyday working life.<br>A place where people enjoy coming together, sharing ideas, laughing together, while at the same time working with a high level of professionalism.That’s exactly what you’ll find at Cardmarket.</span><br><span style="font-]]>
+            </value>
+        </jobDescription>
+    </jobDescriptions>
+    <employmentType>permanent</employmentType>
+    <seniority>experienced</seniority>
+    <schedule>full-time</schedule>
+    <yearsOfExperience>2-5</yearsOfExperience>
+    <occupation>general_and_other_customer_support_and_client_care</occupation>
+    <occupationCategory>customer_support_and_client_care</occupationCategory>
+    <createdAt>2026-10-02T08:53:08+00:00</createdAt>
+    <salaryInformation>
+        <min>33000.00</min>
+        <currencySymbol>€</currencySymbol>
+        <currencyCode>EUR</currencyCode>
+        <type>yearly</type>
+    </salaryInformation>
+</position>
+</workzag-jobs>

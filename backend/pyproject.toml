@@ -21,6 +21,7 @@ dependencies = [
     "pdfplumber>=0.10.0",
     "python-docx>=1.1.0",
     "fpdf2>=2.7.0",  # tailored CV/cover-letter PDF render (services/tailoring/pdf.py) — runtime, not dev
+    "fonttools>=4.34.0",  # glyph coverage check for the bundled CV fonts (services/tailoring/cv_render.py); fpdf2 needs it too
     "rich>=13.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
@@ -66,6 +67,10 @@ dependencies = [
     # #11/#16 — small and C-backed, but not on the import path.
     "rapidfuzz>=3.0",
     "sentry-sdk>=1.40.0",           # error tracking + performance monitoring (Phase 3)
+    # Fernet for the browser agent's saved sign-ins (services/browser_agent/
+    # sign_ins.py). It was already installed (pdfplumber -> pdfminer.six needs
+    # it); named here because we now import it ourselves.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
@@ -90,12 +95,19 @@ dev = [
     # — different versions report different error sets, so "clean locally" said
     # nothing about CI. Bump deliberately: raise the pin, run
     # `python scripts/mypy_ratchet.py --update`, review the delta.
-    "mypy==2.3.1",
+    "mypy==2.4.0",
     # Linter — MUST be in dev extras so the CI "Lint (ruff)" blocking gate can run
     # it. Pinned to the 0.x line the backlog was drained against; ruff's rule set
     # changes between releases, so bump deliberately (an unpinned bump flags
     # previously-clean code and reds CI on unrelated PRs).
     "ruff>=0.15,<0.17",
+]
+# The Job360 browser agent (docs/product/BROWSER_AGENT.md). Optional and
+# heavy (Chromium is installed by `playwright install`, not pip): the Docker
+# build installs it only when BROWSER_AGENT_ENABLED=1. Lazy-imported in
+# services/browser_agent/agent.py; without it the `browser` tool answers "off".
+browser = [
+    "playwright>=1.48,<2",
 ]
 # The optional ESCO skill-canonicalisation stack. It used to cover the job
 # side too (embeddings + ChromaDB vector search); slice 5 (#483) deleted that,
@@ -146,6 +158,8 @@ include = ["src*"]
 [tool.setuptools.package-data]
 src = [
     "data/job_signals/*.txt",
+    "services/tailoring/fonts/*.ttf",
+    "services/tailoring/fonts/LICENSE",
 ]
 
 [tool.pytest.ini_options]
@@ -282,6 +296,8 @@ module = [
     "fpdf",
     "pdfplumber.*",
     "pdfplumber",
+    "fontTools.*",
+    "fontTools",
     "docx.*",
     "docx",
     "argon2.*",
@@ -290,6 +306,8 @@ module = [
     "aioresponses",
     "torch.*",
     "torch",
+    "playwright.*",
+    "playwright",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

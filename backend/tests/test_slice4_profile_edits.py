@@ -246,11 +246,13 @@ def test_every_editable_path_is_a_declared_dataclass_field():
 
     from src.core import settings
     from src.services.profile import edits
-    from src.services.profile.models import CVData, UserPreferences
+    from src.services.profile.models import AssistantSettings, CVData, UserInfo, UserPreferences
 
     declared = {
         "cv_data": {f.name for f in dataclasses.fields(CVData)},
         "preferences": {f.name for f in dataclasses.fields(UserPreferences)},
+        "user_info": {f.name for f in dataclasses.fields(UserInfo)},  # the memory head (2026-10-08)
+        "assistant_settings": {f.name for f in dataclasses.fields(AssistantSettings)},  # S2 (2026-10-08)
     }
     for path in edits.editable_paths():
         head, _, field = path.partition(".")
@@ -292,10 +294,10 @@ async def test_wrong_type_is_422(authenticated_async_context, fixture_user_id):
 async def test_closed_set_preference_lists_allowed_values(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        resp = await _patch(client, {"path": "preferences.work_arrangement", "value": "office"})
+        resp = await _patch(client, {"path": "preferences.work_arrangement", "value": "moon"})
         assert resp.status_code == 422, resp.text
         assert "remote" in resp.text and "hybrid" in resp.text and "onsite" in resp.text
-        resp = await _patch(client, {"path": "preferences.experience_level", "value": "graduate"})
+        resp = await _patch(client, {"path": "preferences.experience_level", "value": "wizard"})
         assert resp.status_code == 422, resp.text
         assert "entry" in resp.text and "executive" in resp.text
         ok = await _patch(client, {"path": "preferences.work_arrangement", "value": " Hybrid "})

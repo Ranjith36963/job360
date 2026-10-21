@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { ProofMark } from "@/components/receipts/ProofMarks";
 import { listReceipts } from "@/lib/api";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { toast } from "@/lib/toast";
@@ -113,6 +114,7 @@ function ReceiptsList() {
               </span>
               {r.channel && <span>via {closedSetLabel(r.channel)}</span>}
               {r.note && <span className="italic">“{r.note}”</span>}
+              <ProofMark proof={r.proof} />
             </div>
           </Link>
         </li>

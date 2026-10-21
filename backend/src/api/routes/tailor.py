@@ -24,7 +24,7 @@ it here (``monkeypatch.setattr(tailor, "load_profile", fake)``).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -32,13 +32,14 @@ from pydantic import BaseModel, Field
 from src.api.auth_deps import VERIFIED_FIRST, CurrentUser, require_verified_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
+from src.services.applications import cv_checks
 from src.services.applications import spine as applications_spine
 from src.services.applications.spine import SpineError
 from src.services.profile.storage import load_profile
 from src.services.tailoring import DOC_KINDS
+from src.services.tailoring.cv_render import render_document_pdf
 from src.services.tailoring.docx import render_docx
 from src.services.tailoring.patterns import derive_patterns
-from src.services.tailoring.pdf import render_pdf
 from src.services.tailoring.provenance import annotate_provenance
 from src.utils.logger import get_audit_logger, get_logger, safe_log_value
 
@@ -77,7 +78,12 @@ class TailorSaveRequest(BaseModel):
 
 class ProvenanceSegment(BaseModel):
     text: str
-    grounded: bool  # True = grounded in the user's CV/job (their fact); False = added
+    # True ONLY when the line is grounded in the user's own profile (their fact). A line
+    # that matches just the job ad, or nothing, is False.
+    grounded: bool
+    # "profile" = the user's own fact; "ad" = matches only the job ad (employer context,
+    # never a candidate fact); "none" = in neither (added by the AI).
+    source: Literal["profile", "ad", "none"] = "none"
 
 
 def _doc_out(kind: str, row: dict[str, Any]) -> TailoredDocOut:
@@ -118,15 +124,15 @@ async def _latest(db: JobDatabase, user_id: str, application_id: int, kind: str)
     return row
 
 
-def _load_cv_text(user_id: str) -> str:
-    """The user's own CV text (stored CV + LinkedIn) — the ground truth the
-    provenance view highlights against."""
+def _load_profile_text(user_id: str) -> str:
+    """Everything the user's OWN profile says (CV, LinkedIn, GitHub, structured fields) —
+    the ground truth the provenance view highlights against. Never includes the job ad.
+    Same helper the save-time checks use (``cv_checks.profile_source_text``)."""
     profile = load_profile(user_id)  # sync (pgsync shim), fast single-row
     if profile is None:
         return ""
-    cv = profile.cv_data
-    parts = [getattr(cv, "raw_text", "") or "", getattr(cv, "linkedin_raw_text", "") or ""]
-    return "\n\n".join(p for p in parts if p.strip()).strip()
+    # Target titles are wishes, not history: a title copied from the ad must stay "ad".
+    return cv_checks.profile_source_text(profile, include_targets=False)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -161,15 +167,18 @@ async def provenance(
     user: CurrentUser = Depends(require_verified_user),
 ) -> list[dict[str, Any]]:
     """Per-line provenance for the newest saved version: which lines are the
-    user's OWN facts (grounded in their CV + the job ad) and which were added.
+    user's OWN facts (grounded in their profile), which only echo the job ad
+    (``source="ad"``: employer context, never a candidate fact) and which were added.
     Deterministic, no LLM — shown before download so the user can verify what is
     real (guardrail #2)."""
     _check_kind(doc_kind)
     application_id = await _application_id(db, user.id, job_id)
     row = await _latest(db, user.id, application_id, doc_kind)
-    job = await db.get_job_by_id(job_id)
-    source = _load_cv_text(user.id) + "\n" + (job.get("description", "") if job else "")
-    return annotate_provenance(row.get("text") or "", source)
+    # P0 2026-10-14 — the ad as THIS user brought it (their snapshot), never
+    # the shared catalog row another user may have pasted first.
+    app_row = await applications_spine.get_owned_application(db, user.id, application_id) or {}
+    ad_text = str(app_row.get("job_description_snapshot") or "")
+    return annotate_provenance(row.get("text") or "", _load_profile_text(user.id), ad_text)
 
 
 @router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut, dependencies=VERIFIED_FIRST)
@@ -266,7 +275,7 @@ async def download(
         content = await asyncio.to_thread(render_docx, text, title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
-        content = await asyncio.to_thread(render_pdf, text, title=title)
+        content = await render_document_pdf(user.id, doc_kind, text)
         media_type = "application/pdf"
 
     # Downloading counts as 'used' → learn from it (§5).

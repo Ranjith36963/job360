@@ -71,10 +71,24 @@ def normalize_detail(value: Optional[str]) -> str:
     return detail
 
 
+class WorkCountries(list[str]):
+    """The candidate's sponsorship-free countries (a plain list, so every reader
+    keeps working) plus ``needs``: countries the candidate SAID need sponsorship.
+    An explicit "needs sponsorship here" is an answer even when no free country
+    is known."""
+
+    needs: frozenset[str] = frozenset()
+
+
 def needs_sponsorship(signal: str, country: str, countries: list[str]) -> Optional[bool]:
     """The one comparison. ``None`` = nothing to say (rule #29): the ad said
-    nothing, the job's country is unknown, or the candidate gave no list."""
-    if signal == "unknown" or not country or not countries:
+    nothing, the job's country is unknown, or the candidate gave no answer
+    for it (no list, and the country is not one they said needs sponsorship)."""
+    if signal == "unknown" or not country:
+        return None
+    if country.upper() in getattr(countries, "needs", frozenset()):
+        return True
+    if not countries:
         return None
     return country.upper() not in {c.upper() for c in countries}
 
@@ -90,10 +104,58 @@ async def user_work_countries(db: JobDatabase, user_id: str) -> list[str]:
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     profile = load_profile(user_id)
+    out = WorkCountries()
     if profile is None:
-        return []
+        return out
     raw = getattr(profile.preferences, "work_authorization_countries", None)
-    return [c for c in raw if isinstance(c, str)] if isinstance(raw, list) else []
+    if isinstance(raw, list):
+        out.extend(c.upper() for c in raw if isinstance(c, str))
+    # The setup interview saves right to work in user_info.right_to_work (one record
+    # per country). A country whose record says no sponsorship is needed counts too,
+    # so the two places never disagree about the same fact.
+    rtw = getattr(profile.user_info, "right_to_work", None)
+    for code in _no_sponsorship_countries(rtw):
+        if code not in out:
+            out.append(code)
+    out.needs = frozenset(_sponsorship_countries(rtw))
+    return out
+
+
+def _sponsorship_countries(right_to_work: Any) -> list[str]:
+    """ISO2 codes whose ``right_to_work`` record says ``needs_sponsorship`` true."""
+    records = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
+    return [
+        rec["country"].strip().upper()
+        for rec in (records if isinstance(records, list) else [])
+        if isinstance(rec, dict) and rec.get("needs_sponsorship") is True
+        and isinstance(rec.get("country"), str) and rec["country"].strip()
+    ]
+
+
+def _no_sponsorship_countries(right_to_work: Any) -> list[str]:
+    """ISO2 codes the user can work in without sponsorship, from
+    ``user_info.right_to_work``: a country record saying ``needs_sponsorship``
+    false, or saying citizen / permanent resident (unless it says sponsorship
+    true), plus the ``citizenship`` list. A record with neither answer is
+    skipped (rule #29)."""
+    if not isinstance(right_to_work, dict):
+        return []
+    out: list[str] = []
+
+    def _add(code: Any) -> None:
+        if isinstance(code, str) and code.strip() and code.strip().upper() not in out:
+            out.append(code.strip().upper())
+
+    records = right_to_work.get("countries")
+    for rec in records if isinstance(records, list) else []:
+        if not isinstance(rec, dict) or rec.get("needs_sponsorship") is True:
+            continue
+        if rec.get("needs_sponsorship") is False or rec.get("work_authorization") in ("citizen", "permanent_resident"):
+            _add(rec.get("country"))
+    citizenship = right_to_work.get("citizenship")
+    for code in citizenship if isinstance(citizenship, list) else []:
+        _add(code)
+    return out
 
 
 def visa_view(app_row: dict[str, Any], countries: list[str]) -> dict[str, Any]:

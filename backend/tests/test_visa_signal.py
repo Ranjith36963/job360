@@ -132,7 +132,7 @@ async def test_save_fit_changes_the_slot_and_the_event_carries_it(authenticated_
         app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="DE")
         fit = await client.put(
             f"/api/applications/{app_id}/fit",
-            json={"score": 70, "verdict": "good", "visa_signal": "sponsors", "visa_country": "DE",
+            json={"score": 70, "verdict": "good", "score_source": "full_ad", "visa_signal": "sponsors", "visa_country": "DE",
                   "visa_detail": "Visa sponsorship available."},
         )
         assert fit.status_code == 200, fit.text
@@ -150,7 +150,7 @@ async def test_save_fit_changes_the_slot_and_the_event_carries_it(authenticated_
 async def test_save_fit_without_visa_leaves_the_slot_alone(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="DE")
-        fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 40})
+        fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 40, "verdict": "ok", "score_source": "full_ad"})
         assert fit.status_code == 200, fit.text
         detail = await _detail(client, app_id)
     assert fit.json()["visa"] is None
@@ -200,7 +200,7 @@ async def test_update_profile_can_set_the_countries(authenticated_async_context,
         profile = await client.get("/api/profile")
         app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="IN")
         detail = await _detail(client, app_id)
-    assert profile.json()["preferences"]["work_authorization_countries"] == ["gb", "IN"]
+    assert profile.json()["preferences"]["work_authorization_countries"] == ["GB", "IN"]
     assert detail["visa"]["needs_sponsorship"] is False
 
 
@@ -230,3 +230,80 @@ def test_no_country_rule_lives_in_the_code():
     for word in ("skilled worker", "h-1b", "h1b", "blue card", "tier 2", "ilr", "green card"):
         assert word not in src.lower()
     assert "@mcp.tool" not in src
+
+
+# ── the setup interview's right-to-work answers count too (2026-10-12) ─────────
+
+
+def _seed_right_to_work(user_id: str, countries: list[dict[str, Any]]) -> None:
+    """An EMPTY preferences list and the visa facts only in user_info.right_to_work,
+    exactly what the setup interview saves."""
+    from src.services.profile.models import UserInfo
+    from src.services.profile.storage import save_user_info
+
+    _seed_countries(user_id, [])
+    save_user_info(user_id, UserInfo(right_to_work={"countries": countries}), "user_edit")
+
+
+@pytest.mark.asyncio
+async def test_right_to_work_answers_feed_the_comparison(authenticated_async_context, fixture_user_id):
+    # Prod 2026-10-12 (app 53): the owner needs a visa, setup saved it here, save_fit said null.
+    _seed_right_to_work(fixture_user_id, [
+        {"country": "IN", "work_authorization": "citizen", "needs_sponsorship": False},
+        {"country": "GB", "work_authorization": "needs_sponsorship", "needs_sponsorship": True},
+    ])
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, visa_signal="sponsors", visa_country="DE", visa_detail="We sponsor visas.")
+        detail = await _detail(client, app_id)
+    assert detail["visa"]["needs_sponsorship"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_country_needing_sponsorship_is_not_counted_as_free(authenticated_async_context, fixture_user_id):
+    _seed_right_to_work(fixture_user_id, [
+        {"country": "GB", "work_authorization": "needs_sponsorship", "needs_sponsorship": True},
+    ])
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="GB", visa_detail="No sponsorship.")
+        detail = await _detail(client, app_id)
+    # The user SAID GB needs sponsorship: that is an answer, not silence.
+    assert detail["visa"]["needs_sponsorship"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_country_stays_silent(authenticated_async_context, fixture_user_id):
+    _seed_right_to_work(fixture_user_id, [
+        {"country": "GB", "work_authorization": "needs_sponsorship", "needs_sponsorship": True},
+    ])
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="FR", visa_detail="No sponsorship.")
+        detail = await _detail(client, app_id)
+    # Nothing known about FR and no sponsorship-free country to compare with (rule #29).
+    assert detail["visa"]["needs_sponsorship"] is None
+
+
+def test_citizen_record_and_citizenship_count_without_the_bool():
+    from src.services.applications.visa import _no_sponsorship_countries
+
+    rtw = {
+        "countries": [
+            {"country": "gb", "work_authorization": "citizen"},          # no bool, still free
+            {"country": "IE", "needs_sponsorship": False},
+            {"country": "US", "work_authorization": "visa"},              # unknown -> skipped
+            {"country": "DE", "work_authorization": "citizen", "needs_sponsorship": True},  # says true -> skipped
+        ],
+        "citizenship": ["in", "GB"],
+    }
+    assert _no_sponsorship_countries(rtw) == ["GB", "IE", "IN"]
+    assert _no_sponsorship_countries({}) == [] and _no_sponsorship_countries(None) == []
+
+
+@pytest.mark.asyncio
+async def test_right_to_work_free_country_reads_as_no_sponsorship(authenticated_async_context, fixture_user_id):
+    _seed_right_to_work(fixture_user_id, [
+        {"country": "in", "work_authorization": "citizen", "needs_sponsorship": False},
+    ])
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="IN", visa_detail="Local hires only.")
+        detail = await _detail(client, app_id)
+    assert detail["visa"]["needs_sponsorship"] is False

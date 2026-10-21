@@ -32,12 +32,29 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
                 {formatDate(receipt.sent_at)}
               </span>
             </div>
+            {receipt.form_host && (
+              <p data-testid="receipt-via" className="mt-1 font-mono text-xs text-muted-foreground">
+                via {receipt.form_host}
+              </p>
+            )}
             {(receipt.cv_artifact_id != null || receipt.cover_letter_artifact_id != null) && (
               <p className="mt-1 font-mono text-xs text-muted-foreground">
-                {receipt.cv_artifact_id != null && `CV #${receipt.cv_artifact_id}`}
+                {receipt.cv_artifact_id != null && (receipt.cv_version_no != null ? `CV v${receipt.cv_version_no}` : `CV #${receipt.cv_artifact_id}`)}
                 {receipt.cv_artifact_id != null && receipt.cover_letter_artifact_id != null && " · "}
                 {receipt.cover_letter_artifact_id != null &&
-                  `Cover letter #${receipt.cover_letter_artifact_id}`}
+                  (receipt.cover_letter_version_no != null
+                    ? `Cover letter v${receipt.cover_letter_version_no}`
+                    : `Cover letter #${receipt.cover_letter_artifact_id}`)}
+              </p>
+            )}
+            {receipt.cover_letter_artifact_id == null && receipt.cover_letter_sent !== true && (
+              <p data-testid="receipt-no-cover-letter" className="mt-1 font-mono text-xs text-muted-foreground">
+                Cover letter: not sent
+              </p>
+            )}
+            {receipt.counts_line && (
+              <p data-testid="receipt-counts" className="mt-1 font-mono text-xs text-muted-foreground">
+                {receipt.counts_line}
               </p>
             )}
             {receipt.confirmation && (

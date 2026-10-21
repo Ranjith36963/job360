@@ -17,8 +17,30 @@ COPY . .
 # slice 5 (#483) / the mission sweep: no code path in this image imports them,
 # and hard rule #28 says installing the extra alone still turns nothing on. No
 # [dev] either.
+# HASH-LOCKED (2026-10-20): the exact set CI tested, every file checked against
+# its sha256 (scripts/check_py_lock.py keeps the lock in step with pyproject;
+# regenerate with scripts/lock_deps.py). Then the app itself, with --no-deps,
+# so pip cannot resolve anything the lock does not name.
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir .
+ && pip install --no-cache-dir --require-hashes -r requirements.lock.txt \
+ && pip install --no-cache-dir --no-deps .
+
+# The Job360 browser agent (docs/product/BROWSER_AGENT.md) — only when the
+# owner turns it on. Railway hands service variables to the build as ARGs, so
+# setting BROWSER_AGENT_ENABLED=1 on the backend service is the one switch:
+# the build installs Playwright + Chromium (with its OS libraries) and the
+# runtime flag turns the `browser` MCP tool on. Unset = the same image as before.
+# The browser lock is the runtime lock plus Playwright, same pins (hash-checked).
+ARG BROWSER_AGENT_ENABLED=0
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Same values as the runtime flag (core/settings.py): 1 / true / yes, any case, spaces trimmed.
+RUN case "$(printf '%s' "$BROWSER_AGENT_ENABLED" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in \
+      1|true|yes) \
+        pip install --no-cache-dir --require-hashes -r requirements-browser.lock.txt \
+        && python -m playwright install --with-deps chromium \
+        && chmod -R a+rX /ms-playwright \
+        && rm -rf /var/lib/apt/lists/* ;; \
+    esac
 
 # Drop privileges — never run the app as root in production.
 RUN addgroup --system job360 \

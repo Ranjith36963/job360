@@ -1,7 +1,8 @@
 "use client";
 
 import type { ApplicationEvent } from "@/lib/api";
-import { eventLabel } from "@/lib/event-labels";
+import { eventTitle, interviewDetails, offerFigures } from "@/lib/event-detail";
+import { actorLabel } from "@/lib/event-labels";
 import { WhoChip } from "@/components/applications/WhoChip";
 import { formatDateTime } from "@/lib/format-date";
 
@@ -27,7 +28,10 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <WhoChip recordedBy={event.recorded_by} />
             <span className={`font-medium ${event.superseded ? "line-through" : ""}`}>
-              {eventLabel(event)}
+              {eventTitle(event)}
+            </span>
+            <span data-testid="event-actor" className="text-xs text-muted-foreground">
+              recorded by {actorLabel(event.recorded_by)}
             </span>
             {event.superseded && (
               <span className="font-mono text-[11px] text-faint">superseded</span>
@@ -45,6 +49,16 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
               {event.source.subject && ` — “${event.source.subject}”`}
               {event.source.received_at &&
                 ` · received ${formatDateTime(event.source.received_at)}`}
+            </p>
+          )}
+          {offerFigures(event) && (
+            <p data-testid="event-offer" className="mt-1 font-mono text-xs text-foreground">
+              Offer: {offerFigures(event)}
+            </p>
+          )}
+          {interviewDetails(event) && (
+            <p data-testid="event-interview" className="mt-1 text-xs text-muted-foreground">
+              {interviewDetails(event)}
             </p>
           )}
           {event.scheduled_at && (

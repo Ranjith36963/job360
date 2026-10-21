@@ -98,6 +98,33 @@ function Overall({ overall }: { overall: StatsResponse["overall"] }) {
   );
 }
 
+type ScoreLine = StatsResponse["score_line"];
+
+/** Counts only: how the user's applications sit against the user's own line. */
+export function ScoreLineCard({ data }: { data: ScoreLine }) {
+  const items: [string, number | string][] = [
+    ["Score line", data.line == null ? "Not set" : data.line],
+    ["At or above", data.above],
+    ["Below", data.below],
+    ["No score", data.unscored],
+  ];
+  return (
+    <section aria-labelledby="stats-score-line" data-testid="stats-score-line">
+      <h2 id="stats-score-line" className={`${LABEL} mb-2`}>
+        Your score line
+      </h2>
+      <ul className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+        {items.map(([label, n]) => (
+          <li key={label}>
+            <span className="block font-heading text-3xl leading-none">{n}</span>
+            <span className="mt-1 block text-[12.5px] text-muted-foreground">{label}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function JobTable({ section }: { section: Section }) {
   return (
     <section aria-labelledby={`stats-${section.id}`} data-testid={`stats-section-${section.id}`}>
@@ -170,6 +197,64 @@ function PeopleTable({ rows }: { rows: StatsResponse["by_contact_found_via"] }) 
   );
 }
 
+type SitesBlock = NonNullable<StatsResponse["sites"]>;
+
+/** "Login page 2, Captcha 1" - the blocked counts by reason, facts only. */
+export function blockedText(blocked: Record<string, number>): string {
+  return Object.entries(blocked)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([reason, n]) => {
+      const words = closedSetLabel(reason);
+      return `${words.charAt(0).toUpperCase()}${words.slice(1)} ${n}`;
+    })
+    .join(", ");
+}
+
+/** Counts per site (the form's host). No ranking, no judgement words. */
+export function SitesTable({ data }: { data: SitesBlock }) {
+  return (
+    <section aria-labelledby="stats-sites" data-testid="stats-section-sites">
+      <h2 id="stats-sites" className={`${LABEL} mb-2`}>
+        By site
+      </h2>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[34rem] border-collapse text-sm">
+          <thead>
+            <tr>
+              <th scope="col" className={TH}>Site</th>
+              <th scope="col" className={TH}>Applications (n)</th>
+              <th scope="col" className={TH}>Forms filled</th>
+              <th scope="col" className={TH}>Applied</th>
+              <th scope="col" className={TH}>Blocked</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.sites.map((r) => (
+              <tr key={r.host} data-testid="stats-site-row" className="border-t border-border">
+                <th scope="row" className={`${TD} font-sans font-normal`}>{r.host}</th>
+                <td className={TD}>{r.n}</td>
+                <td className={TD}>{r.forms_filled}</td>
+                <td className={TD}>{r.applied}</td>
+                <td className={TD}>
+                  {r.blocked_total}
+                  {r.blocked_total > 0 && (
+                    <span data-testid="stats-site-blocked" className="block font-sans text-[11px] text-muted-foreground">
+                      {blockedText(r.blocked)}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {data.note && <p className="mt-2 text-[12.5px] text-muted-foreground">{data.note}</p>}
+      {data.truncated && <p className="mt-1 text-[12.5px] text-muted-foreground">Only part of the list is shown.</p>}
+    </section>
+  );
+}
+
 /** Counts and rates off the stored record. No judgement words, no colours
  * that mean good or bad - the assistant reads these and judges. */
 export function StatsClient() {
@@ -178,7 +263,7 @@ export function StatsClient() {
 
   useEffect(() => {
     let alive = true;
-    getStats()
+    getStats("sites")
       .then((res) => {
         if (alive) setStats(res);
       })
@@ -192,6 +277,7 @@ export function StatsClient() {
 
   const sections = stats ? buildSections(stats) : [];
   const people = stats?.by_contact_found_via ?? [];
+  const scoreLine = stats?.score_line;
 
   return (
     <PageContainer className="flex flex-col gap-8 py-8">
@@ -214,10 +300,12 @@ export function StatsClient() {
       ) : (
         <>
           <Overall overall={stats.overall} />
+          {scoreLine && <ScoreLineCard data={scoreLine} />}
           {sections.map((s) => (
             <JobTable key={s.id} section={s} />
           ))}
           {people.length > 0 && <PeopleTable rows={people} />}
+          {stats.sites && stats.sites.sites.length > 0 && <SitesTable data={stats.sites} />}
         </>
       )}
     </PageContainer>

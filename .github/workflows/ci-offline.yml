@@ -43,7 +43,17 @@ jobs:
   # scripts/ci_scope.py answers `docs` / `frontend` / `full` from the changed
   # files, most restrictive wins, unknown is full, empty is full, and anything
   # that is not a pull_request (push to main, schedule, dispatch) is full
-  # without looking -- main is production.
+  # unless it PROVES `tested` -- main is production.
+  #
+  # `tested` (CI audit 2026-10-19): a push to main re-ran ~27 min of pytest on
+  # a tree its PR had just passed. Now the push skips the heavy steps ONLY when
+  # ci_scope.py proves: the PR that produced this merge commit has the same
+  # tree, every required check on its head is green, and a successful run of
+  # THIS workflow uploaded `ci-tested-tree-<tree>` (only a `full` decision
+  # uploads it, named after the tree that run checked out). The 06:00 schedule
+  # skips only when a FULL push run passed this same sha in the last 24h.
+  # Anything else -- tree differs, a red/missing check, an API error, a
+  # dispatch -- is `full`. See the docstring of scripts/ci_scope.py.
   #
   # JOBS BELOW ARE NEVER SKIPPED, ONLY THEIR STEPS. The ruleset on main and
   # scripts/merge_cage.py require checks BY NAME; a skipped job never reports
@@ -52,6 +62,13 @@ jobs:
     name: Scope (which checks this diff needs)
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    # Read-only lookups for the `tested` proof. Job-level, so no other job
+    # gains anything.
+    permissions:
+      contents: read
+      actions: read        # this workflow's earlier runs and their marker artifact
+      checks: read         # the required checks on the PR head
+      pull-requests: read  # which PR produced the pushed merge commit
     outputs:
       scope: ${{ steps.decide.outputs.scope }}
     steps:
@@ -68,16 +85,40 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --print-scope --summary)
+          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --workflow ci-offline.yml --print-scope --summary)
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
+      # THE PROOF A LATER `tested` READS. Only a `full` decision writes it, and
+      # its name is the tree this run checked out (on a PR: the merge ref).
+      - name: Record the tree this full run tests
+        id: tree
+        if: steps.decide.outputs.scope == 'full'
+        run: |
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          printf 'tree=%s\nsha=%s\nevent=%s\nrun=%s\n' "$tree" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" "$GITHUB_RUN_ID" > tested-tree.txt
+      - name: Upload the full-scope marker
+        if: steps.decide.outputs.scope == 'full'
+        # A lost marker only makes a later main push run `full`. It must never fail
+        # `scope`: a red scope SKIPS the required jobs, and the ruleset passes skipped.
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ci-tested-tree-${{ steps.tree.outputs.tree }}
+          path: tested-tree.txt
+          retention-days: 7
+          overwrite: true
   offline-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # STOPGAP (2026-10-19): the serial suite reached 24-30+ min and was killed
+    # at 30. 45 is headroom while the suite runs in parallel (pytest-xdist,
+    # below); bring it back down once the parallel run's wall time is known.
+    timeout-minutes: 45
     needs: [scope]
     # The backend is Postgres-backed now (pg shim); tests need a DB + Redis.
-    # Mirrors ci.yml's service setup — without it, tests hit the dev-default
-    # :5433 and fail with "connection refused".
+    # This is the ONE backend job that runs pytest (ci.yml Backend is ruff +
+    # mypy only) — without these, tests hit the dev-default :5433 and fail.
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -102,6 +143,12 @@ jobs:
       REDIS_URL: redis://localhost:6379
       SESSION_SECRET: ci-test-secret-not-used-in-prod
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
+    # loop2-e2e-spotlight reads the lifecycle file's result from THIS run
+    # instead of running tests/test_e2e_lifecycle.py a second time.
+    outputs:
+      lifecycle: ${{ steps.lifecycle.outputs.lifecycle }}
+      lifecycle_counts: ${{ steps.lifecycle.outputs.counts }}
+      lifecycle_failed: ${{ steps.lifecycle.outputs.failed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.scope.outputs.scope == 'full'
@@ -109,160 +156,292 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
-      - name: Install backend (with dev extras)
+      # FROM THE HASHED LOCKS (2026-10-20): the runtime pins the prod image installs
+      # (backend/Dockerfile) plus the dev tools, then Playwright for the browser-agent tests
+      # (tests/test_browser_*.py, the code that fills and submits real job forms: `@needs_chromium`,
+      # skipped on every CI run until now). Every file is sha256-checked, then the app goes in with
+      # --no-deps so nothing outside the locks can arrive. `pip check` fails on pins that do not
+      # satisfy each other.
+      - name: Install backend (with dev + browser)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install --require-hashes -r requirements-dev.lock.txt
+          python -m pip install --require-hashes -r requirements-browser.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip check
+          python -m pip show playwright | grep -E '^Version:'
+      # The Chromium build that the installed Python playwright expects, plus
+      # its system libraries. Not cached: the download is the small part; the
+      # apt step (--with-deps) is most of the time and an actions/cache entry
+      # would not cover it.
+      - name: Install Chromium for the browser-agent tests
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: python -m playwright install --with-deps chromium
+      # Fail in seconds, not after the suite: the tests' own helper must now
+      # see Chromium. If it ever does not, the suite would skip ~66 tests and
+      # the skip ratchet below goes red too ("Playwright + Chromium not
+      # installed" has a baseline of 0), so this only makes it fast and plain.
+      - name: The browser-agent tests can run (Chromium is visible to them)
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import sys
+          from tests.test_browser_agent import _chromium_available
+          if not _chromium_available():
+              print("::error title=chromium::Playwright + Chromium not visible to "
+                    "tests/test_browser_agent.py::_chromium_available; every "
+                    "@needs_chromium test would skip")
+              sys.exit(1)
+          print("Chromium visible: @needs_chromium tests will run")
+          PY
+      # The template dump must come from a pg_dump the SERVER can load. The
+      # runner image's own client drifts (ubuntu-latest moves to Ubuntu 26 from
+      # 2026-10-19, with a newer Postgres client than this pg16 service), so
+      # `pg_dump` here is the service container's own, the server's exact version.
+      - name: Use the Postgres service's own pg_dump
+        if: needs.scope.outputs.scope == 'full'
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pgbin"
+          printf '#!/bin/sh\nexec docker exec -i %s pg_dump "$@"\n' "$PG_CONTAINER" > "$RUNNER_TEMP/pgbin/pg_dump"
+          chmod +x "$RUNNER_TEMP/pgbin/pg_dump"
+          echo "$RUNNER_TEMP/pgbin" >> "$GITHUB_PATH"
+      # THE FULL SUITE, UNFILTERED. `--junitxml` only adds a report file; it
+      # selects and deselects nothing.
+      # In parallel: pytest-xdist (a dev extra) runs one worker per vCPU
+      # (`-n auto`, 4 on ubuntu-latest); the controller still writes ONE junit
+      # report and the same `FAILED tests/...` lines. Every test owns its Postgres
+      # schema, so workers never share tables. Each worker migrates ONE template
+      # schema and copies it per test with pg_dump (tests/conftest.py
+      # `_template_sql`; identity proved by tests/test_schema_template.py), so the
+      # step prints the pg_dump it found.
       - name: Run offline suite (full backend + automated Loop 2 E2E)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
-        run: python -m pytest -q -p no:randomly
+        run: |
+          set -o pipefail
+          pg_dump --version
+          python -m pytest -q -p no:randomly -n auto --junitxml=/tmp/junit.xml | tee /tmp/pytest.out
+      # SKIP RATCHET (2026-10-20). A skipped test is a test that did not run, and
+      # the count only ever grew without anyone deciding it should. This fails
+      # when the report's skips exceed SKIP_BASELINE in scripts/test_integrity.py,
+      # in total or for any one reason, and prints each reason that is new or
+      # grew. "Playwright + Chromium not installed" has no allowance: Chromium is
+      # installed above, so one such skip is red. Raising the baseline is an
+      # edit to that file, which the `test-integrity` check (ci.yml) flags.
+      # `!cancelled()`: it still reports after a red suite; no report is red.
+      - name: Skipped tests do not grow (skip ratchet)
+        if: ${{ !cancelled() && needs.scope.outputs.scope == 'full' }}
+        run: python scripts/test_integrity.py --skips /tmp/junit.xml
+      # Per-file verdict for tests/test_e2e_lifecycle.py, read from the report
+      # of the run above. `absent` (no report, or no lifecycle test in it) is
+      # NOT a pass: loop2-e2e-spotlight goes red on anything but `passed`.
+      - name: Lifecycle verdict for loop2-e2e-spotlight
+        id: lifecycle
+        if: always() && needs.scope.outputs.scope == 'full'
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import xml.etree.ElementTree as ET
+          mod = "tests.test_e2e_lifecycle"
+          cases = []
+          if os.path.exists("/tmp/junit.xml"):
+              try:
+                  cases = [c for c in ET.parse("/tmp/junit.xml").getroot().iter("testcase")
+                           if c.get("classname", "") == mod
+                           or c.get("classname", "").startswith(mod + ".")]
+              except ET.ParseError:
+                  cases = []
+          bad = [c.get("name", "?") for c in cases
+                 if c.find("failure") is not None or c.find("error") is not None]
+          skipped = [c for c in cases if c.find("skipped") is not None]
+          ran = len(cases) - len(skipped)
+          verdict = "absent" if ran == 0 else ("failed" if bad else "passed")
+          print(f"lifecycle={verdict}")
+          print(f"counts={ran - len(bad)} passed, {len(bad)} failed, {len(skipped)} skipped")
+          print(f"failed={', '.join(bad)[:900]}")
+          PY
+      - name: Failed tests in job summary (offline suite)
+        if: failure() && needs.scope.outputs.scope == 'full'
+        run: |
+          {
+            echo "### Failed tests (offline suite)"
+            echo '```'
+            if [ ! -f /tmp/pytest.out ]; then
+              echo 'pytest did not run (an earlier step failed)'
+            elif grep -qE '^(FAILED|ERROR) ' /tmp/pytest.out; then
+              grep -E '^(FAILED|ERROR) ' /tmp/pytest.out | head -50
+              grep -E '[0-9]+ (failed|passed|error)' /tmp/pytest.out | tail -1
+            else
+              tail -30 /tmp/pytest.out
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Also log + annotate: $GITHUB_STEP_SUMMARY is not exposed by the
+          # check-run API; annotations are (GET /check-runs/{id}/annotations).
+          if [ -f /tmp/pytest.out ]; then
+            if grep -qE '^(FAILED|ERROR) ' /tmp/pytest.out; then
+              grep -E '^(FAILED|ERROR) ' /tmp/pytest.out | head -50 | while IFS= read -r line; do
+                echo "$line"
+                echo "::error title=pytest::${line//%/%25}"
+              done
+            else
+              tail -30 /tmp/pytest.out
+              echo "::error title=pytest::pytest failed without FAILED lines; see log tail"
+            fi
+          else
+            echo "::error title=pytest::pytest did not run (an earlier step failed)"
+          fi
 
   frontend-e2e:
     # The browser-side of Loop 2: runs the committed Playwright UI specs
     # (frontend/tests/e2e/*) in a clean environment. The specs are self-contained
     # (they set a fake session cookie + mock the API via page.route), so no backend
-    # is needed — Playwright's webServer starts `npm run dev` itself.
+    # is needed — Playwright's webServer builds and starts the app itself.
+    #
+    # THE ONE PLAYWRIGHT RUN PER PR. verify-live.yml `verify / frontend` ran the
+    # same `npx playwright test` again until 2026-10-19; it now defers to this
+    # job whenever this job runs the specs (scope `full` / `frontend`), and the
+    # evidence it used to keep (report + traces, 14 days) is uploaded HERE.
+    # Steps run on an explicit list of scopes: `docs` and `tested` skip them.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [scope]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.scope.outputs.scope != 'docs'
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         with:
           node-version: "22"
       - name: Install frontend deps
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npm ci
       - name: Install Playwright browser
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Run Playwright UI specs
-        if: needs.scope.outputs.scope != 'docs'
+        if: needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend'
         working-directory: frontend
         # GATING (no continue-on-error): a real regression in any of the 14 specs
         # in tests/e2e/ now fails CI — none are quarantined with `test.fixme` any
         # more. Real browser coverage of prod lives in synthetic-live.yml.
         run: npx playwright test
-      - name: Upload Playwright report (on failure)
-        if: failure() && needs.scope.outputs.scope != 'docs'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      # Moved here from verify-live.yml with the run itself: a green covers
+      # every spec that RAN, and this says out loud if any is quarantined.
+      - name: State the coverage bound
+        if: always() && (needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend')
+        working-directory: frontend
+        run: |
+          fixmes=$(grep -rlc "test.fixme" tests/e2e/ 2>/dev/null | wc -l || echo "?")
+          {
+            echo "### frontend-e2e — coverage bound"
+            echo ""
+            echo "Spec files containing a quarantined (\`test.fixme\`) case: **$fixmes**"
+            echo ""
+            echo "A green run covers every spec that RAN. Any quarantined spec is"
+            echo "NOT covered by it — do not read this check (or \`verify / frontend\`,"
+            echo "which defers to it) as 'the frontend works' if the count is non-zero."
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The evidence `verify / frontend` used to keep: report + traces/screens,
+      # pass or fail, 14 days. (Was: report on failure only, 7 days.)
+      - name: Keep the evidence (Playwright report + test results)
+        if: always() && (needs.scope.outputs.scope == 'full' || needs.scope.outputs.scope == 'frontend')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: playwright-report
-          path: frontend/playwright-report/
-          retention-days: 7
+          name: playwright-evidence-${{ github.event.pull_request.number || github.run_id }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
 
   loop2-e2e-spotlight:
-    # A fast, focused run of just the automated Loop 2 lifecycle test, so a
+    # The automated Loop 2 lifecycle verdict, as its own REQUIRED check, so a
     # lifecycle/log-fill regression is obvious in the Actions summary without
     # scanning the whole suite.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [scope]
-    # Postgres-backed backend needs a DB + Redis (see offline-suite note above).
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: job360
-          POSTGRES_PASSWORD: job360dev
-          POSTGRES_DB: job360
-        options: >-
-          --health-cmd "pg_isready -U job360 -d job360"
-          --health-interval 5s --health-timeout 3s --health-retries 10
-        ports:
-          - 5432:5432
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s --health-timeout 3s --health-retries 5
-        ports:
-          - 6379:6379
-    env:
-      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
-      REDIS_URL: redis://localhost:6379
-      SESSION_SECRET: ci-test-secret-not-used-in-prod
-      CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.scope.outputs.scope == 'full'
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        if: needs.scope.outputs.scope == 'full'
-        with:
-          python-version: "3.12"
-      - name: Install backend (with dev extras)
-        if: needs.scope.outputs.scope == 'full'
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-      - name: Automated Loop 2 (E2E lifecycle + log-fill assertions)
-        if: needs.scope.outputs.scope == 'full'
-        working-directory: backend
-        run: python -m pytest tests/test_e2e_lifecycle.py -v -p no:randomly
-
-  # ── Make this loop LOUD ───────────────────────────────────────────────────
-  # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
-  # it alone had issue plumbing. live-e2e then failed 8 consecutive nights
-  # unnoticed over a 6-line config gap. A watcher nobody reads is worse than no
-  # watcher, so every scheduled loop now produces an OBJECT with a lifecycle:
-  # fail -> open/comment one deduped issue; pass -> auto-close it.
-  # Deliberately silent on pull_request: a red PR is already visible in the PR,
-  # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
-  notify:
-    name: Report failure as an issue
-    needs: [offline-suite, frontend-e2e, loop2-e2e-spotlight]
-    if: >-
-      always() && (github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    #
+    # It no longer RUNS tests/test_e2e_lifecycle.py: offline-suite already runs
+    # that file inside the full suite (never deselected there), so this job
+    # reads that run's per-file verdict (the junit report) and reports it. Green
+    # ONLY on `passed`; `failed`, `absent` (no report / no lifecycle case ran),
+    # or an offline-suite that never got that far is red. Until 2026-10-19 it
+    # booted its own Postgres + Redis and re-ran the file (~1 runner-min per PR).
+    #
+    # `!cancelled()`, not `always()`: it must report even when offline-suite
+    # FAILED (another test red, the lifecycle may still be green) — but a run
+    # superseded by a newer push is cancelled and says nothing. A failed
+    # `scope` job skips this, exactly as before.
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      issues: write
-      actions: write # to wake the triage loop (gh workflow run triage.yml)
+    needs: [scope, offline-suite]
+    if: ${{ !cancelled() && needs.scope.result == 'success' }}
     steps:
-      - name: Open, update or close the tracking issue
+      - name: Automated Loop 2 (E2E lifecycle + log-fill assertions, from offline-suite)
+        if: needs.scope.outputs.scope == 'full'
+        env:
+          SUITE_RESULT: ${{ needs.offline-suite.result }}
+          LIFECYCLE: ${{ needs.offline-suite.outputs.lifecycle }}
+          COUNTS: ${{ needs.offline-suite.outputs.lifecycle_counts }}
+          FAILED: ${{ needs.offline-suite.outputs.lifecycle_failed }}
+        run: |
+          {
+            echo "### Automated Loop 2 — tests/test_e2e_lifecycle.py"
+            echo ""
+            echo "Read from \`offline-suite\` (same run, same tree; the file ran once, inside the full suite)."
+            echo ""
+            echo "- verdict: \`${LIFECYCLE:-absent}\` (${COUNTS:-no report})"
+            echo "- offline-suite job result: \`$SUITE_RESULT\`"
+            if [ -n "$FAILED" ]; then echo "- failed: $FAILED"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          case "$LIFECYCLE" in
+            passed)
+              echo "lifecycle passed: $COUNTS"
+              ;;
+            failed)
+              echo "::error title=pytest::test_e2e_lifecycle.py failed in offline-suite: $FAILED"
+              exit 1
+              ;;
+            *)
+              echo "::error title=pytest::no lifecycle verdict from offline-suite (job result: $SUITE_RESULT) -- it did not get as far as the report"
+              exit 1
+              ;;
+          esac
+
+  # Failures on main / on the schedule are reported as an issue by loop-red.yml
+  # (one workflow_run watcher, so PRs no longer show a 'skipping' row for it).
+
+  # WAKE THE MERGE CAGE (2026-10-19). GitHub does not fire `check_suite` for
+  # Actions' own suites, so the arm in auto-merge.yml never heard that this
+  # workflow finished, and a green PR sat waiting for a hand merge. This job
+  # tells it. A `workflow_dispatch` is the one event GITHUB_TOKEN may start, and
+  # the arm never waits on this job's own check run (merge_cage.WAKE_JOB).
+  # ONE wake per push, here: `offline-suite` is the required check that finishes
+  # last (measured on #908, 2026-10-19). A wake in every workflow queued six cage
+  # runs per push onto a runner queue that already held 140. The 20-minute sweep
+  # and the CodeRabbit status event cover a check that finishes later.
+  wake-cage:
+    name: Wake the merge cage
+    needs: [scope, offline-suite, frontend-e2e, loop2-e2e-spotlight]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A fork PR's token cannot dispatch, and that must not read as red CI. A
+    # same-repository dispatch that fails DOES go red: nobody else would see it.
+    continue-on-error: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+    permissions:
+      actions: write
+    steps:
+      - name: Ask the arm to judge this PR again
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          title="Loop RED: ci-offline is failing"
-          num=$(gh issue list --state open --json number,title \
-                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
-            {
-              echo "\`ci-offline.yml\` failed on **${{ github.event_name }}** (\`${{ github.ref_name }}\`)."
-              echo
-              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              echo "- Commit: \`${{ github.sha }}\`"
-            } > notify-body.md
-            if [ -z "$num" ]; then
-              # LABEL + HAND OFF. Until 2026-08-03 this line was the end of the road:
-              # the issue was created with GITHUB_TOKEN, which raises NO `issues:
-              # opened` event (GitHub blocks that recursion), carried no `harness`
-              # label, and dispatched nothing — so no loop ever diagnosed it and no
-              # email was sent. The alarm rang into an empty room. Proven live:
-              # issue #190 (security RED) opened and auto-closed with zero
-              # diagnosis; #185 sat unread for days. Seven loops shared this bug.
-              new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
-              n="${new##*/}"
-              if gh workflow run triage.yml -f issue="$n"; then
-                echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
-              else
-                echo "::warning::issue #$n raised but triage could not be woken - diagnose by hand"
-              fi
-            else
-              gh issue comment "$num" --body-file notify-body.md
-            fi
-          elif [ -n "$num" ]; then
-            gh issue close "$num" \
-              --comment "Green again in run ${{ github.run_id }}. (auto-close)"
-          fi
+          PR: ${{ github.event.pull_request.number }}
+        run: gh workflow run auto-merge.yml --ref main -f pr="$PR"

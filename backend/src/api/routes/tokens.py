@@ -9,10 +9,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
-from src.api.auth_deps import CurrentUser, require_session_user
+from src.api.auth_deps import CurrentUser, email_verification_satisfied, require_session_user
 from src.core import settings
 from src.core.settings import DB_PATH
 from src.services.auth import api_tokens
+from src.services.auth.security_notices import send_security_notice
+from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(prefix="/tokens", tags=["tokens"])
 
@@ -50,6 +52,21 @@ async def create_token(
     body: CreateTokenRequest,
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 — FastAPI DI idiom
 ) -> TokenCreated:
+    # A personal token lets an assistant act for this account (check_submit,
+    # record_application ...): only an account that has confirmed its email may
+    # mint one. OAuth is not gated here (pending owner decision, 2026-10-14).
+    if not email_verification_satisfied(user):
+        get_audit_logger().warning(
+            "token_mint_refused",
+            extra={
+                "event": "token_mint_refused", "user_id": safe_log_value(user.id),
+                "reason": "email_not_verified", "status": 403, "result": "refused",
+            },
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Confirm your email address first: open the link we emailed you, then create a token.",
+        )
     cap = settings.API_TOKENS_PER_USER
     made = await api_tokens.mint(str(DB_PATH), user_id=user.id, name=body.name, cap=cap)
     if made is None:
@@ -57,6 +74,8 @@ async def create_token(
             status_code=409,
             detail=f"You already have {cap} active tokens. Revoke one to create another.",
         )
+    # Tell the owner a credential for an assistant now exists (never its value).
+    await send_security_notice(str(DB_PATH), user.id, "token_created", token_name=made["name"])
     return TokenCreated(**made)
 
 

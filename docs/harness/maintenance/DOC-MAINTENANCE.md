@@ -30,7 +30,7 @@ this table says only what each kind OBLIGES.
 | **PLAN** | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. **A plan does NOT survive its own shipping:** once the slice merges, the code is the description and the plan is a second one, so it is deleted (2026-09-12, slice 8 — the whole `docs/plans/` folder went at once). Git log is the record. |
 | **LOG** | Append-only. Never rewritten, so never stale by definition. |
 | **REFERENCE** | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
-| **FROZEN**, **GENERATED** | Never hand-edited, so never drift. `GENERATED` is rewritten by `scripts/gen_doc_blocks.py --write` and CI fails if it disagrees with the code. |
+| **FROZEN**, **GENERATED** | Never hand-edited, so never drift. (The generated counts file and its generator were deleted 2026-10-20: a committed count conflicted with every open PR.) |
 
 ### Every doc carries its type on line 2 (machine + human readable)
 

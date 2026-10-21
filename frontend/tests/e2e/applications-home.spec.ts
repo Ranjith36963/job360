@@ -227,9 +227,11 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await context.addCookies([SESSION_COOKIE]);
     await mockBackend(page);
 
-    await page.goto("/");
+    // Home no longer lists applications (owner, 2026-10-19); the full list is
+    // /applications.
+    await page.goto("/applications");
 
-    // The brought application is on the signed-in home, status "considering".
+    // The brought application is listed, status "considering".
     await expect(page.getByText(/data engineer/i).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/considering/i).first()).toBeVisible();
 
@@ -249,12 +251,10 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await page.getByTestId("mark-applied-confirm").click();
     await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
 
-    // The list reflects the same change — reload the home page.
-    // Scoped to the ledger: Home's counts block also carries the word "applied".
-    await page.goto("/");
-    await expect(page.getByTestId("home-apps").getByText(/^applied$/i).first()).toBeVisible({
-      timeout: 20_000,
-    });
+    // Home no longer lists applications (owner, 2026-10-19) — the full list
+    // lives on /applications. The same change shows there.
+    await page.goto("/applications");
+    await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
     // ...and the list row no longer offers a Mark Applied button at all.
     await expect(
       page.getByRole("button", { name: /mark applied/i })

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.routes.applications import ReceiptAnswerOut
+from src.api.routes.applications import ProofOut, ReceiptAnswerOut
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -61,7 +61,22 @@ class Receipt(BaseModel):
     confirmation: str | None = None
     cv_version_no: int | None = None
     cover_letter_version_no: int | None = None
+    # True iff the receipt names a cover letter artifact; False = no letter was sent.
+    cover_letter_sent: bool = False
+    # Read-time facts (spine.receipt_summary_facts); "" / None when no form_filled was recorded.
+    counts_line: str = ""
+    fields_total: int | None = None
+    fields_skipped: int = 0
+    guessed_count: int = 0
+    form_host: str = ""
     recorded_by: str | None = None
+    # S3 - '' | same_job | same_role | same_company, the kit the assistant filled from. Set
+    # at INSERT; a receipt made without a kit reads '' / None / ''.
+    possible_duplicate: str = ""
+    kit_event_id: int | None = None
+    kit_sha256: str = ""
+    # S7 - how well this application is backed up; "none" when there is no application.
+    proof: ProofOut = Field(default_factory=ProofOut)
 
 
 _RECEIPT_BASE_FIELDS = (
@@ -82,8 +97,12 @@ class ReceiptSummary(BaseModel):
     job_apply_url: str
     has_cv: bool
     has_cover_letter: bool
+    cover_letter_sent: bool = False
+    counts_line: str = ""
+    form_host: str = ""
     channel: str
     note: str
+    proof: ProofOut = Field(default_factory=ProofOut)
 
 
 class ReceiptListResponse(BaseModel):
@@ -100,13 +119,18 @@ async def _to_receipt(db: JobDatabase, user_id: str, row: dict[str, Any]) -> Rec
     return Receipt(**{k: row[k] for k in _RECEIPT_BASE_FIELDS}, **details)
 
 
-def _to_summary(row: dict[str, Any]) -> ReceiptSummary:
+def _to_summary(
+    row: dict[str, Any], proof: dict[str, Any] | None = None, letter_sent: bool = False,
+    facts: dict[str, Any] | None = None,
+) -> ReceiptSummary:
     return ReceiptSummary(
         id=row["id"], job_id=row["job_id"], sent_at=row["sent_at"],
         job_title=row["job_title"], job_company=row["job_company"],
         job_location=row["job_location"], job_apply_url=row["job_apply_url"],
         has_cv=bool(row["has_cv"]), has_cover_letter=bool(row["has_cover_letter"]),
-        channel=row["channel"], note=row["note"],
+        cover_letter_sent=letter_sent,
+        counts_line=(facts or {}).get("counts_line", ""), form_host=(facts or {}).get("form_host", ""),
+        channel=row["channel"], note=row["note"], proof=ProofOut(**(proof or {})),
     )
 
 
@@ -158,18 +182,27 @@ async def create_receipt(
     except applications_spine.SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
-    job = await db.get_job_by_id(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    # Mark applied FIRST — `create_application` is an upsert (INSERT OR
-    # IGNORE), so the application row (and its id) exists before the receipt
-    # does. R8's `application_id` is then part of the receipt's own INSERT
-    # (below), never a later UPDATE: tests/test_receipts.py::
+    # P0 2026-10-14 — only a job THIS user brought. The catalog is shared
+    # (rule #10): upserting an application onto any existing job_id and
+    # freezing the catalog row into the receipt handed the caller another
+    # user's pasted ad. A job they never brought reads as 404 (no oracle).
+    # R8's `application_id` is part of the receipt's own INSERT (below),
+    # never a later UPDATE: tests/test_receipts.py::
     # test_receipts_are_append_only greps `backend/src/` for any
     # UPDATE/DELETE against `application_receipts`.
-    await db.create_application(job_id, user.id)
     application = await applications_spine.get_application_by_job(db, user.id, job_id)
+    app_row = (
+        await applications_spine.get_owned_application(db, user.id, int(application["id"]))
+        if application is not None else None
+    )
+    if application is None or app_row is None or await db.get_job_by_id(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # The ad "as it read" is the caller's own snapshot, never the catalog row.
+    job = {
+        "id": job_id, "title": app_row.get("job_title") or "", "company": app_row.get("job_company") or "",
+        "location": app_row.get("job_location") or "", "apply_url": app_row.get("job_url") or "",
+        "source": app_row.get("job_source") or "", "description": app_row.get("job_description_snapshot") or "",
+    }
 
     # Decision 28 (2026-09-21): the documents live in `application_artifacts`
     # — the agent writes them and `save_artifact` versions them. Nothing has
@@ -223,7 +256,22 @@ async def list_receipts(
 ) -> ReceiptListResponse:
     rows = await db.list_receipts(user.id, job_id=job_id, limit=limit, offset=offset)
     total = await db.count_receipts(user.id, job_id=job_id)
-    return ReceiptListResponse(receipts=[_to_summary(r) for r in rows], total=total)
+    from src.services.applications.proof import proof_for  # noqa: PLC0415
+
+    proofs = await proof_for(db, user.id, sorted({int(r["application_id"]) for r in rows if r.get("application_id")}))
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+
+    sent = await applications_spine.receipt_letter_sent(db, user.id, [int(r["id"]) for r in rows])
+    return ReceiptListResponse(
+        receipts=[
+            _to_summary(
+                r, proofs.get(int(r.get("application_id") or 0)), sent.get(int(r["id"]), False),
+                await applications_spine.receipt_summary_facts(db, user.id, int(r["id"])),
+            )
+            for r in rows
+        ],
+        total=total,
+    )
 
 
 @router.get("/receipts/{receipt_id}", response_model=Receipt, dependencies=AUTH_FIRST)

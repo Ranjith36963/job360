@@ -1,0 +1,47 @@
+{
+ "meta": {
+  "totalCount": 2
+ },
+ "result": [
+  {
+   "id": "227",
+   "jobOpeningName": "Director of Analytics",
+   "departmentId": null,
+   "departmentLabel": null,
+   "employmentStatusLabel": "1 - Full Time",
+   "employmentType": null,
+   "location": {
+    "city": null,
+    "state": null
+   },
+   "atsLocation": {
+    "country": "United States",
+    "state": null,
+    "province": null,
+    "city": null
+   },
+   "isRemote": null,
+   "locationType": "1"
+  },
+  {
+   "id": "228",
+   "jobOpeningName": "Sr. Technical Architect- SAP Commerce Cloud (Hybris)",
+   "departmentId": "18453",
+   "departmentLabel": "Technology & Architecture",
+   "employmentStatusLabel": "1 - Full Time",
+   "employmentType": null,
+   "location": {
+    "city": null,
+    "state": null
+   },
+   "atsLocation": {
+    "country": "United States",
+    "state": null,
+    "province": null,
+    "city": null
+   },
+   "isRemote": null,
+   "locationType": "1"
+  }
+ ]
+}

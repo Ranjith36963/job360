@@ -4,6 +4,8 @@ import { usePathname } from "next/navigation";
 import { Navbar } from "@/components/layout/Navbar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Footer } from "@/components/layout/Footer";
+import { PausedBanner } from "@/components/layout/PausedBanner";
+import { TopBar } from "@/components/layout/TopBar";
 import { useAuth } from "@/components/layout/AuthProvider";
 import { isProtectedPath } from "@/components/layout/nav-links";
 
@@ -31,6 +33,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         <Navbar />
+        {withSidebar && <TopBar />}
+        {withSidebar && <PausedBanner />}
         <main className="flex-1">{children}</main>
         <Footer />
       </div>

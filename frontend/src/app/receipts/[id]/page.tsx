@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/brand/Logo";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ProofMarks } from "@/components/receipts/ProofMarks";
 import { getReceipt } from "@/lib/api";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { whoLabel } from "@/lib/event-labels";
@@ -154,6 +155,8 @@ export default function ReceiptDetailPage() {
           {receipt.job_company}
           {receipt.job_location ? ` · ${receipt.job_location}` : ""}
         </p>
+
+        <ProofMarks proof={receipt.application_id != null ? receipt.proof : null} confirmation={receipt.confirmation} />
 
         <dl className="mt-6 grid grid-cols-1 gap-x-8 sm:grid-cols-2">
           <Fact label="Frozen" value={sentOn(receipt.sent_at)} />

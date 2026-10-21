@@ -22,6 +22,7 @@ export type ProfileResponse = Schemas["ProfileResponse"];
 export type ProfileSummary = Schemas["ProfileSummary"];
 export type ProfileVersionsListResponse = Schemas["ProfileVersionsListResponse"];
 export type Receipt = Schemas["Receipt"];
+export type Proof = Schemas["ProofOut"];
 export type ReceiptListResponse = Schemas["ReceiptListResponse"];
 export type ReceiptSummary = Schemas["ReceiptSummary"];
 export type ProfileVersionSummary = Schemas["ProfileVersionSummary"];
@@ -64,6 +65,13 @@ export interface PreferencesRequest {
   negative_keywords?: string[];
   about_me?: string;
   excluded_companies?: string[];
+  // What the user wants from a job and will not accept (owner decision
+  // 2026-10-10). Empty / null = "don't care" (rule #29).
+  experience_years_min?: number | null;
+  experience_years_max?: number | null;
+  looking_for?: string[];
+  dealbreakers?: string[];
+  avoid_companies?: string[];
   // Whether the user needs visa sponsorship. Stored on the profile so the
   // user's agent knows whether sponsorship is required. Had no UI control
   // until 2026-08-08, so the field was always the default False because no

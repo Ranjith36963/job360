@@ -32,7 +32,23 @@ VALID_DAILY_CHECK_VALUES: frozenset[str] = frozenset(
 )
 # Owner decision 2026-10-03 — how often the assistant's inbox check runs.
 # "" = not set = once a day (24h; rule #29: empty is silent).
-VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"3h", "6h", "12h", "24h"})
+VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"1h", "3h", "6h", "12h", "24h"})
+# Preference fields the web preferences form does not own: written only through
+# the agent-edit overlay, carried forward by a web save, kept by a "Clear
+# preferences" (only "Clear all" resets them).
+OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset({"daily_check", "check_every", "linkedin_premium"})
+VALID_WORK_AUTH_STATUSES: frozenset[str] = frozenset(
+    {"citizen", "permanent_resident", "visa", "needs_sponsorship"}
+)
+VALID_LANGUAGE_LEVELS: frozenset[str] = frozenset({"native", "fluent", "professional", "basic"})
+# Owner decision 2026-10-08 (S2) — assistant settings. Closed sets. "" / None on
+# the dataclass = "not chosen" (rule #29); the SAFE default applies:
+# no score line / ask / ask / confirm / no cap / not paused (services/profile/assistant_settings.py).
+# VALID_APPLY_MODES is RETIRED (2026-10-10, replaced by above_line / below_line) and only
+# kept so old tests and stored rows still import.
+VALID_APPLY_MODES: frozenset[str] = frozenset({"ask_each", "apply_all", "selective_above_score"})
+VALID_SUBMIT_MODES: frozenset[str] = frozenset({"confirm", "auto_when_sure"})
+VALID_OUTREACH_SEND_VALUES: frozenset[str] = frozenset({"draft_only", "auto"})
 
 
 @dataclass
@@ -231,6 +247,14 @@ class CVData:
     # Timestamps are ISO-8601 UTC strings, matching the rest of storage.
     cv_filename: str = ""
     cv_uploaded_at: str = ""
+    # "cv_file_garbled" when the uploaded PDF's text came out with (cid:N) /
+    # U+FFFD debris - hiring software cannot read such a file either. CV-owned:
+    # a new upload / clear resets it, then the route sets it for the new file.
+    cv_file_warning: str = ""
+    # Visual fingerprint of the uploaded CV PDF (services/profile/cv_style.py):
+    # generated CVs follow this design. Empty = use DEFAULT_STYLE. CV-owned, so
+    # a new upload / clear resets it; old rows without the key load as {}.
+    cv_style: dict[str, Any] = field(default_factory=dict)
     linkedin_filename: str = ""
     linkedin_uploaded_at: str = ""
     # GitHub has no file — the handle IS the receipt, alongside when it was
@@ -571,6 +595,18 @@ class UserPreferences:
     # on the web or by the agent through update_profile; the agent reads them
     # first on every get_profile. Empty = nothing to say (rule #29).
     assistant_notes: list[str] = field(default_factory=list)
+    # Owner decision 2026-10-10 - what the user is looking for, told in the setup
+    # interview. Years are whole numbers 0-60 (min <= max when both are set).
+    # Empty / None = "don't care" (rule #29): never a default, never a penalty.
+    experience_years_min: Optional[int] = None
+    experience_years_max: Optional[int] = None
+    looking_for: list[str] = field(default_factory=list)
+    dealbreakers: list[str] = field(default_factory=list)
+    avoid_companies: list[str] = field(default_factory=list)
+    # Companies the user wants the assistant to check first (owner decision
+    # 2026-10-13): the hunt reads each one's public job board. Empty = no list
+    # (rule #29); Job360 itself never searches (rule 4).
+    target_companies: list[str] = field(default_factory=list)
 
     # Owner decision 2026-09-25 — "" (not asked yet, rule #29: empty is
     # silent), "scheduled" (user said yes and confirmed it in their app), or
@@ -586,6 +622,19 @@ class UserPreferences:
     # "12h" or "24h"; "" = not set = once a day. Same write/carry-forward rules as
     # `daily_check` (overlay only; kept on a "preferences" clear).
     check_every: str = ""
+    # S16 (2026-10-20) - the user's LinkedIn account tier, told to the assistant in
+    # chat: True = Premium / Sales Navigator (a connection note may run to
+    # LINKEDIN_NOTE_MAX_CHARS_PREMIUM), False = not told / assume the free limit, the
+    # safer budget (career-ops modes/contacto.md:168). Only a warn-only save check
+    # reads it; never a penalty (hard rule #29). Same write/carry-forward rules as
+    # daily_check: overlay only, kept on a "preferences" clear, reset only by "clear all".
+    linkedin_premium: bool = False
+    # Owner decision 2026-10-08 — the salary the user wants, one record per
+    # HIRING country: {country (ISO2), amount, currency (ISO 4217), period
+    # ("year" | "month")}. A normal web-owned preference (partial-save shape like
+    # assistant_notes). Never converted, no minimum ever stored. Empty = not set
+    # (rule #29). Shapes: services/profile/user_info.validate_salary_by_country.
+    salary_by_country: list[dict[str, Any]] = field(default_factory=list)
 
     # Values the workplace scorer can actually match. A CLOSED set, because the
     # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —
@@ -623,9 +672,85 @@ class UserPreferences:
 
 
 @dataclass
+class UserInfo:
+    """USER INFO MEMORY (owner decision 2026-10-08) — the facts job forms ask.
+
+    Lives in its own column (``user_profiles.user_info``) with ONE writer,
+    ``storage.save_user_info``; ``save_profile`` never touches it, so no fresh
+    ``UserProfile`` can wipe it. Empty = not answered (rule #29). Shapes:
+    ``services/profile/user_info.py``. Not part of a version snapshot.
+    """
+
+    contact: dict[str, Any] = field(default_factory=dict)
+    right_to_work: dict[str, Any] = field(default_factory=dict)
+    logistics: dict[str, Any] = field(default_factory=dict)
+    languages: list[dict[str, Any]] = field(default_factory=list)
+    equality: dict[str, Any] = field(default_factory=dict)
+    answers: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class AssistantSettings:
+    """ASSISTANT SETTINGS (owner decision 2026-10-08, S2) — how much the user's
+    assistant may do on its own.
+
+    Own column (``user_profiles.assistant_settings``) with ONE writer,
+    ``storage.save_assistant_settings``; ``save_profile`` never touches it. The
+    values the user or the assistant sets ride the ``profile_edits`` overlay.
+    ``""`` / ``None`` = not chosen (rule #29) — the safe default applies, read
+    through ``assistant_settings.effective``. Not part of a version snapshot.
+    The inbox mode, check frequency and standing notes stay where they were
+    (``preferences.daily_check`` / ``check_every`` / ``assistant_notes``) and
+    are only SHOWN here (an alias, not a move).
+    """
+
+    # RETIRED 2026-10-10 (replaced by above_line / below_line): kept so old stored
+    # rows still load. Never read by the gate, never written.
+    apply_mode: str = ""
+    # The user's own score line (0-100). None = not set; there is NO default.
+    apply_min_score: Optional[int] = None
+    # Two separate switches, "ask" (default) | "auto": jobs at or above the line,
+    # and jobs below it. "" = not chosen = ask.
+    above_line: str = ""
+    below_line: str = ""
+    submit_mode: str = ""
+    daily_cap: Optional[int] = None
+    # Owner decision 2026-10-18: at most this many applications to ONE company inside
+    # ``company_cap_days`` days. None = no limit (rule #29: an empty shelf stays silent);
+    # ``company_cap_days`` None = the operator default window.
+    company_cap: Optional[int] = None
+    company_cap_days: Optional[int] = None
+    # Bulk-apply C2: most applications per Monday-Sunday week in the user's own timezone. None = no cap.
+    weekly_cap: Optional[int] = None
+    # Bulk-apply C1: the user's OWN fixed pace. ``min_gap_minutes`` 0-240 in whole seconds (1.5 = 1 min
+    # 30 s; None = none); ``apply_hours`` = {"from": "HH:MM", "to": "HH:MM"} in the user's timezone (None =
+    # any time). Never randomized.
+    min_gap_minutes: Optional[float] = None
+    apply_hours: Optional[dict[str, str]] = None
+    # Bulk-apply R1: "auto for my next N until <time>". While now < until and fewer than N applied events
+    # since the grant began, the submit mode resolves to auto; after that it is the user's own submit_mode.
+    auto_grant_count: Optional[int] = None
+    auto_grant_until: str = ""
+    paused_until: str = ""
+    pause_reason: str = ""
+    # Feedback loop slice 2: may the assistant send the check-in / feedback emails on its own?
+    # False (default) = it may only draft. Turning it ON is a riskier change.
+    auto_employer_emails: bool = False
+    # Owner 2026-10-20 (G087): may the assistant press Send on an outreach email? "draft_only" (default; "" = not
+    # chosen) | "auto". Separate from preferences.daily_check (reading Gmail never grants sending). Turning it to
+    # auto is a riskier change.
+    outreach_send: str = ""
+    # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
+    # Not a setting (no gate, never "riskier"): progress the assistant reports.
+    setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)
+
+
+@dataclass
 class UserProfile:
     cv_data: CVData = field(default_factory=CVData)
     preferences: UserPreferences = field(default_factory=UserPreferences)
+    user_info: UserInfo = field(default_factory=UserInfo)
+    assistant_settings: AssistantSettings = field(default_factory=AssistantSettings)
 
     @property
     def is_complete(self) -> bool:

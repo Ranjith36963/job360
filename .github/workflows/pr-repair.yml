@@ -1,4 +1,12 @@
 name: PR repair (fix conflicts + red CI on a PR branch)
+# THE TITLE IS THE PR'S NAME TAG (2026-10-19). A dispatched run reports
+# `head_branch: main` and the runs API exposes no inputs, so before this line
+# nothing could tell which PR a queued or running repair was for, and
+# finding-watch dispatched again on every check suite (141 runs in 3.7 days,
+# 27 for PR #891 alone). `scripts/fixer_gate.py` reads this title: one run per
+# PR at a time, and none again for a head + findings a run already judged.
+# Keep the format in step with `_title()` in that script.
+run-name: "PR repair #${{ inputs.pr }} head=${{ inputs.head_sha || 'unknown' }} findings=${{ inputs.findings || 'unknown' }} attempt=${{ inputs.attempt || 'unknown' }}"
 
 # The last autonomous mile the owner asked for (2026-07-30): the shepherd
 # DETECTS a red or conflicted PR and triage DIAGNOSES it — but nothing FIXED
@@ -65,6 +73,22 @@ on:
         description: "PR number to repair"
         required: true
         type: string
+      # Optional, written by finding-watch through scripts/fixer_gate.py and
+      # used ONLY in `run-name` above, so the gate can see what a run judged.
+      # This workflow re-reads the PR head and findings itself; it never
+      # trusts these two values.
+      head_sha:
+        description: "PR head sha at dispatch (for the run title; optional)"
+        required: false
+        type: string
+      findings:
+        description: "Fingerprint of the fixable findings at dispatch (for the run title; optional)"
+        required: false
+        type: string
+      attempt:
+        description: "autofix:attempt-N count at dispatch (for the run title; optional)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -116,13 +140,59 @@ jobs:
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
 
     steps:
+      # ── AM I A DUPLICATE? (2026-10-19) — before anything else ──────────────
+      # The concurrency group above keeps ONE pending run per PR, and it starts
+      # the second the running one ends (11 of 11 pairs on 2026-10-18/19, on a
+      # head the first had just judged or a PR that had merged). And an open PR
+      # branched before `scripts/fixer_gate.py` existed still runs its OLD
+      # finding-watch on its own events, which dispatches ungated -- but THIS
+      # file always runs from main. So the gate's own code, fetched from the
+      # default branch (never the PR), asks here: is an earlier run for this PR
+      # still active, or did one finish after I was queued, on the head the PR
+      # still has? Then stop GREEN, write no attempt label, do no work.
+      # Fails OPEN with a warning: finding-watch's gate is the closed door; this
+      # is the second lock, and an API blip must not stop every repair.
+      - name: Duplicate check — another run already has this PR
+        id: dup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ inputs.pr }}
+          FINDINGS: ${{ inputs.findings }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -uo pipefail
+          t="$RUNNER_TEMP/dup"; mkdir -p "$t"
+          if gh api "repos/$GH_REPO/contents/scripts/fixer_gate.py?ref=$DEFAULT_BRANCH" \
+               -H "Accept: application/vnd.github.raw" > "$t/fixer_gate.py" \
+             && gh api "repos/$GH_REPO/actions/workflows/pr-repair.yml/runs?per_page=100" \
+               --jq '[.workflow_runs[]|{id,status,conclusion,display_title,created_at,updated_at}]' > "$t/runs.json" \
+             && head=$(gh api "repos/$GH_REPO/pulls/$PR" --jq .head.sha) \
+             && head_date=$(gh api "repos/$GH_REPO/commits/$head" --jq .commit.committer.date) \
+             && out=$(python3 "$t/fixer_gate.py" --self-run-id "$GITHUB_RUN_ID" --pr "$PR" \
+                        --head-sha "$head" --head-date "$head_date" --findings "$FINDINGS" \
+                        --runs-json "$t/runs.json"); then
+            reason=$(echo "$out" | jq -r .reason)
+            if [ "$(echo "$out" | jq -r .duplicate)" = "true" ]; then
+              echo "duplicate=true" >> "$GITHUB_OUTPUT"
+              echo "PR #$PR head ${head:0:12}: $reason — not starting (no attempt counted)" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "PR #$PR head ${head:0:12}: $reason — starting" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "::warning::duplicate check could not run for PR #$PR; starting anyway (finding-watch's gate is the closed door)"
+            echo "PR #$PR: duplicate check could not run — starting" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Check fixer token present
         id: token
+        if: steps.dup.outputs.duplicate != 'true'
         run: echo "have=${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
 
       # ── G1 + G2: refuse forks and strangers BEFORE any checkout ────────────
       - name: Gate — same-repo branch, allowlisted author, not draft
         id: gate
+        if: steps.dup.outputs.duplicate != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -135,13 +205,11 @@ jobs:
           draft=$(echo "$meta"  | jq -r .isDraft)
           branch=$(echo "$meta" | jq -r .headRefName)
           headowner=$(echo "$meta" | jq -r .headRepositoryOwner.login)
-          parked=$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')
           repoowner="${GH_REPO%%/*}"
 
           fail() { echo "::error::$1"; gh pr comment "$num" --body "**PR repair refused:** $1"; exit 1; }
           [ "$state" = "OPEN" ]        || fail "PR #$num is $state, not open"
           [ "$draft" = "false" ]       || fail "PR #$num is a draft — drafts are left alone"
-          [ "$parked" = "false" ]      || fail "PR #$num is parked by the WIP limit (wip:parked) — remove the label first"
           [ "$headowner" = "$repoowner" ] || fail "PR #$num comes from a FORK ($headowner) — a stranger's code never gets an agent pushed onto it (G1)"
           case "$author" in
             # EXACT LOGINS, NOT A PREFIX GLOB. `dependabot*` matches
@@ -165,7 +233,9 @@ jobs:
       # and fixed nothing. repair.yml has always announced this; pr-repair never
       # did. Added 2026-08-03.
       - name: Say so loudly if the fixer is not configured
-        if: steps.token.outputs.have != 'true'
+        # `== 'false'`, not `!= 'true'`: a duplicate skips the token step, and
+        # an empty output must not read as "the token is missing".
+        if: steps.token.outputs.have == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -276,7 +346,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
 
+      # Copied from ci-offline.yml. tests/conftest.py builds one schema template
+      # per pytest process (per xdist worker) with pg_dump and RAISES on CI when
+      # it cannot: the runner's own client drifts ahead of this pg16 service, so
+      # use the service container's own pg_dump, the server's exact version.
+      - name: Use the Postgres service's own pg_dump
+        if: steps.token.outputs.have == 'true'
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pgbin"
+          printf '#!/bin/sh\nexec docker exec -i %s pg_dump "$@"\n' "$PG_CONTAINER" > "$RUNNER_TEMP/pgbin/pg_dump"
+          chmod +x "$RUNNER_TEMP/pgbin/pg_dump"
+          echo "$RUNNER_TEMP/pgbin" >> "$GITHUB_PATH"
+
       # ── Evidence for the agent: failing tests, as a file (G3) ──────────────
+      # `-n auto` (pytest-xdist, a dev extra), as offline-suite runs it: the
+      # serial suite took 15-27 min here (CI audit, 2026-10-20).
       - name: Capture the current test failures
         if: steps.token.outputs.have == 'true'
         id: tests
@@ -289,7 +375,7 @@ jobs:
           # re-check below needs to know whether the suite is red, and the old
           # `pytest | tail` form only ever reported tail's status.
           rc=0
-          python -m pytest -q -p no:randomly > "$RUNNER_TEMP/pytest-full.txt" 2>&1 || rc=$?
+          python -m pytest -q -p no:randomly -n auto > "$RUNNER_TEMP/pytest-full.txt" 2>&1 || rc=$?
           tail -n 120 "$RUNNER_TEMP/pytest-full.txt" > ../agent-test-output.txt
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           echo "--- pytest exit $rc, captured $(wc -l < ../agent-test-output.txt) lines ---"
@@ -795,7 +881,7 @@ jobs:
         # step could never go red, and a repair that broke tests still pushed.
         run: |
           set -o pipefail
-          python -m pytest -q -p no:randomly 2>&1 | tail -15
+          python -m pytest -q -p no:randomly -n auto 2>&1 | tail -15
 
       # ── G6: ship additive commits to the SAME branch. Never merge the PR. ──
       - name: Push the repair to the PR branch

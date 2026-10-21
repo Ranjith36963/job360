@@ -8,6 +8,9 @@ import { STATUS_LABEL } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { formatDayMonth, formatDateTime } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
+import { PRIORITY_LABEL, PRIORITY_OPTIONS } from "@/lib/memory";
+import { originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import type { QueueSummary } from "@/lib/batch-queue";
 
 
 // The status vocabulary is closed in the backend (src/core/settings.py
@@ -49,6 +52,7 @@ const LIVE_STATUSES = new Set([
   "interview_scheduled",
   "interview_done",
   "offer",
+  "hired",
 ]);
 
 /**
@@ -67,6 +71,8 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
         const hasCoverLetter = (app.artifacts?.cover_letter ?? 0) > 0;
         const showVisa = app.visa_signal === "sponsors" || app.visa_signal === "no_sponsorship";
         const hasFit = typeof app.fit_score === "number";
+        // "unknown" shows nothing.
+        const lineSide = app.line_side;
         const fitScore = hasFit ? Math.max(0, Math.min(100, app.fit_score as number)) : 0;
 
         return (
@@ -94,6 +100,41 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                   />
                   {STATUS_LABEL[app.status] ?? app.status}
                 </span>
+                {/* Job priority (owner decision 2026-10-19): only when the user set one, and "off" says nothing. */}
+                {app.priority && app.priority !== "off" && (
+                  <span
+                    data-testid="row-priority"
+                    className="mt-1.5 inline-block rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                  >
+                    {PRIORITY_LABEL[app.priority] ?? app.priority} priority
+                  </span>
+                )}
+                {/* Weak spot #3 wave 2: the headline stage while another assistant session
+                    holds this application (mirrors Tsenta's two-line "Tailoring résumé /
+                    Reading job description…" status cell; the derivation is Job360's own). */}
+                {app.stage && (
+                  <p data-testid="row-stage" className="mt-1 text-xs text-warning">
+                    {app.stage}
+                  </p>
+                )}
+                {originLabel(app.origin) && (
+                  <p data-testid="row-origin" className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+                    {originLabel(app.origin)}
+                  </p>
+                )}
+                {/* Batch queue: the place in line and anything that would stop it. */}
+                {typeof app.queue_position === "number" && (
+                  <p data-testid="row-queue-position" className="mt-1 font-mono text-xs font-medium text-brand">
+                    #{app.queue_position} in batch
+                  </p>
+                )}
+                {preflightProblems(app.preflight).length > 0 && (
+                  <ul data-testid="row-preflight" className="mt-1 flex flex-col gap-0.5 text-xs text-warning">
+                    {preflightProblems(app.preflight).map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
               {/* 2-6. Everything else — fills the right on wide screens. */}
@@ -131,6 +172,16 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                   <div data-testid="row-fit" className="flex items-baseline gap-2 text-sm">
                     {app.fit_verdict && <span className="min-w-0 truncate">{app.fit_verdict}</span>}
                     <span className="shrink-0 font-mono text-xs text-muted-foreground">{fitScore}/100</span>
+                    {lineSide === "above" && (
+                      <span data-testid="row-line-side" className="shrink-0 text-xs text-muted-foreground">
+                        Above your line
+                      </span>
+                    )}
+                    {lineSide === "below" && (
+                      <span data-testid="row-line-side" className="shrink-0 text-xs text-muted-foreground">
+                        Below your line
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -178,23 +229,41 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   // Owner decision, 2026-09-25 — client-side, over the already-fetched page,
   // the same way the status chips filter: no separate `due=true` round trip.
   const [dueOnly, setDueOnly] = useState(false);
+  // Weak spot #3 wave 2: "In flight" asks the server (`in_flight=true`), because the
+  // hold lives in the event log, not in anything the page already fetched.
+  const [inFlight, setInFlight] = useState(false);
+  // Job priority filter — asks the server (`priority=`): "all" sends nothing.
+  const [priority, setPriority] = useState<string>("all");
+  // Batch queue: server-side too (`queued=true` gives queue order, preflight and the summary).
+  const [queuedOnly, setQueuedOnly] = useState(false);
+  const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
+  // A server-filter switch shows "Loading…" in place of the rows (never the old list under the new
+  // filter), while the filter bar itself stays on screen.
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    listApplications({ limit })
+    listApplications({
+      limit,
+      ...(queuedOnly ? { queued: true } : inFlight ? { in_flight: true } : {}),
+      ...(priority !== "all" ? { priority } : {}),
+    })
       .then((res) => {
         if (cancelled) return;
         setApplications(res.applications);
+        setSwitching(false);
+        setQueueSummary(queuedOnly ? ((res.queue_summary as QueueSummary | null | undefined) ?? null) : null);
         setError(null);
       })
       .catch(() => {
         if (cancelled) return;
+        setSwitching(false);
         setError("Could not load your applications.");
       });
     return () => {
       cancelled = true;
     };
-  }, [limit]);
+  }, [limit, inFlight, queuedOnly, priority]);
 
   // Browser-side only — one chip per status actually present in this list,
   // plus "All". Counts move with the data; there is no server-side facet
@@ -228,7 +297,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return <p className="text-sm text-muted-foreground">Loading your applications…</p>;
   }
 
-  if (applications.length === 0) {
+  if (applications.length === 0 && !inFlight && !queuedOnly && priority === "all") {
     return (
       <p className="text-sm text-muted-foreground">
         Nothing yet. Bring a job from your assistant, or the{" "}
@@ -245,15 +314,53 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       <div data-testid="status-filter" className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => setStatusFilter("all")}
-          aria-pressed={statusFilter === "all"}
+          onClick={() => {
+            setStatusFilter("all");
+            if (inFlight || queuedOnly) setSwitching(true);
+            setInFlight(false);
+            setQueuedOnly(false);
+          }}
+          aria-pressed={statusFilter === "all" && !inFlight && !queuedOnly}
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-            statusFilter === "all"
+            statusFilter === "all" && !inFlight && !queuedOnly
               ? "bg-primary text-primary-foreground"
               : "bg-primary/10 text-brand hover:bg-primary/20"
           }`}
         >
-          All ({applications.length})
+          All{inFlight || queuedOnly ? "" : ` (${applications.length})`}
+        </button>
+        <button
+          type="button"
+          data-testid="queued-filter"
+          onClick={() => {
+            setSwitching(true);
+            setQueuedOnly((v) => !v);
+            setInFlight(false);
+            setStatusFilter("all");
+          }}
+          aria-pressed={queuedOnly}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            queuedOnly ? "bg-primary text-primary-foreground" : "bg-primary/10 text-brand hover:bg-primary/20"
+          }`}
+        >
+          Queued
+        </button>
+        <button
+          type="button"
+          data-testid="in-flight-filter"
+          onClick={() => {
+            setSwitching(true);
+            setInFlight((v) => !v);
+            setQueuedOnly(false);
+          }}
+          aria-pressed={inFlight}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            inFlight
+              ? "bg-warning text-background"
+              : "bg-warning/10 text-warning hover:bg-warning/20"
+          }`}
+        >
+          In flight
         </button>
         {[...statusCounts.entries()].map(([status, count]) => (
           <button
@@ -285,10 +392,44 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             Due ({dueCount})
           </button>
         )}
+        <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          Priority:
+          <select
+            data-testid="priority-filter"
+            value={priority}
+            onChange={(e) => {
+              setSwitching(true);
+              setPriority(e.target.value);
+            }}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="all">All</option>
+            {PRIORITY_OPTIONS.map((o) => (
+              <option key={o} value={o}>{PRIORITY_LABEL[o]}</option>
+            ))}
+            <option value="not_set">Not set</option>
+          </select>
+        </label>
       </div>
 
-      {visibleApplications && visibleApplications.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No applications with this status.</p>
+      {queuedOnly && queueSummaryLine(queueSummary) && (
+        <p data-testid="queue-summary" className="font-mono text-xs text-muted-foreground">
+          {queueSummaryLine(queueSummary)}
+        </p>
+      )}
+
+      {switching ? (
+        <p className="text-sm text-muted-foreground">Loading your applications…</p>
+      ) : visibleApplications && visibleApplications.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {queuedOnly
+            ? "Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt."
+            : inFlight
+              ? "Nothing is in flight right now."
+              : priority !== "all"
+                ? "No applications with this priority."
+                : "No applications with this status."}
+        </p>
       ) : (
         <ApplicationRows applications={visibleApplications ?? []} />
       )}
