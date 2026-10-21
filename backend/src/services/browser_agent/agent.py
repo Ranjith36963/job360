@@ -85,22 +85,64 @@ NAV_TIMEOUT_MS = 30_000
 ACT_TIMEOUT_S = 60.0
 # How often idle browsers are swept, started by the app's lifespan when the agent is on.
 REAP_EVERY_S = 60.0
+
+# Why each browser last closed (idle, crashed, closed, sign_in_forgotten), so the next call can say so
+# instead of a bare "no browser". In memory, bounded: the oldest record is dropped past the cap.
+_CLOSE_REASONS: dict[str, str] = {}
+_CLOSE_REASONS_MAX = 500
+# A process this young with no record of a close was most likely restarted by a deploy.
+_BOOT_AT = time.monotonic()
+RESTART_WINDOW_S = 15 * 60.0
+NO_BROWSER_NEXT = (
+    "Open the form's url again, upload the CV first, retype every answer from get_application_kit, "
+    "read back every value, and re-do form_swept."
+)
+
+
+def _note_closed(user_id: str, reason: str) -> None:
+    _CLOSE_REASONS.pop(user_id, None)
+    _CLOSE_REASONS[user_id] = reason
+    while len(_CLOSE_REASONS) > _CLOSE_REASONS_MAX:
+        _CLOSE_REASONS.pop(next(iter(_CLOSE_REASONS)))
+
+
+def _no_browser_error(user_id: str, idle_s: float) -> BrowserError:
+    """The refusal for a call with no open browser: says why it closed when we know."""
+    reason = _CLOSE_REASONS.get(user_id)
+    if reason == "idle":
+        why = f"The browser was closed after {max(1, int(idle_s // 60))} idle minutes; the page is gone."
+    elif reason == "crashed":
+        why = "The browser crashed; the page is gone."
+    elif reason == "closed":
+        why = "The browser was closed; the page is gone."
+    elif reason == "sign_in_forgotten":
+        why = "The browser was closed when a saved sign-in was forgotten; the page is gone."
+    elif time.monotonic() - _BOOT_AT < RESTART_WINDOW_S:
+        why = "Job360 restarted (an update); the page is gone."
+    else:
+        return BrowserError("refused", "no_browser", "No browser is open. Start with action open and a url.")
+    return BrowserError("refused", "no_browser", why + " Start with action open and a url.", NO_BROWSER_NEXT)
 _REF = re.compile(r"^e\d{1,4}_[a-z0-9]{1,4}$")
 
 
 class BrowserError(Exception):
     """A refusal the tool shows to the assistant: ``status`` + ``reason`` + one plain sentence."""
 
-    def __init__(self, status: str, reason: str, detail: str) -> None:
+    def __init__(self, status: str, reason: str, detail: str, next_step: str = "") -> None:
         super().__init__(detail)
         self.status = status
         self.reason = reason
         self.detail = detail
+        # Job360's own advice to the assistant (not page text); empty means none.
+        self.next_step = next_step
         # The page it happened on, for a needs_you stop: the route records ``blocked`` with its host.
         self.url = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"status": self.status, "reason": self.reason, "detail": self.detail}
+        out = {"status": self.status, "reason": self.reason, "detail": self.detail}
+        if self.next_step:
+            out["next"] = self.next_step
+        return out
 
 
 @dataclass
@@ -214,7 +256,7 @@ class BrowserPool:
         for user_id, s in list(self._sessions.items()):
             expired = s.closes_at is not None and now > s.closes_at
             if (now - s.last_used > self.idle_s or expired) and not s.lock.locked():
-                await self.close(user_id)
+                await self.close(user_id, "idle")
 
     async def get(
         self, user_id: str, *, create: bool, load_state: Optional[StateFn] = None
@@ -223,9 +265,10 @@ class BrowserPool:
         if self._browser is not None and not self._browser.is_connected():
             # Chromium died: every session was bound to it. Free them, or each one errors and
             # still counts against max_sessions until it idles out.
+            logger.warning("browser_agent chromium died; closing %d session(s)", len(self._sessions))
             for uid in list(self._sessions):
-                await self.close(uid)
-        s = self._sessions.get(user_id)
+                await self.close(uid, "crashed")
+        s =self._sessions.get(user_id)
         if s is not None or not create:
             return s
         async with self._create_lock:
@@ -307,12 +350,16 @@ class BrowserPool:
         context.on("request", _on_request)
         context.on("response", _on_response)
         self._sessions[user_id] = s
+        _CLOSE_REASONS.pop(user_id, None)
         return s
 
-    async def close(self, user_id: str) -> bool:
+    async def close(self, user_id: str, reason: Optional[str] = "closed") -> bool:
+        """Close one browser. ``reason`` is remembered for the next call's refusal (None: not recorded)."""
         s = self._sessions.pop(user_id, None)
         if s is None:
             return False
+        if reason:
+            _note_closed(user_id, reason)
         try:
             async with s.lock:  # never under an action in flight: it finishes first
                 await s.context.close()
@@ -322,7 +369,7 @@ class BrowserPool:
 
     async def shutdown(self) -> None:
         for user_id in list(self._sessions):
-            await self.close(user_id)
+            await self.close(user_id, None)
         if self._browser is not None:
             await self._browser.close()
             self._browser = None
@@ -1029,7 +1076,7 @@ async def run(
         return {"status": "ok", "closed": closed}
     s = await pool.get(user_id, create=action == "open", load_state=load_state)
     if s is None:
-        raise BrowserError("refused", "no_browser", "No browser is open. Start with action open and a url.")
+        raise _no_browser_error(user_id, pool.idle_s)
     if owner:
         # Checked and claimed with no await between: two sessions cannot both pass.
         if s.owner and s.owner != owner:
