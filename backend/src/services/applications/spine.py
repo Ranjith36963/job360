@@ -1707,7 +1707,7 @@ async def record_receipt(
             "possible_duplicate",
             extra={
                 "event": "possible_duplicate", "user_id": safe_log_value(user_id),
-                "application_id": application_id, "receipt_id": receipt_id,
+                "application_id": int(application_id), "receipt_id": int(receipt_id),
                 "flag": safe_log_value(possible_duplicate, max_len=40),
                 "actor": safe_log_value(recorded_by, max_len=80), "result": "ok",
             },
@@ -2222,6 +2222,7 @@ async def list_applications(
     in_flight: bool = False,
     queued: bool = False,
     priority: Optional[str] = None,
+    agenda: Optional[str] = None,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
     status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
@@ -2247,6 +2248,9 @@ async def list_applications(
     ``priority`` (owner decision 2026-10-19) - only applications whose PLACE (the job's
     country + remote/on-site, matched to the user's ``right_to_work`` records) has that
     level of the user's own job priority, or ``not_set``. Each row carries ``priority``.
+
+    ``agenda`` (``today`` | ``tomorrow`` | ``week``) - only open applications with a live interview
+    or a ``follow_up_on`` inside that range, in the CALLER's own timezone (``agenda.py``).
     """
     from src.services.profile import job_priority  # noqa: PLC0415 - profile ↔ spine cycle
     from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
@@ -2271,6 +2275,10 @@ async def list_applications(
             f"({settings.APPLICATION_QUIET_DAYS_MAX})",
         )
     from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+    from src.services.applications.agenda import AGENDA_RANGES  # noqa: PLC0415
+
+    if agenda is not None and agenda not in AGENDA_RANGES:
+        raise SpineError(422, f"agenda must be one of: {', '.join(AGENDA_RANGES)}")
 
     where = ["user_id = ?"]
     params: list[Any] = [user_id]
@@ -2307,6 +2315,16 @@ async def list_applications(
         if held:
             where.append(f"id IN ({','.join('?' for _ in held)})")
             params.extend(held)
+        else:
+            where.append("1 = 0")
+    if agenda is not None:
+        from src.services.applications.agenda import agenda_application_ids  # noqa: PLC0415
+
+        zone = await user_zone(db, user_id)
+        in_range = await agenda_application_ids(db, user_id, agenda, today, zone)
+        if in_range:
+            where.append(f"id IN ({','.join('?' for _ in in_range)})")
+            params.extend(in_range)
         else:
             where.append("1 = 0")
     if priority is not None:
@@ -2520,7 +2538,8 @@ async def whats_new(
     never as an independent predicate, so a row from either side of that
     boundary is never dropped.
 
-    Also carries open_asks and proof_missing (applied jobs past PROOF_NO_PROOF_AFTER_DAYS with no proof and no ask) whatever `since` says."""  # noqa: E501
+    Also carries open_asks, proof_missing (applied jobs past PROOF_NO_PROOF_AFTER_DAYS with no proof and no ask)
+    and ``interviews`` ({upcoming, just_passed}, services/applications/agenda.py) whatever `since` says."""  # noqa: E501
     limit = max(1, min(int(limit), settings.WHATS_NEW_MAX_EVENTS))
     now = datetime.now(timezone.utc).isoformat()
     since_val = since or (
@@ -2596,11 +2615,15 @@ async def whats_new(
     from src.services.applications.proof import proof_missing  # noqa: PLC0415
 
     missing_proof = await proof_missing(db, user_id, datetime.now(timezone.utc))
+    # Gap 10 - likewise carried: interviews in the next 7 days, and those of the last 3 with no outcome yet.
+    from src.services.applications.agenda import interview_agenda  # noqa: PLC0415
+
+    interviews = await interview_agenda(db, user_id)
 
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
-        "open_asks": open_asks, "proof_missing": missing_proof,
+        "open_asks": open_asks, "proof_missing": missing_proof, "interviews": interviews,
     }
 
 

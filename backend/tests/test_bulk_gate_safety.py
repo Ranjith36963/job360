@@ -335,6 +335,109 @@ async def test_an_assistant_may_record_the_attempt_but_not_with_a_payload(authen
             assert ok.status_code == 201, ok.text
 
 
+async def _attempts(app_id: int) -> int:
+    cur = await (await _db())._db.execute(
+        "SELECT COUNT(*) FROM application_events WHERE application_id = ? AND event_type = 'submit_attempted'",
+        (app_id,),
+    )
+    return int((await cur.fetchone())[0])
+
+
+@pytest.mark.asyncio
+async def test_submit_attempted_is_a_claim_refused_while_unresolved_and_free_again_after_a_resolve(
+    authenticated_async_context, fixture_user_id, caplog
+):
+    """G338: a second claim while the first is unconfirmed is 409 and writes nothing."""
+    caplog.set_level("INFO", logger="job360.audit")
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client, _ad(1))
+        first = await _event(client, app_id, "submit_attempted")
+        assert first.status_code == 201, first.text
+        second = await _event(client, app_id, "submit_attempted")
+        assert second.status_code == 409
+        assert second.json()["detail"].startswith("submit_already_started: a submit was already started")
+        assert await _attempts(app_id) == 1
+        # the web "It was not sent" resolves the attempt (submit_unconfirmed -> False): a new claim works
+        assert (await client.post(f"/api/applications/{app_id}/submit/resolve")).status_code == 201
+        again = await _event(client, app_id, "submit_attempted")
+        assert again.status_code == 201, again.text
+        assert await _attempts(app_id) == 2
+    refused = [r for r in caplog.records if getattr(r, "event", "") == "submit_claim_refused"]
+    assert [(r.reason, r.status, r.application_id) for r in refused] == [("unconfirmed", 409, app_id)]
+
+
+@pytest.mark.asyncio
+async def test_submit_attempted_is_refused_after_a_receipt_and_off_considering(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        sent, applied = await _bring(client, _ad(1)), await _bring(client, _ad(2))
+        receipt = await client.post(f"/api/applications/{sent}/receipt", json={"channel": "company_site"})
+        assert receipt.status_code == 201, receipt.text
+        after_receipt = await _event(client, sent, "submit_attempted")
+        assert after_receipt.status_code == 409
+        assert "already has a receipt" in after_receipt.json()["detail"]
+        # applied with no receipt and no attempt: the status alone refuses the claim
+        assert (await _event(client, applied, "applied")).status_code == 201
+        off = await _event(client, applied, "submit_attempted")
+        assert off.status_code == 409
+        assert off.json()["detail"] == (
+            "submit_already_started: this application is no longer considering. Do not click Submit."
+        )
+        assert (await _attempts(sent), await _attempts(applied)) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_two_claims_at_once_one_wins_and_one_is_refused(authenticated_async_context, fixture_user_id):
+    """Two sessions that both passed check_submit: each request opens its own connection, the row
+    lock queues them, and exactly one may click."""
+    import asyncio
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client, _ad(1))
+        token = await _mint_token(client)
+        async with _bearer(token) as agent:
+            a, b = await asyncio.gather(
+                _event(client, app_id, "submit_attempted"), _event(agent, app_id, "submit_attempted")
+            )
+        assert sorted([a.status_code, b.status_code]) == [201, 409], (a.text, b.text)
+        assert await _attempts(app_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_record_event_gets_the_same_409(authenticated_async_context, fixture_user_id):
+    import json
+
+    pytest.importorskip("mcp")
+    import httpx2
+    from mcp.client import Client
+    from mcp.client.streamable_http import streamable_http_client
+
+    from src.api.main import app
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client, _ad(1))
+        token = await _mint_token(client)
+    http = httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    )
+    args = {"application_id": app_id, "event_type": "submit_attempted"}
+    async with mcp_runtime():
+        async with Client(streamable_http_client("http://test/api/mcp", http_client=http)) as mcp:
+            ok = await mcp.call_tool("record_event", args)
+            assert not ok.is_error, ok.content[0].text
+            assert json.loads(ok.content[0].text)["event_type"] == "submit_attempted"
+            refused = await mcp.call_tool("record_event", args)
+            assert refused.is_error
+            assert "409: submit_already_started: a submit was already started" in refused.content[0].text
+    assert await _attempts(app_id) == 1
+
+
 @pytest.mark.asyncio
 async def test_morning_check_counts_an_unconfirmed_submit_as_failed(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
@@ -632,3 +735,28 @@ async def test_a_version_restore_by_an_assistant_cannot_drop_a_never_apply_compa
         web = await client.post(f"/api/profile/versions/{oldest}/restore")
         assert web.status_code == 200, web.text
         assert web.json()["preferences"]["avoid_companies"] == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Owner rule 2026-10-20 (strict): every REQUIRED question is answered; only optional ones may stay blank
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_a_required_question_with_no_answer_stops_and_a_yes_never_clears_it():
+    stop = _verdict(_facts(required_unanswered=True))
+    assert (stop.decision, stop.reason) == ("stop", "required_unanswered")
+    assert "never guess" in stop.detail and "Optional questions may stay blank" in stop.detail
+    yes = _verdict(_facts(required_unanswered=True, approved=True))
+    assert (yes.decision, yes.reason) == ("stop", "required_unanswered")
+    confirm = _verdict(_facts(required_unanswered=True, approved=True), _eff(submit_mode="confirm"))
+    assert (confirm.decision, confirm.reason) == ("stop", "required_unanswered")
+
+
+def test_required_unanswered_sits_after_the_form_stops_and_before_the_asks():
+    assert "required_unanswered" in rules.REASONS
+    assert _verdict(_facts(required_unanswered=True, form_swept=False)).reason == "form_not_swept"
+    assert _verdict(_facts(required_unanswered=True, form_check_missing=True)).reason == "form_check_missing"
+    # a stop is never softened to the email ask
+    assert _verdict(_facts(required_unanswered=True, email_verified=False)).reason == "required_unanswered"
+    assert _verdict(_facts(required_unanswered=True), _eff(paused_until="until_resumed")).reason == "paused"
+    assert _verdict(_facts()).reason == "auto_when_sure"

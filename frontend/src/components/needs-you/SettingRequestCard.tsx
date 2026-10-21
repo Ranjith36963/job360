@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { confirmSettingRequest, declineSettingRequest } from "@/lib/api";
 import type { SettingRequest } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT } from "@/lib/assistant-state";
+import { type GrantScopeCount, scopeText } from "@/lib/assistant-tab";
 import { relativeTime } from "@/lib/utils";
 
 // "Waiting for your OK" (S2, owner decision 2026-10-08). An assistant asked for a
@@ -14,16 +15,28 @@ import { relativeTime } from "@/lib/utils";
 // explains the one change in plain words.
 
 /** A waiting request, plus the user's current score line (null = not set) so a
- *  change to it can read "from X to Y". */
-export type WaitingRequest = SettingRequest & { current_score_line?: number | null };
+ *  change to it can read "from X to Y", and (slice 30) the queue a grant confirmed now covers. */
+export type WaitingRequest = SettingRequest & {
+  current_score_line?: number | null;
+  grant_queue?: GrantScopeCount | null;
+};
+
+const GRANT_PATHS = new Set(["assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until"]);
+
+/** Slice 30: what Confirm on a grant request would cover - only the queue as it is now. */
+export function grantScopeLine(path: string, value: unknown, queue?: GrantScopeCount | null): string {
+  if (!GRANT_PATHS.has(path) || value == null || value === "" || !queue) return "";
+  if (queue.count === 0) return "Your queue is empty, so nothing would be sent on its own.";
+  return `Covers only the ${scopeText(queue)} in your queue now; anything queued later still asks you.`;
+}
 
 const SUBMIT_MODES: Record<string, string> = {
   confirm: "I check every application before it is sent",
   auto_when_sure: "Send applications on its own when it is sure",
 };
 const INBOX_MODES: Record<string, string> = {
-  auto: "Read my inbox and send outreach emails on its own",
-  scheduled: "Read my inbox and send outreach emails on its own",
+  auto: "Read my inbox and record what happened on its own",
+  scheduled: "Read my inbox and record what happened on its own",
   ask: "Ask me before each inbox check",
   paused: "Stop checking my inbox",
 };
@@ -129,6 +142,14 @@ export function describeSettingRequest(
             ? "Let your assistant email employers in your name: a check-in 7 days after applying, a feedback request after a rejection, one follow-up 7 days later"
             : "Stop automatic employer emails",
       };
+    case "assistant_settings.outreach_send":
+      return {
+        title: "Automatic outreach emails",
+        change:
+          value === "auto"
+            ? "Let your assistant send the outreach emails it writes from your Gmail, in your name"
+            : "Only draft outreach emails; I send them myself",
+      };
     case "assistant_settings.paused_until":
       if (value === "" || value === null || value === undefined) {
         return { title: "Pause", change: "Start applying again" };
@@ -158,6 +179,7 @@ export function SettingRequestCard({
 }) {
   const [busy, setBusy] = useState(false);
   const { title, change } = describeSettingRequest(request.path, request.value, request.current_score_line);
+  const scopeLine = grantScopeLine(request.path, request.value, request.grant_queue);
 
   async function run(fn: () => Promise<unknown>, failMsg: string) {
     setBusy(true);
@@ -181,6 +203,11 @@ export function SettingRequestCard({
         <p className="whitespace-pre-wrap font-heading text-xl leading-snug" data-testid="setting-request-change">
           {change}
         </p>
+        {scopeLine && (
+          <p className="text-sm" data-testid="setting-request-scope">
+            {scopeLine}
+          </p>
+        )}
         <p className="text-[12.5px] text-muted-foreground">
           asked by {request.requested_by} ·{" "}
           <span className="font-mono">{relativeTime(request.requested_at)}</span>

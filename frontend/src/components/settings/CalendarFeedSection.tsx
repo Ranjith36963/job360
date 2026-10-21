@@ -27,7 +27,8 @@ import {
  * The server keeps only a hash, so the plain URL exists in this component's state
  * for as long as the page is open and is never refetched - lose it and you
  * regenerate (which kills the old one). The URL element carries
- * `data-sentry-mask` so Session Replay (maskAllText is off) never records it.
+ * `data-sentry-mask` so Session Replay never records it, even if replay masking
+ * were ever loosened (today replay is opt-in and masks all text).
  */
 export function CalendarFeedSection() {
   const [exists, setExists] = useState<boolean | null>(null);

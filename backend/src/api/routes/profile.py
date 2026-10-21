@@ -44,7 +44,7 @@ from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import edits as profile_edits
-from src.services.profile import forgiving, refusals, setting_requests, user_info
+from src.services.profile import forgiving, grant_scope, refusals, setting_requests, user_info
 from src.services.profile.cv_parser import extract_text
 from src.services.profile.cv_style import extract_cv_style
 from src.services.profile.github_enricher import (
@@ -397,8 +397,10 @@ def _recent_lessons(user_id: str) -> list[LessonOut]:
 def settings_view(profile: UserProfile, user_id: str) -> dict[str, Any]:
     """The assistant-settings read model for ``profile`` (already overlaid): the
     waiting requests and the derived practice-run state are the two reads."""
+    now = datetime.now(timezone.utc)
     return settings_rules.build_settings_view(
-        profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id)
+        profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id), now,
+        grant_scope=grant_scope.scope_view(user_id, settings_rules.effective(profile.assistant_settings), now),
     )
 
 
@@ -414,6 +416,9 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     route (one profile read + one overlay read) and then loaded the profile
     AGAIN plus the overlay AGAIN — four connections to answer one tool call.
     """
+    # Read BEFORE the profile: a write landing in between then makes a guarded
+    # write 409 (safe), never pass over a value this caller has not seen.
+    edit_id = profile_edits.current_edit_id(user_id)
     profile, overlay = load_profile_with_overlay(user_id, with_previous=True)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found")
@@ -427,10 +432,12 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
         for row in overlay
         if profile_edits.is_assistant_actor(str(row["set_by"]))
     ]
-    return profile, _build_profile_response(
+    response = _build_profile_response(
         profile, user_id, rows, lessons=_recent_lessons(user_id),
         settings_view=settings_view(profile, user_id)
     )
+    response.profile_edit_id = edit_id
+    return profile, response
 
 
 # ``_user_id_for(profile)`` used to live here. It did
@@ -474,6 +481,12 @@ class ProfileEditIn(BaseModel):
     # salary, visa). Without it an assistant's sensitive value is not saved. Never a time:
     # the server stamps the marker itself. A web write is the user and needs no flag.
     remember: Optional[bool] = None
+    # Gap 4 (slice 26) - an item op on a list path, so one record is added or removed without
+    # resending the list: `set` (default) = `value` is the whole value; `append` = `value` is one
+    # item; `upsert` = one user_info.answers record, replacing the same topic (or question) and
+    # company; `remove_at` = drop item `index` of the current list.
+    op: Literal["set", "append", "upsert", "remove_at"] = "set"
+    index: Optional[int] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -486,6 +499,10 @@ class UpdateProfileRequest(BaseModel):
     # invariant (an edit call with no edits is never meaningful), so it stays
     # a Pydantic constraint.
     edits: list[ProfileEditIn] = Field(..., min_length=1)
+    # Gap 4 (slice 26) - the `profile_edit_id` the caller last read. When it has moved
+    # (another assistant wrote since), the whole call is a 409 `stale_profile` and nothing
+    # is saved. Omitted = no check (last write wins, as before).
+    expected_profile_version: Optional[int] = None
 
 
 class UpdateProfileResponse(BaseModel):
@@ -516,14 +533,14 @@ class EditRefused(HTTPException):
     """A refused ``update_profile``: 422 whose body says "Nothing was saved." plus the fix, and
     carrying the closed ``reason`` code so the MCP audit row can log it."""
 
-    def __init__(self, status_code: int, detail: str, reason: str) -> None:
+    def __init__(self, status_code: int, detail: str | dict[str, Any], reason: str) -> None:
         super().__init__(status_code=status_code, detail=detail)
         self.reason = reason
 
 
 def _log_edit_rejected(
     user_id: str, actor: str, pairs: list[tuple[str, Any]], failed_path: str, status: int,
-    reason: str = "validation_error",
+    reason: str = "validation_error", **ids: int,
 ) -> None:
     """Audit a refused ``update_profile`` call: who, which paths, which one
     failed, the status and a CLOSED reason code. NEVER the detail — a message
@@ -535,7 +552,7 @@ def _log_edit_rejected(
             "actor": safe_log_value(actor), "http_status": status,
             "paths": [safe_log_value(path, max_len=100) for path, _ in pairs],
             "failed_path": safe_log_value(failed_path, max_len=100),
-            "status": status, "reason": safe_log_value(reason, max_len=40), "result": "rejected",
+            "status": status, "reason": safe_log_value(reason, max_len=40), "result": "rejected", **ids,
         },
     )
 
@@ -825,7 +842,19 @@ async def update_profile(
     value (S3): an edit can carry a name, an email fragment inside `about_me`,
     or anything else the agent chose to write, and none of that belongs in a
     log line.
+
+    Gap 4 (slice 26) - two assistants writing one profile: the whole call runs
+    under the user's profile-write lock, so `expected_profile_version` (409
+    `stale_profile` when another write landed since) and the item ops (applied
+    to the CURRENT list) are checked against exactly what gets written.
     """
+    # `_apply_profile_edits` is a plain `def`: nothing can `await` while the lock is held.
+    with profile_edits.user_edit_lock(user.id):
+        return _apply_profile_edits(body, user)
+
+
+def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> UpdateProfileResponse:
+    """:func:`update_profile`'s body, run while the caller holds ``user_edit_lock``."""
     # Cap check FIRST — no side effect (no profile row created) on a call
     # that is going to be rejected outright.
     actor = actor_for(user)
@@ -849,6 +878,28 @@ async def update_profile(
             ),
             "too_long",
         )
+    # Gap 4 - the caller's view is stale: another write landed since it read `profile_edit_id`.
+    if body.expected_profile_version is not None:
+        current_id = profile_edits.current_edit_id(user.id)
+        if current_id != body.expected_profile_version:
+            _log_edit_rejected(
+                user.id, actor, pairs, "", 409, "stale_profile",
+                expected_profile_version=body.expected_profile_version, profile_edit_id=current_id,
+            )
+            raise EditRefused(409, {"code": "stale_profile", "current": current_id}, "stale_profile")
+    # Item ops (append / upsert / remove_at) become the RESULTING whole value of their path, read
+    # off the current profile under the lock; the checks below then see exactly what is written.
+    op_paths = {e.path for e in body.edits if e.op != "set" and e.path in profile_edits.editable_paths()}
+    current = profile_edits.field_values(load_profile(user.id) or UserProfile(), op_paths) if op_paths else {}
+    try:
+        pairs = profile_edits.resolve_ops([(e.path, e.op, e.value, e.index) for e in body.edits], current)
+    except profile_edits.ProfileEditError as exc:
+        bad = next((e.path for e in body.edits if exc.detail.startswith((e.path, repr(e.path)))), "")
+        reason = refusals.reason_for_http(exc.detail, exc.reason)
+        _log_edit_rejected(user.id, actor, pairs, bad, exc.status_code, reason)
+        raise EditRefused(
+            exc.status_code, refusals.self_correcting_message([p for p, _ in pairs], [(bad, exc.detail)]), reason
+        ) from exc
 
     # VALIDATE BEFORE BOOTSTRAPPING. The blank-profile creation below is a
     # WRITE — it inserts a `user_profiles` row and a `user_profile_versions`
@@ -934,7 +985,7 @@ async def update_profile(
         # are never WEB_ACTOR and stay limited.
         applied = profile_edits.record_edits(
             user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR, source=sources,
-            consent_paths=consent_paths,
+            consent_paths=consent_paths, lock_held=True,
         )
     except profile_edits.ProfileEditError as exc:
         _log_edit_rejected(
@@ -951,6 +1002,8 @@ async def update_profile(
         extra={
             "event": "profile_edit", "paths": [path for path, _ in write_now],
             "sources": sorted({sources.get(path, "") for path, _ in write_now}),
+            # Gap 4 - which item ops ran and whether the write was version-guarded (names only).
+            "ops": sorted({e.op for e in body.edits}), "guarded": body.expected_profile_version is not None,
             "actor": safe_log_value(actor), "user_id": safe_log_value(user.id), "result": "ok",
         },
     )

@@ -24,6 +24,8 @@ import io
 import re
 from typing import Any, Optional
 
+from src.core import settings
+
 MAX_LISTED = 12  # items named in one detail line
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -174,9 +176,12 @@ _SOURCE_FIELDS = (
 )
 
 
-def profile_source_text(profile: Any) -> str:
+def profile_source_text(profile: Any, *, include_targets: bool = True) -> str:
     """Everything the user's OWN profile says: CV + LinkedIn raw text, dated positions,
-    projects, education, certifications, skills, GitHub languages/topics/frameworks."""
+    projects, education, certifications, skills, GitHub languages/topics/frameworks.
+
+    ``include_targets=False`` leaves out ``target_job_titles``: those are roles the user
+    WANTS, not roles they held, so they cannot vouch for a CV line (provenance view)."""
     cv = getattr(profile, "cv_data", None)
     if cv is None:
         return ""
@@ -185,7 +190,8 @@ def profile_source_text(profile: Any) -> str:
         parts.extend(_flat(getattr(cv, name, None)))
     prefs = getattr(profile, "preferences", None)
     if prefs is not None:
-        for name in ("additional_skills", "about_me", "target_job_titles"):
+        names = ("additional_skills", "about_me") + (("target_job_titles",) if include_targets else ())
+        for name in names:
             parts.extend(_flat(getattr(prefs, name, None)))
     return "\n".join(parts)
 
@@ -525,6 +531,27 @@ def stock_phrases(text: str) -> Optional[dict[str, str]]:
     return _issue(
         "stock_phrases", "warn",
         f"Reads as stock or AI writing: {_listed(hits)}. Say it plainly in the user's own words.",
+    )
+
+
+def linkedin_note_too_long(text: str, *, premium: bool) -> Optional[dict[str, str]]:
+    """A LinkedIn message longer than a connection-request note may be. Warn only:
+    a message to an existing connection may be longer, and the user decides.
+    career-ops (MIT) modes/contacto.md:168: 200 on a free account, 300 on Premium."""
+    limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    n = len(text)
+    if n <= limit:
+        return None
+    if premium:
+        tier = "a Premium account"
+        hint = ""
+    else:
+        tier = "a free account"
+        hint = " If the user told you they have Premium, set preferences.linkedin_premium to true (300)."
+    return _issue(
+        "linkedin_note_too_long", "warn",
+        f"{n} characters; a LinkedIn connection-request note on {tier} allows {limit} and longer ones are"
+        f" cut off or refused. Shorten it if this is a connection note.{hint}",
     )
 
 
