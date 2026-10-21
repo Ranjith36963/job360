@@ -63,6 +63,17 @@
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -94,6 +105,17 @@
               }
             ],
             "title": "Event Id"
+          },
+          "matched_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched On"
           }
         },
         "required": [
@@ -165,6 +187,17 @@
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -3210,9 +3243,25 @@
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
           },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -6991,9 +7040,25 @@
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
           },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -7103,6 +7168,11 @@
             "title": "Notes",
             "type": "string"
           },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
           "replied": {
             "title": "Replied",
             "type": "boolean"
@@ -7110,6 +7180,17 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -10293,7 +10374,7 @@
         "type": "object"
       },
       "StatsContactFoundViaGroupOut": {
-        "description": "Owner decision 2026-10-04 \u2014 per current contact ``found_via``: how\nmany contacts, how many had an outreach marked sent / a reply recorded,\nand ``reply_rate`` = contacts with both / contacts with a sent mark\n(``null`` when nothing was sent).",
+        "description": "Owner decision 2026-10-04 \u2014 per current contact ``found_via``: how\nmany contacts, how many are ``reachable`` (CURRENT email or LinkedIn URL\nsaved), how many had an outreach marked sent / a reply recorded,\nand ``reply_rate`` = contacts with both / contacts with a sent mark\n(``null`` when nothing was sent).",
         "properties": {
           "contacts": {
             "title": "Contacts",
@@ -10320,6 +10401,11 @@
           },
           "outreach_sent": {
             "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "reachable": {
+            "default": 0,
+            "title": "Reachable",
             "type": "integer"
           },
           "reply_rate": {
@@ -12660,6 +12746,17 @@
               }
             ],
             "title": "Role"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "title": "UpdateContactRequest",
@@ -14850,7 +14947,7 @@
     },
     "/api/applications/{application_id}/contacts": {
       "post": {
-        "description": "201 for a new contact, 200 (``already_existed: true``) for the same\nemail seen again on this application (R2) \u2014 the status code is set\ndynamically since the same call can legitimately answer either.",
+        "description": "201 for a new contact, 200 (``already_existed: true``, ``matched_on``)\nfor the same person seen again on this application (R2): same email, else\n(no email) same normalised LinkedIn URL, else same name unless both carry\ndifferent LinkedIn URLs. The status code is set dynamically since the\nsame call can legitimately answer either.",
         "operationId": "add_contact_api_applications__application_id__contacts_post",
         "parameters": [
           {
@@ -19104,7 +19201,7 @@
     },
     "/api/contacts": {
       "post": {
-        "description": "Owner decision, 2026-09-25 \u2014 a person with no job yet (cold\nnetworking), or a linked one when ``application_id`` is given. Same\nidempotency/cap/rate-limit rules as the per-application route, just\nscoped to the USER instead of an application when there is none.",
+        "description": "Owner decision, 2026-09-25 \u2014 a person with no job yet (cold\nnetworking), or a linked one when ``application_id`` is given. Same\nidempotency/cap/rate-limit rules as the per-application route, just\nscoped to the USER instead of an application when there is none. Cold\nscope without an email: same LinkedIn URL, else same name only when\nneither side has a LinkedIn URL. ``source_url`` is stored, never fetched.",
         "operationId": "add_person_api_contacts_post",
         "parameters": [
           {
