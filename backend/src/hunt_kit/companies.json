@@ -6398,5 +6398,14 @@
 {"name":"PCDN Global","ats":"jobboardly","board":"pcdn-global","source":"freehire"},
 {"name":"Drone Vet","ats":"jobboardly","board":"drone-vet-1","source":"freehire"},
 {"name":"Remote Jobs","ats":"jobboardly","board":"remotejobs","source":"freehire"},
-{"name":"HZ Coffee Group LLC","ats":"jobappnetwork","board":"20448","source":"freehire"}
+{"name":"HZ Coffee Group LLC","ats":"jobappnetwork","board":"20448","source":"freehire"},
+{"name":"Muffin","ats":"factorial","board":"muffin.factorial.it","source":"freehire"},
+{"name":"Highbras","ats":"factorial","board":"highbras.factorialhr.com.br","source":"freehire"},
+{"name":"9Net","ats":"factorial","board":"9net.factorialhr.com.br","source":"freehire"},
+{"name":"4Farma","ats":"factorial","board":"4farma.factorialhr.pt","source":"freehire"},
+{"name":"Factorial","ats":"factorial","board":"careers.factorialhr.com","source":"career-ops"},
+{"name":"GigaCloud","ats":"peopleforce","board":"gigacloud","source":"freehire"},
+{"name":"Akvelon","ats":"peopleforce","board":"akvelon","source":"freehire"},
+{"name":"Dnext Intelligence","ats":"talenthr","board":"dnext","source":"freehire"},
+{"name":"INETEC d.o.o.","ats":"talentlyft","board":"inetec","source":"freehire"}
 ]

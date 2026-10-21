@@ -76,9 +76,11 @@ from the first 20 ads of each board only; the rest come back undated.
 UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN,
 Jibe, Keka Hire (`keka`) and Zoho Recruit (`zohorecruit`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
 some Zoho Recruit sites list no description either, so open the link to read the ad.
-`kit_ats_eu.py` adds Emply (`emply`), Manatal (`manatal`), TalentAdore (`talentadore`), Traffit (`traffit`)
-and Trakstar (`trakstar`), mostly European employers (rows with `source` `freehire`). Each is read with a few
-requests per board; the first refusal ends that board.
+`kit_ats_eu.py` adds Emply (`emply`), Factorial (`factorial`), Jobylon (`jobylon`), Manatal (`manatal`),
+PeopleForce (`peopleforce`), TalentAdore (`talentadore`), TalentHR (`talenthr`), TalentLyft (`talentlyft`),
+Traffit (`traffit`) and Trakstar (`trakstar`), mostly European employers (rows with `source` `freehire`). The
+readers whose listing has no title (Factorial, Jobylon, PeopleForce, TalentHR, TalentLyft) open a posting page only
+for a card that passes your title filter, at most 25 pages per board; the first refusal ends that board.
 `kit_ats_misc2.py` adds OpenCATS portals (`opencats`), Odoo recruitment sites (`odoo`), recruiting-solutions.org
 (`recruitingsolutions`), the TeamEx marketplace (`teamex`), the Wantapply aggregator (`wantapply`, read from its wantapply.cy
 mirror), werecruit, Workstream (`workstream`), WordPress career sites built on WP Job Manager and Yoast (`wpyoast`),
@@ -179,6 +181,9 @@ Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT
 `werecruit:locale/tenant` (`careers.werecruit.io/en/idiap`), `workstream:8hex` (`www.workstream.us/j/8hex`),
 `wpyoast:career-host`, `careerspage:tenant` (`tenant.careers-page.com`), `jobboardly:tenant` (`tenant.jobboardly.com`),
 `jobappnetwork:clientId`,
+`factorial:host` (the careers host, e.g. `muffin.factorial.it`), `peopleforce:tenant` (`tenant.peopleforce.io`),
+`talenthr:slug` (`jobs.talenthr.io/slug`), `talentlyft:tenant` (`tenant.talentlyft.com`), `jobylon:all` (one global
+sitemap, no per-company board),
 `keka:tenant` (`tenant.keka.com/careers`), `zohorecruit:tenant` (`tenant.zohorecruit.in`, then `.com` is tried;
 a `companies.json` row may set `"tld": "com"`), `gem:id`
 (`jobs.gem.com/id`), `join:slug` (`join.com/companies/slug`), `deel:slug` (`jobs.deel.com/slug`), `dover:slug` (`app.dover.com/jobs/slug`). Cornerstone sites that need a session cookie return no ads.
