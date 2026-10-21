@@ -571,6 +571,7 @@ CONTACT_NAME_MAX_CHARS = int(os.getenv("CONTACT_NAME_MAX_CHARS", "200"))
 CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
 CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
 CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
+CONTACT_SOURCE_URL_MAX_CHARS = int(os.getenv("CONTACT_SOURCE_URL_MAX_CHARS", "1000"))
 CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
 CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
 CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
@@ -609,7 +610,7 @@ LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
 CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
-CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via")
+CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via", "source_url")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
@@ -1023,11 +1024,10 @@ URL_FETCH_MAX_JSONLD_BYTES = int(os.getenv("URL_FETCH_MAX_JSONLD_BYTES", str(256
 
 # Owner decision, 2026-09-28 — two funnel events only the backend can see
 # (`first_tool_call`, `first_bring`) fire through `src/services/analytics.py`.
-# The frontend's consent banner (fable/05 C3) stores its choice in the
-# BROWSER only — there is no per-user consent flag in the database for the
-# backend to read — so this is the owner's own opt-in for every user, off by
-# default, not a per-user consent check. Off, every `capture_event` call is a
-# no-op: nothing is sent, nothing is queued.
+# This is the owner's global switch, off by default; on top of it each user
+# must have turned on "Help improve Job360" (`users.analytics_consent_at`,
+# migration 0067) or nothing is sent for them. Off, every `capture_event`
+# call is a no-op: nothing is sent, nothing is queued.
 ANALYTICS_BACKEND_ENABLED = _env_flag("ANALYTICS_BACKEND_ENABLED", False)
 # The SAME PostHog project the frontend posts to (its keys are
 # NEXT_PUBLIC_POSTHOG_KEY / NEXT_PUBLIC_POSTHOG_HOST, PostHogProviderWrapper.tsx)

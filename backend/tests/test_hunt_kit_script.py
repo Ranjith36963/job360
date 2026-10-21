@@ -372,9 +372,13 @@ def test_companies_json_valid() -> None:
         "jobvite",
         "eightfold",
     } | {"rippling", "breezy", "pinpoint", "phenom", "ultipro", "adp", "cornerstone", "gem",
-         "jazzhr", "softgarden", "join", "jibe", "keka", "zohorecruit", "ripplehire"} | {"avature", "comeet", "hibob", "pageup", "freshteam"}  # the kit_ats_more and kit_ats_extra types
+         "jazzhr", "softgarden", "join", "jibe", "keka", "zohorecruit", "ripplehire"}  # the kit_ats_more types
+    ok |= {"emply", "manatal", "talentadore", "traffit", "trakstar",
+           "factorial", "peopleforce", "talenthr", "talentlyft"}  # the kit_ats_eu types
+    ok |= {"avature", "comeet", "hibob", "pageup", "freshteam"}  # the kit_ats_extra types
     ok |= {"betterteam", "catsone", "clinch", "crelate", "erecruiter", "gr8people", "hrmanager", "ismartrecruit", "loxo", "mindsight"}  # the kit_ats_misc1 types
-    ok |= {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream"}  # the kit_ats_misc2 types
+    ok |= {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream", "wpyoast",
+           "careerspage", "jobboardly", "jobappnetwork"}  # the kit_ats_misc2 types
     ok |= {"bullhorn", "careerplug", "hireology", "hiringthing", "hrmdirect", "isolvedhire", "paycom", "paycor",
           "jobscore", "recruiterflow"}  # the kit_ats_us types
     seen = set()

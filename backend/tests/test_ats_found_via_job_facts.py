@@ -479,7 +479,7 @@ async def test_stats_by_contact_found_via(authenticated_async_context):
     by = _by_key(groups)
     assert set(by) == {"linkedin", "event", None}, "the edit overlay wins over the base row"
     assert by["linkedin"] == {
-        "key": "linkedin", "label": "linkedin", "contacts": 2, "outreach_sent": 2,
+        "key": "linkedin", "label": "linkedin", "contacts": 2, "reachable": 0, "outreach_sent": 2,
         "outreach_replied": 1, "reply_rate": 0.5,
     }
     assert by["event"]["contacts"] == 1 and by["event"]["outreach_sent"] == 0 and by["event"]["reply_rate"] is None

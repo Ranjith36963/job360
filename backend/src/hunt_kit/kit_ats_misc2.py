@@ -1,4 +1,4 @@
-"""Seven more ATS readers for the hunt kit: OpenCATS, Odoo, recruiting-solutions.org, TeamEx, Wantapply, werecruit and Workstream. Same contract as
+"""Eleven more ATS readers for the hunt kit: OpenCATS, Odoo, recruiting-solutions.org, TeamEx, Wantapply, werecruit, Workstream, WordPress/Yoast career sites, careers-page.com, Jobboardly and JobAppNetwork. Same contract as
 kit_ats.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only through the ``http`` callable, no file IO at
 import, standard library only. Nothing here ranks or scores a job.
 
@@ -10,6 +10,10 @@ Board tokens (companies JSON ``board``, or ``--companies-extra "ats:token"``):
   wantapply            none (one aggregator, read from the wantapply.cy mirror): any placeholder token works
   werecruit            <locale>/<tenant> from careers.werecruit.io/<locale>/<tenant>, e.g. en/idiap
   workstream           the eight hex characters of www.workstream.us/j/<board>
+  wpyoast              career-site host of a WP Job Manager + Yoast SEO site, e.g. careers.theplanetgroup.com
+  careerspage          tenant subdomain of <tenant>.careers-page.com
+  jobboardly           tenant subdomain of <tenant>.jobboardly.com (a niche job board: each ad names its own employer)
+  jobappnetwork        numeric client id from apply.jobappnetwork.com/clients/<id>
 
 Endpoints, params and field names are adapted from the MIT-licensed freehire adapters (internal/ingest/sources/<name>.go,
 see NOTICE.md). Where the kit differs from the reference it says so next to the reader: the kit never fans out, so every
@@ -20,6 +24,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 from html.parser import HTMLParser
 from typing import Any, Callable, Iterator
@@ -51,9 +56,11 @@ except ImportError:  # loaded by file path: find the sibling file
     _count, _get, _iso_date, _job = _mod._count, _mod._get, _mod._iso_date, _mod._job
     _remote_from, _text, _title_ok = _mod._remote_from, _mod._text, _mod._title_ok
 
+_JSON = {"Accept": "application/json"}
 _POST = {"Content-Type": "application/json", "Accept": "application/json"}
 _HTMLH = {"Accept": "text/html"}
 _HOST = re.compile(r"[a-z0-9][a-z0-9.-]{1,120}\.[a-z]{2,24}")
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?")
 DETAIL_CAP = 25  # detail-page requests per board (the kit's own cap; the references fan out under a worker pool)
 _LIST_CAP = MAX_PAGES * 100  # postings kept from one listing
 
@@ -799,6 +806,240 @@ def _workstream(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- WordPress / Yoast career sites
+# Borrowed from freehire internal/ingest/sources/wpyoast.go:37 (GET https://<board>/sitemap.xml, the Yoast sitemap index), :34-43 and
+# resolveSubSitemap at sitemap.go:52-65 (the first sub-sitemap whose URL contains "job_listing"; none = no postings, not an
+# error), :45 and sitemap.go:35-50 (its <url><loc> entries that are job pages), :95-101 (a job page URL has /job/<digits>-),
+# :58-80 (job page: schema.org JobPosting ld+json; title HTML-unescaped, company = hiringOrganization.name else the row's, location =
+# one Place "City, Region, Country", description HTML-unescaped, datePosted). Kit differences: capped detail pages gated by
+# title_ok on the URL slug, postings past the cap are not listed, and every job link must stay on the board's host.
+_WP_JOB = re.compile(r"/job/(\d+)-")
+
+
+def _wpyoast(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """WordPress WP Job Manager + Yoast career site: sitemap index -> job_listing sitemap -> JobPosting per job (capped)."""
+    host = str(row.get("token") or "").strip().lower()
+    if not _HOST.fullmatch(host):
+        return None
+    _st, index = _page(http, f"https://{host}/sitemap.xml")
+    if index is None:
+        return None
+    sub = next((u for u in _locs(index, "sitemap") if "job_listing" in u and _https(u, host)), "")
+    if not sub:
+        return []
+    _st, jobmap = _page(http, sub)
+    if jobmap is None:
+        return None
+    jobs: list[Job] = []
+    details = 0
+    for loc in _locs(jobmap, "url"):
+        m = _WP_JOB.search(loc)
+        url = _https(loc, host)
+        if not m or not url:
+            continue
+        if details >= DETAIL_CAP:
+            break
+        if not _title_ok(row, _slug_title(urlsplit(url).path.rsplit("/job/", 1)[-1].strip("/"))):
+            continue
+        details += 1
+        _s, det = _page(http, url)
+        p = _ld_posting(_dom(det)) if det is not None else None
+        title = html.unescape(str((p or {}).get("title") or "")).strip()
+        if not p or not title:
+            continue
+        org = p.get("hiringOrganization")
+        place = ", ".join(_ld_place(p.get("jobLocation"))[:1])
+        j = _job(row, "wpyoast", title=title, url=url, location=place, posted=_iso_date(p.get("datePosted")),
+                 description=_body(p.get("description")), remote=_remote_from(place), extra={"job_id": m.group(1)})
+        if isinstance(org, dict) and str(org.get("name") or "").strip():
+            j["company"] = str(org["name"]).strip()
+        jobs.append(j)
+    return jobs
+
+
+# --------------------------------------------------------------------------- careers-page.com
+# Borrowed from freehire internal/ingest/sources/careerspage.go:40 (https://<board>.careers-page.com/, server-rendered HTML), :47-49
+# (listing pages ?page=N from 1 until a page adds no new job link; a failing first page fails the board), :112 and :116-125 (a job
+# link is /jobs/<uuid> and nothing after the id, so the /refer and /apply links of a card are not postings), :65-94 (detail page:
+# schema.org JobPosting ld+json; company = hiringOrganization.name else the row's, location = one Place "City, Region,
+# Country", description HTML-unescaped, datePosted), :32-37 (the host rate-limits by request volume: two workers). Kit
+# differences: at most MAX_PAGES listing pages and a capped number of detail pages gated by title_ok on the link text, postings past
+# the cap are not listed, the first 403 or 429 ends the board, and links must stay on the tenant's host.
+_CP_JOB = re.compile(r"/jobs/([0-9a-fA-F-]{36})(?:$|[?#])")
+
+
+def _careerspage(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """careers-page.com tenant (<tenant>.careers-page.com): paged listing, then each posting's JobPosting (capped)."""
+    tenant = str(row.get("token") or "").strip().lower()
+    if not _LABEL.fullmatch(tenant):
+        return None
+    host, base = f"{tenant}.careers-page.com", f"https://{tenant}.careers-page.com/"
+    links: dict[str, tuple[str, str]] = {}
+    for n in range(1, MAX_PAGES + 1):
+        _st, page = _page(http, f"{base}?page={n}")
+        if page is None:
+            if n == 1:
+                return None
+            break
+        before = len(links)
+        for a in _walk(_dom(page)):
+            href = a.attrs.get("href", "") if a.tag == "a" else ""
+            m = _CP_JOB.search(href) if href and len(href) <= 300 else None
+            url = _https(urljoin(base, href), host) if m else ""
+            if m and url and url not in links:
+                links[url] = (m.group(1), _inline(a))
+        if len(links) == before:
+            break
+    jobs: list[Job] = []
+    details = 0
+    for url, (uid, anchor) in list(links.items())[:_LIST_CAP]:
+        if details >= DETAIL_CAP:
+            break
+        if not _title_ok(row, anchor):
+            continue
+        details += 1
+        st, det = _page(http, url)
+        if st in (403, 429):
+            break
+        p = _ld_posting(_dom(det)) if det is not None else None
+        title = str((p or {}).get("title") or "").strip()
+        if not p or not title:
+            continue
+        org = p.get("hiringOrganization")
+        place = ", ".join(_ld_place(p.get("jobLocation"))[:1])
+        j = _job(row, "careerspage", title=html.unescape(title), url=url, location=place, posted=_iso_date(p.get("datePosted")),
+                 description=_body(p.get("description")), remote=_remote_from(place), extra={"job_id": uid})
+        if isinstance(org, dict) and str(org.get("name") or "").strip():
+            j["company"] = str(org["name"]).strip()
+        jobs.append(j)
+    return jobs
+
+
+# --------------------------------------------------------------------------- Jobboardly
+# Borrowed from freehire internal/ingest/sources/jobboardly.go:29 (GET https://<board>.jobboardly.com/jobs.json, the whole catalogue as
+# one unpaginated array with the bodies inline; a board on its own domain redirects), :32,:87-90 (the board is one lowercase DNS
+# label), :63-84 (title, arrangement, location = the work arrangement, location_limits, published_at, description.html,
+# company.name and company.location, salary{schedule, minimum, maximum}, links.self), :107-131 (a posting without links.self
+# or company.name is skipped; the place is company.location else the location limits; the URL is links.self, never application_link),
+# :134-146 (links.self must be /jobs/<slug>), :155-206 (arrangement -> fulltime / parttime / contract / internship; salary
+# schedule yearly / monthly / daily / hourly, bounds in cents, one currency). A board is a niche job board: company is the
+# employer each ad names. Kit difference: at most 1000 postings are kept from one board.
+_JB_PERIOD = {"yearly": "year", "monthly": "month", "daily": "day", "hourly": "hour"}
+_JB_TYPE = {"fulltime": "full_time", "parttime": "part_time", "contract": "contract", "internship": "internship"}
+
+
+def _jb_salary(sal: Any) -> dict[str, Any]:
+    if not isinstance(sal, dict) or _JB_PERIOD.get(str(sal.get("schedule") or "")) is None:
+        return {}
+    lo, hi = sal.get("minimum"), sal.get("maximum")
+    cur = ""
+    out: dict[str, Any] = {}
+    for key, m in (("salary_min", lo), ("salary_max", hi)):
+        cents = m.get("cents") if isinstance(m, dict) else None
+        iso = m.get("currency_iso") if isinstance(m, dict) else None
+        if isinstance(cents, (int, float)) and not isinstance(cents, bool):
+            try:  # json.loads accepts Infinity, NaN, 1e999 and huge integers: none of them is a salary
+                amount = round(cents / 100) if math.isfinite(cents) else None
+            except (OverflowError, ValueError):
+                amount = None
+            if amount is None:
+                continue
+            c = str(iso or "")
+            if cur and c != cur:
+                return {}
+            cur, out[key] = c, amount
+    if not out or not cur:
+        return {}
+    return {**out, "salary_currency": cur.upper(), "salary_period": _JB_PERIOD[str(sal["schedule"])]}
+
+
+def _jobboardly(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Jobboardly niche job board (<tenant>.jobboardly.com/jobs.json): one request, bodies inline."""
+    board = str(row.get("token") or "").strip().lower()
+    if not _LABEL.fullmatch(board):
+        return None
+    st, data = _get(http, f"https://{board}.jobboardly.com/jobs.json", headers=_JSON)
+    if st != 200 or not isinstance(data, list):
+        return None
+    jobs: list[Job] = []
+    for p in data[:_LIST_CAP]:
+        if not isinstance(p, dict):
+            continue
+        links, comp = p.get("links"), p.get("company")
+        url = _https(links.get("self") if isinstance(links, dict) else "")
+        parts = urlsplit(url).path.rstrip("/").rsplit("/", 1) if url else []
+        company = str(comp.get("name") or "").strip() if isinstance(comp, dict) else ""
+        title = str(p.get("title") or "").strip()
+        if len(parts) != 2 or parts[0] != "/jobs" or not parts[1] or not company or not title:
+            continue
+        mode = str(p.get("location") or "").strip().lower()
+        limits = [str(x) for x in (p.get("location_limits") or []) if x] if isinstance(p.get("location_limits"), list) else []
+        place = str(comp.get("location") or "").strip() if isinstance(comp, dict) else ""
+        place = place or ", ".join(limits)
+        desc = p.get("description")
+        j = _job(row, "jobboardly", title=title, url=url, location=place, posted=_iso_date(p.get("published_at")),
+                 description=_body(desc.get("html") if isinstance(desc, dict) else ""),
+                 remote=True if mode == "remote" else None,
+                 extra={"job_id": parts[1], "work_mode": mode if mode in ("remote", "hybrid", "onsite") else "",
+                        "employment_type": _JB_TYPE.get(str(p.get("arrangement") or ""), ""), **_jb_salary(p.get("salary"))})
+        j["company"] = company
+        jobs.append(j)
+    return jobs
+
+
+# --------------------------------------------------------------------------- JobAppNetwork (talentReef)
+# Borrowed from freehire internal/ingest/sources/jobappnetwork.go:30 (POST https://prod-kong.internal.talentreef.com/apply/proxy-es/
+# search-en-us/posting/_search, an Elasticsearch proxy the platform's own career pages call without a key or session), :31 (posting
+# page https://apply.jobappnetwork.com/clients/<clientId>/posting/<jobId>/), :89-94 (the board is a positive numeric client id),
+# :127-140 (body: bool.filter of term clientId and term internalOrExternal = externalOnly, from, size 100 - both filters are
+# mandatory: without the client filter the proxy answers every employer on the platform), :100-120 (walk until hits.total postings are
+# read or a page is empty; a failing first page fails the board), :49-68 and :142-152 (_source: jobId, title, HTML description,
+# address.city / stateOrProvince / country, createdDate; company = the employer the board names). Kit difference: at most MAX_PAGES
+# pages (1000 postings). NOT IN REFERENCE: hits.total as an object ({"value": n}); the kit reads it too.
+_JAN_URL = "https://prod-kong.internal.talentreef.com/apply/proxy-es/search-en-us/posting/_search"
+_JAN_PAGE = 100
+
+
+def _jobappnetwork(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """JobAppNetwork / talentReef career sites (token = numeric client id): the keyless search proxy, one client only."""
+    tok = str(row.get("token") or "").strip()
+    if not re.fullmatch(r"[0-9]{1,12}", tok) or int(tok) <= 0:
+        return None
+    cid = int(tok)
+    jobs: list[Job] = []
+    got = 0
+    for page in range(MAX_PAGES):
+        body = {"query": {"bool": {"filter": [{"term": {"clientId": cid}}, {"term": {"internalOrExternal": "externalOnly"}}]}},
+                "from": page * _JAN_PAGE, "size": _JAN_PAGE}
+        st, data = _get(http, _JAN_URL, method="POST", data=json.dumps(body).encode(), headers=_POST)
+        hits = data.get("hits") if isinstance(data, dict) else None
+        rows = hits.get("hits") if isinstance(hits, dict) else None
+        if st != 200 or not isinstance(rows, list):
+            if page:
+                break
+            return None
+        if not rows:
+            break
+        for h in rows:
+            s = h.get("_source") if isinstance(h, dict) else None
+            if not isinstance(s, dict) or not isinstance(s.get("jobId"), int) or isinstance(s.get("jobId"), bool):
+                continue
+            title = str(s.get("title") or "").strip()
+            if not title:
+                continue
+            a: dict[str, Any] = s["address"] if isinstance(s.get("address"), dict) else {}
+            place = _commas(a.get("city"), a.get("stateOrProvince"), a.get("country"))
+            jobs.append(_job(row, "jobappnetwork", title=title, url=f"https://apply.jobappnetwork.com/clients/{cid}/posting/{s['jobId']}/",
+                             location=place, posted=_iso_date(s.get("createdDate")), description=_body(s.get("description")),
+                             remote=_remote_from(place), extra={"job_id": str(s["jobId"])}))
+        got += len(rows)
+        total = hits.get("total") if isinstance(hits, dict) else None
+        total = total.get("value") if isinstance(total, dict) else total
+        if isinstance(total, int) and got >= total:
+            break
+    return jobs
+
+
 ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
     "opencats": _wrap(_opencats),
     "odoo": _wrap(_odoo),
@@ -807,4 +1048,8 @@ ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Jo
     "wantapply": _wrap(_wantapply),
     "werecruit": _wrap(_werecruit),
     "workstream": _wrap(_workstream),
+    "wpyoast": _wrap(_wpyoast),
+    "careerspage": _wrap(_careerspage),
+    "jobboardly": _wrap(_jobboardly),
+    "jobappnetwork": _wrap(_jobappnetwork),
 }
