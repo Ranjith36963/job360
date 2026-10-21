@@ -30,11 +30,10 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 > - **Frontend:** https://frontend-production-c608f.up.railway.app
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
 >
-> `/readyz` is `api.routes.health.readyz`, and it is Railway's deploy healthcheck
-> (`backend/railway.json` `healthcheckPath`). It borrows a connection from the
-> request-path pool within `READYZ_POOL_TIMEOUT_S` (default 2) and runs `SELECT 1`:
-> 200 `{"status":"ready","pool":{size,idle,used,waiting,max}}`, else 503
-> `{"status":"not_ready","reason":"pool_timeout"|"db_error"}`. It no longer checks Redis.
+> Railway's deploy healthcheck is `backend/railway.json`'s `healthcheckPath`; what
+> answers it is `api.routes.health.readyz`. The probes are mounted under `/api`
+> (`api.main`'s `include_router`), so every live path carries that prefix, and the
+> codes and bodies are pinned by `backend/tests/test_health_probes.py`.
 
 ## 🟢 What's already done (no action needed)
 - Backend + frontend **Dockerfiles** and **`docker-compose.prod.yml`** — read the
@@ -42,7 +41,7 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 - App runs on **Postgres**. (Test count deliberately not quoted here — measure it:
   `cd backend && python -m pytest --collect-only -q | tail -1`. The
   merge-gate floor lives in one place, `CONTRIBUTING.md`, and only there.)
-- **`/health`, `/livez`, `/readyz`** + **env validation at boot** (fail-fast on missing prod secrets).
+- **The health probes** (`api/routes/health.py`, mounted under `/api`) + **env validation at boot** (fail-fast on missing prod secrets).
 - **Nightly encrypted DB backup** — `.github/workflows/db-backup.yml`; restore procedure in `RUNBOOK-backups.md`.
 
 ## First-time provisioning (HISTORICAL — already done 2026-07-02)
@@ -77,6 +76,6 @@ railway domain --service frontend    # → public site URL
 ```
 
 ## Verify after deploy
-- `curl https://<backend-url>/livez` → 200; `/api/readyz` → 200 with `"status":"ready"` and the pool numbers.
+- `curl https://<backend-url>/api/livez` and `/api/readyz` → 200 (`backend/tests/test_health_probes.py` pins both).
 - Register + upload CV on the live frontend; confirm a row in the managed Postgres.
 - Sentry receives a test error; PostHog receives a pageview.

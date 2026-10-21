@@ -81,13 +81,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## CLI
 
-```bash
-python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin li.pdf --github user
-python -m src.cli api                          # same as `python main.py`
-```
-
-`run` / `status` / `view` / `sources` / `rescore-backfill` were deleted with the
-sourcing era (slice 5, #483) — there is nothing left to search, score or list.
+`python -m src.cli --help`. The commands and their options are the
+`@cli.command` decorators in `src/cli.py`, nowhere else.
 
 ## Tests
 
