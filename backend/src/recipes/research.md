@@ -22,7 +22,7 @@ outreach. Every fact you save must say where it came from.
    Job360 history line cites the stats result instead, never a URL). Visa facts go in `save_fit`'s visa
    fields only when a source states them.
 5. **Who to talk to:** if you find the hiring manager or recruiter, `list_people`
-   first, then `add_contact` (notes = where you found them). Not finding one is
+   first, then `add_contact` (source_url = the page you found them on). Not finding one is
    fine — it is not a gate.
 6. **Finish** with two lines: what matters for the CV and letter, and the
    next command ("run 360 apply <link>").

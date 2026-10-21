@@ -23,14 +23,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
-import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
-from src.services.browser_agent.egress import EgressProxy, OpenFn
+from src.services.applications.job_checks import redact_url_for_display
+from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
     CONTROL_STATE_JS,
@@ -144,6 +143,11 @@ class Session:
     recent: list[tuple[str, str, str, str]] = field(default_factory=list)
     # A live sign-in view closes at this time (monotonic) however busy it is; None = no limit.
     closes_at: Optional[float] = None
+    # Tabs whose last main-frame load the egress proxy refused (a redirect hop to a private address,
+    # or a host it could not reach), with the reason the agent answers.
+    blocked_tabs: dict[Any, str] = field(default_factory=dict)
+    # Addresses of refused loads Playwright could not tie to a tab (a new tab's first load).
+    blocked_urls: dict[str, str] = field(default_factory=dict)
     # The assistant session (its `session` label) driving this browser: another one is refused.
     owner: str = ""
 
@@ -267,6 +271,41 @@ class BrowserPool:
             s.page = new_page
 
         context.on("page", _on_page)
+
+        def _main_frame(message: Any) -> Any:
+            frame = message.frame
+            return frame if frame.parent_frame is None else None
+
+        def _on_request(request: Any) -> None:
+            try:
+                frame = _main_frame(request) if request.is_navigation_request() else None
+            except Exception:  # noqa: BLE001 - a request with no frame (a worker): not a page load
+                return
+            if frame is not None:
+                # The tab moves on: its refusal (by tab or by address) is over.
+                s.blocked_tabs.pop(frame.page, None)
+                s.blocked_urls.pop(frame.page.url, None)
+
+        def _on_response(response: Any) -> None:
+            # Only the proxy's own 403 holds its per-process mark: a site cannot send it.
+            reason = _REFUSAL.get(response.headers.get(BLOCK_HEADER, "")) if response.status == 403 else None
+            if reason is None:
+                return
+            try:
+                if not response.request.is_navigation_request():
+                    return
+            except Exception:  # noqa: BLE001 - a response with no request: not a page load
+                return
+            try:
+                frame = _main_frame(response)
+            except Exception:  # noqa: BLE001 - a new tab's first load has no frame yet: keep its address
+                s.blocked_urls[response.url] = reason
+                return
+            if frame is not None:
+                s.blocked_tabs[frame.page] = reason
+
+        context.on("request", _on_request)
+        context.on("response", _on_response)
         self._sessions[user_id] = s
         return s
 
@@ -292,6 +331,31 @@ class BrowserPool:
             self._playwright = None
         await self.egress.close()
         self.egress.port = 0
+
+
+BLOCKED_HOP = (
+    "That led to a private or local address, and Job360's browser only opens public web pages. "
+    "Open another link."
+)
+UNREACHABLE_HOP = "That site could not be found or did not answer. Open another link."
+# The proxy's own marks (fresh each process: a site cannot send them) and what each one answers.
+_REFUSAL = {BLOCK_MARK: "blocked_address", UNREACHABLE_MARK: "load_failed"}
+
+
+def _refusal(s: Session, page: Any) -> Optional[BrowserError]:
+    """The proxy's refusal if it is the tab's last load (a new tab is known by its address)."""
+    if page not in s.blocked_tabs and page.url in s.blocked_urls:
+        s.blocked_tabs[page] = s.blocked_urls.pop(page.url)
+    reason = s.blocked_tabs.get(page)
+    if reason == "load_failed":
+        return BrowserError("error", "load_failed", UNREACHABLE_HOP)
+    return _hop_refused() if reason else None
+
+
+def _hop_refused() -> BrowserError:
+    """A load the screen or the egress proxy refused (a redirect hop, a history entry): the same
+    answer as opening that address directly."""
+    return BrowserError("refused", "blocked_address", BLOCKED_HOP)
 
 
 async def _press(s: Session, ref: str, key: str) -> dict[str, Any]:
@@ -539,6 +603,21 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:n] + "…"
 
 
+def _shown_url(url: str) -> str:
+    """The address the assistant is told (gap-audit #18): scheme + host + path + job-id query keys. A
+    magic link, session id or signed link in the query string or fragment must not reach the
+    assistant's transcript. Shown only: the browser itself still sits on, and opens, the full address."""
+    return _clip(redact_url_for_display(url), MAX_URL)
+
+
+_LINK_IN_TEXT = re.compile(r"https?://[^\s'\"<>]+")
+
+
+def _scrub_links(text: str) -> str:
+    """``text`` (a browser error line) with every http(s) link redacted: Playwright's messages quote the URL."""
+    return _LINK_IN_TEXT.sub(lambda m: redact_url_for_display(m.group(0)) or "[link]", text)
+
+
 def _within_size(
     elements: list[dict[str, Any]], places: list[tuple[float, bool]]
 ) -> tuple[list[dict[str, Any]], int, int]:
@@ -628,7 +707,7 @@ def _load_failed(page: Any, after_action: bool) -> dict[str, Any]:
     if not after_action:
         raise BrowserError("error", "load_failed", "The last page did not load. Open it again or try another link.")
     return {
-        "status": "error", "reason": "load_failed", "url": _clip(page.url, MAX_URL),
+        "status": "error", "reason": "load_failed", "url": _shown_url(page.url),
         "detail": "The page did not load after that action.",
     }
 
@@ -639,6 +718,9 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     page = _live_page(s)
     if page.url.startswith("chrome-error://"):
         return _load_failed(page, after_action)
+    refused = _refusal(s, page)
+    if refused is not None:  # the tab holds the proxy's refusal, never a page to read as "ok"
+        raise refused
     elements: list[dict[str, Any]] = []
     places: list[tuple[float, bool]] = []
     texts: list[str] = []
@@ -696,7 +778,7 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
-        "url": _clip(page.url, MAX_URL),
+        "url": _shown_url(page.url),
         "title": _clip(await page.title(), MAX_TITLE),
         "note": UNTRUSTED,
         "elements": elements,
@@ -822,6 +904,59 @@ async def _settle(page: Any) -> None:
         pass
 
 
+# A link that opens its page in a new tab.
+OPENS_NEW_TAB_JS = "(e) => !!(e.closest && e.closest('a[target=\"_blank\"]'))"
+# How long a click on such a link waits for the new tab to be reported.
+NEW_TAB_WAIT_S = 2.0
+
+
+async def _settle_new_tab(s: Session, page: Any, tabs: int, opens_tab: bool) -> None:
+    """A click that opens a new tab: wait for the tab to be reported, then let it load. Until it
+    commits its first page its address is still blank, so the proxy's refusal could not yet be matched
+    to it (a loaded CI machine read a refused address as a page)."""
+    if opens_tab:
+        for _ in range(int(NEW_TAB_WAIT_S / 0.05)):
+            if len(page.context.pages) > tabs:
+                break
+            await asyncio.sleep(0.05)
+    new_page = s.page
+    if new_page is not None and new_page is not page and not new_page.is_closed():
+        await _settle(new_page)
+
+
+# How long a scroll may take to land before the page is read anyway (the end of the page never moves).
+SCROLL_WAIT_MS = 1000
+# A promise (boxed: evaluate_handle would wait for a bare one) that resolves on the first scroll anywhere
+# in the page (capture: an inner box's scroll does not bubble), or after the wait; then two frames, so
+# the page's own scroll handlers (lazy sections) have run and drawn.
+SCROLL_SEEN_JS = """(ms) => ({seen: new Promise((done) => {
+  const end = () => {
+    removeEventListener('scroll', on, true);
+    requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+  };
+  const on = () => { clearTimeout(t); end(); };
+  const t = setTimeout(end, ms);
+  addEventListener('scroll', on, {capture: true, once: true});
+})})"""
+
+
+async def _wheel(page: Any, dy: float) -> None:
+    """Turn the wheel and wait for the page to move. ``mouse.wheel`` returns before Chromium scrolls
+    (the scroll lands a frame or more later), so a look straight after it read the page as it was:
+    a form that draws its next section on scroll looked like it had nothing below."""
+    seen = await page.evaluate_handle(SCROLL_SEEN_JS, SCROLL_WAIT_MS)
+    try:
+        await page.mouse.wheel(0, dy)
+        await asyncio.wait_for(page.evaluate("(box) => box.seen", seen), SCROLL_WAIT_MS / 1000 + FRAME_READ_TIMEOUT_S)
+    except Exception:  # noqa: BLE001, S110 - the page navigated or never answers: read it as it is
+        pass
+    finally:
+        try:
+            await seen.dispose()
+        except Exception:  # noqa: BLE001 - its page is already gone
+            logger.debug("browser_agent scroll handle dispose failed", exc_info=True)
+
+
 # The same action this many times in a row gets a warning (browser-use browser_use/agent/views.py:157-178,
 # :211-215 nudges at 5, 8, 12 repeats; a smaller window here because each of our steps is one tool call).
 REPEAT_LIMIT = 3
@@ -861,7 +996,7 @@ async def _save_proof(page: Any, gate: Gate) -> bool:
     if gate.save_proof is None:
         return False
     try:
-        await gate.save_proof(await page.screenshot(type="jpeg", quality=70))
+        await gate.save_proof(await _capture(page, quality=70))
     except Exception:  # noqa: BLE001 - proof is extra: the application still went
         logger.warning("browser proof screenshot not saved", exc_info=True)
         return False
@@ -915,7 +1050,7 @@ async def run(
         except BrowserError as exc:
             if exc.status == "needs_you" and not exc.url:
                 try:
-                    exc.url = _live_page(s).url
+                    exc.url = redact_url_for_display(_live_page(s).url)
                 except BrowserError:
                     pass
             raise
@@ -928,7 +1063,7 @@ async def run(
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
             if getattr(exc, "status_code", None) is not None:
                 raise  # an HTTP refusal from the gate (e.g. not the caller's application) stays one
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
         if action not in ("click", "look"):
@@ -966,16 +1101,26 @@ async def _act(
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
         await _settle(page)
+        if (refusal := _refusal(s, page)) is not None:
+            raise refusal
         return await look(s)
     if action == "look":
         return await look(s)
     if action == "back":
         page = _live_page(s)
-        await page.go_back()
+        try:
+            await page.go_back()
+        except Exception as exc:
+            # The history entry is a private address: the request screen (route) refused it.
+            if "ERR_BLOCKED_BY_CLIENT" in str(exc):
+                raise _hop_refused() from None
+            raise
         await _settle(page)
+        if (refusal := _refusal(s, page)) is not None:
+            raise refusal
         return await look(s, after_action=True)
     # A CAPTCHA stops the run: past this point every action could work the check itself.
     if await _page_captcha(_live_page(s)):
@@ -986,7 +1131,7 @@ async def _act(
         if text not in ("down", "up"):
             raise BrowserError("refused", "bad_scroll", 'scroll needs text "down" or "up".')
         page = _live_page(s)
-        await page.mouse.wheel(0, 800 if text == "down" else -800)
+        await _wheel(page, 800 if text == "down" else -800)
         await _settle(page)
         return await look(s, after_action=True)
 
@@ -1044,11 +1189,16 @@ async def _act(
         except Exception:  # noqa: BLE001 - unreadable: compared as changed
             before = None
         frames = await _watch(page, frame)
+        try:
+            opens_tab = bool(await loc.evaluate(OPENS_NEW_TAB_JS, timeout=1000))
+        except Exception:  # noqa: BLE001 - unreadable: no wait for a tab
+            opens_tab = False
         if submitted:
             # Set before the click: a click that fails after it reached the page still counts as one.
             s.submitted_on, s.submit_refused = (app_id, url), False
         await loc.click()
         await _settle(page)
+        await _settle_new_tab(s, page, tabs, opens_tab)
         changed = await _changed(page, frames, url, tabs)
         if not changed:
             try:
@@ -1060,13 +1210,14 @@ async def _act(
         else:
             s.dead_clicks[ref] = s.dead_clicks.get(ref, 0) + 1
         try:
-            out = await look(s, after_action=True)
+            # The proxy's refusal is never read as the page (a submit that went still says so below).
+            out = refusal.as_dict() if (refusal := _refusal(s, s.page)) else await look(s, after_action=True)
         except Exception as exc:  # noqa: BLE001 - after a submit, any failure to read must still say it went
             if not submitted:
                 raise
             out = exc.as_dict() if isinstance(exc, BrowserError) else {
                 "status": "error", "reason": "browser_error",
-                "detail": (str(exc).splitlines() or [type(exc).__name__])[0][:300],
+                "detail": _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300],
             }
         out["page_changed"] = changed
         if not changed and not submitted:
@@ -1111,6 +1262,8 @@ async def _act(
             )
         if len(text) > MAX_TYPE_CHARS:
             raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
+        # Windows line breaks are line breaks: "\r\n" and a lone "\r" become "\n" before the check.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         if _CONTROL_CHARS.search(text.replace("\n", "")) or (
             "\n" in text and not await loc.evaluate("(el) => el.tagName === 'TEXTAREA'")
         ):
@@ -1155,27 +1308,34 @@ async def _act(
     name, data = await files(doc_kind)
     page_before, near_before = await _upload_texts(frame, loc)
     is_file_input = (await loc.evaluate("(el) => el.tagName === 'INPUT' && el.type === 'file'"))
-    with tempfile.TemporaryDirectory(prefix="j360-upload-") as tmp:
-        path = os.path.join(tmp, name)
-        with open(path, "wb") as fh:
-            fh.write(data)
-        if is_file_input:
-            await loc.set_input_files(path)
-        else:
-            # An "Attach" button with no reachable file box: catch the file picker it opens
-            # (Playwright filechooser; the Greenhouse fix in ApplYourself src/apply/fill.py:450-509).
-            try:
-                async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
-                    await loc.click()
-                chooser = await chooser_info.value
-            except Exception:  # noqa: BLE001 - the button opened no file picker
-                raise BrowserError(
-                    "refused", "not_an_upload",
-                    "That control did not open a file picker. Use the file box or the Attach button.",
-                ) from None
-            await chooser.set_files(path)
+    # A bytes payload, never a temp file: the page reads the file after the change event (Greenhouse, Ashby),
+    # and a file already deleted by then fails with NotFoundError.
+    payload = {"name": name, "mimeType": "application/pdf", "buffer": data}
+    if is_file_input:
+        await loc.set_input_files(payload)
+    else:
+        # An "Attach" button with no reachable file box: catch the file picker it opens
+        # (Playwright filechooser; the Greenhouse fix in ApplYourself src/apply/fill.py:450-509).
+        try:
+            async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
+                await loc.click()
+            chooser = await chooser_info.value
+        except Exception:  # noqa: BLE001 - the button opened no file picker
+            raise BrowserError(
+                "refused", "not_an_upload",
+                "That control did not open a file picker. Use the file box or the Attach button.",
+            ) from None
+        await chooser.set_files(payload)
     await _settle(page)
     page_after, near_after = await _upload_texts(frame, loc)
+    # The site uploads in the background: wait (up to ~10 s) for the file name or an error to be drawn.
+    for _ in range(UPLOAD_POLL_STEPS):
+        if name in page_after or name in near_after or any(
+            _UPLOAD_ERROR.search(ln) and ln.strip() not in near_before for ln in near_after.splitlines()
+        ):
+            break
+        await asyncio.sleep(UPLOAD_POLL_STEP_S)
+        page_after, near_after = await _upload_texts(frame, loc)
     out = await look(s, after_action=True)
     # A site can take the file into the box and still show an error (Greenhouse): believe only the file name
     # the site newly drew on the page, and never over an error that appeared next to the field.
@@ -1188,6 +1348,8 @@ async def _act(
     return out
 
 
+UPLOAD_POLL_STEPS = 40
+UPLOAD_POLL_STEP_S = 0.25
 _UPLOAD_ERROR = re.compile(r"failed|error|try again|too large|not supported", re.IGNORECASE)
 
 
@@ -1225,11 +1387,32 @@ def live_key(user_id: str) -> str:
 _live_hosts: dict[str, str] = {}
 
 
+SHOT_TRIES = 3
+
+
+async def _capture(page: Any, *, quality: int) -> bytes:
+    """A JPEG of the page. Taken while a navigation commits (a sign-in form that submits and reloads on
+    Enter), Chromium answers "Unable to capture screenshot": wait for the new page's HTML, then try
+    again, a bounded number of times; the last try's failure is raised as it is."""
+    for attempt in range(SHOT_TRIES - 1):
+        try:
+            image: bytes = await page.screenshot(type="jpeg", quality=quality)
+            return image
+        except Exception:  # noqa: BLE001 - mid-navigation: wait for the new page, then the next try
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=ACTION_TIMEOUT_MS)
+            except Exception:  # noqa: BLE001, S110 - still loading: the next try says so
+                pass
+            await asyncio.sleep(0.1 * (attempt + 1))
+    last: bytes = await page.screenshot(type="jpeg", quality=quality)
+    return last
+
+
 async def _shot(s: Session) -> dict[str, Any]:
     import base64  # noqa: PLC0415
 
     page = _live_page(s)
-    png = await page.screenshot(type="jpeg", quality=60)
+    png = await _capture(page, quality=60)
     return {
         "status": "ok", "url": _clip(page.url, MAX_URL), "title": _clip(await page.title(), MAX_TITLE),
         "width": VIEWPORT["width"], "height": VIEWPORT["height"],

@@ -157,7 +157,7 @@ async def test_added_by_comes_from_the_credential(authenticated_async_context):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# R2 — idempotent on email; no email = no identity
+# R2 — idempotent on email; without one, on LinkedIn URL then name
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -182,11 +182,15 @@ async def test_same_email_twice_is_the_same_contact(authenticated_async_context)
 
 
 @pytest.mark.asyncio
-async def test_without_an_email_every_add_is_a_new_row(authenticated_async_context):
+async def test_without_an_email_two_different_people_are_two_rows(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        a = await _add_contact(client, app_id, email="", name="Alex")
-        b = await _add_contact(client, app_id, email="", name="Alex")
+        a = await _add_contact(
+            client, app_id, email="", name="Alex Rivera", linkedin_url="https://www.linkedin.com/in/alex-rivera"
+        )
+        b = await _add_contact(
+            client, app_id, email="", name="Alexa Rivers", linkedin_url="https://www.linkedin.com/in/alexa-rivers"
+        )
         assert a.status_code == 201 and b.status_code == 201
         assert a.json()["contact"]["id"] != b.json()["contact"]["id"]
         detail = await client.get(f"/api/applications/{app_id}")

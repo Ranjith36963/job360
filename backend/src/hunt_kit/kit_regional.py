@@ -63,11 +63,15 @@ _WS = re.compile(r"\s+")
 
 
 def _wanted(countries: list[str], *codes: str) -> list[str]:
-    """The given ISO codes that appear in the user's countries (in the order given), or all of them for "*"."""
+    """The given ISO codes that appear in the user's countries, then (for "*") all the others.
+
+    The user's own codes come first: the core adds "*" next to them by default (--visa-onsite), and a shared
+    request budget spent in a fixed market order could otherwise run out before the user's own country."""
     have = {c.upper() for c in countries}
+    mine = [c for c in codes if c in have]
     if "*" in have:  # --visa-onsite: run everywhere; the core keeps only ads that sponsor a visa
-        return list(codes)
-    return [c for c in codes if c in have]
+        return mine + [c for c in codes if c not in mine]
+    return mine
 
 
 class _Budget:

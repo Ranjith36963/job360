@@ -205,13 +205,11 @@ jobs:
           draft=$(echo "$meta"  | jq -r .isDraft)
           branch=$(echo "$meta" | jq -r .headRefName)
           headowner=$(echo "$meta" | jq -r .headRepositoryOwner.login)
-          parked=$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')
           repoowner="${GH_REPO%%/*}"
 
           fail() { echo "::error::$1"; gh pr comment "$num" --body "**PR repair refused:** $1"; exit 1; }
           [ "$state" = "OPEN" ]        || fail "PR #$num is $state, not open"
           [ "$draft" = "false" ]       || fail "PR #$num is a draft — drafts are left alone"
-          [ "$parked" = "false" ]      || fail "PR #$num is parked by the WIP limit (wip:parked) — remove the label first"
           [ "$headowner" = "$repoowner" ] || fail "PR #$num comes from a FORK ($headowner) — a stranger's code never gets an agent pushed onto it (G1)"
           case "$author" in
             # EXACT LOGINS, NOT A PREFIX GLOB. `dependabot*` matches
@@ -348,7 +346,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
 
+      # Copied from ci-offline.yml. tests/conftest.py builds one schema template
+      # per pytest process (per xdist worker) with pg_dump and RAISES on CI when
+      # it cannot: the runner's own client drifts ahead of this pg16 service, so
+      # use the service container's own pg_dump, the server's exact version.
+      - name: Use the Postgres service's own pg_dump
+        if: steps.token.outputs.have == 'true'
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pgbin"
+          printf '#!/bin/sh\nexec docker exec -i %s pg_dump "$@"\n' "$PG_CONTAINER" > "$RUNNER_TEMP/pgbin/pg_dump"
+          chmod +x "$RUNNER_TEMP/pgbin/pg_dump"
+          echo "$RUNNER_TEMP/pgbin" >> "$GITHUB_PATH"
+
       # ── Evidence for the agent: failing tests, as a file (G3) ──────────────
+      # `-n auto` (pytest-xdist, a dev extra), as offline-suite runs it: the
+      # serial suite took 15-27 min here (CI audit, 2026-10-20).
       - name: Capture the current test failures
         if: steps.token.outputs.have == 'true'
         id: tests
@@ -361,7 +375,7 @@ jobs:
           # re-check below needs to know whether the suite is red, and the old
           # `pytest | tail` form only ever reported tail's status.
           rc=0
-          python -m pytest -q -p no:randomly > "$RUNNER_TEMP/pytest-full.txt" 2>&1 || rc=$?
+          python -m pytest -q -p no:randomly -n auto > "$RUNNER_TEMP/pytest-full.txt" 2>&1 || rc=$?
           tail -n 120 "$RUNNER_TEMP/pytest-full.txt" > ../agent-test-output.txt
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           echo "--- pytest exit $rc, captured $(wc -l < ../agent-test-output.txt) lines ---"
@@ -867,7 +881,7 @@ jobs:
         # step could never go red, and a repair that broke tests still pushed.
         run: |
           set -o pipefail
-          python -m pytest -q -p no:randomly 2>&1 | tail -15
+          python -m pytest -q -p no:randomly -n auto 2>&1 | tail -15
 
       # ── G6: ship additive commits to the SAME branch. Never merge the PR. ──
       - name: Push the repair to the PR branch

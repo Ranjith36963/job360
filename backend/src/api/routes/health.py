@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import os
+import re
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
@@ -11,6 +13,7 @@ from src.api.models import (
     HealthResponse,
     LivezResponse,
     StatusResponse,
+    VersionResponse,
 )
 from src.core import settings
 from src.core.tenancy import DEFAULT_TENANT_ID
@@ -21,10 +24,30 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
+# A git SHA and nothing else: never echo an env value that does not look like one.
+_SHA = re.compile(r"[0-9a-f]{7,40}")
+
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     return HealthResponse(status="ok", version="1.0.0")
+
+
+@router.get("/version", response_model=VersionResponse)
+async def version(response: Response) -> VersionResponse:
+    """The commit this process was deployed from (2026-10-20).
+
+    post-merge-watch.yml polls this until it reports the merge SHA, so "deployed"
+    means THIS commit is serving, not that the old container still answers 200
+    (readyz and /health cannot tell the two apart). Railway injects
+    RAILWAY_GIT_COMMIT_SHA on every GitHub deploy, and a rollback restores the old
+    deployment's variables, so after a rollback this reports the old SHA. Public and
+    data-free: the SHA is already public on GitHub. ``no-store`` so no proxy can
+    serve an old SHA after the swap.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    raw = os.getenv("RAILWAY_GIT_COMMIT_SHA", "").strip().lower()
+    return VersionResponse(sha=raw if _SHA.fullmatch(raw) else "unknown")
 
 
 @router.get("/livez", response_model=LivezResponse)

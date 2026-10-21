@@ -10,14 +10,15 @@ Print this checklist and tick each step:
 2. **Check first:** `list_people` so you never add someone twice.
 3. **Record them:** `add_contact` with the `application_id`, their `role`,
    and `found_via` - where you found them: `company_site`, `linkedin`,
-   `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Put any detail
-   (the page, the post) in `notes`.
+   `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Pass the page as
+   `source_url`; other detail in `notes`.
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
    `email`, `linkedin` or `other`). This is a draft.
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
-   `preferences.daily_check` from `get_profile`.
-   - `auto` (or the older `scheduled`), channel `email`: right before Send,
+   `settings.outreach_send` from `get_profile` (its `effective`; the Gmail
+   mode `preferences.daily_check` never allows sending).
+   - `auto`, channel `email`: right before Send,
      call `check_outreach(contact_id, message_id)` (`message_id` = the
      `artifact_id` `save_artifact` gave you). It checks the user's settings,
      an earlier send or reply (the Gmail Sent folder too: look there first),
@@ -29,7 +30,7 @@ Print this checklist and tick each step:
      - `ask`: save a Gmail draft and `ask_user` "Press Send on the draft to
        <name>" (Needs you); the user sends.
      - `stop`: do not send; tell the user its `detail` in one line.
-   - `ask`, `paused`, `declined` or empty: draft only. The user sends it.
+   - `draft_only` (the default): draft only. The user sends it.
      Never send it yourself.
    - Any mode: record `outreach_sent` with `record_event` (`contact_id`,
      `channel`) only when the Sent folder shows it, with its message id as

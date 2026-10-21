@@ -109,9 +109,7 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
 **Unblock it.**
 - The fastest way to exercise the product path end-to-end is `POST /api/jobs/bring`
   (or the `/bring` UI form) with a job-ad URL or pasted text — there is no source
-  pipeline to run standalone anymore (`backend/src/cli.py`'s own module docstring
-  says so: slice 5 deleted `run`/`status`/`view`/`sources`; the CLI only has `api`
-  and `setup-profile`).
+  pipeline to run standalone anymore (slice 5 deleted `run`/`status`/`view`/`sources`).
 - Add temporary structured logs Claude can grep to prove a branch executed.
 
 ---
