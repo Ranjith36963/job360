@@ -5,7 +5,7 @@
 >
 > This file describes the one path the app has. The path itself is stated once, in root [`CLAUDE.md`](CLAUDE.md); an Application is born in `services/applications/spine.birth_application`, called from `api/routes/bring.py`. Route and endpoint counts: measure it (`ls`, `grep -c`, `python -m pytest --collect-only -q`).
 >
-> **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day.** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
+> **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) went in the cleanup audit that followed (#503).** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
 >
 > Three Railway services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02, and `src/workers/` was deleted with the sourcing era — nothing runs in the background (no notifications, no crons).
 

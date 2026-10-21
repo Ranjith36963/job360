@@ -131,7 +131,7 @@ If a script is a one-shot phase migrator (touches the tree, run-once,
 then dead), delete it once its migration has run rather than leaving it in
 either live `scripts/` directory — git history is the record. There is no
 archive directory for one-shot scripts; the two doc-archive directories this
-repo once had were both removed 2026-09-05.
+repo once had were both removed (#437 and #503).
 
 ## Architecture + rules
 

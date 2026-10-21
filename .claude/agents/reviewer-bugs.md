@@ -12,7 +12,7 @@ bugs in the code under review — nothing else.
 ## What to hunt
 - Logic errors, off-by-one, wrong operators, inverted conditions.
 - Unhandled edge cases: empty/None, missing keys, first-run, concurrent access.
-- Security: IDOR (a per-user route not scoped by `user.id` — CLAUDE.md rules #12/#25), SQL
+- Security: IDOR (a per-user route not scoped by `user.id` — `.claude/skills/hard-rules/SKILL.md` rules #12/#25), SQL
   built from user input, secrets in logs/errors, missing auth.
 - Data integrity: anything touching `normalized_key()` (rule #1) or the shared `jobs`
   catalog gaining `user_id` (rule #10).
