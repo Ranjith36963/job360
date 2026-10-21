@@ -1,4 +1,4 @@
-"""Niche job sites, batch B, for the Job360 hunt kit (3 small feeds).
+"""Niche job sites, batch B, for the Job360 hunt kit (6 small feeds).
 
 Same contract as ``kit_regional.FEEDS``: ``fetch_x(queries, http, stats, *, days, countries) -> list[Job]``,
 never raises, networking only through the ``http`` callable the core passes in. Every ad names its own
@@ -31,6 +31,7 @@ import json
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator
 from urllib.parse import urlsplit
@@ -105,6 +106,7 @@ def _script_bodies(page: Any, open_tag: re.Pattern[str]) -> Iterator[str]:
 
 SITES_MAX_REQUESTS = 30  # hard cap per site per run (index + searches + detail pages)
 DETAIL_CAP = 15  # ad pages read per run, per site
+LINK_CAP = 2000  # unique ad links collected from one page (the query filter runs after, so above DETAIL_CAP)
 PAUSE_S = 1.0  # between two requests to one site (tests set it to 0)
 AIRSWIFT_PAUSE_S = 15.0  # airswift.com answered 429 to anything faster (freehire pacer.go:106-138)
 AIRSWIFT_DETAILS = 8  # so few pages, because of that pace
@@ -473,8 +475,220 @@ def fetch_functionalworks(queries: list[str], http: HttpFn, stats: Stats, *, day
     return _keep(_unique(jobs), queries, days)
 
 
+# ------------------------------------------------------------------------------------------ Rapyd
+# Borrowed from freehire internal/ingest/sources/rapyd.go:12-17 (Rapyd's own WordPress careers site, no ATS,
+# server-rendered HTML, no JobPosting block), :33 (listing https://www.rapyd.net/company/careers-search/),
+# :92-98 (positions are the links matching /company/careers/positions/<slug>/, resolved against the listing URL,
+# first seen order, no repeats), :100-108 (slug regex), :45-90 (detail page: :58-65 the h1 is the title, a page
+# without one is not a posting; :67-70 the element with class "country-term" is the location; :72-77 the column
+# with class "single-career-position__main" is the description; :86-88 remote only if the location text says
+# so, never the title). Test shape: rapyd_test.go:25-36 (detail), :14-23 (listing) and :74-113. NOT IN
+# REFERENCE: the employer name "Rapyd" (freehire uses e.Company from its config entry, rapyd.go:83;
+# rapyd_test.go:75), the title match on the URL slug before a page is read, and the cap on pages.
+RAPYD_LIST = "https://www.rapyd.net/company/careers-search/"
+_RAPYD_POS = re.compile(r"/company/careers/positions/([^/?#]+)")
+
+
+def rapyd_links(page: Any) -> list[str]:
+    """Absolute position URLs on the listing page, in order, without repeats."""
+    out: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(page, str):
+        return out
+    for n in _walk(_tree(page)):
+        href = n.attrs.get("href", "") if n.tag == "a" else ""
+        m = _RAPYD_POS.search(href)
+        if m:
+            url = f"https://www.rapyd.net/company/careers/positions/{m.group(1)}/"
+            if url not in seen:
+                seen.add(url)
+                out.append(url)
+                if len(out) >= LINK_CAP:
+                    break
+    return out
+
+
+def parse_rapyd_ad(page: Any, url: str) -> Job | None:
+    root = _tree(page)
+    h1 = _first(root, lambda n: n.tag == "h1")
+    title = _text(h1) if h1 else ""
+    if not title:
+        return None
+    loc = _by_class(root, "country-term")
+    where = _text(loc) if loc else ""
+    main = _by_class(root, "single-career-position__main")
+    return _made("rapyd", "Rapyd careers", title=title, company="Rapyd", url=url, place=where, country="",
+                 description=_plain(main) if main else "", remote=_remote(where))
+
+
+@_feed
+def fetch_rapyd(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """Rapyd's own careers site (listing, then position pages); worldwide."""
+    budget = _Budget(SITES_MAX_REQUESTS)
+    links = [u for u in rapyd_links(_fetch(http, stats, "rapyd", budget, RAPYD_LIST, as_json=False))
+             if _slug_hit(u.rstrip("/").rsplit("/", 1)[-1], queries)]
+    jobs = _read(http, stats, "rapyd", budget, links, DETAIL_CAP, parse_rapyd_ad)
+    jobs = [j for j in jobs if _place_ok(j["location"], countries, j["remote"])]
+    return _keep(_unique(jobs), queries, days)
+
+
+# ----------------------------------------------------------------------------------- StartupAndVC
+# Borrowed from freehire internal/ingest/sources/startupandvc.go:13-23 (curated venture-capital jobs board that
+# links out to the original posting, one listing page of at most 100 cards, no paging), :37-44 (base
+# https://www.startupandvc.com/ and listing https://www.startupandvc.com/venture-capital-jobs), :46-59 (listing
+# links), :130-138 (a vacancy link is /venture-capital-jobs/<slug>; the bare listing path and deeper paths never
+# match), :62-94 (detail page: ld+json JobPosting gives title, hiringOrganization.name as the employer,
+# datePosted; no JobPosting = not a posting), :96-116 (posting struct; location = first jobLocation place),
+# :118-128 (the real description is the element with class "w-richtext"; the ld+json one is a one-line stub),
+# :140-143 (datePosted layout "Jan 2, 2006", e.g. "Jul 07, 2026"), :145-163 (the original posting is the href of
+# the page's a.button-large "Apply now" link with its query and fragment cut off: they are the board's
+# tracking). Test shapes: startupandvc_test.go:17-33 (detail) and :37-48 (listing). NOT IN REFERENCE: the title
+# match on the URL slug before a page is read, the cap on pages, and dropping an ad whose page names no employer
+# (freehire falls back to e.Company, startupandvc.go:88).
+SVC_BASE = "https://www.startupandvc.com/"
+SVC_LIST = SVC_BASE + "venture-capital-jobs"
+_SVC_SLUG = re.compile(r"/venture-capital-jobs/([a-z0-9][a-z0-9-]*)(?:$|[?#])")
+
+
+def _svc_date(value: Any) -> str:
+    s = str(value or "").strip()
+    for fmt in ("%b %d, %Y", "%B %d, %Y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return _date(s)
+
+
+def _svc_slug(url: str) -> str:
+    m = _SVC_SLUG.search(url)
+    return m.group(1) if m else ""
+
+
+def svc_links(page: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(page, str):
+        return out
+    for n in _walk(_tree(page)):
+        href = n.attrs.get("href", "") if n.tag == "a" else ""
+        slug = _svc_slug(href) if not href.startswith("//") else ""
+        if not slug:
+            continue
+        try:
+            host = (urlsplit(href).hostname or "").lower() if href.startswith("http") else "www.startupandvc.com"
+        except ValueError:
+            continue
+        # NOT IN REFERENCE: freehire resolves any absolute href (html.go:228-251); the kit sends a request only
+        # to the board's own host, and rebuilds the https URL from the slug (no http, port, query or repeats).
+        if host in ("www.startupandvc.com", "startupandvc.com"):
+            url = SVC_BASE + "venture-capital-jobs/" + slug
+            if url not in seen:
+                seen.add(url)
+                out.append(url)
+                if len(out) >= LINK_CAP:
+                    break
+    return out
+
+
+def _svc_apply_link(href: str) -> str:
+    """The Apply-now target without query, fragment, userinfo; "" when it is not a plain https host link."""
+    try:
+        u = urlsplit(href.strip())
+        host = u.hostname
+        u.port  # noqa: B018 - raises ValueError on a bad port
+    except ValueError:
+        return ""
+    if u.scheme != "https" or not host or u.username is not None or u.password is not None:
+        return ""
+    return f"https://{host}{u.path}"
+
+
+def parse_startupandvc_ad(page: Any, url: str) -> Job | None:
+    ps = _ld_postings(page if isinstance(page, str) else "")
+    p = ps[0] if ps else {}
+    title, company = _WS.sub(" ", str(p.get("title") or "")).strip(), _posting_company(p)
+    if not (title and company):
+        return None
+    locality, ctext = _posting_place(p)
+    root = _tree(page)
+    body = _by_class(root, "w-richtext")
+    desc = _plain(body) if body else ""
+    btn = _first(root, lambda n: n.tag == "a" and "button-large" in n.classes() and bool(n.attrs.get("href")))
+    link = _svc_apply_link(btn.attrs["href"]) if btn else ""
+    link = link or url
+    return _made("startupandvc", "StartupAndVC", title=title, company=company, url=link, place=locality,
+                 country=ctext, posted=_svc_date(p.get("datePosted")),
+                 description=desc or _unescaped(p.get("description")), remote=_remote(locality))
+
+
+@_feed
+def fetch_startupandvc(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
+                       countries: list[str]) -> list[Job]:
+    """StartupAndVC (venture-capital roles): the listing, then the matching ads; worldwide."""
+    budget = _Budget(SITES_MAX_REQUESTS)
+    links = [u for u in svc_links(_fetch(http, stats, "startupandvc", budget, SVC_LIST, as_json=False))
+             if _slug_hit(_svc_slug(u), queries)]
+    jobs = _read(http, stats, "startupandvc", budget, links, DETAIL_CAP, parse_startupandvc_ad)
+    jobs = [j for j in jobs if _place_ok(j["location"], countries, j["remote"])]
+    return _keep(_unique(jobs), queries, days)
+
+
+# ---------------------------------------------------------------------------------------- TechTree
+# Borrowed from freehire internal/ingest/sources/techtree.go:11-16 (small AI-recruiting board; flat sitemap, ld+json
+# JobPosting plus a "prose" body), :37 (sitemap https://jobs.techtree.dev/sitemap.xml), :39-47 (an ad is
+# /job/<uuid>; other sitemap entries are dropped), :68-105 (detail page: :81-84 an ad with no employer in
+# hiringOrganization.name is dropped; :86-90 the full text is the element with class "prose" and a page without it
+# is dropped, the ld+json description is only a short summary; :92 jobLocation.address is a plain string, e.g.
+# "Latin America (remote)"), :107-118 (datePosted is a zone-less ISO time, "2026-09-11T07:46:06.765320"),
+# :120-136 (posting struct). Test shapes: techtree_test.go:22-31 (sitemap) and :34-40 (ld+json ad with a "prose"
+# body); the sitemap entry shape is testdata/techtree_sitemap.xml:19-23.
+# NOT IN REFERENCE: which ads come first in the sitemap (the kit reads the first DETAIL_CAP in file order; the
+# URL carries no title to match, so the user's titles are matched on the page).
+TT_SITEMAP = "https://jobs.techtree.dev/sitemap.xml"
+_TT_JOB = re.compile(r"/job/([0-9a-fA-F-]{36})")
+
+
+def parse_techtree_ad(page: Any, url: str) -> Job | None:
+    ps = _ld_postings(page if isinstance(page, str) else "")
+    p = ps[0] if ps else {}
+    title, company = _WS.sub(" ", str(p.get("title") or "")).strip(), _posting_company(p)
+    root = _tree(page)
+    body = _by_class(root, "prose")
+    if not (title and company and body):
+        return None
+    loc = p.get("jobLocation")
+    addr = loc.get("address") if isinstance(loc, dict) else ""
+    where = str(addr if isinstance(addr, str) else "").strip()
+    return _made("techtree", "TechTree", title=title, company=company, url=url, place=where, country="",
+                 posted=_date(p.get("datePosted")), description=_plain(body), remote=_remote(where))
+
+
+@_feed
+def fetch_techtree(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
+    """TechTree (AI recruiting agency board) read through its sitemap; worldwide."""
+    budget = _Budget(SITES_MAX_REQUESTS)
+    urls: list[str] = []
+    seen: set[str] = set()
+    for loc in _sitemap_locs(_fetch(http, stats, "techtree", budget, TT_SITEMAP, as_json=False)):
+        m = _TT_JOB.search(loc)
+        if m and "techtree.dev" in loc:
+            url = "https://jobs.techtree.dev/job/" + m.group(1)
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+                if len(urls) >= LINK_CAP:
+                    break
+    jobs = _read(http, stats, "techtree", budget, urls, DETAIL_CAP, parse_techtree_ad)
+    jobs = [j for j in jobs if _place_ok(j["location"], countries, j["remote"])]
+    return _keep(_unique(jobs), queries, days)
+
+
 FEEDS: dict[str, Callable[..., list[Job]]] = {
     "airswift": fetch_airswift,
     "briefhq": fetch_briefhq,
     "functionalworks": fetch_functionalworks,
+    "rapyd": fetch_rapyd,
+    "startupandvc": fetch_startupandvc,
+    "techtree": fetch_techtree,
 }

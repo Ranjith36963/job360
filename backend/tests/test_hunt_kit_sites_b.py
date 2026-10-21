@@ -1,8 +1,10 @@
 """Offline tests for src/hunt_kit/kit_sites_b.py (fixtures only, no network).
 
 Fixture origins (freehire, MIT): Airswift sitemap and ad page follow airswift_test.go:9-33; Brief follows
-briefhq_test.go:12-39; Functional Works follows functionalworks_test.go:45-52. The hosts are unreachable from the
-build container: nothing here was checked against a live response.
+briefhq_test.go:12-39; Functional Works follows functionalworks_test.go:45-52; Rapyd follows rapyd_test.go:14-36;
+StartupAndVC follows startupandvc_test.go:17-48; TechTree follows techtree_test.go:22-40 and
+testdata/techtree_sitemap.xml. The hosts are unreachable from the build container: nothing here was checked against a
+live response.
 """
 from __future__ import annotations
 
@@ -200,8 +202,155 @@ def test_functionalworks_empty_and_non_200():
     assert sb.fetch_functionalworks([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
 
 
+# ----------------------------------------------------------------------------------------- Rapyd
+RP_POS1 = "https://www.rapyd.net/company/careers/positions/finance-data-developer-bogota-colombia/"
+RP_LIST = ('<html><body><a href="/company/careers/positions/finance-data-developer-bogota-colombia/">Finance</a>'
+           f'<a href="{RP_POS1}">Apply</a>'
+           '<a href="/company/careers/positions/sales-manager-bogota-colombia/">Sales</a>'
+           '<a href="/company/careers/">All</a><a href="/company/about/">About</a></body></html>')
+
+
+def _rp_page(title="Finance Data Analyst", where="Bogota, Colombia"):
+    return (f'<html><body><div class="country-term"><h4>{where}</h4></div>'
+            f'<h1 class="vcex-heading"><span>{title}</span></h1>'
+            '<div class="single-career-position__main"><div class="job-details"><h3>Description</h3>'
+            "<p>Build <b>pipelines</b>.</p><h3>Requirements</h3><ul><li>Python</li></ul></div></div>"
+            '<div class="footer"><a href="/company/partners">Partners</a></div></body></html>')
+
+
+def test_rapyd_happy_path_prefilter_and_country():
+    routes = {"careers-search": (200, RP_LIST), "finance-data-developer": (200, _rp_page())}
+    http = _http(routes)
+    jobs = sb.fetch_rapyd(["finance"], http, {}, days=BIG, countries=["CO"])
+    _check(jobs, "rapyd")
+    j = jobs[0]
+    assert len(jobs) == 1 and j["url"] == RP_POS1 and j["title"] == "Finance Data Analyst" and j["company"] == "Rapyd"
+    assert j["location"] == "Bogota, Colombia" and "pipelines" in j["description"] and "Python" in j["description"]
+    assert "Partners" not in j["description"]
+    assert [c["url"] for c in http.calls] == [sb.RAPYD_LIST, RP_POS1]  # the sales ad was never read
+    assert sb.fetch_rapyd(["finance"], _http(routes), {}, days=BIG, countries=["GB"]) == []
+    assert len(sb.fetch_rapyd(["finance"], _http(routes), {}, days=BIG, countries=[])) == 1
+
+
+def test_rapyd_failed_detail_skips_only_that_one_and_refusal_stops():
+    routes = {"careers-search": (200, RP_LIST), "sales-manager": (404, None),
+              "finance-data-developer": (200, _rp_page())}
+    http = _http(routes)
+    jobs = sb.fetch_rapyd([], http, {}, days=BIG, countries=[])
+    assert len(jobs) == 1 and len(http.calls) == 3
+    routes["finance-data-developer"] = (429, None)
+    http = _http(routes)
+    assert sb.fetch_rapyd([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 2
+
+
+def test_rapyd_empty_and_non_200_and_no_heading():
+    assert sb.fetch_rapyd([], _http({"careers-search": (200, "<html></html>")}), {}, days=BIG, countries=[]) == []
+    http = _http({"careers-search": (503, None)})
+    assert sb.fetch_rapyd([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
+    assert sb.parse_rapyd_ad("<html><body><p>layout page</p></body></html>", RP_POS1) is None
+
+
+# ------------------------------------------------------------------------------- StartupAndVC
+SV_LIST = ('<html><body><a href="/venture-capital-jobs/associate-9a2fb">A Role</a>'
+           '<a href="/venture-capital-jobs/associate-9a2fb">A Company</a>'
+           '<a href="/venture-capital-jobs/analyst-39b3f">Analyst</a>'
+           '<a href="/venture-capital-jobs">All jobs</a><a href="/about-us">About</a></body></html>')
+SV_APPLY = "https://www.linkedin.com/jobs/view/4417182287/?eBP=xyz&trk=abc?utm_source=startupandvc"
+
+
+def _sv_page(title="Associate", company="Acme Ventures", apply=SV_APPLY, locality="London", country="UK"):
+    btn = f'<a href="{apply}" target="_blank" class="button-large fw w-button">Apply now</a>' if apply else ""
+    return ("<html><head></head><body><h1>" + title + "</h1>"
+            + _ld(title=title, description=f"<p>{company} is looking for a {title}.</p>", datePosted="Jul 07, 2026",
+                  hiringOrganization={"name": company},
+                  jobLocation={"@type": "Place", "address": {"addressLocality": locality, "addressCountry": country}})
+            + '<div class="w-richtext"><h2>POSITION SUMMARY</h2><p>Real body with detail.</p>'
+              "<script>alert(1)</script></div>" + btn + "</body></html>")
+
+
+def test_startupandvc_happy_path_original_link_and_prefilter():
+    http = _http({"venture-capital-jobs/associate-9a2fb": (200, _sv_page()),
+                  "venture-capital-jobs": (200, SV_LIST)})
+    jobs = sb.fetch_startupandvc(["associate"], http, {}, days=BIG, countries=["GB"])
+    _check(jobs, "startupandvc")
+    j = jobs[0]
+    assert len(jobs) == 1 and j["url"] == "https://www.linkedin.com/jobs/view/4417182287/"  # tracking cut off
+    assert j["company"] == "Acme Ventures" and j["posted"] == "2026-07-07" and j["location"] == "London, UK"
+    assert "Real body with detail." in j["description"] and "alert" not in j["description"]
+    assert [c["url"] for c in http.calls][0] == sb.SVC_LIST and len(http.calls) == 2  # "analyst" never read
+
+
+def test_startupandvc_links_stay_on_the_boards_own_host():
+    page = ('<a href="https://evil.example/venture-capital-jobs/x-1">x</a>'
+            '<a href="https://www.startupandvc.com/venture-capital-jobs/ok-1">ok</a>'
+            '<a href="//evil.example/venture-capital-jobs/y-2">y</a>')
+    assert sb.svc_links(page) == ["https://www.startupandvc.com/venture-capital-jobs/ok-1"]
+
+
+def test_startupandvc_no_apply_button_falls_back_and_drops_unusable():
+    page = _sv_page(apply="")
+    http = _http({"associate-9a2fb": (200, page), "analyst-39b3f": (200, "<html>no posting</html>"),
+                  "venture-capital-jobs": (200, SV_LIST)})
+    jobs = sb.fetch_startupandvc([], http, {}, days=BIG, countries=[])
+    assert [j["url"] for j in jobs] == ["https://www.startupandvc.com/venture-capital-jobs/associate-9a2fb"]
+    assert sb.parse_startupandvc_ad(_sv_page(company=""), "https://x.example/a") is None
+    assert sb.fetch_startupandvc([], _http({"associate": (200, _sv_page(locality="Paris", country="France")),
+                                            "venture-capital-jobs": (200, SV_LIST)}), {}, days=BIG,
+                                 countries=["GB"]) == []
+
+
+def test_startupandvc_empty_non_200_and_refusal():
+    assert sb.fetch_startupandvc([], _http({"venture-capital-jobs": (200, "<html></html>")}), {}, days=BIG,
+                                 countries=[]) == []
+    http = _http({"venture-capital-jobs": (500, None)})
+    assert sb.fetch_startupandvc([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
+    http = _http({"associate-9a2fb": (403, None), "venture-capital-jobs": (200, SV_LIST)})
+    assert sb.fetch_startupandvc([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 2
+
+
+# --------------------------------------------------------------------------------------- TechTree
+TT1 = "https://jobs.techtree.dev/job/8773660e-c2c3-4b49-9d03-6f9f76859bc8"
+TT2 = "https://jobs.techtree.dev/job/0515f6f5-8f30-4cb6-abd2-16bf87137a4d"
+TT3 = "https://jobs.techtree.dev/job/e00478de-1575-4da7-bbba-ea2505c9545b"
+
+
+def _tt_page(company="Telepatia", where="Latin America (remote)", prose=True):
+    ldp = dict(title="Mid/Senior AI Engineer, New Products", description="short summary",
+               datePosted="2026-09-11T07:46:06.765320", employmentType="FULL_TIME",
+               jobLocation={"@type": "Place", "address": where})
+    if company:
+        ldp["hiringOrganization"] = {"@type": "Organization", "name": company}
+    body = '<div class="prose prose-base"><p>Full body text.</p><ul><li>Python</li></ul></div>' if prose else ""
+    return "<html><head>" + _ld(**ldp) + "</head><body>" + body + "</body></html>"
+
+
+def test_techtree_happy_path_company_from_ad_and_drops():
+    http = _http({"sitemap.xml": (200, _urlset("https://jobs.techtree.dev/", "https://jobs.techtree.dev/talent-scout",
+                                               TT1 + "?tp=abc", TT2, TT3)),
+                  "8773660e": (200, _tt_page()), "0515f6f5": (200, _tt_page(company="")),
+                  "e00478de": (200, _tt_page(prose=False))})
+    jobs = sb.fetch_techtree([], http, {}, days=BIG, countries=["GB"])
+    _check(jobs, "techtree")
+    j = jobs[0]
+    assert len(jobs) == 1 and j["url"] == TT1 and j["company"] == "Telepatia" and j["remote"] is True
+    assert j["location"] == "Latin America (remote)" and j["posted"] == "2026-09-11"
+    assert "Full body text." in j["description"] and "short summary" not in j["description"]
+    assert len(http.calls) == 4
+
+
+def test_techtree_empty_non_200_refusal_and_query():
+    assert sb.fetch_techtree([], _http({"sitemap.xml": (200, _urlset("https://jobs.techtree.dev/"))}), {}, days=BIG,
+                             countries=[]) == []
+    http = _http({"sitemap.xml": (502, None)})
+    assert sb.fetch_techtree([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
+    http = _http({"sitemap.xml": (200, _urlset(TT1, TT2)), "job/": (429, None)})
+    assert sb.fetch_techtree([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 2
+    ok = _http({"sitemap.xml": (200, _urlset(TT1)), "8773660e": (200, _tt_page())})
+    assert sb.fetch_techtree(["plumber"], ok, {}, days=BIG, countries=[]) == []  # the page is read, then matched
+
+
 # ------------------------------------------------------------------------------- all readers
-RUN_ARGS = {"airswift": [], "briefhq": [], "functionalworks": []}
+RUN_ARGS = {"airswift": [], "briefhq": [], "functionalworks": [], "rapyd": [], "startupandvc": [], "techtree": []}
 
 
 def test_feeds_dict_complete():
@@ -255,7 +404,9 @@ def test_slug_hit_and_remote_helpers():
 
 def test_parsers_survive_garbage_inputs():
     for fn, args in ((sb.parse_airswift_ad, (None, "https://x")), (sb.parse_briefhq, (123,)), (sb.parse_functionalworks, ({"data":
-                     []},))):
+                     []},)), (sb.parse_rapyd_ad, (None, "https://x")), (sb.rapyd_links, (None,)),
+                     (sb.parse_startupandvc_ad, (None, "https://x")), (sb.svc_links, (5,)),
+                     (sb.parse_techtree_ad, (None, "https://x"))):
         assert fn(*args) in ([], None)
 
 
@@ -309,7 +460,8 @@ def test_ld_json_block_with_spaced_or_upper_case_closing_tag():
     assert [p["title"] for p in sb._ld_postings(page)] == ["Welder"]
 
 
-HOSTS = {"airswift": "www.airswift.com", "briefhq": "briefhq.ai", "functionalworks": "functional.works-hub.com"}
+HOSTS = {"airswift": "www.airswift.com", "briefhq": "briefhq.ai", "functionalworks": "functional.works-hub.com", "rapyd":
+         "www.rapyd.net", "startupandvc": "www.startupandvc.com", "techtree": "jobs.techtree.dev"}
 
 
 def test_feeds_are_registered_with_the_kit_and_on_by_default():
@@ -347,16 +499,20 @@ def _ask_why(mod, url):
 def test_feed_hosts_cover_only_the_hosts_the_readers_fetch():
     mod = _hunt_kit_module()
     hosts = dict(mod._FEED_HOSTS)
-    read = {"airswift": ["www.airswift.com", "airswift.com"], "briefhq": ["briefhq.ai", "www.briefhq.ai"],
-            "functionalworks": ["functional.works-hub.com"]}
+    read = {"airswift": ["www.airswift.com", "airswift.com"], "briefhq": ["briefhq.ai", "www.briefhq.ai"], "rapyd":
+            ["www.rapyd.net", "rapyd.net"], "startupandvc": ["www.startupandvc.com", "startupandvc.com"],
+            "techtree": ["jobs.techtree.dev"], "functionalworks": ["functional.works-hub.com"]}
     for feed, names in read.items():
         for host in names:
             assert hosts[feed].search(host), (feed, host)
-    other = {"briefhq": ["app.briefhq.ai"], "airswift": ["careers.airswift.com"], "functionalworks":
+    other = {"rapyd": ["careers.rapyd.net"], "briefhq": ["app.briefhq.ai"], "airswift": ["careers.airswift.com"],
+             "startupandvc": ["blog.startupandvc.com"], "techtree": ["www.techtree.dev"], "functionalworks":
              ["www.functional.works-hub.com"]}
     for feed, names in other.items():
         for host in names:
             assert not hosts[feed].search(host), (feed, host)
+    for url in ("https://careers.rapyd.net/jobs/1",):
+        assert _ask_why(mod, url)["verdict"] != "feed_covered", url
 
 
 def test_script_scan_is_linear_on_unclosed_tags_and_keeps_case_and_space_variants():
@@ -402,3 +558,54 @@ def test_new_south_wales_is_not_the_uk():
     assert sb._iso_hits("Sydney, New South Wales, Australia") == {"AU"}
     assert not sb._place_ok("Sydney, New South Wales, Australia", ["GB"])
     assert sb._place_ok("Cardiff, Wales", ["GB"])
+
+
+# ------------------------------------------------------------------ final review findings
+def test_startupandvc_malformed_apply_href_keeps_the_other_ads():
+    lst = ('<a href="/venture-capital-jobs/a-1">a</a><a href="/venture-capital-jobs/b-2">b</a>')
+    http = _http({"venture-capital-jobs/a-1": (200, _sv_page(apply="https://www.linkedin.com/jobs/view/1/")),
+                  "venture-capital-jobs/b-2": (200, _sv_page(title="Analyst", apply="https://[bad/x")),
+                  "venture-capital-jobs": (200, lst)})
+    jobs = sb.fetch_startupandvc([], http, {}, days=BIG, countries=[])
+    assert sorted(j["url"] for j in jobs) == ["https://www.linkedin.com/jobs/view/1/",
+                                              "https://www.startupandvc.com/venture-capital-jobs/b-2"]
+
+
+def test_startupandvc_apply_link_rejects_userinfo_and_keeps_port():
+    assert sb._svc_apply_link("https://www.linkedin.com@evil.example/jobs/view/1/") == ""
+    assert sb._svc_apply_link("https://u:p@evil.example/x") == ""
+    assert sb._svc_apply_link("https://jobs.example:8443/a/b?x=1#f") == "https://jobs.example/a/b"
+    assert sb._svc_apply_link("javascript:alert(1)") == ""
+    page = _sv_page(apply="https://www.linkedin.com@evil.example/jobs/view/1/")
+    job = sb.parse_startupandvc_ad(page, "https://www.startupandvc.com/venture-capital-jobs/a-1")
+    assert job and job["url"] == "https://www.startupandvc.com/venture-capital-jobs/a-1"
+
+
+def test_link_collectors_are_linear_on_huge_pages():
+    import time
+    n = 30000
+    rp = "".join(f'<a href="/company/careers/positions/p{i}/">x</a>' for i in range(n))
+    sv = "".join(f'<a href="/venture-capital-jobs/s{i}-abc">x</a>' for i in range(n))
+    sm = "<urlset>" + "".join(
+        f"<url><loc>https://jobs.techtree.dev/job/{i:08x}-0000-4000-8000-000000000000</loc></url>"
+        for i in range(n)) + "</urlset>"
+    t = time.monotonic()
+    assert len(sb.rapyd_links(rp)) == sb.LINK_CAP
+    assert len(sb.svc_links(sv)) == sb.LINK_CAP
+    http = _http({"sitemap": (200, sm)})
+    sb.fetch_techtree([], http, {}, days=BIG, countries=[])
+    assert time.monotonic() - t < 15
+
+
+def test_startupandvc_links_are_https_slug_rebuilt_and_deduped():
+    page = ('<a href="http://www.startupandvc.com/venture-capital-jobs/a-1">a</a>'
+            '<a href="/venture-capital-jobs/b-1?utm=1">b</a><a href="/venture-capital-jobs/b-1">b</a>'
+            '<a href="https://www.startupandvc.com:8443/venture-capital-jobs/c-1?x=1">c</a>')
+    assert sb.svc_links(page) == ["https://www.startupandvc.com/venture-capital-jobs/a-1",
+                                  "https://www.startupandvc.com/venture-capital-jobs/b-1",
+                                  "https://www.startupandvc.com/venture-capital-jobs/c-1"]
+
+
+def test_startupandvc_apply_link_is_https_only_without_port():
+    assert sb._svc_apply_link("http://careers.example.com/jobs/1?x=1") == ""
+    assert sb._svc_apply_link("https://careers.example.com:444/jobs/1?x=1") == "https://careers.example.com/jobs/1"
