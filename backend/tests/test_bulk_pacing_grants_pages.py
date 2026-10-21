@@ -482,6 +482,8 @@ async def test_a_grant_resolves_the_mode_through_the_real_gate(authenticated_asy
         assert (await client.put(f"/api/applications/{target}/fit", json=fit)).status_code == 200
         body = await _check(client, target)
         assert body["reason"] != "practice_run"
+        # Slice 30: a grant covers only what is in the queue when the user confirms it.
+        assert (await _event(client, target, "queued")).status_code == 201
         until = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
         assert (await _patch(
             client, _e("assistant_settings.above_line", "auto"), _e("assistant_settings.below_line", "auto"),

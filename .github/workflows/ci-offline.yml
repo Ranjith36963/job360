@@ -156,15 +156,21 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
-      # `browser` too (2026-10-20): the browser-agent tests (tests/test_browser_*.py,
-      # the code that fills and submits real job forms) are `@needs_chromium` and
-      # skipped on every CI run until now, because only `.[dev]` was installed.
-      - name: Install backend (with dev + browser extras)
+      # FROM THE HASHED LOCKS (2026-10-20): the runtime pins the prod image installs
+      # (backend/Dockerfile) plus the dev tools, then Playwright for the browser-agent tests
+      # (tests/test_browser_*.py, the code that fills and submits real job forms: `@needs_chromium`,
+      # skipped on every CI run until now). Every file is sha256-checked, then the app goes in with
+      # --no-deps so nothing outside the locks can arrive. `pip check` fails on pins that do not
+      # satisfy each other.
+      - name: Install backend (with dev + browser)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,browser]"
+          python -m pip install --require-hashes -r requirements-dev.lock.txt
+          python -m pip install --require-hashes -r requirements-browser.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip check
           python -m pip show playwright | grep -E '^Version:'
       # The Chromium build that the installed Python playwright expects, plus
       # its system libraries. Not cached: the download is the small part; the
