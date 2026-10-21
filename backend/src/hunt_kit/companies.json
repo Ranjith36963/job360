@@ -6389,5 +6389,14 @@
 {"name":"IERUS Technologies","ats":"jobscore","board":"ierustechnologiesinc","source":"freehire"},
 {"name":"Day Kimball Health","ats":"paycor","board":"4028f88b24c330a20124eb33b4ad1653","source":"freehire"},
 {"name":"Clark Hill","ats":"paycor","board":"8a29a018478a87e70147a7588a6343cf","source":"freehire"},
-{"name":"Rad Hires","ats":"recruiterflow","board":"radhires","source":"freehire"}
+{"name":"Rad Hires","ats":"recruiterflow","board":"radhires","source":"freehire"},
+{"name":"The Planet Group","ats":"wpyoast","board":"careers.theplanetgroup.com","source":"freehire"},
+{"name":"David Joseph & Company","ats":"careerspage","board":"davidjoseph-co","source":"freehire"},
+{"name":"Kubernetes Jobs","ats":"jobboardly","board":"kubernetes-jobs","source":"freehire"},
+{"name":"Hire Mamas","ats":"jobboardly","board":"hire-mamas","source":"freehire"},
+{"name":"QA Jobs Board","ats":"jobboardly","board":"qajobsboard","source":"freehire"},
+{"name":"PCDN Global","ats":"jobboardly","board":"pcdn-global","source":"freehire"},
+{"name":"Drone Vet","ats":"jobboardly","board":"drone-vet-1","source":"freehire"},
+{"name":"Remote Jobs","ats":"jobboardly","board":"remotejobs","source":"freehire"},
+{"name":"HZ Coffee Group LLC","ats":"jobappnetwork","board":"20448","source":"freehire"}
 ]

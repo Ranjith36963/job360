@@ -138,6 +138,10 @@ BOARD_SOURCES = (
     "recruiterflow",
     "deel",
     "dover",
+    "wpyoast",
+    "careerspage",
+    "jobboardly",
+    "jobappnetwork",
 )
 FEED_SOURCES = (
     "freehire",
