@@ -221,7 +221,7 @@ async def consume_magic_link(
         # it. The schema requires a password_hash, so store an argon2 hash of a
         # random secret (unguessable; the user can set a real one later via reset).
         # Clicking the emailed link proves ownership, so a new row starts verified.
-        # has_password=FALSE (migration 0069): nobody knows that random secret, so
+        # has_password=FALSE (migration 0070): nobody knows that random secret, so
         # account deletion asks for a fresh link instead of a password. Only the
         # row this INSERT creates gets it; an existing account keeps its value.
         new_id = uuid.uuid4().hex
