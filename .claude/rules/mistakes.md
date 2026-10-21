@@ -26,6 +26,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict,
   gate the merged tree, commit. A script hides the merge from the commit-gate hook.
 - Run the gate as its own command and read its PASS line; never `gate && git commit` (the hook misses it).
+- Before a PR with a migration merges, merge main and check its NNNN is still free (2026-10-21: two 0067s).
 - Resolve a conflict per hunk; `git checkout --ours/--theirs <file>` also drops the other side's clean hunks.
 - A child PR's squash merge ships its stacked base too: diff the base against main, close it as shipped.
 - A stacked worker's first step merges its base branch: worktree agents start from origin/main.
