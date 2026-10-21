@@ -214,7 +214,6 @@ async def test_audit_log_has_counts_never_people(authenticated_async_context, au
 
 @pytest.mark.asyncio
 async def test_mcp_bring_job_takes_listed_people(authenticated_async_context):
-    pytest.importorskip("mcp")
     import httpx2
     from mcp.client import Client
     from mcp.client.streamable_http import streamable_http_client
