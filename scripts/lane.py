@@ -252,11 +252,31 @@ def _requirement_names(text: str) -> list[str]:
         if line.startswith("-") or ("://" in line and " @ " not in line):
             names.append("source:" + " ".join(line.split()))
             continue
-        m = _REQ_NAME.match(line)
-        if not m:
-            raise ValueError(f"cannot read a package name from {line[:60]!r}")
-        names.append(m.group(1))
+        names.extend(_pep508(line))
     return names
+
+
+# A SOURCE SWAP IS A NEW PACKAGE TOO (reviewer P2 on #998). `next` -> a git
+# repo keeps the name and changes what installs, so a dependency whose spec is
+# not a registry version is recorded again as `name@<source>`: a new or changed
+# source fires the pin, a version/range/tag bump does not.
+_DIRECT_REF = re.compile(r"^[^@;]*?@\s*(\S+)")
+
+
+def _pep508(req: str) -> list[str]:
+    """`[name]`, plus `name@<url>` for a PEP 508 direct reference."""
+    m = _REQ_NAME.match(req)
+    if not m:
+        raise ValueError(f"cannot read a package name from {req[:60]!r}")
+    ref = _DIRECT_REF.match(req)
+    return [m.group(1)] + ([f"{m.group(1)}@{ref.group(1)}"] if ref else [])
+
+
+def _npm_source(name: str, spec: object) -> list[str]:
+    """`name@<spec>` when the spec is not a registry range (git, github:, npm:, file:, a path)."""
+    if isinstance(spec, str) and ":" not in spec and "/" not in spec:
+        return []
+    return [f"{name}@{json.dumps(spec, sort_keys=True)}"]
 
 
 def dependency_names(text: str, kind: str) -> set[str]:
@@ -273,14 +293,22 @@ def dependency_names(text: str, kind: str) -> set[str]:
                 raise ValueError("no `packages` table (a v1 lockfile is not read)")
             # Every installed name, transitive ones included: `npm ci` installs
             # what the lock says, so a name added only here is still a new one.
-            names.extend(k.rsplit("node_modules/", 1)[-1] for k in packages if k)
+            for key, meta in packages.items():
+                if not key:
+                    continue
+                name = key.rsplit("node_modules/", 1)[-1]
+                names.append(name)
+                got = (meta or {}).get("resolved") if isinstance(meta, dict) else None
+                if got and not str(got).startswith("https://registry.npmjs.org/"):
+                    names.append(f"{name}@{got}")
             tables = [packages.get("") or {}]
         for table_owner in tables:
             for table in _PACKAGE_JSON_TABLES:
                 deps = table_owner.get(table) or {}
                 if not isinstance(deps, dict):
                     raise ValueError(f"`{table}` is not an object")
-                names.extend(deps)
+                for name, spec in deps.items():
+                    names += [name, *_npm_source(name, spec)]
     elif kind == "requirements":
         names = _requirement_names(text)
     elif kind == "pyproject":
@@ -297,13 +325,35 @@ def dependency_names(text: str, kind: str) -> set[str]:
             reqs.extend(r for r in group if not isinstance(r, dict))  # skip {include-group}
         reqs.extend((data.get("build-system") or {}).get("requires") or [])
         for req in reqs:
-            m = _REQ_NAME.match(req) if isinstance(req, str) else None
-            if not m:
+            if not isinstance(req, str):
                 raise ValueError(f"cannot read a package name from {req!r}")
-            names.append(m.group(1))
+            names.extend(_pep508(req))
+        # uv sources and poetry tables: every name, and any non-version spec
+        # (git, url, path, a named source) as `name@<spec>`.
+        tool = data.get("tool") or {}
+        poetry = tool.get("poetry") or {}
+        tables = [(tool.get("uv") or {}).get("sources") or {},
+                  poetry.get("dependencies") or {}, poetry.get("dev-dependencies") or {},
+                  *((g or {}).get("dependencies") or {}
+                    for g in (poetry.get("group") or {}).values())]
+        for table in tables:
+            for name, spec in table.items():
+                if name.lower() != "python":
+                    names += [name] + ([] if isinstance(spec, str) and table is not tables[0]
+                                       else [f"{name}@{json.dumps(spec, sort_keys=True)}"])
     else:
         raise ValueError(f"unknown manifest kind {kind!r}")
-    return {_norm_package(n, kind) for n in names}
+    return {_norm_entry(n, kind) for n in names}
+
+
+def _norm_entry(entry: str, kind: str) -> str:
+    """Normalise the NAME only; a `name@<source>` keeps its source verbatim."""
+    if entry.startswith("source:"):
+        return entry
+    cut = entry.find("@", 1)            # skip a scoped npm name's leading `@`
+    if cut < 0:
+        return _norm_package(entry, kind)
+    return _norm_package(entry[:cut], kind) + entry[cut:]
 
 
 def _git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -1032,6 +1082,28 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
           pinned_lane(pyp, {pyp: base_tm},
                       {pyp: tm(["fastapi>=0.115", "psycopg[binary,pool]>=3.2"],
                                ["pytest>=8", "pytest-magic"])}), human)
+    # A SOURCE SWAP keeps the name and changes what installs (reviewer P2, #998).
+    check("package.json: a range bump (^16.0.0 -> ^16.1.0) stays product_owner",
+          pinned_lane(pkg, {pkg: pj({"next": "^16.0.0"}, {})}, {pkg: pj({"next": "^16.1.0"}, {})}),
+          ("product_owner", True))
+    check("package.json: a SOURCE swap of an existing name is the owner's",
+          pinned_lane(pkg, {pkg: base_pj},
+                      {pkg: pj({"next": "github:evil/next"}, {"vitest": "3.0.0"})}), human)
+    check("package.json: an npm: alias of an existing name is the owner's",
+          pinned_lane(pkg, {pkg: base_pj},
+                      {pkg: pj({"next": "npm:nexxt@16.0.0"}, {"vitest": "3.0.0"})}), human)
+    check("pyproject: a direct reference (`pkg @ git+https`) is the owner's",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: tm(["fastapi @ git+https://x.example/fastapi",
+                                "psycopg[binary,pool]>=3.2"], ["pytest>=8"])}), human)
+    check("pyproject: a new [tool.uv.sources] entry is the owner's",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: base_tm + "[tool.uv.sources]\nfastapi = { git = \"https://x.example\" }\n"}),
+          human)
+    check("requirements: a `pkg @ https://` line for an existing name is the owner's",
+          pinned_lane(req, {req: base_rq},
+                      {req: base_rq.replace("fastapi==0.115.0", "fastapi @ https://x.example/f.whl")}),
+          human)
     check("NEGATIVE CONTROL: a harmless neighbour of a manifest keeps its lane",
           pinned_lane("frontend/src/lib/api.ts", {"frontend/src/lib/api.ts": "a"},
                       {"frontend/src/lib/api.ts": "b"}), ("product", True))
