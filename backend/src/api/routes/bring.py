@@ -263,7 +263,12 @@ class BringJobRequest(BaseModel):
         # javascript:, data:, or a bare path the browser would resolve to us.
         if v and not (v.startswith("https://") or v.startswith("http://")):
             raise ValueError("apply_url must start with http:// or https://")
-        return v
+        # Gap-audit #18: drop the fragment, user info, tracking keys and secret-named keys (token, sid,
+        # session, code, signature ...); every other key stays because real ATS links need it. The dedupe
+        # code (canonical_url) drops the same keys, so old rows stored in full still match.
+        from src.services.applications.job_checks import redact_url  # noqa: PLC0415
+
+        return redact_url(v) if v else v
 
 
 class BringJobResponse(BaseModel):
