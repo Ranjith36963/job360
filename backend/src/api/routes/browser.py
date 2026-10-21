@@ -297,7 +297,7 @@ async def forget_sign_in(
         forgotten = await sign_ins.forget(db, user.id, clean)
     if not forgotten:
         raise HTTPException(status_code=404, detail="no saved sign-in for that site")
-    await browser_agent.get_pool().close(user.id)
-    await browser_agent.get_pool().close(browser_agent.live_key(user.id))
+    await browser_agent.get_pool().close(user.id, "sign_in_forgotten")
+    await browser_agent.get_pool().close(browser_agent.live_key(user.id), "sign_in_forgotten")
     _audit(user, "forget_sign_in", "ok")
     return {"forgotten": clean}

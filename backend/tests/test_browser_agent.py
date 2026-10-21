@@ -1954,3 +1954,99 @@ FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
 </body></html>"""
+
+
+# ── Why the browser is gone: the no_browser refusal names the reason ─────────
+
+def _closing_pool(idle_s=600):
+    from src.services.browser_agent.agent import BrowserPool, Session
+
+    class _Ctx:
+        async def close(self):
+            pass
+
+    async def resolve(host, port=0, family=socket.AF_UNSPEC):
+        return []
+
+    pool = BrowserPool(max_sessions=2, idle_s=idle_s, resolve=resolve)
+    pool._sessions = {"u1": Session(context=_Ctx(), page=None)}  # noqa: SLF001
+    return pool
+
+
+def _empty_pool():
+    pool = _closing_pool()
+    pool._sessions = {}  # noqa: SLF001
+    return pool
+
+
+@pytest.fixture
+def _fresh_reasons(monkeypatch):
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(agent, "_CLOSE_REASONS", {})
+    monkeypatch.setattr(agent, "_BOOT_AT", agent.time.monotonic() - 3600)  # long uptime unless a test says so
+    return agent
+
+
+async def _refusal(agent, pool):
+    with pytest.raises(agent.BrowserError) as exc:
+        await agent.run(pool, "u1", "look")
+    return exc.value.as_dict()
+
+
+async def test_idle_sweep_says_how_many_idle_minutes(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool(idle_s=600)
+    pool._sessions["u1"].last_used -= 1000  # noqa: SLF001
+    await pool.reap()
+    out = await _refusal(agent, pool)
+    assert out["reason"] == "no_browser" and "10 idle minutes" in out["detail"]
+    assert "get_application_kit" in out["next"] and "form_swept" in out["next"]
+
+
+async def test_a_crash_is_named_and_logged(_fresh_reasons, caplog):
+    import types
+
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    pool._browser = types.SimpleNamespace(is_connected=lambda: False)  # noqa: SLF001
+    with caplog.at_level("WARNING", logger="job360.services.browser_agent"):
+        out = await _refusal(agent, pool)
+    assert "crashed" in out["detail"] and out["next"]
+    assert any("chromium died" in r.getMessage() for r in caplog.records)
+
+
+async def test_an_explicit_close_is_named(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    assert (await agent.run(pool, "u1", "close"))["closed"] is True
+    out = await _refusal(agent, pool)
+    assert "was closed" in out["detail"] and out["next"]
+
+
+async def test_forgetting_a_sign_in_is_named(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    await pool.close("u1", "sign_in_forgotten")
+    out = await _refusal(agent, pool)
+    assert "sign-in was forgotten" in out["detail"] and out["next"]
+
+
+async def test_no_record_soon_after_boot_says_restarted(_fresh_reasons, monkeypatch):
+    agent = _fresh_reasons
+    monkeypatch.setattr(agent, "_BOOT_AT", agent.time.monotonic() - 60)
+    out = await _refusal(agent, _empty_pool())
+    assert "restarted" in out["detail"] and out["next"]
+
+
+async def test_no_record_after_long_uptime_is_the_plain_refusal(_fresh_reasons):
+    out = await _refusal(_fresh_reasons, _empty_pool())
+    assert out["detail"] == "No browser is open. Start with action open and a url." and "next" not in out
+
+
+def test_the_reason_record_is_bounded(_fresh_reasons, monkeypatch):
+    agent = _fresh_reasons
+    monkeypatch.setattr(agent, "_CLOSE_REASONS_MAX", 3)
+    for i in range(10):
+        agent._note_closed(f"u{i}", "idle")  # noqa: SLF001
+    assert list(agent._CLOSE_REASONS) == ["u7", "u8", "u9"]  # noqa: SLF001
