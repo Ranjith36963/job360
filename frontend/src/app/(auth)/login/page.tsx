@@ -40,6 +40,13 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
   // page keeps working after a magic-link round trip. An external/malformed
   // `next` is dropped here rather than substituted with a fallback — the
   // backend treats an absent `next` as "no preference", not "/applications".
+  //
+  // DELIBERATELY NOT falling back to readReturnCookie() here (reviewed on #701).
+  // That would bake a remembered /oauth/consent/<rid> into an emailed URL, where
+  // it outlives the 30-minute cookie and crosses devices — widening exactly the
+  // consent-hijack window the middleware's cookie guards were added to shrink.
+  // The same-browser case this would cover is already handled: resolvePostLoginPath()
+  // reads the cookie on the magic-link landing page (app/auth/magic/page.tsx).
   const next = safeNextOrUndefined(searchParams.get("next"));
 
   const [serverError, setServerError] = useState<string | null>(null);

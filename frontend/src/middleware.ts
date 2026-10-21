@@ -20,18 +20,56 @@ const PROTECTED_PATHS = [
 // Backend origin used to VERIFY the session (same value the /api proxy forwards to).
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || "http://localhost:8000";
 
-// Remember an OAuth consent URL across a login that lost its ?next (see safe-next.ts).
-function rememberConsentReturn(res: NextResponse, pathname: string): void {
-  if (!isConsentPath(pathname)) return;
-  const isProd =
+// The ONE production signal in this file, matching the backend's
+// `_is_production()` (api/middleware.py). Read per REQUEST, never at module
+// load, so the value is the live env. NODE_ENV is deliberately not an arm —
+// see the long comment on the E2E bypass below for why it lies in CI.
+function isProductionEnv(): boolean {
+  return (
     (process.env.APP_ENV ?? "").toLowerCase() === "production" ||
-    !!process.env.RAILWAY_ENVIRONMENT ||
-    process.env.NODE_ENV === "production";
+    !!process.env.RAILWAY_ENVIRONMENT
+  );
+}
+
+// Remember an OAuth consent URL across a login that lost its ?next (see safe-next.ts).
+//
+// Two guards, both from review of #701:
+//
+//   * SET ONLY ON A REAL TOP-LEVEL NAVIGATION. `/oauth/authorize` is
+//     unauthenticated and mints a pending `rid` for any registered client
+//     (backend/src/api/routes/oauth.py), so an attacker can always hold a live
+//     /oauth/consent/<rid> URL. This cookie used to be set by ANY unauthenticated
+//     GET of such a path — including an <img>/<iframe> on a third-party page —
+//     which silently planted a consent destination in a passing visitor's
+//     browser and hijacked their NEXT, unrelated sign-in. `Sec-Fetch-Dest:
+//     document` is sent only for a top-level document load; a subresource gets
+//     image/iframe/empty and is refused here. A MISSING header still passes:
+//     fetch-metadata is a progressive signal, and a client old enough to omit it
+//     is not the browser cookie jar this attack needs.
+//
+//   * NEVER OUTLIVE THE FLOW THAT CREATED IT. Any other protected bounce expires
+//     a leftover cookie, so an abandoned consent flow cannot ambush a later
+//     plain login inside the 30-minute TTL.
+function rememberConsentReturn(
+  request: NextRequest,
+  res: NextResponse,
+  pathname: string
+): void {
+  if (!isConsentPath(pathname)) {
+    // Conditional on purpose: an unconditional expiry would put a Set-Cookie on
+    // every single bounce for a cookie that is almost never there.
+    if (request.cookies.has(RETURN_COOKIE)) {
+      res.cookies.set(RETURN_COOKIE, "", { path: "/", maxAge: 0, sameSite: "lax" });
+    }
+    return;
+  }
+  const dest = request.headers.get("sec-fetch-dest");
+  if (dest && dest !== "document") return;
   res.cookies.set(RETURN_COOKIE, pathname, {
     path: "/",
     maxAge: RETURN_COOKIE_MAX_AGE,
     sameSite: "lax",
-    secure: isProd,
+    secure: isProductionEnv(),
   });
 }
 
@@ -48,7 +86,7 @@ export async function middleware(request: NextRequest) {
     loginUrl.searchParams.set("next", pathname);
     const res = NextResponse.redirect(loginUrl, { status: 307 });
     res.cookies.delete("job360_session");
-    rememberConsentReturn(res, pathname);
+    rememberConsentReturn(request, res, pathname);
     return res;
   };
 
@@ -72,10 +110,9 @@ export async function middleware(request: NextRequest) {
   // Case-insensitive like the backend's _is_production() (.lower() there) —
   // APP_ENV=Production must count as prod on BOTH sides, or the bypass gate
   // and the cookie-Secure/HSTS gate disagree about what "production" means.
-  const isProduction =
-    (process.env.APP_ENV ?? "").toLowerCase() === "production" ||
-    !!process.env.RAILWAY_ENVIRONMENT;
-  if (process.env.E2E_TEST_MODE === "1" && !isProduction) {
+  // isProductionEnv() is the single definition both gates now read; it used to
+  // be spelled out twice and the two copies had already drifted.
+  if (process.env.E2E_TEST_MODE === "1" && !isProductionEnv()) {
     return NextResponse.next();
   }
 
@@ -102,7 +139,7 @@ export async function middleware(request: NextRequest) {
     loginUrl.searchParams.set("next", pathname);
     loginUrl.searchParams.set("error", "service_unavailable");
     const res = NextResponse.redirect(loginUrl, { status: 307 });
-    rememberConsentReturn(res, pathname);
+    rememberConsentReturn(request, res, pathname);
     return res;
   }
 
