@@ -3924,6 +3924,8 @@ export interface components {
             employer_published_at?: string | null;
             /** Found On */
             found_on?: string | null;
+            /** Listed People */
+            listed_people?: components["schemas"]["ListedPerson"][] | null;
             /**
              * Location
              * @default
@@ -3968,6 +3970,8 @@ export interface components {
             /** Found On */
             found_on?: string | null;
             job: components["schemas"]["JobResponse"];
+            /** Listed People */
+            listed_people?: components["schemas"]["ListedPersonOut"][] | null;
             /** Queue Note */
             queue_note?: string | null;
             /** Queued */
@@ -5530,6 +5534,46 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+        };
+        /**
+         * ListedPerson
+         * @description Outreach pack #15 — a person the ad itself names ("Meet the hiring team").
+         *     Stored as a contact on this application, found_via='job_ad'. Lengths and the
+         *     http(s) rule are add_contact's (contacts.validate_listed_people).
+         */
+        ListedPerson: {
+            /**
+             * Linkedin Url
+             * @default
+             */
+            linkedin_url: string;
+            /** Name */
+            name: string;
+            /**
+             * Role
+             * @default
+             */
+            role: string;
+        };
+        /**
+         * ListedPersonOut
+         * @description One per ``listed_people`` item, same order. ``error`` (closed set) = not stored:
+         *     "contact_cap" (CONTACTS_PER_APPLICATION_MAX) or "rate_limited" (CONTACTS_MAX_PER_HOUR).
+         */
+        ListedPersonOut: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
+            /** Contact Id */
+            contact_id?: number | null;
+            /** Error */
+            error?: ("contact_cap" | "rate_limited") | null;
+            /** Matched On */
+            matched_on?: string | null;
+            /** Name */
+            name: string;
         };
         /** LiveActionRequest */
         LiveActionRequest: {

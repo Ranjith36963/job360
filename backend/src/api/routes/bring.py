@@ -45,7 +45,7 @@ from typing import Any, Literal, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
@@ -184,6 +184,28 @@ _MAX_TEXT = settings.BRING_MAX_TEXT
 _MAX_FIELD = settings.BRING_MAX_FIELD
 
 
+class ListedPerson(BaseModel):
+    """Outreach pack #15 — a person the ad itself names ("Meet the hiring team").
+    Stored as a contact on this application, found_via='job_ad'. Lengths and the
+    http(s) rule are add_contact's (contacts.validate_listed_people)."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    role: str = ""
+    linkedin_url: str = ""
+
+
+class ListedPersonOut(BaseModel):
+    """One per ``listed_people`` item, same order. ``error`` (closed set) = not stored:
+    "contact_cap" (CONTACTS_PER_APPLICATION_MAX) or "rate_limited" (CONTACTS_MAX_PER_HOUR)."""
+
+    name: str
+    contact_id: Optional[int] = None
+    already_existed: bool = False
+    matched_on: Optional[str] = None  # "email" | "linkedin_url" | "name" when already_existed
+    error: Optional[Literal["contact_cap", "rate_limited"]] = None
+
+
 class BringJobRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=_MAX_FIELD)
     company: str = Field(..., min_length=1, max_length=_MAX_FIELD)
@@ -217,6 +239,8 @@ class BringJobRequest(BaseModel):
     origin: Optional[Literal["ai_hunt", "user_link", "user_paste"]] = None
     # Owner ask 2026-10-18: put it straight into the batch (a ``queued`` event) when it is open.
     queue: bool = Field(False, strict=True)
+    # Outreach pack #15 — people the ad names; stored as job_ad contacts on THIS application. Omitted = none.
+    listed_people: Optional[list[ListedPerson]] = None
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -239,7 +263,12 @@ class BringJobRequest(BaseModel):
         # javascript:, data:, or a bare path the browser would resolve to us.
         if v and not (v.startswith("https://") or v.startswith("http://")):
             raise ValueError("apply_url must start with http:// or https://")
-        return v
+        # Gap-audit #18: drop the fragment, user info, tracking keys and secret-named keys (token, sid,
+        # session, code, signature ...); every other key stays because real ATS links need it. The dedupe
+        # code (canonical_url) drops the same keys, so old rows stored in full still match.
+        from src.services.applications.job_checks import redact_url  # noqa: PLC0415
+
+        return redact_url(v) if v else v
 
 
 class BringJobResponse(BaseModel):
@@ -268,6 +297,8 @@ class BringJobResponse(BaseModel):
     # ("not open" = already applied or closed; "already queued" is still true).
     queued: Optional[bool] = None
     queue_note: Optional[str] = None
+    # Outreach pack #15 — one result per `listed_people` item; null when the call sent none.
+    listed_people: Optional[list[ListedPersonOut]] = None
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -343,6 +374,15 @@ async def bring_job(
         clean_facts = job_facts.validate_job_facts(given_facts)
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+    clean_people: list[dict[str, str]] = []
+    if body.listed_people:
+        from src.services.applications import contacts as contacts_service  # noqa: PLC0415
+
+        try:
+            clean_people = contacts_service.validate_listed_people([p.model_dump() for p in body.listed_people])
+        except SpineError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
     now = datetime.now(timezone.utc).isoformat()
     job = Job(
@@ -502,6 +542,24 @@ async def bring_job(
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     facts: dict[str, Any] = {k: stored[k] for k in job_facts.JOB_FACT_FIELDS}
+    listed: Optional[list[ListedPersonOut]] = None
+    if clean_people:
+        from src.services.applications import contacts as contacts_service  # noqa: PLC0415
+
+        results = await contacts_service.add_listed_people(
+            db, user.id, birth["application_id"], actor_for(user), clean_people, source_url=body.apply_url or None,
+        )
+        listed = [ListedPersonOut(**r) for r in results]
+        get_audit_logger().info(
+            "job_bring_listed_people",
+            extra={
+                "event": "job_bring_listed_people", "user_id": safe_log_value(user.id),
+                "application_id": birth["application_id"], "sent": len(results),
+                "stored": sum(1 for r in results if r["contact_id"] is not None and not r["already_existed"]),
+                "already_existed": sum(1 for r in results if r["already_existed"]),
+                "refused": sum(1 for r in results if r["error"]), "status": "ok",
+            },
+        )
     from src.services.applications.job_checks import checks_for_application  # noqa: PLC0415
 
     app_now = await applications_spine.get_owned_application(db, user.id, birth["application_id"]) or {}
@@ -562,6 +620,7 @@ async def bring_job(
         employer_published_at=stored.get("employer_published_at"),
         checks=checks,
         repost=flagged_repost,
+        listed_people=listed,
         **facts,
     )
 

@@ -23,13 +23,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
-import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from src.services.applications.job_checks import redact_url_for_display
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
@@ -604,6 +603,21 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:n] + "…"
 
 
+def _shown_url(url: str) -> str:
+    """The address the assistant is told (gap-audit #18): scheme + host + path + job-id query keys. A
+    magic link, session id or signed link in the query string or fragment must not reach the
+    assistant's transcript. Shown only: the browser itself still sits on, and opens, the full address."""
+    return _clip(redact_url_for_display(url), MAX_URL)
+
+
+_LINK_IN_TEXT = re.compile(r"https?://[^\s'\"<>]+")
+
+
+def _scrub_links(text: str) -> str:
+    """``text`` (a browser error line) with every http(s) link redacted: Playwright's messages quote the URL."""
+    return _LINK_IN_TEXT.sub(lambda m: redact_url_for_display(m.group(0)) or "[link]", text)
+
+
 def _within_size(
     elements: list[dict[str, Any]], places: list[tuple[float, bool]]
 ) -> tuple[list[dict[str, Any]], int, int]:
@@ -693,7 +707,7 @@ def _load_failed(page: Any, after_action: bool) -> dict[str, Any]:
     if not after_action:
         raise BrowserError("error", "load_failed", "The last page did not load. Open it again or try another link.")
     return {
-        "status": "error", "reason": "load_failed", "url": _clip(page.url, MAX_URL),
+        "status": "error", "reason": "load_failed", "url": _shown_url(page.url),
         "detail": "The page did not load after that action.",
     }
 
@@ -764,7 +778,7 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
-        "url": _clip(page.url, MAX_URL),
+        "url": _shown_url(page.url),
         "title": _clip(await page.title(), MAX_TITLE),
         "note": UNTRUSTED,
         "elements": elements,
@@ -1036,7 +1050,7 @@ async def run(
         except BrowserError as exc:
             if exc.status == "needs_you" and not exc.url:
                 try:
-                    exc.url = _live_page(s).url
+                    exc.url = redact_url_for_display(_live_page(s).url)
                 except BrowserError:
                     pass
             raise
@@ -1049,7 +1063,7 @@ async def run(
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
             if getattr(exc, "status_code", None) is not None:
                 raise  # an HTTP refusal from the gate (e.g. not the caller's application) stays one
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
         if action not in ("click", "look"):
@@ -1087,7 +1101,7 @@ async def _act(
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
         await _settle(page)
         if (refusal := _refusal(s, page)) is not None:
@@ -1203,7 +1217,7 @@ async def _act(
                 raise
             out = exc.as_dict() if isinstance(exc, BrowserError) else {
                 "status": "error", "reason": "browser_error",
-                "detail": (str(exc).splitlines() or [type(exc).__name__])[0][:300],
+                "detail": _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300],
             }
         out["page_changed"] = changed
         if not changed and not submitted:
@@ -1294,27 +1308,34 @@ async def _act(
     name, data = await files(doc_kind)
     page_before, near_before = await _upload_texts(frame, loc)
     is_file_input = (await loc.evaluate("(el) => el.tagName === 'INPUT' && el.type === 'file'"))
-    with tempfile.TemporaryDirectory(prefix="j360-upload-") as tmp:
-        path = os.path.join(tmp, name)
-        with open(path, "wb") as fh:
-            fh.write(data)
-        if is_file_input:
-            await loc.set_input_files(path)
-        else:
-            # An "Attach" button with no reachable file box: catch the file picker it opens
-            # (Playwright filechooser; the Greenhouse fix in ApplYourself src/apply/fill.py:450-509).
-            try:
-                async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
-                    await loc.click()
-                chooser = await chooser_info.value
-            except Exception:  # noqa: BLE001 - the button opened no file picker
-                raise BrowserError(
-                    "refused", "not_an_upload",
-                    "That control did not open a file picker. Use the file box or the Attach button.",
-                ) from None
-            await chooser.set_files(path)
+    # A bytes payload, never a temp file: the page reads the file after the change event (Greenhouse, Ashby),
+    # and a file already deleted by then fails with NotFoundError.
+    payload = {"name": name, "mimeType": "application/pdf", "buffer": data}
+    if is_file_input:
+        await loc.set_input_files(payload)
+    else:
+        # An "Attach" button with no reachable file box: catch the file picker it opens
+        # (Playwright filechooser; the Greenhouse fix in ApplYourself src/apply/fill.py:450-509).
+        try:
+            async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
+                await loc.click()
+            chooser = await chooser_info.value
+        except Exception:  # noqa: BLE001 - the button opened no file picker
+            raise BrowserError(
+                "refused", "not_an_upload",
+                "That control did not open a file picker. Use the file box or the Attach button.",
+            ) from None
+        await chooser.set_files(payload)
     await _settle(page)
     page_after, near_after = await _upload_texts(frame, loc)
+    # The site uploads in the background: wait (up to ~10 s) for the file name or an error to be drawn.
+    for _ in range(UPLOAD_POLL_STEPS):
+        if name in page_after or name in near_after or any(
+            _UPLOAD_ERROR.search(ln) and ln.strip() not in near_before for ln in near_after.splitlines()
+        ):
+            break
+        await asyncio.sleep(UPLOAD_POLL_STEP_S)
+        page_after, near_after = await _upload_texts(frame, loc)
     out = await look(s, after_action=True)
     # A site can take the file into the box and still show an error (Greenhouse): believe only the file name
     # the site newly drew on the page, and never over an error that appeared next to the field.
@@ -1327,6 +1348,8 @@ async def _act(
     return out
 
 
+UPLOAD_POLL_STEPS = 40
+UPLOAD_POLL_STEP_S = 0.25
 _UPLOAD_ERROR = re.compile(r"failed|error|try again|too large|not supported", re.IGNORECASE)
 
 

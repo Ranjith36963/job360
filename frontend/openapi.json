@@ -2568,6 +2568,20 @@
             ],
             "title": "Found On"
           },
+          "listed_people": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ListedPerson"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listed People"
+          },
           "location": {
             "default": "",
             "maxLength": 300,
@@ -2733,6 +2747,20 @@
           },
           "job": {
             "$ref": "#/components/schemas/JobResponse"
+          },
+          "listed_people": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ListedPersonOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listed People"
           },
           "queue_note": {
             "anyOf": [
@@ -6383,6 +6411,87 @@
           }
         },
         "title": "ListPeopleResponse",
+        "type": "object"
+      },
+      "ListedPerson": {
+        "additionalProperties": false,
+        "description": "Outreach pack #15 \u2014 a person the ad itself names (\"Meet the hiring team\").\nStored as a contact on this application, found_via='job_ad'. Lengths and the\nhttp(s) rule are add_contact's (contacts.validate_listed_people).",
+        "properties": {
+          "linkedin_url": {
+            "default": "",
+            "title": "Linkedin Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ListedPerson",
+        "type": "object"
+      },
+      "ListedPersonOut": {
+        "description": "One per ``listed_people`` item, same order. ``error`` (closed set) = not stored:\n\"contact_cap\" (CONTACTS_PER_APPLICATION_MAX) or \"rate_limited\" (CONTACTS_MAX_PER_HOUR).",
+        "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "enum": [
+                  "contact_cap",
+                  "rate_limited"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "matched_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched On"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ListedPersonOut",
         "type": "object"
       },
       "LiveActionRequest": {

@@ -170,18 +170,21 @@ def file_stem(company: str, kind: str, version_no: int) -> str:
 
 
 def norm_url(url: str) -> str:
-    """Lowercase scheme + host, drop the fragment, strip a trailing slash;
-    the query is kept (two different ``?id=`` are two different jobs)."""
+    """Lowercase scheme + host, drop the fragment, strip a trailing slash. The query is kept (two
+    different ``?id=`` are two different jobs) minus tracking keys and secret-named keys such as a
+    token or session id (gap-audit #18, ``job_checks.redact_url``), so a receipt stored in full still
+    matches one stored redacted. An unparseable value is compared as typed."""
     text = (url or "").strip()
     if not text:
         return ""
-    try:
-        parts = urlsplit(text)
-    except ValueError:
+    from src.services.applications.job_checks import redact_url  # noqa: PLC0415
+
+    red = redact_url(text)
+    if not red:
         return text
-    path = parts.path.rstrip("/")
+    parts = urlsplit(red)
     query = f"?{parts.query}" if parts.query else ""
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}{query}"
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{query}"
 
 
 def host_needs_account(host: Optional[str], learned: set[str]) -> bool:
