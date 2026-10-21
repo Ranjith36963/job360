@@ -1,16 +1,19 @@
 """Offline tests for src/hunt_kit/kit_sites_b.py (fixtures only, no network).
 
 Fixture origins (freehire, MIT): Airswift sitemap and ad page follow airswift_test.go:9-33; Brief follows
-briefhq_test.go:12-39; Functional Works follows functionalworks_test.go:45-52; Rapyd follows rapyd_test.go:14-36;
-StartupAndVC follows startupandvc_test.go:17-48; TechTree follows techtree_test.go:22-40 and
-testdata/techtree_sitemap.xml. The hosts are unreachable from the build container: nothing here was checked against a
-live response.
+briefhq_test.go:12-39; emagine listing and detail follow emagine_test.go:60-70 and :163-170; Functional Works follows
+functionalworks_test.go:45-52; Golang Jobs follows the row shape of testdata/golangjobs/jobs.json and the client
+pattern at golangjobs.go:65-70; Joppy follows joppy_test.go:36-56, :170-200 and :205-221; Rapyd follows
+rapyd_test.go:14-36; StartupAndVC follows startupandvc_test.go:17-48; TechTree follows techtree_test.go:22-40 and
+testdata/techtree_sitemap.xml. The hosts are unreachable from the build container: nothing here was checked
+against a live response.
 """
 from __future__ import annotations
 
 import importlib.util
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -165,6 +168,80 @@ def test_briefhq_empty_nonjob_blocks_and_non_200():
     assert sb.fetch_briefhq([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
 
 
+# --------------------------------------------------------------------------------------- emagine
+EM_LIST = {"items": [
+    {"id": 178956, "title": "Senior AI Platform Engineer", "isPartTime": False,
+     "jobAdWorkLocation": {"workLocationType": "Remote", "city": None, "region": None, "country": "Portugal"},
+     "area": {"id": 1, "name": "Data & Analytics"}},
+    {"id": 178953, "title": "Junior Business Analyst", "isPartTime": False,
+     "jobAdWorkLocation": {"workLocationType": "Hybrid", "city": "Warsaw", "region": "Mazovia", "country": "Poland"},
+     "area": {"id": 2, "name": "Project Delivery"}},
+    {"id": 178950, "title": "Part-time Tester", "isPartTime": True, "jobAdWorkLocation": None,
+     "area": {"id": 3, "name": "Test & QA"}},
+    {"id": 0, "title": "No id"}, {"id": 5, "title": " "}, "garbage"], "totalCount": 6}
+
+
+def test_emagine_happy_path_request_shape_filter_and_detail():
+    detail = {"id": 178953, "status": "Open", "seniority": "Entry", "description": "<p>Analyse things.</p>"}
+    http = _http({"/api/JobAds/Search": (200, EM_LIST), "details/178953/EN": (200, detail)})
+    jobs = sb.fetch_emagine(["analyst"], http, {}, days=BIG, countries=["PL"])
+    _check(jobs, "emagine")
+    j = jobs[0]
+    assert len(jobs) == 1 and j["title"] == "Junior Business Analyst" and j["company"] == "emagine"
+    assert j["url"] == "https://portal.emagine.org/jobs/178953/junior-business-analyst"
+    assert j["location"] == "Warsaw, Mazovia, Poland" and "Analyse things." in j["description"]
+    assert j["posted"] == "" and j["extra"]["contract"] is True
+    post = http.calls[0]
+    body = json.loads(post["data"])
+    assert post["method"] == "POST" and post["headers"]["Content-Type"] == "application/json"
+    assert body["skipCount"] == 0 and body["maxResultCount"] == 500 and body["sorting"] == "Id asc"
+    assert body["supportedLanguageId"] == "EN" and body["filter"]["textFilters"] == []
+    assert all(v == [] for v in body["filter"].values()) and len(body["filter"]) == 8
+
+
+def test_emagine_country_gate_filter_and_unknown_place():
+    http = _http({"/api/JobAds/Search": (200, EM_LIST)})
+    assert sb.fetch_emagine([], http, {}, days=BIG, countries=["US"]) == [] and http.calls == []
+    http = _http({"/api/JobAds/Search": (200, EM_LIST), "details": (404, None)})
+    titles = [j["title"] for j in sb.fetch_emagine([], http, {}, days=BIG, countries=["PL"])]
+    # Portugal is another country; the ad with no place states none and stays
+    assert sorted(titles) == ["Junior Business Analyst", "Part-time Tester"]
+    part = [j for j in sb.fetch_emagine(["tester"], http, {}, days=BIG, countries=["*"])][0]
+    assert part["extra"]["part_time"] is True and part["extra"]["title_only"] is True
+
+
+def test_emagine_closed_detail_dropped_and_paging():
+    first = {"items": [{"id": 1, "title": "One", "jobAdWorkLocation": None}], "totalCount": 2}
+    second = {"items": [{"id": 2, "title": "Two", "jobAdWorkLocation": None}], "totalCount": 2}
+    pages = iter([first, second])
+    http = _http({"/Search": lambda url: (200, next(pages)),
+                  "details/1/": (200, {"status": "Closed", "description": "x"}),
+                  "details/2/": (200, {"status": "Open", "description": "<p>Open</p>"})})
+    jobs = sb.fetch_emagine([], http, {}, days=BIG, countries=["DE"])
+    assert [j["title"] for j in jobs] == ["Two"]
+    skips = [json.loads(c["data"])["skipCount"] for c in http.calls if c["method"] == "POST"]
+    assert skips == [0, 1]
+
+
+def test_emagine_pages_on_raw_items_not_kept_rows():
+    # 6 raw items, 3 usable: the next skipCount is 6 and the totalCount test counts raw items (emagine.go:186, :193)
+    first = {**EM_LIST, "totalCount": 8}
+    second = {"items": [{"id": 7, "title": "Seven", "jobAdWorkLocation": None}, {"id": 8, "title": "Eight"}],
+              "totalCount": 8}
+    pages = iter([first, second])
+    http = _http({"/Search": lambda url: (200, next(pages)), "details": (404, None)})
+    jobs = sb.fetch_emagine([], http, {}, days=BIG, countries=["*"])
+    skips = [json.loads(c["data"])["skipCount"] for c in http.calls if c["method"] == "POST"]
+    assert skips == [0, 6] and len(jobs) == 5
+
+
+def test_emagine_empty_and_non_200():
+    http = _http({"/Search": (200, {"items": [], "totalCount": 99})})
+    assert sb.fetch_emagine([], http, {}, days=BIG, countries=["DE"]) == [] and len(http.calls) == 1
+    http = _http({"/Search": (403, None)})
+    assert sb.fetch_emagine([], http, {}, days=BIG, countries=["DE"]) == [] and len(http.calls) == 1
+
+
 # ------------------------------------------------------------------------------ Functional Works
 FW = {"data": {"jobs": [
     {"title": "Senior Scala Engineer", "slug": "remote-senior-scala-engineer-abc", "company": {"name": "Acme"},
@@ -200,6 +277,176 @@ def test_functionalworks_empty_and_non_200():
                                     countries=[]) == []
     http = _http({"graphql": (500, None)})
     assert sb.fetch_functionalworks([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
+
+
+# ---------------------------------------------------------------------------------- Golang Jobs
+GO_HOME = '<html><script type="module" crossorigin src="/assets/index-AbC123_x.js"></script></html>'
+GO_BUNDLE = ('var a=1;const c=new Zq("https://abcdefghij0123456789.supabase.co",'
+             '"eyJhbGciOi.eyJyb2xl.c2lnbmF0dXJl");')
+
+
+def _go_rows():
+    now = datetime.now(timezone.utc)
+    new, old = (now - timedelta(days=3)).isoformat(), (now - timedelta(days=100)).isoformat()
+    return [
+        {"id": "1", "title": "Senior Go Engineer", "company": "Rubix Network", "type": "full-time",
+         "description": "<p>We are looking for a Senior Go Engineer.</p>", "posted_at": new, "slug": "senior-go-1",
+         "application_url": "https://boards.greenhouse.io/rubix/jobs/1", "cities": {"name": "Remote", "country": "Global"}},
+        {"id": "2", "title": "Go Developer", "company": "Happl", "description": "<p>x</p>", "posted_at": new,
+         "slug": "go-dev-2", "application_url": "https://jobs.example.com/shared",
+         "cities": {"name": "Berlin", "country": "Germany"}},
+        {"id": "3", "title": "Go Developer (repost)", "company": "Happl", "description": "<p>x</p>", "posted_at": new,
+         "slug": "go-dev-3", "application_url": "https://jobs.example.com/shared",
+         "cities": {"name": "Berlin", "country": "Germany"}},
+        {"id": "4", "title": "Ancient", "company": "Old Co", "posted_at": old, "slug": "old-4", "cities": None},
+        {"id": "5", "title": "No slug", "company": "X", "posted_at": new, "slug": ""},
+        {"id": "6", "title": "Remote Germany Go", "company": "Gopher GmbH", "posted_at": new, "slug": "rg-6",
+         "cities": {"name": "Remote", "country": "Germany"}}]
+
+
+def _go_routes(rows):
+    return {"/rest/v1/jobs": (200, rows), "assets/index-": (200, GO_BUNDLE), "golangjobs.tech/": (200, GO_HOME)}
+
+
+def test_golangjobs_happy_path_request_shape_urls_age_and_scope():
+    http = _http(_go_routes(_go_rows()))
+    jobs = sb.fetch_golangjobs(["go"], http, {}, days=BIG, countries=[])
+    _check(jobs, "golangjobs")
+    by = {j["company"]: j for j in jobs}
+    assert set(by) == {"Rubix Network", "Happl", "Gopher GmbH"} and len(jobs) == 4  # old and slug-less are dropped
+    assert by["Rubix Network"]["url"] == "https://boards.greenhouse.io/rubix/jobs/1"  # the original posting
+    assert by["Rubix Network"]["remote"] is True and by["Rubix Network"]["location"] == "Remote"
+    happl = [j for j in jobs if j["company"] == "Happl"]
+    assert {j["url"] for j in happl} == {"https://www.golangjobs.tech/golang-jobs/go-dev-2",
+                                         "https://www.golangjobs.tech/golang-jobs/go-dev-3"}  # shared link: own page
+    assert happl[0]["location"] == "Berlin, Germany"
+    urls = [c["url"] for c in http.calls]
+    assert urls[0] == "https://www.golangjobs.tech/" and urls[1].endswith("/assets/index-AbC123_x.js")
+    rest = http.calls[2]
+    assert rest["url"].startswith("https://abcdefghij0123456789.supabase.co/rest/v1/jobs?")
+    for part in ("is_archived=eq.false", "order=id", "limit=1000", "offset=0", "select=id,title,company"):
+        assert part in rest["url"]
+    assert rest["headers"]["apikey"] == "eyJhbGciOi.eyJyb2xl.c2lnbmF0dXJl"
+    assert rest["headers"]["Authorization"] == "Bearer eyJhbGciOi.eyJyb2xl.c2lnbmF0dXJl"
+    assert len(http.calls) == 3
+
+
+def test_golangjobs_only_plain_https_links_are_emitted():
+    now = datetime.now(timezone.utc).isoformat()
+    bad = ["http://jobs.example.com/x", "http://user:pw@evil.example:8080/x?a=1",
+           "https://user:pw@evil.example/x", "https://jobs.example.com:8443/x", "ftp://jobs.example.com/x"]
+    rows = [{"id": str(i), "title": "Go Dev", "company": "Co", "posted_at": now, "slug": f"s-{i}",
+             "application_url": u, "cities": None} for i, u in enumerate(bad)]
+    rows.append({"id": "9", "title": "Go Dev", "company": "Co", "posted_at": now, "slug": "s-9",
+                 "application_url": "https://jobs.example.com/ok?gh_jid=7", "cities": None})
+    got = {j["title"] + j["url"] for j in sb.parse_golangjobs(rows)}
+    assert got == {"Go Dev" + f"https://www.golangjobs.tech/golang-jobs/s-{i}" for i in range(5)} | {
+        "Go Dev" + "https://jobs.example.com/ok?gh_jid=7"}
+
+
+def test_golangjobs_country_filter():
+    gb = sb.fetch_golangjobs([], _http(_go_routes(_go_rows())), {}, days=BIG, countries=["GB"])
+    assert [j["company"] for j in gb] == ["Rubix Network"]  # Berlin and "Remote, Germany" are other countries
+    de = sb.fetch_golangjobs([], _http(_go_routes(_go_rows())), {}, days=BIG, countries=["DE"])
+    assert {j["company"] for j in de} == {"Rubix Network", "Happl", "Gopher GmbH"}
+
+
+def test_golangjobs_empty_and_failures_stop_early():
+    http = _http(_go_routes([]))
+    assert sb.fetch_golangjobs([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 3
+    http = _http({"golangjobs.tech/": (403, None)})
+    assert sb.fetch_golangjobs([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
+    http = _http({"golangjobs.tech/": (200, "<html>no bundle</html>")})
+    assert sb.fetch_golangjobs([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 1
+    http = _http({"assets/index-": (200, "var nothing=1"), "golangjobs.tech/": (200, GO_HOME)})
+    assert sb.fetch_golangjobs([], http, {}, days=BIG, countries=[]) == [] and len(http.calls) == 2
+    routes = _go_routes([])
+    routes["/rest/v1/jobs"] = (401, None)
+    assert sb.fetch_golangjobs([], _http(routes), {}, days=BIG, countries=[]) == []
+
+
+def test_golangjobs_bundle_naming_captcha_is_not_a_security_page():
+    routes = _go_routes(_go_rows())
+    routes["assets/index-"] = (200, GO_BUNDLE + "gotrue_meta_security:{captcha_token:e.options?.captchaToken}")
+    stats: dict = {}
+    jobs = sb.fetch_golangjobs([], _http(routes), stats, days=BIG, countries=[])
+    assert len(jobs) == 4 and stats["ok"] == 3  # supabase-js names captchaToken; a JS bundle is not a page
+
+
+def test_golangjobs_pages_until_a_short_page(monkeypatch):
+    monkeypatch.setattr(sb, "GOLANG_PAGE", 2)
+    rows = _go_rows()
+    pages = iter([rows[:2], rows[2:3]])
+    routes = _go_routes([])
+    routes["/rest/v1/jobs"] = lambda url: (200, next(pages))
+    http = _http(routes)
+    jobs = sb.fetch_golangjobs([], http, {}, days=BIG, countries=[])
+    assert len(jobs) == 3
+    offsets = [c["url"].split("offset=")[1] for c in http.calls if "/rest/v1/" in c["url"]]
+    assert offsets == ["0", "2"]
+
+
+# ----------------------------------------------------------------------------------------- Joppy
+def _joppy_sitemap():
+    rows = [("https://www.joppy.me/companies/seidor", "2026-09-10T08:00:00.000Z"),
+            ("https://www.joppy.me/companies/seidor/7941c018-b7c5-42f2-a92a-bced77649fc4", "2026-09-10T08:00:00.000Z"),
+            ("https://www.joppy.me/companies/empty-co", "2026-09-12T08:00:00.000Z"),
+            ("https://www.joppy.me/companies/broken-co", "2026-01-01T08:00:00.000Z"),
+            ("https://www.joppy.me/about", "2026-09-12T08:00:00.000Z")]
+    return ("<?xml version='1.0'?><urlset>"
+            + "".join(f"<url><loc>{u}</loc><lastmod>{m}</lastmod></url>" for u, m in rows) + "</urlset>")
+
+
+JOB1 = {"uid": "7941c018-b7c5-42f2-a92a-bced77649fc4", "title": "Consultor/a Senior SAP FI-CO",
+        "description": "<p>Great role.</p>", "isSalaryPublic": True, "onlyEuCandidates": True, "sponsorVisa": False,
+        "relocationPack": False, "skills": [{"name": "SAP", "isMandatory": True},
+                                           {"name": "SAP Implementation", "isMandatory": False}],
+        "place": {"isRemote": True, "isHybrid": False, "isOffice": False, "located": "Madrid, Barcelona", "cities": []},
+        "languages": [{"name": "spanish", "level": 5}], "salaryMin": 40000, "salaryMax": 50000}
+JOB2 = {"uid": "14d16b99-0cdb-4813-8644-dd6f3ccf0d64", "title": "Consultor/a SAP Logistica",
+        "description": "<p>Second role.</p>", "isSalaryPublic": False, "sponsorVisa": True, "relocationPack": True,
+        "skills": [], "place": {"isRemote": True, "isHybrid": True, "isOffice": False, "located": "Espana",
+                                "cities": ["Valencia, Spain", "Barcelona, Spain"]}, "languages": [],
+        "salaryMin": 45000, "salaryMax": 60000}
+
+
+def _joppy_page(name, slug, *jobs):
+    data = {"props": {"pageProps": {"company": {"name": name, "slug": slug, "jobs": list(jobs)}}}}
+    return f'<html><body><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></body></html>'
+
+
+def test_joppy_happy_path_order_gate_and_fields():
+    routes = {"sitemap.directory.xml": (200, _joppy_sitemap()),
+              "/companies/seidor": (200, _joppy_page("SEIDOR", "seidor", JOB1, JOB2, {"uid": "", "title": "No id"})),
+              "/companies/empty-co": (200, _joppy_page("Empty Co", "empty-co")),
+              "/companies/broken-co": (500, None)}
+    http = _http(routes)
+    jobs = sb.fetch_joppy(["sap"], http, {}, days=BIG, countries=["ES"])
+    _check(jobs, "joppy")
+    assert [c["url"].rsplit("/", 1)[-1] for c in http.calls] == ["sitemap.directory.xml", "empty-co", "seidor", "broken-co"]
+    by = {j["extra"]["visa_sponsor"]: j for j in jobs}
+    assert len(jobs) == 2 and by[False]["company"] == "SEIDOR"
+    assert by[False]["url"] == "https://www.joppy.me/companies/seidor/7941c018-b7c5-42f2-a92a-bced77649fc4"
+    assert by[False]["remote"] is True and by[False]["location"] == "Madrid, Barcelona, Spain"
+    assert "Must-have skills: SAP." in by[False]["description"] and "Salary: 40000 - 50000 EUR" in by[False]["description"]
+    assert by[True]["remote"] is None and by[True]["location"] == "Valencia, Spain; Barcelona, Spain"
+    assert "work visa" in by[True]["description"] and "Salary" not in by[True]["description"]
+    for cc in (["GB"], [], ["US"]):
+        h = _http(routes)
+        assert sb.fetch_joppy([], h, {}, days=BIG, countries=cc) == [] and h.calls == []
+    assert sb.fetch_joppy([], _http(routes), {}, days=BIG, countries=["*"])
+
+
+def test_joppy_empty_non_200_refusal_and_bad_page():
+    http = _http({"sitemap.directory.xml": (200, "<urlset></urlset>")})
+    assert sb.fetch_joppy([], http, {}, days=BIG, countries=["ES"]) == [] and len(http.calls) == 1
+    http = _http({"sitemap.directory.xml": (404, None)})
+    assert sb.fetch_joppy([], http, {}, days=BIG, countries=["ES"]) == [] and len(http.calls) == 1
+    http = _http({"sitemap.directory.xml": (200, _joppy_sitemap()), "/companies/": (429, None)})
+    assert sb.fetch_joppy([], http, {}, days=BIG, countries=["ES"]) == [] and len(http.calls) == 2
+    assert sb.parse_joppy_company("<html>no data</html>") == []
+    assert sb.parse_joppy_company('<script id="__NEXT_DATA__">{not json</script>') == []
+    assert sb.parse_joppy_company('<script id="__NEXT_DATA__">{"props":{}}</script>') == []
 
 
 # ----------------------------------------------------------------------------------------- Rapyd
@@ -350,7 +597,8 @@ def test_techtree_empty_non_200_refusal_and_query():
 
 
 # ------------------------------------------------------------------------------- all readers
-RUN_ARGS = {"airswift": [], "briefhq": [], "functionalworks": [], "rapyd": [], "startupandvc": [], "techtree": []}
+RUN_ARGS = {"airswift": [], "briefhq": [], "emagine": ["DE"], "functionalworks": [], "golangjobs": [],
+            "joppy": ["ES"], "rapyd": [], "startupandvc": [], "techtree": []}
 
 
 def test_feeds_dict_complete():
@@ -382,6 +630,13 @@ def test_http_that_raises_is_contained(name):
     assert sb.FEEDS[name](["engineer"], boom, {}, days=BIG, countries=RUN_ARGS[name]) == []
 
 
+def test_gated_feeds_send_no_request_for_other_countries():
+    for name, cc in (("joppy", ["GB", "US", "DE"]), ("emagine", ["US", "ES", "BR"])):
+        http = _http({"": (200, {})})
+        assert sb.FEEDS[name](["x"], http, {}, days=BIG, countries=cc) == [] and http.calls == []
+        assert sb.FEEDS[name](["x"], http, {}, days=BIG, countries=[]) == [] and http.calls == []
+
+
 # ----------------------------------------------------------------------------------- helpers
 def test_place_ok_rules():
     ok = sb._place_ok
@@ -403,10 +658,11 @@ def test_slug_hit_and_remote_helpers():
 
 
 def test_parsers_survive_garbage_inputs():
-    for fn, args in ((sb.parse_airswift_ad, (None, "https://x")), (sb.parse_briefhq, (123,)), (sb.parse_functionalworks, ({"data":
-                     []},)), (sb.parse_rapyd_ad, (None, "https://x")), (sb.rapyd_links, (None,)),
-                     (sb.parse_startupandvc_ad, (None, "https://x")), (sb.svc_links, (5,)),
-                     (sb.parse_techtree_ad, (None, "https://x"))):
+    for fn, args in ((sb.parse_airswift_ad, (None, "https://x")), (sb.parse_briefhq, (123,)),
+                     (sb.parse_emagine, ("x",)), (sb.parse_functionalworks, ({"data": []},)),
+                     (sb.parse_golangjobs, ({"a": 1},)), (sb.parse_joppy_company, (None,)),
+                     (sb.parse_rapyd_ad, (None, "https://x")), (sb.parse_startupandvc_ad, (None, "https://x")),
+                     (sb.parse_techtree_ad, (None, "https://x")), (sb.rapyd_links, (None,)), (sb.svc_links, (5,))):
         assert fn(*args) in ([], None)
 
 
@@ -460,8 +716,9 @@ def test_ld_json_block_with_spaced_or_upper_case_closing_tag():
     assert [p["title"] for p in sb._ld_postings(page)] == ["Welder"]
 
 
-HOSTS = {"airswift": "www.airswift.com", "briefhq": "briefhq.ai", "functionalworks": "functional.works-hub.com", "rapyd":
-         "www.rapyd.net", "startupandvc": "www.startupandvc.com", "techtree": "jobs.techtree.dev"}
+HOSTS = {"airswift": "www.airswift.com", "briefhq": "briefhq.ai", "emagine": "portal.emagine.org",
+         "functionalworks": "functional.works-hub.com", "golangjobs": "www.golangjobs.tech", "joppy": "www.joppy.me",
+         "rapyd": "www.rapyd.net", "startupandvc": "www.startupandvc.com", "techtree": "jobs.techtree.dev"}
 
 
 def test_feeds_are_registered_with_the_kit_and_on_by_default():
@@ -499,20 +756,108 @@ def _ask_why(mod, url):
 def test_feed_hosts_cover_only_the_hosts_the_readers_fetch():
     mod = _hunt_kit_module()
     hosts = dict(mod._FEED_HOSTS)
-    read = {"airswift": ["www.airswift.com", "airswift.com"], "briefhq": ["briefhq.ai", "www.briefhq.ai"], "rapyd":
-            ["www.rapyd.net", "rapyd.net"], "startupandvc": ["www.startupandvc.com", "startupandvc.com"],
-            "techtree": ["jobs.techtree.dev"], "functionalworks": ["functional.works-hub.com"]}
+    read = {"airswift": ["www.airswift.com", "airswift.com"], "briefhq": ["briefhq.ai", "www.briefhq.ai"],
+            "emagine": ["portal.emagine.org"], "rapyd": ["www.rapyd.net", "rapyd.net"],
+            "startupandvc": ["www.startupandvc.com", "startupandvc.com"], "techtree": ["jobs.techtree.dev"],
+            "golangjobs": ["www.golangjobs.tech"], "joppy": ["www.joppy.me"],
+            "functionalworks": ["functional.works-hub.com"]}
     for feed, names in read.items():
         for host in names:
             assert hosts[feed].search(host), (feed, host)
-    other = {"rapyd": ["careers.rapyd.net"], "briefhq": ["app.briefhq.ai"], "airswift": ["careers.airswift.com"],
-             "startupandvc": ["blog.startupandvc.com"], "techtree": ["www.techtree.dev"], "functionalworks":
-             ["www.functional.works-hub.com"]}
+    other = {"emagine": ["www.emagine.org", "emagine.org", "portal-api.emagine.org"], "rapyd": ["careers.rapyd.net"],
+             "briefhq": ["app.briefhq.ai"], "airswift": ["careers.airswift.com"],
+             "startupandvc": ["blog.startupandvc.com"], "techtree": ["www.techtree.dev"],
+             "golangjobs": ["blog.golangjobs.tech"], "joppy": ["app.joppy.me"],
+             "functionalworks": ["www.functional.works-hub.com"]}
     for feed, names in other.items():
         for host in names:
             assert not hosts[feed].search(host), (feed, host)
-    for url in ("https://careers.rapyd.net/jobs/1",):
+    for url in ("https://www.emagine.org/careers/1", "https://careers.rapyd.net/jobs/1"):
         assert _ask_why(mod, url)["verdict"] != "feed_covered", url
+    r = _ask_why(mod, "https://portal.emagine.org/jobs/178953/x")
+    assert (r["verdict"], r["board"]) == ("feed_covered", "feed:emagine")
+
+
+def test_golangjobs_reads_newest_rows_first_and_warns_when_capped(monkeypatch, capsys):
+    monkeypatch.setattr(sb, "GOLANG_PAGE", 2)
+    monkeypatch.setattr(sb, "GOLANG_PAGES", 2)
+    rows = _go_rows()
+    routes = _go_routes([])
+    routes["/rest/v1/jobs"] = lambda url: (200, rows[:2])  # always a full page: the board is bigger than the cap
+    http = _http(routes)
+    sb.fetch_golangjobs([], http, {}, days=BIG, countries=[])
+    rest = [c["url"] for c in http.calls if "/rest/v1/" in c["url"]]
+    assert len(rest) == 2 and all("order=id.desc" in u and "order=id&" not in u for u in rest)
+    assert "golangjobs page cap reached" in capsys.readouterr().err
+    routes["/rest/v1/jobs"] = (200, rows[:1])  # a short page: nothing left behind, nothing to warn about
+    sb.fetch_golangjobs([], _http(routes), {}, days=BIG, countries=[])
+    assert "page cap" not in capsys.readouterr().err
+
+
+def _em_page(ids, total):
+    return {"items": [{"id": i, "title": f"Ad {i}", "jobAdWorkLocation": None} for i in ids], "totalCount": total}
+
+
+def test_emagine_starts_at_the_newest_ads_when_the_board_outgrows_the_cap(monkeypatch, capsys):
+    monkeypatch.setattr(sb, "EMAGINE_PAGE", 2)
+    monkeypatch.setattr(sb, "EMAGINE_PAGES", 2)
+    everything = list(range(1, 11))  # ids 1..10, oldest first; the cap reads 4
+    skips: list[int] = []
+
+    def route(url):  # the skipCount of the request being answered is the last one recorded below
+        return 200, _em_page(everything[skips[-1]:skips[-1] + 2], 10)
+
+    inner = _http({"/Search": route, "details": (404, None)})
+
+    def http2(url, **kw):
+        if kw.get("data"):
+            skips.append(json.loads(kw["data"])["skipCount"])
+        return inner(url, **kw)
+
+    http2.calls = inner.calls  # type: ignore[attr-defined]
+    jobs = sb.fetch_emagine([], http2, {}, days=BIG, countries=["*"])
+    assert sorted(j["extra"]["emagine_id"] for j in jobs) == [7, 8, 9, 10]  # the newest four, not 1..4
+    assert skips == [0, 6, 8]  # one probe, then the two pages that end at totalCount
+    err = capsys.readouterr().err
+    assert "emagine lists 10 ads; 6 were not read" in err
+
+
+def test_emagine_reads_everything_and_stays_quiet_below_the_cap(monkeypatch, capsys):
+    monkeypatch.setattr(sb, "EMAGINE_PAGE", 2)
+    monkeypatch.setattr(sb, "EMAGINE_PAGES", 3)
+    pages = iter([_em_page([1, 2], 5), _em_page([3, 4], 5), _em_page([5], 5)])
+    http = _http({"/Search": lambda url: (200, next(pages)), "details": (404, None)})
+    jobs = sb.fetch_emagine([], http, {}, days=BIG, countries=["*"])
+    assert len(jobs) == 5
+    assert [json.loads(c["data"])["skipCount"] for c in http.calls if c["method"] == "POST"] == [0, 2, 4]
+    assert "were not read" not in capsys.readouterr().err
+
+
+def test_emagine_one_gone_detail_does_not_end_the_other_details():
+    first = _em_page([30, 20, 10], 3)
+    http = _http({"/Search": (200, first), "details/30/": (404, None),
+                  "details/20/": (200, {"status": "Open", "description": "<p>Twenty</p>"}),
+                  "details/10/": (200, {"status": "Closed", "description": "x"})})
+    jobs = sb.fetch_emagine([], http, {}, days=BIG, countries=["*"])
+    detail_urls = [c["url"] for c in http.calls if "details" in c["url"]]
+    assert len(detail_urls) == 3  # the 404 on the newest ad ended nothing
+    by = {j["extra"]["emagine_id"]: j for j in jobs}
+    assert set(by) == {30, 20} and "Twenty" in by[20]["description"]  # the Closed one is dropped
+
+
+def test_emagine_pauses_before_every_listing_page_after_the_first(monkeypatch):
+    monkeypatch.setattr(sb, "EMAGINE_PAGE", 1)
+    events: list[str] = []
+    monkeypatch.setattr(sb, "_pause", lambda seconds=None: events.append("pause"))
+    pages = iter([_em_page([1], 3), _em_page([2], 3), _em_page([3], 3)])
+
+    def search(url):
+        events.append("post")
+        return 200, next(pages)
+
+    http = _http({"/Search": search, "details": (404, None)})
+    sb.fetch_emagine([], http, {}, days=BIG, countries=["*"], )
+    assert events[:5] == ["post", "pause", "post", "pause", "post"]
 
 
 def test_script_scan_is_linear_on_unclosed_tags_and_keeps_case_and_space_variants():
@@ -520,6 +865,7 @@ def test_script_scan_is_linear_on_unclosed_tags_and_keeps_case_and_space_variant
     opener = '<script type="application/ld+json">{"x":'
     start = time.perf_counter()
     assert sb._ld_postings(opener * 8000) == []
+    assert sb.parse_joppy_company('<script id="__NEXT_DATA__" ' * 8000) == []
     assert sb._ld_postings('<script ' * 8000) == []
     assert time.perf_counter() - start < 1.0
     page = '<SCRIPT TYPE="application/ld+json">{"@type":"JobPosting","title":"A"}</SCRIPT >'
@@ -528,6 +874,7 @@ def test_script_scan_is_linear_on_unclosed_tags_and_keeps_case_and_space_variant
     page = ('<script type="text/javascript">var a;</script>'
             '<script type="application/ld+json">{"@type":"JobPosting","title":"B</scripts>"}</script\n>')
     assert [p["title"] for p in sb._ld_postings(page)] == ["B</scripts>"]
+    assert sb.parse_joppy_company(_joppy_page("Acme", "acme", JOB1).replace("</script>", "</SCRIPT >"))
     late = '<script type="application/ld+json">{"@type":"JobPosting","title":"Z"}</script>'
     assert sb._ld_postings("x" * (sb.SCAN_MAX + 10) + late) == []  # past the scan cap
     assert [p["title"] for p in sb._ld_postings("x" * 1000 + late)] == ["Z"]

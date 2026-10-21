@@ -179,12 +179,15 @@ FEED_SOURCES = (
     "instaffo",
     "airswift",
     "briefhq",
+    "emagine",
     "functionalworks",
     "techinasia",
     "itviec",
     "jobdanmark",
     "remotedotcom",
     "work180",
+    "golangjobs",
+    "joppy",
     "rapyd",
     "startupandvc",
     "techtree",
@@ -2632,8 +2635,8 @@ WHY_VERDICTS = {
                     "or the feed needs a key you have not set",
 }
 # Job sites the kit reads as a feed (host -> feed name). Checked before the aggregator list.
-# The sites_b entries are anchored to the host the reader fetches: a link on another host of the same
-# domain is not something the feed reads.
+# The sites_b entries (airswift .. techtree) are anchored to the host the reader fetches: a link on another host of
+# the same domain (www.emagine.org, careers.rapyd.net) is not something the feed reads.
 _FEED_HOSTS = (
     ("reed", re.compile(r"(?:^|\.)reed\.co\.uk$", re.I)),
     ("jobstreet", re.compile(r"(?:^|\.)(?:seek\.com\.au|seek\.co\.nz|jobstreet\.com|jobsdb\.com)$", re.I)),
@@ -2648,12 +2651,15 @@ _FEED_HOSTS = (
     ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
     ("airswift", re.compile(r"^(?:www\.)?airswift\.com$", re.I)),
     ("briefhq", re.compile(r"^(?:www\.)?briefhq\.ai$", re.I)),
+    ("emagine", re.compile(r"^portal\.emagine\.org$", re.I)),
     ("functionalworks", re.compile(r"^functional\.works-hub\.com$", re.I)),
     ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
     ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
     ("jobdanmark", re.compile(r"(?:^|\.)jobdanmark\.dk$", re.I)),
     ("remotedotcom", re.compile(r"(?:^|\.)remote\.com$", re.I)),
     ("work180", re.compile(r"(?:^|\.)work180\.com$", re.I)),
+    ("golangjobs", re.compile(r"^(?:www\.)?golangjobs\.tech$", re.I)),
+    ("joppy", re.compile(r"^(?:www\.)?joppy\.me$", re.I)),
     ("rapyd", re.compile(r"^(?:www\.)?rapyd\.net$", re.I)),
     ("startupandvc", re.compile(r"^(?:www\.)?startupandvc\.com$", re.I)),
     ("techtree", re.compile(r"^jobs\.techtree\.dev$", re.I)),
