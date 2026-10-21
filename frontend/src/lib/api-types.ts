@@ -1218,6 +1218,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/me/analytics-consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Analytics Consent
+         * @description Web session only: the user's own "Help improve Job360" switch (gap roadmap slice 4).
+         *
+         *     The ONE write door for `users.analytics_consent_at`. ``true`` stamps when they
+         *     agreed; ``false`` clears it, which withdraws consent at once (server PostHog
+         *     capture and Sentry session replay both read it). Consent is the person's own
+         *     choice, so an assistant's token is refused (403 ``session_required``).
+         */
+        put: operations["set_analytics_consent_api_auth_me_analytics_consent_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me/email-verified": {
         parameters: {
             query?: never;
@@ -3085,6 +3110,16 @@ export interface components {
             skills_not_in_ad: string[];
             /** Skills Total */
             skills_total: number;
+        };
+        /** AnalyticsConsentRequest */
+        AnalyticsConsentRequest: {
+            /** Consent */
+            consent: boolean;
+        };
+        /** AnalyticsConsentResponse */
+        AnalyticsConsentResponse: {
+            /** Analytics Consent */
+            analytics_consent: boolean;
         };
         /** AnswerAskRequest */
         AnswerAskRequest: {
@@ -7872,6 +7907,11 @@ export interface components {
         };
         /** UserResponse */
         UserResponse: {
+            /**
+             * Analytics Consent
+             * @default false
+             */
+            analytics_consent: boolean;
             /** Email */
             email: string;
             /** Id */
@@ -10157,6 +10197,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_analytics_consent_api_auth_me_analytics_consent_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyticsConsentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsConsentResponse"];
                 };
             };
             /** @description Validation Error */

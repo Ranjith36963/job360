@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({
   logout: vi.fn(),
   me: vi.fn().mockResolvedValue(null),
   setTimezone: vi.fn(),
+  setAnalyticsConsent: vi.fn(),
   resendVerificationEmail: vi.fn(),
   downloadMyData: (...args: unknown[]) => mockDownloadMyData(...args),
   getCalendarFeed: () => Promise.resolve({ exists: false, created_at: null }),

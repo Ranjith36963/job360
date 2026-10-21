@@ -2406,7 +2406,7 @@ class _CaptureFirstToolCall:
         try:
             async with _request_db() as db:
                 if await analytics.mark_first_tool_call(db._db, user_id):
-                    analytics.capture_event(user_id, "first_tool_call")
+                    await analytics.capture_event(db._db, user_id, "first_tool_call")
         except Exception:  # noqa: BLE001 — analytics must never break a tool call
             logger.debug("analytics_first_tool_call_failed", extra={"user_id": user_id})
 
