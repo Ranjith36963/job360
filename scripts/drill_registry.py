@@ -183,6 +183,14 @@ REGISTRY: dict[str, Guard] = {
     #
     # All six are `drilled` -- each --drill asserts real cases and was run under
     # CI conditions. NOT claimed: that they fail under MUTATION (issue #359).
+    "scripts/backup_checks.py": Guard(
+        status="drilled",
+        # Decides whether a restored nightly dump kept every row, and whether the
+        # newest backup in R2 is under 36 h old (gap 7, G410).
+        drill=[sys.executable, "scripts/backup_checks.py", "drill"],
+        # NEGATIVE CONTROL: both checks blinded to pass everything; must exit 1.
+        negative=[sys.executable, "scripts/backup_checks.py", "drill", "--blind"],
+    ),
     "scripts/merge_cage.py": Guard(
         status="drilled",
         # Decides what may reach production without the owner. Its drill refuses a
