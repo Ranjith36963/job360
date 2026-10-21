@@ -192,6 +192,20 @@ async def test_known_people_leaves_out_people_on_this_application(authenticated_
 
 
 @pytest.mark.asyncio
+async def test_a_failing_known_people_lookup_never_fails_a_bring(authenticated_async_context, monkeypatch):
+    def boom(_company: str) -> str:
+        raise RuntimeError("boom")
+
+    async with authenticated_async_context() as client:
+        monkeypatch.setattr("src.services.applications.contacts.company_key", boom)
+        brought = await _bring(client, _AD)
+        assert brought["known_people"] == {"count": 0, "people": [], "truncated": False}
+        detail = await client.get(f"/api/applications/{brought['application_id']}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["known_people"]["count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_known_people_excludes_person_whose_own_row_is_filtered_by_company(authenticated_async_context):
     async with authenticated_async_context() as client:
         app1 = (await _bring(client, _AD))["application_id"]

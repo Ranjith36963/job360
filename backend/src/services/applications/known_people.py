@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 from src.core import settings
 from src.services.applications import contacts
+from src.utils.logger import get_logger, safe_log_value
 
 if TYPE_CHECKING:
     from src.repositories.database import JobDatabase
+
+logger = get_logger(__name__)
 
 EMPTY: dict[str, Any] = {"count": 0, "people": [], "truncated": False}
 
@@ -35,12 +38,17 @@ def _slim(p: dict[str, Any]) -> dict[str, Any]:
 
 
 async def for_application(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> dict[str, Any]:
+    """Advisory: a failure here must never fail the bring, the kit or the page that hosts it."""
     if not app_row:
         return dict(EMPTY, people=[])
-    company = str(app_row.get("job_company") or "")
-    if not contacts.company_key(company):
+    try:
+        company = str(app_row.get("job_company") or "")
+        if not contacts.company_key(company):
+            return dict(EMPTY, people=[])
+        listed = await contacts.list_people(db, user_id, company=company, exclude_application_id=int(app_row["id"]))
+        people = listed["people"] or []
+        cap = settings.KNOWN_PEOPLE_MAX
+        return {"count": len(people), "people": [_slim(p) for p in people[:cap]], "truncated": len(people) > cap}
+    except Exception:  # noqa: BLE001 - known_people is a join for display, never a gate
+        logger.warning("known_people_failed", extra={"application_id": safe_log_value(app_row.get("id"))})
         return dict(EMPTY, people=[])
-    listed = await contacts.list_people(db, user_id, company=company, exclude_application_id=int(app_row["id"]))
-    people = listed["people"] or []
-    cap = settings.KNOWN_PEOPLE_MAX
-    return {"count": len(people), "people": [_slim(p) for p in people[:cap]], "truncated": len(people) > cap}
