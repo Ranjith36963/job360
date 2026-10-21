@@ -12,7 +12,8 @@
 name: db-backup
 on:
   schedule:
-    - cron: "17 2 * * *" # 02:17 UTC nightly
+    - cron: "17 2 * * *" # 02:17 UTC nightly: dump, verify, upload
+    - cron: "43 */6 * * *" # every 6 h: is the newest nightly object still fresh?
   workflow_dispatch: {} # fire on demand from the Actions tab
 
 # Least-privilege token (CodeQL actions/missing-workflow-permissions):
@@ -22,6 +23,8 @@ permissions:
 
 jobs:
   backup:
+    # The 6-hourly cron is the freshness check below, not a second backup.
+    if: github.event_name != 'schedule' || github.event.schedule == '17 2 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -53,6 +56,8 @@ jobs:
           --health-cmd "pg_isready -U verify"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - name: Install tools (Postgres client 18)
         run: |
           # Railway's Postgres is 18.x; pg_dump refuses to dump a server newer
@@ -74,9 +79,21 @@ jobs:
       - name: Dump prod database
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          # Tables whose rows are the product (users, the application spine,
+          # profile history). Real names: backend/migrations 0001, 0002, 0037, 0038.
+          CORE_TABLES: users applications application_events application_artifacts application_receipts profile_edits
         run: |
           TS=$(date -u +%Y%m%dT%H%M%SZ)
           echo "TS=$TS" >> "$GITHUB_ENV"
+          # Row counts of the core tables, taken right BEFORE the dump. Writes
+          # during the dump can only add rows (the spine tables are append-only),
+          # so the restore must hold at least these. Only names + numbers are
+          # kept: no secret or connection string reaches the file.
+          : > source-counts.txt
+          for t in $CORE_TABLES; do
+            n=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT count(*) FROM $t")
+            echo "$t $n" >> source-counts.txt
+          done
           pg_dump --no-owner --no-privileges "$DATABASE_URL" > dump.sql
           SIZE=$(stat -c%s dump.sql)
           echo "dump size: $SIZE bytes"
@@ -85,9 +102,26 @@ jobs:
           test "$SIZE" -gt 10000
 
       - name: VERIFY — restore the dump into a throwaway DB and check the data
+        env:
+          CORE_TABLES: users applications application_events application_artifacts application_receipts profile_edits
         run: |
+          set -o pipefail # so a failing compare is not hidden by `| tee`
           export PGPASSWORD=verify
+          # Time the restore: the measured RTO (replay only; see the runbook).
+          RESTORE_START=$SECONDS
           psql -h localhost -U verify -d verify -v ON_ERROR_STOP=1 -f dump.sql
+          RESTORE_SECS=$((SECONDS - RESTORE_START))
+          echo "Restore took ${RESTORE_SECS} s (RTO measured)"
+          # Same tables, counted in the restored copy, compared to the source.
+          : > restored-counts.txt
+          for t in $CORE_TABLES; do
+            n=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM $t")
+            echo "$t $n" >> restored-counts.txt
+          done
+          # Fails the step (and the job) if any table lost rows; the table goes
+          # to the step summary whether it passed or not.
+          python3 scripts/backup_checks.py compare source-counts.txt restored-counts.txt \
+            | tee -a "$GITHUB_STEP_SUMMARY"
           USERS=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM users")
           JOBS=$(psql -h localhost -U verify -d verify -tAc "SELECT count(*) FROM jobs")
           # _schema_migrations.id is TEXT (e.g. '0024_tailored_flagged_terms'), so
@@ -106,6 +140,8 @@ jobs:
             echo "| jobs restored | $JOBS |"
             echo "| migrations applied | $MIG |"
             echo "| dump size (bytes) | $(stat -c%s dump.sql) |"
+            echo ""
+            echo "Restore took ${RESTORE_SECS} s (RTO measured)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Encrypt (gpg symmetric) — R2 only ever sees ciphertext
@@ -147,6 +183,63 @@ jobs:
           done
           echo "retention: kept newest 30, pruned ${#OLD[@]}"
 
+      # Cold copy: the first nightly of each month is also kept under monthly/,
+      # which the 30-copy prune above never touches (it lists the bucket root and
+      # only matches job360-*.gpg keys). Server-side copy of the object just
+      # uploaded: same ciphertext, same credentials, no new secret. "First run of
+      # the month" rather than "the 1st", so a failed run on the 1st cannot skip
+      # a whole month.
+      - name: Monthly cold copy (keep newest 12 under monthly/)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          MONTH="${TS:0:6}" # YYYYMM
+          if aws s3 ls "s3://${R2_BUCKET}/monthly/job360-${MONTH}" --endpoint-url "$R2_ENDPOINT" | grep -q 'job360-'; then
+            echo "monthly copy for ${MONTH} already exists, nothing to add"
+          else
+            aws s3 cp "s3://${R2_BUCKET}/job360-${TS}.sql.gz.gpg" \
+              "s3://${R2_BUCKET}/monthly/job360-${TS}.sql.gz.gpg" --endpoint-url "$R2_ENDPOINT"
+            echo "cold copy: r2://${R2_BUCKET}/monthly/job360-${TS}.sql.gz.gpg"
+          fi
+          mapfile -t OLDM < <(aws s3 ls "s3://${R2_BUCKET}/monthly/" --endpoint-url "$R2_ENDPOINT" \
+            | awk '{print $4}' | grep '^job360-.*\.sql\.gz\.gpg$' | sort | head -n -12)
+          for key in "${OLDM[@]}"; do
+            [ -n "$key" ] && aws s3 rm "s3://${R2_BUCKET}/monthly/${key}" --endpoint-url "$R2_ENDPOINT"
+          done
+          echo "monthly retention: kept newest 12, pruned ${#OLDM[@]}"
+
+  # ── Is the newest nightly object still fresh? ─────────────────────────────
+  # Independent of the nightly job: it runs on its own cron and only LOOKS at
+  # the bucket, so a nightly that never started, never uploaded, or lost its
+  # secrets turns this red instead of staying silent. A red scheduled run emails
+  # the owner and shows up as RED in scripts/watchdog_check.py.
+  freshness:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '43 */6 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Newest nightly backup must be under 36 h old
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix job360- \
+            --endpoint-url "$R2_ENDPOINT" \
+            --query 'Contents[].[Key,LastModified]' --output text > listing.txt
+          rc=0
+          python3 scripts/backup_checks.py freshness listing.txt --max-hours 36 \
+            | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
+          exit "$rc"
+
   # ── Make this loop LOUD ───────────────────────────────────────────────────
   # A watcher nobody reads is worse than no watcher: measured 2026-07-26, every
   # artifact here without a notifier died (MISSIONS.md 39d, STATUS-DAILY.md 5w,
@@ -161,7 +254,9 @@ jobs:
     # notify layer could not be exercised until a real incident — the
     # worst possible moment to discover it broken. Two loops in this repo
     # were dead on arrival and only a deliberate drill revealed it.
-    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    # A freshness-only run skips `backup`; it must not touch the backup issue
+    # (a green freshness run would otherwise auto-close a real nightly failure).
+    if: always() && needs.backup.result != 'skipped' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -34,6 +34,43 @@ name: Post-merge watch (the eyes after the merge)
 # ACTING half — the real `deploymentRollback` mutation, a real GitHub issue,
 # a real Slack ping — stays a rehearsal. `push` to `main` always runs LIVE:
 # that is the actual post-merge trigger this workflow exists for.
+#
+# ───────────────────────────────────────────────────────────────────────────
+# DEPLOY NOISE vs A REGRESSION (FC-009, docs/harness/FAILURE_CATALOG.md)
+#
+# On 2026-10-03 this workflow rolled production back THREE times (#722, #724,
+# #725; trip run 37131014974) on the same 3 Sentry issues: `ClientDisconnect` on
+# /api/mcp and two `event loop blocked for 3.13s`, each 2 events, 0 users, first
+# seen 15:01Z. They are what the OLD container logs while Railway swaps it out.
+# Two causes stacked: (1) Step 1 waited for ANY readyz 200, which the old container
+# answers, so the watch began on old code and sampled across the swap; (2) Step 3
+# treated ANY new unresolved issue in a 1h wall-clock window as a trip, so the same
+# 3 issues re-tripped every run until they aged out.
+#
+# THE KNOBS (every one an env var on the steps below; a manual dispatch can set the
+# first four; a push uses the defaults here):
+#   SENTRY_MIN_EVENTS             5   ignore a new issue with fewer events AND ...
+#   SENTRY_MIN_USERS              1   ... fewer users. >= 1 user ALWAYS trips.
+#   SENTRY_NOISE_TITLES  ClientDisconnect,event loop blocked
+#                                     title substrings (case-insensitive) treated as
+#                                     deploy shutdown/startup noise ...
+#   SENTRY_NOISE_ESCALATE_EVENTS 20   ... ONLY below this many events: a flood trips.
+#   SETTLE_MINUTES                5   quiet time after THIS commit's deploy reports
+#                                     SUCCESS before the watch window starts.
+#   DEPLOY_WAIT_MINUTES          10   longest wait for that SUCCESS (job budget: 6 min
+#                                     readyz + 10 + 5 version + 5 settle + 15 watch < 50 min).
+#   DEPLOY_VERSION_WAIT_MINUTES   5   longest wait for /api/version to serve THIS sha.
+#   DEPLOY_BUILD_MINUTES          4   estimate used when a queued run finds the deploy
+#                                     already SUCCESS (Railway gives no SUCCESS time).
+# The trip rule itself is the pure `decide()` in scripts/sentry_poll.py. Ignored
+# issues are LISTED in the step output, never hidden. Anything unreadable fails
+# toward the alarm. These are not read from merge-policy.yml on purpose: that file
+# is cage-protected (owner lane) and `sentry_new_issues: 1` there keeps its meaning,
+# "first seen since the merge", as the CANDIDATE set this filter then judges.
+#
+# STILL INFERRED (not proven): that the 15:01 swap was the 62f9a919 deploy replacing
+# 41504c58 (deploy list: 62f9a919 created 14:57:52, ~3 min build); Sentry's raw
+# `count` type; and the 5 / 20 defaults, which are judgment, not measurement.
 # ═══════════════════════════════════════════════════════════════════════════
 
 on:
@@ -47,6 +84,22 @@ on:
           without calling Railway's rollback mutation or raising a real alarm.
         type: boolean
         default: true
+      sentry_min_events:
+        description: "Ignore a new Sentry issue below this many events (and 0 users). Default 5."
+        type: string
+        default: "5"
+      sentry_noise_titles:
+        description: "Comma list of deploy-noise title substrings. Default: ClientDisconnect,event loop blocked"
+        type: string
+        default: "ClientDisconnect,event loop blocked"
+      sentry_noise_escalate_events:
+        description: "A noise-titled issue still trips at this many events. Default 20."
+        type: string
+        default: "20"
+      settle_minutes:
+        description: "Quiet minutes after this commit's deploy is SUCCESS before watching. Default 5."
+        type: string
+        default: "5"
 
 concurrency:
   group: post-merge-watch-${{ github.ref }}
@@ -60,6 +113,7 @@ permissions:
   contents: read
   issues: write
   actions: write # to wake triage.yml on a real trip, same handoff every loop here uses
+  pull-requests: read # the "merged and live (PR #N)" line looks up the PR behind the merge commit
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
@@ -139,9 +193,13 @@ jobs:
     name: Watch prod after the merge
     needs: policy
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # 50, was 40: Step 1b adds up to 10 min (deploy wait) + 5 min (/api/version) + 5 min (settle)
+    # ahead of the 15 min watch and the up-to-6 min readyz wait. See the header.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # deploy_settle asks git whether a served sha is newer than ours
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
@@ -182,6 +240,68 @@ jobs:
             echo "::error::readyz never returned 200 within ~6 minutes of the merge landing."
           fi
 
+      # ── STEP 1b — wait for THIS commit's deploy, then let the swap settle ─
+      # Step 1 above is satisfied by the OLD container (all 3 runs on 2026-10-03
+      # logged `[0 s] GET .../api/readyz -> 200`), so on its own it proves nothing
+      # about the new deploy and the watch window below started on old code.
+      # scripts/deploy_settle.py asks Railway which deployment carries
+      # $GITHUB_SHA, waits for SUCCESS, then waits SETTLE_MINUTES more so the
+      # shutdown noise of the swap is over BEFORE anything is probed or sampled.
+      # It can only WAIT and REPORT, never trip: if Railway cannot be asked it
+      # says so (`deploy_state`), the workflow falls back to a plain sleep, and the
+      # readyz probe + Sentry rules stay the only trip paths.
+      #
+      # THE SERVED SHA (PR #997): it then polls GET /api/version on job360.uk (the
+      # backend's own URL as fallback) until it serves $GITHUB_SHA. This runs with
+      # or without RAILWAY_TOKEN. `judge=false` when the old sha was still served at
+      # the end of the wait (`version_state=never_live`: Steps 2-3 would sample the
+      # old code and a rollback would undo the good deployment, so they are skipped
+      # and the run ends RED "deploy never went live", no rollback) or when a newer
+      # commit already serves (`superseded`: its own run judges it; green).
+      - name: "Step 1b — wait for this commit's deploy to be SUCCESS, then settle"
+        id: settle
+        if: steps.wait.outputs.live == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          DEPLOY_SERVICE: backend
+          DEPLOY_WAIT_MINUTES: "10"
+          DEPLOY_VERSION_WAIT_MINUTES: "5"
+          DEPLOY_BUILD_MINUTES: "4"
+          SETTLE_MINUTES: ${{ inputs.settle_minutes || '5' }}
+          READYZ_URL: ${{ needs.policy.outputs.readyz_url }}
+        run: |
+          set +e
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            npm i -g @railway/cli --silent 2>&1 | tail -3
+          fi
+          # Without the CLI the Railway half reports `unverifiable`; the version half still runs.
+          python scripts/deploy_settle.py --sha "$GITHUB_SHA" \
+            --version-url "https://job360.uk/api/version" \
+            --version-url "${READYZ_URL%/readyz}/version" > settle.out
+          code=$?
+          grep -vE '^(judge|version_state|version_served)=' settle.out >> "$GITHUB_OUTPUT"
+          # Named here so every reader of these outputs sees their producer. A script
+          # that died before printing them reads as "judge as before" (judge=true).
+          judge=$(sed -n 's/^judge=//p' settle.out | tail -1)
+          version_state=$(sed -n 's/^version_state=//p' settle.out | tail -1)
+          version_served=$(sed -n 's/^version_served=//p' settle.out | tail -1)
+          echo "judge=${judge:-true}" >> "$GITHUB_OUTPUT"
+          echo "version_state=${version_state:-unverifiable}" >> "$GITHUB_OUTPUT"
+          echo "version_served=${version_served}" >> "$GITHUB_OUTPUT"
+          if [ "$judge" = "false" ]; then
+            echo "::warning::not judging this deploy: version_state=$version_state (last served $version_served)."
+            exit 0
+          fi
+          if [ "$code" -ne 0 ] || ! grep -q '^settled=true$' settle.out 2>/dev/null; then
+            # Not verified. Never silent: say it, then settle blind so the swap
+            # noise window still passes before the watch starts.
+            echo "::warning::could not confirm this commit's deploy is SUCCESS (RAILWAY_TOKEN missing, Railway unreachable, or deploy not live in time) - settling for ${SETTLE_MINUTES} min blind."
+            if ! grep -q '^deploy_state=' settle.out 2>/dev/null; then
+              echo "deploy_state=unverifiable" >> "$GITHUB_OUTPUT"
+            fi
+            sleep $((SETTLE_MINUTES * 60))
+          fi
+
       # ── STEP 2 — watch for watch_minutes, every poll_seconds ─────────────
       # A single non-200 can be a blip (a redeploy mid-request, a cold LB).
       # `readyz_non_200`/`frontend_non_200` — both from the policy file — are
@@ -189,6 +309,7 @@ jobs:
       # noise, N in a row is a trend.
       - name: "Step 2 — watch readyz + frontend for the policy's watch window"
         id: probe
+        if: steps.settle.outputs.judge != 'false'
         run: |
           set +e
           readyz="${{ needs.policy.outputs.readyz_url }}"
@@ -239,15 +360,30 @@ jobs:
       # so this can only OVER-report, never miss something inside the window.
       - name: "Step 3 — Sentry: any NEW unresolved issue since the merge?"
         id: sentry
+        if: steps.settle.outputs.judge != 'false'
         env:
-          SENTRY_API_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_API_TOKEN: ${{ secrets.SENTRY_API_TOKEN || secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_WINDOW_HOURS: "1"
+          # FC-009 knobs - see the header. `inputs.*` is empty on a push, so the
+          # `||` default IS the live value.
+          SENTRY_MIN_EVENTS: ${{ inputs.sentry_min_events || '5' }}
+          SENTRY_MIN_USERS: "1"
+          SENTRY_NOISE_TITLES: ${{ inputs.sentry_noise_titles || 'ClientDisconnect,event loop blocked' }}
+          SENTRY_NOISE_ESCALATE_EVENTS: ${{ inputs.sentry_noise_escalate_events || '20' }}
+          DEPLOY_CREATED_AT: ${{ steps.settle.outputs.deploy_created_at }}
         run: |
           set +e
+          # Issues first seen BEFORE this deploy cannot be its fault (run 3 of the
+          # incident tripped on 15:01 issues for a 15:42 deploy). Prefer the
+          # deploy's own createdAt; else the commit's time, which is earlier, so the
+          # fallback only ever widens the net.
+          SENTRY_SINCE="${DEPLOY_CREATED_AT:-$(git log -1 --format=%cI)}"
+          export SENTRY_SINCE
+          echo "Sentry filter: since=$SENTRY_SINCE min_events=$SENTRY_MIN_EVENTS min_users=$SENTRY_MIN_USERS noise=[$SENTRY_NOISE_TITLES] escalate_at=$SENTRY_NOISE_ESCALATE_EVENTS"
           if [ -z "$SENTRY_API_TOKEN" ]; then
             echo "watched=false" >> "$GITHUB_OUTPUT"
             echo "tripped=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::SENTRY_AUTH_TOKEN is not set. Sentry is an UNWATCHED dimension of this run — a new production error would NOT trip a rollback. Add the secret to close this gap."
+            echo "::warning::SENTRY_API_TOKEN is not set. Sentry is an UNWATCHED dimension of this run — a new production error would NOT trip a rollback. Add the secret to close this gap."
             exit 0
           fi
           python scripts/sentry_poll.py > sentry.md
@@ -256,7 +392,7 @@ jobs:
           if [ "$code" -eq 1 ]; then
             echo "watched=true" >> "$GITHUB_OUTPUT"
             echo "tripped=true" >> "$GITHUB_OUTPUT"
-            echo "reason=new unresolved Sentry issue(s) first seen since the merge" >> "$GITHUB_OUTPUT"
+            echo "reason=new unresolved Sentry issue(s) first seen since the merge that cleared the noise filter (events/users/flood rule in sentry_poll.py)" >> "$GITHUB_OUTPUT"
           elif [ "$code" -eq 0 ]; then
             echo "watched=true" >> "$GITHUB_OUTPUT"
             echo "tripped=false" >> "$GITHUB_OUTPUT"
@@ -269,7 +405,11 @@ jobs:
       # ── DECIDE ─────────────────────────────────────────────────────────
       - name: Decide the verdict
         id: decide
+        env:
+          JUDGE: ${{ steps.settle.outputs.judge }}
         run: |
+          # judged=false: the merged sha never served, or a newer one did (Step 1b).
+          echo "judged=$([ "$JUDGE" = "false" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
           tripped="false"
           reasons=()
           services=()
@@ -450,6 +590,13 @@ jobs:
       # ── THE HONESTY RULE — always, win or lose ────────────────────────────
       - name: "HONESTY — what this run watched, what it could NOT, and the verdict"
         if: always()
+        # Dispatch inputs reach the script through the ENVIRONMENT, never pasted into
+        # it (reviewer-security P2 on #728): a `${{ inputs.* }}` inside `run:` is
+        # code, so a crafted value such as `$(cmd)` would run in this shell.
+        env:
+          IN_SETTLE_MINUTES: ${{ inputs.settle_minutes || '5' }}
+          IN_SENTRY_MIN_EVENTS: ${{ inputs.sentry_min_events || '5' }}
+          IN_SENTRY_NOISE_ESCALATE: ${{ inputs.sentry_noise_escalate_events || '20' }}
         run: |
           {
             echo "## Post-merge watch — run summary"
@@ -460,13 +607,15 @@ jobs:
             echo "### Watched"
             echo "- \`readyz\` (${{ needs.policy.outputs.readyz_url }}) — every ${{ needs.policy.outputs.poll_seconds }}s for ${{ needs.policy.outputs.watch_minutes }} min; trips at ${{ needs.policy.outputs.readyz_non_200 }} consecutive non-200"
             echo "- \`frontend\` (${{ needs.policy.outputs.frontend_url }}) — same cadence; trips at ${{ needs.policy.outputs.frontend_non_200 }} consecutive non-200"
+            echo "- deploy identity — \`${{ steps.settle.outputs.deploy_state || 'not reached' }}\` (live = Railway reported THIS commit's deploy SUCCESS, then ${IN_SETTLE_MINUTES} min settle; anything else = the settle was blind)"
+            echo "- served sha — \`${{ steps.settle.outputs.version_state || 'not reached' }}\` (last served \`${{ steps.settle.outputs.version_served || '-' }}\`; live = /api/version served THIS commit; never_live = the old sha was still served, the run is RED and nothing was judged or rolled back; superseded = a newer commit serves, its own run judges it)"
             if [ "${{ steps.sentry.outputs.watched }}" = "true" ]; then
-              echo "- Sentry — new unresolved issues since the merge (trip threshold: ${{ needs.policy.outputs.sentry_new_issues }})"
+              echo "- Sentry — new unresolved issues since the deploy that cleared the noise filter (min events ${IN_SENTRY_MIN_EVENTS} or any user; known deploy noise ignored below ${IN_SENTRY_NOISE_ESCALATE} events; ignored issues are listed in Step 3's output, not hidden)"
             fi
             echo
             echo "### NOT watched — say it loud, never a silent skip"
             if [ "${{ steps.sentry.outputs.watched }}" != "true" ]; then
-              echo "- **Sentry is UNWATCHED this run.** SENTRY_AUTH_TOKEN is missing or the poller itself failed. A new production error right now would NOT trip a rollback."
+              echo "- **Sentry is UNWATCHED this run.** SENTRY_API_TOKEN is missing or the poller itself failed. A new production error right now would NOT trip a rollback."
             fi
             echo "- **\`sentry_error_rate_multiple\` (${{ needs.policy.outputs.sentry_error_rate_multiple }}x)** is read from the policy but this workflow does not yet compute a live hourly error-rate baseline to compare against — only the new-unresolved-issue signal is wired to a trip. Treat this threshold as DECLARED in the policy, not YET ENFORCED here."
             echo
@@ -502,22 +651,38 @@ jobs:
           subject=$(git log -1 --pretty=%s)
           echo "text=$subject" >> "$GITHUB_OUTPUT"
 
+      # The PR this commit came from, so "merged and live" carries a link the
+      # owner can open. Derived from the merge commit (GitHub knows which PR
+      # introduced a sha); a lookup that fails or finds nothing falls back to the
+      # commit URL rather than going silent. Three non-blank lines on purpose,
+      # for the same rule-B reason as the step above.
+      - name: The pull request that introduced that commit
+        id: prlink
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pr=$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty' 2>/dev/null || true)
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "link=$GITHUB_SERVER_URL/$GH_REPO/$([ -n "$pr" ] && echo "pull/$pr" || echo "commit/$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+
       # Only on a LIVE run (a rehearsal announcing a merge would be a lie), only
       # when `decide` really reached a verdict, and only when that verdict was
       # clean. A trip has its own critical message to production-incidents above;
       # this one is the quiet "it landed and it is fine" line, which belongs in
       # log-github-ci and nowhere louder.
       - name: "Slack — merged, watched, and still standing"
-        if: always() && steps.decide.outcome == 'success' && steps.decide.outputs.tripped != 'true' && steps.mode.outputs.dry_run != 'true'
+        if: always() && steps.decide.outcome == 'success' && steps.decide.outputs.tripped != 'true' && steps.mode.outputs.dry_run != 'true' && steps.decide.outputs.judged != 'false'
         uses: ./.github/actions/slack
         with:
           channel: log-github-ci
           severity: info
-          title: "merged and live: ${{ steps.subject.outputs.text }}"
+          title: "merged and live${{ steps.prlink.outputs.number && format(' (PR #{0})', steps.prlink.outputs.number) || '' }}: ${{ steps.subject.outputs.text }}"
           body: |
-            Commit `${{ github.sha }}` is on main, deployed, and survived the post-merge watch
-            window with nothing crossing a trip threshold.
-
+            What happened: commit `${{ github.sha }}` is on main, deployed, and nothing broke during the post-merge watch.
+            What to do: nothing, this is for your information only.
+            Link: ${{ steps.prlink.outputs.link }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
@@ -533,4 +698,13 @@ jobs:
         if: always() && steps.decide.outputs.tripped == 'true'
         run: |
           echo "::error::post-merge-watch TRIPPED — ${{ steps.decide.outputs.trip_reason }}"
+          exit 1
+
+      # The merged commit never served (PR #997): RED, never a rollback — the
+      # deployment still serving is the last good one. No Slack step keys off this,
+      # so it can sit last; the step summary above already says why.
+      - name: Fail the run if the deploy never went live
+        if: always() && steps.settle.outputs.version_state == 'never_live'
+        run: |
+          echo "::error::deploy never went live: /api/version still served ${{ steps.settle.outputs.version_served }}, not ${{ github.sha }}. Nothing was judged or rolled back."
           exit 1

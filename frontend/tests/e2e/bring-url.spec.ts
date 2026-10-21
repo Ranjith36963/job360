@@ -86,7 +86,7 @@ function fetchUrlResponse(overrides: Record<string, unknown>) {
 
 async function mockCommonLayout(page: Page) {
   await page.route("**/api/status**", (route) =>
-    route.fulfill(json({ jobs_total: 0, last_run: null, sources: [] }))
+    route.fulfill(json({ profile_exists: false }))
   );
 }
 
@@ -128,7 +128,7 @@ test.describe("Bring a job — fetch from a link", () => {
     });
 
     await page.goto("/bring");
-    await expect(page.getByRole("heading", { name: "Bring a job" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Jobs in" })).toBeVisible();
 
     const linkInput = page.getByLabel(/fetch a job from a link/i);
     await linkInput.fill(url);

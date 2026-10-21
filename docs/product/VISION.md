@@ -20,6 +20,37 @@ changed, what worked".
 
 Job boards find jobs. Agents think and act. Job360 remembers.
 
+## The house (the owner's analogy, 2026-10-20)
+
+The lifecycle is a house. Each part has one name, and one owner of the work:
+
+| Part | Name | What it is | Who does the work |
+|---|---|---|---|
+| Soul | **The assistant** | Whichever AI the seeker already uses — Claude, ChatGPT, Gemini — with its connectors. It thinks, finds, writes, reads the inbox, fills the form. | The seeker's AI, never Job360 |
+| Heart | **Job360** | The memory and context: profile, every version, every event, every receipt. | Job360 stores and remembers |
+| Source 1 | **Jobs** | Where an opening comes from: the assistant finds it, or the seeker brings a link or pasted text. | `bring_job` |
+| Source 2 | **People (outreach)** | Where a connection comes from: recruiters, hiring managers, referrals, found by the assistant through its own connectors (Apollo, Vibe Prospecting, Sprouts, company pages and others). Most jobs come through people, so this source matters as much as Jobs. | `add_contact` |
+| Process | **Application** | One object per job. Both sources feed it, and a person can start one. Everything after the click lives here. | the spine (`services/applications/`) |
+| Wiring | **Gmail, calendar, events** | What joins the parts: replies read from the inbox, interview dates, the event log. | the assistant's connector reads, `record_event` stores |
+
+The assistant is the soul that runs the house; Job360 is the heart it runs with.
+The better the context in the heart, the more the soul can do alone. We never
+source, rank or recommend (rule 4): a new source is a list of places the
+assistant tries and a field that records where it came from, never a Job360 finder.
+
+## How a job gets in (decided 2026-10-16, the owner)
+
+Jobs enter the apply process in two ways:
+
+1. **The assistant finds it.** It searches for you ("run 360 hunt").
+2. **You bring it.** Two ways:
+   - a. Paste the **link**.
+   - b. Copy-paste the **whole job description**.
+
+All three land in the same place: `bring_job` births one Application, and the
+same apply process runs from there. There is no fourth way — Job360 never
+finds jobs itself.
+
 ## Why this and not the old Job360
 
 Job360 spent a year sourcing and ranking jobs. Every board already does that
@@ -37,7 +68,7 @@ That persistent, agent-accessible record is the product.
 | One **Application** object per job, born the moment the job is brought | Fit judging, CV / cover-letter / answer writing (we store, the agent writes) |
 | **Every version** of every artifact, forever, stamped with who/when/which profile | Gmail OAuth, inbox polling, email classification (the agent's connector reads; we store the event) |
 | A **typed event log**, one door (`record_event`), every event says who wrote it | People databases (Apollo, LinkedIn lookups) — the agent finds, we store the contact |
-| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Form filling, browser automation, auto-submit at volume |
+| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Auto-submit only when the user turns it on (never Indeed/LinkedIn; practice run first; pause switch). *Our own browser agent: allowed since decision 29 — see `BROWSER_AGENT.md`.* |
 | `whats_new` — pull, not push | Push notifications, WhatsApp, mobile apps (later, on evidence) |
 | OAuth 2.1 so ChatGPT / Grok / any client can connect | Our own LLM, our own general agent |
 | Cheap counts (reply rate per CV version / role) + full `export_history` | Charts-heavy analytics; the agent analyses the export |
@@ -60,15 +91,19 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
       ├── Contacts[]        name, role, email, linkedin — found by the agent
       ├── Receipt           frozen on "I applied": artifact versions sent, fields filled, answers,
       │                     confirmation text/number, channel, sent_at — append-only
-      └── Events[]          the history; the current status is just the last status event
+      └── Events[]          the history; the status is replayed from it by
+                            services/applications/status.replay_status
 ```
 
-**Event types (fixed list, plus free-text detail):**
-`brought`, `fit_judged`, `artifact_saved`, `contact_added`, `outreach_sent`,
-`outreach_replied`, `applied`, `replied`, `interview_requested`, `interview_scheduled`,
-`interview_done`, `offer`, `rejected`, `withdrawn`, `ghosted`, `note`,
-`lesson` ("flag for next time"). Every event: `type`, `detail`, `occurred_at`,
-`recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
+**Event types are a fixed list plus free-text detail.** The list is
+`core.settings.APPLICATION_STATUS_EVENT_TYPES` (these move the status) and
+`APPLICATION_NOTE_EVENT_TYPES` (these never do). Who may write each one, and
+the payload it must carry, is the `record_event` route in
+`api/routes/applications.py`, which dispatches one validator per event family.
+Pinned by `tests/test_application_kit.py::test_autofill_events_assistants_may_only_deny`,
+`tests/test_application_kit.py::test_duplicate_clear_is_web_only` and
+`tests/test_assistant_settings.py::test_per_job_override_an_assistant_may_only_send_confirm`.
+Nothing is ever deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +
 `application_stage_history` + `tailored_documents` (unversioned, DELETE+INSERT)
@@ -76,20 +111,12 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 ## The agent surface (MCP + same REST)
 
-| Tool | Does |
-|---|---|
-| `get_profile` / `update_profile` | structured candidate context; agent may fix or add fields |
-| `bring_job` | link or text → Application (status `considering`) |
-| `get_application` / `list_applications` | full object with events and artifact versions |
-| `save_artifact` | new version of cv / cover_letter / answers / outreach |
-| `save_fit` | agent's verdict + gaps on this application |
-| `add_contact` | recruiter / hiring manager on this application |
-| `record_event` | typed event, free-text detail |
-| `record_application` | the receipt — what was actually sent |
-| `whats_new` | everything since a timestamp (replaces push for now) |
-| `export_history` | applications + events + versions + outcomes as clean JSON |
-| `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
+The tools are the `@mcp.tool()` functions in `api/mcp_server.py`; each carries its
+own docstring, which is what the agent actually reads. The exact set is pinned by
+`tests/test_mcp_server.py::test_tools_list_is_exactly_the_expected_tools`. Two that
+are decisions, not mechanics: we write no CV or letter ourselves (decision 28 — the
+agent writes, we version and render), and nothing sources, ranks or recommends a
+job (rule 4).
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
@@ -151,7 +178,7 @@ applications and events in the database, not a doc.
 | 18 | Success measure | **Owner uses it daily for his own hunt.** |
 
 Taken from the 2026-09-02 pivot without re-asking: recruiters later and
-consent-first; everything free; no auto-submit at volume; global from day one.
+consent-first; everything free; auto-submit only when the user switches it on (owner decision 2026-10-08, no cap by default); global from day one.
 
 ### Additions, 2026-09-07 (the Tsenta competitor read — decisions kept, the read itself deleted 2026-09-12)
 
@@ -177,6 +204,12 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 | # | Question | Decision |
 |---|---|---|
 | 28 | "Do we need any model of our own?" | **Job360 has no brain of its own.** The user's agent (Claude, ChatGPT, Perplexity, Grok, Gemini — connected over MCP) reads, judges and writes; Job360 stores, versions, renders and remembers. This **replaces the "tailor stays as a web fallback" half of decision 17** — the tailor's LLM is gone; what stays is the part a browser cannot do for itself: version history, per-line provenance, keep/download, DOCX and PDF rendering of text the agent saved with `save_artifact`. Four slices: **A** removes the tailor LLM (this PR), **B** removes the profile LLM passes, **C** teaches the agents, **D** fixes the copy. Market check 2026-09-20 — custom MCP connectors are available on Claude (all plans, including Free), ChatGPT Plus/Pro, Perplexity Pro/Max, Grok paid and Gemini business: a seeker who can use Job360 at all already has an agent, so a second-rate model of ours is cost, not value. |
+
+### Addition, 2026-10-19 (the owner, on a browser of our own)
+
+| # | Question | Decision |
+|---|---|---|
+| 29 | "Claude in Chrome needs my PC on, and only Claude can use it. Can we build one browser that works for every assistant, even with my laptop off?" | **Yes: the Job360 browser agent** (`docs/product/BROWSER_AGENT.md`, which says what is built and what is still off). It replaces "browser automation of our own" on the never-build list. A cloud Chrome that Job360 runs, driven by the user's own agent over MCP, so Claude, ChatGPT, Gemini and others all use the same browser, laptop on or off. The agent still thinks; Job360's browser only does what the agent asks, through the same gates (`check_submit`, never-apply list, limits). The owner also said yes to keeping the user's signed-in session (cookie only, encrypted, never a password) and to Job360 submitting from the cloud. Hard lines stay: never type a password, never solve a CAPTCHA, never disguise the browser to get past a bot check. What the cloud browser cannot do goes to Needs you, and the user's own assistant's browser (Claude in Chrome, Gemini in Chrome, ChatGPT agent, Comet) finishes it when their computer is on. |
 
 ## Older docs this supersedes
 

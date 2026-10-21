@@ -1,4 +1,4 @@
-"""Recipes — the `/run 360` playbooks a connected assistant follows.
+"""Recipes — the `run 360` playbooks a connected assistant follows.
 
 Owner plan (2026-10-01): one command sets up the whole hunt inside the user's
 own assistant. A recipe is plain text the ASSISTANT reads and acts on — Job360
@@ -18,6 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.api.auth_deps import CurrentUser, require_user
+from src.services.applications.authorship import actor_for
+from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["recipes"])
 
@@ -25,7 +27,10 @@ RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 
 # Order is the order a new user runs them in. Adding a recipe = add the file
 # AND a row here; tests/test_recipes.py pins that the two agree.
-RECIPE_NAMES: tuple[str, ...] = ("setup", "hunt", "apply", "daily", "reach", "review")
+RECIPE_NAMES: tuple[str, ...] = (
+    "setup", "hunt", "research", "apply", "batch", "forms", "ats", "reach", "daily", "feedback", "prep", "debrief",
+    "review", "rules",
+)
 
 
 class RecipeSummary(BaseModel):
@@ -37,6 +42,22 @@ class Recipe(BaseModel):
     name: str
     title: str
     text: str
+    # Stamped per request (mcp_server.tools_stamp), never cached with the file text.
+    tools_version: str = ""
+    tools_rev: int = 0
+
+
+def _log_read(user: CurrentUser, recipe: str, result: str) -> None:
+    """One audit line per recipe read: who, which recipe, when (the log's own
+    timestamp). Never a personal value - only the closed recipe name or "list"."""
+    get_audit_logger().info(
+        "recipe_read",
+        extra={
+            "event": "recipe_read", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "recipe": safe_log_value(recipe, max_len=40),
+            "result": result,
+        },
+    )
 
 
 @cache
@@ -50,6 +71,7 @@ def load_recipe(name: str) -> Recipe:
 @router.get("/recipes", response_model=list[RecipeSummary])
 async def list_recipes(user: CurrentUser = Depends(require_user)) -> list[RecipeSummary]:
     """Every recipe, in the order a new user runs them."""
+    _log_read(user, "list", "ok")
     return [RecipeSummary(name=n, title=load_recipe(n).title) for n in RECIPE_NAMES]
 
 
@@ -58,5 +80,9 @@ async def get_recipe(name: str, user: CurrentUser = Depends(require_user)) -> Re
     """One recipe's full text. Only names in ``RECIPE_NAMES`` resolve — the
     name never reaches the filesystem otherwise (no path traversal)."""
     if name not in RECIPE_NAMES:
+        _log_read(user, name, "not_found")
         raise HTTPException(status_code=404, detail=f"No recipe {name!r}. Recipes: {', '.join(RECIPE_NAMES)}")
-    return load_recipe(name)
+    _log_read(user, name, "ok")
+    from src.api.mcp_server import tools_stamp  # noqa: PLC0415 - lazy, rule #16
+
+    return load_recipe(name).model_copy(update=tools_stamp())

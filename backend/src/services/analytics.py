@@ -9,10 +9,11 @@ for events a browser can see (`signup_completed`, `connect_address_copied`);
 these two cannot be seen there because the assistant, not the browser, makes
 the call.
 
-Off by default (`settings.ANALYTICS_BACKEND_ENABLED`). The frontend's consent
-banner (fable/05 C3) stores its choice in the browser only — there is no
-per-user consent flag in the database — so this is the owner's own opt-in for
-every user, not a per-user check, until a stored consent flag exists.
+Two gates, both must pass. The owner's global switch
+(`settings.ANALYTICS_BACKEND_ENABLED`, off by default) and, per user, the
+stored consent `users.analytics_consent_at` (migration 0067, set only from
+Settings > Account "Help improve Job360"; NULL = no consent, the default).
+A user who never turned it on is never sent to PostHog.
 
 Fire-and-forget by design (product rule: analytics must never slow down or
 break a real request). The DB claim below (`mark_first_tool_call` /
@@ -36,14 +37,33 @@ if TYPE_CHECKING:  # pragma: no cover — type-only
 logger = get_logger(__name__)
 
 
-def capture_event(distinct_id: str, event: str, properties: Mapping[str, Any] | None = None) -> None:
-    """Fire `event` to PostHog for `distinct_id`. Never raises, never blocks.
+async def has_analytics_consent(conn: pg.Connection, user_id: str) -> bool:
+    """True only when the user turned on "Help improve Job360" (a primary-key
+    read of one column). Any failure — a drifted DB without the column, a
+    connection blip — reads as NO consent: the safe direction."""
+    try:
+        cur = await conn.execute("SELECT analytics_consent_at FROM users WHERE id = ?", (user_id,))
+        row = await cur.fetchone()
+    except Exception:  # noqa: BLE001 — analytics must never break the caller
+        logger.debug("analytics_consent_lookup_failed", extra={"user_id": user_id})
+        return False
+    return bool(row and row[0])
 
-    A no-op unless both `ANALYTICS_BACKEND_ENABLED` and a project key are set.
-    The actual HTTP POST runs as a background task — this function returns
-    before any network I/O happens.
+
+async def capture_event(
+    conn: pg.Connection, distinct_id: str, event: str, properties: Mapping[str, Any] | None = None
+) -> None:
+    """Fire `event` to PostHog for user `distinct_id`. Never raises, never blocks on the network.
+
+    A no-op unless `ANALYTICS_BACKEND_ENABLED` and a project key are set (checked
+    first, so a disabled install never touches the DB) AND the user has stored
+    analytics consent. The actual HTTP POST runs as a background task — this
+    function returns before any network I/O happens.
     """
     if not settings.ANALYTICS_BACKEND_ENABLED or not settings.POSTHOG_PROJECT_API_KEY:
+        return
+    if not await has_analytics_consent(conn, distinct_id):
+        logger.debug("analytics_skipped_no_consent", extra={"event": event, "user_id": distinct_id})
         return
     try:
         loop = asyncio.get_running_loop()

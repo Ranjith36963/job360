@@ -1,0 +1,96 @@
+name: Loop RED (report main / nightly failures as an issue)
+
+# ONE watcher for the four check workflows' "Report failure as an issue" jobs
+# (owner, 2026-10-19 CI audit: "34 checks, that's extreme").
+#
+# Those jobs lived inside ci.yml, ci-offline.yml, codeql.yml and security.yml and
+# only ever ran on a push to main or a schedule - so on EVERY pull request they
+# sat in the check list as four "skipping" rows that did nothing. A workflow_run
+# watcher is not attached to the PR, so it never shows there, and it still fires
+# after each of those workflows finishes on main / on its schedule.
+#
+# Same lifecycle as before: fail -> open (or comment on) ONE deduped issue with
+# the same title as before (scripts/slack_transition.py and daily-digest read the
+# `Loop RED: ` prefix), label it `harness` and wake triage; green -> auto-close.
+# Deliberately silent on pull_request: a red PR is already visible in the PR.
+# One change: a CANCELLED run (superseded by a newer push) is now neither red nor
+# green - it used to close the issue as if it were green.
+
+on:
+  workflow_run:
+    workflows:
+      - "CI"
+      - "CI — offline suite (automated Loop 2 + full backend)"
+      - "CodeQL"
+      - "Security scanning"
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Report failure as an issue
+    if: >-
+      github.event.workflow_run.event == 'schedule' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      actions: write # to wake the triage loop (gh workflow run triage.yml)
+    steps:
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          WF_PATH: ${{ github.event.workflow_run.path }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # The titles are the ones each workflow's own notify job used: keep them.
+          case "$WF_NAME" in
+            "CI") title="Loop RED: ci (main) is failing" ;;
+            "CI — offline suite (automated Loop 2 + full backend)") title="Loop RED: ci-offline is failing" ;;
+            "CodeQL") title="Loop RED: codeql is failing" ;;
+            "Security scanning") title="Loop RED: security scanning is failing" ;;
+            *) echo "::error::unmapped workflow '$WF_NAME' - add its title here"; exit 1 ;;
+          esac
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          case "$CONCLUSION" in
+            failure|timed_out)
+              {
+                echo "\`${WF_PATH##*/}\` failed on **${RUN_EVENT}** (\`${RUN_BRANCH}\`)."
+                echo
+                echo "- Run: ${RUN_URL}"
+                echo "- Commit: \`${RUN_SHA}\`"
+              } > notify-body.md
+              if [ -z "$num" ]; then
+                # LABEL + HAND OFF: an issue created with GITHUB_TOKEN raises no
+                # `issues: opened` event, so triage is woken explicitly.
+                new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
+                n="${new##*/}"
+                if gh workflow run triage.yml -f issue="$n"; then
+                  echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "::warning::issue #$n raised but triage could not be woken - diagnose by hand"
+                fi
+              else
+                gh issue comment "$num" --body-file notify-body.md
+              fi
+              ;;
+            success)
+              if [ -n "$num" ]; then
+                gh issue close "$num" --comment "Green again in run ${RUN_URL}. (auto-close)"
+              fi
+              ;;
+            *)
+              echo "conclusion '$CONCLUSION' is neither red nor green - issue left as it is" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac

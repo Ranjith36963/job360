@@ -1,0 +1,781 @@
+"""User info memory — the facts a job form asks, stored once by Job360.
+
+Owner decision 2026-10-08, THREE STORES. Six memory paths under the
+``user_info.*`` head (their own ``user_profiles.user_info`` column, written by
+``storage.save_user_info``, overlaid by ``profile_edits`` rows) plus one normal
+preference, ``preferences.salary_by_country``. Every write REPLACES the whole
+value (like ``cv_data.cv_positions``); an item op is resolved to that whole value
+first (``edits.resolve_ops``, gap 4). Rules, all seven:
+
+* an empty answer (``""`` / ``null`` / ``[]``) is DROPPED — a missing key means
+  "not answered" (rule #29), never a default we invent; ``false`` is a real
+  answer and is kept; ``{}`` / ``[]`` for the whole path means nothing answered;
+* control and bidi characters are stripped (``edits._strip_control``); only an
+  ``answer`` keeps its newlines;
+* an unknown key, a wrong type or a value out of range is a 422 naming the
+  path and the rule — the message NEVER echoes the submitted value (a date of
+  birth or a phone number must not reach a log or an error body).
+
+:func:`validate_user_info` and :func:`validate_salary_by_country` are called
+from ``edits.validate_edit``; :func:`answered_count` exists for the audit log
+only (a count, never a value).
+"""
+from __future__ import annotations
+
+import math
+import re
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, cast
+
+from src.core import settings
+from src.services.profile import forgiving
+from src.services.profile.answer_match import TOPIC_MAX_CHARS, TOPIC_PATTERN
+from src.services.profile.countries import is_plain_code, to_iso2
+from src.services.profile.edits import ProfileEditError, _strip_control
+from src.services.profile.models import VALID_LANGUAGE_LEVELS, VALID_WORK_AUTH_STATUSES
+
+USER_INFO_PATHS: frozenset[str] = frozenset({
+    "user_info.contact",
+    "user_info.right_to_work",
+    "user_info.logistics",
+    "user_info.languages",
+    "user_info.equality",
+    "user_info.answers",
+})
+USER_INFO_ANSWERS_PATH = "user_info.answers"
+SALARY_BY_COUNTRY_PATH = "preferences.salary_by_country"
+
+# Closed key schemas: key -> kind. Dict paths first, then the record lists.
+_CONTACT: dict[str, str] = {
+    "email": "email", "phone": "phone", "address_lines": "address_lines",
+    "address_city": "line", "address_postcode": "line", "address_country": "iso2",
+    "date_of_birth": "dob", "residence_city": "line", "residence_country": "iso2",
+    "legal_first_name": "line", "legal_last_name": "line", "preferred_name": "line",
+    "linkedin_url": "line",
+}
+# Spellings seen live that mean a real key: alias -> key. Applied BEFORE the unknown-key check.
+_CONTACT_ALIASES: dict[str, str] = {"linkedin": "linkedin_url", "linkedin_profile": "linkedin_url"}
+_RTW_COUNTRY: dict[str, str] = {
+    "country": "iso2_or_any", "work_authorization": "work_auth", "needs_sponsorship": "bool",
+    "visa_type": "line", "visa_expires": "visa_expires",
+    # Owner decision 2026-10-10 - what people really say: "remote anywhere, on-site only if
+    # sponsored". `country` may also be "ANY" = every other country.
+    "remote_ok": "bool", "onsite": "onsite", "note": "line",
+    # Owner decision 2026-10-19 - the user's own order of search effort per place
+    # (job_priority.PRIORITY_LEVELS). Empty = not chosen (rule #29), never a default.
+    "remote_priority": "priority", "onsite_priority": "priority",
+}
+ANY_COUNTRY = "ANY"
+ONSITE_VALUES = ("yes", "only_if_sponsored", "no")
+PRIORITY_LEVELS = ("highest", "high", "medium", "low", "off")
+LICENCE_TYPES = ("full", "provisional", "none")
+_RIGHT_TO_WORK: dict[str, str] = {
+    "countries": "rtw_countries", "citizenship": "iso2_list", "sanctions_country_citizen": "bool_or_pns",
+}
+_LOGISTICS_COUNTRY: dict[str, str] = {
+    "country": "iso2", "willing_to_relocate": "bool", "relocate_where": "line",
+    "travel_ok_pct": "pct", "driving_licence": "bool", "driving_licence_type": "licence_type",
+    "driving_licence_country": "iso2",
+}
+_LOGISTICS_COUNTRY_ALIASES: dict[str, str] = {"relocate": "willing_to_relocate"}
+_LOGISTICS: dict[str, str] = {
+    "notice_period": "line", "earliest_start": "start", "countries": "logistics_countries",
+    "start_on_site_abroad": "line_or_bool", "current_salary": "current_salary",
+}
+_CURRENT_SALARY_KEYS = ("amount", "currency", "period")
+_LANGUAGE: dict[str, str] = {"language": "line", "level": "level"}
+_EQUALITY: dict[str, str] = {
+    "gender": "line_or_bool", "ethnicity": "line_or_bool", "disability": "line_or_bool",
+    "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
+}
+EQUALITY_KEYS: frozenset[str] = frozenset(_EQUALITY)
+_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company", "topic", "aliases")
+_SALARY_KEYS = ("country", "min", "max", "currency", "period")
+_SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored
+PREFER_NOT_TO_SAY = "Prefer not to say"
+_SALARY_PERIODS = ("year", "month")
+_SALARY_AMOUNT_MAX = 1e12
+
+_DICT_SCHEMAS: dict[str, dict[str, str]] = {
+    "user_info.contact": _CONTACT,
+    "user_info.right_to_work": _RIGHT_TO_WORK,
+    "user_info.logistics": _LOGISTICS,
+    "user_info.equality": _EQUALITY,
+}
+
+_PHONE_CHARS_RE = re.compile(r"^[0-9 +().\-]+$")
+_CURRENCY_RE = re.compile(r"^[A-Za-z]{3}$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
+_EMAIL_MAX = 254
+
+
+def _is_email(text: str) -> bool:
+    """name@domain.tld without a regex (CodeQL py/polynomial-redos): one '@',
+    no whitespace, non-empty name, and a dot inside the domain."""
+    if any(ch.isspace() for ch in text) or text.count("@") != 1:
+        return False
+    name, domain = text.split("@")
+    return bool(name) and "." in domain[1:-1]
+_PHONE_MAX = 40
+_ADDRESS_LINES_MAX = 3
+_COUNTRY_MESSAGE = "must be an ISO alpha-2 code like 'GB' or 'IN' (or a country name)"
+_REMOTE_HINT = " - no 'remote' record: a remote job uses the hiring country's record"
+
+
+def _fail(detail: str) -> ProfileEditError:
+    return ProfileEditError(422, detail)
+
+
+def _safe_key(key: Any) -> str:
+    """An unknown key name made safe to put in an error: control chars out, 60 chars."""
+    return _strip_control(str(key))[:60]
+
+
+def _type_error(where: str, expected: str, value: Any) -> ProfileEditError:
+    return _fail(f"{where} must be {expected}, got {type(value).__name__}")
+
+
+def _line(where: str, value: Any, limit: int | None = None) -> str:
+    """One line of text, stripped; ``""`` when empty. Never echoes ``value``."""
+    cap = settings.PROFILE_EDIT_MAX_ITEM_CHARS if limit is None else limit
+    if not isinstance(value, str):
+        raise _type_error(where, "a string", value)
+    text = _strip_control(value)
+    if len(text) > cap:
+        suffix = " (PROFILE_EDIT_MAX_ITEM_CHARS)" if limit is None else ""
+        raise _fail(f"{where} exceeds the {cap}-character limit{suffix}")
+    return text
+
+
+def _bool(where: str, value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise _type_error(where, "a boolean", value)
+    return value
+
+
+def _iso2(where: str, value: Any, *, remote_hint: bool = False, demonym: bool = False) -> str:
+    """One country as an ISO alpha-2 code. A name or common spelling ("United Kingdom",
+    "UK") is converted and reported (``country_name_to_iso2``); unreadable is refused."""
+    text = _line(where, value)
+    if not text:
+        return ""
+    code = to_iso2(text, allow_demonym=demonym)
+    if code is None:
+        raise _fail(f"{where} {_COUNTRY_MESSAGE}{_REMOTE_HINT if remote_hint else ''}")
+    if not is_plain_code(text) and not (len(text) == 2 and text.isalpha() and text.upper() == code):
+        forgiving.note(forgiving.RULE_COUNTRY, at=where)
+    return code
+
+
+def _real_date(text: str) -> date | None:
+    if not _DATE_RE.match(text):
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _value(where: str, key: str, kind: str, raw: Any) -> Any:
+    """Validate one field; return the cleaned value or ``None`` to DROP it."""
+    at = f"{where}.{key}" if key else where
+    if raw is None:
+        return None
+    if kind == "line":
+        return _line(at, raw) or None
+    if kind == "bool":
+        return _bool(at, raw)
+    if kind == "bool_or_pns":
+        if isinstance(raw, str) and " ".join(raw.lower().split()) == PREFER_NOT_TO_SAY.lower():
+            return PREFER_NOT_TO_SAY
+        if not isinstance(raw, bool):
+            raise _fail(f"{at} must be a boolean or \"{PREFER_NOT_TO_SAY}\", got {type(raw).__name__}")
+        return raw
+    if kind == "iso2":
+        return _iso2(at, raw, remote_hint=where.startswith(("user_info.logistics", "user_info.right_to_work"))) or None
+    if kind == "iso2_or_any":
+        if isinstance(raw, str) and raw.strip().upper() == ANY_COUNTRY:
+            return ANY_COUNTRY
+        return _iso2(at, raw, remote_hint=True) or None
+    if kind == "line_or_bool":
+        yes_no = forgiving.bool_to_yes_no(raw)
+        if yes_no is not None:
+            forgiving.note(forgiving.RULE_BOOL_YESNO, at=at)
+            return yes_no
+        return _line(at, raw) or None
+    if kind in ("onsite", "licence_type", "priority"):
+        allowed = {"onsite": ONSITE_VALUES, "licence_type": LICENCE_TYPES, "priority": PRIORITY_LEVELS}[kind]
+        text = "_".join(_line(at, raw).lower().replace("-", " ").split())
+        if not text:
+            return None
+        if text not in allowed:
+            raise _fail(f"{at} must be one of: {', '.join(allowed)}")
+        return text
+    if kind == "email":
+        text = _line(at, raw, _EMAIL_MAX)
+        if not text:
+            return None
+        if not _is_email(text):
+            raise _fail(f"{at} is not an email address (expected name@domain)")
+        return text
+    if kind == "phone":
+        if not isinstance(raw, str):
+            raise _type_error(at, "a string", raw)
+        text = _strip_control(raw)
+        if not text:
+            return None
+        digits = sum(ch.isdigit() for ch in text)
+        if len(text) > _PHONE_MAX or not _PHONE_CHARS_RE.match(text) or not 6 <= digits <= 15:
+            raise _fail(f"{at} must be 6-15 digits, with only + ( ) - . and spaces")
+        return text
+    if kind == "address_lines":
+        if not isinstance(raw, list):
+            raise _type_error(at, "a list of strings", raw)
+        lines = [t for i, item in enumerate(raw) if (t := _line(f"{at}[{i}]", item))]
+        if len(lines) > _ADDRESS_LINES_MAX:
+            raise _fail(f"{at} exceeds the {_ADDRESS_LINES_MAX}-line limit")
+        return lines or None
+    if kind == "dob":
+        text = _line(at, raw)
+        if not text:
+            return None
+        parsed = _real_date(text)
+        if parsed is None or parsed >= datetime.now(timezone.utc).date():
+            raise _fail(f"{at} must be a real date as YYYY-MM-DD in the past")
+        return text
+    if kind == "visa_expires":
+        text = _line(at, raw)
+        if not text:
+            return None
+        ok = bool(_MONTH_RE.match(text))
+        if ok and len(text) == 7:
+            ok = 1 <= int(text[5:7]) <= 12
+        elif ok:
+            ok = _real_date(text) is not None
+        if not ok:
+            raise _fail(f"{at} must be YYYY-MM or YYYY-MM-DD")
+        return text
+    if kind == "start":
+        text = _line(at, raw)
+        if not text:
+            return None
+        if _DATE_RE.match(text) and _real_date(text) is None:
+            raise _fail(f"{at} looks like a date (YYYY-MM-DD) but is not a real date")
+        return text
+    if kind == "work_auth":
+        text = _line(at, raw).lower()
+        if not text:
+            return None
+        if text not in VALID_WORK_AUTH_STATUSES:
+            mapped = forgiving.work_auth_alias(text)
+            if mapped is None:
+                raise _fail(f"{at} must be one of: {', '.join(sorted(VALID_WORK_AUTH_STATUSES))}")
+            forgiving.note(forgiving.RULE_WORK_AUTH, at=at)
+            return mapped
+        return text
+    if kind == "level":
+        text = _line(at, raw).lower()
+        if not text:
+            return None
+        if text not in VALID_LANGUAGE_LEVELS:
+            raise _fail(f"{at} must be one of: {', '.join(sorted(VALID_LANGUAGE_LEVELS))}")
+        return text
+    if kind == "pct":
+        if isinstance(raw, bool) or not isinstance(raw, int) or not 0 <= raw <= 100:
+            raise _fail(f"{at} must be a whole number 0-100")
+        return raw
+    if kind == "current_salary":
+        return _current_salary(at, raw)
+    if kind == "rtw_countries":
+        return _countries(at, raw, _RTW_COUNTRY, contradictions=True)
+    if kind == "logistics_countries":
+        return _countries(at, raw, _LOGISTICS_COUNTRY, contradictions=False)
+    if kind == "iso2_list":
+        if isinstance(raw, str):
+            # "British" / "UK, India" -> a list; each item read like any country.
+            forgiving.note(forgiving.RULE_STR_LIST, at=at)
+            # Whole string first: "Trinidad and Tobago" is ONE country. Split only when it is not.
+            if to_iso2(raw, allow_demonym=True, strict=True) is not None:
+                raw = [raw]
+            else:
+                raw = [part for part in re.split(r"[,;/]|\band\b", raw) if part.strip()]
+        if not isinstance(raw, list):
+            raise _type_error(at, "a list of ISO alpha-2 codes", raw)
+        for i, item in enumerate(raw):
+            if not isinstance(item, str):
+                raise _type_error(f"{at}[{i}]", "a string", item)
+        codes: list[str] = []
+        for i, item in enumerate(raw):
+            code = _iso2(f"{at}[{i}]", item, demonym=True)
+            if code and code not in codes:
+                codes.append(code)
+        return codes or None
+    raise AssertionError(f"unknown user-info kind {kind!r}")  # pragma: no cover
+
+
+def _current_salary(at: str, raw: Any) -> dict[str, Any] | None:
+    """``{amount, currency, period}`` - what the user earns now, as they said it. Never converted;
+    ``{}`` = not answered. Same figure/currency/period rules as ``preferences.salary_by_country``."""
+    allowed = ", ".join(_CURRENT_SALARY_KEYS)
+    if not isinstance(raw, dict):
+        raise _fail(f"{at} must be an object with keys {allowed}, got {type(raw).__name__}")
+    if not raw:
+        return None
+    for key in raw:
+        if key not in _CURRENT_SALARY_KEYS:
+            raise _unknown_key(at, key, allowed)
+    amount, currency, period = raw.get("amount"), raw.get("currency"), raw.get("period")
+    if (
+        not _salary_figure(amount)
+        or not isinstance(currency, str)
+        or not _CURRENCY_RE.match(_strip_control(currency))
+        or not isinstance(period, str)
+        or period.strip().lower() not in _SALARY_PERIODS
+    ):
+        raise _fail(f"{at} needs amount (a number > 0), currency (ISO 4217, 3 letters) and period (year or month)")
+    return {"amount": amount, "currency": _strip_control(currency).upper(), "period": period.strip().lower()}
+
+
+def _unknown_key(where: str, key: Any, allowed: str) -> ProfileEditError:
+    return _fail(f"{where}: unknown key '{_safe_key(key)}' — allowed keys: {allowed}")
+
+
+def _apply_aliases(where: str, raw: dict[str, Any], aliases: dict[str, str]) -> dict[str, Any]:
+    """Rename a known alias key to its real key (reported as ``key_alias``). Both
+    spellings in one object is a refusal - one of them would be lost."""
+    if not any(k in aliases for k in raw):
+        return raw
+    renamed: dict[str, Any] = {}
+    for key, val in raw.items():
+        real = aliases.get(key, key) if isinstance(key, str) else key
+        if real != key:
+            if real in raw:
+                raise _fail(f"{where}: send '{real}' once - not both '{real}' and '{key}'")
+            forgiving.note(forgiving.RULE_KEY, at=f"{where}.{real}")
+        renamed[real] = val
+    return renamed
+
+
+def _split_licence(where: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """``driving_licence: "provisional UK"`` -> licence true + type + country (``driving_licence_split``).
+    An explicit type/country in the same record wins; a leftover that is no country is refused."""
+    value = raw.get("driving_licence")
+    if not isinstance(value, str):
+        return raw
+    parts = forgiving.split_licence(value)
+    if parts is None:
+        raise _fail(
+            f"{where}.driving_licence must be true/false "
+            f"(put the kind in driving_licence_type: {', '.join(LICENCE_TYPES)})"
+        )
+    kind, rest = parts
+    out = dict(raw)
+    out["driving_licence"] = kind != "none"
+    out.setdefault("driving_licence_type", kind)
+    if rest:
+        code = to_iso2(rest, strict=True)
+        if code is None:
+            raise _fail(f"{where}.driving_licence: put the country in driving_licence_country (ISO alpha-2)")
+        out.setdefault("driving_licence_country", code)
+    forgiving.note(forgiving.RULE_LICENCE, at=f"{where}.driving_licence")
+    return out
+
+
+def _object(
+    where: str, raw: dict[str, Any], schema: dict[str, str], aliases: dict[str, str] | None = None
+) -> dict[str, Any]:
+    allowed = ", ".join(schema)
+    if aliases:
+        raw = _apply_aliases(where, raw, aliases)
+    if "driving_licence" in schema and "driving_licence_type" in schema:
+        raw = _split_licence(where, raw)
+    original_auth = raw.get("work_authorization") if schema is _RTW_COUNTRY else None
+    for key in raw:
+        if key not in schema:
+            raise _unknown_key(where, key, allowed)
+    out: dict[str, Any] = {}
+    for key, kind in schema.items():
+        if key not in raw:
+            continue
+        cleaned = _value(where, key, kind, raw[key])
+        if cleaned is not None:
+            out[key] = cleaned
+    if isinstance(original_auth, str) and "note" not in out and out.get("work_authorization"):
+        # A free-text status was mapped to the closed set: keep the user's own words in `note`.
+        words = _strip_control(original_auth)
+        if " ".join(words.lower().replace("_", " ").split()) != out["work_authorization"].replace("_", " "):
+            out["note"] = _line(f"{where}.note", words)
+    _check_licence(where, out)
+    return out
+
+
+def _check_licence(where: str, rec: dict[str, Any]) -> None:
+    """A licence flag and its type must not contradict each other."""
+    kind, flag = rec.get("driving_licence_type"), rec.get("driving_licence")
+    if (kind == "none" and flag is True) or (kind in ("full", "provisional") and flag is False):
+        raise _fail(f"{where}: driving_licence {str(flag).lower()} contradicts driving_licence_type '{kind}'")
+
+
+def _dict_path(path: str, value: Any) -> dict[str, Any]:
+    schema = _DICT_SCHEMAS[path]
+    if path == "user_info.right_to_work" and isinstance(value, list):
+        value = {"countries": value}  # a bare list of country records
+    if not isinstance(value, dict):
+        raise _fail(
+            f"{path} must be an object with keys {', '.join(schema)}, got {type(value).__name__}"
+        )
+    if path == "user_info.right_to_work":
+        value = _coerce_rtw(path, value)
+    return _object(path, value, schema, _CONTACT_ALIASES if path == "user_info.contact" else None)
+
+
+def _country_key(key: Any) -> str | None:
+    """A dict key that NAMES a country (or "ANY"); ``None`` when it does not."""
+    if not isinstance(key, str):
+        return None
+    if key.strip().upper() == ANY_COUNTRY:
+        return ANY_COUNTRY
+    return to_iso2(key, strict=True)
+
+
+def _keyed_records(path: str, keyed: dict[Any, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for key, val in keyed.items():
+        code = _country_key(key)
+        if code is None or not isinstance(val, dict):
+            raise _fail(f"{path}: each country entry must be an object keyed by an ISO alpha-2 code (or ANY)")
+        out.append({"country": code, **val})
+    return out
+
+
+def _coerce_rtw(path: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """``{"GB": {...}, "ANY": {...}}`` (or ``countries`` as such a dict) -> the ``countries`` list
+    (``country_keyed_to_records``). Keys that are neither schema keys nor countries stay and are refused."""
+    out: dict[str, Any] = {}
+    extra: list[dict[str, Any]] = []
+    for key, val in raw.items():
+        if key in _RIGHT_TO_WORK:
+            out[key] = val
+        elif _country_key(key) is not None and isinstance(val, dict):
+            extra.extend(_keyed_records(path, {key: val}))
+        else:
+            out[key] = val
+    countries = out.get("countries")
+    if isinstance(countries, dict) and countries:
+        out["countries"] = _keyed_records(path, countries)
+        forgiving.note(forgiving.RULE_COUNTRY_KEYED, at=f"{path}.countries")
+    if extra:
+        base = out.get("countries")
+        if base is None:
+            base = []
+        if not isinstance(base, list):
+            return raw
+        out["countries"] = [*base, *extra]
+        forgiving.note(forgiving.RULE_COUNTRY_KEYED, at=path)
+    return out
+
+
+def _check_record_count(path: str, value: list[Any]) -> None:
+    # Saved answers have their own, larger cap (gap 4); every other list keeps the generic one.
+    answers = path == USER_INFO_ANSWERS_PATH
+    cap = settings.USER_INFO_ANSWERS_MAX_RECORDS if answers else settings.PROFILE_EDIT_MAX_RECORDS
+    if len(value) > cap:
+        setting = "USER_INFO_ANSWERS_MAX_RECORDS" if answers else "PROFILE_EDIT_MAX_RECORDS"
+        raise _fail(f"{path} exceeds the {cap}-record limit ({setting})")
+
+
+def _record_list(
+    path: str, value: Any, schema: dict[str, str], aliases: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise _fail(
+            f"{path} must be a list of objects with keys {', '.join(schema)}, "
+            f"got {type(value).__name__}"
+        )
+    _check_record_count(path, value)
+    records: list[dict[str, Any]] = []
+    for i, raw in enumerate(value):
+        where = f"{path}[{i}]"
+        if not isinstance(raw, dict):
+            raise _fail(
+                f"{where} must be an object with keys {', '.join(schema)}, got {type(raw).__name__}"
+            )
+        records.append(_object(where, raw, schema, aliases))
+    return records
+
+
+def _countries(
+    path: str, value: Any, schema: dict[str, str], *, contradictions: bool
+) -> list[dict[str, Any]] | None:
+    """A per-country record list: country required and unique; an empty list
+    is "not answered" (``None`` -> dropped). ``contradictions`` adds the two
+    work-authorization rules."""
+    records = _record_list(path, value, schema, None if contradictions else _LOGISTICS_COUNTRY_ALIASES)
+    if not records:
+        return None
+    seen: set[str] = set()
+    for i, rec in enumerate(records):
+        code = rec.get("country")
+        if not code:
+            raise _fail(f"{path}[{i}] needs a country (ISO alpha-2)")
+        if code in seen:
+            raise _fail(f"{path}: country '{code}' appears twice — one record per country")
+        seen.add(code)
+        if not contradictions:
+            continue
+        status = rec.get("work_authorization")
+        sponsor = rec.get("needs_sponsorship")
+        if status in ("citizen", "permanent_resident") and sponsor is True:
+            raise _fail(f"{path}[{i}]: work_authorization '{status}' contradicts needs_sponsorship true")
+        if status == "needs_sponsorship" and sponsor is False:
+            raise _fail(
+                f"{path}[{i}]: work_authorization 'needs_sponsorship' contradicts needs_sponsorship false"
+            )
+    return records
+
+
+def _languages(path: str, value: Any) -> list[dict[str, Any]]:
+    records = _record_list(path, value, _LANGUAGE)
+    seen: set[str] = set()
+    for i, rec in enumerate(records):
+        if not rec.get("language") or not rec.get("level"):
+            raise _fail(f"{path}[{i}] needs a language and a level")
+        key = " ".join(rec["language"].lower().split())
+        if key in seen:
+            raise _fail(f"{path}: language '{key}' appears twice")
+        seen.add(key)
+    return records
+
+
+def _recorded_at(where: str, raw: Any) -> str:
+    """Stamp now (UTC) when absent; else an ISO date/datetime at most a day ahead."""
+    if raw is None or raw == "":
+        return datetime.now(timezone.utc).isoformat()
+    text = _line(where, raw)
+    bad = _fail(f"{where} must be an ISO date or datetime, not more than a day in the future")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise bad from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed > datetime.now(timezone.utc) + timedelta(days=1):
+        raise bad
+    return text
+
+
+def _answers(path: str, value: Any) -> list[dict[str, Any]]:
+    allowed = ", ".join(_ANSWER_KEYS)
+    if not isinstance(value, list):
+        raise _fail(f"{path} must be a list of objects with keys {allowed}, got {type(value).__name__}")
+    _check_record_count(path, value)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, raw in enumerate(value):
+        where = f"{path}[{i}]"
+        if not isinstance(raw, dict):
+            raise _fail(f"{where} must be an object with keys {allowed}, got {type(raw).__name__}")
+        for key in raw:
+            if key not in _ANSWER_KEYS:
+                raise _unknown_key(where, key, allowed)
+        question = raw.get("question")
+        answer = raw.get("answer")
+        for key, item in (("question", question), ("answer", answer)):
+            if item is not None and not isinstance(item, str):
+                raise _type_error(f"{where}.{key}", "a string", item)
+        q = _strip_control(question or "")
+        a = _strip_control(answer or "", keep_newlines=True)
+        if not q or not a:
+            raise _fail(f"{where} needs a non-empty question and answer")
+        if len(q) > settings.USER_INFO_QUESTION_MAX_CHARS:
+            raise _fail(
+                f"{where}.question exceeds the {settings.USER_INFO_QUESTION_MAX_CHARS}-character "
+                "limit (USER_INFO_QUESTION_MAX_CHARS)"
+            )
+        if len(a) > settings.USER_INFO_ANSWER_MAX_CHARS:
+            raise _fail(
+                f"{where}.answer exceeds the {settings.USER_INFO_ANSWER_MAX_CHARS}-character "
+                "limit (USER_INFO_ANSWER_MAX_CHARS)"
+            )
+        key = " ".join(q.lower().split())
+        if key in seen:
+            raise _fail(f"{path}: the same question appears twice")
+        seen.add(key)
+        approved = raw.get("approved")
+        record: dict[str, Any] = {
+            "question": q,
+            "answer": a,
+            "approved": False if approved is None else _bool(f"{where}.approved", approved),
+            "recorded_at": _recorded_at(f"{where}.recorded_at", raw.get("recorded_at")),
+        }
+        company = raw.get("company")
+        if company is not None:
+            company_line = _line(f"{where}.company", company, 200)
+            if company_line:
+                record["company"] = company_line
+        topic = raw.get("topic")
+        if topic is not None and topic != "":
+            if not isinstance(topic, str):
+                raise _type_error(f"{where}.topic", "a string", topic)
+            if len(topic) > TOPIC_MAX_CHARS or not TOPIC_PATTERN.match(topic):
+                raise _fail(
+                    f"{where}.topic must be a short stable key of at most {TOPIC_MAX_CHARS} characters "
+                    f"using only letters, digits, _ and . - no spaces (e.g. work_from.IN), got {topic!r}"
+                )
+            record["topic"] = topic
+        aliases = raw.get("aliases")
+        if aliases is not None and aliases != []:
+            if not isinstance(aliases, list) or len(aliases) > 5:
+                raise _fail(f"{where}.aliases must be a list of at most 5 other wordings of the question")
+            cap = settings.USER_INFO_QUESTION_MAX_CHARS
+            clean = [_line(f"{where}.aliases[{j}]", x, cap) for j, x in enumerate(aliases)]
+            record["aliases"] = [x for x in clean if x]
+        out.append(record)
+    return _one_per_topic(out)
+
+
+def _one_per_topic(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Upsert, not duplicate (neonwatty job-apply-store.py:475-540, put_answer updates the
+    record under its key): two records with the same ``topic`` and the same ``company`` are
+    one answer, and the LATER one in the write wins. A different company is its own record."""
+    last: dict[tuple[str, str], int] = {}
+    for i, rec in enumerate(records):
+        if rec.get("topic"):
+            last[(rec["topic"], _company_key(rec))] = i
+    return [
+        rec for i, rec in enumerate(records)
+        if not rec.get("topic") or last[(rec["topic"], _company_key(rec))] == i
+    ]
+
+
+def _company_key(rec: dict[str, Any]) -> str:
+    return " ".join(str(rec.get("company") or "").lower().split())
+
+
+def answer_upsert_index(records: list[Any], new: Any) -> int | None:
+    """Where an ``upsert`` edit puts ``new`` in the saved answers (gap 4): the record with the
+    same ``topic`` and company (:func:`_one_per_topic`'s rule), else the one with the same
+    question (case/space-insensitive) and company. ``None`` = no match, append it."""
+    if not isinstance(new, dict):
+        return None
+    company = _company_key(new)
+    same = [i for i, rec in enumerate(records) if isinstance(rec, dict) and _company_key(rec) == company]
+    topic = new.get("topic")
+    for i in same if isinstance(topic, str) and topic else ():
+        if records[i].get("topic") == topic:
+            return i
+    question = new.get("question")
+    wanted = " ".join(_strip_control(question).lower().split()) if isinstance(question, str) else ""
+    for i in same if wanted else ():
+        if " ".join(str(records[i].get("question") or "").lower().split()) == wanted:
+            return i
+    return None
+
+
+def validate_country_list(path: str, value: Any) -> list[str]:
+    """A list of countries for a plain list path (``preferences.work_authorization_countries``):
+    names and common spellings become ISO alpha-2 codes; a lone string becomes a one-item list."""
+    return cast(list[str], _value(path, "", "iso2_list", value) or [])
+
+
+def validate_user_info(path: str, value: Any) -> Any:
+    """Normalise ``value`` for one ``user_info.*`` path, or raise
+    ``ProfileEditError(422, ...)``. The write REPLACES the whole value; empty
+    answers are dropped (rule #29)."""
+    if path in _DICT_SCHEMAS:
+        return _dict_path(path, value)
+    if path == "user_info.languages":
+        return _languages(path, value)
+    if path == USER_INFO_ANSWERS_PATH:
+        return _answers(path, value)
+    raise _fail(f"{path!r} is not a user-info path")  # pragma: no cover — callers gate on USER_INFO_PATHS
+
+
+def _salary_figure(value: Any) -> bool:
+    """A finite number > 0, not a bool, <= 1e12. The range check runs BEFORE
+    isfinite: a JSON integer with hundreds of digits makes ``math.isfinite``
+    raise OverflowError (a 500), while the int-vs-float comparison is exact and
+    refuses it as a 422. NaN fails the comparison too; isfinite stays for inf."""
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and 0 < value <= _SALARY_AMOUNT_MAX
+        and math.isfinite(value)
+    )
+
+
+def validate_salary_by_country(path: str, value: Any) -> list[dict[str, Any]]:
+    """Normalise ``preferences.salary_by_country``: a list (<= 50) of flat
+    records, EXACTLY the keys country (ISO2, unique), min and max (finite
+    numbers > 0, min <= max; equal = one figure), currency (ISO 4217,
+    upper-cased) and period (``year`` | ``month``), all required. The old
+    single ``amount`` is accepted INSTEAD of min/max (never both) and is read
+    as min = max; ``min`` alone is one figure (max = min), ``max`` alone is
+    refused; writes always store min/max. Order is kept, nothing is
+    converted; ``[]`` = not set. A ``minimum`` key is refused like any unknown
+    key."""
+    allowed = ", ".join(_SALARY_KEYS)
+    if not isinstance(value, list):
+        raise _fail(
+            f"{path} must be a list of objects with keys {allowed}, got {type(value).__name__}"
+        )
+    _check_record_count(path, value)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, raw in enumerate(value):
+        where = f"{path}[{i}]"
+        need = _fail(
+            f"{where} needs country, min and max (numbers > 0, min not above max), currency "
+            "(ISO 4217, 3 letters like 'EUR') and period (year or month)"
+        )
+        if not isinstance(raw, dict):
+            raise _fail(f"{where} must be an object with keys {allowed}, got {type(raw).__name__}")
+        for key in raw:
+            if key not in _SALARY_KEYS and key != _SALARY_LEGACY_KEY:
+                raise _unknown_key(where, key, allowed)
+        country = raw.get("country")
+        if not isinstance(country, str) or not _strip_control(country):
+            raise need
+        code = _iso2(f"{where}.country", country, remote_hint=True)
+        if _SALARY_LEGACY_KEY in raw:
+            if "min" in raw or "max" in raw:
+                raise _fail(f"{where}: send min and max, or the old amount — never both")
+            low = high = raw[_SALARY_LEGACY_KEY]
+        else:
+            if "max" in raw and "min" not in raw:
+                raise _fail(f"{where}: max needs a min — send min alone for one figure, or min and max")
+            # min alone = one figure (max = min); the stored record always has both.
+            low = raw.get("min")
+            high = raw["max"] if "max" in raw else low
+        currency, period = raw.get("currency"), raw.get("period")
+        if (
+            not _salary_figure(low)
+            or not _salary_figure(high)
+            or low > high
+            or not isinstance(currency, str)
+            or not _CURRENCY_RE.match(_strip_control(currency))
+            or not isinstance(period, str)
+            or period.strip().lower() not in _SALARY_PERIODS
+        ):
+            raise need
+        if code in seen:
+            raise _fail(f"{path}: country '{code}' appears twice — one record per country")
+        seen.add(code)
+        out.append({
+            "country": code, "min": low, "max": high,
+            "currency": _strip_control(currency).upper(), "period": period.strip().lower(),
+        })
+    return out
+
+
+def answered_count(path: str, value: Any) -> int:
+    """How many answers ``value`` holds — for the audit log ONLY (a count,
+    never a value or a key name). ``None`` / empty -> 0. A dict path counts its
+    top-level keys present plus its country records (``countries``)."""
+    if isinstance(value, dict):
+        countries = value.get("countries")
+        return len(value) + (len(countries) if isinstance(countries, list) else 0)
+    if isinstance(value, list):
+        return len(value)
+    return 0

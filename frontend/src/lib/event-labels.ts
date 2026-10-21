@@ -23,6 +23,8 @@ const STATUS_EVENT_TYPES = new Set([
   "interview_scheduled",
   "interview_done",
   "offer",
+  "hired",
+  "offer_declined",
   "rejected",
   "withdrawn",
   "ghosted",
@@ -45,6 +47,8 @@ export const STATUS_LABEL: Record<string, string> = {
   interview_scheduled: "Interview scheduled",
   interview_done: "Interview done",
   offer: "Offer",
+  hired: "Hired",
+  offer_declined: "Offer declined",
   rejected: "Rejected",
   withdrawn: "Withdrawn",
   ghosted: "Ghosted",
@@ -59,13 +63,69 @@ export const EVENT_LABEL: Record<string, string> = {
   outreach_sent: "Outreach sent",
   note: "Note",
   lesson: "Lesson",
+  post_mortem: "Post-mortem: what to learn from this",
+  outreach_replied: "Reply received to your outreach",
+  // Needs-you asks.
+  asked: "Assistant asked you a question",
+  answered: "You answered a question",
+  ask_withdrawn: "Question withdrawn",
+  // Per-job submit switch.
+  submit_mode_set: "Sending setting changed for this job",
+  // Application kit trail (human-in-the-loop before sending).
+  kit_read: "Assistant opened your application kit",
+  cv_seen: "CV checked",
+  submit_approved: "You said yes to sending",
+  submit_declined: "You said don't send",
+  autofill_set: "Autofill setting changed",
+  duplicate_cleared: "Possible duplicate cleared",
+  form_filled: "Form filled",
+  form_swept: "Form double-checked before sending",
+  form_checked: "Form questions checked against your saved answers",
+  hold_released: "Hold on sending lifted",
+  site_account: "Account on the employer site noted",
+  account_needed: "Employer site needs an account",
+  // S6 blocked record.
+  blocked: "Assistant got stuck",
+  unblocked: "Unblocked",
+  // S7 proof of application.
+  proof_text: "Saved the confirmation page text",
+  proof_screenshot: "Saved a screenshot of the confirmation",
+  // Automatic employer emails (sent by the assistant in the owner's name).
+  checkin_sent: "Check-in email sent to the employer",
+  feedback_asked: "Asked the employer for feedback",
+  feedback_followup_sent: "Follow-up email sent to the employer",
+  auto_email_skipped: "Automatic email skipped",
+  // Simulated/test application marker.
+  simulation: "Marked as a test (not a real application)",
+  // Feedback loop slice 4 (interview side).
+  interview_session: "Interview round debriefed",
+  process_friction: "Hiring-process friction noted",
+  assessment: "Skills test logged",
+  // Batch queue (2026-10-18).
+  queued: "Added to the batch",
+  unqueued: "Removed from the batch",
+  // Bulk-apply D1 (2026-10-18).
+  submit_attempted: "Submit started",
+  submit_resolved: "Submit marked as not sent",
+  // Bulk-apply F4 (2026-10-18).
+  answer_corrected: "Answer corrected by you",
 };
+
+function relayedWords(payload: unknown): boolean {
+  const w = (payload as { user_words?: unknown } | null | undefined)?.user_words;
+  return typeof w === "string" && w.trim().length > 0;
+}
 
 /** The label for one timeline row. A status event reads "Status → <label>";
  * a note-family event reads its own label; anything unrecognised (a future
  * `APPLICATION_EXTRA_EVENT_TYPES` addition, or drift) falls back to the raw
  * `event_type` string rather than hiding the row. */
-export function eventLabel(e: { event_type: string; payload?: unknown }): string {
+export function eventLabel(e: { event_type: string; payload?: unknown; recorded_by?: string }): string {
+  if (e.event_type === "answered" && relayedWords(e.payload)) {
+    // The assistant typed it, but the words are the user's (answer_ask user_words).
+    const via = e.recorded_by && e.recorded_by !== "web" ? whoLabel(e.recorded_by).name : "";
+    return via ? `Your answer (via ${via})` : "Your answer (via your assistant)";
+  }
   if (STATUS_EVENT_TYPES.has(e.event_type)) {
     const status = EVENT_TYPE_TO_STATUS[e.event_type] ?? e.event_type;
     return `Status → ${STATUS_LABEL[status] ?? status}`;
@@ -85,6 +145,14 @@ export function eventLabel(e: { event_type: string; payload?: unknown }): string
  * "agent" (not renamed — it is code, never shown), only the display string in
  * `WhoChip` changed.
  */
+/** Plain-words "who recorded it" line for the Timeline: "you", "your
+ * assistant (via <client>)" or "Job360" (the server itself). */
+export function actorLabel(recordedBy: string): string {
+  if (recordedBy === "system" || recordedBy === "job360") return "Job360";
+  const { who, name } = whoLabel(recordedBy);
+  return who === "you" ? "you" : `your assistant (via ${name})`;
+}
+
 export function whoLabel(recordedBy: string): { who: "you" | "agent"; name: string } {
   if (recordedBy === "web") {
     return { who: "you", name: "You" };

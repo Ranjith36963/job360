@@ -19,6 +19,19 @@ on:
   # codeql could not be drilled at all.
   workflow_dispatch: {}
 
+# A newer push to a PR supersedes the analysis of the old head; don't pay for
+# the stale one. PULL REQUESTS ONLY: every other event gets its own group (the
+# run id) and cancel-in-progress is false, so a push to main, the weekly
+# schedule or a dispatch is never cancelled or queued behind anything.
+#
+# Deliberately NOT given a `tested` skip on push to main (CI audit 2026-10-19):
+# code scanning's default-branch alerts, and the base a PR analysis is
+# compared against, come only from analyses uploaded FOR main. Skipping them
+# would leave the Security tab and every later PR diff reading a stale main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   security-events: write # required so CodeQL can upload alerts
@@ -31,15 +44,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # python = backend, javascript-typescript = frontend
-        language: ["python", "javascript-typescript"]
+        # python = backend, javascript-typescript = frontend, actions = the
+        # workflows (injection, untrusted input, token scope). `actions` was only
+        # ever analyzed by autodetect while `languages:` was misspelled; it is
+        # explicit now so fixing the spelling does not drop it.
+        language: ["python", "javascript-typescript", "actions"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
-          language: ${{ matrix.language }}
+          # `languages` (plural) is the input. `language:` was ignored with
+          # "Unexpected input(s)", so each job autodetected and analyzed python,
+          # javascript AND actions (CI audit, 2026-10-20).
+          languages: ${{ matrix.language }}
           # security-extended, NOT security-and-quality: the quality half
           # duplicates ruff (which already governs style/dead-code and documents
           # deliberate suppressions like S110 empty-except). Running both meant
@@ -48,68 +67,12 @@ jobs:
           queries: security-extended
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/autobuild@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
 
       - name: Analyze
-        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:${{ matrix.language }}"
 
-  # ── Make this loop LOUD ───────────────────────────────────────────────────
-  # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
-  # it alone had issue plumbing. live-e2e then failed 8 consecutive nights
-  # unnoticed over a 6-line config gap. A watcher nobody reads is worse than no
-  # watcher, so every scheduled loop now produces an OBJECT with a lifecycle:
-  # fail -> open/comment one deduped issue; pass -> auto-close it.
-  # Deliberately silent on pull_request: a red PR is already visible in the PR,
-  # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
-  notify:
-    name: Report failure as an issue
-    needs: [analyze]
-    if: >-
-      always() && (github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      issues: write
-      actions: write # to wake the triage loop (gh workflow run triage.yml)
-    steps:
-      - name: Open, update or close the tracking issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          title="Loop RED: codeql is failing"
-          num=$(gh issue list --state open --json number,title \
-                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
-            {
-              echo "\`codeql.yml\` failed on **${{ github.event_name }}** (\`${{ github.ref_name }}\`)."
-              echo
-              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              echo "- Commit: \`${{ github.sha }}\`"
-            } > notify-body.md
-            if [ -z "$num" ]; then
-              # LABEL + HAND OFF. Until 2026-08-03 this line was the end of the road:
-              # the issue was created with GITHUB_TOKEN, which raises NO `issues:
-              # opened` event (GitHub blocks that recursion), carried no `harness`
-              # label, and dispatched nothing — so no loop ever diagnosed it and no
-              # email was sent. The alarm rang into an empty room. Proven live:
-              # issue #190 (security RED) opened and auto-closed with zero
-              # diagnosis; #185 sat unread for days. Seven loops shared this bug.
-              new=$(gh issue create --title "$title" --body-file notify-body.md --label harness)
-              n="${new##*/}"
-              if gh workflow run triage.yml -f issue="$n"; then
-                echo "raised #$n and woke triage" >> "$GITHUB_STEP_SUMMARY"
-              else
-                echo "::warning::issue #$n raised but triage could not be woken - diagnose by hand"
-              fi
-            else
-              gh issue comment "$num" --body-file notify-body.md
-            fi
-          elif [ -n "$num" ]; then
-            gh issue close "$num" \
-              --comment "Green again in run ${{ github.run_id }}. (auto-close)"
-          fi
+  # Failures on main / on the schedule are reported as an issue by loop-red.yml
+  # (one workflow_run watcher, so PRs no longer show a 'skipping' row for it).

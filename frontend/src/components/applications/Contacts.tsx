@@ -10,8 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format-date";
+import { closedSetLabel } from "@/lib/closed-sets";
+import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
+import { CopyButton } from "@/components/applications/CopyButton";
 
-const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "" };
+const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "" };
 // One stable empty list. An inline `= []` default would be a NEW array every
 // render, the `[contacts]` effect below would fire every render, and setList
 // would re-render forever.
@@ -20,7 +23,7 @@ const NO_CONTACTS: Contact[] = [];
 /** S5: `linkedin_url` is rendered as text everywhere, an `<a href>` ONLY when
  * it actually starts with `https://` — a stored `javascript:` (or bare
  * `http://`) value must never become a clickable script. */
-function LinkedinCell({ url }: { url: string }) {
+export function LinkedinCell({ url }: { url: string }) {
   if (!url) return null;
   if (url.startsWith("https://")) {
     return (
@@ -28,7 +31,7 @@ function LinkedinCell({ url }: { url: string }) {
         href={url}
         target="_blank"
         rel="noreferrer"
-        className="text-primary hover:underline"
+        className="text-foreground underline underline-offset-2 hover:text-muted-foreground"
       >
         LinkedIn
       </a>
@@ -48,7 +51,7 @@ function channelLabel(channel: string): string {
  * never changes; this is just plain words for it. `"web"` -> "you" (the
  * seeker added it in the browser); a token/agent actor -> its name, since
  * that is more useful here than the generic word "assistant". */
-function addedByLabel(addedBy: string): string {
+export function addedByLabel(addedBy: string): string {
   if (addedBy === "web") return "you";
   const idx = addedBy.indexOf(":");
   if (idx >= 0) return addedBy.slice(idx + 1).trim() || "your assistant";
@@ -58,10 +61,10 @@ function addedByLabel(addedBy: string): string {
 /** "Sent on 3 Oct via LinkedIn" / "Not sent yet". */
 function SentLine({ contact }: { contact: Contact }) {
   const last = contact.outreach?.last_sent;
-  if (!last) return <p className="text-xs text-muted-foreground">Not sent yet.</p>;
+  if (!last) return <p className="font-mono text-[11px] text-faint">Not sent yet.</p>;
   const via = channelLabel(last.channel);
   return (
-    <p className="text-xs text-muted-foreground">
+    <p className="font-mono text-[11px] text-faint">
       Sent on {formatDate(last.occurred_at)}
       {via && ` via ${via}`}
     </p>
@@ -71,8 +74,8 @@ function SentLine({ contact }: { contact: Contact }) {
 /** "Replied on 5 Oct" / "No reply yet". */
 function RepliedLine({ contact }: { contact: Contact }) {
   const last = contact.outreach?.last_reply;
-  if (!last) return <p className="text-xs text-muted-foreground">No reply yet.</p>;
-  return <p className="text-xs text-muted-foreground">Replied on {formatDate(last.occurred_at)}.</p>;
+  if (!last) return <p className="font-mono text-[11px] text-faint">No reply yet.</p>;
+  return <p className="font-mono text-[11px] text-faint">Replied on {formatDate(last.occurred_at)}.</p>;
 }
 
 /** The latest message text, with earlier versions folded away — plain text
@@ -85,16 +88,18 @@ function MessageVersions({ contact }: { contact: Contact }) {
   return (
     <div className="mt-1 text-xs">
       <p className="whitespace-pre-wrap text-foreground/90">{latest.text}</p>
+      <CopyButton getText={() => latest.text} testId="message-copy" className="mt-0.5" />
       {earlier.length > 0 && (
         <details className="mt-1">
-          <summary className="cursor-pointer text-muted-foreground">
+          <summary className="cursor-pointer font-mono text-[11px] text-faint">
             Earlier versions ({earlier.length})
           </summary>
-          <ul className="mt-1 flex flex-col gap-1 border-l pl-2">
+          <ul className="mt-1 flex flex-col gap-1 border-l border-border pl-2">
             {[...earlier].reverse().map((m) => (
               <li key={m.id} className="text-muted-foreground">
                 <span className="text-[11px]">{formatDate(m.occurred_at)}</span>
                 <p className="whitespace-pre-wrap">{m.text}</p>
+                <CopyButton getText={() => m.text} testId="message-copy" />
               </li>
             ))}
           </ul>
@@ -123,11 +128,13 @@ function EditContact({
   const [form, setForm] = useState({
     name: contact.name, role: contact.role, email: contact.email, notes: contact.notes,
   });
+  const [foundVia, setFoundVia] = useState(contact.found_via ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setForm({ name: contact.name, role: contact.role, email: contact.email, notes: contact.notes });
+    setFoundVia(contact.found_via ?? "");
   }, [contact]);
 
   const save = useCallback(
@@ -136,10 +143,13 @@ function EditContact({
       setError(null);
       setSaving(true);
       try {
-        const body: Record<string, string> = {};
+        const body: Record<string, string | null> = {};
         for (const field of EDITABLE_FIELDS) {
           if (form[field] !== contact[field]) body[field] = form[field];
         }
+        // "Not set" clears it with "" (the backend reads null as "not given"),
+        // never a default.
+        if (foundVia !== (contact.found_via ?? "")) body.found_via = foundVia;
         if (Object.keys(body).length === 0) {
           setOpen(false);
           return;
@@ -153,7 +163,7 @@ function EditContact({
         setSaving(false);
       }
     },
-    [contact, form, onSaved]
+    [contact, form, foundVia, onSaved]
   );
 
   const history = contact.edit_history ?? {};
@@ -165,14 +175,14 @@ function EditContact({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="text-[11px] font-medium text-primary hover:underline"
+          className="font-mono text-[11px] text-faint underline-offset-2 hover:text-foreground hover:underline"
         >
           Edit
         </button>
         {hasHistory && (
-          <details className="text-[11px] text-muted-foreground">
+          <details className="font-mono text-[11px] text-faint">
             <summary className="cursor-pointer">History</summary>
-            <ul className="mt-1 flex flex-col gap-1 border-l pl-2">
+            <ul className="mt-1 flex flex-col gap-1 border-l border-border pl-2">
               {EDITABLE_FIELDS.flatMap((field) => {
                 const rows = history[field] ?? [];
                 if (rows.length <= 1) return [];
@@ -191,11 +201,11 @@ function EditContact({
   }
 
   return (
-    <form onSubmit={save} className="mt-2 flex flex-col gap-2 rounded border border-border/60 p-2">
+    <form onSubmit={save} className="mt-2 flex flex-col gap-2 rounded-lg border border-border p-3">
       <div className="grid gap-2 sm:grid-cols-2">
         {EDITABLE_FIELDS.map((field) => (
           <div key={field} className="flex flex-col gap-1">
-            <Label htmlFor={`edit-${field}-${contact.id}`} className="text-[11px]">
+            <Label htmlFor={`edit-${field}-${contact.id}`} className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               {FIELD_LABEL[field]}
             </Label>
             <Input
@@ -205,13 +215,19 @@ function EditContact({
             />
           </div>
         ))}
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`edit-found-via-${contact.id}`} className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+            Found via
+          </Label>
+          <FoundViaSelect id={`edit-found-via-${contact.id}`} value={foundVia} onChange={setFoundVia} />
+        </div>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={saving}>
+        <Button type="submit" size="sm" disabled={saving} className="bg-foreground text-background hover:bg-foreground/90">
           {saving ? "Saving…" : "Save"}
         </Button>
-        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setOpen(false)}>
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setOpen(false)} className="border-border bg-card">
           Cancel
         </Button>
       </div>
@@ -268,7 +284,9 @@ export function Contacts({
           email?: string;
           linkedin_url?: string;
           notes?: string;
+          found_via?: string;
         } = { name };
+        if (form.found_via) body.found_via = form.found_via;
         if (form.role.trim()) body.role = form.role.trim();
         if (form.email.trim()) body.email = form.email.trim();
         if (form.linkedin_url.trim()) body.linkedin_url = form.linkedin_url.trim();
@@ -299,19 +317,24 @@ export function Contacts({
           No people yet. Your assistant can add one, or use the button below.
         </p>
       ) : (
-        <ul data-testid="contacts-list" className="flex flex-col gap-2">
+        <ul data-testid="contacts-list" className="flex flex-col">
           {list.map((contact) => (
-            <li key={contact.id} className="glass-card rounded-lg p-3 text-sm">
+            <li key={contact.id} className="border-t border-border py-3 text-sm first:border-t-0 first:pt-0">
               <div className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-medium">{contact.name}</span>
+                <span>{contact.name}</span>
                 {contact.role && (
                   <span className="text-muted-foreground">· {contact.role}</span>
                 )}
               </div>
+              {contact.found_via && (
+                <p data-testid="contact-found-via" className="mt-1 font-mono text-[11px] text-faint">
+                  Found via {closedSetLabel(contact.found_via)}
+                </p>
+              )}
               {(contact.email || contact.linkedin_url) && (
                 <div className="mt-1 flex flex-wrap gap-3 text-xs">
                   {contact.email && (
-                    <a href={`mailto:${contact.email}`} className="text-primary hover:underline">
+                    <a href={`mailto:${contact.email}`} className="text-foreground underline underline-offset-2 hover:text-muted-foreground">
                       {contact.email}
                     </a>
                   )}
@@ -319,9 +342,9 @@ export function Contacts({
                 </div>
               )}
               {contact.notes && (
-                <p className="mt-1 text-xs text-foreground/80">{contact.notes}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{contact.notes}</p>
               )}
-              <p className="mt-1 text-[11px] text-muted-foreground/70">
+              <p className="mt-1 font-mono text-[11px] text-faint">
                 added by {addedByLabel(contact.added_by)} ·{" "}
                 {formatDate(contact.created_at)}
               </p>
@@ -346,13 +369,13 @@ export function Contacts({
           type="button"
           data-testid="contacts-add-toggle"
           onClick={() => setFormOpen(true)}
-          className="self-start text-sm font-medium text-primary hover:underline"
+          className="self-start text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
           + Add person
         </button>
       ) : (
-      <form onSubmit={submit} className="glass-card flex flex-col gap-3 rounded-lg p-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <form onSubmit={submit} className="flex flex-col gap-3 border-t border-border pt-3">
+        <p className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Add a person
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -396,6 +419,14 @@ export function Contacts({
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
+          <Label htmlFor="contact-found-via">Found via (optional)</Label>
+          <FoundViaSelect
+            id="contact-found-via"
+            value={form.found_via}
+            onChange={(v) => setForm((prev) => ({ ...prev, found_via: v }))}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="contact-notes">Notes</Label>
           <Textarea
             id="contact-notes"
@@ -413,7 +444,7 @@ export function Contacts({
             type="submit"
             size="sm"
             disabled={submitting || !form.name.trim()}
-            className="self-start"
+            className="self-start bg-foreground text-background hover:bg-foreground/90"
           >
             {submitting ? "Adding…" : "Add person"}
           </Button>
@@ -427,7 +458,7 @@ export function Contacts({
               setFormError(null);
               setForm(EMPTY_FORM);
             }}
-            className="self-start"
+            className="self-start border-border bg-card"
           >
             Cancel
           </Button>

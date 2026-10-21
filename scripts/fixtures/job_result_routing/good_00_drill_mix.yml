@@ -1,0 +1,38 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          FIX_RESULT: ${{ needs.fix.result }}
+        run: |
+          case "$VERIFY_RESULT" in
+            success) mode=ship ;;
+            *) mode=incomplete ;;
+          esac
+          if [ "$FIX_RESULT" = "success" ]; then
+            mode=park
+          elif [ "$FIX_RESULT" = "failure" ]; then
+            mode=fix-failed
+          else
+            mode=incomplete
+          fi
+          if [ "$FIX_RESULT" = "failure" ]; then echo one-line-is-fine; fi
+          if [ "$FIX_RESULT" = success ]; then a=1; elif [ "$FIX_RESULT" = failure ]; then a=2; else a=3; fi
+          if [ "$FIX_RESULT" = failure ] || [ "$FIX_RESULT" = cancelled ]; then
+            echo a-deliberate-single-check-not-a-router
+          fi
+          case "$VERIFY_RESULT" in success) a=1 ;; *) a=2 ;; esac
+          case "$VERIFY_RESULT" in
+            success) mode=ship ;;
+            failure) mode=fail ;; *) mode=incomplete ;;
+          esac
+          echo "a ; inside quotes; if [ \"$FIX_RESULT\" = x ]" # if [ $FIX_RESULT = y ]; then
+          case "$VERIFY_RESULT" in
+            success)
+              case "$X" in *) y=1 ;; esac
+              ;;
+            *) z=1 ;;
+          esac

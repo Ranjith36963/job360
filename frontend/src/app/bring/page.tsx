@@ -39,6 +39,8 @@ export default function BringJobPage() {
   const [applyUrl, setApplyUrl] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Owner ask 2026-10-18: a job you bring goes straight into your batch (untick to keep it out).
+  const [toBatch, setToBatch] = useState(true);
 
   const [fetchingUrl, setFetchingUrl] = useState(false);
   const [fetchOutcome, setFetchOutcome] = useState<FetchUrlOutcome | null>(null);
@@ -64,10 +66,15 @@ export default function BringJobPage() {
         location,
         apply_url: applyUrl,
         description,
+        // Where it came from, for the tag on the job: a link we fetched, or an ad you pasted.
+        origin: fetchOutcome === "ok" ? "user_link" : "user_paste",
+        queue: toBatch,
       });
       if (res.existing) {
         toast.success("Already brought — opening it.");
       }
+      if (toBatch && res.queued) toast.success("Added to your batch.");
+      else if (toBatch && res.queue_note === "not open") toast.info("Not added to your batch: it is already applied or closed.");
       router.push(`/applications/${res.application_id}`);
     } catch (err) {
       toast.apiError(err, "Couldn't save this job — please check the fields and try again.");
@@ -125,7 +132,7 @@ export default function BringJobPage() {
     <PageContainer className="py-8">
       <div className="max-w-3xl">
         <div className="mb-6">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">Bring a job</h1>
+          <h1 className="font-heading text-2xl font-medium tracking-tight">Jobs in</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Paste a link and we&apos;ll try to fill the form, or paste the ad you found. We keep
             it, every CV your assistant writes for it, and a receipt of exactly what you sent.
@@ -181,7 +188,7 @@ export default function BringJobPage() {
             void submit();
           }}
           className="space-y-5"
-          aria-label="Bring a job"
+          aria-label="Jobs in"
         >
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="space-y-2">
@@ -293,6 +300,16 @@ export default function BringJobPage() {
               {description.length.toLocaleString()} / 40,000 characters
             </p>
           </div>
+
+          <label className="flex items-center gap-2 text-sm" data-testid="bring-to-batch">
+            <input
+              type="checkbox"
+              checked={toBatch}
+              onChange={(e) => setToBatch(e.target.checked)}
+              className="size-4 accent-[#1d9bf0]"
+            />
+            Add to batch: your assistant applies to it by your batch rules
+          </label>
 
           <div className="flex items-center gap-3">
             <Button type="submit" disabled={!canSubmit} className="gap-2">

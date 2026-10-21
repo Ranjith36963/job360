@@ -10,15 +10,15 @@ const LAST_UPDATED = "27 September 2026";
 
 export default function TermsPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-3xl font-semibold">Terms of Service</h1>
+    <main className="mx-auto max-w-[65ch] px-6 py-16">
+      <h1 className="text-balance font-heading text-4xl font-normal tracking-tight">Terms of Service</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Last updated: {LAST_UPDATED}
       </p>
 
       <div className="mt-8 space-y-8 text-sm leading-relaxed text-muted-foreground">
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             1. The service
           </h2>
           <p className="mt-2">
@@ -38,8 +38,8 @@ export default function TermsPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             2. Your account
           </h2>
           <ul className="mt-2 list-disc space-y-2 pl-5">
@@ -56,8 +56,8 @@ export default function TermsPage() {
           </ul>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             3. Acceptable use
           </h2>
           <p className="mt-2">You agree not to:</p>
@@ -77,8 +77,8 @@ export default function TermsPage() {
           </ul>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             4. Job listings
           </h2>
           <p className="mt-2">
@@ -91,8 +91,8 @@ export default function TermsPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             5. AI-generated documents
           </h2>
           <p className="mt-2">
@@ -108,8 +108,8 @@ export default function TermsPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             6. Availability and changes
           </h2>
           <p className="mt-2">
@@ -121,8 +121,8 @@ export default function TermsPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             7. Liability
           </h2>
           <p className="mt-2">
@@ -138,8 +138,8 @@ export default function TermsPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             8. Changes to these terms
           </h2>
           <p className="mt-2">
@@ -149,8 +149,8 @@ export default function TermsPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             9. Governing law
           </h2>
           <p className="mt-2">

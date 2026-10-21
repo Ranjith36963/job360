@@ -4,8 +4,8 @@
 **Purpose:** the itemised checkpoints a complete `/verify-job360` run must cover, from
 landing on the site to closing it. A "full sweep" is not done until every item below is
 exercised (or explicitly marked gated, with the reason) **and** every endpoint in the
-generated route table of [`docs/GENERATED.md`](../../../docs/GENERATED.md) — written from
-the routers, so separately mounted apps still need their own item — is covered too.
+route the routers declare (`grep -n '@router\.' backend/src/api/routes/*.py`; separately
+mounted apps still need their own item) is covered too.
 
 **How to use:** start the full stack (backend + frontend + the dev Postgres),
 register a fresh user, then walk the list top to bottom. Prove each with evidence

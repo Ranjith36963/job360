@@ -17,8 +17,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
+from src.api.routes.applications import ProofOut, ReceiptAnswerOut
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -26,7 +27,10 @@ router = APIRouter(tags=["receipts"])
 
 
 class CreateReceiptRequest(BaseModel):
-    channel: str = Field("", max_length=100)   # "company site", "LinkedIn", "email"…
+    # Owner decision 2026-10-04 — a closed set for every NEW receipt
+    # (settings.APPLICATION_RECEIPT_CHANNELS; '' = not said), checked by the
+    # same spine.normalize_receipt_channel the rich receipt route uses.
+    channel: str = Field("", max_length=100)
     note: str = Field("", max_length=2_000)
 
 
@@ -47,6 +51,39 @@ class Receipt(BaseModel):
     profile_version: int | None
     channel: str
     note: str
+    # What the assistant recorded when the user applied (record_application,
+    # spine R8) — stored facts read off this same row, never computed. A
+    # receipt made without them (the web "I applied" button, rows from before
+    # 0037) reads empty / None: no defaults, no placeholders (rule #29).
+    application_id: int | None = None
+    answers: list[ReceiptAnswerOut] = Field(default_factory=list)
+    fields_filled: dict[str, Any] = Field(default_factory=dict)
+    confirmation: str | None = None
+    cv_version_no: int | None = None
+    cover_letter_version_no: int | None = None
+    # True iff the receipt names a cover letter artifact; False = no letter was sent.
+    cover_letter_sent: bool = False
+    # Read-time facts (spine.receipt_summary_facts); "" / None when no form_filled was recorded.
+    counts_line: str = ""
+    fields_total: int | None = None
+    fields_skipped: int = 0
+    guessed_count: int = 0
+    form_host: str = ""
+    recorded_by: str | None = None
+    # S3 - '' | same_job | same_role | same_company, the kit the assistant filled from. Set
+    # at INSERT; a receipt made without a kit reads '' / None / ''.
+    possible_duplicate: str = ""
+    kit_event_id: int | None = None
+    kit_sha256: str = ""
+    # S7 - how well this application is backed up; "none" when there is no application.
+    proof: ProofOut = Field(default_factory=ProofOut)
+
+
+_RECEIPT_BASE_FIELDS = (
+    "id", "job_id", "sent_at", "job_title", "job_company", "job_location", "job_apply_url",
+    "job_source", "job_description", "cv_text", "cv_origin", "cover_letter_text",
+    "cover_letter_origin", "profile_version", "channel", "note",
+)
 
 
 class ReceiptSummary(BaseModel):
@@ -60,8 +97,12 @@ class ReceiptSummary(BaseModel):
     job_apply_url: str
     has_cv: bool
     has_cover_letter: bool
+    cover_letter_sent: bool = False
+    counts_line: str = ""
+    form_host: str = ""
     channel: str
     note: str
+    proof: ProofOut = Field(default_factory=ProofOut)
 
 
 class ReceiptListResponse(BaseModel):
@@ -69,17 +110,27 @@ class ReceiptListResponse(BaseModel):
     total: int
 
 
-def _to_receipt(row: dict[str, Any]) -> Receipt:
-    return Receipt(**{k: row[k] for k in Receipt.model_fields})
+async def _to_receipt(db: JobDatabase, user_id: str, row: dict[str, Any]) -> Receipt:
+    """The frozen row plus the details recorded on the SAME
+    `application_receipts` row (spine.receipt_details), scoped by owner."""
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+
+    details = await applications_spine.receipt_details(db, user_id, int(row["id"])) or {}
+    return Receipt(**{k: row[k] for k in _RECEIPT_BASE_FIELDS}, **details)
 
 
-def _to_summary(row: dict[str, Any]) -> ReceiptSummary:
+def _to_summary(
+    row: dict[str, Any], proof: dict[str, Any] | None = None, letter_sent: bool = False,
+    facts: dict[str, Any] | None = None,
+) -> ReceiptSummary:
     return ReceiptSummary(
         id=row["id"], job_id=row["job_id"], sent_at=row["sent_at"],
         job_title=row["job_title"], job_company=row["job_company"],
         job_location=row["job_location"], job_apply_url=row["job_apply_url"],
         has_cv=bool(row["has_cv"]), has_cover_letter=bool(row["has_cover_letter"]),
-        channel=row["channel"], note=row["note"],
+        cover_letter_sent=letter_sent,
+        counts_line=(facts or {}).get("counts_line", ""), form_host=(facts or {}).get("form_host", ""),
+        channel=row["channel"], note=row["note"], proof=ProofOut(**(proof or {})),
     )
 
 
@@ -113,7 +164,7 @@ async def _document_sent(
     return _sent_text(await db.get_tailored_doc(user_id, job_id, kind))
 
 
-@router.post("/receipts/{job_id}", response_model=Receipt, status_code=201)
+@router.post("/receipts/{job_id}", response_model=Receipt, status_code=201, dependencies=AUTH_FIRST)
 async def create_receipt(
     job_id: int,
     body: CreateReceiptRequest,
@@ -126,18 +177,32 @@ async def create_receipt(
     from src.services.applications import spine as applications_spine  # noqa: PLC0415
     from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
 
-    job = await db.get_job_by_id(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+    try:
+        channel = applications_spine.normalize_receipt_channel(body.channel)
+    except applications_spine.SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
-    # Mark applied FIRST — `create_application` is an upsert (INSERT OR
-    # IGNORE), so the application row (and its id) exists before the receipt
-    # does. R8's `application_id` is then part of the receipt's own INSERT
-    # (below), never a later UPDATE: tests/test_receipts.py::
+    # P0 2026-10-14 — only a job THIS user brought. The catalog is shared
+    # (rule #10): upserting an application onto any existing job_id and
+    # freezing the catalog row into the receipt handed the caller another
+    # user's pasted ad. A job they never brought reads as 404 (no oracle).
+    # R8's `application_id` is part of the receipt's own INSERT (below),
+    # never a later UPDATE: tests/test_receipts.py::
     # test_receipts_are_append_only greps `backend/src/` for any
     # UPDATE/DELETE against `application_receipts`.
-    await db.create_application(job_id, user.id)
     application = await applications_spine.get_application_by_job(db, user.id, job_id)
+    app_row = (
+        await applications_spine.get_owned_application(db, user.id, int(application["id"]))
+        if application is not None else None
+    )
+    if application is None or app_row is None or await db.get_job_by_id(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # The ad "as it read" is the caller's own snapshot, never the catalog row.
+    job = {
+        "id": job_id, "title": app_row.get("job_title") or "", "company": app_row.get("job_company") or "",
+        "location": app_row.get("job_location") or "", "apply_url": app_row.get("job_url") or "",
+        "source": app_row.get("job_source") or "", "description": app_row.get("job_description_snapshot") or "",
+    }
 
     # Decision 28 (2026-09-21): the documents live in `application_artifacts`
     # — the agent writes them and `save_artifact` versions them. Nothing has
@@ -154,7 +219,7 @@ async def create_receipt(
         cover_letter_text=cl_text,
         cover_letter_origin=cl_origin,
         profile_version=current_profile_version_id(user.id),
-        channel=body.channel.strip(),
+        channel=channel,
         note=body.note.strip(),
         application_id=application["id"] if application else None,
     )
@@ -178,10 +243,10 @@ async def create_receipt(
             "has_cover_letter": cl_text is not None, "status": "ok",
         },
     )
-    return _to_receipt(receipt)
+    return await _to_receipt(db, user.id, receipt)
 
 
-@router.get("/receipts", response_model=ReceiptListResponse)
+@router.get("/receipts", response_model=ReceiptListResponse, dependencies=AUTH_FIRST)
 async def list_receipts(
     job_id: int | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -191,10 +256,25 @@ async def list_receipts(
 ) -> ReceiptListResponse:
     rows = await db.list_receipts(user.id, job_id=job_id, limit=limit, offset=offset)
     total = await db.count_receipts(user.id, job_id=job_id)
-    return ReceiptListResponse(receipts=[_to_summary(r) for r in rows], total=total)
+    from src.services.applications.proof import proof_for  # noqa: PLC0415
+
+    proofs = await proof_for(db, user.id, sorted({int(r["application_id"]) for r in rows if r.get("application_id")}))
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+
+    sent = await applications_spine.receipt_letter_sent(db, user.id, [int(r["id"]) for r in rows])
+    return ReceiptListResponse(
+        receipts=[
+            _to_summary(
+                r, proofs.get(int(r.get("application_id") or 0)), sent.get(int(r["id"]), False),
+                await applications_spine.receipt_summary_facts(db, user.id, int(r["id"])),
+            )
+            for r in rows
+        ],
+        total=total,
+    )
 
 
-@router.get("/receipts/{receipt_id}", response_model=Receipt)
+@router.get("/receipts/{receipt_id}", response_model=Receipt, dependencies=AUTH_FIRST)
 async def get_receipt(
     receipt_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
@@ -203,4 +283,4 @@ async def get_receipt(
     row = await db.get_receipt(user.id, receipt_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Receipt not found")
-    return _to_receipt(row)
+    return await _to_receipt(db, user.id, row)

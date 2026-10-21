@@ -427,4 +427,7 @@ def test_mcp_docs_say_positions_and_projects_are_writable():
 
     src = inspect.getsource(mcp_server)
     assert "not writable" not in src
-    assert "cv_data.cv_positions" in mcp_server.INSTRUCTIONS
+    # S4 (2026-10-09): the shapes moved word for word into the `rules` recipe.
+    from src.api.routes.recipes import load_recipe
+
+    assert "cv_data.cv_positions" in load_recipe("rules").text

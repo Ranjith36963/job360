@@ -9,9 +9,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor, act } from "@testing-library/react";
+import { render, waitFor, act, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AuthProvider } from "./AuthProvider";
+import { AuthProvider, useAuth } from "./AuthProvider";
+import { ApiError } from "@/lib/api-error";
 
 // AuthProvider reads the query cache (to drop one account's data when a
 // different account signs in), so every render needs a QueryClientProvider —
@@ -49,7 +50,10 @@ vi.mock("posthog-js", () => ({
 let capturedListener: (() => void) | null = null;
 const unsubscribeSpy = vi.fn();
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api", async (importOriginal) => ({
+  // Keep the REAL AuthUnknownError so instanceof in AuthProvider works.
+  AuthUnknownError: (await importOriginal<typeof import("@/lib/api")>())
+    .AuthUnknownError,
   me: vi.fn().mockResolvedValue(null),
   logout: vi.fn().mockResolvedValue(undefined),
   onEmailNotVerified: (listener: () => void) => {
@@ -162,5 +166,111 @@ describe("AuthProvider — account switch clears the previous account's data", (
       { id: 1, title: "A's job" },
     ]);
     expect(testQueryClient.getQueryData(["profile"])).toEqual({ name: "A" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Transient /me failures must never look like a logout.
+// ---------------------------------------------------------------------------
+
+describe("AuthProvider — transient me() failure is not a logout", () => {
+  const USER = { id: "user-a", email: "a@example.com" };
+
+  function Probe() {
+    const { user, loading } = useAuth();
+    return (
+      <div>
+        {user ? <span>signed-in:{user.email}</span> : null}
+        {!user && !loading ? <span>Log in</span> : null}
+        {loading ? <span>loading</span> : null}
+      </div>
+    );
+  }
+
+  async function setup() {
+    const { me, AuthUnknownError } = await import("@/lib/api");
+    const meMock = me as ReturnType<typeof vi.fn>;
+    meMock.mockReset();
+    return { meMock, AuthUnknownError };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockPathname = "/applications";
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("keeps the user and the cache when a refresh gets 503", async () => {
+    const { meMock, AuthUnknownError } = await setup();
+    meMock.mockResolvedValueOnce(USER);
+    renderAuth(<Probe />);
+    await act(async () => {});
+    expect(screen.getByText("signed-in:a@example.com")).toBeTruthy();
+
+    const clearSpy = vi.spyOn(testQueryClient, "clear");
+    meMock.mockRejectedValue(new AuthUnknownError(new ApiError(503, "down")));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+
+    expect(meMock).toHaveBeenCalledTimes(4); // 1 ok + 3 failed attempts
+    expect(clearSpy).not.toHaveBeenCalled();
+    expect(screen.getByText("signed-in:a@example.com")).toBeTruthy();
+    expect(screen.queryByText("Log in")).toBeNull();
+  });
+
+  it("500 then 200 ends with the user and never shows Log in", async () => {
+    const { meMock, AuthUnknownError } = await setup();
+    meMock
+      .mockRejectedValueOnce(new AuthUnknownError(new ApiError(500, "boom")))
+      .mockResolvedValueOnce(USER);
+    renderAuth(<Probe />);
+    await act(async () => {});
+    expect(screen.queryByText("Log in")).toBeNull();
+    expect(screen.getByText("loading")).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(meMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("signed-in:a@example.com")).toBeTruthy();
+    expect(screen.queryByText("Log in")).toBeNull();
+  });
+
+  it("does not stack retries when focus fires during a retry wait", async () => {
+    const { meMock, AuthUnknownError } = await setup();
+    meMock.mockRejectedValue(new AuthUnknownError(new ApiError(500, "boom")));
+    renderAuth(<Probe />);
+    await act(async () => {});
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(meMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits at least 5s before retrying a 429", async () => {
+    const { meMock, AuthUnknownError } = await setup();
+    meMock
+      .mockRejectedValueOnce(
+        new AuthUnknownError(new ApiError(429, "slow", "api_error", 1))
+      )
+      .mockResolvedValueOnce(USER);
+    renderAuth(<Probe />);
+    await act(async () => {});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4900);
+    });
+    expect(meMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+    expect(meMock).toHaveBeenCalledTimes(2);
   });
 });

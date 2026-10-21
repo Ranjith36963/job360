@@ -66,6 +66,7 @@ TOOL_ROUTES = {
     # new "applications" route module, none require_verified_user.
     "get_application": ("applications", "get_application", {"application_id": 987654321}),
     "list_applications": ("applications", "list_applications", {}),
+    "mark_inbox_checked": ("applications", "mark_inbox_checked", {"application_ids": [987654321]}),
     "save_artifact": (
         "applications", "save_artifact", {"application_id": 987654321, "kind": "cv", "text": "x"}
     ),
@@ -85,6 +86,31 @@ TOOL_ROUTES = {
     "update_contact": ("applications", "update_contact", {"contact_id": 987654321, "name": "x"}),
     # /run 360 recipes (owner plan 2026-10-01) — require_user, no email gate.
     "get_recipe": ("recipes", "get_recipe", {"name": "setup"}),
+    # "Needs you" (owner plan 2026-10-01) - require_user, no email gate.
+    "ask_user": ("asks", "create_ask", {"question": "x"}),
+    "answer_ask": ("asks", "answer_ask", {"ask_id": 987654321, "answer": "x"}),
+    # Job facts fix-later door (owner decision 2026-10-04) - require_user.
+    "update_job": ("applications", "update_job_facts", {"application_id": 987654321, "country": "FR"}),
+    # The one submit gate (owner decision 2026-10-08, S2) - require_user, read-only.
+    "check_submit": ("applications", "submit_check", {"application_id": 987654321, "form_url": ""}),
+    # The application kit (owner decision 2026-10-08, S3) - require_user, no email gate.
+    "get_application_kit": ("applications", "get_application_kit", {"application_id": 987654321}),
+    # Proof of application (owner decision 2026-10-10, S7) - require_user, no email gate.
+    "get_proof_upload_link": ("proof", "create_proof_link", {"application_id": 987654321}),
+    # The outreach send gate (feature 10) - require_user, read-only, no email gate.
+    "check_outreach": ("applications", "outreach_check", {"contact_id": 987654321, "message_id": 1}),
+    "check_auto_email": ("applications", "auto_email_check", {"application_id": 987654321, "kind": "checkin"}),
+    # The agent doctor + missing-tool report (feature 7) - require_user, no email gate
+    # (an unverified user is TOLD to verify by doctor, never refused by it).
+    # The live-form check (weak spot #1) - require_user, read-only, no email gate.
+    "check_form": (
+        "applications", "check_application_form",
+        {"application_id": 987654321, "questions": [{"question": "x"}]},
+    ),
+    "doctor": ("doctor", "doctor", {}),
+    "report_missing_tool": ("doctor", "report_missing_tool", {"name": "x"}),
+    # The Job360 browser agent (decision 29) - require_user, no email gate (submit_check owns that).
+    "browser": ("browser", "browser_action", {"action": "look"}),
 }
 
 

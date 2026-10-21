@@ -1,0 +1,327 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Home } from "@/components/home/Home";
+import { LAST_VISIT_KEY } from "@/lib/home";
+
+const api = vi.hoisted(() => ({
+  whatsNew: vi.fn(),
+  getStats: vi.fn(),
+  listApplications: vi.fn(),
+  listAsks: vi.fn(),
+  answerAsk: vi.fn(),
+  withdrawAsk: vi.fn(),
+  getAssistantSettings: vi.fn(),
+  getReadyToSend: vi.fn(),
+  getProfile: vi.fn(),
+  uploadProfile: vi.fn(),
+  keepProfileEdit: vi.fn(),
+  takeBackProfileEdit: vi.fn(),
+  getProfileEditHistory: vi.fn(),
+}));
+
+vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" }));
+vi.mock("posthog-js", () => ({ default: { capture: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+// "Now" is the real clock: the sentence counts events after the last visit
+// (7 days ago when none is stored), so a fixed date would rot.
+const NOW = new Date().toISOString();
+
+const event = (id: number, by: string) => ({
+  id,
+  application_id: 7,
+  event_type: "artifact_saved",
+  detail: "",
+  payload: {},
+  occurred_at: NOW,
+  recorded_at: NOW,
+  recorded_by: by,
+  corrects_event_id: null,
+  scheduled_at: null,
+  source: null,
+});
+
+const whatsNewOk = (events: unknown[]) => ({
+  now: NOW,
+  since: NOW,
+  events,
+  applications: [{ id: 7, job_title: "Engineer", job_company: "Mistral AI", last_event_at: NOW, status: "applied" }],
+  next_since: NOW,
+  next_after_id: null,
+  truncated: false,
+  open_asks: [],
+});
+
+const app = {
+  id: 7,
+  job_id: 1,
+  job_title: "Engineer",
+  job_company: "Mistral AI",
+  job_url: "",
+  job_location: "",
+  status: "applied",
+  last_event_at: NOW,
+  events: 2,
+  artifacts: {},
+  receipts: 0,
+  follow_up_due: false,
+  next_step: { code: "wait", label: "Waiting" },
+  fit_score: 70,
+  fit_verdict: "Good fit",
+};
+
+const ask = (id: number) => ({
+  id,
+  question: `Question ${id}?`,
+  context: "",
+  asked_by: "Claude",
+  asked_at: NOW,
+  status: "open",
+  answer: null,
+  answered_by_user: false,
+  application_id: 7,
+  job_title: "Engineer",
+  job_company: "Mistral AI",
+});
+
+function happy({ events = [event(1, "agent:Claude"), event(2, "web")], asks = [] as unknown[] } = {}) {
+  api.whatsNew.mockResolvedValue(whatsNewOk(events));
+  api.getStats.mockResolvedValue({ overall: { brought: 5, applied: 3, replied: 1, interview: 1 } });
+  api.listApplications.mockResolvedValue({ applications: [app], total: 1 });
+  api.listAsks.mockResolvedValue({ asks, open_count: asks.length });
+  api.getProfile.mockResolvedValue({
+    preferences: { assistant_notes: ["Never apply to agencies"] },
+    agent_edits: [],
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  window.localStorage.clear();
+});
+
+describe("Home", () => {
+  it("shows the sentence, the ledger and the right pane", async () => {
+    happy({ asks: [ask(1), ask(2)] });
+    render(<Home />);
+    const h1 = await screen.findByRole("heading", { level: 1, name: /Your assistant \(Claude\) wrote 1 record/ });
+    expect(h1).toHaveTextContent("Your assistant (Claude) wrote 1 record since you were last here. Two things need you.");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.queryByTestId("home-apps")).toBeNull();
+    expect(await screen.findByTestId("home-counts")).toHaveTextContent("jobs brought");
+    expect(screen.getByTestId("home-feed")).toHaveTextContent("Document saved");
+    expect(screen.getByRole("link", { name: "Jobs in" })).toHaveAttribute("href", "/bring");
+  });
+
+  it("stores the new last visit only after rendering", async () => {
+    happy();
+    render(<Home />);
+    expect(window.localStorage.getItem(LAST_VISIT_KEY)).toBeNull();
+    await screen.findByRole("heading", { level: 1, name: /wrote 1 record/ });
+    await waitFor(() => expect(window.localStorage.getItem(LAST_VISIT_KEY)).toBe(NOW));
+  });
+
+  it("first 3 asks as cards, with See all when there are more", async () => {
+    happy({ asks: [ask(1), ask(2), ask(3), ask(4)] });
+    render(<Home />);
+    expect(await screen.findByTestId("ask-1")).toBeInTheDocument();
+    expect(screen.getByTestId("ask-3")).toBeInTheDocument();
+    expect(screen.queryByTestId("ask-4")).toBeNull();
+    expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "/needs-you");
+  });
+
+  it("after an answer the badge hears asks + waiting changes + ready to send, never the asks alone", async () => {
+    happy({ asks: [ask(1)] });
+    api.answerAsk.mockResolvedValue({});
+    api.getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }], paused: false });
+    api.getReadyToSend.mockResolvedValue({ paused: false, total: 3, unflagged: 3, items: [] });
+    const heard: number[] = [];
+    const onChanged = (e: Event) => heard.push(Number((e as CustomEvent).detail));
+    window.addEventListener("job360:asks-changed", onChanged);
+    try {
+      render(<Home />);
+      await screen.findByTestId("ask-1");
+      api.listAsks.mockResolvedValue({ asks: [], open_count: 1 });
+      fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Yes" } });
+      fireEvent.click(screen.getByTestId("ask-save"));
+      fireEvent.click(screen.getByTestId("ask-answer-confirm"));
+      await waitFor(() => expect(heard).toEqual([5]));
+      expect(api.getReadyToSend).toHaveBeenCalledWith({ limit: 0 });
+    } finally {
+      window.removeEventListener("job360:asks-changed", onChanged);
+    }
+  });
+
+  it("no asks: the section is silent", async () => {
+    happy();
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /wrote 1 record/ });
+    expect(screen.queryByTestId("home-asks")).toBeNull();
+    expect(screen.queryByRole("link", { name: "See all" })).toBeNull();
+  });
+
+  it("brand-new user: heading and connect steps, no sentence, no ledger, no rail", async () => {
+    api.whatsNew.mockResolvedValue(whatsNewOk([]));
+    api.getStats.mockResolvedValue({ overall: { brought: 0, applied: 0, replied: 0, interview: 0 } });
+    api.listApplications.mockResolvedValue({ applications: [], total: 0 });
+    api.listAsks.mockResolvedValue({ asks: [], open_count: 0 });
+    render(<Home />);
+    expect(await screen.findByTestId("home-welcome")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    expect(screen.getByText(/^Step 1/)).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing new since/)).toBeNull();
+    expect(screen.queryByTestId("home-rail")).toBeNull();
+    expect(screen.queryByTestId("home-apps")).toBeNull();
+  });
+
+  it("asks the backend as little as it can: one whats-new read, no separate due call", async () => {
+    happy();
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /wrote 1 record/ });
+    await screen.findByTestId("home-feed");
+    expect(api.whatsNew).toHaveBeenCalledTimes(1);
+    expect(api.listApplications).toHaveBeenCalledTimes(1);
+    expect(api.listApplications.mock.calls[0][0]).not.toHaveProperty("due");
+  });
+
+  it("due follow-ups come from the ledger rows, soonest first", async () => {
+    happy();
+    api.listApplications.mockResolvedValue({
+      applications: [
+        { ...app, id: 8, job_company: "Lakera", follow_up_due: true, follow_up_on: "2026-10-09" },
+        { ...app, id: 9, job_company: "Sana", follow_up_due: true, follow_up_on: "2026-10-05" },
+        app,
+      ],
+      total: 3,
+    });
+    render(<Home />);
+    const due = await screen.findByTestId("home-due");
+    const text = due.textContent ?? "";
+    expect(text.indexOf("Sana")).toBeGreaterThan(-1);
+    expect(text.indexOf("Sana")).toBeLessThan(text.indexOf("Lakera"));
+    expect(text).not.toContain("Mistral AI");
+  });
+
+  it("events from before the last visit are in the feed but not in the sentence", async () => {
+    const old = { ...event(3, "agent:Claude"), recorded_at: new Date(Date.now() - 20 * 864e5).toISOString() };
+    happy({ events: [old, event(1, "agent:Claude")] });
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /Your assistant \(Claude\) wrote 1 record/ });
+    expect(screen.getByTestId("home-feed").querySelectorAll("li")).toHaveLength(2);
+  });
+
+  it("a failed right-pane call shows nothing; the rest still renders", async () => {
+    happy();
+    api.getStats.mockRejectedValue(new Error("boom"));
+    render(<Home />);
+    expect(await screen.findByTestId("home-feed")).toBeInTheDocument();
+    expect(screen.queryByTestId("home-counts")).toBeNull();
+    expect(screen.getByTestId("home-feed")).toBeInTheDocument();
+  });
+
+  it("a failed ledger shows an error with a retry", async () => {
+    happy();
+    api.listApplications.mockRejectedValue(new Error("boom"));
+    render(<Home />);
+    expect(await screen.findByText("Could not load your applications.")).toBeInTheDocument();
+    expect(screen.getByTestId("home-retry")).toBeInTheDocument();
+  });
+
+  it("shows 'Things your AI assistant should know' ABOVE the sentence, saving the whole preferences block", async () => {
+    happy();
+    api.uploadProfile.mockResolvedValue({
+      preferences: { assistant_notes: ["Never apply to agencies", "No night shifts"] },
+      agent_edits: [],
+    });
+    render(<Home />);
+    const card = await screen.findByTestId("home-assistant-notes");
+    expect(card).toHaveTextContent("Things your AI assistant should know");
+    expect(card).toHaveTextContent("Set instructions for your AI assistant");
+    expect(card).toHaveTextContent("Never apply to agencies");
+    const h1 = await screen.findByTestId("home-sentence");
+    expect(card.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("New note for your assistant"), { target: { value: "No night shifts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    await waitFor(() => expect(api.uploadProfile).toHaveBeenCalledTimes(1));
+    const [cv, prefs] = api.uploadProfile.mock.calls[0];
+    expect(cv).toBeNull();
+    expect(prefs.assistant_notes).toEqual(["Never apply to agencies", "No night shifts"]);
+  });
+
+  it("Take back waits for a note save still in flight, so that save cannot undo it", async () => {
+    happy();
+    const agentEdit = {
+      path: "preferences.assistant_notes",
+      value: ["Never apply to agencies"],
+      previous_value: [],
+      set_by: "agent:Claude",
+      set_at: NOW,
+    };
+    api.getProfile.mockResolvedValue({
+      preferences: { assistant_notes: ["Never apply to agencies"] },
+      agent_edits: [agentEdit],
+    });
+    let finishSave: (p: unknown) => void = () => {};
+    api.uploadProfile.mockImplementation(() => new Promise((resolve) => (finishSave = resolve)));
+    api.takeBackProfileEdit.mockResolvedValue({ preferences: { assistant_notes: [] }, agent_edits: [] });
+
+    render(<Home />);
+    await screen.findByTestId("home-assistant-notes");
+    fireEvent.change(screen.getByLabelText("New note for your assistant"), { target: { value: "No night shifts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    await waitFor(() => expect(api.uploadProfile).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTestId("take-back"));
+    // The save is still in flight: Take back has not gone out yet.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(api.takeBackProfileEdit).not.toHaveBeenCalled();
+    // Until Take back answers, no edit can start from the list it is changing.
+    expect(screen.getByLabelText("New note for your assistant")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove note: No night shifts" })).toBeDisabled();
+
+    finishSave({
+      preferences: { assistant_notes: ["Never apply to agencies", "No night shifts"] },
+      agent_edits: [agentEdit],
+    });
+    await waitFor(() => expect(api.takeBackProfileEdit).toHaveBeenCalledWith("preferences.assistant_notes"));
+    // Take back landed last, and the screen shows its answer.
+    await waitFor(() =>
+      expect(screen.getByTestId("home-assistant-notes")).not.toHaveTextContent("Never apply to agencies"),
+    );
+    expect(api.uploadProfile).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("New note for your assistant")).toBeEnabled();
+  });
+
+  it("a failed Take back unlocks the notes again", async () => {
+    happy();
+    api.getProfile.mockResolvedValue({
+      preferences: { assistant_notes: ["Never apply to agencies"] },
+      agent_edits: [
+        {
+          path: "preferences.assistant_notes",
+          value: ["Never apply to agencies"],
+          previous_value: [],
+          set_by: "agent:Claude",
+          set_at: NOW,
+        },
+      ],
+    });
+    api.takeBackProfileEdit.mockRejectedValue(new Error("500"));
+    render(<Home />);
+    await screen.findByTestId("home-assistant-notes");
+    fireEvent.click(screen.getByTestId("take-back"));
+    await waitFor(() => expect(api.takeBackProfileEdit).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByLabelText("New note for your assistant")).toBeEnabled());
+    expect(screen.getByTestId("home-assistant-notes")).toHaveTextContent("Never apply to agencies");
+  });
+
+  it("no profile yet: the notes card is simply absent", async () => {
+    happy();
+    api.getProfile.mockRejectedValue(new Error("404"));
+    render(<Home />);
+    await screen.findByTestId("home-sentence");
+    await screen.findByTestId("home-feed");
+    expect(screen.queryByTestId("home-assistant-notes")).toBeNull();
+  });
+});

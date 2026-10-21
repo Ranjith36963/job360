@@ -30,6 +30,14 @@ DATABASE_URL = os.getenv(
 from src.repositories import pg as _pg  # noqa: E402
 
 _pg.configure(DATABASE_URL)
+# Every connection the request-path pool opens gets this Postgres
+# ``statement_timeout`` (repositories/pool.py), so one runaway query cannot pin
+# a pooled connection forever. Pool only: migrations and boot DDL open their own
+# connections through ``pg.connect`` and never see it. ``0`` = no timeout.
+DB_STATEMENT_TIMEOUT_MS = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "30000"))
+# How long /api/readyz waits to borrow a pooled connection (and then for its
+# ``SELECT 1``) before answering 503. Railway's deploy healthcheck calls it.
+READYZ_POOL_TIMEOUT_S = float(os.getenv("READYZ_POOL_TIMEOUT_S", "2"))
 LOGS_DIR = DATA_DIR / "logs"
 
 
@@ -236,6 +244,22 @@ OAUTH_MAX_CLIENTS = int(os.getenv("OAUTH_MAX_CLIENTS", "10000"))
 # computed, so a slow prune can never delay a token exchange (Claude.ai's 10s
 # budget). `1` = every call; `0` disables housekeeping entirely.
 OAUTH_PRUNE_SAMPLE = int(os.getenv("OAUTH_PRUNE_SAMPLE", "20"))
+# A session's `last_seen` is written at most once per this many seconds.
+# Writing it on EVERY cookie resolve turned each signed-in read into a commit,
+# and prod's commits wait on a slow disk (0.2-1 s, spikes past 10 s), so
+# `/api/auth/me` took 17-61 s under a burst. `last_seen` is informational only:
+# expiry is the absolute `expires_at`, nothing reads `last_seen` to decide
+# access. `0` restores the old write-every-request behaviour.
+SESSION_TOUCH_INTERVAL_SECONDS = int(os.getenv("SESSION_TOUCH_INTERVAL_SECONDS", "300"))
+# The touch runs in a background task on its OWN Postgres connection (outside
+# the pool). A stalled disk or dead TCP link must not hold that connection
+# forever: the whole write (connect + UPDATE + commit + close) is abandoned
+# after this many seconds and retried on a later request.
+SESSION_TOUCH_TIMEOUT_SECONDS = float(os.getenv("SESSION_TOUCH_TIMEOUT_SECONDS", "10"))
+# At most this many touches run at once per process; each holds a real
+# connection, and Postgres allows ~100. Extra touches are skipped (informational
+# only) with a rate-limited warning.
+SESSION_TOUCH_MAX_INFLIGHT = int(os.getenv("SESSION_TOUCH_MAX_INFLIGHT", "20"))
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""
@@ -266,10 +290,60 @@ APPLICATION_STATUS_EVENT_TYPES = (
     "brought", "applied", "replied", "interview_requested",
     "interview_scheduled", "interview_done", "offer", "rejected",
     "withdrawn", "ghosted",
+    # Feedback loop slice 1: `hired` is a rung above `offer`; `offer_declined` is
+    # terminal (the user turned the offer down).
+    "hired", "offer_declined",
 )
 APPLICATION_NOTE_EVENT_TYPES = (
     "fit_judged", "artifact_saved", "contact_added", "outreach_sent", "outreach_replied", "note", "lesson",
+    # Feedback loop slice 1: the written look-back after an outcome (payload keys
+    # checked by spine.validate_outcome_payload).
+    "post_mortem",
+    "asked", "answered", "ask_withdrawn",
+    # Owner decision 2026-10-08 (S2) — the per-job submit switch
+    # (payload {"submit_mode": "confirm" | "auto_when_sure" | "inherit"}). A NOTE
+    # event: it never moves the status. Latest one wins (spine.submit_override).
+    "submit_mode_set",
+    # Owner decision 2026-10-08 (S3, application kit) - the human-in-the-loop
+    # trail. All note-family, none moves the status. Payload shapes and who may
+    # write each are checked in the record_event ROUTE (applications._check_kit_event).
+    "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
+    "form_filled", "form_swept", "hold_released", "site_account", "account_needed", "form_checked",
+    # Owner decision 2026-10-10 (S6, blocked record) - the assistant got stuck
+    # (`blocked`, which opens one Needs-you ask) and the way out (`unblocked`).
+    # Note-family; closed payloads checked in services/applications/blocked.py.
+    "blocked", "unblocked",
+    # Owner decision 2026-10-10 (S7, proof of application): the pasted
+    # confirmation text, and the server-written trail of an uploaded screenshot.
+    "proof_text", "proof_screenshot",
+    # Owner decision 2026-10-15: a test/simulated application is marked with a
+    # `simulation` note (no payload; detail is free text) recorded FIRST. Stats,
+    # proof_missing and the practice run never count it; a corrects_event_id
+    # event retracts the mark.
+    "simulation",
+    # Feedback loop slice 2: automatic employer emails. The assistant sends them from the
+    # owner's own Gmail; Job360 only records (`*_sent`, exact text) and gates (check_auto_email).
+    # `auto_email_skipped` records why a due email was NOT sent. Payloads: spine.validate_auto_email_payload.
+    "checkin_sent", "feedback_asked", "feedback_followup_sent", "auto_email_skipped",
+    # Feedback loop slice 4 (interview side): payloads checked by
+    # services/applications/interview_payloads.py. All note-family; `assessment`
+    # must never enter FEEDBACK_FUNNEL_RANK.
+    "interview_session", "process_friction", "assessment",
+    # Owner decision 2026-10-18: the batch queue. `queued` puts a considering application on
+    # the user's queue, `unqueued` takes it off. Note-family, never moves the status; no
+    # payload, detail optional. Checked in the record_event ROUTE (applications._check_queue_event);
+    # read by spine.queued_at_by_app.
+    "queued", "unqueued",
+    # Owner decision 2026-10-18 (bulk-apply D1): `submit_attempted` (no payload) is written by the
+    # assistant right before the final click; `submit_resolved` {outcome: "not_sent"} is WEB ONLY
+    # (the user says the submit never went out). Checked in services/applications/kit.py.
+    "submit_attempted", "submit_resolved",
+    # Owner decision 2026-10-18 (bulk-apply F4): the user changed an answer the assistant wrote or
+    # guessed; payload {key | question, was_source}. A note: saving it to memory is a separate,
+    # user-approved update_profile. Checked in the record_event ROUTE (_check_answer_corrected).
+    "answer_corrected",
 )
+SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
 APPLICATION_EXTRA_EVENT_TYPES = _env_list("APPLICATION_EXTRA_EVENT_TYPES", ())
@@ -286,7 +360,7 @@ APPLICATION_EVENT_MAX_FUTURE_SECONDS = int(os.getenv("APPLICATION_EVENT_MAX_FUTU
 # carry the email it came from, and an interview may carry a real datetime
 # instead of prose in `detail`. Every cap a parameter; a breach is 422 naming
 # the setting (S2).
-APPLICATION_EVENT_SOURCE_KINDS = _env_list("APPLICATION_EVENT_SOURCE_KINDS", ("email",))
+APPLICATION_EVENT_SOURCE_KINDS = _env_list("APPLICATION_EVENT_SOURCE_KINDS", ("email", "pasted"))
 APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS = int(
     os.getenv("APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS", "256")
 )
@@ -315,12 +389,24 @@ APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS = int(
 
 # R5 — artifact versions. Storage decision: TEXT in Postgres, not a file store
 # (spec §Data model) — a tailored CV measured on this codebase is 2-8 KB.
-APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach")
+APPLICATION_ARTIFACT_KINDS = (
+    "cv", "cover_letter", "answers", "outreach",
+    # Feedback loop slice 4 (interview side).
+    "story_bank", "interview_transcript", "redflag_analysis",
+    # Feedback loop slice 5 (fit patterns): the learning plan.
+    "skill_gap_report",
+)
 APPLICATION_ARTIFACT_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_MAX_CHARS", "60000"))
 APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERSIONS", "200"))
 # Slice 8 (#515) — the read-only artifact diff caps each side in LINES before
 # difflib runs (quadratic worst case); the response says `truncated`.
 APPLICATION_DIFF_MAX_LINES = int(os.getenv("APPLICATION_DIFF_MAX_LINES", "4000"))
+# Owner decision 2026-10-04 — the ASSISTANT's own ATS opinion on a saved
+# document (score 0-100 + notes). Job360 never computes or markets it; it is
+# stored on the artifact version. Only these kinds may carry one — any other
+# kind given an ats_score/ats_notes is a 422 (the stricter choice).
+APPLICATION_ARTIFACT_ATS_KINDS = ("cv", "cover_letter")
+APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS", "2000"))
 # Slice 9 (#516) — "flag for next time". `get_profile` hands the agent the
 # last PROFILE_LESSONS_MAX lessons; the web's full list pages up to
 # LESSONS_PAGE_MAX per call.
@@ -348,6 +434,54 @@ APPLICATION_VISA_DETAIL_MAX_CHARS = int(os.getenv("APPLICATION_VISA_DETAIL_MAX_C
 APPLICATION_RECEIPT_ANSWERS_MAX = int(os.getenv("APPLICATION_RECEIPT_ANSWERS_MAX", "50"))
 APPLICATION_RECEIPT_ANSWER_MAX_CHARS = int(os.getenv("APPLICATION_RECEIPT_ANSWER_MAX_CHARS", "2000"))
 APPLICATION_RECEIPT_FIELDS_MAX_BYTES = int(os.getenv("APPLICATION_RECEIPT_FIELDS_MAX_BYTES", "8192"))
+# Owner decision 2026-10-04 — where the user applied. A CLOSED set for every
+# NEW receipt ('' = not said, rule #29); spine.normalize_receipt_channel is
+# the one validator every door calls. Receipts written before this were free
+# text and are history (append-only, never rewritten): stats maps a legacy
+# value that spells a set member (case/space/hyphen-insensitive, e.g.
+# "Company site") to it and everything else to "other".
+APPLICATION_RECEIPT_CHANNELS = (
+    "company_site", "linkedin_easy_apply", "job_board", "email", "referral", "recruiter", "other",
+)
+
+# Owner decision 2026-10-04 — facts about the job the ASSISTANT reads off
+# the ad and passes with bring_job (or fixes later): the ISO alpha-2 country
+# (validated by visa.normalize_country — no country table), remote yes/no,
+# and where the ad was found. Stored per USER on `applications`, never on the
+# shared `jobs` row (hard rule #10). Unset = NULL (rule #29).
+JOB_FOUND_ON = (
+    "indeed", "linkedin", "company_careers", "job_board", "referral", "visa_sponsor_list",
+    "pasted_by_user", "other",
+)
+
+# Job checks (deterministic facts about ONE brought job, never used to sort).
+# Closed TECHNICAL lists of ATS vendors / big job boards - NOT job sources
+# (rule 4: Job360 never searches). A host is "official" only on an exact match
+# or a real subdomain (`x.greenhouse.io`); see job_checks.classify_host.
+OFFICIAL_ATS_HOSTS = (
+    "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "smartrecruiters.com",
+    "workable.com", "bamboohr.com", "recruitee.com", "teamtailor.com", "personio.de", "personio.com",
+    "applytojob.com", "jazzhr.com", "gem.com", "dayforcehcm.com", "freshteam.com",
+    "zohorecruit.com", "zohorecruit.in", "rippling.com", "icims.com", "taleo.net",
+    "ultipro.com", "careers-page.com",
+)
+# Gmail check slice (owner decision 2026-10-15): an employer's ATS sends its
+# emails from its OWN domain, and many never name the company in the text
+# (an Ashby confirmation signed "TALENT TEAM"), so a company-name search misses
+# them. Each application exposes `email_senders` = the ATS host's domain plus the
+# extra sender domains below, for the assistant's Gmail `from:` search. Data, not
+# a keyword list: a vendor missing here still gets its own domain.
+ATS_EXTRA_EMAIL_SENDERS: dict[str, tuple[str, ...]] = {
+    "greenhouse.io": ("greenhouse-mail.io",),
+    "myworkdayjobs.com": ("myworkday.com",),
+    "workable.com": ("workablemail.com",),
+}
+# A batch mark covers at most this many applications (one list_applications page).
+INBOX_CHECK_MAX_APPLICATIONS = int(os.getenv("INBOX_CHECK_MAX_APPLICATIONS", "200"))
+JOB_BOARD_HOSTS = ("linkedin.com",)  # plus indeed.<tld>, handled in job_checks
+JOB_CHECK_PARTIAL_MIN_WORDS = 40   # below this the "ad" is a title or a teaser
+JOB_CHECK_FULL_MIN_WORDS = 150     # at or above this the ad is treated as complete
+JOB_CHECK_REPOST_GAP_DAYS = 3      # listing date vs employer date further apart than this = reposted
 
 # R6 — the fit verdict is stored, never computed.
 APPLICATION_FIT_REASONING_MAX_CHARS = int(os.getenv("APPLICATION_FIT_REASONING_MAX_CHARS", "4000"))
@@ -380,7 +514,18 @@ APPLICATION_FOLLOW_UP_MAX_FUTURE_DAYS = int(os.getenv("APPLICATION_FOLLOW_UP_MAX
 # real closed statuses in APPLICATION_STATUS_EVENT_TYPES; there is no
 # "offer accepted" status — `offer` stays open until the caller records what
 # happened next).
-APPLICATION_FOLLOW_UP_CLOSED_STATUSES = ("rejected", "withdrawn", "ghosted")
+APPLICATION_FOLLOW_UP_CLOSED_STATUSES = ("rejected", "withdrawn", "ghosted", "hired", "offer_declined")
+# Feedback loop slice 1 (owner decisions #1, #4): an application still at `applied` this many
+# days after its newest status event is marked `ghosted` by Job360 itself
+# (services/applications/ghosting.py). An operator constant, not a user setting.
+GHOSTED_AFTER_DAYS = int(os.getenv("GHOSTED_AFTER_DAYS", "45"))
+GHOSTED_SWEEP_MAX = int(os.getenv("GHOSTED_SWEEP_MAX", "200"))
+# Feedback loop slice 4 (interview side). Operator constants, not user settings.
+INTERVIEW_COURTESY_DAYS = int(os.getenv("INTERVIEW_COURTESY_DAYS", "30"))  # rejection-latency.mjs:71
+INTERVIEW_SILENT_MAX_ITEMS = int(os.getenv("INTERVIEW_SILENT_MAX_ITEMS", "20"))  # NOT IN REFERENCE - a bound
+INTERVIEW_VIEW_MAX_EVENTS = int(os.getenv("INTERVIEW_VIEW_MAX_EVENTS", "5000"))  # NOT IN REFERENCE - a bound
+FRICTION_MIN_ROUNDS = int(os.getenv("FRICTION_MIN_ROUNDS", "1"))  # process-quality.mjs:70-73, :173
+DIGEST_RECURRING_MIN = int(os.getenv("DIGEST_RECURRING_MIN", "2"))  # weekly-digest.mjs:250
 # quiet_days (R "gone quiet" list filter) — a live cap, not a hardcoded 365,
 # so a breach is a 422 an agent can read rather than a silently clipped value.
 APPLICATION_QUIET_DAYS_MAX = int(os.getenv("APPLICATION_QUIET_DAYS_MAX", "365"))
@@ -402,6 +547,8 @@ WHATS_NEW_MAX_EVENTS = int(os.getenv("WHATS_NEW_MAX_EVENTS", "200"))
 EXPORT_HISTORY_MAX_APPLICATIONS = int(os.getenv("EXPORT_HISTORY_MAX_APPLICATIONS", "500"))
 EXPORT_HISTORY_MAX_BYTES = int(os.getenv("EXPORT_HISTORY_MAX_BYTES", str(8 * 1024 * 1024)))
 EXPORT_HISTORY_MAX_PER_HOUR = int(os.getenv("EXPORT_HISTORY_MAX_PER_HOUR", "12"))
+# Feature 4 — "Download everything" (GET /api/auth/users/me/export): per-user cap.
+USER_EXPORT_MAX_PER_HOUR = int(os.getenv("USER_EXPORT_MAX_PER_HOUR", "6"))
 # Slice 4 review (S3) — the export's top-level `profile_edits` blob is bounded
 # like everything else it carries: the NEWEST N rows, rendered oldest-first,
 # with `profile_edits_truncated` saying when the tail was cut.
@@ -421,22 +568,46 @@ CONTACT_NAME_MAX_CHARS = int(os.getenv("CONTACT_NAME_MAX_CHARS", "200"))
 CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
 CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
 CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
+CONTACT_SOURCE_URL_MAX_CHARS = int(os.getenv("CONTACT_SOURCE_URL_MAX_CHARS", "1000"))
 CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
 CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
 CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
 
 # ── Outreach tracking (owner decisions, 2026-09-25) ─────────────────────────
 # People: a contact can be linked to a job or to none (cold networking). The
-# user's own assistant WRITES messages; the USER sends; Job360 never sends.
+# user's own assistant WRITES messages; the USER sends them (or, with assistant_settings.outreach_send = auto,
+# the assistant sends from the user's own Gmail); Job360 never sends.
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
+# LinkedIn connection-request note limits: career-ops (MIT) modes/contacto.md:168
+# "200 characters on a free account, 300 on Premium/Sales Navigator ... Default to the
+# safer 200-char budget unless the user has confirmed". LinkedIn's own facts, not
+# operator knobs (no env). Warn-only save check: cv_checks.linkedin_note_too_long.
+LINKEDIN_NOTE_MAX_CHARS = 200
+LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_MAX", "200"))
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
 CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))
 OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 — per USER
+# The outreach SEND gate (check_outreach, feature 10). Operator ceilings, not user
+# settings: OUTREACH_MAX_PER_HOUR above throttles WRITES; these cap SENDS. Only
+# recorded `sent` marks count. Day = the user's own today (as for check_submit).
+OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "10"))
+# At most this many sends to people at the same (lower-cased) job_company within
+# the window, so one company is never carpet-bombed.
+OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
+OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
+# Automatic employer emails (feedback loop slice 2; check_auto_email). Operator constants, not user
+# settings: how long to wait before each email, and the most that go out per user per day.
+AUTO_EMAIL_CHECKIN_DAYS = int(os.getenv("AUTO_EMAIL_CHECKIN_DAYS", "7"))
+AUTO_EMAIL_FOLLOWUP_DAYS = int(os.getenv("AUTO_EMAIL_FOLLOWUP_DAYS", "7"))
+AUTO_EMAILS_MAX_PER_DAY = int(os.getenv("AUTO_EMAILS_MAX_PER_DAY", "10"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
-CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes")
+# Owner decision 2026-10-04 — where a person was found. Closed set; unset =
+# NULL (rule #29). Editable like the other fields (a contact_edits row).
+CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
+CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via", "source_url")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
@@ -479,6 +650,81 @@ if not STATS_INTERVIEW_EVENT_TYPES:  # pragma: no cover — a vocabulary edit wo
         "stats cannot compute an interview count"
     )
 
+# ── Feedback numbers (slice 3): operator constants, NOT user settings ────────
+# Each mirrors a career-ops constant (file:line in services/applications/
+# feedback_numbers.py). Env-backed like GHOSTED_AFTER_DAYS.
+STATS_SMALL_SAMPLE_N = int(os.getenv("STATS_SMALL_SAMPLE_N", "10"))  # stats.mjs:182
+STATS_CLAIM_MIN_N = int(os.getenv("STATS_CLAIM_MIN_N", "20"))  # funnel-velocity.mjs:26,105
+VELOCITY_HOP_MIN_N = int(os.getenv("VELOCITY_HOP_MIN_N", "3"))  # funnel-velocity.mjs:106
+CALIBRATION_MIN_BAND_N = int(os.getenv("CALIBRATION_MIN_BAND_N", "5"))  # calibrate.mjs:136
+CALIBRATION_GAP_POINTS = int(os.getenv("CALIBRATION_GAP_POINTS", "10"))  # calibrate.mjs:200
+CALIBRATION_FEEDBACK_MAX = int(os.getenv("CALIBRATION_FEEDBACK_MAX", "10"))  # calibrate.mjs:215
+# Owner #16: calibrate.mjs:84-89 (3.5/4.0/4.5 of 5) re-mapped to 0-100. Bands:
+# "<70", "70-79", "80-89", ">=90" (score >= min and < max).
+CALIBRATION_BAND_EDGES = (70, 80, 90)
+COMPANY_SILENCE_WINDOW_DAYS = int(os.getenv("COMPANY_SILENCE_WINDOW_DAYS", "28"))  # company-history.mjs:79
+COMPANY_STALE_AFTER_DAYS = int(os.getenv("COMPANY_STALE_AFTER_DAYS", "365"))  # company-history.mjs:78
+COMPANY_FACTS_MAX = int(os.getenv("COMPANY_FACTS_MAX", "50"))  # NOT IN REFERENCE - a bound
+STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
+# The `view` values of stats. "all" is computed as every member except "all", so
+# a view a later slice appends (before "all") joins it automatically.
+STATS_VIEWS = (
+    "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "all",
+)
+# Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
+# (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE
+# event, so it never enters this table. brought/ghosted/withdrawn have no rank.
+FEEDBACK_FUNNEL_RANK: dict[str, int] = {
+    _status_event("applied"): 1,
+    _status_event("replied"): 2,
+    _status_event("rejected"): 2,  # a rejection is an answer
+    _status_event("interview_requested"): 4,
+    _status_event("interview_scheduled"): 4,
+    _status_event("interview_done"): 4,
+    _status_event("offer"): 5,
+    _status_event("offer_declined"): 5,  # an offer was reached (calibrate.mjs:66)
+    _status_event("hired"): 6,
+}
+# Plain strings on purpose, not validated: slice 2 adds these note types in parallel.
+FEEDBACK_FOLLOWUP_EVENT_TYPES = ("checkin_sent", "feedback_asked", "feedback_followup_sent")
+FEEDBACK_SKIP_EVENT_TYPE = "auto_email_skipped"
+
+# Slice 5 — fit and patterns
+# career-ops file:line cites are in services/applications/fit_record.py,
+# fit_patterns.py and reposts.py. Env-backed operator constants.
+FIT_SCORE_REASON_MAX_CHARS = int(os.getenv("FIT_SCORE_REASON_MAX_CHARS", "140"))  # rank-pipeline.mjs:53
+# Who/what produced the score (modes/pipeline.md:108-113). Values NOT IN REFERENCE.
+FIT_SCORE_SOURCES = ("full_ad", "listing", "owner")
+FIT_GAP_KINDS = ("hard", "soft")  # analyze-patterns.mjs:999-1002
+FIT_GAP_TEXT_MAX_CHARS = int(os.getenv("FIT_GAP_TEXT_MAX_CHARS", "200"))  # NOT IN REFERENCE - a bound
+FIT_JD_REQUIREMENTS_MAX = int(os.getenv("FIT_JD_REQUIREMENTS_MAX", "50"))  # NOT IN REFERENCE - a bound
+FIT_ARCHETYPE_MAX_CHARS = int(os.getenv("FIT_ARCHETYPE_MAX_CHARS", "80"))  # analyze-patterns.mjs:1418
+FIT_REMOTE_POLICIES = ("remote", "hybrid", "onsite")  # analyze-patterns.mjs:1095-1107
+FIT_VIA = ("agency", "direct")  # analyze-patterns.mjs:321-334
+FIT_TEAM_SIZE_MAX = 10_000_000  # a bound
+FIT_TEAM_SIZE_BUCKETS = (50, 500)  # analyze-patterns.mjs:1117-1127: <=50, <=500, else
+PATTERNS_MIN_SUBMITTED = int(os.getenv("PATTERNS_MIN_SUBMITTED", "5"))  # analyze-patterns.mjs:96
+PATTERNS_MIN_DECIDED = int(os.getenv("PATTERNS_MIN_DECIDED", "2"))  # analyze-patterns.mjs:161-164
+PATTERNS_LEAD_POINTS = int(os.getenv("PATTERNS_LEAD_POINTS", "10"))  # analyze-patterns.mjs:1569,1585
+PATTERNS_REASONS_MAX = int(os.getenv("PATTERNS_REASONS_MAX", "20"))  # NOT IN REFERENCE - a bound
+SKILL_GAPS_MIN_SCORED = int(os.getenv("SKILL_GAPS_MIN_SCORED", "5"))  # upskill.mjs:1076,483-490
+SKILL_GAPS_LOW_FIT_SCORE = int(os.getenv("SKILL_GAPS_LOW_FIT_SCORE", "80"))  # upskill.mjs:98 (4.0 of 5 x20)
+SKILL_GAPS_MAX = int(os.getenv("SKILL_GAPS_MAX", "50"))  # NOT IN REFERENCE - a bound
+SKILL_GAP_REPORT_SCHEMA = 1  # upskill.mjs:85-94
+REPOST_WINDOW_DAYS = int(os.getenv("REPOST_WINDOW_DAYS", "90"))  # detect-reposts.mjs:79
+REPOST_MIN_SPAN_DAYS = int(os.getenv("REPOST_MIN_SPAN_DAYS", "1"))  # detect-reposts.mjs:87
+# Similar-ad check (posting_history.py): career-ops fingerprint-core.mjs. Same ad text,
+# another link / title / company, among THIS user's own brings in the repost window.
+SIMILAR_AD_MIN_TEXT = 200  # fingerprint-core.mjs:26 FINGERPRINT_MIN_TEXT
+SIMILAR_AD_THRESHOLD = 0.92  # fingerprint-core.mjs:30 CROSSLIST_THRESHOLD (at most 5 of 64 bits differ)
+SIMILAR_AD_MAX_ROWS = int(os.getenv("SIMILAR_AD_MAX_ROWS", "500"))  # NOT IN REFERENCE - a bound
+SIMILAR_AD_MAX_LISTED = 3  # NOT IN REFERENCE - a bound
+# Posting signs (posting_history.py): freehire internal/job/jobreality/classify.go:21
+# oldAgeDays = 90, and ghost/classify.go:90 convergence = 2 (one sign alone says nothing).
+POSTING_SIGN_OLD_DAYS = 90
+POSTING_SIGNS_CONVERGE = 2
+
 # update_profile (R8-R11). The overlay of agent edits over extraction.
 # R9 — a CLOSED set of dotted paths into UserProfile. Each MUST be a declared
 # dataclass field (S8); src/services/profile/edits.py asserts that at import.
@@ -495,12 +741,57 @@ PROFILE_EDITABLE_PATHS = (
     # Owner decision 2026-09-25 — "the daily check offer, remembered by
     # Job360, not by any one assistant" (mcp_server.py INSTRUCTIONS).
     "preferences.daily_check",
+    # Owner decision 2026-10-03 — how often that check runs (3h/6h/12h/24h);
+    # daily_check also holds the inbox mode auto/ask/paused. Both stored by Job360.
+    "preferences.check_every",
+    # S16 - the user's LinkedIn tier (bool): true = Premium / Sales Navigator, so a
+    # connection note may run to 300 characters instead of 200. Overlay-only.
+    "preferences.linkedin_premium",
     # Slice B2 (decision 28) — dated work history and projects, as lists of
     # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
     "cv_data.cv_positions", "cv_data.cv_projects",
     # Standing instructions for the assistant — one short line each
     # (PROFILE_NOTE_MAX_CHARS), at most PROFILE_EDIT_MAX_LIST_ITEMS lines.
     "preferences.assistant_notes",
+    # Owner decision 2026-10-10 - what the user is looking for (setup interview,
+    # targets round): years of experience (0-60, min <= max), what they look for,
+    # dealbreakers, companies to avoid. Empty = don't care (rule #29).
+    "preferences.experience_years_min", "preferences.experience_years_max",
+    "preferences.looking_for", "preferences.dealbreakers", "preferences.avoid_companies",
+    "preferences.target_companies",
+    # Owner decision 2026-10-08 — THREE STORES. (1) The salary the user wants,
+    # one record per hiring country, is a normal PREFERENCE. (2) USER INFO
+    # MEMORY — the facts job forms ask (contact, right to work, logistics,
+    # languages, equality answers, approved free-text answers) — lives in its
+    # own `user_profiles.user_info` column under the `user_info.*` head, written
+    # only by storage.save_user_info. (3) The assistant's edits ride the
+    # profile_edits overlay on top of both. Shapes: services/profile/user_info.py.
+    "preferences.salary_by_country",
+    "user_info.contact", "user_info.right_to_work", "user_info.logistics",
+    "user_info.languages", "user_info.equality", "user_info.answers",
+    # Owner decision 2026-10-08 (S2) — ASSISTANT SETTINGS, a fourth head with
+    # its own `user_profiles.assistant_settings` column (default '{}'). The
+    # values ride the same profile_edits overlay (who/when history for free).
+    # A RISKIER change from an assistant is never written here: it becomes a
+    # waiting request the user confirms on the website
+    # (services/profile/setting_requests.py). Rules: services/profile/assistant_settings.py.
+    # apply_mode is RETIRED (2026-10-10): the user's own score line plus two
+    # separate switches (above / below it) replace it.
+    "assistant_settings.apply_min_score",
+    "assistant_settings.above_line", "assistant_settings.below_line",
+    "assistant_settings.submit_mode", "assistant_settings.daily_cap",
+    # Owner decision 2026-10-18 - the per-company limit and its window in days.
+    "assistant_settings.company_cap", "assistant_settings.company_cap_days",
+    # Bulk-apply C1 / C2 / R1 - the weekly cap, the pace (gap + apply hours) and the counted auto grant.
+    "assistant_settings.weekly_cap", "assistant_settings.min_gap_minutes", "assistant_settings.apply_hours",
+    "assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until",
+    "assistant_settings.paused_until", "assistant_settings.pause_reason",
+    # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
+    "assistant_settings.auto_employer_emails",
+    # Owner 2026-10-20 (G087) - may the assistant send outreach itself (draft_only | auto); its own consent.
+    "assistant_settings.outreach_send",
+    # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
+    "assistant_settings.setup_progress",
 )
 # Env-added paths must ALSO be declared dataclass fields — an unknown one is a
 # startup error, not an accepted path.
@@ -523,9 +814,114 @@ PROFILE_EDIT_MAX_BULLET_CHARS = int(os.getenv("PROFILE_EDIT_MAX_BULLET_CHARS", "
 PROFILE_EDIT_MAX_RECORDS_CHARS = int(os.getenv("PROFILE_EDIT_MAX_RECORDS_CHARS", "60000"))
 # preferences.assistant_notes — the length of ONE note (a line, not an essay).
 PROFILE_NOTE_MAX_CHARS = int(os.getenv("PROFILE_NOTE_MAX_CHARS", "200"))
+# Assistant settings (S2, owner decision 2026-10-08). The most applications a
+# user may cap themselves to per day; no cap is the default (owner: "no cap by
+# default"), this is only the ceiling a typed cap may take.
+ASSISTANT_DAILY_CAP_MAX = int(os.getenv("ASSISTANT_DAILY_CAP_MAX", "500"))
+# Owner decision 2026-10-18: the per-company limit (applications to ONE company
+# inside a window). Like the daily cap there is no limit by default; these are only
+# the ceiling a typed limit may take and the window used when the user set a limit
+# without choosing days.
+ASSISTANT_COMPANY_CAP_MAX = int(os.getenv("ASSISTANT_COMPANY_CAP_MAX", "50"))
+ASSISTANT_COMPANY_CAP_DEFAULT_DAYS = int(os.getenv("ASSISTANT_COMPANY_CAP_DEFAULT_DAYS", "180"))
+# Bulk-apply C2 / R1: the ceiling a typed weekly cap may take, the most a counted auto grant may allow,
+# and how far ahead its end may be (a grant that never ends would be the old standing auto mode).
+ASSISTANT_WEEKLY_CAP_MAX = int(os.getenv("ASSISTANT_WEEKLY_CAP_MAX", "2000"))
+ASSISTANT_AUTO_GRANT_MAX = int(os.getenv("ASSISTANT_AUTO_GRANT_MAX", "100"))
+ASSISTANT_AUTO_GRANT_MAX_DAYS = int(os.getenv("ASSISTANT_AUTO_GRANT_MAX_DAYS", "7"))
+# A waiting (riskier) change request the user never answered stops counting
+# after this many days; the assistant has to ask again.
+ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TTL_DAYS", "7"))
+# How many waiting requests ONE user's assistants may create per hour — a loop
+# cannot bury the Needs-you page. Counted off the table, never per IP.
+ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR", "20"))
+# Sites where auto-submit never runs: the assistant fills the form, stops and
+# asks yes. Matched against whole host labels (indeed.co.uk, uk.indeed.com,
+# linkedin.com, lnkd.in all hit; notindeed.com does not). Over-blocking only
+# asks, so a loose match is the safe direction. Owner: Indeed bans automated apply.
+SUBMIT_ASK_ALWAYS_BRANDS = _env_list("SUBMIT_ASK_ALWAYS_BRANDS", ("indeed", "linkedin", "lnkd"))
+# ── S3 application kit (owner decisions 2026-10-08). Every number a parameter. ──
+# A file link the kit hands out: how long it lives and how often it downloads.
+KIT_LINK_TTL_MINUTES = int(os.getenv("KIT_LINK_TTL_MINUTES", "30"))
+KIT_LINK_MAX_DOWNLOADS = int(os.getenv("KIT_LINK_MAX_DOWNLOADS", "3"))
+# Kit reads one user may make per hour (each mints links + writes an event).
+KIT_DOC_TEXT_MAX_CHARS = int(os.getenv("KIT_DOC_TEXT_MAX_CHARS", "8000"))
+KIT_APPROVED_TEXT_MAX = int(os.getenv("KIT_APPROVED_TEXT_MAX", "25"))
+KIT_READS_MAX_PER_HOUR = int(os.getenv("KIT_READS_MAX_PER_HOUR", "60"))
+# Public /api/files/{token}: downloads per link OWNER per minute (not per IP:
+# behind the Next rewrite every caller may share one address), and bad tokens
+# per IP per minute before that IP's bad tokens are refused (a valid link is
+# never locked out).
+FILE_DOWNLOADS_MAX_PER_MIN = int(os.getenv("FILE_DOWNLOADS_MAX_PER_MIN", "30"))
+FILE_BAD_TOKEN_MAX_PER_MIN = int(os.getenv("FILE_BAD_TOKEN_MAX_PER_MIN", "20"))
+# Private calendar feed (GET /api/calendar/{token}.ics, migration 0058): fetches per feed
+# OWNER per hour (calendar apps poll slowly; this only stops a leaked URL being hammered).
+CALENDAR_FEED_MAX_PER_HOUR = int(os.getenv("CALENDAR_FEED_MAX_PER_HOUR", "30"))
+# How far back the feed reaches for interviews (days).
+CALENDAR_FEED_LOOKBACK_DAYS = int(os.getenv("CALENDAR_FEED_LOOKBACK_DAYS", "30"))
+# Reminders (VALARM) in the feed: an interview alerts this many minutes before it starts
+# (two alarms; a value <= 0 drops that alarm), a follow-up all-day event alerts at this
+# hour of the day (0-23).
+CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES = int(os.getenv("CALENDAR_ALARM_INTERVIEW_FIRST_MINUTES", "1440"))
+CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES = int(os.getenv("CALENDAR_ALARM_INTERVIEW_SECOND_MINUTES", "60"))
+CALENDAR_ALARM_FOLLOW_UP_HOUR = int(os.getenv("CALENDAR_ALARM_FOLLOW_UP_HOUR", "9"))
+# "Another assistant is on this application": a kit read by someone else this
+# recently warns (never blocks).
+KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
+# Gap roadmap slice 8: the user's Send yes (``submit_approved``) counts for this many minutes
+# after it was recorded; an older yes is ``approval_stale`` (expired) and check_submit asks again.
+SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "120"))
+# A second application at the same company inside this window is flagged.
+DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
+# Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
+# asks `duplicate_role` (a repost on another board has a new URL). Exact equality only.
+DUPLICATE_ROLE_WINDOW_DAYS = int(os.getenv("DUPLICATE_ROLE_WINDOW_DAYS", "180"))
+# Hosts that need an account before you can apply (seed list; the user's own
+# `account_needed` events add more). Registrable-domain match, subdomains included.
+ACCOUNT_REQUIRED_HOST_SUFFIXES = _env_list(
+    "ACCOUNT_REQUIRED_HOST_SUFFIXES",
+    (
+        "myworkdayjobs.com", "myworkdaysite.com", "taleo.net", "icims.com",
+        "successfactors.com", "successfactors.eu",
+    ),
+)
+# Most fields a `form_filled` event may claim.
+KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
+# S5d - the biggest `form_filled` payload (it may carry the answers the assistant typed).
+KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"))
+# S5b - the most "ready to send" applications one read returns (newest first).
+READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
+
+# ── S7 proof of application (owner decision 2026-10-10). Every number a parameter. ──
+PROOF_TEXT_MAX_CHARS = int(os.getenv("PROOF_TEXT_MAX_CHARS", "4000"))
+PROOF_SCREENSHOT_MAX_BYTES = int(os.getenv("PROOF_SCREENSHOT_MAX_BYTES", str(3 * 1024 * 1024)))
+# Live (not deleted) screenshots one application may hold.
+PROOF_SCREENSHOTS_MAX_LIVE = int(os.getenv("PROOF_SCREENSHOTS_MAX_LIVE", "3"))
+# Deadline for reading an upload body; it runs before a DB connection is borrowed so a trickling client
+# cannot pin one of the pool's 10 connections.
+PROOF_UPLOAD_READ_SECONDS = float(os.getenv("PROOF_UPLOAD_READ_SECONDS", "30"))
+# An upload link lives this long and works once.
+PROOF_LINK_TTL_MINUTES = int(os.getenv("PROOF_LINK_TTL_MINUTES", "5"))
+# An applied job with no proof after this many days becomes a "Needs you" ask.
+PROOF_NO_PROOF_AFTER_DAYS = int(os.getenv("PROOF_NO_PROOF_AFTER_DAYS", "7"))
+# Upload links one user may mint per hour.
+PROOF_LINKS_MAX_PER_HOUR = int(os.getenv("PROOF_LINKS_MAX_PER_HOUR", "30"))
+# report_missing_tool (feature 7): reports ONE user's assistants may store per
+# rolling day — counted off the table, so a looping agent cannot fill it.
+MISSING_TOOL_REPORTS_MAX_PER_DAY = int(os.getenv("MISSING_TOOL_REPORTS_MAX_PER_DAY", "20"))
+MISSING_TOOL_WHY_MAX_CHARS = 280
+
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.
 PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))
+# user_info.answers — one saved question (a line), one answer (keeps
+# newlines), and the ENCODED ceiling for the whole list write.
+USER_INFO_QUESTION_MAX_CHARS = int(os.getenv("USER_INFO_QUESTION_MAX_CHARS", "300"))
+USER_INFO_ANSWER_MAX_CHARS = int(os.getenv("USER_INFO_ANSWER_MAX_CHARS", "2000"))
+USER_INFO_ANSWERS_MAX_CHARS = int(os.getenv("USER_INFO_ANSWERS_MAX_CHARS", "120000"))
+# Gap 4 (slice 26) - saved answers grow by one or two per application, so they
+# get their own record cap; every other list keeps PROFILE_EDIT_MAX_RECORDS.
+USER_INFO_ANSWERS_MAX_RECORDS = int(os.getenv("USER_INFO_ANSWERS_MAX_RECORDS", "500"))
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
@@ -625,11 +1021,10 @@ URL_FETCH_MAX_JSONLD_BYTES = int(os.getenv("URL_FETCH_MAX_JSONLD_BYTES", str(256
 
 # Owner decision, 2026-09-28 — two funnel events only the backend can see
 # (`first_tool_call`, `first_bring`) fire through `src/services/analytics.py`.
-# The frontend's consent banner (fable/05 C3) stores its choice in the
-# BROWSER only — there is no per-user consent flag in the database for the
-# backend to read — so this is the owner's own opt-in for every user, off by
-# default, not a per-user consent check. Off, every `capture_event` call is a
-# no-op: nothing is sent, nothing is queued.
+# This is the owner's global switch, off by default; on top of it each user
+# must have turned on "Help improve Job360" (`users.analytics_consent_at`,
+# migration 0067) or nothing is sent for them. Off, every `capture_event`
+# call is a no-op: nothing is sent, nothing is queued.
 ANALYTICS_BACKEND_ENABLED = _env_flag("ANALYTICS_BACKEND_ENABLED", False)
 # The SAME PostHog project the frontend posts to (its keys are
 # NEXT_PUBLIC_POSTHOG_KEY / NEXT_PUBLIC_POSTHOG_HOST, PostHogProviderWrapper.tsx)
@@ -657,3 +1052,41 @@ def validate_required_env() -> None:
             "Missing required environment variables for production: "
             + ", ".join(missing)
         )
+
+
+# -- "Needs you" (owner plan 2026-10-01) - asks the assistant raises when it
+# would have to guess; the user answers once. Every cap a parameter; a breach
+# is a 422 (429 for the open-ask cap) naming the setting.
+ASKS_QUESTION_MAX_CHARS = int(os.getenv("ASKS_QUESTION_MAX_CHARS", "1000"))
+ASKS_CONTEXT_MAX_CHARS = int(os.getenv("ASKS_CONTEXT_MAX_CHARS", "2000"))
+ASKS_ANSWER_MAX_CHARS = int(os.getenv("ASKS_ANSWER_MAX_CHARS", "4000"))
+ASKS_MAX_OPEN_PER_USER = int(os.getenv("ASKS_MAX_OPEN_PER_USER", "50"))
+ASKS_WHATS_NEW_MAX = int(os.getenv("ASKS_WHATS_NEW_MAX", "20"))  # open asks whats_new carries
+
+
+# -- The Job360 browser agent (docs/product/BROWSER_AGENT.md, VISION decision 29).
+# OFF by default: the `browser` MCP tool answers "off" until the owner sets
+# BROWSER_AGENT_ENABLED=1 on Railway (the same variable makes the Docker build
+# install Chromium). One live browser costs ~300 MB of memory, hence the cap.
+BROWSER_AGENT_ENABLED = os.getenv("BROWSER_AGENT_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
+# Live sign-in views (Settings -> Job sites) have their own cap, apart from the assistants' browsers.
+BROWSER_AGENT_MAX_LIVE = int(os.getenv("BROWSER_AGENT_MAX_LIVE", "2"))
+BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))
+
+
+# -- Migration safety (gap roadmap slice 20). Migrations auto-apply on boot and
+# every merge to main deploys, so one bad migration must fail fast, not stall
+# production. migrations/runner.py issues SET LOCAL lock_timeout / statement_timeout
+# inside each migration's own transaction (0 = Postgres "no limit"). Before applying
+# pending migrations it copies every existing table their up.sql alters, drops,
+# updates, deletes from or truncates into the `migration_snapshots` schema as
+# `<table>__<migration_id>`, skipping tables over the row cap. Snapshots never run in
+# test mode (pg.TEST_MODE), whatever this flag says.
+MIGRATION_LOCK_TIMEOUT_S = int(os.getenv("MIGRATION_LOCK_TIMEOUT_S", "5"))
+MIGRATION_STATEMENT_TIMEOUT_S = int(os.getenv("MIGRATION_STATEMENT_TIMEOUT_S", "120"))
+MIGRATION_SNAPSHOTS_ENABLED = _env_flag("MIGRATION_SNAPSHOTS_ENABLED", True)
+MIGRATION_SNAPSHOT_MAX_ROWS = int(os.getenv("MIGRATION_SNAPSHOT_MAX_ROWS", "200000"))
+# Snapshots hold whole tables (users, applications, receipts), outside the erasure
+# path, so they must not outlive the backups: every up() drops those older than this.
+MIGRATION_SNAPSHOT_RETENTION_DAYS = int(os.getenv("MIGRATION_SNAPSHOT_RETENTION_DAYS", "14"))

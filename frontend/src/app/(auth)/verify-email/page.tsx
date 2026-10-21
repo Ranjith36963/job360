@@ -78,7 +78,7 @@ function VerifyBody() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-red-400">{error}</p>
+      <p className="text-sm text-danger">{error}</p>
       <Button render={<Link href="/applications" />} className="w-full" variant="secondary">
         Back to my applications
       </Button>
@@ -91,10 +91,12 @@ function VerifyBody() {
 
 export default function VerifyEmailPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Email verification</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">
+            <h1>Email verification</h1>
+          </CardTitle>
           <CardDescription>Confirming the address you registered with.</CardDescription>
         </CardHeader>
         <CardContent>

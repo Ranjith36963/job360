@@ -16,6 +16,14 @@ import type { AgentEdit } from "./api";
 
 export type { AgentEdit };
 
+/** Feature 9: true only when the user stands behind the value (a web write or
+ *  an assistant write marked `user_said`). A legacy row (no source) is not. */
+export function isUnconfirmed(edit: AgentEdit | undefined): boolean {
+  if (!edit || !isAssistantActor(edit.set_by)) return false;
+  const e = edit as AgentEdit & { confirmed?: boolean };
+  return e.confirmed === false;
+}
+
 /** The actor a signed-in human at the browser writes as (backend `actor_for`). */
 export const WEB_ACTOR = "web";
 
@@ -35,7 +43,10 @@ export function findAgentEdit(
 /** `preferences.*` paths that have no field on the preferences card — the
  * daily-check answer lives on Settings → Connect (owner decision
  * 2026-09-25), so it must not inflate a count that links to the card. */
-const NOT_ON_PREFERENCES_CARD = new Set(["preferences.daily_check"]);
+const NOT_ON_PREFERENCES_CARD = new Set([
+  "preferences.daily_check",
+  "preferences.check_every",
+]);
 
 /** How many `preferences.*` fields on the card an assistant currently has set. */
 export function countAssistantPreferenceEdits(edits: AgentEdit[] | undefined): number {

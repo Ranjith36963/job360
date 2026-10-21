@@ -1,0 +1,12 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        run: |
+          r='${{ needs.x.result }}'  # verify job result
+          case "$r" in
+            success) echo ok ;;
+            failure) echo bad ;;
+          esac

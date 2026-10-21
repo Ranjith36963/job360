@@ -389,6 +389,31 @@ class TestCVReceipt:
         assert summary["cv_uploaded_at"], "no upload timestamp recorded"
         assert summary["cv_uploaded_at"].startswith("20"), summary["cv_uploaded_at"]
 
+    def test_pdf_upload_stores_the_cv_style_fingerprint(self, api, monkeypatch, tmp_path) -> None:
+        from fpdf import FPDF
+
+        from src.services.profile.storage import load_profile
+
+        _stub_extraction(monkeypatch)
+        _register_and_login(api, "style1@example.com")
+        pdf = FPDF(format="A4")
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 20)
+        pdf.cell(0, 10, "JANE EXAMPLE", align="C")
+        path = str(tmp_path / "up.pdf")
+        pdf.output(path)
+        with open(path, "rb") as fh:
+            content = fh.read()
+        r = api.post(
+            "/api/profile/cv",
+            files={"cv": ("up.pdf", io.BytesIO(content), "application/pdf")},
+        )
+        assert r.status_code == 200, r.text
+        uid = api.get("/api/auth/me").json()["id"]
+        stored = load_profile(uid)
+        assert stored is not None
+        assert stored.cv_data.cv_style["source"] == "uploaded"
+
     def test_reupload_replaces_the_receipt(self, api, monkeypatch) -> None:
         """A stale name is worse than none — it confirms the WRONG document."""
         _stub_extraction(monkeypatch)
@@ -1274,3 +1299,22 @@ class TestAFailedLinkedInReuploadKeepsTheOldData:
             "the restore-on-failure path also fired on success -- re-upload "
             "has become a no-op"
         )
+
+
+def test_garbled_cv_upload_sets_cv_file_warning(api, monkeypatch):
+    """A PDF whose text has (cid:N) debris stores cv_file_garbled; a clean re-upload clears it."""
+    import src.api.routes.profile as profile_route
+
+    _patch_extractor(monkeypatch)
+    _register_and_login(api)
+    pdf = b"%PDF-1.4\n%%EOF"
+
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "Built (cid:123)(cid:45) pipelines")
+    r = api.post("/api/profile", files={"cv": ("cv.pdf", io.BytesIO(pdf), "application/pdf")})
+    assert r.status_code == 200, r.text
+    assert api.get("/api/profile").json()["summary"]["cv_file_warning"] == "cv_file_garbled"
+
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "Built clean pipelines")
+    r = api.post("/api/profile", files={"cv": ("cv.pdf", io.BytesIO(pdf), "application/pdf")})
+    assert r.status_code == 200, r.text
+    assert api.get("/api/profile").json()["summary"]["cv_file_warning"] == ""

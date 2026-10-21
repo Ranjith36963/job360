@@ -1,0 +1,12 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: summary
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          if [ "$R" = success ]; then echo "::notice::verify passed"; fi
+          echo "verify: $R" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$R" = failure ]; then echo "::warning::see verify logs"; fi

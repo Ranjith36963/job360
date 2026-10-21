@@ -1,0 +1,14 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: |
+          mode=none
+          if [ "$VERIFY_RESULT" = "success" ]; then
+            mode=ship
+          fi
+          if [ "$VERIFY_RESULT" = "failure" ]; then mode=verify-failed; fi

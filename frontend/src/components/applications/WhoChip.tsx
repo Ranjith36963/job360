@@ -12,7 +12,7 @@ export function WhoChip({ recordedBy }: { recordedBy: string }) {
     return (
       <span
         data-testid="event-who"
-        className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+        className="inline-flex items-center rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-muted-foreground"
       >
         {name}
       </span>
@@ -21,7 +21,7 @@ export function WhoChip({ recordedBy }: { recordedBy: string }) {
   return (
     <span
       data-testid="event-who"
-      className="inline-flex items-center gap-1 rounded-full bg-accent/20 px-2 py-0.5 text-[11px] font-medium text-accent-foreground"
+      className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-px font-mono text-[10.5px] text-brand"
     >
       <Bot className="h-3 w-3" />
       Assistant · {name}

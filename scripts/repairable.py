@@ -35,6 +35,8 @@ stays correct is not a cage. This holds even if the policy regresses.
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -74,7 +76,12 @@ SELF_FILES: frozenset[str] = frozenset({
 
 def why_not(path: str, policy: dict) -> str | None:
     """Return the reason this path may not be repaired, or None if it may."""
-    norm = path.replace("\\", "/").lstrip("./")
+    norm = path.replace("\\", "/")
+    # `lstrip("./")` strips CHARACTERS, not a prefix: `.github/x` lost its leading
+    # dot and became `github/x`, so the SELF check below never matched and the
+    # path was refused only by accident (lane "unknown"). Strip a literal `./`.
+    while norm.startswith("./"):
+        norm = norm[2:]
     for prefix in SELF:
         if norm.startswith(prefix):
             return f"`{path}` is part of the harness that judges this repair (SELF: {prefix})"
@@ -87,16 +94,128 @@ def why_not(path: str, policy: dict) -> str | None:
     return None
 
 
+# ── WHAT IS WORTH WAKING THE FIXER FOR (added 2026-10-02) ────────────────────
+# PRs #665, #666, #679 and #703 all ended `autofix:exhausted` within ~2 minutes
+# without the fixer ever having a real chance, because the doorbell dispatched
+# for findings the fixer cannot or need not act on: threads on SELF paths,
+# threads on code that already changed (outdated), and red checks not caused by
+# the PR's own code. `finding-watch.yml` and `pr-repair.yml` both call `triage`,
+# so "fixable" means ONE thing -- and it is built on `why_not`, the same matcher
+# that cages the agent's edits, so the doorbell can never ring for a file the
+# cage would then refuse.
+
+# (pattern on the check-run name, why the fixer cannot help). A failure of one
+# of these is NOT a finding the fixer can fix.
+UNFIXABLE_CHECKS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^(npm audit|pip-audit)", re.I),
+     "a dependency audit: it fails when an advisory lands on the dependencies "
+     "(lockfiles are the owner's), not because of this PR's code"),
+    # Reviewer checks: a REAL finding arrives as review threads, which are
+    # counted on their own. A red reviewer CHECK with no thread is "did not
+    # finish" (out of turns, cancelled, no token) and re-running a fixer cannot
+    # change that. Telling the two apart would mean parsing the check's output,
+    # so the whole check is excluded and the threads carry the real findings.
+    (re.compile(r"^reviewer-", re.I),
+     "a reviewer check: its real findings arrive as review threads, a red "
+     "check alone means it did not finish"),
+    (re.compile(r"^wake-the-fixer$"),
+     "the fixer's own doorbell, not a test of this PR's code"),
+)
+# Conclusions that mean the check never gave a verdict about the code.
+NO_VERDICT = {
+    "cancelled": "it was cancelled and never produced a verdict, re-run it",
+    "action_required": "it is waiting for someone to approve the run",
+}
+CODE_RED = frozenset({"failure", "timed_out"})
+
+
+def _clean(text: object) -> str:
+    """Make untrusted text safe to quote in a PR comment (no ticks, no mentions)."""
+    return re.sub(r"[`@\r\n]", "", str(text or ""))[:120]
+
+
+def triage(threads: list[dict], checks: list[dict], policy: dict) -> dict:
+    """Split findings into what the fixer can act on and what only a human can.
+
+    `threads`: reviewThreads nodes (id, isResolved, isOutdated, path).
+    `checks`: check_runs (name, status, conclusion).
+    """
+    t_open = [t for t in threads if not t.get("isResolved")]
+    t_fixable: list[dict] = []
+    t_outdated = 0
+    t_blocked: list[str] = []
+    for t in t_open:
+        path = t.get("path")
+        if t.get("isOutdated"):
+            t_outdated += 1
+        elif path and why_not(path, policy):
+            t_blocked.append(path)
+        else:
+            # No path at all is not "outside the cage": it is a finding the
+            # fixer should read, so it stays fixable.
+            t_fixable.append(t)
+
+    red = [c for c in checks
+           if c.get("status") == "completed"
+           and c.get("conclusion") in (CODE_RED | set(NO_VERDICT))]
+    c_fixable: list[str] = []
+    c_unfixable: list[dict] = []
+    for c in red:
+        name, concl = c.get("name") or "?", c.get("conclusion")
+        why = NO_VERDICT.get(concl)
+        for pat, reason in UNFIXABLE_CHECKS:
+            if why is None and pat.search(name):
+                why = reason
+        if why is None:
+            c_fixable.append(name)
+        else:
+            c_unfixable.append({"name": name, "conclusion": concl, "why": why})
+
+    lines: list[str] = []
+    if t_blocked:
+        paths = sorted({_clean(p) for p in t_blocked})
+        shown = ", ".join(f"`{p}`" for p in paths[:5]) + (", ..." if len(paths) > 5 else "")
+        lines.append(f"{len(t_blocked)} review thread(s) on files the auto-fixer may not edit ({shown})")
+    if t_outdated:
+        lines.append(f"{t_outdated} outdated review thread(s) (the code they point at has "
+                     f"since changed): resolve or dismiss them by hand")
+    for u in c_unfixable[:5]:
+        lines.append(f"red check `{_clean(u['name'])}` ({u['conclusion']}) is not something the "
+                     f"auto-fixer can fix: {u['why']}")
+    if len(c_unfixable) > 5:
+        lines.append(f"...and {len(c_unfixable) - 5} more red check(s) of that kind")
+
+    return {
+        "threads": {"open": len(t_open), "fixable": len(t_fixable),
+                    "fixable_ids": [t.get("id") for t in t_fixable],
+                    "outdated": t_outdated, "blocked": len(t_blocked)},
+        "checks": {"red": len(red), "fixable": c_fixable, "unfixable": len(c_unfixable)},
+        "fixable": len(t_fixable) + len(c_fixable),
+        "raw": len(t_open) + len(red),
+        "explanation": "; ".join(lines),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("files", nargs="*", help="repo-relative paths; omit to read stdin")
     ap.add_argument("--drill", action="store_true", help="prove this guard can go red")
+    ap.add_argument("--threads-json", help="reviewThreads nodes (JSON array); with "
+                    "--checks-json, prints the fixable/unfixable split as JSON")
+    ap.add_argument("--checks-json", help="check_runs (JSON array); see --threads-json")
     ap.add_argument("--paths-only", action="store_true",
                     help="print just the blocked paths, one per line — for shell pipelines")
     args = ap.parse_args()
 
     if args.drill:
         return drill()
+
+    if args.threads_json or args.checks_json:
+        def load(p: str | None) -> list[dict]:
+            return json.loads(Path(p).read_text(encoding="utf-8")) if p else []
+        print(json.dumps(triage(load(args.threads_json), load(args.checks_json),
+                                load_policy())))
+        return 0
 
     paths = args.files or [ln.strip() for ln in sys.stdin if ln.strip()]
     if not paths:
@@ -180,7 +299,50 @@ def drill() -> int:
             "ok" if ok else "FAIL", path,
             f"{what} -> {'blocked' if blocked else 'repairable'}"
             + ("" if ok else f"  WANTED {'blocked' if must_block else 'repairable'}")))
-    print(f"\n{len(cases) - bad}/{len(cases)}")
+    total = len(cases)
+
+    # ── ADDED 2026-10-02: blocked FOR THE RIGHT REASON, and the doorbell split ─
+    # `lstrip("./")` turned `.github/x` into `github/x`, so every SELF-prefix
+    # case above was blocked by the "unknown lane" accident, not by SELF — and
+    # the drill could not tell, because it only checks blocked-or-not. These
+    # prove the SELF rule itself fires, with and without a `./` prefix.
+    for path in (".github/workflows/x.yml", "./.github/workflows/x.yml",
+                 ".claude/x.md", "scripts/x.py"):
+        total += 1
+        why = why_not(path, policy) or ""
+        ok = "SELF" in why
+        bad += 0 if ok else 1
+        print("  %-4s %-46s %s" % ("ok" if ok else "FAIL", path,
+                                   "blocked by the SELF rule" if ok else f"WRONG REASON: {why!r}"))
+
+    def th(i: str, path: str | None, outdated: bool = False, resolved: bool = False) -> dict:
+        return {"id": i, "path": path, "isOutdated": outdated, "isResolved": resolved}
+
+    def ck(name: str, concl: str) -> dict:
+        return {"name": name, "status": "completed", "conclusion": concl}
+
+    triage_cases: list[tuple[str, list[dict], list[dict], int, int]] = [
+        # (what, threads, checks, want_fixable, want_raw)
+        ("only .github threads (PR #679)", [th("a", ".github/workflows/x.yml")], [], 0, 1),
+        ("a backend thread -> dispatch", [th("a", "backend/src/api/routes/jobs.py")], [], 1, 1),
+        ("outdated thread is not fixable", [th("a", "backend/src/a.py", outdated=True)], [], 0, 1),
+        ("resolved thread is not a finding", [th("a", ".github/x.yml", resolved=True)], [], 0, 0),
+        ("clean PR (PR #703 at f89ec5f9)", [], [ck("verify", "success")], 0, 0),
+        ("npm audit red is main's problem (PR #666)", [], [ck("npm audit (frontend deps)", "failure")], 0, 1),
+        ("reviewer ran out of turns", [], [ck("reviewer-bugs", "failure")], 0, 1),
+        ("cancelled / action_required are no verdict", [],
+         [ck("verify / backend", "cancelled"), ck("verify / frontend", "action_required")], 0, 2),
+        ("a real red test IS fixable", [], [ck("verify / backend", "failure")], 1, 1),
+    ]
+    for what, threads, checks, want_fix, want_raw in triage_cases:
+        total += 1
+        got = triage(threads, checks, policy)
+        ok = got["fixable"] == want_fix and got["raw"] == want_raw
+        bad += 0 if ok else 1
+        print("  %-4s triage: %-37s fixable=%d raw=%d%s" % (
+            "ok" if ok else "FAIL", what, got["fixable"], got["raw"],
+            "" if ok else f"  WANTED fixable={want_fix} raw={want_raw}"))
+    print(f"\n{total - bad}/{total}")
     return 1 if bad else 0
 
 

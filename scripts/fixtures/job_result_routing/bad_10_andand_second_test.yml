@@ -1,0 +1,12 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          mode=none
+          [ "$GITHUB_EVENT_NAME" = push ] && [ "$R" = success ] && mode=ship
+          [ "$GITHUB_EVENT_NAME" = push ] && [ "$R" = failure ] && mode=failed

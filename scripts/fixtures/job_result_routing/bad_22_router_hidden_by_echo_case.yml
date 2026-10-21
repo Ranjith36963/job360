@@ -1,0 +1,13 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          mode=none
+          case "$R" in success) echo ok ;; *) echo "verify: $R" ;; esac
+          if [ "$R" = success ]; then mode=ship; fi
+          if [ "$R" = failure ]; then mode=failed; fi

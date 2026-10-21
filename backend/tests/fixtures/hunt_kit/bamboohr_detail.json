@@ -1,0 +1,34 @@
+{
+ "meta": {},
+ "result": {
+  "jobOpening": {
+   "jobOpeningShareUrl": "https://smith.bamboohr.com/careers/227",
+   "jobOpeningName": "Director of Analytics",
+   "jobOpeningStatus": "Open",
+   "jobCategoryId": null,
+   "departmentId": null,
+   "departmentLabel": "",
+   "employmentStatusLabel": "1 - Full Time",
+   "employmentType": null,
+   "location": {
+    "city": null,
+    "state": null,
+    "postalCode": null,
+    "addressCountry": null
+   },
+   "atsLocation": {
+    "country": "United States",
+    "countryId": "1",
+    "state": null,
+    "city": null
+   },
+   "description": "<p><span style=\"font-family: arial, helvetica, sans-serif; font-size: 14pt; font-weight: bold\">Director of Analytics\u00a0</span></p>\n<p>Location: Remote | Columbus, OH</p>\n<p><br></p>\n<p><span><span>Smith is seeking a </span></span><span style=\"font-weight: bold\"><span><span>Director of Analytics</span></span></span><span><span>\u00a0to lead the strategy, growth, and evolution of our Analytics practice across\u00a0</span></span><span><span>enterprise\u00a0</span></span><span><span>B2B commerce, marketing, and customer experience</span></span><span><span>\u00a0with deep\u00a0</span><span>expertise</span><span>\u00a0in complex B2B buying journeys\u00a0and commerce platform\u00a0</span><span>analytics.</span></span><span>\u00a0</span></p>\n<p>",
+   "compensation": null,
+   "datePosted": "2026-08-04",
+   "minimumExperience": "Senior Manager/Supervisor",
+   "locationType": "1",
+   "seekPromoted": false,
+   "aiProcessingDisclosureEnabled": false
+  }
+ }
+}

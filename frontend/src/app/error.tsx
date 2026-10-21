@@ -24,13 +24,13 @@ export default function GlobalError({
     <div className="min-h-[60vh] flex items-center justify-center">
       <div className="text-center max-w-md mx-auto px-4">
         <div className="text-6xl mb-4">⚠️</div>
-        <h2 className="text-2xl font-bold mb-2">Something went wrong</h2>
+        <h2 className="text-balance font-heading text-3xl font-normal tracking-tight mb-2">Something went wrong</h2>
         <p className="text-muted-foreground mb-6">
           {error.message || "An unexpected error occurred. Please try again."}
         </p>
         <button
           onClick={reset}
-          className="inline-flex items-center justify-center rounded-md bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          className="inline-flex items-center justify-center rounded-lg bg-foreground px-6 py-2.5 text-sm font-medium text-background hover:opacity-90 transition-colors"
         >
           Try again
         </button>

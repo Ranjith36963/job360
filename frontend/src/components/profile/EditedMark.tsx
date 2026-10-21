@@ -7,6 +7,7 @@ import {
   formatEditValue,
   formatEditedDate,
   isAssistantActor,
+  isUnconfirmed,
 } from "@/lib/agent-edits";
 
 /** "Changed by Claude · was £45k  [Keep] [Take back]" — the mark next to any
@@ -32,6 +33,7 @@ export function EditedMark({
   const [pending, setPending] = useState<"keep" | "take-back" | null>(null);
   if (!edit || !isAssistantActor(edit.set_by)) return null;
   const who = actorName(edit.set_by);
+  const unconfirmed = isUnconfirmed(edit);
   const was = formatEditValue(edit.previous_value, edit.path);
 
   const run = (kind: "keep" | "take-back", fn: (path: string) => Promise<void>) =>
@@ -49,27 +51,36 @@ export function EditedMark({
     };
 
   const buttonClass =
-    "rounded-full border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50";
+    "font-mono text-[10px] normal-case tracking-normal text-faint underline-offset-2 transition-colors hover:text-foreground hover:underline disabled:opacity-50";
 
   return (
-    <span className="ml-2 inline-flex flex-wrap items-center gap-1.5">
+    <span className="ml-2 inline-flex min-w-0 flex-wrap items-center gap-1.5 normal-case tracking-normal">
       <span
         data-testid="agent-edit-mark"
         title={`Changed by ${edit.set_by} on ${formatEditedDate(edit.set_at)}`}
-        className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
+        className="line-clamp-2 min-w-0 rounded-md bg-brand-soft px-2 py-0.5 font-mono text-[10px] font-medium text-brand [overflow-wrap:anywhere]"
       >
         Changed by {who} · was {was}
       </span>
+      {unconfirmed && (
+        <span
+          data-testid="unconfirmed-badge"
+          title="Your assistant worked this out. It is not confirmed until you say so."
+          className="rounded-md bg-warning-soft px-2 py-0.5 font-mono text-[10px] font-medium text-warning"
+        >
+          unconfirmed
+        </span>
+      )}
       {onKeep && (
         <button
           type="button"
           data-testid="keep"
-          aria-label={`Keep ${who}'s change`}
+          aria-label={unconfirmed ? `Confirm ${who}'s change` : `Keep ${who}'s change`}
           disabled={pending !== null}
           onClick={run("keep", onKeep)}
           className={buttonClass}
         >
-          {pending === "keep" ? "Keeping…" : "Keep"}
+          {pending === "keep" ? (unconfirmed ? "Confirming…" : "Keeping…") : unconfirmed ? "Confirm" : "Keep"}
         </button>
       )}
       {onTakeBack && (

@@ -25,6 +25,8 @@ vi.mock("@/lib/api", () => ({
   recordApplicationEvent: (...args: unknown[]) => recordApplicationEvent(...args),
   getApplicationArtifact: (...args: unknown[]) => getApplicationArtifact(...args),
   getArtifactDiff: (...args: unknown[]) => getArtifactDiff(...args),
+  // S3: the decision buttons read this on mount; a failed read hides them.
+  getApplicationControls: vi.fn().mockRejectedValue(new Error("not mocked")),
 }));
 
 type DetailWithNextStep = ApplicationDetail & {
@@ -173,6 +175,15 @@ describe("ApplicationClient — six-question layout", () => {
     // Stays scrollable — scroll-quiet only hides the bar, it doesn't remove
     // the sticky/overflow behaviour.
     expect(side).toHaveClass("lg:overflow-y-auto");
+  });
+
+  it("sticks near the top of the viewport — the desktop shell has no top bar to clear (redesign slice 1)", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    const side = screen.getByTestId("app-col-side");
+    expect(side).toHaveClass("lg:sticky", "lg:top-6");
+    expect(side).not.toHaveClass("lg:top-20");
   });
 
   it("the actions column carries Next, status, the status menu, Mark Applied and View ad", async () => {
@@ -337,8 +348,8 @@ describe("ApplicationClient — status menu asks first (decision 1)", () => {
     recordApplicationEvent.mockResolvedValue({
       event_id: 11,
       application_id: 42,
-      event_type: "rejected",
-      status: "rejected",
+      event_type: "withdrawn",
+      status: "withdrawn",
       status_changed: true,
     });
   });
@@ -347,16 +358,16 @@ describe("ApplicationClient — status menu asks first (decision 1)", () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");
 
-    fireEvent.change(screen.getByTestId("status-menu"), { target: { value: "rejected" } });
+    fireEvent.change(screen.getByTestId("status-menu"), { target: { value: "withdrawn" } });
     expect(recordApplicationEvent).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/record "rejected"\? this is added to the history/i)
+      screen.getByText(/record "withdrawn"\? this is added to the history/i)
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("status-confirm"));
 
     await waitFor(() =>
-      expect(recordApplicationEvent).toHaveBeenCalledWith(42, { event_type: "rejected" })
+      expect(recordApplicationEvent).toHaveBeenCalledWith(42, { event_type: "withdrawn" })
     );
   });
 
