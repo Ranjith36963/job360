@@ -260,7 +260,6 @@ async def test_gate_company_cap_uses_the_key_and_counts_cold_contacts(
 
 @pytest.mark.asyncio
 async def test_mcp_company_round_trip(authenticated_async_context):
-    pytest.importorskip("mcp")
     import httpx2
     from mcp.client import Client
     from mcp.client.streamable_http import streamable_http_client

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from src.core import settings
 from src.services.applications import contacts
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from src.repositories.database import JobDatabase
 
 EMPTY: dict[str, Any] = {"count": 0, "people": [], "truncated": False}
