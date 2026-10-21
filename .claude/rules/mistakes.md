@@ -26,6 +26,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict,
   gate the merged tree, commit. A script hides the merge from the commit-gate hook.
 - Run the gate as its own command and read its PASS line; never `gate && git commit` (the hook misses it).
+- Before a PR with a migration merges, merge main and check its NNNN is still free (2026-10-21: two 0067s).
 - Resolve a conflict per hunk; `git checkout --ours/--theirs <file>` also drops the other side's clean hunks.
 - A child PR's squash merge ships its stacked base too: diff the base against main, close it as shipped.
 - A stacked worker's first step merges its base branch: worktree agents start from origin/main.
@@ -49,6 +50,14 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - After editing any MCP tool description or the server instructions, run
   `python scripts/mcp_text_budget.py` (2,000-character cap); the gate's fast tier skips it.
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
+- A test proving a reader stays on its site compares exact hostnames (`urlsplit(u).hostname`),
+  never `"host" in url`: CodeQL flags it high (2026-10-21: #1054 and #1060).
+- A date assert takes its expected value from the fixture's own clock, never a second `now()`
+  (2026-10-21: a run crossing midnight turned #1026 red).
+- Before resuming a saved workflow script, check every script and file it names still exists on main;
+  never tell a worker to loosen a test assert or budget.
+- When a reader for a host lands, take that host off `_UNSUPPORTED_HOSTS` in the same commit.
+- To list a session's PRs, page `pulls?state=all` and filter bodies; `in:body` search misses most.
 - To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,
   `@mcp.tool()`, the decorator) — never X's importers; they cannot show a second doer.
 

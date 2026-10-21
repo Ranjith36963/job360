@@ -1913,6 +1913,68 @@ async def test_opening_three_different_pages_is_no_repeat(pool):
     assert "3 times in a row" in (await run(pool, "u1", "open", url="http://jobs.example/form?job=1"))["repeat_warning"]
 
 
+# ── Gap-audit #18: a secret in the page address never reaches the assistant ───
+
+
+class _FakeFrame:
+    parent_frame = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    async def evaluate(self, js, arg=None):
+        return {"elements": [], "places": [], "text": "Sign in", "has_password_box": False}
+
+
+class _FakePage:
+    viewport_size = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.frames = [_FakeFrame(url)]
+        self.context = type("Ctx", (), {"pages": []})()
+
+    def is_closed(self) -> bool:
+        return False
+
+    async def title(self) -> str:
+        return "Welcome"
+
+    async def evaluate(self, js, arg=None):
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page_url", "shown"),
+    [
+        ("https://x.example/auth?token=abc&email=a@b.c", "https://x.example/auth"),
+        ("https://x.example/cb#access_token=eyJsecret", "https://x.example/cb"),
+        ("https://co.example/careers?gh_jid=123&sid=S1#frag", "https://co.example/careers?gh_jid=123"),
+        (
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1?source=LinkedIn",
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1",
+        ),
+    ],
+)
+async def test_look_shows_the_address_without_its_secret(page_url, shown):
+    from src.services.browser_agent.agent import Session, look
+
+    page = _FakePage(page_url)
+    out = await look(Session(context=page.context, page=page))
+    assert out["url"] == shown
+    assert "abc" not in str(out) and "secret" not in str(out) and "S1" not in str(out)
+
+
+def test_load_failed_and_error_text_carry_no_secret_either():
+    from src.services.browser_agent.agent import _load_failed, _scrub_links
+
+    out = _load_failed(_FakePage("https://x.example/auth?token=abc#t"), after_action=True)
+    assert out["url"] == "https://x.example/auth"
+    msg = "net::ERR_ABORTED at https://x.example/magic?token=abc&email=a@b.c#frag while loading"
+    assert _scrub_links(msg) == "net::ERR_ABORTED at https://x.example/magic while loading"
+
+
 @pytest.mark.asyncio
 async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(authenticated_async_context):
     from src.api.auth_deps import CurrentUser
@@ -1954,3 +2016,74 @@ FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
 </body></html>"""
+
+
+# ── Upload reads the file AFTER the change event (Greenhouse, Ashby) ──────────
+
+SLOW_UPLOAD = """<!doctype html><html><head><title>Upload - Acme</title></head><body>
+<label for="plain">Resume file</label><input id="plain" type="file">
+<label for="cv">Resume</label><input id="cv" type="file" style="display:none">
+<button type="button" id="attach" onclick="document.getElementById('cv').click()">Attach</button>
+<div id="status"></div>
+<script>
+  for (const id of ['plain', 'cv']) {
+    document.getElementById(id).addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      await new Promise(r => setTimeout(r, 300));   // the site reads the file later, as Ashby does
+      try {
+        const buf = await file.arrayBuffer();
+        await fetch('/up', {method: 'POST', body: buf});
+        document.getElementById('status').textContent = file.name + ' ' + buf.byteLength;
+      } catch (err) { document.getElementById('status').textContent = 'Upload failed'; }
+    });
+  }
+</script></body></html>"""
+
+
+@pytest.fixture
+async def slow_upload_site():
+    from aiohttp import web
+
+    got: list[bytes] = []
+
+    async def page(_):
+        return web.Response(text=SLOW_UPLOAD, content_type="text/html")
+
+    async def up(request):
+        got.append(await request.read())
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/upload", page)
+    app.router.add_post("/up", up)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1], got  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+@pytest.mark.parametrize("control", ["Attach", "Resume file"])
+async def test_upload_sends_the_exact_bytes_the_site_reads_late(slow_upload_site, control):
+    from src.services.browser_agent.agent import BrowserPool, run
+
+    port, got = slow_upload_site
+    data = b"%PDF-1.4 exact bytes \x00\x01\xff"
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(port))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/upload")
+
+        async def pdf(kind):
+            return "Ada_CV.pdf", data
+
+        page = await run(pool, "u1", "upload", ref=_ref(page, control), doc_kind="cv", files=pdf)
+        assert page["upload_confirmed"] is True
+        assert got == [data]
+        s = pool._sessions["u1"]  # noqa: SLF001
+        assert await s.page.locator("#status").inner_text() == f"Ada_CV.pdf {len(data)}"
+    finally:
+        await pool.shutdown()
