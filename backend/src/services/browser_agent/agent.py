@@ -23,9 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
-import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
@@ -1294,27 +1292,34 @@ async def _act(
     name, data = await files(doc_kind)
     page_before, near_before = await _upload_texts(frame, loc)
     is_file_input = (await loc.evaluate("(el) => el.tagName === 'INPUT' && el.type === 'file'"))
-    with tempfile.TemporaryDirectory(prefix="j360-upload-") as tmp:
-        path = os.path.join(tmp, name)
-        with open(path, "wb") as fh:
-            fh.write(data)
-        if is_file_input:
-            await loc.set_input_files(path)
-        else:
-            # An "Attach" button with no reachable file box: catch the file picker it opens
-            # (Playwright filechooser; the Greenhouse fix in ApplYourself src/apply/fill.py:450-509).
-            try:
-                async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
-                    await loc.click()
-                chooser = await chooser_info.value
-            except Exception:  # noqa: BLE001 - the button opened no file picker
-                raise BrowserError(
-                    "refused", "not_an_upload",
-                    "That control did not open a file picker. Use the file box or the Attach button.",
-                ) from None
-            await chooser.set_files(path)
+    # A bytes payload, never a temp file: the page reads the file after the change event (Greenhouse, Ashby),
+    # and a file already deleted by then fails with NotFoundError.
+    payload = {"name": name, "mimeType": "application/pdf", "buffer": data}
+    if is_file_input:
+        await loc.set_input_files(payload)
+    else:
+        # An "Attach" button with no reachable file box: catch the file picker it opens
+        # (Playwright filechooser; the Greenhouse fix in ApplYourself src/apply/fill.py:450-509).
+        try:
+            async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
+                await loc.click()
+            chooser = await chooser_info.value
+        except Exception:  # noqa: BLE001 - the button opened no file picker
+            raise BrowserError(
+                "refused", "not_an_upload",
+                "That control did not open a file picker. Use the file box or the Attach button.",
+            ) from None
+        await chooser.set_files(payload)
     await _settle(page)
     page_after, near_after = await _upload_texts(frame, loc)
+    # The site uploads in the background: wait (up to ~10 s) for the file name or an error to be drawn.
+    for _ in range(UPLOAD_POLL_STEPS):
+        if name in page_after or name in near_after or any(
+            _UPLOAD_ERROR.search(ln) and ln.strip() not in near_before for ln in near_after.splitlines()
+        ):
+            break
+        await asyncio.sleep(UPLOAD_POLL_STEP_S)
+        page_after, near_after = await _upload_texts(frame, loc)
     out = await look(s, after_action=True)
     # A site can take the file into the box and still show an error (Greenhouse): believe only the file name
     # the site newly drew on the page, and never over an error that appeared next to the field.
@@ -1327,6 +1332,8 @@ async def _act(
     return out
 
 
+UPLOAD_POLL_STEPS = 40
+UPLOAD_POLL_STEP_S = 0.25
 _UPLOAD_ERROR = re.compile(r"failed|error|try again|too large|not supported", re.IGNORECASE)
 
 
