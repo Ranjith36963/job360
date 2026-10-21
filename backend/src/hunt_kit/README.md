@@ -76,6 +76,9 @@ from the first 20 ads of each board only; the rest come back undated.
 UltiPro (`ultipro`), ADP Workforce Now (`adp`), Cornerstone, Gem, JazzHR, Softgarden, JOIN,
 Jibe, Keka Hire (`keka`) and Zoho Recruit (`zohorecruit`). Phenom, UltiPro, ADP and Cornerstone list ads only (no description);
 some Zoho Recruit sites list no description either, so open the link to read the ad.
+`kit_ats_eu.py` adds Emply (`emply`), Manatal (`manatal`), TalentAdore (`talentadore`), Traffit (`traffit`)
+and Trakstar (`trakstar`), mostly European employers (rows with `source` `freehire`). Each is read with a few
+requests per board; the first refusal ends that board.
 `kit_ats_misc2.py` adds OpenCATS portals (`opencats`), Odoo recruitment sites (`odoo`), recruiting-solutions.org
 (`recruitingsolutions`), the TeamEx marketplace (`teamex`), the Wantapply aggregator (`wantapply`, read from its wantapply.cy
 mirror), werecruit, Workstream (`workstream`), WordPress career sites built on WP Job Manager and Yoast (`wpyoast`),
@@ -168,6 +171,9 @@ Longer tokens: `ultipro:host/tenant/boardId` (from `recruiting.ultipro.ca/TENANT
 `cornerstone:tenant/siteId` (from `tenant.csod.com/ux/ats/careersite/4/home`), `phenom:careers.example.com`
 (the branded career host). One slug each: `rippling:slug` (`ats.rippling.com/slug/jobs`), `breezy:tenant`,
 `pinpoint:tenant`, `jazzhr:tenant` (`tenant.applytojob.com`), `softgarden:tenant`, `jibe:slug`,
+`emply:slug` (`slug.career.emply.com`, or the career-site host when it runs on the employer's own domain),
+`manatal:slug` (`careers-page.com/slug`), `talentadore:token` (the career-site widget's feed token),
+`traffit:tenant` (`tenant.traffit.com`), `trakstar:tenant` (`tenant.hire.trakstar.com`),
 `opencats:host[/path]` (`careers.boomit.pt/careers`), `odoo:careers-host`,
 `recruitingsolutions:key` (the customerId, e.g. `riv-prod`), `teamex:global`, `wantapply:global`,
 `werecruit:locale/tenant` (`careers.werecruit.io/en/idiap`), `workstream:8hex` (`www.workstream.us/j/8hex`),
@@ -275,7 +281,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py` and `kit_ats_us.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py` and `kit_ats_us.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)

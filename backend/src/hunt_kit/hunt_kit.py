@@ -99,6 +99,11 @@ BOARD_SOURCES = (
     "jibe",
     "keka",
     "zohorecruit",
+    "emply",
+    "manatal",
+    "talentadore",
+    "traffit",
+    "trakstar",
     "betterteam",
     "catsone",
     "clinch",
@@ -324,7 +329,8 @@ def _import_kit(name: str) -> Any:
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
 ATS_MODULES = (
-    "kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us", "kit_sites_a",
+    "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
+    "kit_sites_a",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2711,6 +2717,10 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
     ("keka", re.compile(r"^([a-z0-9-]+)\.keka\.com$")),
     ("zohorecruit", re.compile(r"^([a-z0-9-]+)\.zohorecruit\.(?:in|com)$")),
+    ("emply", re.compile(r"^([a-z0-9-]+)\.career\.emply\.com$")),
+    ("manatal", re.compile(r"^(?:([a-z0-9-]+)\.)?careers-page\.com$")),
+    ("traffit", re.compile(r"^([a-z0-9-]+)\.traffit\.com$")),
+    ("trakstar", re.compile(r"^([a-z0-9-]+)\.hire\.trakstar\.com$")),
     ("careerplug", re.compile(r"^([a-z0-9-]+)\.careerplug\.com$")),
     ("hireology", re.compile(r"^careers\.hireology\.com$")),
     ("hiringthing", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+)*\.hiringthing\.com)$")),
@@ -2789,6 +2799,12 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
         elif ats == "join":  # https://join.com/companies/<slug>/...
             tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
+        elif ats == "manatal":  # https://www.careers-page.com/<slug>/job/<hash> or https://<slug>.careers-page.com/jobs/<n>
+            sub = m.group(1) or ""
+            if sub and sub != "www":
+                tok = sub if sub.lower() not in _SLUG_BLOCK else ""
+            else:
+                tok = seg[0] if seg and re.fullmatch(_SLUG, seg[0]) and seg[0].lower() not in _SLUG_BLOCK else ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
         elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
