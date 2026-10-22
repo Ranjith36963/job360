@@ -21,6 +21,8 @@ check trains people to ignore the loop).
 Read-only on purpose: this loop REPORTS drift, it never edits docs
 (see docs/harness/maintenance/loop1_safe_reenable.md — "verify=read is safe").
 Run: python scripts/doc_sync_check.py   (from the repo root)
+     python scripts/doc_sync_check.py --baseline BASE_DIR   (PRs: fail only on
+     drift BASE_DIR, a checkout of the PR's base, does not already have)
 """
 
 from __future__ import annotations
@@ -1306,6 +1308,105 @@ def main() -> int:
     return 1
 
 
+# ─── PR baseline: red only for THIS PR's drift (owner decision 2026-10-22) ────
+# On 2026-10-21 drift on main (a duplicate migration prefix) turned 28 open PRs
+# red at once, and people merged main into PRs just to clear it. With
+# `--baseline DIR` (DIR = a checkout of the PR's base commit) the base's OWN
+# checker judges the base tree, this checker judges this tree, and only
+# findings the base does not have fail the run. The rest print as inherited.
+# Main's drift is still a red build on main: doc-sync.yml runs on push to main
+# without --baseline. When the base gives nothing comparable, every finding
+# counts as this PR's (fail closed, i.e. exactly the old behaviour).
+_REPORT_ROW = re.compile(r"^\| (.*) \|$")
+_CRASH_PREFIX = "doc_sync_check crashed:"
+
+
+def _run_report(root: Path) -> tuple[int, str, str]:
+    """Run root's own doc_sync_check.py on root's tree: (exit, stdout, stderr)."""
+    env = {**os.environ, "JOB360_ROOT": str(root), "PYTHONIOENCODING": "utf-8"}
+    p = subprocess.run([sys.executable, str(root / "scripts" / "doc_sync_check.py")],
+                       cwd=root, env=env, capture_output=True, check=False,
+                       encoding="utf-8", errors="replace", timeout=300)
+    return p.returncode, p.stdout, p.stderr
+
+
+def report_findings(code: int, out: str, err: str, root: Path) -> set[str] | None:
+    """The comparable findings of one run, or None if it gave nothing comparable.
+
+    A drift row minus its line number (an edit above an inherited finding moves
+    it, and must not make it this PR's), with the tree's own path masked; a
+    crash is its one message.
+    """
+    def norm(s: str) -> str:
+        return s.replace(str(root), "<root>")
+
+    if code == 0:
+        return set()
+    if code == 1:
+        rows: set[str] = set()
+        for line in out.splitlines():
+            m = _REPORT_ROW.match(line.strip())
+            if not m:
+                continue
+            cells = [c.strip() for c in m.group(1).split(" | ")]
+            if cells[:2] == ["File", "Line"]:
+                continue
+            if len(cells) == 5:
+                del cells[1]
+            rows.add(norm(" | ".join(cells)))
+        return rows or None
+    if code == 2:
+        crash = [ln for ln in err.splitlines() if ln.startswith(_CRASH_PREFIX)]
+        return {norm(crash[-1])} if crash else None
+    return None
+
+
+def _annotate(level: str, title: str, text: str) -> None:
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::{level} title={title}::{text}")
+
+
+def baseline_main(base: Path) -> int:
+    hcode, hout, herr = _run_report(ROOT)
+    sys.stdout.write(hout)
+    sys.stdout.write(herr)
+    head = report_findings(hcode, hout, herr, ROOT)
+    if head is None:
+        print(f"\nBaseline: this run gave no comparable output (exit {hcode}); judged as before.")
+        return hcode or 2
+    if not head:
+        return 0
+    try:
+        bcode, bout, berr = _run_report(base)
+        base_found = report_findings(bcode, bout, berr, base)
+    except (OSError, subprocess.SubprocessError) as exc:
+        bcode, base_found = -1, None
+        berr = str(exc)
+    print("\n## Baseline: the PR's base commit\n")
+    if base_found is None:
+        _annotate("warning", "drift baseline unavailable",
+                  f"the base run gave nothing comparable (exit {bcode}); every finding "
+                  "is judged as this PR's (fail closed)")
+        print("The base run gave nothing comparable, so every finding above is this PR's.")
+        return hcode
+    inherited = sorted(head & base_found)
+    new = sorted(head - base_found)
+    if inherited:
+        print(f"**inherited from main (not this PR's): {len(inherited)}.** Fix these on main, "
+              "not in this PR.\n")
+        for f in inherited:
+            print(f"- {f}")
+            _annotate("warning", "drift inherited from main (not this PR's)", f)
+    if not new:
+        print("\nNo drift of this PR's own. OK")
+        return 0
+    print(f"\n**this PR's own drift: {len(new)}.** Fix it in this PR.\n")
+    for f in new:
+        print(f"- {f}")
+        _annotate("error", "drift added by this PR", f)
+    return hcode
+
+
 if __name__ == "__main__":
     if "--budget-only" in sys.argv[1:]:
         sys.exit(budget_only())
@@ -1315,6 +1416,13 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 — very old runtimes; keep going
         pass
+    if "--baseline" in sys.argv[1:]:
+        _args = sys.argv[1:]
+        _i = _args.index("--baseline")
+        if _i + 1 >= len(_args):
+            print("doc_sync_check: --baseline needs the base checkout's directory", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(baseline_main(Path(_args[_i + 1]).resolve()))
     try:
         sys.exit(main())
     except Exception as exc:  # noqa: BLE001 — a broken checker must be loud, not a silent pass

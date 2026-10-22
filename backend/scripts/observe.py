@@ -62,6 +62,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # per-user table nobody registers here is one this layer silently cannot see.
     ("email_verifications", "user_id"),
     ("password_resets", "user_id"),
+    ("email_change_undos", "user_id"),
     ("oauth_states", "user_id"),
     ("oauth_grants", "user_id"),
     ("audit_log", "user_id"),

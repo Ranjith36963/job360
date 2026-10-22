@@ -1,0 +1,19 @@
+{
+ "companyVO": {
+  "companyName": "Mphasis"
+ },
+ "jobVO": {
+  "jobSeq": "917235",
+  "jobTitle": "Senior Data Engineering",
+  "jobDesc": "<p><span style=\"font-family: 'Marsh Serif';\">Job Description for Data Engineer – Databricks Data Platform</span><span style=\"font-family: 'Noto Sans',sans-serif;\"><span style=\"mso-bidi-font-family: 'Times New Roman'; mso-bidi-theme-font: major-bidi;\">Role Overview</span></span></p>\r\n<p style=\"margin-bottom: 8.0pt;\">Experienced Data Engineer to design, build, and maintain scalable data pipelines and analytics-ready data products on Databricks and AWS. End-to-end ownership of data ingestion, modelling, transformation, quality, and performance optimisation.</p>\r\n<p><span style=\"font-family: 'Noto",
+  "jobPostingDate": "19-Oct-2026",
+  "publishDetails": {
+   "CAREER_SITE": "2026-10-19T11:52:49Z",
+   "EMPLOYEE": "2026-10-19T11:52:49Z"
+  },
+  "locations": "Pune",
+  "jobMinExp": 48,
+  "isEeoEnabled": "f"
+ },
+ "jobSeq": "917235"
+}

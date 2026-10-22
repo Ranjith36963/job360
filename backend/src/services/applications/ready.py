@@ -240,6 +240,9 @@ def _answer_rows(
             continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
         if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
+        if not verified and kit._question_is_sensitive(str(a["question"]), str(key) if key else None):
+            # Owner, 2026-10-22: a private, legal or risky question is the user's to answer, in any country.
+            flags.append(_flag("sensitive", f"A private question needs your OK: {a['question']}", key))
         if not a["answer"]:
             flags.append(_flag("blank", f"An answer is blank: {a['question']}", key))
         if src in ("memory", "approved") and key and key not in have and not verified:
@@ -247,33 +250,49 @@ def _answer_rows(
     return answers, flags
 
 
-async def has_unverified_guess(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
-    """True when the NEWEST ``form_filled`` holds an answer the assistant marked
-    ``guessed`` that the user has not stood behind (owner rule 2026-10-19: "if you
-    guess you are not verified - you need to ask me"). The SAME reading as the
-    card (:func:`_answer_rows`), so the gate and the card never disagree. Only the
-    ``guessed`` flag counts: a guess the user EDITED is the user's word (``changed``),
-    and :func:`type_first_lock` holds the submit until the form holds it. Scoped by
-    ``user_id`` (rule #12)."""
+async def _unverified_flags(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], pick: Any,
+) -> list[dict[str, Any]]:
+    """The card's flags for the answers of the NEWEST ``form_filled`` that ``pick`` selects (the SAME reading as
+    the card, :func:`_answer_rows`, so a gate and the card never disagree). Scoped by ``user_id`` (rule #12)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
     fills = await kit._events(db, user_id, int(app_row["id"]), ("form_filled",))
     typed = fills[0]["payload"].get("answers") if fills else None
-    if not isinstance(typed, list) or not any(isinstance(a, dict) and a.get("source") == "guessed" for a in typed):
-        return False
+    if not isinstance(typed, list):
+        return []
+    rows = [a for a in typed if isinstance(a, dict) and "question" in a and "answer" in a and pick(a)]
+    if not rows:
+        return []
     loaded, overlay = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     blocks, _missing = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
-    guesses = [
-        a for a in typed
-        if isinstance(a, dict) and "question" in a and "answer" in a and a.get("source") == "guessed"
-    ]
-    _answers, flags = _answer_rows(guesses, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    _answers, flags = _answer_rows(rows, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    return flags
+
+
+async def has_unverified_guess(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds an answer the assistant marked
+    ``guessed`` that the user has not stood behind (owner rule 2026-10-19: "if you
+    guess you are not verified - you need to ask me"). Only the ``guessed`` flag counts: a
+    guess the user EDITED is the user's word (``changed``), and :func:`type_first_lock` holds the
+    submit until the form holds it."""
+    flags = await _unverified_flags(db, user_id, app_row, lambda a: a.get("source") == "guessed")
     return any(f["code"] == "guessed" for f in flags)
+
+
+async def has_unconfirmed_sensitive(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds an answer to a sensitive question (``kit`` decides which
+    wording counts) that the user has not stood behind: not their approved answer, not a value they saved
+    themselves (owner, 2026-10-22). The card shows it as a ``sensitive`` flag; check_submit asks."""
+    flags = await _unverified_flags(
+        db, user_id, app_row, lambda a: kit._question_is_sensitive(str(a["question"]), str(a.get("key") or "") or None)
+    )
+    return any(f["code"] == "sensitive" for f in flags)
 
 
 def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:

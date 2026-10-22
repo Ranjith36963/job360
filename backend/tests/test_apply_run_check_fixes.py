@@ -93,11 +93,17 @@ def test_current_role_still_missing_when_company_absent():
 @pytest.mark.parametrize(
     "host",
     ["jobs.gem.com", "gem.com", "ats.rippling.com", "x.applytojob.com", "a.jazzhr.com", "x.dayforcehcm.com",
-     "x.freshteam.com", "x.zohorecruit.com", "x.zohorecruit.in", "x.icims.com", "x.taleo.net",
+     "x.freshteam.com", "x.zohorecruit.com", "x.zohorecruit.in", "x.ripplehire.com", "x.icims.com", "x.taleo.net",
      "x.ultipro.com", "x.careers-page.com"],
 )
 def test_new_ats_hosts_are_official(host):
     assert classify_host(host) == "official_ats"
+
+
+@pytest.mark.parametrize("host", ["app.ripplehire.com", "www.ripplehire.com"])
+def test_shared_ats_sandbox_is_not_an_employer_host(host):
+    """Security review 2026-10-20: app.ripplehire.com answers any company's token."""
+    assert classify_host(host) == "unknown"
 
 
 @pytest.mark.parametrize("host", ["gem.com.evil.com", "evilgem.com", "rippling.com.evil.io"])

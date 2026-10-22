@@ -1,0 +1,41 @@
+{
+ "startJobIndex": 0,
+ "maxJobSize": 100,
+ "totalJobCount": 192,
+ "jobVoList": [
+  {
+   "jobSeq": "917235",
+   "jobTitle": "Senior Data Engineering",
+   "jobLocation": "IND",
+   "jobReqExp": "4 - 6 Years",
+   "jobMinExp": 4,
+   "jobMaxExp": 6,
+   "locations": "Pune",
+   "jobCode": "117393-38-1",
+   "allowCareerSite": "Y"
+  },
+  {
+   "jobSeq": "917234",
+   "jobTitle": "QA  AIML Consultant",
+   "jobLocation": "IND",
+   "jobReqExp": "8 - 12 Years",
+   "jobMinExp": 8,
+   "jobMaxExp": 12,
+   "locations": "Pune",
+   "jobCode": "117997-15-1",
+   "allowCareerSite": "Y"
+  },
+  {
+   "jobSeq": "916889",
+   "jobTitle": "Senior Analyst",
+   "jobLocation": null,
+   "jobReqExp": "5 - 8 Years",
+   "jobMinExp": 5,
+   "jobMaxExp": 8,
+   "locations": "Noida",
+   "jobCode": "105660-302-1",
+   "allowCareerSite": "Y"
+  }
+ ],
+ "errorStatus": "success"
+}

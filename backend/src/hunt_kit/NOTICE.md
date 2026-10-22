@@ -40,6 +40,7 @@ ai-job-search projects. Apart from the re-writes named below, the code in this f
 - `hunt_kit.py` `--why-missed`: the idea (a closed set of reasons, one proposed change, nothing edited, no network) and the board-from-link table follow career-ops `coverage-check.mjs` (MIT, lines 1-11, 40-50, 54-82) and, for the other boards, `backend/scripts/harvest_hunt_boards.py`. The verdict names are the kit's own.
 
 - `kit_ats_more.py`: the Keka Hire and Zoho Recruit readers are original. Their endpoints come from our own read of the boards' public career pages in October 2026 (Keka: `<tenant>.keka.com/careers/` and its `/careers/api/embedjobs/default/active/<id>` list, the only path its robots.txt allows; Zoho Recruit: `<tenant>.zohorecruit.in|com/jobs/Careers`, allowed by its robots.txt). No third-party code.
+- `kit_ats_more.py`: the RippleHire reader is original, from our own read of public RippleHire career sites in October 2026 (`<tenant>.ripplehire.com/candidate/candidatejobsearch` and `/candidate/candidatejobdetail`, the calls the public career page makes). Its robots.txt redirects to a login page, so no rules are published. No third-party code.
 
 ## Search guidance (README "Search every source", "LinkedIn, Glassdoor, Google Jobs and Indeed")
 
