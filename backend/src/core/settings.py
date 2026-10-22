@@ -391,6 +391,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # bytes served, fmt, renderer_version, host}. A hash, never bytes or text. Refused from
     # record_event (services/applications/uploads.py); record_application freezes it as `files`.
     "document_uploaded",
+    # Gap roadmap slice 31 (G078): an EMAIL application's exact draft, recorded by the assistant before
+    # check_submit {to, subject, attachments: [{artifact_id, sha256 of the text}], gmail_draft_id?}; never
+    # the body. Checked in services/applications/email_channel.py; read by the gate and the receipt.
+    "email_drafted",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4

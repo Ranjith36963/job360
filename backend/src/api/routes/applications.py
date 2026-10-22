@@ -318,6 +318,10 @@ class RecordApplicationReceiptRequest(BaseModel):
     # Idempotency key (1-128 printable chars): the same one again returns the FIRST
     # receipt with already_existed=true and writes nothing; a different body = 409.
     request_id: Optional[str] = None
+    # Gap roadmap slice 31 (G078): an EMAIL application's recipient (ONE address; '' = take it from the
+    # newest email_drafted when channel is email) and the sent message's Gmail id ('' = not given).
+    recipient: str = Field("", max_length=320)
+    gmail_message_id: str = Field("", max_length=300)
 
     def clamp_fields_filled(self) -> dict[str, Any]:
         cap = settings.APPLICATION_RECEIPT_FIELDS_MAX_BYTES
@@ -945,7 +949,9 @@ class RecordEventResponse(BaseModel):
 
 
 class ReceiptFileOut(BaseModel):
-    """Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``)."""
+    """Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+    Slice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is
+    of the artifact's TEXT and ``fmt`` is '' (the email's file format is not known)."""
 
     kind: str
     artifact_id: int
@@ -978,6 +984,9 @@ class RecordApplicationReceiptResponse(BaseModel):
     answers_from: str = ""
     # Slice 29 - the uploaded / served files this receipt names ([] = none seen, or other versions named).
     files: list[ReceiptFileOut] = Field(default_factory=list)
+    # Slice 31 - an email application's recipient and Gmail message id ('' = not an email / not given).
+    recipient: str = ""
+    gmail_message_id: str = ""
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
     referred_by_contact_id: Optional[int] = None
@@ -2856,7 +2865,8 @@ async def approve_send(
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-    (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
+    or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+    event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
     nothing is recorded (the yes must name what the user saw)."""
@@ -3062,7 +3072,9 @@ async def submit_check(
     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
-    clears none of them. An unconfirmed email answers ``ask`` /
+    clears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form
+    rules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.
+    An unconfirmed email answers ``ask`` /
     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
     ``get_application_kit``; 422 when malformed): another session's live kit hold
     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -3096,7 +3108,8 @@ async def submit_check(
             "event": "submit_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
             "decision": verdict.decision, "reason": verdict.reason,
-            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)), "result": "ok",
+            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)),
+            "channel": "email" if settings_rules.is_mailto(form_url) else "form", "result": "ok",
         },
     )
     return {
@@ -3472,6 +3485,7 @@ async def record_application_receipt(
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
             applied_at=applied_at, request_id=body.request_id,
             referred_by_contact_id=body.referred_by_contact_id,
+            recipient=body.recipient, gmail_message_id=body.gmail_message_id,
         )
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
