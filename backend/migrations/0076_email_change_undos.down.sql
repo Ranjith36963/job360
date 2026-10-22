@@ -1,3 +1,3 @@
--- Reverse of 0075_email_change_undos.
+-- Reverse of 0076_email_change_undos.
 DROP INDEX IF EXISTS idx_email_change_undos_user;
 DROP TABLE IF EXISTS email_change_undos;

@@ -34,6 +34,7 @@ export function AlignmentPanel({
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setLoading(true);
     setError(null);
     (async () => {

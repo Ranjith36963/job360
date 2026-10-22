@@ -323,6 +323,8 @@ class AddContactRequest(BaseModel):
     # the employer; REQUIRED when there is no application_id (contacts.add_contact checks it)
     company: Optional[str] = None
     email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES
+    relationship: Optional[str] = None  # closed set CONTACT_RELATIONSHIP
+    shared: Optional[str] = None  # a profile record pointer, checked by contacts._validate_shared
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -625,6 +627,8 @@ class ContactOut(BaseModel):
     source_url: Optional[str] = None
     company: Optional[str] = None
     email_source: Optional[str] = None
+    relationship: Optional[str] = None
+    shared: Optional[str] = None
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
     added_by: str
@@ -1366,6 +1370,8 @@ class UpdateContactRequest(BaseModel):
     source_url: Optional[str] = None  # "" clears it
     company: Optional[str] = None  # "" clears it (not on a cold contact)
     email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES; "" clears it
+    relationship: Optional[str] = None  # "" clears it
+    shared: Optional[str] = None  # "" clears it
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1417,6 +1423,8 @@ class PersonOut(BaseModel):
     source_url: Optional[str] = None
     company: Optional[str] = None
     email_source: Optional[str] = None
+    relationship: Optional[str] = None
+    shared: Optional[str] = None
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
@@ -1837,6 +1845,7 @@ class StatsResponse(BaseModel):
     by_job_source: list[StatsKeyedGroupOut]
     by_channel: list[StatsKeyedGroupOut]
     by_contact_found_via: list[StatsContactFoundViaGroupOut]
+    by_contact_relationship: list[StatsContactFoundViaGroupOut]  # same group model, per relationship
     score_line: StatsScoreLineOut
     groups_truncated: bool
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
@@ -2208,6 +2217,7 @@ async def add_contact(
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
             source_url=body.source_url, company=body.company, email_source=body.email_source,
+            relationship=body.relationship, shared=body.shared,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2240,6 +2250,7 @@ async def add_person(
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
             source_url=body.source_url, company=body.company, email_source=body.email_source,
+            relationship=body.relationship, shared=body.shared,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2266,6 +2277,7 @@ async def update_contact(
             notes=body.notes, found_via=body.found_via, source_url=body.source_url,
             company=body.company,
             email_source=body.email_source,
+            relationship=body.relationship, shared=body.shared,
         )
     except SpineError as exc:
         _raise(exc)

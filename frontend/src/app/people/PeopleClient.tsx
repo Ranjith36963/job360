@@ -198,6 +198,7 @@ export function PeopleClient() {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     void load(() => cancelled);
     return () => {
       cancelled = true;

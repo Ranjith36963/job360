@@ -25,6 +25,14 @@ export const CLOSED_SET_LABEL: Record<string, string> = {
   job_ad: "Job ad",
   event: "Event",
   other: "Other",
+  // contact relationship ("recruiter" is above)
+  former_colleague: "Former colleague",
+  classmate: "Classmate",
+  alumni: "Alumni",
+  friend: "Friend",
+  hiring_manager: "Hiring manager",
+  interviewer: "Interviewer",
+  none: "No relationship",
 };
 
 export const JOB_FOUND_ON_VALUES = [
@@ -47,6 +55,17 @@ export const CONTACT_FOUND_VIA_VALUES = [
   "email",
   "event",
   "other",
+] as const;
+
+export const CONTACT_RELATIONSHIP_VALUES = [
+  "former_colleague",
+  "classmate",
+  "alumni",
+  "friend",
+  "recruiter",
+  "hiring_manager",
+  "interviewer",
+  "none",
 ] as const;
 
 /** "some_value" -> "Some value" (unknown members). */

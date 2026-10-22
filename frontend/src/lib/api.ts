@@ -1145,6 +1145,7 @@ export async function addContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string;
+    relationship?: string;
     occurred_at?: string;
   }
 ): Promise<AddContactResult> {
@@ -1169,6 +1170,7 @@ export async function updateContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string; // "" clears it; null would mean "not given"
+    relationship?: string; // "" clears it
   }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });

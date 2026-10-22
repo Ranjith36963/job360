@@ -1,5 +1,5 @@
 """Email change: unverify the new address, tell the old one, offer an undo link
-(gap roadmap slice 35, migration 0075).
+(gap roadmap slice 35, migration 0076).
 
 Before: PATCH /users/me/email left ``email_verified_at`` set, so the account stayed
 "verified" for an address nobody proved, and the old address was never told.
