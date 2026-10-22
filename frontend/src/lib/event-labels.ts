@@ -117,6 +117,8 @@ export const EVENT_LABEL: Record<string, string> = {
   referral_given: "Referral given",
   // Gap roadmap slice 29: the exact file sent (server-written).
   document_uploaded: "Document file sent",
+  // Gap roadmap slice 31: an email application's exact draft (no body).
+  email_drafted: "Email application drafted",
 };
 
 function relayedWords(payload: unknown): boolean {
