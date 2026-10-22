@@ -21,13 +21,13 @@ beforeEach(() => {
 
 // card(64): 0 memory, 1 profile, 2 written, 3 guessed.
 describe("Verify / Edit on each answer", () => {
-  it("memory and guessed rows get Verify and Edit; profile and written rows do not", () => {
+  it("memory, written and guessed rows get Verify and Edit; profile rows do not", () => {
     render(<ReadyCard card={card(64)} paused={false} onChanged={() => {}} />);
-    for (const i of [0, 3]) {
+    for (const i of [0, 2, 3]) {
       expect(screen.getByTestId(`ready-answer-verify-64-${i}`)).toHaveTextContent("Verify");
       expect(screen.getByTestId(`ready-answer-edit-64-${i}`)).toHaveTextContent("Edit");
     }
-    for (const i of [1, 2]) {
+    for (const i of [1]) {
       expect(screen.queryByTestId(`ready-answer-verify-64-${i}`)).toBeNull();
       expect(screen.queryByTestId(`ready-answer-edit-64-${i}`)).toBeNull();
     }

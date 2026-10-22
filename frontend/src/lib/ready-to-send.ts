@@ -49,9 +49,9 @@ export function sourceChip(a: ReadyAnswer, filledBy: string): { text: string; to
   }
 }
 
-/** Verify / Edit sit on the answers the user should vouch for: memory and guesses. */
+/** Verify / Edit sit on the answers the user should vouch for: memory, guesses and written answers. */
 export function canCheck(a: ReadyAnswer): boolean {
-  return a.source === "memory" || a.source === "guessed";
+  return a.source === "memory" || a.source === "guessed" || a.source === "written";
 }
 
 /** "APP-064 · brought by Claude · 08 Oct" - stored facts only. */

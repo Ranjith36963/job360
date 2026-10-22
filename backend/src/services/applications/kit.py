@@ -745,6 +745,7 @@ async def gate_facts(
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
+        written_unapproved=await _written_unapproved(db, user_id, app_row),
         application_id=application_id,
     )
 
@@ -754,6 +755,13 @@ async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unverified_guess(db, user_id, app_row)
+
+
+async def _written_unapproved(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest form holds a written answer the user has not approved (``ready`` owns the reading)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return await ready.has_unapproved_written(db, user_id, app_row)
 
 
 async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
@@ -914,7 +922,7 @@ async def submit_verdict(
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False, sensitive_unconfirmed=False,
+            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False,
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 

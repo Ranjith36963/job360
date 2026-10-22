@@ -249,6 +249,9 @@ def _answer_rows(
             continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
         if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
+        if src in ("written", "approved") and not verified:
+            # Owner rule: "I draft, you approve" - an essay is typed only after the user approved it.
+            flags.append(_flag("unapproved", f"A written answer needs your OK: {a['question']}", key))
         if not verified and kit._question_is_sensitive(str(a["question"]), str(key) if key else None):
             # Owner, 2026-10-22: a private, legal or risky question is the user's to answer, in any country.
             flags.append(_flag("sensitive", f"A private question needs your OK: {a['question']}", key))
@@ -295,6 +298,14 @@ async def has_unverified_guess(db: JobDatabase, user_id: str, app_row: dict[str,
     submit until the form holds it."""
     flags = await _unverified_flags(db, user_id, app_row, lambda a: a.get("source") == "guessed")
     return any(f["code"] == "guessed" for f in flags)
+
+
+async def has_unapproved_written(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds a ``written`` (or ``approved``) answer the user has not
+    approved: no ``user_info.answers`` record for this company (or any) matches its topic or wording
+    (owner rule: "I draft, you approve"). The card shows it as an ``unapproved`` flag; check_submit asks."""
+    flags = await _unverified_flags(db, user_id, app_row, lambda a: a.get("source") in ("written", "approved"))
+    return any(f["code"] == "unapproved" for f in flags)
 
 
 async def has_unconfirmed_sensitive(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
@@ -509,7 +520,7 @@ def _path_value(profile: Any, path: str) -> Any:
 
 
 def _with_approved(
-    profile: Any, question: str, text: str, company_key: Optional[str], topic: str = "",
+    profile: Any, question: str, text: str, company_key: Optional[str], topic: str = "", company: str = "",
 ) -> list[dict[str, Any]]:
     """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
     to the same question (unscoped, or scoped to this company) on the same topic. A same-worded
@@ -522,11 +533,13 @@ def _with_approved(
                 and (not str(r.get("company") or "").strip()
                      or kit.normalized_company_key(str(r["company"])) == company_key))
     ]
-    return [*keep, {"question": question, "answer": text, "approved": True, **({"topic": topic} if topic else {})}]
+    return [*keep, {"question": question, "answer": text, "approved": True,
+                    **({"topic": topic} if topic else {}), **({"company": company} if company else {})}]
 
 
 def answer_edits(
-    profile: Any, answer: dict[str, Any], text: str, *, edited: bool, company_key: Optional[str]
+    profile: Any, answer: dict[str, Any], text: str, *, edited: bool, company_key: Optional[str],
+    company: str = "",
 ) -> list[tuple[str, Any]]:
     """The memory writes that make ``text`` the user's own answer to ``answer``."""
     key = str(answer.get("key") or "")
@@ -543,7 +556,9 @@ def answer_edits(
         if kit._present(value):
             out.append((path, value))  # the same value, now saved by the user
     if not sensitive or not out:
-        approved = _with_approved(profile, answer["question"], text, company_key, key)
+        # A written answer is for this employer only: a why-this-company essay is never reused elsewhere.
+        scoped = company if answer["source"] == "written" else ""
+        approved = _with_approved(profile, answer["question"], text, company_key, key, scoped)
         out.append((user_info.USER_INFO_ANSWERS_PATH, approved))
     return out
 
@@ -578,7 +593,7 @@ async def confirm_answer(
     loaded, _ = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
     writes = answer_edits(profile, answer, text, edited=new_text is not None,
-                          company_key=_company_key(card["job_company"]))
+                          company_key=_company_key(card["job_company"]), company=card["job_company"])
     for path, value in writes:
         profile_edits.validate_edit(path, value)  # all-or-nothing: a bad value writes nothing
     if load_profile(user_id, with_overlay=False) is None:

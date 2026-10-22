@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ReadyToSend } from "./ReadyToSend";
-import { guardSend, splitReady } from "@/lib/ready-to-send";
+import { canCheck, guardSend, splitReady } from "@/lib/ready-to-send";
+import type { ReadyAnswer } from "@/lib/api";
 import { card } from "./ready-fixtures";
 import { ApiError } from "@/lib/api-error";
 
@@ -139,6 +140,14 @@ describe("ready-to-send helpers", () => {
     expect(guardSend([a], [a]).go).toEqual([a]);
     expect(guardSend([a], []).skipped).toEqual([a]);
     expect(guardSend([a], [card(1, { flags: missing })]).skipped).toEqual([a]);
+  });
+});
+
+describe("canCheck", () => {
+  const answer = (source: string) => ({ question: "Why us?", answer: "x", source }) as unknown as ReadyAnswer;
+  it("offers Verify / Edit on memory, guessed and written answers only", () => {
+    expect(["memory", "guessed", "written"].map((s) => canCheck(answer(s)))).toEqual([true, true, true]);
+    expect(["profile", "approved"].map((s) => canCheck(answer(s)))).toEqual([false, false]);
   });
 });
 

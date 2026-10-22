@@ -25,10 +25,10 @@ _AD = {
 }
 _FORM = "https://boards.greenhouse.io/northwind/jobs/7"
 _DOT = "·"
-WHY = {"question": "Why this role?", "answer": "I like the product.", "source": "written"}
-NOTICE = {"question": "Which team interests you most?", "answer": "Platform", "source": "written"}
-VISA = {"question": "Will you require visa sponsorship?", "answer": "Yes - Skilled Worker 7731", "source": "written"}
-PAY = {"question": "What are your salary expectations?", "answer": "GBP 61,500", "source": "written"}
+WHY = {"question": "Why this role?", "answer": "I like the product.", "source": "profile"}
+NOTICE = {"question": "Which team interests you most?", "answer": "Platform", "source": "profile"}
+VISA = {"question": "Will you require visa sponsorship?", "answer": "Yes - Skilled Worker 7731", "source": "profile"}
+PAY = {"question": "What are your salary expectations?", "answer": "GBP 61,500", "source": "profile"}
 
 
 def _sql(statement: str, params: tuple = ()) -> list[Any]:
@@ -194,7 +194,7 @@ async def test_a_sensitive_answer_not_remembered_is_hashed_in_the_event_and_the_
     for stored in (json.loads(event_payload)["answers"], json.loads(rows[0])):
         by_q = {a["question"]: a for a in stored}
         for q in (VISA["question"], PAY["question"]):
-            assert by_q[q] == {"question": q, "source": "written", "value_sha256": sha[q], "redacted": True}
+            assert by_q[q] == {"question": q, "source": "profile", "value_sha256": sha[q], "redacted": True}
         assert by_q["Why this role?"]["answer"] == "I like the product."
         assert by_q["Gender"]["answer"] == "Female", "remembered with the user's OK: kept as typed"
     assert [a["redacted"] for a in json.loads(rows[1]) if a["question"] == VISA["question"]] == [True]
