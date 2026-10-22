@@ -242,8 +242,14 @@ jobs:
     timeout-minutes: 10
     needs: [scope]
     steps:
+      # On a PR this IS the default (the merge tree), written out so that
+      # gate_wiring_check G4 can see the `--baseline` steps below measure
+      # `refs/pull/<N>/merge` (same as doc-sync.yml, #1098). On a push it stays
+      # the pushed ref.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: needs.scope.outputs.scope == 'full'
+        with:
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         if: needs.scope.outputs.scope == 'full'
         with:
