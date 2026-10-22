@@ -785,3 +785,28 @@ def test_a_stated_years_floor_beats_the_text_guess() -> None:
     col.offer_job("test", dict(base, title="AI Engineer", url="https://a/1", extra={"years_min": 12}))
     col.offer_job("test", dict(base, title="ML Engineer", url="https://a/2", extra={}))
     assert [r["url"] for r in col.results] == ["https://a/2"]
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_html_to_text_and_pipe_spacing_are_linear():
+    assert hk.html_to_text("<p>A &amp; B</p><br/>C<ul><li>x</li></ul>") == "A & B\nC x"
+    for evil in ("<a ", "<li", "<"):
+        _grows_linearly(hk.html_to_text, lambda k, e=evil: e * k)
+    assert hk._respace("a|  b | c", "|", " | ") == "a | b | c" and hk._respace("a b", "|", " | ") == "a b"
+    _grows_linearly(lambda s: hk._respace(s, "|", " | "), lambda k: " " * (4 * k) + "x")
