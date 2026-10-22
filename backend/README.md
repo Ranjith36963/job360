@@ -107,6 +107,22 @@ python -m migrations.runner down       # reverse last migration
 
 The API also auto-applies on boot via `lifespan`.
 
+### Numbering (read before adding one)
+
+Each migration is a pair `NNNN_name.up.sql` + `NNNN_name.down.sql`. `NNNN` is the
+next free four-digit number on `main`; the runner applies them in that order and
+records each by its full name. Two files must never share a number:
+`tests/test_migration_numbering.py` makes a shared, gapped or unpaired number a red build.
+
+How it goes wrong: two PRs open at once both take the next free number. Each PR's CI
+is green on its own, both auto-merge, and `main` ends up with two of the same number
+(2026-10-21 two 0067s, fixed in #1071; 2026-10-22 two 0077s, fixed in #1106).
+
+- Before your migration PR merges, merge `main` into it and check that its number is still free.
+- If `main` already has a duplicate, rename the one that merged LAST to the next free number,
+  in its own small PR. First check that production has not run it yet: the `/api/version`
+  sha must not contain that commit. Once production has run a migration, never rename it.
+
 ## Further reading
 
 - [`docs/README.md`](../docs/README.md) — full docs index
