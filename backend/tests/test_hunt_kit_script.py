@@ -375,6 +375,7 @@ def test_companies_json_valid() -> None:
          "jazzhr", "softgarden", "join", "jibe", "keka", "zohorecruit", "ripplehire"}  # the kit_ats_more types
     ok |= {"emply", "manatal", "talentadore", "traffit", "trakstar",
            "factorial", "peopleforce", "talenthr", "talentlyft"}  # the kit_ats_eu types
+    ok |= {"gupy", "hiringroom", "inhire", "recrutei", "solides", "vagas"}  # the kit_latam types
     ok |= {"neogov", "applitrack", "schoolspring", "edjoin"}  # the kit_pubsec types
     ok |= {"radancy", "ukgready"}  # the kit_ats_misc3 types
     ok |= {"avature", "comeet", "hibob", "pageup", "freshteam"}  # the kit_ats_extra types

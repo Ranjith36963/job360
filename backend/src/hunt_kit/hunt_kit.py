@@ -154,6 +154,12 @@ BOARD_SOURCES = (
     "edjoin",
     "radancy",
     "ukgready",
+    "gupy",
+    "hiringroom",
+    "inhire",
+    "recrutei",
+    "solides",
+    "vagas",
 )
 FEED_SOURCES = (
     "freehire",
@@ -345,7 +351,7 @@ def _import_kit(name: str) -> Any:
 # replaces a name an earlier one already provides).
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
-    "kit_sites_a", "kit_pubsec", "kit_ats_misc3",
+    "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2787,6 +2793,13 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     # so it is matched by path in board_from_job_url
     ("ukgready", re.compile(r"^((?:[a-z0-9-]+\.)*(?:saashr\.com|entertimeonline\.com|yourpayrollhr\.com|mykronos\.com|"
                             r"workforceready\.[a-z]{2,3}(?:\.[a-z]{2})?))$")),
+    # Latin America: the tenant is the subdomain (Gupy, HiringRoom, InHire, Solides) or a path segment (Recrutei)
+    ("gupy", re.compile(r"^([a-z0-9-]+)\.gupy\.io$")),
+    ("hiringroom", re.compile(r"^([a-z0-9-]+)\.hiringroom\.com$")),
+    ("recrutei", re.compile(r"^jobs\.recrutei\.com\.br$")),
+    ("inhire", re.compile(r"^([a-z0-9-]+)\.inhire\.app$")),
+    ("solides", re.compile(r"^([a-z0-9-]+)\.vagas\.solides\.com\.br$")),
+    ("vagas", re.compile(r"^(?:www\.)?vagas\.com\.br$")),
 ]
 # Career sites on an employer's own host that the URL path gives away: Radancy (TalentBrew) jobs
 _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+/\d+/?$")
@@ -2868,6 +2881,12 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", seg[0]) else ""
         elif ats == "schoolspring":  # <district>.schoolspring.com is a district board; www/api carry no board token
             tok = "" if m.group(1) in ("www", "api") else host
+        elif ats in ("gupy", "hiringroom", "inhire"):  # portal., private-api., api., www.: vendor hosts
+            tok = "" if m.group(1) in ("www", "api", "portal", "private-api", "employability-portal") else m.group(1)
+        elif ats == "recrutei":  # https://jobs.recrutei.com.br/<tenant>/vacancy/<id>-<slug>
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
+        elif ats == "vagas":  # one national board: the job link carries no board token
+            tok = ""
         elif ats == "edjoin":  # one central index: the job link does not show the job-type id the board is
             tok = ""
         elif ats == "ukgready":  # https://<pod host>/ta/<tenant>.careers?ShowJob=<id>
