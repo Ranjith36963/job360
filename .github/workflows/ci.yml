@@ -263,9 +263,22 @@ jobs:
       # any diff over 800 lines, and an output written only on the success path
       # left the outage unannounced. Nothing watched the wires, because every
       # individual workflow was green. This job watches the wires.
+      # On a PR, red only for wires THIS PR breaks (owner, 2026-10-22): the PR's
+      # base is judged by its own checker and shared findings print as inherited.
+      # Push to main has no base, so main's own breaks still fail on main. No
+      # base checkout -> every finding counts as this PR's (fail closed).
       - name: Every wire connects
         if: needs.scope.outputs.scope == 'full'
-        run: python scripts/chain_check.py --no-map
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ] && git fetch -q --no-tags --depth=1 origin "$BASE_SHA" \
+              && git worktree add -q --detach "$RUNNER_TEMP/base" FETCH_HEAD; then
+            python scripts/chain_check.py --no-map --baseline "$RUNNER_TEMP/base"
+          else
+            [ -z "$BASE_SHA" ] || echo "::warning::could not check out the PR base; every finding counts as this PR's"
+            python scripts/chain_check.py --no-map
+          fi
 
       # And this is the part that matters: a checker nobody has watched fail is
       # indistinguishable from a checker that cannot fail. The drill breaks three
