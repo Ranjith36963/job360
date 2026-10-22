@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core import settings
 from src.repositories import pg
 from src.services.applications.spine import SpineError
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:
     from src.repositories.database import JobDatabase
@@ -106,8 +106,8 @@ async def save_template(
     get_audit_logger().info(
         "user_template_saved",
         extra={
-            "event": "user_template_saved", "user_id": user_id, "template_id": template_id,
-            "kind": kind, "version_no": version_no, "chars": len(text),
+            "event": "user_template_saved", "user_id": safe_log_value(user_id), "template_id": template_id,
+            "kind": safe_log_value(kind), "version_no": version_no, "chars": len(text),
         },
     )
     return {
