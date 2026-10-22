@@ -14,6 +14,8 @@ Print this checklist and tick each step:
    `source_url`; other detail in `notes`. With an email, pass `email_source` -
    where the address came from: `they_emailed`, `on_company_page`,
    `provider_verified`, `pattern_guess` or `user_gave` (never guess it).
+   If the user knows them, pass `relationship` and `shared` (the get_profile
+   path of the job or school you share) - never guess.
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
    `email`, `linkedin` or `other`). This is a draft.

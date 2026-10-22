@@ -34,6 +34,9 @@ function stats(over: Partial<StatsResponse> = {}): StatsResponse {
       { key: "linkedin", label: "linkedin", contacts: 5, outreach_sent: 4, outreach_replied: 1, reply_rate: 0.25 },
       { key: null, label: "Not set", contacts: 2, outreach_sent: 0, outreach_replied: 0, reply_rate: null },
     ],
+    by_contact_relationship: [
+      { key: "former_colleague", label: "former_colleague", contacts: 2, outreach_sent: 2, outreach_replied: 1, reply_rate: 0.5 },
+    ],
     ...over,
   } as unknown as StatsResponse;
 }
@@ -113,12 +116,23 @@ describe("StatsClient", () => {
     expect(prow[1]).toHaveTextContent("—");
   });
 
+  it("shows By relationship with counts and reply %", async () => {
+    getStats.mockResolvedValue(stats());
+    render(<StatsClient />);
+    const section = await screen.findByTestId("stats-section-people-relationship");
+    expect(section).toHaveTextContent("By relationship");
+    expect(section).toHaveTextContent("Former colleague");
+    expect(section).toHaveTextContent("2");
+    expect(section).toHaveTextContent("50%");
+  });
+
   it("omits an empty section", async () => {
-    getStats.mockResolvedValue(stats({ by_country: [], by_contact_found_via: [] }));
+    getStats.mockResolvedValue(stats({ by_country: [], by_contact_found_via: [], by_contact_relationship: [] }));
     render(<StatsClient />);
     await screen.findByTestId("stats-overall");
     expect(screen.queryByTestId("stats-section-country")).toBeNull();
     expect(screen.queryByTestId("stats-section-people")).toBeNull();
+    expect(screen.queryByTestId("stats-section-people-relationship")).toBeNull();
     expect(screen.getByTestId("stats-section-role")).toBeInTheDocument();
   });
 

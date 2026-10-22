@@ -1,0 +1,41 @@
+{
+ "startJobIndex": 0,
+ "maxJobSize": 3,
+ "totalJobCount": 464,
+ "jobVoList": [
+  {
+   "jobSeq": "83076",
+   "jobTitle": "Manager - Service Delivery",
+   "jobLocation": "",
+   "jobReqExp": "4 - 10 Years",
+   "jobMinExp": 4,
+   "jobMaxExp": 10,
+   "locations": "Puducherry",
+   "jobCode": "81112",
+   "allowCareerSite": "Y"
+  },
+  {
+   "jobSeq": "83075",
+   "jobTitle": "Sales Manager-Loan on Cards",
+   "jobLocation": "",
+   "jobReqExp": "4 - 7 Years",
+   "jobMinExp": 4,
+   "jobMaxExp": 7,
+   "locations": "Hyderabad",
+   "jobCode": "82574",
+   "allowCareerSite": "Y"
+  },
+  {
+   "jobSeq": "83074",
+   "jobTitle": "ECOM-ECOM-NAM-Wholesale",
+   "jobLocation": "",
+   "jobReqExp": "5 - 15 Years",
+   "jobMinExp": 5,
+   "jobMaxExp": 15,
+   "locations": "Bangalore",
+   "jobCode": "78164",
+   "allowCareerSite": "Y"
+  }
+ ],
+ "errorStatus": "success"
+}
