@@ -129,7 +129,9 @@ def test_the_email_gate_needs_a_draft_to_the_mailto_address():
     drafted = _facts(email_to=TO)
     # No form_filled / form_swept / form_checked, yet no form stop: an email has no form.
     assert _gate(confirm, drafted) == ("ask", "submit_mode_confirm")
-    assert _gate(confirm, drafted, "mailto:") == ("ask", "submit_mode_confirm"), "a bare mailto: compares nothing"
+    assert _gate(confirm, drafted, "mailto:") == ("stop", "email_not_drafted"), "a bare mailto: is refused"
+    # A web-form application cannot dodge its form rules by passing a mailto: address.
+    assert _gate(confirm, replace(drafted, form_filled=True)) == ("stop", "form_not_swept")
     assert _gate(confirm, drafted, "mailto:hr@southwind.example") == ("stop", "email_not_drafted")
     assert _gate(confirm, drafted, "mailto:Ada <jobs@northwind.example>") == ("stop", "email_not_drafted")
     # A yes never clears the missing draft (a stop), but clears the confirm ask once there is one.

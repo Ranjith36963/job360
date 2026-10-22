@@ -1029,9 +1029,9 @@ def may_submit(
     4a4. ``below_line`` is ``skip`` and the fit is below the user's score line -> stop
         ``below_score_line`` (owner 2026-10-19: drop the job; a yes does NOT clear it)
     4b-email. ``form_url`` is ``mailto:<to>`` (an EMAIL application, gap roadmap slice 31): no
-        ``email_drafted`` recorded, or the mailto address is not the newest draft's ``to`` -> stop
-        ``email_not_drafted`` (a yes does NOT clear it). An email application skips 4b-4c4, 4e, 5d, 5e, 5e2
-        and the site rules 6, 7 and 10b (there is no form and no site).
+        ``email_drafted`` recorded, or the mailto address is empty or not the newest draft's ``to`` -> stop
+        ``email_not_drafted`` (a yes does NOT clear it). An email application (no ``form_filled`` recorded)
+        skips 4b-4c4, 4e, 5d, 5e, 5e2 and the site rules 6, 7 and 10b (there is no form and no site).
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
@@ -1135,7 +1135,8 @@ def may_submit(
             f"This job is below your score line ({cfg.apply_min_score}) and you chose to drop those. "
             "Do not apply; leave this job.",
         )
-    email = is_mailto(site_host)
+    # An email application has NO recorded form: a form application that passes ``mailto:`` keeps every form rule.
+    email = is_mailto(site_host) and not application.form_filled
     if email:
         stop = _email_stop(application, site_host)
         if stop is not None:
@@ -1244,7 +1245,7 @@ def may_submit(
 
 def _email_stop(application: SubmitFacts, site_host: Optional[str]) -> Optional[SubmitDecision]:
     """Rule 4b-email (gap roadmap slice 31, G078): an email application needs a recorded ``email_drafted``
-    whose ``to`` is the ``mailto:`` address (a bare ``mailto:`` compares nothing). A yes never clears it."""
+    whose ``to`` is the ``mailto:`` address (a bare ``mailto:`` is refused). A yes never clears it."""
     if application.email_to is None:
         return SubmitDecision(
             "stop", "email_not_drafted",
@@ -1252,7 +1253,7 @@ def _email_stop(application: SubmitFacts, site_host: Optional[str]) -> Optional[
             "then call check_submit again. Do not send yet.",
         )
     wanted = mailto_address(site_host)
-    if wanted != "" and wanted != application.email_to:
+    if not wanted or wanted != application.email_to:
         return SubmitDecision(
             "stop", "email_not_drafted",
             "This mailto address is not the recipient of your newest email_drafted. Record email_drafted "
