@@ -89,3 +89,6 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Re-read `origin/main`'s migration list in the minute before every merge call (2026-10-22: two 0077 files on main).
 - After editing an MCP description, also run `tests/test_tools_states_recipes.py`; cut prose a recipe carries, never a
   closed value set or a payload key.
+- From a detached worktree push `HEAD:<branch>` and compare `git ls-remote` with `git rev-parse HEAD`; "Everything up-to-date" is not proof (2026-10-22).
+- Sibling hunt-kit PRs conflict in the shared registries after each merge: merge main in, keep both sides, re-gate, re-read `mergeable_state`.
+
