@@ -52,6 +52,25 @@ async def test_a_dropped_connection_releases_the_lock():
 
 
 @pytest.mark.asyncio
+async def test_a_killed_lock_connection_is_noticed_and_the_lock_retaken():
+    from src.repositories import pg
+
+    b = deploy_hold.Beacon()
+    try:
+        await b.sync(True)
+        cur = await b._conn.execute("SELECT pg_backend_pid()")
+        pid = (await cur.fetchone())[0]
+        async with pg.connect() as other:  # Postgres restarts / kills the idle connection
+            await other.execute("SELECT pg_terminate_backend(?)", (pid,))
+        assert await deploy_hold.others_busy() is False   # the lock went with the connection
+        assert b.held                                     # ...but the beacon still thinks it holds it
+        await b.sync(True)                                # the next tick notices and retakes it
+        assert await deploy_hold.others_busy() is True
+    finally:
+        await b.close()
+
+
+@pytest.mark.asyncio
 async def test_sync_never_raises_on_a_db_error():
     b = deploy_hold.Beacon()
     with patch("src.repositories.pg.connect", side_effect=RuntimeError("down")):

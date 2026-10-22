@@ -49,12 +49,26 @@ class Beacon:
         """Take the lock when busy, release it (by closing the connection) when not. Never raises."""
         try:
             async with self._lock:
+                if busy and self._conn is not None and not await self._alive():
+                    # Postgres restarted or killed the idle connection: the lock went with it.
+                    await self._drop()
                 if busy and self._conn is None:
                     await asyncio.wait_for(self._open(), _DB_TIMEOUT_S)
                 elif not busy and self._conn is not None:
                     await self._drop()
         except Exception as exc:  # noqa: BLE001 - the beacon must never break the browser
             logger.warning("deploy_hold beacon sync failed: %s", type(exc).__name__)
+
+    async def _alive(self) -> bool:
+        """The held connection still answers (so its lock is still held)."""
+        conn = self._conn
+        if conn is None:
+            return False
+        try:
+            await asyncio.wait_for(conn.execute("SELECT 1"), _DB_TIMEOUT_S)
+            return True
+        except Exception:  # noqa: BLE001 - dead or hung: retake the lock on a fresh one
+            return False
 
     async def _open(self) -> None:
         conn = await pg.connect()
