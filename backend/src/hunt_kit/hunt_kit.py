@@ -793,9 +793,11 @@ def http_request(
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
+    truncate: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given); see _http_request. Notes the status for dead-board memory."""
-    res = _http_request(url, params, data, retries, max_bytes, method, headers, **({"once": True} if once else {}))
+    extra: dict[str, bool] = {**({"once": True} if once else {}), **({"truncate": True} if truncate else {})}
+    res = _http_request(url, params, data, retries, max_bytes, method, headers, **extra)
     log = getattr(_STATUS_TL, "log", None)
     if log is not None:
         log.append(res[0])
@@ -811,8 +813,12 @@ def _http_request(
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
+    truncate: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given). Returns (status, final_url, body).
+
+    A body over ``max_bytes`` is a failed request (status 0, empty body), never a half-parsed page, unless
+    ``truncate=True``: then the first ``max_bytes`` bytes are returned (check_live classifies a page from its head).
 
     429 backs off, retries twice; 502/503/504 on a GET retry once; other 4xx never retry.
     ``once=True`` sends the request exactly once, whatever the answer (kit_bigboards: a refusal ends the site).
@@ -838,7 +844,7 @@ def _http_request(
             try:
                 req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
                 with _open(req, TIMEOUT_S) as r:
-                    body = r.read(max_bytes + 1)
+                    body = r.read(max_bytes if truncate else max_bytes + 1)
                     if len(body) > max_bytes:  # oversize is a failed request, never a half-parsed body
                         return 0, url, b""
                     return r.status, r.geturl(), body
@@ -2516,7 +2522,8 @@ def check_live(col: Collector, results: list[dict[str, Any]]) -> list[dict[str, 
 
     def one(rec: dict[str, Any]) -> bool:
         try:
-            st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000)
+            # the head of a long page is enough to classify it: keep it, do not treat "over 300 KB" as a failed fetch
+            st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000, truncate=True)
             verdict = classify_liveness(st, rec["url"], final, body.decode("utf-8", "replace"))
         except Exception:  # a failed check keeps the job (never abort the run)
             return True
