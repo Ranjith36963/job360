@@ -122,3 +122,24 @@ def test_a_sitemap_reader_still_reads_a_3mb_sitemap(monkeypatch):
     jobs = eu.ATS_FETCHERS["talentlyft"]({"name": "INETEC", "ats": "talentlyft", "token": "inetec"}, hk.http, stats)
     assert seen[0] == f"https://{host}/sitemap.xml"
     assert [j["title"] for j in jobs] == ["Senior Electronics Engineer"]
+
+
+bc = _load("build_companies_cap_under_test", "build_companies.py")
+
+
+def test_build_companies_http_takes_max_bytes_like_the_kit_helper(monkeypatch):
+    # make_http is the helper the company-list builder hands to its probes; the probes pass max_bytes to it.
+    _serve(monkeypatch, {"/page": b"p" * 3_000_000, "/api": json.dumps(["z" * 2_500_000]).encode()})
+    http = bc.make_http(hk)
+    assert http("https://example.com/page", as_json=False) == (0, None)  # over the 2 MB page default
+    st, text = http("https://example.com/page", as_json=False, max_bytes=5_000_000)
+    assert st == 200 and len(text) == 3_000_000
+    st, data = http("https://example.com/api")  # JSON keeps the 20 MB default
+    assert st == 200 and len(data[0]) == 2_500_000
+
+
+def test_personio_and_teamtailor_probes_run_through_the_real_make_http(monkeypatch):
+    _serve(monkeypatch, {"personio.de/xml": b"<workzag-jobs></workzag-jobs>", "teamtailor.com/jobs.rss": b"<rss></rss>"})
+    http = bc.make_http(hk)
+    assert isinstance(bc.probe_personio(http, "acme"), dict)  # was: TypeError unexpected keyword max_bytes
+    assert isinstance(bc.probe_teamtailor(http, "acme"), dict)

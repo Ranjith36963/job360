@@ -647,8 +647,12 @@ def run_probes(
 def make_http(kit: Any) -> Http:
     """The kit's http helper (public hosts only, honest User-Agent, per-host limit) without its quick 429 retries."""
 
-    def h(url: str, *, as_json: bool = True, headers: dict[str, str] | None = None) -> tuple[int, Any]:
-        st, _u, body = kit.http_request(url, retries=0, headers=headers)
+    def h(
+        url: str, *, as_json: bool = True, headers: dict[str, str] | None = None, max_bytes: int | None = None
+    ) -> tuple[int, Any]:
+        if max_bytes is None:  # same defaults as the kit's own http(): 2 MB for pages, 20 MB for JSON
+            max_bytes = kit.API_MAX_BYTES if as_json else kit.PAGE_MAX_BYTES
+        st, _u, body = kit.http_request(url, retries=0, headers=headers, max_bytes=max_bytes)
         if not 200 <= st < 300:
             return st, None
         text = kit.decode_body(body)
