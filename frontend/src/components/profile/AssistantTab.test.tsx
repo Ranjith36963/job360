@@ -378,6 +378,20 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("offers no Hours to apply card; an old saved window with sending on its own reads as Straight away", async () => {
+    getAssistantSettings.mockResolvedValue(
+      view({
+        submit_mode: field("auto_when_sure", "auto_when_sure"),
+        apply_hours: field({ from: "09:00", to: "17:30" }),
+      }),
+    );
+    await ready();
+    expect(screen.queryByTestId("mode-hours")).toBeNull();
+    expect(screen.queryByTestId("apply-hours-from")).toBeNull();
+    expect(screen.queryByTestId("apply-hours-to")).toBeNull();
+    expect(screen.getByTestId("mode-straight")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("Ask me each time turns sending on its own off", async () => {
     getAssistantSettings.mockResolvedValue(view({ submit_mode: field("auto_when_sure", "auto_when_sure") }));
     await ready();
