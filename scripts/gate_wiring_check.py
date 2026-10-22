@@ -321,6 +321,34 @@ def root_checkout_is_the_pr(job_text: str) -> bool:
     return False
 
 
+_PR_TRIGGER = re.compile(r"\bpull_request\b(?!_)")
+
+
+def default_checkout_is_the_merge_tree(head: str, job_text: str) -> bool:
+    """On a `pull_request` event, `actions/checkout` with no `ref:` checks out
+    `refs/pull/<N>/merge`. So a `--baseline` job in a `pull_request` workflow
+    whose checkout names no ref IS standing in the merged tree (doc-sync.yml's
+    drift-check, #1095). `pull_request_target` is not this: its default is the
+    BASE branch. A checkout with any `ref:` is judged by that ref instead.
+    """
+    if not _PR_TRIGGER.search(head):
+        return False
+    lines = job_text.splitlines()
+    for i, line in enumerate(lines):
+        if not _CHECKOUT.search(line):
+            continue
+        indent = len(line) - len(line.lstrip())
+        has_ref = False
+        for nxt in lines[i + 1:]:
+            if nxt.strip().startswith("- ") and (len(nxt) - len(nxt.lstrip())) <= indent:
+                break
+            if re.match(r"\s*ref:\s*", nxt):
+                has_ref = True
+        if not has_ref:
+            return True
+    return False
+
+
 def _merges(text: str) -> bool:
     """Does this job text actually cause a merge?
 
@@ -433,7 +461,8 @@ def check_workflows(workflows_dir: Path, disabled: frozenset[str] = frozenset())
                     f"decision to merge_cage.py, which refuses an empty check list outright."))
 
             if "G4" not in disabled and _BASELINE.search(job_text) \
-                    and not _PULL_MERGE_REF.search(job_text):
+                    and not _PULL_MERGE_REF.search(job_text) \
+                    and not default_checkout_is_the_merge_tree(head, job_text):
                 out.append(Finding(
                     "G4", name,
                     f"job `{job_name}` passes `--baseline` (a tree-scoped ratchet comparison) "
@@ -626,6 +655,53 @@ def self_drill(disabled: frozenset[str] = frozenset()) -> int:
              "          ref: main\n"
              "      - run: python scripts/merge_cage.py \"$pr\" --baseline \"$BASE\"\n",
              "belong to whatever tree")
+
+        # G4 THROUGH THE DEFAULT CHECKOUT ON A NON-PR TRIGGER: no `ref:` on a
+        # schedule run is `main`, so the baseline compares main to main.
+        case("a --baseline with a ref-less checkout on a schedule is caught", "G4",
+             "      - uses: actions/checkout@v7\n"
+             "      - run: python scripts/doc_sync_check.py --baseline \"$BASE\"\n",
+             "belong to whatever tree")
+
+        # G4 NEGATIVE CONTROL — doc-sync.yml's drift-check (#1095): on a
+        # `pull_request` event a ref-less checkout IS refs/pull/<N>/merge, so a
+        # `--baseline` there is measured on the merged tree. Flagging it turned
+        # every merge-cage run into `error` on 2026-10-22.
+        probe.write_text(
+            "name: drill\n"
+            "on:\n"
+            "  pull_request: {}\n"
+            "  push:\n"
+            "    branches: [main]\n"
+            "jobs:\n"
+            "  drift:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "      - run: python scripts/doc_sync_check.py --baseline \"$BASE_DIR\"\n",
+            encoding="utf-8")
+        f = new_findings()
+        results.append(("NEGATIVE CONTROL (a pull_request job's default checkout is the merge tree)",
+                        not f, "" if not f else
+                        f"the default merge-tree checkout was flagged: {f[0].rule} — {f[0].message[:110]}"))
+        probe.unlink()
+
+        # G4 STAYS STRICT ON pull_request_target, whose default is the BASE.
+        probe.write_text(
+            "name: drill\n"
+            "on:\n"
+            "  pull_request_target: {}\n"
+            "jobs:\n"
+            "  drift:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - uses: actions/checkout@v7\n"
+            "      - run: python scripts/doc_sync_check.py --baseline \"$BASE_DIR\"\n",
+            encoding="utf-8")
+        hits = [x for x in new_findings() if x.rule == "G4"]
+        results.append(("pull_request_target's default checkout (the BASE) is still caught",
+                        bool(hits), "" if hits else "expected a G4 finding; got silence"))
+        probe.unlink()
 
         # G5 — the judge supplied by the thing being judged. This is the exact
         # shape pr-advisor.yml shipped with, and running this checker against

@@ -12,7 +12,9 @@ with the caller's assistant; the safety stays here and in
 * the final submit runs the caller's ``submit_check`` and records
   ``submit_attempted`` first, both scoped to the caller;
 * uploads are only the caller's own saved CV / cover letter for that
-  application, rendered by Job360;
+  application, rendered by Job360, and each one records ``document_uploaded``
+  (the sha256 of the exact bytes and the form's host - slice 29), which the
+  receipt names as its ``files``;
 * step 6: when a gated submit lands on the site's confirmation, a screenshot
   of it is stored as that application's proof (``proof_screenshot``);
 * slice 3: when the browser stops on a CAPTCHA or a sign-in wall for a named
@@ -98,7 +100,9 @@ def _gate_and_files(
 
     async def _files(kind: str) -> tuple[str, bytes]:
         from src.services.applications import kit as applications_kit  # noqa: PLC0415
-        from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415 - fpdf2 is heavy
+        from src.services.applications import uploads  # noqa: PLC0415
+        from src.services.applications.authorship import actor_for  # noqa: PLC0415
+        from src.services.tailoring.cv_render import RENDERER_VERSION, render_document_pdf  # noqa: PLC0415 - heavy
 
         async with _db() as db:
             row = await applications_spine.latest_artifact(db, user.id, application_id, kind)
@@ -107,6 +111,23 @@ def _gate_and_files(
                 "refused", "no_document", f"No {kind} is saved for this application: save_artifact first."
             )
         pdf = await render_document_pdf(user.id, kind, row.get("text") or "")
+        # Slice 29: the receipt names exactly these bytes (sha256 only). Never blocks the upload.
+        host = await _page_host(user)
+        try:
+            async with _db() as db:
+                await uploads.record(
+                    db, user_id=user.id, application_id=application_id, kind=kind, artifact=row, data=pdf,
+                    fmt="pdf", renderer_version=RENDERER_VERSION, host=host, recorded_by=actor_for(user),
+                )
+        except Exception:  # noqa: BLE001 - opening the connection failed: the upload still goes ahead
+            get_audit_logger().warning(
+                "document_uploaded_failed",
+                extra={
+                    "event": "document_uploaded_failed", "user_id": safe_log_value(user.id),
+                    "application_id": int(application_id), "kind": safe_log_value(kind, max_len=20),
+                    "artifact_id": int(row["id"]), "result": "error",
+                },
+            )
         # The file name an employer sees: the kit's own name for this PDF, else the plain default.
         stem = await applications_kit.named_stem(user.id, kind)
         return (f"{stem}.pdf" if stem else "CV.pdf" if kind == "cv" else "Cover_letter.pdf"), pdf
@@ -126,6 +147,20 @@ def _gate_and_files(
     return browser_agent.Gate(
         check=_check, mark_attempt=_mark, save_proof=_proof, application_id=application_id
     ), _files
+
+
+async def _page_host(user: CurrentUser) -> Optional[str]:
+    """The host of the page the caller's browser is on (the form an upload goes into); ``None``
+    when there is no browser or the address has no host. Never raises."""
+    from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+    try:
+        s = await browser_agent.get_pool().get(user.id, create=False)
+        if s is None:
+            return None
+        return site_host(str(s.page.url)) or None
+    except Exception:  # noqa: BLE001 - a missing host never stops an upload
+        return None
 
 
 def _loader(user: CurrentUser) -> browser_agent.StateFn:

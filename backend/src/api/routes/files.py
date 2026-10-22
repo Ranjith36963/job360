@@ -17,6 +17,9 @@ the token IS the credential. So the rules are strict:
   rewrite the path to ``/api/files/[redacted]``).
 
 A link download is NOT a ``cv_seen``: the assistant fetched the file, not the user.
+Each served download writes one ``document_uploaded`` (slice 29: the sha256 of the
+exact bytes, host ``None``) so a receipt can name the file; a failed write is logged
+and the file is still served.
 """
 from __future__ import annotations
 
@@ -94,7 +97,7 @@ async def download_file(
 
     computed = kit.hash_token(token)
     cur = await db._db.execute(
-        "SELECT id, token_hash, user_id, application_id, artifact_id, version_no, fmt "
+        "SELECT id, token_hash, user_id, application_id, artifact_id, version_no, fmt, created_by "
         "FROM artifact_links WHERE token_hash = ?",
         (computed,),
     )
@@ -128,21 +131,31 @@ async def download_file(
     if artifact is None or latest is None or latest["id"] != artifact["id"]:
         raise _refuse(request, 410, "cv_changed", user_id, CHANGED_DETAIL)
 
-    from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415
-    from src.services.tailoring.docx import render_docx  # noqa: PLC0415 - heavy, lazy (rule #16)
+    from src.services.applications import uploads  # noqa: PLC0415
+    from src.services.tailoring import cv_render  # noqa: PLC0415
+    from src.services.tailoring import docx as docx_render  # noqa: PLC0415 - heavy, lazy (rule #16)
 
     kind = str(artifact["kind"])
     title = "Curriculum Vitae" if kind == "cv" else "Cover Letter"
     fmt = "docx" if row["fmt"] == "docx" else "pdf"
     if fmt == "docx":
-        content = await asyncio.to_thread(render_docx, artifact["text"], title=title)
+        content = await asyncio.to_thread(docx_render.render_docx, artifact["text"], title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        renderer_version = docx_render.RENDERER_VERSION
     else:
-        content = await render_document_pdf(user_id, kind, artifact["text"])
+        content = await cv_render.render_document_pdf(user_id, kind, artifact["text"])
         media_type = "application/pdf"
+        renderer_version = cv_render.RENDERER_VERSION
     app_row = await spine.get_owned_application(db, user_id, int(row["application_id"])) or {}
     stem = await kit.download_stem(
         user_id, str(app_row.get("job_company") or ""), kind, int(artifact["version_no"])
+    )
+    # Slice 29: one document_uploaded per serve, the sha256 of exactly these bytes (no host: a link).
+    # Last DB write of the request, and it never raises, so the download is served whatever happens.
+    await uploads.record(
+        db, user_id=user_id, application_id=int(row["application_id"]), kind=kind, artifact=artifact,
+        data=content, fmt=fmt, renderer_version=renderer_version, host=None,
+        recorded_by=str(row.get("created_by") or "web"),
     )
     get_audit_logger().info(
         "file_download",
