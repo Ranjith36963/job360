@@ -6454,5 +6454,13 @@
 {"name":"Camas School District","ats":"applitrack","board":"camas","source":"career-ops"},
 {"name":"Vancouver Public Schools","ats":"schoolspring","board":"vansd.schoolspring.com","source":"career-ops"},
 {"name":"SchoolSpring — Network administrators","ats":"schoolspring","board":"network administrator","source":"freehire"},
-{"name":"EDJOIN (Information Tech. / Computer Svcs.)","ats":"edjoin","board":"25","source":"freehire"}
+{"name":"EDJOIN (Information Tech. / Computer Svcs.)","ats":"edjoin","board":"25","source":"freehire"},
+{"name":"Albanese Confectionery","ats":"ukgready","board":"secure4.saashr.com/6162397","source":"freehire"},
+{"name":"Rapid Robert's","ats":"ukgready","board":"secure.entertimeonline.com/10284","source":"freehire"},
+{"name":"AstraZeneca","ats":"radancy","board":"careers.astrazeneca.com","source":"freehire"},
+{"name":"Munich Re","ats":"radancy","board":"careers.munichre.com","source":"career-ops"},
+{"name":"Cambridge University Press & Assessment","ats":"earcu","board":"careers.cambridge.org","source":"freehire"},
+{"name":"Mercedes-Benz","ats":"beesite","board":"mercedes-benz-beesite-production-gjb.app.beesite.de","source":"freehire"},
+{"name":"Porsche","ats":"beesite","board":"porsche-beesite-production-gjb.app.beesite.de","source":"freehire"},
+{"name":"Intuition Machines","ats":"workablemarketplace","board":"ix7jhWd4JnugmXDK5RaQSZ","source":"freehire"}
 ]
