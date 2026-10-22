@@ -15,7 +15,7 @@ from migrations import runner
 from src.repositories import pg
 from src.repositories.database import JobDatabase
 
-STEM = "0070_contact_interactions_referrals"
+STEM = "0072_contact_interactions_referrals"
 
 _AD = {
     "title": "Data Engineer",
@@ -310,8 +310,8 @@ async def _has_column(path: str, table: str, column: str) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_migration_0070_up_down(tmp_path):
-    path = str(tmp_path / f"m70_{uuid.uuid4().hex[:8]}.db")
+async def test_migration_0072_up_down(tmp_path):
+    path = str(tmp_path / f"m72_{uuid.uuid4().hex[:8]}.db")
     db = JobDatabase(path)
     await db.init_db()
     await db.close()

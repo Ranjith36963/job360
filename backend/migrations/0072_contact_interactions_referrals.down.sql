@@ -1,4 +1,4 @@
--- 0070 down: reverses the DDL only.
+-- 0072 down: reverses the DDL only.
 --
 -- WHAT THIS COSTS, STATED PLAINLY: every interaction/referral follow-up date is dropped and NOT
 -- recoverable except from a backup. The ledger rows with entry
