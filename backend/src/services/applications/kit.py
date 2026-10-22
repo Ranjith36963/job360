@@ -744,6 +744,7 @@ async def gate_facts(
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
+        sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         application_id=application_id,
     )
 
@@ -753,6 +754,13 @@ async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unverified_guess(db, user_id, app_row)
+
+
+async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest form holds an answer to a sensitive question the user has not confirmed (``ready`` reads it)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return await ready.has_unconfirmed_sensitive(db, user_id, app_row)
 
 
 def company_avoided(user_id: str, app_row: dict[str, Any], entries: Optional[list[Any]] = None) -> bool:
@@ -906,7 +914,7 @@ async def submit_verdict(
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False,
+            guessed_unverified=False, sensitive_unconfirmed=False,
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -2175,7 +2183,10 @@ FORM_NEXT_ASK = (
     "save reusable answers with update_profile (user_info.answers); never guess."
 )
 FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
-FORM_NEXT_CONFIRM = " Confirm every `needs_confirmation` answer with the user in that same message."
+FORM_NEXT_CONFIRM = (
+    " Confirm every `needs_confirmation` answer with the user in that same message, and raise each one with "
+    "ask_user so it shows on Needs you: the user checks it there before anything is sent."
+)
 FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
 # NOT IN REFERENCE (kept small, deterministic): which kit groups / which wording count as sensitive or a knock-out.
@@ -2192,7 +2203,17 @@ _SENSITIVE_RE = re.compile(
     r"vetting (?:check|process|level)|(?:undergo|pass|hold) (?:\w+ )?vetting|"
     r"day.?rate|expected (?:pay|salary)|notice period|\bitar\b|export controls?|non.?compete|"
     r"interview record(?:ing)?|record(?:ing)? (?:of )?(?:the |this )?interview|"
-    r"previously (?:been )?employed (?:by|at|with)"
+    r"previously (?:been )?employed (?:by|at|with)|"
+    # Any country, any job (owner, 2026-10-22): identity, health, money and legal history are the user's to
+    # answer, never typed from a guess. "health" and "age" alone are too broad ("healthcare", "page"), so
+    # only the asking phrases count.
+    r"nationality|citizen(?:ship)?\b|immigration status|national origin|(?:place|country) of birth|"
+    r"passport|national insurance|social security|\bssn\b|tax (?:id|number)|"
+    r"date of birth|\bdob\b|\bhow old\b|marital|pregnan|"
+    r"medical (?:condition|history|exam)|health (?:condition|issue|problem|status)|mental health|"
+    r"drug (?:test|screen)|vaccinat|transgender|\blgbt|political|trade union|union member|\bcaste\b|"
+    r"bankrupt|credit (?:check|score|history)|financial (?:history|status)|salary history|"
+    r"(?:current|previous) (?:salary|pay)\b|arrest|felony|misdemeanou?r|military|armed forces"
 )
 _KNOCKOUT_GROUPS = frozenset({"right_to_work", "salary"})
 _KNOCKOUT_RE = re.compile(

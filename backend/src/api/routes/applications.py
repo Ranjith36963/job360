@@ -24,7 +24,7 @@ from __future__ import annotations
 import contextlib
 import json
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional, Union
+from typing import Any, Awaitable, Callable, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
@@ -74,6 +74,22 @@ router = APIRouter(tags=["applications"])
 
 def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+def _key_body(body: BaseModel) -> dict[str, Any]:
+    """The idempotency body (slice 25): the request's own fields, minus the key itself."""
+    return body.model_dump(exclude={"client_key"})
+
+
+async def _client_key_once(
+    db: JobDatabase, user: CurrentUser, tool: str, key: Optional[str], key_body: dict[str, Any],
+    write: Callable[[], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """``idempotency.run_once`` for a route: a bad or reused key becomes its 422/409."""
+    try:
+        return await idempotency.run_once(db._db, user.id, tool, key, key_body, write)
+    except idempotency.IdempotencyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
 # Every event a contact ledger mark writes (outreach pack #5/#6): event_type -> ledger entry.
@@ -127,6 +143,10 @@ class SaveArtifactRequest(BaseModel):
     # characters removed.
     ats_score: Optional[int] = Field(None, ge=0, le=100, strict=True)
     ats_notes: Optional[str] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the
+    # same key + same body returns the FIRST reply (already_existed=true) and writes
+    # nothing; the same key with a different body is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
 
 class FitAxisIn(BaseModel):
@@ -226,6 +246,10 @@ class RecordEventRequest(BaseModel):
     # use `POST /api/contacts/{contact_id}/outreach` for a cold contact).
     contact_id: Optional[int] = None
     channel: Optional[str] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the
+    # same key + same body returns the FIRST reply (already_existed=true) and writes
+    # nothing; the same key with a different body is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
     def clamp_detail(self) -> str:
         cap = settings.APPLICATION_EVENT_DETAIL_MAX_CHARS
@@ -322,6 +346,8 @@ class AddContactRequest(BaseModel):
     source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
     # the employer; REQUIRED when there is no application_id (contacts.add_contact checks it)
     company: Optional[str] = None
+    # Slice 25 — optional idempotency key, same rule as SaveArtifactRequest.client_key.
+    client_key: Optional[str] = None
     email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES
     relationship: Optional[str] = None  # closed set CONTACT_RELATIONSHIP
     shared: Optional[str] = None  # a profile record pointer, checked by contacts._validate_shared
@@ -865,6 +891,8 @@ class SaveArtifactResponse(BaseModel):
     # Deterministic save-time checks (services/applications/cv_checks.py): claims
     # not found in the profile + PDF problems. Advisory - a save is never refused.
     checks: list[dict[str, str]] = []
+    # Slice 25 — true when this client_key was already used: the FIRST reply, nothing written.
+    already_existed: bool = False
 
 
 class SaveFitLineOut(BaseModel):
@@ -1397,6 +1425,10 @@ class RecordOutreachRequest(BaseModel):
     # contact linked to THAT SAME application — set by the wrapper below,
     # never by the request body itself.
     application_id: Optional[int] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the
+    # same key + same body returns the FIRST reply (already_existed=true) and writes
+    # nothing; the same key with a different body is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
 
 class RecordOutreachResponse(BaseModel):
@@ -2228,21 +2260,35 @@ async def add_contact(
     """201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
     for the same person seen again on this application (R2): same email, else
     (no email) same normalised LinkedIn URL, else same name unless both carry
-    different LinkedIn URLs. The status code is set dynamically since the
-    same call can legitimately answer either."""
-    try:
-        result = await contacts_service.add_contact(
-            db, user.id, application_id, actor_for(user),
-            name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url, company=body.company, email_source=body.email_source,
-            relationship=body.relationship, shared=body.shared,
-        )
-    except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+    different LinkedIn URLs; also a repeated ``client_key``. The status code is
+    set dynamically since the same call can legitimately answer either."""
+    return await _add_contact_once(db, user, application_id, body, response)
+
+
+async def _add_contact_once(
+    db: JobDatabase, user: CurrentUser, application_id: Optional[int], body: AddContactRequest, response: Response
+) -> dict[str, Any]:
+    """Both contact doors (per-application and ``POST /contacts``) share one
+    ``add_contact`` key space: the key body always names ``application_id``."""
+
+    async def _write() -> dict[str, Any]:
+        try:
+            result = await contacts_service.add_contact(
+                db, user.id, application_id, actor_for(user),
+                name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
+                notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
+                source_url=body.source_url, company=body.company, email_source=body.email_source,
+                relationship=body.relationship, shared=body.shared,
+            )
+        except SpineError as exc:
+            _raise(exc)
+            raise AssertionError("unreachable")  # _raise always raises
+        return {**result, "contact_id": result["contact"]["id"]}
+
+    key_body = {**_key_body(body), "application_id": application_id}
+    result = await _client_key_once(db, user, "add_contact", body.client_key, key_body, _write)
     response.status_code = 200 if result["already_existed"] else 201
-    return {**result, "contact_id": result["contact"]["id"]}
+    return result
 
 
 @router.post(
@@ -2263,19 +2309,7 @@ async def add_person(
     scoped to the USER instead of an application when there is none. Cold
     scope without an email: same LinkedIn URL, else same name only when
     neither side has a LinkedIn URL. ``source_url`` is stored, never fetched."""
-    try:
-        result = await contacts_service.add_contact(
-            db, user.id, body.application_id, actor_for(user),
-            name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url, company=body.company, email_source=body.email_source,
-            relationship=body.relationship, shared=body.shared,
-        )
-    except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
-    response.status_code = 200 if result["already_existed"] else 201
-    return {**result, "contact_id": result["contact"]["id"]}
+    return await _add_contact_once(db, user, body.application_id, body, response)
 
 
 @router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
@@ -2322,19 +2356,27 @@ async def record_outreach(
     (``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to
     the SAME service function this route calls (M5 parity) — this route is
     the one door that works for a COLD contact too, since it carries no
-    ``application_id`` in its URL."""
-    try:
-        source = spine.validate_source(body.source.model_dump() if body.source else None)
-        result = await contacts_service.record_outreach(
-            db, user.id, contact_id, actor_for(user),
-            entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
-            source_message_id=source["message_id"] if source else "",
-            follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
-            label=body.label,
-        )
-    except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+    ``application_id`` in its URL. A ``client_key`` lives in the key space of
+    the tool that calls this door: ``save_artifact`` for a message version,
+    ``record_event`` for a sent/reply mark."""
+
+    async def _write() -> dict[str, Any]:
+        try:
+            source = spine.validate_source(body.source.model_dump() if body.source else None)
+            return await contacts_service.record_outreach(
+                db, user.id, contact_id, actor_for(user),
+                entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
+                source_message_id=source["message_id"] if source else "",
+                follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
+                label=body.label,
+            )
+        except SpineError as exc:
+            _raise(exc)
+            raise AssertionError("unreachable")  # _raise always raises
+
+    tool = "save_artifact" if body.entry == "message" else "record_event"
+    key_body = {**_key_body(body), "contact_id": contact_id}
+    result = await _client_key_once(db, user, tool, body.client_key, key_body, _write)
     response.status_code = 200 if result["already_existed"] else 201
     return result
 
@@ -2455,6 +2497,15 @@ async def save_artifact(
     body: SaveArtifactRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    key_body = {**_key_body(body), "application_id": application_id}
+    return await _client_key_once(
+        db, user, "save_artifact", body.client_key, key_body, lambda: _save_artifact(application_id, body, db, user)
+    )
+
+
+async def _save_artifact(
+    application_id: int, body: SaveArtifactRequest, db: JobDatabase, user: CurrentUser
 ) -> dict[str, Any]:
     try:
         if body.contact_id is None and body.kind == "outreach":
@@ -3081,6 +3132,15 @@ async def record_event(
     body: RecordEventRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    key_body = {**_key_body(body), "application_id": application_id}
+    return await _client_key_once(
+        db, user, "record_event", body.client_key, key_body, lambda: _record_event(application_id, body, db, user)
+    )
+
+
+async def _record_event(
+    application_id: int, body: RecordEventRequest, db: JobDatabase, user: CurrentUser
 ) -> dict[str, Any]:
     try:
         if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:

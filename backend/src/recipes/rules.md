@@ -107,7 +107,7 @@ mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), approval_stale (`ask`: that yes no longer counts - the `detail` names
 what changed), auto_when_sure, blocked (you
 recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it), below_score_line (`stop`: below the
-line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them). Indeed and LinkedIn
+line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them), sensitive_unconfirmed (a private or legal question's answer the user has not confirmed: `ask_user`, a yes does not clear it). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch, form_page_mismatch,
@@ -236,6 +236,14 @@ and writes nothing; the same `request_id` with different fields is refused (409
 `idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
 After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
 
+Write tools take an optional `client_key` the same way: `save_artifact`,
+`record_event`, `bring_job`, `add_contact` and `ask_user` (your own id for this
+one write, 1-128 characters). The same `client_key` with the same fields returns
+the FIRST reply with `already_existed: true` and writes nothing; the same key with
+different fields is refused (409 `idempotency_key_reused`). Use a new key for
+each new write; after a network error re-read before you retry, then retry with
+the SAME key.
+
 An ask can also be answered by the user on the Job360 Needs-you page.
 
 When the user answered in chat, pass `user_words` (their exact words) to `answer_ask`: the answer then shows as theirs, via you.
@@ -246,8 +254,8 @@ history and are not a promise you can take back. If the user does not want even
 that, do not call `answer_ask` for that fact - use it in the form and leave the
 ask open.
 
-Legal questions (right to work, SC / DV clearance, BPSS, ITAR / export control, non-compete, interview recording, "previously employed by", day rate):
-explain the question to the user in one sentence, then ask; never infer the answer. ITAR "US person" is not work
+Sensitive questions on ANY job, in any country (right to work, nationality, passport or ID numbers, date of birth, health, criminal record, money history, plus the UK
+ones: SC / DV clearance, BPSS, ITAR / export control, non-compete, interview recording, "previously employed by", day rate): check_form flags them `needs_confirmation`; raise each with `ask_user` so it shows on Needs you. Explain the question to the user in one sentence, then ask; never infer the answer. ITAR "US person" is not work
 authorisation, and a non-compete is not "worked for a competitor". Save right to work, clearance and day rate as the
 SENSITIVE rule above says (remember: true only after a yes); save non-compete, interview-recording consent and
 "previously employed by" as `user_info.answers` with that job's `company`.

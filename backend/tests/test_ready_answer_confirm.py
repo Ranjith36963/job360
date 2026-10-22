@@ -254,7 +254,7 @@ async def test_sensitive_memory_goes_to_its_field_never_the_approved_list(authen
         app_id = await _bring(client)
         await _fill(client, app_id, [GENDER])
         card = await _card(client, app_id)
-        assert _codes(card) == ["not_in_memory"]
+        assert _codes(card) == ["sensitive", "not_in_memory"]  # gender is a private question (any job)
         resp = await _confirm(client, app_id, 0, card["form_filled_event_id"])
         assert resp.status_code == 200, resp.text
         assert resp.json()["answers"][0]["verified"] is True and _codes(resp.json()) == []

@@ -1,4 +1,4 @@
--- 0076_outreach_variants: outreach pack #13 (2026-10-20).
+-- 0077_outreach_variants: outreach pack #13 (2026-10-20).
 -- 1) contact_outreach.label — the caller's own name for the approach a MESSAGE
 --    version used (e.g. a template's label). '' = not labelled (rule #29: stats
 --    shows it as "Not set"). Set at INSERT on entry='message' only; sent/reply

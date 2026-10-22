@@ -21,7 +21,7 @@ _AD = {
     "apply_url": "https://northwind.example/careers/7",
     "description": "Build the pipelines. Python, dbt, Snowflake. Fully remote.",
 }
-STEM = "0076_outreach_variants"
+STEM = "0077_outreach_variants"
 
 
 async def _bring(client: AsyncClient) -> int:
@@ -272,7 +272,7 @@ async def _shape(path: str) -> tuple[bool, bool]:
 
 
 @pytest.mark.asyncio
-async def test_migration_0076_up_down(tmp_path):
+async def test_migration_0077_up_down(tmp_path):
     from migrations import runner
     from src.repositories.database import JobDatabase
 
