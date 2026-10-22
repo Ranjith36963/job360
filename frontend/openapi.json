@@ -38,6 +38,17 @@
             "title": "Email",
             "type": "string"
           },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
+          },
           "found_via": {
             "anyOf": [
               {
@@ -172,6 +183,17 @@
             "default": "",
             "title": "Email",
             "type": "string"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -3314,6 +3336,17 @@
             "title": "Email",
             "type": "string"
           },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
+          },
           "found_via": {
             "anyOf": [
               {
@@ -3382,6 +3415,13 @@
       },
       "ContactOutreachOut": {
         "properties": {
+          "bounced": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Bounced",
+            "type": "array"
+          },
           "interactions": {
             "items": {
               "$ref": "#/components/schemas/OutreachEntryOut"
@@ -7162,7 +7202,7 @@
         "type": "object"
       },
       "OutreachEntryOut": {
-        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times). Also a meeting/call/intro/referral entry (``follow_up_on``\nis set only on those).",
+        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times). Also a meeting/call/intro/referral entry (``follow_up_on``\nis set only on those). A ``bounced`` mark's ``text`` is the address that bounced.",
         "properties": {
           "channel": {
             "title": "Channel",
@@ -7403,6 +7443,17 @@
             "title": "Email",
             "type": "string"
           },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
+          },
           "found_via": {
             "anyOf": [
               {
@@ -7524,6 +7575,17 @@
           "email": {
             "title": "Email",
             "type": "string"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -13283,6 +13345,17 @@
               }
             ],
             "title": "Email"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
