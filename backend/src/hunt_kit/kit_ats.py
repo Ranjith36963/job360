@@ -148,6 +148,9 @@ def _remote_from(*texts: Any) -> bool | None:
     return None
 
 
+_FEED_MAX = 5_000_000  # an XML/RSS job feed carries a full description per item; the 2 MB page default would drop it
+
+
 def _get(http: Http, url: str, *, as_json: bool = True, **kw: Any) -> tuple[int, Any]:
     """Call http and never raise."""
     try:
@@ -342,7 +345,7 @@ def fetch_personio(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> li
         _count(stats, ok=False)
         return []
     try:
-        status, data = _get(http, f"https://{token}.jobs.personio.de/xml", as_json=False)
+        status, data = _get(http, f"https://{token}.jobs.personio.de/xml", as_json=False, max_bytes=_FEED_MAX)
         if status != 200 or not isinstance(data, str) or "<workzag-jobs" not in data:
             _count(stats, ok=False)
             return []
@@ -382,7 +385,7 @@ def fetch_teamtailor(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> 
         _count(stats, ok=False)
         return []
     try:
-        status, data = _get(http, f"https://{token}.teamtailor.com/jobs.rss", as_json=False)
+        status, data = _get(http, f"https://{token}.teamtailor.com/jobs.rss", as_json=False, max_bytes=_FEED_MAX)
         if status != 200 or not isinstance(data, str) or "<rss" not in data:
             _count(stats, ok=False)
             return []
@@ -1333,7 +1336,7 @@ def fetch_jobvite(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> lis
                 _count(stats, ok=False)
                 return []
             eid = m.group(1)
-        status, data = _get(http, f"{JOBVITE_FEED}?c={quote(eid, safe='')}", as_json=False)
+        status, data = _get(http, f"{JOBVITE_FEED}?c={quote(eid, safe='')}", as_json=False, max_bytes=_FEED_MAX)
         if status != 200 or not isinstance(data, str) or "<result" not in data:
             _count(stats, ok=False)
             return []

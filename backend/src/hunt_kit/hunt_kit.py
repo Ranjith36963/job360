@@ -787,6 +787,10 @@ def _open(req: urllib.request.Request, timeout: int) -> Any:
     return _OPENER.open(req, timeout=timeout)
 
 
+PAGE_MAX_BYTES = 2_000_000  # default cap for one HTML/XML/RSS response (pages the readers parse with regexes)
+API_MAX_BYTES = 20_000_000  # default cap for one JSON API response (SimplifyJobs listings.json is ~13 MB)
+SITEMAP_MAX_BYTES = 10_000_000  # explicit cap for a sitemap (can list tens of thousands of postings)
+FEED_MAX_BYTES = 5_000_000  # explicit cap for an RSS/Atom/XML job feed (full descriptions per item)
 _STATUS_TL = threading.local()  # a board task sets .log; http_request then notes every status it returns
 
 
@@ -795,13 +799,15 @@ def http_request(
     params: Any = None,
     data: bytes | None = None,
     retries: int = RETRIES_429,
-    max_bytes: int = 20_000_000,
+    max_bytes: int = API_MAX_BYTES,
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
+    truncate: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given); see _http_request. Notes the status for dead-board memory."""
-    res = _http_request(url, params, data, retries, max_bytes, method, headers, **({"once": True} if once else {}))
+    extra: dict[str, bool] = {**({"once": True} if once else {}), **({"truncate": True} if truncate else {})}
+    res = _http_request(url, params, data, retries, max_bytes, method, headers, **extra)
     log = getattr(_STATUS_TL, "log", None)
     if log is not None:
         log.append(res[0])
@@ -813,12 +819,16 @@ def _http_request(
     params: Any = None,
     data: bytes | None = None,
     retries: int = RETRIES_429,
-    max_bytes: int = 20_000_000,
+    max_bytes: int = API_MAX_BYTES,
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
+    truncate: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given). Returns (status, final_url, body).
+
+    A body over ``max_bytes`` is a failed request (status 0, empty body), never a half-parsed page, unless
+    ``truncate=True``: then the first ``max_bytes`` bytes are returned (check_live classifies a page from its head).
 
     429 backs off, retries twice; 502/503/504 on a GET retry once; other 4xx never retry.
     ``once=True`` sends the request exactly once, whatever the answer (kit_bigboards: a refusal ends the site).
@@ -844,7 +854,10 @@ def _http_request(
             try:
                 req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
                 with _open(req, TIMEOUT_S) as r:
-                    return r.status, r.geturl(), r.read(max_bytes)
+                    body = r.read(max_bytes if truncate else max_bytes + 1)
+                    if len(body) > max_bytes:  # oversize is a failed request, never a half-parsed body
+                        return 0, url, b""
+                    return r.status, r.geturl(), body
             except urllib.error.HTTPError as e:
                 if once:
                     return e.code, url, b""
@@ -880,14 +893,18 @@ def http(
     headers: dict[str, str] | None = None,
     as_json: bool = True,
     once: bool = False,
+    max_bytes: int | None = None,
 ) -> tuple[int, Any]:
     """The shared http helper handed to every kit module (contract signature).
 
     Returns (status, parsed_json_or_text_or_None); status 0 on network error.
     Rate limiting (3 per host), 429 backoff and the User-Agent are built in. ``once=True`` sends the request
     exactly once (no 429 backoff, no 5xx retry): kit_bigboards uses it so a refusal ends the site.
+    ``max_bytes`` caps one response (PAGE_MAX_BYTES for text, API_MAX_BYTES for JSON); a larger body is status 0.
     """
-    st, _u, body = http_request(url, data=data, method=method, headers=headers, once=once)
+    if max_bytes is None:
+        max_bytes = API_MAX_BYTES if as_json else PAGE_MAX_BYTES
+    st, _u, body = http_request(url, data=data, method=method, headers=headers, once=once, max_bytes=max_bytes)
     if not (200 <= st < 300):
         return st, None
     text = decode_body(body)
@@ -2531,7 +2548,8 @@ def check_live(col: Collector, results: list[dict[str, Any]]) -> list[dict[str, 
 
     def one(rec: dict[str, Any]) -> bool:
         try:
-            st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000)
+            # the head of a long page is enough to classify it: keep it, do not treat "over 300 KB" as a failed fetch
+            st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000, truncate=True)
             verdict = classify_liveness(st, rec["url"], final, body.decode("utf-8", "replace"))
         except Exception:  # a failed check keeps the job (never abort the run)
             return True

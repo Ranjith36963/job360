@@ -40,7 +40,7 @@ def _stub(routes: dict):
     calls: list = []
     once_flags: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True, once=False):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, once=False, max_bytes=None):
         once_flags.append((url, once))
         body = json.loads(data) if data else None
         calls.append((url, method, body, headers or {}))

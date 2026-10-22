@@ -168,6 +168,9 @@ def _keep(jobs: list[Job], queries: list[str], days: int, *, search: bool = True
             and (not search or _matches(j, queries))]
 
 
+_FEED_MAX = 5_000_000  # an XML/RSS job feed carries a full description per item; the 2 MB page default would drop it
+
+
 def _get(http: HttpFn, stats: Stats, url: str, **kw: Any) -> Any:
     """One request through the core's http helper; returns body on HTTP 200, else None."""
     stats["tried"] = stats.get("tried", 0) + 1
@@ -399,7 +402,7 @@ def fetch_wwr(queries: list[str], http: HttpFn, stats: Stats, *, days: int, coun
     """We Work Remotely: four programming-related category feeds, keyword-matched locally."""
     jobs: list[Job] = []
     for cat in WWR_CATEGORIES:
-        body = _get(http, stats, f"https://weworkremotely.com/categories/{cat}.rss", as_json=False)
+        body = _get(http, stats, f"https://weworkremotely.com/categories/{cat}.rss", as_json=False, max_bytes=_FEED_MAX)
         jobs += parse_wwr(body if isinstance(body, str) else "")
     seen: set[str] = set()
     uniq: list[Job] = []
@@ -850,7 +853,7 @@ def fetch_jobbank(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
     for q in _queries(queries):
         for page in range(1, NATIONAL_PAGES + 1):
             qs = urlencode({"searchstring": q, "locationstring": "", "page": page})
-            body = _get(http, stats, f"{JOBBANK_URL}?{qs}", as_json=False)
+            body = _get(http, stats, f"{JOBBANK_URL}?{qs}", as_json=False, max_bytes=_FEED_MAX)
             known = {j["url"] for j in jobs}
             got = [j for j in parse_jobbank(body if isinstance(body, str) else "") if j["url"] not in known]
             jobs += got

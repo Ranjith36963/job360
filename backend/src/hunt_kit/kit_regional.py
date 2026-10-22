@@ -81,6 +81,9 @@ class _Budget:
         self.left = n
 
 
+_SITEMAP_MAX = 10_000_000  # a sitemap can list tens of thousands of postings; the 2 MB page default would drop it
+
+
 def _fetch(http: HttpFn, stats: Stats, name: str, budget: _Budget, url: str, **kw: Any) -> Any:
     """One counted request; the body on HTTP 200, else None (status warned on stderr, a refusal ends the run)."""
     if budget.left <= 0:
@@ -511,13 +514,14 @@ def fetch_gulftalent(queries: list[str], http: HttpFn, stats: Stats, *, days: in
     if not markets or not qs:
         return []
     budget = _Budget()
-    index = _fetch(http, stats, "gulftalent", budget, GT_INDEX, as_json=False, headers=CHROME_HEADERS)
+    index = _fetch(http, stats, "gulftalent", budget, GT_INDEX, as_json=False, headers=CHROME_HEADERS,
+                   max_bytes=_SITEMAP_MAX)
     shards = sorted((u for u in _sitemap_locs(index) if "_jx" in u), reverse=True)[:GT_SHARDS]
     ads: dict[str, tuple[int, str]] = {}  # url -> (id, country name)
     for shard in shards:
         _pause()
         for loc in _sitemap_locs(_fetch(http, stats, "gulftalent", budget, shard, as_json=False,
-                                        headers=CHROME_HEADERS)):
+                                        headers=CHROME_HEADERS, max_bytes=_SITEMAP_MAX)):
             m = _GT_JOB.match(loc)
             if not m or m.group(1) not in markets:
                 continue

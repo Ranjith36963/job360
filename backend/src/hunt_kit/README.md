@@ -251,6 +251,8 @@ two-letter codes are only read in patterns like "Remote - US".
 - The phrase filters (visa, relocation, "must be located in", years) are English.
   Ads in other languages can slip past them. The assistant must read the ad itself.
 - Country locks are found in ad text by sentence patterns. They can miss odd wording.
+- One response is capped. A web page over 2 MB is skipped (the board counts as a failed request, never a
+  half-read page). JSON APIs may be up to 20 MB, sitemaps up to 10 MB and RSS/XML feeds up to 5 MB.
 
 ## Search every source (any AI, with or without Python)
 

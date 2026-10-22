@@ -51,7 +51,7 @@ LD_DETAIL = ('<html><head><script type="application/ld+json">'
 def _http(routes: dict):
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append(url)
         for frag, resp in routes.items():
             if url.startswith(frag):

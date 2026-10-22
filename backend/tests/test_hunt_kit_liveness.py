@@ -374,3 +374,32 @@ def test_visible_text_ends_a_comment_at_either_closer_browsers_accept():
     assert hk._visible_text("A<!-- hidden note --!>B") == "A B"
     assert hk._visible_text("A<!-- hidden note -->B") == "A B"
     assert hk._visible_text("A<!-- one --!>B<!-- two -->C") == "A B C"
+
+
+def test_check_live_still_classifies_a_page_longer_than_its_300kb_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    # check_live reads only the head of a page. The response cap must not turn "longer than 300 KB" into a failed
+    # fetch, or every closed job page with a big inlined state would stay in the results as "unknown".
+    class _Resp:
+        status = 200
+
+        def __init__(self, body: bytes) -> None:
+            self._body = body
+
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def geturl(self) -> str:
+            return "https://a/closed"
+
+        def read(self, n: int = -1) -> bytes:
+            return self._body if n < 0 else self._body[:n]
+
+    page = b"This job is no longer available. " + b"x" * 400_000
+    monkeypatch.setattr(hk, "_open", lambda req, timeout: _Resp(page))
+    monkeypatch.setattr(hk, "check_url", lambda u: True)
+    col = hk.Collector(_args())
+    kept = hk.check_live(col, [{"url": "https://a/closed", "source": "t"}])
+    assert kept == [] and col.stats["t"]["live_dead"] == 1 and "live_unknown" not in col.stats["t"]

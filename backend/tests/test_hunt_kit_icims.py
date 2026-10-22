@@ -21,7 +21,7 @@ def _fx(name: str) -> str:
 def _stub(routes: dict):
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append(url)
         for frag, resp in routes.items():
             if frag in url:
@@ -77,7 +77,7 @@ def test_pagination_stops_on_empty_and_repeat():
 def test_max_pages_cap():
     pages = {}
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         if "/jobs/search" in url:
             n = int(url.split("pr=")[1].split("&")[0])
             pages[n] = 1
