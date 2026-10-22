@@ -236,6 +236,14 @@ and writes nothing; the same `request_id` with different fields is refused (409
 `idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
 After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
 
+Write tools take an optional `client_key` the same way: `save_artifact`,
+`record_event`, `bring_job`, `add_contact` and `ask_user` (your own id for this
+one write, 1-128 characters). The same `client_key` with the same fields returns
+the FIRST reply with `already_existed: true` and writes nothing; the same key with
+different fields is refused (409 `idempotency_key_reused`). Use a new key for
+each new write; after a network error re-read before you retry, then retry with
+the SAME key.
+
 An ask can also be answered by the user on the Job360 Needs-you page.
 
 When the user answered in chat, pass `user_words` (their exact words) to `answer_ask`: the answer then shows as theirs, via you.

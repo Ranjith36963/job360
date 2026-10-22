@@ -17,6 +17,7 @@ from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.api.routes.applications import AskOut
 from src.repositories.database import JobDatabase
+from src.services import idempotency
 from src.services.applications import asks as asks_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
@@ -34,6 +35,14 @@ class CreateAskRequest(BaseModel):
     application_id: Optional[int] = None
     question: str
     context: str = ""
+    # Gap roadmap slice 25 — optional idempotency key: the same key + same body returns the
+    # FIRST ask (already_existed=true), writing nothing; another body under it is a 409.
+    client_key: Optional[str] = None
+
+
+class CreateAskOut(AskOut):
+    # Slice 25 — true when this client_key was already used: the FIRST reply, nothing written.
+    already_existed: bool = False
 
 
 class AnswerAskRequest(BaseModel):
@@ -48,19 +57,27 @@ class ListAsksResponse(BaseModel):
     open_count: int
 
 
-@router.post("/asks", status_code=201, response_model=AskOut, dependencies=AUTH_FIRST)
+@router.post("/asks", status_code=201, response_model=CreateAskOut, dependencies=AUTH_FIRST)
 async def create_ask(
     body: CreateAskRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
+    async def _write() -> dict[str, Any]:
+        try:
+            return await asks_service.create_ask(
+                db, user.id, body.application_id, body.question, body.context, actor_for(user)
+            )
+        except SpineError as exc:
+            _raise(exc)
+            raise AssertionError("unreachable")  # _raise always raises
+
     try:
-        return await asks_service.create_ask(
-            db, user.id, body.application_id, body.question, body.context, actor_for(user)
+        return await idempotency.run_once(
+            db._db, user.id, "ask_user", body.client_key, body.model_dump(exclude={"client_key"}), _write
         )
-    except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+    except idempotency.IdempotencyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
 @router.get("/asks", response_model=ListAsksResponse, dependencies=AUTH_FIRST)
