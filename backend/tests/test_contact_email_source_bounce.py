@@ -434,7 +434,6 @@ async def test_check_outreach_stops_on_bounced_address_and_new_address_clears_it
 
 @pytest.mark.asyncio
 async def test_record_event_outreach_bounced_route_and_mcp(authenticated_async_context, fixture_user_id):
-    pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
     from src.api.routes.applications import OUTREACH_NEEDS_CONTACT
 
@@ -479,7 +478,6 @@ async def test_record_event_outreach_bounced_route_and_mcp(authenticated_async_c
 
 @pytest.mark.asyncio
 async def test_mcp_add_and_update_contact_take_email_source(authenticated_async_context):
-    pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
     async with authenticated_async_context() as client:
