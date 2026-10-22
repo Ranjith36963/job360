@@ -133,6 +133,7 @@ async def test_the_yes_stores_the_fingerprint_and_holds_while_nothing_changes(
         assert stored["fingerprint"] == {
             "cover_letter_id": None, "cover_letter_sha256": None, "form_filled_event_id": fill,
             "form_url": FORM, "profile_edit_id": 0,
+            "email_drafted_event_id": None, "email_to": None, "attachments": [],  # slice 31: no email draft
         }
         assert (await _check(client, app_id))["reason"] == "user_approved"
         assert (await _check(client, app_id))["decision"] == "submit", "reading twice changes nothing"
