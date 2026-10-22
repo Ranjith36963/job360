@@ -111,7 +111,8 @@ async def test_each_flag_fires_on_its_own_row_and_is_absent_otherwise(authentica
         await _fill(client, dup_b, FULL)
         cards = {c["application_id"]: c for c in (await _ready(client))["items"]}
         assert _codes(cards[none]) == ["no_answers"]
-        assert _codes(cards[guess]) == ["guessed"] and cards[guess]["flags"][0]["text"] == "An answer was guessed: Visa?"
+        assert _codes(cards[guess]) == ["guessed", "sensitive"]  # "Visa?" is also a private question
+        assert cards[guess]["flags"][0]["text"] == "An answer was guessed: Visa?"
         assert _codes(cards[blank]) == ["blank"] and cards[blank]["flags"][0]["text"] == "An answer is blank: Middle name"
         assert _codes(cards[gone]) == ["not_in_memory"]
         assert _codes(cards[nocv]) == ["no_cv"]

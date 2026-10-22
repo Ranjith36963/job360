@@ -777,6 +777,10 @@ class SubmitFacts:
     # user has not verified (``ready.has_unverified_guess``, the card's ``guessed`` flag). Asks
     # ``answer_guessed`` in EVERY mode; a yes does NOT clear it - the user verifies or edits the answer.
     guessed_unverified: bool = False
+    # Owner rule 2026-10-22: the newest ``form_filled`` holds an answer to a private, legal or risky question
+    # (any country) the user has not confirmed (``ready.has_unconfirmed_sensitive``, the card's ``sensitive``
+    # flag). Asks ``sensitive_unconfirmed`` in EVERY mode; a yes does NOT clear it - the user confirms the answer.
+    sensitive_unconfirmed: bool = False
     # Gap roadmap slice 8: the newest yes for this CV no longer holds (``kit.approval_stale``): the
     # part named here changed since the user said yes - ``expired`` (older than
     # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
@@ -806,8 +810,8 @@ REASONS: tuple[str, ...] = (
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "form_page_mismatch", "email_not_verified",
     "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
-    "type_first_pending", "below_score_line", "answer_guessed", "approval_stale", "required_unanswered",
-    "grant_scope",
+    "type_first_pending", "below_score_line", "answer_guessed", "sensitive_unconfirmed", "approval_stale",
+    "required_unanswered", "grant_scope",
 )
 
 # What each ``approval_stale`` part means, in the words the ask shows the user.
@@ -1041,7 +1045,7 @@ def may_submit(
     ``approval_stale`` naming the part.
     Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
-    ``below_score_line`` (4a4) and ``answer_guessed`` (4e) are NEVER cleared by a yes.
+    ``below_score_line`` (4a4), ``answer_guessed`` and ``sensitive_unconfirmed`` (4e) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
@@ -1157,6 +1161,13 @@ def may_submit(
             "An answer on this form was guessed and the user has not verified it, or the user changed it "
             "and the form still holds the guess. Do not submit; ask the user, type their answer, record a "
             "new form_filled (they can Verify or Edit it on Needs you).",
+        )
+    if application.sensitive_unconfirmed:
+        return SubmitDecision(
+            "ask", "sensitive_unconfirmed",
+            "This form asks a private, legal or risky question (identity, health, money, right to work, "
+            "criminal record...) and the user has not confirmed the answer. Do not submit; raise it with "
+            "ask_user, the user checks it on Needs you, then record a new form_filled.",
         )
     if application.other_session_hold is not None:
         held_by, session, since = application.other_session_hold
