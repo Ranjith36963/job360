@@ -47,4 +47,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
-        run: python scripts/migration_sweep.py $DRY_RUN | tee -a "$GITHUB_STEP_SUMMARY"
+        # pipefail: without it the step's exit code is tee's, and a sweep that
+        # could not run (exit 1) would read green.
+        run: |
+          set -euo pipefail
+          python scripts/migration_sweep.py $DRY_RUN | tee -a "$GITHUB_STEP_SUMMARY"
