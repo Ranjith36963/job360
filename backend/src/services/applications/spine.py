@@ -1607,6 +1607,7 @@ async def record_receipt(
     cover_letter_artifact_id: Optional[int] = None,
     applied_at: Optional[str] = None,
     request_id: Optional[str] = None,
+    referred_by_contact_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1630,6 +1631,7 @@ async def record_receipt(
         "application_id": application_id, "channel": channel, "note": note, "confirmation": confirmation,
         "answers": answers or [], "fields_filled": fields_filled or {}, "cv_artifact_id": cv_artifact_id,
         "cover_letter_artifact_id": cover_letter_artifact_id, "applied_at": applied_at,
+        "referred_by_contact_id": referred_by_contact_id,
     }
     channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
@@ -1658,6 +1660,18 @@ async def record_receipt(
         replay = await _receipt_replay(db, user_id, request_id, idem_body)
         if replay is not None:
             return replay
+
+    # The referrer must be the caller's own contact linked to THIS application. One message for
+    # unknown, foreign and other-job contacts, so it is no existence oracle. (Not via contacts:
+    # contacts imports spine.)
+    if referred_by_contact_id is not None:
+        cur = await db._db.execute(
+            "SELECT application_id FROM application_contacts WHERE id = ? AND user_id = ?",
+            (referred_by_contact_id, user_id),
+        )
+        ref = await cur.fetchone()
+        if ref is None or dict(ref)["application_id"] != application_id:
+            raise SpineError(422, "referred_by_contact_id must be one of your contacts linked to this application")
 
     cv_artifact = await _resolve_receipt_artifact(db, user_id, application_id, "cv", cv_artifact_id)
     if cv_artifact_id is None and cv_artifact is not None:
@@ -1718,8 +1732,9 @@ async def record_receipt(
                 "(user_id, job_id, sent_at, job_title, job_company, job_location, job_apply_url, job_source, "
                 " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
                 " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
-                " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+                " referred_by_contact_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, app_row["job_id"], sent_at,
                     app_row.get("job_title") or "", app_row.get("job_company") or "",
@@ -1731,6 +1746,7 @@ async def record_receipt(
                     application_id, cv_artifact["id"] if cv_artifact else None,
                     cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
                     confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
+                    referred_by_contact_id,
                 ),
             )
             receipt_id = int(cur.lastrowid or 0)
@@ -1750,6 +1766,7 @@ async def record_receipt(
                 "confirmation": confirmation or "",
                 "url": f"/applications/{application_id}", "event_id": event["event_id"],
                 "possible_duplicate": possible_duplicate, "already_existed": False,
+                "referred_by_contact_id": referred_by_contact_id,
             }
             if request_id is not None:
                 await idempotency.store(db._db, user_id, _RECEIPT_TOOL, request_id, idem_body, result)
@@ -1765,6 +1782,7 @@ async def record_receipt(
         extra={
             "event": "receipt_created", "receipt_id": receipt_id,
             "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
+            "referred_by_contact_id": referred_by_contact_id,
         },
     )
     if possible_duplicate:
@@ -2057,7 +2075,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     """
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
-        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, referred_by_contact_id, "
         "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
@@ -2079,6 +2097,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "possible_duplicate": r.get("possible_duplicate") or "",
         "kit_event_id": r.get("kit_event_id"),
         "kit_sha256": r.get("kit_sha256") or "",
+        "referred_by_contact_id": r.get("referred_by_contact_id"),
         "cv_version_no": await _artifact_version_no(
             db, user_id, application_id, "cv", r.get("cv_artifact_id")
         ),
