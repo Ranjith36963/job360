@@ -1,9 +1,13 @@
-"""Generic applicant-tracking platforms for the hunt kit, part 3: Radancy (TalentBrew) and UKG Ready. Same contract as kit_ats_eu.py:
+"""Generic applicant-tracking platforms for the hunt kit, part 3: Radancy (TalentBrew), UKG Ready, eArcu, BeeSite and the
+Workable marketplace. Same contract as kit_ats_eu.py:
 ``fetch(row, http, stats) -> list[Job]``, never raises, network only through the ``http`` callable, no file IO at import, standard library only. Nothing here ranks or scores a job.
 
 Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
   radancy             the career-site host (``careers.ing.com``), optionally ``host/<lang>`` (default ``en``)
   ukgready            ``<pod host>/<tenant>`` (``secure4.saashr.com/6162397``); NOT UKG Pro Recruiting (``ultipro``)
+  earcu               the full careers host (``careers.cambridge.org``), not a subdomain of a vendor domain
+  beesite             the portal's search host, ``<name>.app.beesite.de``
+  workablemarketplace the company's opaque hashid on jobs.workable.com (NOT the apply.workable.com ``workable`` board)
 
 Endpoints, params and field names are adapted from the MIT-licensed freehire and career-ops source adapters (see NOTICE.md);
 the code is original. The container this was written in could not reach any of these hosts, so every parser is tested on
@@ -14,10 +18,13 @@ NOT built (written up in README and NOTICE):
   HumanBit (freehire humanbit.go:9-18, :37-44): the board's listing page is a Next.js flight stream of about 5.6 MB (the
   reference measures it, :14-16) and the kit refuses a page over 2 MB; its fields also live on two page shapes read through
   the flight primitives. A jobs.humanbit.ai link is reported as unsupported (hunt_kit.board_from_job_url).
+BeeSite posting bodies: the reference opens each posting's page on the EMPLOYER's own domain when the search record has no
+body (beesite.go:174-198). That is a request off the board's host, so the kit reads only what the search record carries.
 """
 # ruff: noqa: E501
 from __future__ import annotations
 
+import json
 import re
 import sys
 import uuid
@@ -37,12 +44,14 @@ from kit_ats_eu import (  # noqa: E402
     Job,
     _body,
     _get,
+    _iso_date,
     _job,
     _join,
     _ld_posting,
     _Node,
     _open_details,
     _remote_from,
+    _rfc822_date,
     _sitemap_locs,
     _title_ok,
     _tree,
@@ -57,6 +66,9 @@ _XHR = {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
 
 DETAIL_CAP = 25  # detail requests per board (the kit's own cap; the references open every posting)
 UKG_PAGE = 200  # ukgready.go:78-80 the API maximum
+BEESITE_PAGE = 100
+BEESITE_PAGES = 40  # beesite.go:41-44 the largest tenant measured is 28 pages
+WM_PAGES = 100  # workablemarketplace.go:22-24
 
 
 def _clean(value: Any) -> str:
@@ -332,7 +344,207 @@ def _ukgready(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- eArcu
+# Borrowed from freehire internal/ingest/sources/earcu.go:11-17 (eArcu is a UK ATS; every client runs on its own careers host, so
+# the board is the FULL host, not a vendor subdomain), :52-53 (keyless RSS at https://<host>/jobs/rss), :39-47 and :57-71 (item
+# link, title, description, pubDate), :49-56 (the posting id is the number before "/description" in the vacancy URL; an item
+# with none is dropped), :58-61 (the title carries a trailing " (<ref>)" reference), :63-69 and :122-139 (the description is a
+# "Key: value, ..." metadata prefix followed by <div id="rssjobdesc"> and the body; location comes from the prefix only, so a
+# "Country:" in the body never leaks: the Location value runs to ", eArcu Vacancy Reference:", else the Country value),
+# :111-120 and :141-157 (no inline body: the detail page's schema.org JobPosting description; a failed fetch keeps the item with
+# no body) and :159-169 and earcu_test.go:19-48 (RFC 822 pubDate with a literal "Z" zone and an unpadded day).
+_EARCU_ID = re.compile(r"/(\d+)/description/?$")
+_EARCU_REF = re.compile(r"\s*\(\d+\)\s*$")
+_EARCU_KEY = ", eArcu Vacancy Reference:"
+_EARCU_PREFIX_MAX = 2000  # a real metadata prefix is short; a hostile one is cut before any scan
+
+
+def _earcu_split(desc: str) -> tuple[str, str]:
+    i = desc.find('<div id="rssjobdesc"')
+    return (desc[:i], desc[i:]) if i >= 0 else (desc[:_EARCU_PREFIX_MAX], "")
+
+
+def _earcu_place(prefix: str) -> str:
+    i = prefix.find("Location:")
+    j = prefix.find(_EARCU_KEY, i) if i >= 0 else -1
+    if i >= 0 and j > i and prefix[i + 9:j].strip():
+        return _clean(prefix[i + 9:j])
+    k = prefix.find("Country:")
+    return _clean(prefix[k + 8:].split(",", 1)[0]) if k >= 0 else ""
+
+
+def _earcu(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """eArcu careers site: the keyless /jobs/rss feed (body inline), ld+json posting pages only for items without one."""
+    host = str(row.get("token") or "").strip().lower()
+    if not _RADANCY_HOST.fullmatch(host):
+        return None
+    st, feed = _get(http, f"https://{host}/jobs/rss", as_json=False, headers=_XML)
+    root = safe_fromstring(feed) if st == 200 and isinstance(feed, str) else None
+    if root is None:
+        return None
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in root.iter("item"):
+        try:
+            def f(name: str, _it: Any = item) -> str:
+                el = _it.find(name)
+                return (el.text or "").strip() if el is not None else ""
+            url = _on(f("link"), host)
+            m = _EARCU_ID.search(urlsplit(url).path) if url else None
+            title = _clean(_EARCU_REF.sub("", f("title")))
+            if m is None or not title or m.group(1) in seen:
+                continue
+            seen.add(m.group(1))
+            prefix, body = _earcu_split(f("description"))
+            items.append({"id": m.group(1), "url": url, "title": title, "place": _earcu_place(prefix), "body": _body(body),
+                          "posted": _rfc822_date(f("pubDate"))})
+        except Exception:  # noqa: BLE001, S112 - one bad item must not lose the board
+            continue
+    pages = _open_details(row, http, [(i["url"], i["title"]) for i in items if not i["body"]], DETAIL_CAP)
+    jobs: list[Job] = []
+    for i in items:
+        try:
+            desc = i["body"]
+            if not desc and i["url"] in pages:
+                ld = _ld_posting(_tree(pages[i["url"]]))
+                desc = _body(ld.get("description")) if ld else ""
+            jobs.append(_job(row, "earcu", title=i["title"], url=i["url"], location=i["place"], posted=i["posted"], description=desc,
+                             remote=_remote_from(i["place"]), extra={"job_id": i["id"]}))
+        except Exception:  # noqa: BLE001, S112
+            continue
+    return jobs
+
+
+# --------------------------------------------------------------------------- BeeSite
+# Borrowed from freehire internal/ingest/sources/beesite.go:15-21 (milch & zucker career portals: jobs.mercedes-benz.com,
+# jobs.porsche.com; every portal searches through a keyless JSON endpoint on its own <name>.app.beesite.de host, and the board is
+# that host), :88-91 and :113-121 (a board must be a *.beesite.de host), :107-111 (GET https://<host>/search?data=<json> with
+# {"LanguageCode":"EN","SearchParameters":{"FirstItem":n,"CountItem":100}}; FirstItem is 1-based; the default order is kept),
+# :123-146 (page until a page is short; SearchResultCountAll is the stated total), :36-60 (MatchedObjectId, descriptor
+# PositionTitle, PositionURI, PublicationStartDate, PositionFormattedDescription[].Content/Tasks/Qualifications, PositionLocation
+# [].CityName/CountryName, PositionSchedule, CareerLevel), :200-248 (title entity-decoded; the URL is the portal's own page
+# PositionURI on the employer's domain; body = the three description parts joined; places "City, Country" distinct joined by
+# "; "; an Internship career level is an internship). The record's body is read only when present: the reference opens the
+# employer's page otherwise (:174-198), which is a request off the board's host, so the kit leaves that body empty.
+_BEESITE_HOST = re.compile(r"[a-z0-9][a-z0-9-]{0,80}(?:\.[a-z0-9-]{1,80}){0,3}\.beesite\.de")
+
+
+def _beesite_url(host: str, first: int) -> str:
+    q = json.dumps({"LanguageCode": "EN", "SearchParameters": {"FirstItem": first, "CountItem": BEESITE_PAGE}}, separators=(",", ":"))
+    return f"https://{host}/search?data={quote(q, safe='')}"
+
+
+def _beesite(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """BeeSite portal: the keyless search answers whole posting records (some with the body); no employer page is opened."""
+    host = str(row.get("token") or "").strip().lower()
+    if not _BEESITE_HOST.fullmatch(host):
+        return None
+    rows: dict[str, dict[str, Any]] = {}
+    for page in range(BEESITE_PAGES):
+        st, data = _get(http, _beesite_url(host, page * BEESITE_PAGE + 1), headers=_JSON)
+        sr = data.get("SearchResult") if st == 200 and isinstance(data, dict) else None
+        items = sr.get("SearchResultItems") if isinstance(sr, dict) else None
+        if not isinstance(items, list):
+            if page > 0:
+                break
+            return None
+        fresh = 0
+        for it in items:
+            ident = it.get("MatchedObjectId") if isinstance(it, dict) else None
+            d = it.get("MatchedObjectDescriptor") if isinstance(it, dict) else None
+            if isinstance(ident, str) and ident and ident not in rows and isinstance(d, dict):
+                rows[ident] = d
+                fresh += 1
+        total = sr.get("SearchResultCountAll") if isinstance(sr, dict) else None
+        if len(items) < BEESITE_PAGE or not fresh or (isinstance(total, int) and len(rows) >= total):
+            break
+    jobs: list[Job] = []
+    for ident, d in rows.items():
+        try:
+            title = _clean(_body(d.get("PositionTitle")))
+            raw = str(d.get("PositionURI") or "").strip()
+            u = urlsplit(raw)
+            if (not title or u.scheme != "https" or "." not in (u.hostname or "") or u.username is not None
+                    or u.password is not None or u.port not in (None, 443) or any(c.isspace() for c in raw)):
+                continue  # a link back to the posting is a plain https URL on a real host: no userinfo, odd port or blanks
+            parts = d.get("PositionFormattedDescription")
+            desc = _body("".join(str(p.get(k) or "") for p in parts if isinstance(p, dict) for k in ("Content", "Tasks", "Qualifications"))
+                         if isinstance(parts, list) else "")
+            places: list[str] = []
+            for loc in d.get("PositionLocation") or []:
+                p = _join(_clean(loc.get("CityName")), _clean(loc.get("CountryName"))) if isinstance(loc, dict) else ""
+                if p and p not in places:
+                    places.append(p)
+            level = d.get("CareerLevel")
+            sched = d.get("PositionSchedule")
+            kind = _clean(sched[0].get("Name")) if isinstance(sched, list) and sched and isinstance(sched[0], dict) else ""
+            if isinstance(level, list) and any(isinstance(x, dict) and str(x.get("Name") or "").lower() == "internship" for x in level):
+                kind = "Internship"
+            place = "; ".join(places)
+            jobs.append(_job(row, "beesite", title=title, url=u._replace(fragment="").geturl(), location=place,
+                             posted=_iso_date(d.get("PublicationStartDate")), description=desc, remote=_remote_from(place),
+                             extra={"job_id": ident, "employment_type": kind}))
+        except Exception:  # noqa: BLE001, S112 - one bad posting must not lose the board
+            continue
+    return jobs
+
+
+# --------------------------------------------------------------------------- Workable marketplace
+# Borrowed from freehire internal/ingest/sources/workablemarketplace.go:10-14 (the public marketplace API
+# https://jobs.workable.com/api/v1/companies/<hashid> serves postings a company published to the marketplace but not to a widget
+# board, so a marketplace-only employer is reachable here; the board is the company's opaque hashid), :35-47 (job fields id,
+# title, state, description, employmentType, workplace, url, created, location.city / countryName), :56-61 (pages chain through
+# nextPageToken, sent as ?pageToken=<token>), :63-69 (the first page failing fails the board; a later one ends it with what was
+# gathered), :72-82 (only state "published" is a vacancy; the same id twice is one), :84-99 (workplace "remote" = remote; the
+# list carries the inline HTML body; location = city, country) and :101-106 (stop on an empty token or a page with nothing new).
+_WM_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_WM_HOST = "jobs.workable.com"
+
+
+def _workablemarketplace(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """Workable marketplace company feed: JSON pages chained by nextPageToken, the body inline; no detail request."""
+    hashid = str(row.get("token") or "").strip()
+    if not _WM_ID.fullmatch(hashid):
+        return None
+    base = f"https://{_WM_HOST}/api/v1/companies/{hashid}"
+    jobs: list[Job] = []
+    seen: set[str] = set()
+    token = ""
+    for page in range(WM_PAGES):
+        st, data = _get(http, base + (f"?{urlencode({'pageToken': token})}" if token else ""), headers=_JSON)
+        batch = data.get("jobs") if st == 200 and isinstance(data, dict) else None
+        if not isinstance(batch, list):
+            if page > 0:
+                break
+            return None
+        fresh = 0
+        for j in batch:
+            try:
+                ident = str(j.get("id") or "") if isinstance(j, dict) else ""
+                if not ident or j.get("state") != "published" or ident in seen:
+                    continue
+                seen.add(ident)
+                fresh += 1
+                title, url = _clean(j.get("title")), _on(str(j.get("url") or ""), _WM_HOST)
+                if not title or not url:
+                    continue
+                loc = j.get("location") if isinstance(j.get("location"), dict) else {}
+                place = _join(_clean(loc.get("city")), _clean(loc.get("countryName")))
+                jobs.append(_job(row, "workablemarketplace", title=title, url=url, location=place, posted=_iso_date(j.get("created")),
+                                 description=_body(j.get("description")), remote=True if j.get("workplace") == "remote" else None,
+                                 extra={"job_id": ident, "employment_type": _clean(j.get("employmentType"))}))
+            except Exception:  # noqa: BLE001, S112 - one bad posting must not lose the board
+                continue
+        token = str(data.get("nextPageToken") or "")
+        if not token or not fresh:
+            break
+    return jobs
+
+
 ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
+    "beesite": _wrap(_beesite),
+    "earcu": _wrap(_earcu),
     "radancy": _wrap(_radancy),
     "ukgready": _wrap(_ukgready),
+    "workablemarketplace": _wrap(_workablemarketplace),
 }

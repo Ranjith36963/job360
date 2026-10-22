@@ -6468,5 +6468,9 @@
 {"name":"Neoway","ats":"inhire","board":"neoway","source":"freehire"},
 {"name":"Dynamox","ats":"solides","board":"dynamox","source":"freehire"},
 {"name":"Reivax","ats":"solides","board":"reivax","source":"freehire"},
-{"name":"Vagas.com.br (tech areas)","ats":"vagas","board":"all","source":"freehire"}
+{"name":"Vagas.com.br (tech areas)","ats":"vagas","board":"all","source":"freehire"},
+{"name":"Cambridge University Press & Assessment","ats":"earcu","board":"careers.cambridge.org","source":"freehire"},
+{"name":"Mercedes-Benz","ats":"beesite","board":"mercedes-benz-beesite-production-gjb.app.beesite.de","source":"freehire"},
+{"name":"Porsche","ats":"beesite","board":"porsche-beesite-production-gjb.app.beesite.de","source":"freehire"},
+{"name":"Intuition Machines","ats":"workablemarketplace","board":"ix7jhWd4JnugmXDK5RaQSZ","source":"freehire"}
 ]

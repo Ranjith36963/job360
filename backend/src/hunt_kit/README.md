@@ -108,12 +108,15 @@ Vagas.com.br (`vagas:all`, the national board's three tech listings). A posting 
 passes your title filter, at most 25 per board, and the first refusal ends the board's detail requests. Gupy, InHire and HiringRoom
 list a posting without its description when it was not opened; Vagas.com.br lists only the postings it opened.
 
-`kit_ats_misc3.py` adds two generic platforms: Radancy / TalentBrew career sites (`radancy:<career-site host>`, e.g.
-`radancy:careers.ing.com`, optionally `host/<lang>`; the site's results fragment, else its sitemap) and UKG Ready
+`kit_ats_misc3.py` adds five generic platforms: Radancy / TalentBrew career sites (`radancy:<career-site host>`, e.g.
+`radancy:careers.ing.com`, optionally `host/<lang>`; the site's results fragment, else its sitemap), UKG Ready
 (`ukgready:<pod host>/<tenant>`, e.g. `secure4.saashr.com/6162397`; a different product from UKG Pro Recruiting, which is
-`ultipro`). A posting page is opened only for a card that passes your title filter, at most 25 per board; the first
-refusal ends the board's pages. HumanBit is not read: its listing page is about 5.6 MB, over the kit's page limit, so a
-`jobs.humanbit.ai` link is reported as unsupported. A Radancy link on an employer's own domain is recognised by its path.
+`ultipro`), eArcu (`earcu:<careers host>`, the site's RSS feed), BeeSite (`beesite:<name>.app.beesite.de`, the portal's
+search records; a body is shown only when the record carries one) and the Workable marketplace
+(`workablemarketplace:<company hashid>`, not the `workable` board). A posting page is opened only for a card that passes
+your title filter, at most 25 per board; the first refusal ends the board's pages. HumanBit is not read: its listing page is
+about 5.6 MB, over the kit's page limit, so a `jobs.humanbit.ai` link is reported as unsupported. A Radancy or eArcu link on
+an employer's own domain is recognised by its path.
 
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
