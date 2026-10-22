@@ -43,6 +43,8 @@ SIX = (
     # 2026-10-18 bulk-apply C1 / C2 / R1 (tests/test_bulk_pacing_grants_pages.py).
     "assistant_settings.weekly_cap", "assistant_settings.min_gap_minutes", "assistant_settings.apply_hours",
     "assistant_settings.auto_grant_count", "assistant_settings.auto_grant_until",
+    # 2026-10-20 G087 outreach_send (tests/test_outreach_gate.py).
+    "assistant_settings.outreach_send",
 )
 PROGRESS = "assistant_settings.setup_progress"
 

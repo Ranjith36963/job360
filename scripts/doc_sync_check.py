@@ -21,6 +21,8 @@ check trains people to ignore the loop).
 Read-only on purpose: this loop REPORTS drift, it never edits docs
 (see docs/harness/maintenance/loop1_safe_reenable.md — "verify=read is safe").
 Run: python scripts/doc_sync_check.py   (from the repo root)
+     python scripts/doc_sync_check.py --baseline BASE_DIR   (PRs: fail only on
+     drift BASE_DIR, a checkout of the PR's base, does not already have)
 """
 
 from __future__ import annotations
@@ -78,23 +80,6 @@ LIVING_DOCS = [
     # deleted whole 2026-09-05 (slice 5, #483) along with the job-search-and-
     # score product it described — there is no pillars folder to watch any
     # more, and `pillars_fully_watched()` went with it.
-]
-
-# MACHINE-WRITTEN docs. Not LIVING prose: `scripts/gen_doc_blocks.py --write`
-# rewrites every line of these from the code, and `gen_doc_blocks.py` (no args)
-# fails CI if the file on disk disagrees. So they carry no `last-verified`
-# stamp and no doc-type of their own — there is no human whose freshness is in
-# question.
-#
-# They ARE read by the countable-fact loop below, and that is the load-bearing
-# part. Slice 8 (2026-09-12) moved both generated blocks out of ARCHITECTURE.md
-# and deleted the hand-written copies of the route/endpoint, test-file and
-# workflow counts along with them. The generated row is now the ONLY claim for
-# those facts, so leaving this list out of the loop would make four guards
-# report "claim not found in any doc" — the guard-watches-nothing alarm — and
-# the honest fix is to read the doc that now holds the claim.
-GENERATED_DOCS = [
-    "docs/GENERATED.md",
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -821,8 +806,7 @@ def collected_baseline_claims() -> list[tuple[str, str, int]]:
 
     NOT a check against a live collection. Collecting the suite imports conftest,
     which wants a Postgres on 5433, and this runs in a blocking CI step that must
-    stay fast and offline — test_file_count() exists for what the filesystem can
-    answer.
+    stay fast and offline.
 
     This asks a different question, and the only one every other guard here is
     structurally unable to ask: DO TWO DOCS DISAGREE WITH EACH OTHER?
@@ -916,27 +900,6 @@ def skill_dead_paths() -> list[tuple[str, str, str]]:
     return out
 
 
-def workflow_count() -> int:
-    """Number of GitHub Actions workflow files.
-
-    Promoted from the nightly doc-truth routine 2026-08-24, which found the
-    docs claiming 26 while three more had landed. A countable fact an LLM
-    re-discovers every night is a fact this script should hold for free.
-    """
-    return len(list((ROOT / ".github/workflows").glob("*.yml")))
-
-
-def test_file_count() -> int:
-    """Number of backend test_*.py files.
-
-    NOT the collected-test count. Collection imports conftest, which wants a
-    live Postgres, and this checker runs in a blocking CI step that must stay
-    fast and offline. The collected number stays the routine's job; the file
-    count is filesystem-only and cannot lie.
-    """
-    return len(list((ROOT / "backend/tests").glob("test_*.py")))
-
-
 def migration_file_count() -> int:
     """Number of forward-migration files, as a VALIDATED ``0000..head`` sequence.
 
@@ -1027,26 +990,6 @@ def hard_rule_count() -> int:
     for m in re.finditer(r"^(\d+(?:\s*\+\s*\d+)*)\. \*\*", text, re.M):
         numbers.update(int(n) for n in re.findall(r"\d+", m.group(1)))
     return len(numbers)
-
-
-def route_module_count() -> int:
-    """Route modules under backend/src/api/routes/, excluding __init__."""
-    d = ROOT / "backend" / "src" / "api" / "routes"
-    if not d.is_dir():
-        return -1
-    return len([p for p in d.glob("*.py") if p.name != "__init__.py"])
-
-
-def endpoint_count() -> int:
-    """`@router.<verb>` decorators across the route modules."""
-    d = ROOT / "backend" / "src" / "api" / "routes"
-    if not d.is_dir():
-        return -1
-    n = 0
-    for p in d.glob("*.py"):
-        n += len(re.findall(r"@router\.(?:get|post|put|patch|delete)\b",
-                            p.read_text(encoding="utf-8", errors="replace")))
-    return n
 
 
 def dead_path_claims() -> list[tuple[str, str]]:
@@ -1164,18 +1107,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # all wrong at once. A drift checker that only guards what it already
         # guarded is how a doc estate dies while its tripwire stays green.
         ("hard-rules", hard_rule_count(), r"the (\d+) hard rules"),
-        ("route-modules", route_module_count(), r"(\d+) route modules"),
-        ("endpoints", endpoint_count(), r"\((\d+) endpoints"),
-        # Promoted from the nightly doc-truth routine 2026-08-24. Each of these
-        # was drift the LLM found by reading; they are countable, so they belong
-        # here where they cost nothing and are caught on every push.
-        ("workflows", workflow_count(), r"(\d+) workflows in"),
-        # `\*{0,2}` around the digits tolerates markdown bold ("across **133**
-        # `test_*.py` files", backend/README.md) as well as plain prose
-        # ("across 135 `test_*.py` files", ARCHITECTURE.md) — added
-        # 2026-09-07 after the checker couldn't see backend/README.md's own
-        # claim because its bold asterisks broke the naive `(\d+)` match.
-        ("test-files", test_file_count(), r"across \*{0,2}(\d+)\*{0,2} `?test_\*\.py`? files"),
     ]
 
     # String-valued facts. Kept separate because the numeric loop below does
@@ -1201,7 +1132,7 @@ def main() -> int:
     matches_per_fact: dict[str, int] = {}
     today = _dt.date.today()
 
-    for rel in LIVING_DOCS + GENERATED_DOCS:
+    for rel in LIVING_DOCS:
         path = ROOT / rel
         if not path.exists():
             # A vanished LIVING doc is exactly the stale-merge disaster case.
@@ -1227,13 +1158,6 @@ def main() -> int:
                     matches_per_fact[fact] = matches_per_fact.get(fact, 0) + 1
                     if m.group(1) != actual_text:
                         drift.append((rel, str(i), fact, m.group(1), actual_text))
-
-        # Everything below this line judges a HUMAN: is the prose stale, is the
-        # file stamped, when did someone last verify it. None of those questions
-        # mean anything for a file the build rewrites from code every run, and
-        # asking them would demand a 45-day freshness ritual on machine text.
-        if rel in GENERATED_DOCS:
-            continue
 
         for phrase, why in FORBIDDEN_PHRASES:
             for i, line in enumerate(lines, start=1):
@@ -1384,6 +1308,105 @@ def main() -> int:
     return 1
 
 
+# ─── PR baseline: red only for THIS PR's drift (owner decision 2026-10-22) ────
+# On 2026-10-21 drift on main (a duplicate migration prefix) turned 28 open PRs
+# red at once, and people merged main into PRs just to clear it. With
+# `--baseline DIR` (DIR = a checkout of the PR's base commit) the base's OWN
+# checker judges the base tree, this checker judges this tree, and only
+# findings the base does not have fail the run. The rest print as inherited.
+# Main's drift is still a red build on main: doc-sync.yml runs on push to main
+# without --baseline. When the base gives nothing comparable, every finding
+# counts as this PR's (fail closed, i.e. exactly the old behaviour).
+_REPORT_ROW = re.compile(r"^\| (.*) \|$")
+_CRASH_PREFIX = "doc_sync_check crashed:"
+
+
+def _run_report(root: Path) -> tuple[int, str, str]:
+    """Run root's own doc_sync_check.py on root's tree: (exit, stdout, stderr)."""
+    env = {**os.environ, "JOB360_ROOT": str(root), "PYTHONIOENCODING": "utf-8"}
+    p = subprocess.run([sys.executable, str(root / "scripts" / "doc_sync_check.py")],
+                       cwd=root, env=env, capture_output=True, check=False,
+                       encoding="utf-8", errors="replace", timeout=300)
+    return p.returncode, p.stdout, p.stderr
+
+
+def report_findings(code: int, out: str, err: str, root: Path) -> set[str] | None:
+    """The comparable findings of one run, or None if it gave nothing comparable.
+
+    A drift row minus its line number (an edit above an inherited finding moves
+    it, and must not make it this PR's), with the tree's own path masked; a
+    crash is its one message.
+    """
+    def norm(s: str) -> str:
+        return s.replace(str(root), "<root>")
+
+    if code == 0:
+        return set()
+    if code == 1:
+        rows: set[str] = set()
+        for line in out.splitlines():
+            m = _REPORT_ROW.match(line.strip())
+            if not m:
+                continue
+            cells = [c.strip() for c in m.group(1).split(" | ")]
+            if cells[:2] == ["File", "Line"]:
+                continue
+            if len(cells) == 5:
+                del cells[1]
+            rows.add(norm(" | ".join(cells)))
+        return rows or None
+    if code == 2:
+        crash = [ln for ln in err.splitlines() if ln.startswith(_CRASH_PREFIX)]
+        return {norm(crash[-1])} if crash else None
+    return None
+
+
+def _annotate(level: str, title: str, text: str) -> None:
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::{level} title={title}::{text}")
+
+
+def baseline_main(base: Path) -> int:
+    hcode, hout, herr = _run_report(ROOT)
+    sys.stdout.write(hout)
+    sys.stdout.write(herr)
+    head = report_findings(hcode, hout, herr, ROOT)
+    if head is None:
+        print(f"\nBaseline: this run gave no comparable output (exit {hcode}); judged as before.")
+        return hcode or 2
+    if not head:
+        return 0
+    try:
+        bcode, bout, berr = _run_report(base)
+        base_found = report_findings(bcode, bout, berr, base)
+    except (OSError, subprocess.SubprocessError) as exc:
+        bcode, base_found = -1, None
+        berr = str(exc)
+    print("\n## Baseline: the PR's base commit\n")
+    if base_found is None:
+        _annotate("warning", "drift baseline unavailable",
+                  f"the base run gave nothing comparable (exit {bcode}); every finding "
+                  "is judged as this PR's (fail closed)")
+        print("The base run gave nothing comparable, so every finding above is this PR's.")
+        return hcode
+    inherited = sorted(head & base_found)
+    new = sorted(head - base_found)
+    if inherited:
+        print(f"**inherited from main (not this PR's): {len(inherited)}.** Fix these on main, "
+              "not in this PR.\n")
+        for f in inherited:
+            print(f"- {f}")
+            _annotate("warning", "drift inherited from main (not this PR's)", f)
+    if not new:
+        print("\nNo drift of this PR's own. OK")
+        return 0
+    print(f"\n**this PR's own drift: {len(new)}.** Fix it in this PR.\n")
+    for f in new:
+        print(f"- {f}")
+        _annotate("error", "drift added by this PR", f)
+    return hcode
+
+
 if __name__ == "__main__":
     if "--budget-only" in sys.argv[1:]:
         sys.exit(budget_only())
@@ -1393,6 +1416,13 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 — very old runtimes; keep going
         pass
+    if "--baseline" in sys.argv[1:]:
+        _args = sys.argv[1:]
+        _i = _args.index("--baseline")
+        if _i + 1 >= len(_args):
+            print("doc_sync_check: --baseline needs the base checkout's directory", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(baseline_main(Path(_args[_i + 1]).resolve()))
     try:
         sys.exit(main())
     except Exception as exc:  # noqa: BLE001 — a broken checker must be loud, not a silent pass

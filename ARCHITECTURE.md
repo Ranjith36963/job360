@@ -3,7 +3,7 @@
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
-> This file describes the one path the app has. The path itself is stated once, in root [`CLAUDE.md`](CLAUDE.md); an Application is born in `services/applications/spine.birth_application`, called from `api/routes/bring.py`. Route and endpoint counts: [`docs/GENERATED.md`](docs/GENERATED.md).
+> This file describes the one path the app has. The path itself is stated once, in root [`CLAUDE.md`](CLAUDE.md); an Application is born in `services/applications/spine.birth_application`, called from `api/routes/bring.py`. Route and endpoint counts: measure it (`ls`, `grep -c`, `python -m pytest --collect-only -q`).
 >
 > **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day.** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
 >
@@ -11,7 +11,7 @@
 
 ## Repo facts
 
-The countable facts — migration head, route and endpoint counts, test-file count, workflow count, hard-rule count — are machine-written into [`docs/GENERATED.md`](docs/GENERATED.md) by `scripts/gen_doc_blocks.py`. They are deliberately NOT repeated here: a generated block beside a prose copy is two copies again, and a block that rewrites itself on every merge is what made this file conflict with every open PR that touched its prose.
+The countable facts — migration head, route and endpoint counts, test-file count, workflow count, hard-rule count — are written nowhere: measure it (`ls`, `grep -c`, `python -m pytest --collect-only -q`). A committed count changes on every PR that adds a route or a test, and every other open PR then conflicts on it (2026-10-20: 22 of 36 open PRs, which is why the generated counts file was deleted).
 
 ---
 
@@ -25,10 +25,10 @@ job360/
 │   ├── data/                         # Runtime (gitignored). NO jobs.db — the store is Postgres; `core.settings.DB_PATH` is a connection selector `repositories.pg.connect` maps to a schema, not a file
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: repo facts above)
 │   ├── src/
-│   │   ├── cli.py                    # Click CLI: api, setup-profile
+│   │   ├── cli.py                    # Click CLI — `python -m src.cli --help` for the commands
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE constraint, still used by a brought ad
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, route modules (counts: repo facts above)
-│   │   │   └── routes/               # `ls` it for the module list; the route table is docs/GENERATED.md
+│   │   │   └── routes/               # `ls` it for the module list; `grep -n '@router' routes/*.py` for the routes
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, rate limits, the ESCO flag
 │   │   │   ├── observability.py      # Sentry init
@@ -44,7 +44,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # file count: `docs/GENERATED.md` (collected-test count: measure it, never quote it)
+│   └── tests/                        # measure the count (`ls tests/test_*.py | wc -l`), never quote it
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4
 │   └── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 ├── docs/                             # every doc, indexed: docs/README.md
@@ -119,7 +119,7 @@ compares, counts down and rate-limits it (`api/routes/files.py`), and
 `utils.logger.redact_path` keeps the token out of every log and Sentry event.
 Caps: the `KIT_*` and `FILE_*` constants in `core/settings.py`.
 `application_receipts` gained `possible_duplicate`, `kit_event_id`,
-`kit_sha256`, all set at INSERT; migration 0071 added `answers_from` / `answers_count`
+`kit_sha256`, all set at INSERT; migration 0077 added `answers_from` / `answers_count`
 (a receipt recorded without answers freezes the newest form event's, `spine.record_receipt`).
 The human in the loop is the note events in
 `services/applications/kit.KIT_EVENT_TYPES`, validated in the `record_event`
@@ -190,10 +190,7 @@ Profile extraction infers a candidate's seniority band from job titles
 
 ## API Routes
 
-Every endpoint the app declares. Generated, so it cannot disagree with the
-routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
-
-The full table — every method, path and router file, generated from the routers themselves — lives in [`docs/GENERATED.md`](docs/GENERATED.md).
+Read the routers: `grep -n '@router\.' backend/src/api/routes/*.py`, or open `http://localhost:8000/docs` with the backend running.
 
 ## Configuration
 

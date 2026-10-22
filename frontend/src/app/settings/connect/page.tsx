@@ -280,9 +280,9 @@ export function dailyCheckStatusLine(
   connected: boolean | null
 ): string | null {
   if (state === "auto" || state === "scheduled") {
-    return "Your assistant reads Gmail for your open applications, records what happened, and sends the outreach messages it wrote.";
+    return "Your assistant reads Gmail for your open applications and records what happened.";
   }
-  if (state === "ask") return "Your assistant asks you before each Gmail check and only drafts messages.";
+  if (state === "ask") return "Your assistant asks you before each Gmail check.";
   if (state === "paused") return "Off — your assistant reads nothing.";
   if (state === "declined") {
     return "You said no — your assistant won't ask again.";
@@ -833,6 +833,7 @@ export default function ConnectAgentPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     refresh();
     refreshGrants();
     refreshDailyCheck();

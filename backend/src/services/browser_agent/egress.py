@@ -12,9 +12,12 @@ launched with this proxy as its only way out (``--proxy-server`` plus
    (``services/fetch/guard.py``: ``screen_url`` for the shape,
    ``screen_host`` resolving ONCE and denying the whole host if any address
    is private);
-3. connects to one of the addresses IT approved — never resolving again —
+3. connects to the addresses IT approved, IPv4 first — never resolving again —
    so the address checked is the address used (no DNS rebinding);
-4. otherwise answers ``403`` and closes.
+4. otherwise answers ``403`` and closes. That 403 carries ``BLOCK_HEADER`` with ``BLOCK_MARK``, a
+   value fresh in each process that no site can know, so the agent can tell the proxy's refusal of
+   a redirect hop from a page (it answers ``blocked_address``, never "ok" with this text). A host
+   that cannot be resolved or does not answer gets ``UNREACHABLE_MARK`` instead (``load_failed``).
 
 ``resolve`` and ``open_connection`` are injected, so the suite runs it with a
 fake resolver and a loopback test site and nothing leaves the machine.
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urlsplit
 
@@ -34,6 +38,10 @@ OpenFn = Callable[[str, int], Awaitable[tuple[asyncio.StreamReader, asyncio.Stre
 HEAD_LIMIT = 32 * 1024
 CONNECT_TIMEOUT_S = 15.0
 _HOP_BY_HOP = (b"proxy-connection", b"connection", b"keep-alive", b"proxy-authorization")
+# Only the proxy's own 403 carries this header with this value (a new one each process).
+BLOCK_HEADER = "x-job360-egress-refused"
+BLOCK_MARK = secrets.token_hex(16)
+UNREACHABLE_MARK = secrets.token_hex(16)  # the host could not be resolved or did not answer
 
 
 async def _default_open(host: str, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -100,14 +108,16 @@ class EgressProxy:
             await self._server.wait_closed()
             self._server = None
 
-    async def _refuse(self, writer: asyncio.StreamWriter, host: str, reason: str) -> None:
+    async def _refuse(
+        self, writer: asyncio.StreamWriter, host: str, reason: str, mark: str = BLOCK_MARK
+    ) -> None:
         self.denied = (self.denied + [f"{host}: {reason}"])[-20:]
         logger.info("browser egress refused %s (%s)", host, reason)
         try:
             body = b"Job360's browser only reaches the public internet."
             writer.write(
                 b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n"
-                + f"Content-Length: {len(body)}\r\n\r\n".encode() + body
+                + f"{BLOCK_HEADER}: {mark}\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
             )
             await writer.drain()
         finally:
@@ -137,16 +147,25 @@ class EgressProxy:
         try:
             verdict = await screen_host(shape.host, port, resolve=self._resolve)
         except OSError:
-            await self._refuse(writer, host, "the address could not be resolved")
+            await self._refuse(writer, host, "the address could not be resolved", UNREACHABLE_MARK)
             return
         if not verdict.ok or not verdict.approved:
             await self._refuse(writer, host, verdict.reason or "denied")
             return
-        address = sorted(verdict.approved)[0]  # PINNED: the address screened is the address used
-        try:
-            up_reader, up_writer = await asyncio.wait_for(self._open(address, port), CONNECT_TIMEOUT_S)
-        except (OSError, asyncio.TimeoutError):
-            await self._refuse(writer, host, "the site did not answer")
+        # PINNED: only the addresses screened above are ever used. IPv4 first, then
+        # each in turn: Railway has no outbound IPv6 unless switched on, and a
+        # string sort put a dual-stack site's IPv6 address first, so every such
+        # site was refused (CodeRabbit on #902; the fix was in #929 and lost when
+        # #933 shipped). Refuse only when all fail.
+        up_reader = up_writer = None
+        for address in sorted(verdict.approved, key=lambda a: (":" in a, a)):
+            try:
+                up_reader, up_writer = await asyncio.wait_for(self._open(address, port), CONNECT_TIMEOUT_S)
+                break
+            except (OSError, asyncio.TimeoutError):
+                continue
+        if up_reader is None or up_writer is None:
+            await self._refuse(writer, host, "the site did not answer", UNREACHABLE_MARK)
             return
         if method.upper() == "CONNECT":
             writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")

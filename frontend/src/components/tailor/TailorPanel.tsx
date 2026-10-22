@@ -116,6 +116,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setLoading(true);
     setError(null);
     setActiveTab(initialKind);
@@ -228,20 +229,42 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                             <span className="h-2.5 w-2.5 rounded-full bg-warning" aria-hidden="true" />
                             Added on top — verify before you send
                           </span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              className="h-2.5 w-2.5 rounded-sm border border-dashed border-muted-foreground"
+                              aria-hidden="true"
+                            />
+                            From the ad, not yours
+                          </span>
                         </div>
                         <div className="min-h-[300px] max-h-[45vh] overflow-y-auto rounded-md border p-3 font-mono text-xs leading-relaxed">
-                          {(prov[t.key] ?? []).map((seg, i) => (
-                            <div
-                              key={i}
-                              className={
-                                seg.grounded
-                                  ? "text-success"
-                                  : "rounded bg-warning/10 px-1 text-warning"
-                              }
-                            >
-                              {seg.text || " "}
-                            </div>
-                          ))}
+                          {(prov[t.key] ?? []).map((seg, i) => {
+                            // A line that only echoes the job ad is NOT the user's fact
+                            // (an older API response has no `source`: fall back to `grounded`).
+                            const fromAd = !seg.grounded && seg.source === "ad";
+                            return (
+                              <div
+                                key={i}
+                                data-provenance={
+                                  seg.grounded ? "profile" : fromAd ? "ad" : "none"
+                                }
+                                className={
+                                  seg.grounded
+                                    ? "text-success"
+                                    : fromAd
+                                      ? "rounded border border-dashed border-muted-foreground px-1 italic text-muted-foreground"
+                                      : "rounded bg-warning/10 px-1 text-warning"
+                                }
+                              >
+                                {fromAd && (
+                                  <span className="mr-1 font-sans font-semibold not-italic">
+                                    [From the ad, not yours]
+                                  </span>
+                                )}
+                                {seg.text || " "}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : (

@@ -117,6 +117,7 @@ def _ascii_part(value: Any) -> str:
 
 
 _NAMED_KINDS = {"cv": "CV", "cover_letter": "Cover_Letter"}
+_STEM_MAX = 120  # characters of an uploaded file-name stem (ASCII, so also bytes)
 
 
 def legal_file_stem(profile: Any, kind: str) -> Optional[str]:
@@ -139,8 +140,8 @@ def legal_file_stem(profile: Any, kind: str) -> Optional[str]:
     return f"{first}_{last}_{suffix}"
 
 
-async def download_stem(user_id: str, company: str, kind: str, version_no: int) -> str:
-    """The one download/kit file-name stem: the user's legal name, else ``file_stem``."""
+async def named_stem(user_id: str, kind: str) -> Optional[str]:
+    """``legal_file_stem`` for the user's saved profile; ``None`` when no name is known."""
     import asyncio  # noqa: PLC0415
 
     try:
@@ -149,7 +150,17 @@ async def download_stem(user_id: str, company: str, kind: str, version_no: int) 
         profile = await asyncio.to_thread(load_profile, user_id)
     except Exception:  # noqa: BLE001 - a name lookup must never break a download
         profile = None
-    return legal_file_stem(profile, kind) or file_stem(company, kind, version_no)
+    stem = legal_file_stem(profile, kind)
+    if stem is None or len(stem) <= _STEM_MAX:
+        return stem
+    # An upload writes this name to disk (NAME_MAX 255): keep the start of the name, always the kind.
+    suffix = _NAMED_KINDS[kind]
+    return f"{stem[: -len(suffix) - 1][: _STEM_MAX - len(suffix) - 1].rstrip('_-')}_{suffix}"
+
+
+async def download_stem(user_id: str, company: str, kind: str, version_no: int) -> str:
+    """The one download/kit file-name stem: the user's legal name, else ``file_stem``."""
+    return await named_stem(user_id, kind) or file_stem(company, kind, version_no)
 
 
 def file_stem(company: str, kind: str, version_no: int) -> str:
@@ -159,18 +170,21 @@ def file_stem(company: str, kind: str, version_no: int) -> str:
 
 
 def norm_url(url: str) -> str:
-    """Lowercase scheme + host, drop the fragment, strip a trailing slash;
-    the query is kept (two different ``?id=`` are two different jobs)."""
+    """Lowercase scheme + host, drop the fragment, strip a trailing slash. The query is kept (two
+    different ``?id=`` are two different jobs) minus tracking keys and secret-named keys such as a
+    token or session id (gap-audit #18, ``job_checks.redact_url``), so a receipt stored in full still
+    matches one stored redacted. An unparseable value is compared as typed."""
     text = (url or "").strip()
     if not text:
         return ""
-    try:
-        parts = urlsplit(text)
-    except ValueError:
+    from src.services.applications.job_checks import redact_url  # noqa: PLC0415
+
+    red = redact_url(text)
+    if not red:
         return text
-    path = parts.path.rstrip("/")
+    parts = urlsplit(red)
     query = f"?{parts.query}" if parts.query else ""
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}{query}"
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{query}"
 
 
 def host_needs_account(host: Optional[str], learned: set[str]) -> bool:
@@ -619,6 +633,44 @@ async def _form_check_missing(db: JobDatabase, user_id: str, app_row: dict[str, 
     return not await _events(db, user_id, int(app_row["id"]), ("form_checked",))
 
 
+# Owner rule 2026-10-20 (strict): an autofill answers every REQUIRED question from the user's saved facts;
+# only optional questions may stay blank. Applications created on or after this day cannot be submitted
+# while the newest ``form_checked`` of any page still lists a required question with no answer.
+REQUIRED_ANSWERS_FROM = datetime(2026, 10, 20, tzinfo=timezone.utc)
+
+
+def required_answers_enforced(created_at: Any) -> bool:
+    """True when an application created at ``created_at`` is under the required-answers rule (it follows
+    the ``form_checked`` cut-off too, so a test that moves that cut-off moves this one). Fail open on an
+    unreadable timestamp, like :func:`form_check_required`."""
+    if not form_check_required(created_at):
+        return False
+    made = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=timezone.utc)
+    return made >= REQUIRED_ANSWERS_FROM
+
+
+async def _required_unanswered(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest ``form_checked`` of a page (or of the unpaged form) still lists a required question with
+    no answer. ``missing_required`` is the count check_form returned; a check that reports ``missing``
+    questions without saying how many are required counts as unanswered too (it must say). A later
+    ``form_checked`` of the same page, recorded after the user answered, clears it."""
+    if not required_answers_enforced(app_row.get("created_at")):
+        return False
+    newest: dict[Optional[int], dict[str, Any]] = {}
+    for e in await _events(db, user_id, int(app_row["id"]), ("form_checked",)):  # newest first
+        newest.setdefault(_page_of(e), e)
+    for e in newest.values():
+        required = e["payload"].get("missing_required")
+        if isinstance(required, int) and not isinstance(required, bool):
+            if required > 0:
+                return True
+        elif (e["payload"].get("missing") or 0) > 0:
+            return True
+    return False
+
+
 async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
     """The host stored on the NEWEST ``form_filled`` (``None`` when there is none)."""
     fills = await _events(db, user_id, application_id, ("form_filled",))
@@ -683,6 +735,7 @@ async def gate_facts(
         unreadable_fields=shortfalls[1],
         form_pages_incomplete=shortfalls[2],
         form_check_missing=await _form_check_missing(db, user_id, app_row),
+        required_unanswered=await _required_unanswered(db, user_id, app_row),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=form_host,
@@ -691,6 +744,8 @@ async def gate_facts(
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
+        sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
+        application_id=application_id,
     )
 
 
@@ -699,6 +754,13 @@ async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unverified_guess(db, user_id, app_row)
+
+
+async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest form holds an answer to a sensitive question the user has not confirmed (``ready`` reads it)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return await ready.has_unconfirmed_sensitive(db, user_id, app_row)
 
 
 def company_avoided(user_id: str, app_row: dict[str, Any], entries: Optional[list[Any]] = None) -> bool:
@@ -848,11 +910,11 @@ async def submit_verdict(
         # shows a form_host_mismatch for a form that is not filled yet.
         facts = replace(
             facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
-            form_check_missing=False, form_pages_incomplete=False,
+            form_check_missing=False, form_pages_incomplete=False, required_unanswered=False,
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False,
+            guessed_unverified=False, sensitive_unconfirmed=False,
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -901,7 +963,7 @@ FORM_SWEPT_NOTES_MAX = 300
 FORM_SWEPT_UNREADABLE_MAX = 50
 # ``form_checked`` (weak spot #1b): what check_form found, COUNTS and wording only - never an answer value.
 FORM_CHECKED_REQUIRED = frozenset({"questions_count", "answered", "missing"})
-FORM_CHECKED_OPTIONAL = frozenset({"answers", "page", "pages_total"})
+FORM_CHECKED_OPTIONAL = frozenset({"answers", "page", "pages_total", "missing_required"})
 FORM_PAGES_MAX = 20  # bulk-apply F2: the most pages one form may declare
 FORM_CHECKED_ANSWER_KEYS = frozenset({"question", "key", "source", "needs_confirmation"})
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
@@ -1226,9 +1288,15 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
     elif event_type == "form_checked":
         problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
         _pages_problems(payload, problems)
-        for name in ("questions_count", "answered", "missing"):
+        for name in ("questions_count", "answered", "missing", "missing_required"):
             if name in payload:
                 _count_problem(name, payload[name], problems)
+        missing_required, missing = payload.get("missing_required"), payload.get("missing")
+        if (
+            isinstance(missing_required, int) and isinstance(missing, int)
+            and not isinstance(missing_required, bool) and not isinstance(missing, bool) and missing_required > missing
+        ):
+            problems.append("missing_required cannot be more than missing")
         if "answers" in payload:
             _checked_answers(payload["answers"], problems)
     return problems
@@ -1402,7 +1470,9 @@ async def _check_kit_event(
         found = payload_problems(event_type, payload)
         if found:
             raise SpineError(422, found[0])
-        stored_checked: dict[str, Any] = {k: payload[k] for k in ("questions_count", "answered", "missing")}
+        stored_checked: dict[str, Any] = {
+            k: payload[k] for k in ("questions_count", "answered", "missing", "missing_required") if k in payload
+        }
         if "answers" in payload:
             stored_checked["answers"] = _checked_answers(payload["answers"], [])
         if "page" in payload:
@@ -2069,6 +2139,9 @@ async def build_kit(
         answers["approved_text"] = [it for i, it in enumerate(approved) if i in keep]
     hold = await live_hold(db, user, application_id, now, session)
     state = await controls_state(db, user.id, app_row, now)
+    from src.services.applications import known_people as known_people_service  # noqa: PLC0415
+
+    people_here = await known_people_service.for_application(db, user.id, app_row)
     events = await _events(db, user.id, application_id, ("cv_seen", "submit_approved"))
 
     docs: list[dict[str, Any]] = []
@@ -2094,9 +2167,12 @@ async def build_kit(
         # Plain facts about this ad (job_checks.py) - never a verdict, never a sort key.
         "checks": base_checks,
     }
+    from src.services.applications import contacts as contacts_service  # noqa: PLC0415 - contacts imports spine
+
     application = {
         "id": application_id, "status": app_row["status"], "follow_up_on": app_row.get("follow_up_on"),
         "submit_override": await spine.submit_override(db, user.id, application_id),
+        "referred_by": await contacts_service.referred_by(db, user.id, application_id),
     }
     host = settings_rules.parse_site_host(apply_url)
     learned = {
@@ -2145,7 +2221,7 @@ async def build_kit(
         "application_id": application_id, "kit_event_id": event["event_id"], "missing_count": len(missing),
         "hold": bool(hold), "session": safe_log_value(session, max_len=SESSION_MAX_CHARS),
         "duplicate": dup["flag"], "surface": "mcp" if user.auth_via != "session" else "web",
-        "result": "ok",
+        "result": "ok", "known_people_count": people_here["count"],
     })
     out: dict[str, Any] = {
         "kit": {"id": event["event_id"], "sha256": kit_sha, "generated_at": now.isoformat()},
@@ -2157,12 +2233,19 @@ async def build_kit(
         "hold": hold, "account_site": account_site,
         "autofill": state["autofill"]["mode"],
         "warnings": pay_warnings(profile, country),
+        "known_people": people_here,
         "instructions": list(KIT_INSTRUCTIONS),
     }
     if answers_omitted:
         out["answers_omitted"] = answers_omitted
         out["instructions"].append(
             "More approved answers: get_profile fields['user_info.answers']"
+        )
+    if people_here["count"]:
+        out["instructions"].append(
+            f"known_people: {people_here['count']} people you already stored at this company "
+            "(list_people(company=...) lists them all). Read them before finding someone new; "
+            "whether to reach out is the user's call."
         )
     if cv is None:
         out["cv_none_reason"] = NO_CV_REASON
@@ -2178,7 +2261,10 @@ FORM_NEXT_ASK = (
     "save reusable answers with update_profile (user_info.answers); never guess."
 )
 FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
-FORM_NEXT_CONFIRM = " Confirm every `needs_confirmation` answer with the user in that same message."
+FORM_NEXT_CONFIRM = (
+    " Confirm every `needs_confirmation` answer with the user in that same message, and raise each one with "
+    "ask_user so it shows on Needs you: the user checks it there before anything is sent."
+)
 FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
 # NOT IN REFERENCE (kept small, deterministic): which kit groups / which wording count as sensitive or a knock-out.
@@ -2195,7 +2281,17 @@ _SENSITIVE_RE = re.compile(
     r"vetting (?:check|process|level)|(?:undergo|pass|hold) (?:\w+ )?vetting|"
     r"day.?rate|expected (?:pay|salary)|notice period|\bitar\b|export controls?|non.?compete|"
     r"interview record(?:ing)?|record(?:ing)? (?:of )?(?:the |this )?interview|"
-    r"previously (?:been )?employed (?:by|at|with)"
+    r"previously (?:been )?employed (?:by|at|with)|"
+    # Any country, any job (owner, 2026-10-22): identity, health, money and legal history are the user's to
+    # answer, never typed from a guess. "health" and "age" alone are too broad ("healthcare", "page"), so
+    # only the asking phrases count.
+    r"nationality|citizen(?:ship)?\b|immigration status|national origin|(?:place|country) of birth|"
+    r"passport|national insurance|social security|\bssn\b|tax (?:id|number)|"
+    r"date of birth|\bdob\b|\bhow old\b|marital|pregnan|"
+    r"medical (?:condition|history|exam)|health (?:condition|issue|problem|status)|mental health|"
+    r"drug (?:test|screen)|vaccinat|transgender|\blgbt|political|trade union|union member|\bcaste\b|"
+    r"bankrupt|credit (?:check|score|history)|financial (?:history|status)|salary history|"
+    r"(?:current|previous) (?:salary|pay)\b|arrest|felony|misdemeanou?r|military|armed forces"
 )
 _KNOCKOUT_GROUPS = frozenset({"right_to_work", "salary"})
 _KNOCKOUT_RE = re.compile(
@@ -2207,6 +2303,10 @@ _KNOCKOUT_RE = re.compile(
     r"\b18 (?:years )?(?:of age )?or (?:over|older)\b"
 )
 _OPTION_FIELDS = frozenset({"select", "radio", "checkbox"})
+# A FILE question that asks for the CV or the cover letter: Job360's browser tool uploads the saved artifact.
+_CV_FILE_RE = re.compile(r"\bcv\b|\bresume\b|résumé|curriculum vitae")
+_LETTER_FILE_RE = re.compile(r"cover(?:ing)? letter|motivation(?:al)? letter|letter of motivation")
+_DOCUMENT_LABELS = {"cv": "CV", "cover_letter": "Cover letter"}
 
 
 def _norm_question(text: Any) -> str:
@@ -2235,9 +2335,16 @@ def _record_item(rec: dict[str, Any]) -> dict[str, Any]:
     return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text"}
 
 
+def _file_kind(text: str) -> Optional[str]:
+    """The artifact kind a file question asks for, or None (portfolio, transcript, ID, "CV or cover letter")."""
+    low = text.casefold()
+    is_cv, is_letter = bool(_CV_FILE_RE.search(low)), bool(_LETTER_FILE_RE.search(low))
+    return "cv" if is_cv and not is_letter else "cover_letter" if is_letter and not is_cv else None
+
+
 def form_check(
     answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
-    records: Any = None, company_key: Optional[str] = None,
+    records: Any = None, company_key: Optional[str] = None, documents: Optional[dict[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
@@ -2250,6 +2357,8 @@ def form_check(
     not one of a select/radio/checkbox's ``options`` is a gap, one longer than the
     control's ``limit`` is flagged ``over_limit`` (never cut), a sensitive question is
     flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts``.
+    A ``file`` question for the CV or the cover letter is answered by the application's newest saved
+    artifact of that kind (``documents``: kind -> artifact row), source ``artifact``; none saved = a gap.
     Never logs, never writes, never guesses."""
     from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
 
@@ -2296,6 +2405,19 @@ def form_check(
                 item = approved.get(_norm_question(text)) if _norm_question(text) else None
             if item is None and not why:
                 why = "no saved answer for this question"
+        kind = _file_kind(text) if ftype == "file" and item is None else None
+        if kind is not None:
+            label = _DOCUMENT_LABELS[kind]
+            doc = (documents or {}).get(kind)
+            if doc is None:
+                why = f"no {label} saved for this application yet: save the {label} first (save_artifact kind {kind})"
+            else:
+                why = ""
+                item = {
+                    "key": f"artifact.{kind}", "source": "artifact",
+                    "value": f"{label} v{doc['version_no']} (artifact {doc['id']})",
+                }
+                matched_by = "key" if key is not None else "wording"
         options = [str(o) for o in (q.get("options") or [])]
         if item is not None and ftype in _OPTION_FIELDS and options and isinstance(item["value"], str) \
                 and item["value"].casefold() not in {o.casefold() for o in options}:
@@ -2362,7 +2484,14 @@ async def check_form(
         })
         raise SpineError(404, "application not found")
     profile, _country, answers, _missing = await _application_answers(db, user, app_row)
-    out = form_check(answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None)
+    documents = {}
+    for kind in _DOCUMENT_LABELS:
+        row = await spine.latest_artifact(db, user.id, application_id, kind)
+        if row is not None:
+            documents[kind] = row
+    out = form_check(
+        answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None, documents,
+    )
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
         "questions_count": out["questions_count"], "answered": out["counts"]["answered"],

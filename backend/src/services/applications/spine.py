@@ -1271,16 +1271,20 @@ async def save_artifact(
             )
         version_no = max_version + 1
         try:
-            ins = await db._db.execute(
-                "INSERT INTO application_artifacts "
-                "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
-                " label, chars, created_at, ats_score, ats_notes, checks_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    user_id, application_id, kind, version_no, text, made_by, model,
-                    profile_version, label or "", len(text), now, ats_score, ats_notes, checks_json,
-                ),
-            )
+            # Scoped (a SAVEPOINT inside a client_key transaction, slice 25): a
+            # bare rollback() is forbidden inside an outer transaction() and
+            # would leave it aborted; the block rolls back only this INSERT.
+            async with db._db.transaction():
+                ins = await db._db.execute(
+                    "INSERT INTO application_artifacts "
+                    "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
+                    " label, chars, created_at, ats_score, ats_notes, checks_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id, application_id, kind, version_no, text, made_by, model,
+                        profile_version, label or "", len(text), now, ats_score, ats_notes, checks_json,
+                    ),
+                )
         except pg.IntegrityError:
             # C4 — a real UNIQUE(application_id, kind, version_no) violation
             # (a concurrent save landed the same version_no first); retry with
@@ -1289,7 +1293,6 @@ async def save_artifact(
             # exception type means too, so a bounded retry loop still bails
             # out via the `artifact_id is None` check below rather than
             # looping forever on something that will never succeed.
-            await db._db.rollback()
             continue
         artifact_id = int(ins.lastrowid or 0)
         break
@@ -1658,6 +1661,7 @@ async def record_receipt(
     cover_letter_artifact_id: Optional[int] = None,
     applied_at: Optional[str] = None,
     request_id: Optional[str] = None,
+    referred_by_contact_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1686,6 +1690,7 @@ async def record_receipt(
         "application_id": application_id, "channel": channel, "note": note, "confirmation": confirmation,
         "answers": answers or [], "fields_filled": fields_filled or {}, "cv_artifact_id": cv_artifact_id,
         "cover_letter_artifact_id": cover_letter_artifact_id, "applied_at": applied_at,
+        "referred_by_contact_id": referred_by_contact_id,
     }
     channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
@@ -1714,6 +1719,18 @@ async def record_receipt(
         replay = await _receipt_replay(db, user_id, request_id, idem_body)
         if replay is not None:
             return replay
+
+    # The referrer must be the caller's own contact linked to THIS application. One message for
+    # unknown, foreign and other-job contacts, so it is no existence oracle. (Not via contacts:
+    # contacts imports spine.)
+    if referred_by_contact_id is not None:
+        cur = await db._db.execute(
+            "SELECT application_id FROM application_contacts WHERE id = ? AND user_id = ?",
+            (referred_by_contact_id, user_id),
+        )
+        ref = await cur.fetchone()
+        if ref is None or dict(ref)["application_id"] != application_id:
+            raise SpineError(422, "referred_by_contact_id must be one of your contacts linked to this application")
 
     # Lazy: kit imports spine.
     from src.services.applications import kit as kit_service  # noqa: PLC0415
@@ -1800,8 +1817,8 @@ async def record_receipt(
                 " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
                 " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
                 " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
-                " answers_from, answers_count) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " referred_by_contact_id, answers_from, answers_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, app_row["job_id"], sent_at,
                     app_row.get("job_title") or "", app_row.get("job_company") or "",
@@ -1813,7 +1830,7 @@ async def record_receipt(
                     application_id, cv_artifact["id"] if cv_artifact else None,
                     cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
                     confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
-                    answers_from, answers_count,
+                    referred_by_contact_id, answers_from, answers_count,
                 ),
             )
             receipt_id = int(cur.lastrowid or 0)
@@ -1833,6 +1850,7 @@ async def record_receipt(
                 "confirmation": confirmation or "",
                 "url": f"/applications/{application_id}", "event_id": event["event_id"],
                 "possible_duplicate": possible_duplicate, "answers_from": answers_from, "already_existed": False,
+                "referred_by_contact_id": referred_by_contact_id,
             }
             if request_id is not None:
                 await idempotency.store(db._db, user_id, _RECEIPT_TOOL, request_id, idem_body, result)
@@ -1848,6 +1866,7 @@ async def record_receipt(
         extra={
             "event": "receipt_created", "receipt_id": receipt_id,
             "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
+            "referred_by_contact_id": referred_by_contact_id,
         },
     )
     if answers_from or hashed or (form_host and not channel_given):
@@ -1868,7 +1887,7 @@ async def record_receipt(
             "possible_duplicate",
             extra={
                 "event": "possible_duplicate", "user_id": safe_log_value(user_id),
-                "application_id": application_id, "receipt_id": receipt_id,
+                "application_id": int(application_id), "receipt_id": int(receipt_id),
                 "flag": safe_log_value(possible_duplicate, max_len=40),
                 "actor": safe_log_value(recorded_by, max_len=80), "result": "ok",
             },
@@ -2162,7 +2181,8 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     """
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
-        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, answers_from, "
+        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, referred_by_contact_id, "
+        "answers_from, "
         "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
@@ -2185,6 +2205,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "possible_duplicate": r.get("possible_duplicate") or "",
         "kit_event_id": r.get("kit_event_id"),
         "kit_sha256": r.get("kit_sha256") or "",
+        "referred_by_contact_id": r.get("referred_by_contact_id"),
         "cv_version_no": await _artifact_version_no(
             db, user_id, application_id, "cv", r.get("cv_artifact_id")
         ),
@@ -2259,6 +2280,7 @@ async def get_application_detail(
     from src.services.applications.asks import list_asks  # noqa: PLC0415
     from src.services.applications.contacts import list_contacts  # noqa: PLC0415
     from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
+    from src.services.applications.known_people import for_application as known_people_for  # noqa: PLC0415
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
@@ -2317,6 +2339,7 @@ async def get_application_detail(
         "interview_at": interview_at,
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
         "contacts": await list_contacts(db, user_id, application_id),
+        "known_people": await known_people_for(db, user_id, app_row),
         # "Needs you" - every ask about this job, open first (never filtered).
         "asks": await list_asks(
             db, user_id, "all", application_id=application_id, limit=settings.ASKS_MAX_OPEN_PER_USER
@@ -2382,6 +2405,7 @@ async def list_applications(
     in_flight: bool = False,
     queued: bool = False,
     priority: Optional[str] = None,
+    agenda: Optional[str] = None,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
     status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
@@ -2407,6 +2431,9 @@ async def list_applications(
     ``priority`` (owner decision 2026-10-19) - only applications whose PLACE (the job's
     country + remote/on-site, matched to the user's ``right_to_work`` records) has that
     level of the user's own job priority, or ``not_set``. Each row carries ``priority``.
+
+    ``agenda`` (``today`` | ``tomorrow`` | ``week``) - only open applications with a live interview
+    or a ``follow_up_on`` inside that range, in the CALLER's own timezone (``agenda.py``).
     """
     from src.services.profile import job_priority  # noqa: PLC0415 - profile ↔ spine cycle
     from src.services.profile.storage import load_profile  # noqa: PLC0415 - heavy (rule #16)
@@ -2431,6 +2458,10 @@ async def list_applications(
             f"({settings.APPLICATION_QUIET_DAYS_MAX})",
         )
     from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+    from src.services.applications.agenda import AGENDA_RANGES  # noqa: PLC0415
+
+    if agenda is not None and agenda not in AGENDA_RANGES:
+        raise SpineError(422, f"agenda must be one of: {', '.join(AGENDA_RANGES)}")
 
     where = ["user_id = ?"]
     params: list[Any] = [user_id]
@@ -2467,6 +2498,16 @@ async def list_applications(
         if held:
             where.append(f"id IN ({','.join('?' for _ in held)})")
             params.extend(held)
+        else:
+            where.append("1 = 0")
+    if agenda is not None:
+        from src.services.applications.agenda import agenda_application_ids  # noqa: PLC0415
+
+        zone = await user_zone(db, user_id)
+        in_range = await agenda_application_ids(db, user_id, agenda, today, zone)
+        if in_range:
+            where.append(f"id IN ({','.join('?' for _ in in_range)})")
+            params.extend(in_range)
         else:
             where.append("1 = 0")
     if priority is not None:
@@ -2680,7 +2721,8 @@ async def whats_new(
     never as an independent predicate, so a row from either side of that
     boundary is never dropped.
 
-    Also carries open_asks and proof_missing (applied jobs past PROOF_NO_PROOF_AFTER_DAYS with no proof and no ask) whatever `since` says."""  # noqa: E501
+    Also carries open_asks, proof_missing (applied jobs past PROOF_NO_PROOF_AFTER_DAYS with no proof and no ask)
+    and ``interviews`` ({upcoming, just_passed}, services/applications/agenda.py) whatever `since` says."""  # noqa: E501
     limit = max(1, min(int(limit), settings.WHATS_NEW_MAX_EVENTS))
     now = datetime.now(timezone.utc).isoformat()
     since_val = since or (
@@ -2756,11 +2798,15 @@ async def whats_new(
     from src.services.applications.proof import proof_missing  # noqa: PLC0415
 
     missing_proof = await proof_missing(db, user_id, datetime.now(timezone.utc))
+    # Gap 10 - likewise carried: interviews in the next 7 days, and those of the last 3 with no outcome yet.
+    from src.services.applications.agenda import interview_agenda  # noqa: PLC0415
+
+    interviews = await interview_agenda(db, user_id)
 
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
-        "open_asks": open_asks, "proof_missing": missing_proof,
+        "open_asks": open_asks, "proof_missing": missing_proof, "interviews": interviews,
     }
 
 

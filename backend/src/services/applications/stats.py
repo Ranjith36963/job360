@@ -34,10 +34,12 @@ two above (``_group_by``):
   member, any other text → ``"other"``, empty/no receipt → ``None``.
 * ``by_contact_found_via`` — a different unit: CONTACTS, not applications.
   Per current ``found_via`` (base row overlaid by its newest edit): how many
-  contacts, how many had an ``outreach_sent`` mark, how many had a reply
+  contacts, how many are ``reachable`` (CURRENT email or LinkedIn URL saved),
+  how many had an ``outreach_sent`` mark, how many had a reply
   mark, and ``reply_rate`` = contacts with BOTH a sent and a reply mark /
   contacts with a sent mark (``None`` when nothing was sent — rule #29).
   One aggregate query, bounded by the closed set.
+* ``by_contact_relationship`` — the same, per current ``relationship``.
 """
 from __future__ import annotations
 
@@ -230,14 +232,18 @@ _SIMULATED_SQL = (
 
 
 async def _contact_found_via_groups(
-    db: JobDatabase, user_id: str, since_val: Optional[str]
+    db: JobDatabase, user_id: str, since_val: Optional[str], field: str = "found_via"
 ) -> list[dict[str, Any]]:
     """``by_contact_found_via`` — ONE aggregate query over the caller's own
     contacts (S1: ``user_id`` on every table), grouped by the CURRENT
     ``found_via`` (the newest ``contact_edits`` row for that field, else the
-    base row; a cleared edit '' reads as unset). Bounded by the closed set,
+    base row; a cleared edit '' reads as unset). ``reachable`` counts contacts
+    whose CURRENT email or LinkedIn URL is saved. Bounded by the closed set,
     so there is no row cap to apply. ``since`` scopes by the contact's own
-    ``created_at``."""
+    ``created_at``. ``field='relationship'`` gives ``by_contact_relationship``
+    (same shape)."""
+    if field not in ("found_via", "relationship"):
+        raise ValueError(field)
     where = ["ac.user_id = ?", "NOT " + _SIMULATED_SQL.format(app="ac.application_id")]
     where_params: list[Any] = [user_id, user_id, settings.SIMULATION_EVENT_TYPE]
     if since_val:
@@ -245,11 +251,13 @@ async def _contact_found_via_groups(
         where_params.append(since_val)
     where_sql = " AND ".join(where)
     sql = f"""
-        SELECT fv, COUNT(*) AS contacts, SUM(sent) AS sent, SUM(replied) AS replied,
+        SELECT fv, COUNT(*) AS contacts, SUM(reachable) AS reachable, SUM(sent) AS sent, SUM(replied) AS replied,
                SUM(sent * replied) AS sent_and_replied
         FROM (
             SELECT
-                NULLIF(COALESCE(fe.value, ac.found_via), '') AS fv,
+                NULLIF(COALESCE(le.fv, ac.{field}), '') AS fv,
+                CASE WHEN COALESCE(le.em, ac.email, '') <> '' OR COALESCE(le.li, ac.linkedin_url, '') <> ''
+                     THEN 1 ELSE 0 END AS reachable,
                 CASE WHEN EXISTS (
                     SELECT 1 FROM contact_outreach o
                     WHERE o.contact_id = ac.id AND o.user_id = ac.user_id AND o.entry = 'sent'
@@ -260,12 +268,16 @@ async def _contact_found_via_groups(
                 ) THEN 1 ELSE 0 END AS replied
             FROM application_contacts ac
             LEFT JOIN (
-                SELECT contact_id, value FROM (
-                    SELECT contact_id, value,
-                           ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY id DESC) AS rn
-                    FROM contact_edits WHERE field = 'found_via' AND user_id = ?
-                ) t WHERE rn = 1
-            ) fe ON fe.contact_id = ac.id
+                SELECT contact_id,
+                       MAX(CASE WHEN field = '{field}' THEN value END) AS fv,
+                       MAX(CASE WHEN field = 'email' THEN value END) AS em,
+                       MAX(CASE WHEN field = 'linkedin_url' THEN value END) AS li
+                FROM (
+                    SELECT contact_id, field, value,
+                           ROW_NUMBER() OVER (PARTITION BY contact_id, field ORDER BY id DESC) AS rn
+                    FROM contact_edits WHERE user_id = ? AND field IN ('{field}', 'email', 'linkedin_url')
+                ) t WHERE rn = 1 GROUP BY contact_id
+            ) le ON le.contact_id = ac.id
             WHERE {where_sql}
         ) per_contact
         GROUP BY fv
@@ -281,6 +293,7 @@ async def _contact_found_via_groups(
                 "key": key,
                 "label": NOT_SET_LABEL if key is None else key,
                 "contacts": int(row["contacts"] or 0),
+                "reachable": int(row["reachable"] or 0),
                 "outreach_sent": sent,
                 "outreach_replied": int(row["replied"] or 0),
                 "reply_rate": round(int(row["sent_and_replied"] or 0) / sent, 3) if sent else None,
@@ -496,6 +509,7 @@ async def compute_stats(
     by_job_source, source_truncated = _group_by(rows, lambda r: r.get("job_found_on") or None)
     by_channel, channel_truncated = _group_by(rows, lambda r: receipt_channel_key(r.get("receipt_channel")))
     by_contact_found_via = await _contact_found_via_groups(db, user_id, since_val)
+    by_contact_relationship = await _contact_found_via_groups(db, user_id, since_val, field="relationship")
     score_line = await _score_line_counts(user_id, rows)
 
     # Every view key is present on every response; a view ADDS one block, the
@@ -506,7 +520,7 @@ async def compute_stats(
 
     # Slice 3's loader only for slice 3's own views: a single slice-4/5 view must not
     # pay for (or audit-log) a load it does not use.
-    other_views = ("patterns", "skill_gaps", "sites")
+    other_views = ("patterns", "skill_gaps", "sites", "referrals")
     numbers_selected = [v for v in selected if v not in interview_counts.INTERVIEW_VIEWS and v not in other_views]
     if numbers_selected:
         from src.services.applications import feedback_numbers  # noqa: PLC0415
@@ -537,6 +551,11 @@ async def compute_stats(
 
         view_blocks["sites"] = await site_stats.build(db, user_id, rows)
 
+    if "referrals" in selected:
+        from src.services.applications import referral_stats  # noqa: PLC0415
+
+        view_blocks["referrals"] = await referral_stats.build(db, user_id, rows)
+
     return {
         "since": since_val,
         "overall": overall,
@@ -546,6 +565,7 @@ async def compute_stats(
         "by_job_source": by_job_source,
         "by_channel": by_channel,
         "by_contact_found_via": by_contact_found_via,
+        "by_contact_relationship": by_contact_relationship,
         "score_line": score_line,
         "groups_truncated": (
             cv_truncated or role_truncated or country_truncated or source_truncated or channel_truncated

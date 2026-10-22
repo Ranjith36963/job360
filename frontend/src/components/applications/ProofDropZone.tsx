@@ -65,6 +65,7 @@ export function ProofDropZone({ applicationId }: { applicationId: number }) {
     }
   }, [applicationId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
   useEffect(() => void load(), [load]);
 
   async function act(fn: () => Promise<unknown>, failMsg: string) {

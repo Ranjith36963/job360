@@ -167,6 +167,7 @@ async def doctor(
         "ghosted_now": ghosted_now,
         "auto_emails": await _auto_emails_block(db, user.id, eff, now),
         "silent_after_interview": await _silent_after_interview(db, user.id, now),
+        "interviews": await _interviews_block(db, user.id, now),
         **_tools_block(client_tools_version, client_tools_rev),
     }
 
@@ -232,6 +233,22 @@ async def _silent_after_interview(db: JobDatabase, user_id: str, now: datetime) 
         )
         return {"courtesy_days": settings.INTERVIEW_COURTESY_DAYS, "items": [], "disclaimer": SILENT_DISCLAIMER,
                 "truncated": False}
+
+
+async def _interviews_block(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]:
+    """Upcoming and just-passed interviews (services/applications/agenda.py, read-only); a failure
+    logs and reads as two empty lists, never a 500."""
+    try:
+        from src.services.applications.agenda import interview_agenda  # noqa: PLC0415
+
+        return await interview_agenda(db, user_id, now)
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "doctor_interviews_failed",
+            extra={"event": "doctor_interviews_failed", "user_id": safe_log_value(user_id)},
+            exc_info=True,
+        )
+        return {"upcoming": [], "just_passed": []}
 
 
 def _tools_block(client_tools_version: str, client_tools_rev: Optional[int] = None) -> dict[str, Any]:

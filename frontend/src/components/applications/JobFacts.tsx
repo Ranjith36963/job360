@@ -50,6 +50,7 @@ export function JobFacts({
 
   // A fresh load of the application re-hydrates us.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setFacts(initial);
   }, [initial.country, initial.remote, initial.found_on]); // eslint-disable-line react-hooks/exhaustive-deps
 

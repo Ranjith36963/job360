@@ -45,11 +45,11 @@ from typing import Any, Literal, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.models import JobResponse
+from src.api.models import JobResponse, KnownPeopleOut
 from src.core import settings
 from src.core.settings import USER_BROUGHT_SOURCE
 from src.repositories.database import JobDatabase
@@ -184,6 +184,28 @@ _MAX_TEXT = settings.BRING_MAX_TEXT
 _MAX_FIELD = settings.BRING_MAX_FIELD
 
 
+class ListedPerson(BaseModel):
+    """Outreach pack #15 — a person the ad itself names ("Meet the hiring team").
+    Stored as a contact on this application, found_via='job_ad'. Lengths and the
+    http(s) rule are add_contact's (contacts.validate_listed_people)."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    role: str = ""
+    linkedin_url: str = ""
+
+
+class ListedPersonOut(BaseModel):
+    """One per ``listed_people`` item, same order. ``error`` (closed set) = not stored:
+    "contact_cap" (CONTACTS_PER_APPLICATION_MAX) or "rate_limited" (CONTACTS_MAX_PER_HOUR)."""
+
+    name: str
+    contact_id: Optional[int] = None
+    already_existed: bool = False
+    matched_on: Optional[str] = None  # "email" | "linkedin_url" | "name" when already_existed
+    error: Optional[Literal["contact_cap", "rate_limited"]] = None
+
+
 class BringJobRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=_MAX_FIELD)
     company: str = Field(..., min_length=1, max_length=_MAX_FIELD)
@@ -217,6 +239,12 @@ class BringJobRequest(BaseModel):
     origin: Optional[Literal["ai_hunt", "user_link", "user_paste"]] = None
     # Owner ask 2026-10-18: put it straight into the batch (a ``queued`` event) when it is open.
     queue: bool = Field(False, strict=True)
+    # Outreach pack #15 — people the ad names; stored as job_ad contacts on THIS application. Omitted = none.
+    listed_people: Optional[list[ListedPerson]] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the same
+    # key + same body returns the FIRST reply (already_existed=true), writing nothing;
+    # another body under it is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -239,7 +267,12 @@ class BringJobRequest(BaseModel):
         # javascript:, data:, or a bare path the browser would resolve to us.
         if v and not (v.startswith("https://") or v.startswith("http://")):
             raise ValueError("apply_url must start with http:// or https://")
-        return v
+        # Gap-audit #18: drop the fragment, user info, tracking keys and secret-named keys (token, sid,
+        # session, code, signature ...); every other key stays because real ATS links need it. The dedupe
+        # code (canonical_url) drops the same keys, so old rows stored in full still match.
+        from src.services.applications.job_checks import redact_url  # noqa: PLC0415
+
+        return redact_url(v) if v else v
 
 
 class BringJobResponse(BaseModel):
@@ -268,6 +301,13 @@ class BringJobResponse(BaseModel):
     # ("not open" = already applied or closed; "already queued" is still true).
     queued: Optional[bool] = None
     queue_note: Optional[str] = None
+    # Outreach pack #15 — one result per `listed_people` item; null when the call sent none.
+    listed_people: Optional[list[ListedPersonOut]] = None
+    # people THIS user already stored at this company (known_people.py) - a join, never a lookup
+    known_people: KnownPeopleOut = Field(default_factory=KnownPeopleOut)
+    # Slice 25 — true when this client_key was already used: the FIRST reply, nothing
+    # written. Not ``existing`` (that is "you had this job before this bring").
+    already_existed: bool = False
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -318,8 +358,32 @@ async def bring_job(
     Nothing is scored: the caller (the user's agent) already decided this ad
     is worth keeping, and product rule 4 forbids us judging fit. Returns the
     stored job plus the `application_id` the caller should work against from
-    here on.
+    here on. A repeated ``client_key`` returns the first reply (slice 25).
     """
+    from src.services import idempotency  # noqa: PLC0415
+
+    async def _write() -> dict[str, Any]:
+        return (await _bring_job(body, db, user)).model_dump()
+
+    # The MCP tool sends "" where a web body leaves the visa text out (None); both mean
+    # "not said", so they hash the same and the two doors share one key space.
+    key_body = {
+        **body.model_dump(exclude={"client_key"}),
+        "visa_detail": body.visa_detail or "", "visa_country": body.visa_country or "",
+    }
+    try:
+        # Not one transaction (atomic=False): the bring's read-only checks swallow their own
+        # errors, which would abort an enclosing transaction. The key is stored right after;
+        # a retry that slips between the two is caught by the title+company dedupe below.
+        reply = await idempotency.run_once(
+            db._db, user.id, "bring_job", body.client_key, key_body, _write, atomic=False,
+        )
+    except idempotency.IdempotencyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    return BringJobResponse(**reply)
+
+
+async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) -> BringJobResponse:
     # Lazy import (rule #16) — keeps the spine off the module import path.
     from src.models import Job  # noqa: PLC0415
     from src.services.applications import job_facts  # noqa: PLC0415
@@ -343,6 +407,15 @@ async def bring_job(
         clean_facts = job_facts.validate_job_facts(given_facts)
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+    clean_people: list[dict[str, str]] = []
+    if body.listed_people:
+        from src.services.applications import contacts as contacts_service  # noqa: PLC0415
+
+        try:
+            clean_people = contacts_service.validate_listed_people([p.model_dump() for p in body.listed_people])
+        except SpineError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
     now = datetime.now(timezone.utc).isoformat()
     job = Job(
@@ -502,6 +575,24 @@ async def bring_job(
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     facts: dict[str, Any] = {k: stored[k] for k in job_facts.JOB_FACT_FIELDS}
+    listed: Optional[list[ListedPersonOut]] = None
+    if clean_people:
+        from src.services.applications import contacts as contacts_service  # noqa: PLC0415
+
+        results = await contacts_service.add_listed_people(
+            db, user.id, birth["application_id"], actor_for(user), clean_people, source_url=body.apply_url or None,
+        )
+        listed = [ListedPersonOut(**r) for r in results]
+        get_audit_logger().info(
+            "job_bring_listed_people",
+            extra={
+                "event": "job_bring_listed_people", "user_id": safe_log_value(user.id),
+                "application_id": birth["application_id"], "sent": len(results),
+                "stored": sum(1 for r in results if r["contact_id"] is not None and not r["already_existed"]),
+                "already_existed": sum(1 for r in results if r["already_existed"]),
+                "refused": sum(1 for r in results if r["error"]), "status": "ok",
+            },
+        )
     from src.services.applications.job_checks import checks_for_application  # noqa: PLC0415
 
     app_now = await applications_spine.get_owned_application(db, user.id, birth["application_id"]) or {}
@@ -518,12 +609,21 @@ async def bring_job(
             description=str(app_now.get("job_description_snapshot") or body.description),
         )
 
+    from src.services.applications import known_people as known_people_service  # noqa: PLC0415
+
+    known = (
+        await known_people_service.for_application(db, user.id, app_now)
+        if app_now
+        else dict(known_people_service.EMPTY, people=[])
+    )
+
     get_audit_logger().info(
         "job_brought",
         extra={
             "event": "job_brought", "job_id": job_id, "user_id": user.id,
             "application_id": birth["application_id"],
             "existing": bool(birth["existing"]), "catalog_existing": not inserted, "status": "ok",
+            "known_people_count": known["count"],
         },
     )
 
@@ -562,6 +662,8 @@ async def bring_job(
         employer_published_at=stored.get("employer_published_at"),
         checks=checks,
         repost=flagged_repost,
+        listed_people=listed,
+        known_people=KnownPeopleOut(**known),
         **facts,
     )
 

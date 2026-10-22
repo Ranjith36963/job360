@@ -242,38 +242,6 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # THE OTHER HALF OF THE WIP LIMIT (2026-10-20). pr-advisor.yml parks a PR
-  # opened over the limit, and `pick` below never judges a parked PR, so with
-  # `merge-cage` required a parked PR could never merge. Nothing ever unparked:
-  # that day 17 of 24 open PRs sat parked, many of them green. Each sweep now
-  # puts the oldest parked PRs back while slots are free (scripts/wip_gate.py
-  # `pick_unpark`), and the next sweep or check suite judges them. Sweep-only:
-  # a slot frees when a PR merges or closes, and 20 minutes is soon enough.
-  unpark:
-    name: Unpark while WIP slots are free
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pr == '')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: write # remove the wip:parked label, and say so on the PR
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: "3.12"
-      - name: The gate's one dependency
-        run: python -m pip install --quiet pyyaml
-      - name: The WIP gate still parks and unparks on purpose
-        run: python scripts/wip_gate.py --drill
-      - name: Unpark
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: python scripts/wip_gate.py --unpark
-
   # Which PRs are even worth spending a judgement on. Split out so the expensive
   # job below runs once per candidate and not once per event.
   pick:
@@ -317,19 +285,16 @@ jobs:
               if [ -n "${INPUT_PR:-}" ]; then prs="$INPUT_PR"
               else prs=$(gh pr list --state open --limit 30 --json number --jq '.[].number'); fi ;;
           esac
-          # Only OPEN, non-draft, non-parked, same-repo PRs are ever candidates.
+          # Only OPEN, non-draft, same-repo PRs are ever candidates.
           # A fork PR is a stranger's code and never reaches the arm — the cage
           # would refuse it, but a refusal should be the second line of
-          # defence, not the first. A PR labeled `wip:parked` (scripts/wip_gate.py)
-          # is filtered out for the same reason as a draft: it opted itself out
-          # of the queue, on purpose, and must not be picked up here.
+          # defence, not the first.
           keep=""
           for pr in $prs; do
             meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner,labels,headRefName,mergeable 2>/dev/null || echo '')
             [ -n "$meta" ] || continue
             [ "$(echo "$meta" | jq -r .state)" = "OPEN" ] || continue
             [ "$(echo "$meta" | jq -r .isDraft)" = "false" ] || continue
-            [ "$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')" = "false" ] || continue
             # `human-merge` (issue-fix.yml): code a machine wrote from an ISSUE. This
             # repo is public and detector issues carry scraped, attacker-influenced
             # text (a Sentry message can echo user input), so that code is never
@@ -415,10 +380,13 @@ jobs:
 
       # THE TREE UNDER JUDGEMENT — the PR merged into its base, i.e. what would
       # actually ship, not the head, which has never been combined with anything.
+      # `fetch-depth: 2` (2026-10-20): the merge commit AND its parents, so the
+      # lane step can read the base as HEAD^1 for the new-package tripwire.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: refs/pull/${{ matrix.pr }}/merge
           path: _pr
+          fetch-depth: 2
 
       # WHICH BASE THIS PR IS ACTUALLY ON.
       # Read per PR from the API, NOT from the event payload. `check_suite` and
@@ -494,10 +462,17 @@ jobs:
             --jq '.[].filename' > changed.txt
           echo "$(wc -l < changed.txt) changed file(s)" >> "$GITHUB_STEP_SUMMARY"
 
+      # THE NEW-PACKAGE TRIPWIRE (2026-10-20, owner): a manifest that adds a
+      # NEW package name is `product_human` and is never queued here. It
+      # compares the merge ref's base (HEAD^1) to it; with no revisions it would
+      # fire on every manifest bump instead. Still no --base/--head: the data
+      # exemptions stay withheld, as before.
       - name: Which lane is this PR in
         run: |
           set -euo pipefail
-          python scripts/lane.py --json lane.json $(tr '\n' ' ' < changed.txt)
+          python scripts/lane.py --json lane.json \
+            --pin-repo _pr --pin-base HEAD^1 --pin-head HEAD \
+            $(tr '\n' ' ' < changed.txt)
           {
             echo "### PR #${{ matrix.pr }} — lane \`$(jq -r .lane lane.json)\`"
             echo "auto_merge: \`$(jq -r .auto_merge lane.json)\` · requires: \`$(jq -r '.requires|join(", ")' lane.json)\`"

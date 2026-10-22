@@ -17,7 +17,9 @@ import {
   HISTORY_PATHS,
   INBOX_MODES,
   AUTO_EMAILS_HELP,
+  OUTREACH_SEND_HELP,
   P_AUTO_EMAILS,
+  P_OUTREACH_SEND,
   P_EVERY,
   P_INBOX,
   P_SCORE,
@@ -27,6 +29,7 @@ import {
   inboxKey,
   mergeHistory,
   settingAutoEmails,
+  settingOutreachSend,
   settingScore,
   settingSwitch,
 } from "@/lib/assistant-tab";
@@ -106,6 +109,7 @@ export function AssistantTab() {
   const [busy, setBusy] = useState(false);
   const [score, setScore] = useState("");
   const [confirmAuto, setConfirmAuto] = useState(false);
+  const [confirmOutreach, setConfirmOutreach] = useState(false);
   const enterDone = useRef(false);
 
   const readHistory = useCallback(async () => {
@@ -144,6 +148,7 @@ export function AssistantTab() {
   }, [apply, readHistory]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     void load();
   }, [load]);
 
@@ -204,6 +209,7 @@ export function AssistantTab() {
   const aboveLine = settingSwitch(view.above_line);
   const belowLine = String(eff(view.below_line) || "ask");
   const autoEmails = settingAutoEmails(view.auto_employer_emails);
+  const outreachSend = settingOutreachSend(view.outreach_send);
   const submit_mode = String(eff(view.submit_mode) ?? "confirm");
   const batch = batchOn(aboveLine, submit_mode);
   const inbox = inboxKey(view.inbox_mode);
@@ -389,6 +395,55 @@ export function AssistantTab() {
                   type="button"
                   data-testid="auto-employer-emails-cancel"
                   onClick={() => setConfirmAuto(false)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Cancel
+                </button>
+              </span>
+            )}
+          </Row>
+          <Row title="Automatic outreach emails" sub={OUTREACH_SEND_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={outreachSend}
+              aria-label="Automatic outreach emails"
+              data-testid="outreach-send-toggle"
+              disabled={busy}
+              onClick={() => {
+                if (outreachSend) {
+                  setConfirmOutreach(false);
+                  void save(P_OUTREACH_SEND, "draft_only"); // the stop switch applies at once
+                } else {
+                  setConfirmOutreach(true);
+                }
+              }}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                outreachSend ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {outreachSend ? "On" : "Off"}
+            </button>
+            {confirmOutreach && !outreachSend && (
+              <span className="flex items-center gap-2 text-[13px]">
+                Let your assistant send outreach emails from your Gmail in your name?
+                <button
+                  type="button"
+                  data-testid="outreach-send-confirm"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmOutreach(false);
+                    void save(P_OUTREACH_SEND, "auto");
+                  }}
+                  className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground md:min-h-9"
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  data-testid="outreach-send-cancel"
+                  onClick={() => setConfirmOutreach(false)}
                   className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
                 >
                   Cancel

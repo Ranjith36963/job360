@@ -36,6 +36,15 @@ For dev tooling, install the dev extra — read
 pip install -e ".[dev]"
 ```
 
+CI and the prod image do not resolve `pyproject.toml` themselves: they install
+the hashed locks (`requirements.lock.txt` for prod, `requirements-dev.lock.txt`
+for CI, `requirements-browser.lock.txt` for the browser image) with
+`pip install --require-hashes -r <lock>`, then the app with `--no-deps`. To get
+CI's exact set on Linux, run `pip install --require-hashes -r requirements-dev.lock.txt`
+and then `pip install --no-deps -e .`. After any dependency edit in
+`pyproject.toml`, run `python scripts/lock_deps.py` (it needs uv) and commit the
+three locks. `python ../scripts/check_py_lock.py` says whether they match.
+
 `pre-commit` is **not** in that extra even though `CONTRIBUTING.md` makes
 `pre-commit run --all-files` a merge gate. Install it yourself
 (`pip install pre-commit`, or pipx) before the first commit.
@@ -72,13 +81,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## CLI
 
-```bash
-python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin li.pdf --github user
-python -m src.cli api                          # same as `python main.py`
-```
-
-`run` / `status` / `view` / `sources` / `rescore-backfill` were deleted with the
-sourcing era (slice 5, #483) — there is nothing left to search, score or list.
+`python -m src.cli --help`. The commands and their options are the
+`@cli.command` decorators in `src/cli.py`, nowhere else.
 
 ## Tests
 
