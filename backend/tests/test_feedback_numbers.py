@@ -526,7 +526,7 @@ async def test_no_view_returns_the_old_response_with_every_block_null(authentica
         await _applied(client, "Plain", 10, None, ("replied", 5))
         body = (await _stats(client)).json()
         for key in ("since", "overall", "by_cv_version", "by_role", "by_country", "by_job_source", "by_channel",
-                    "by_contact_found_via", "score_line", "groups_truncated", "applications_truncated", "computed_at"):
+                    "by_contact_found_via", "by_outreach_variant", "score_line", "groups_truncated", "applications_truncated", "computed_at"):
             assert key in body
         for key in ("funnel", "velocity", "calibration", "company", "lesson_effect", "followups"):
             assert body[key] is None

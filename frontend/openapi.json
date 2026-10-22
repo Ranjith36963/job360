@@ -6728,6 +6728,22 @@
         "title": "ListPeopleResponse",
         "type": "object"
       },
+      "ListTemplatesResponse": {
+        "properties": {
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateOut"
+            },
+            "title": "Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "title": "ListTemplatesResponse",
+        "type": "object"
+      },
       "ListedPerson": {
         "additionalProperties": false,
         "description": "Outreach pack #15 \u2014 a person the ad itself names (\"Meet the hiring team\").\nStored as a contact on this application, found_via='job_ad'. Lengths and the\nhttp(s) rule are add_contact's (contacts.validate_listed_people).",
@@ -7296,6 +7312,11 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
           },
           "occurred_at": {
             "title": "Occurred At",
@@ -9814,6 +9835,12 @@
             ],
             "title": "Follow Up On"
           },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
           "occurred_at": {
             "anyOf": [
               {
@@ -9994,7 +10021,7 @@
           },
           "label": {
             "default": "",
-            "maxLength": 100,
+            "maxLength": 200,
             "title": "Label",
             "type": "string"
           },
@@ -10093,6 +10120,11 @@
           },
           "kind": {
             "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
             "type": "string"
           },
           "made_by": {
@@ -10422,6 +10454,43 @@
           "event_id"
         ],
         "title": "SaveFitResponse",
+        "type": "object"
+      },
+      "SaveTemplateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "text"
+        ],
+        "title": "SaveTemplateRequest",
         "type": "object"
       },
       "SetVisaRequest": {
@@ -11749,6 +11818,59 @@
         "title": "StatsLessonSideOut",
         "type": "object"
       },
+      "StatsOutreachVariantGroupOut": {
+        "description": "Pack #13 \u2014 per outreach `label` (lower(trim)): contacts with a sent mark, counted\nonce under the label of their newest message version saved BEFORE their first sent\nmark ('' / none = key null, \"Not set\"); of those, how many have a reply mark;\nreply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outreach_replied": {
+            "title": "Outreach Replied",
+            "type": "integer"
+          },
+          "outreach_sent": {
+            "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "outreach_sent",
+          "outreach_replied",
+          "reply_rate",
+          "small_sample"
+        ],
+        "title": "StatsOutreachVariantGroupOut",
+        "type": "object"
+      },
       "StatsOverallOut": {
         "properties": {
           "applied": {
@@ -12374,6 +12496,14 @@
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
             },
             "title": "By Job Source",
+            "type": "array"
+          },
+          "by_outreach_variant": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StatsOutreachVariantGroupOut"
+            },
+            "title": "By Outreach Variant",
             "type": "array"
           },
           "by_role": {
@@ -13268,6 +13398,65 @@
           "at"
         ],
         "title": "TallyItem",
+        "type": "object"
+      },
+      "TemplateOut": {
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "template_id": {
+            "title": "Template Id",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "template_id",
+          "kind",
+          "label",
+          "version_no",
+          "text",
+          "chars",
+          "made_by",
+          "created_at"
+        ],
+        "title": "TemplateOut",
         "type": "object"
       },
       "TimezoneRequest": {
@@ -23631,6 +23820,172 @@
         "summary": "Provenance",
         "tags": [
           "tailor"
+        ]
+      }
+    },
+    "/api/templates": {
+      "get": {
+        "operationId": "list_templates_api_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "outreach_template",
+              "maxLength": 40,
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTemplatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "templates"
+        ]
+      },
+      "post": {
+        "operationId": "save_template_api_templates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Template",
+        "tags": [
+          "templates"
         ]
       }
     },

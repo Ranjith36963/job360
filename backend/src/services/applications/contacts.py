@@ -51,6 +51,7 @@ from src.services.applications.spine import (
     parse_occurred_at,
     user_today,
 )
+from src.services.applications.templates import clean_variant_label
 from src.services.auth import rate_limit
 from src.services.profile import assistant_settings as settings_rules
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -1121,6 +1122,7 @@ def _serialize_outreach(row: dict[str, Any], *, include_text: bool = True) -> di
         "recorded_by": row["recorded_by"],
         "source_message_id": row.get("source_message_id") or "",
         "follow_up_on": row.get("follow_up_on"),
+        "label": row.get("label") or "",
     }
 
 
@@ -1132,7 +1134,7 @@ _NEW_ENTRIES = settings.CONTACT_INTERACTION_ENTRIES + settings.CONTACT_REFERRAL_
 async def _outreach_rows(db: JobDatabase, contact_id: int) -> list[dict[str, Any]]:
     cur = await db._db.execute(
         "SELECT id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, recorded_by, "
-        "source_message_id, follow_up_on FROM contact_outreach WHERE contact_id = ? ORDER BY id ASC",
+        "source_message_id, follow_up_on, label FROM contact_outreach WHERE contact_id = ? ORDER BY id ASC",
         (contact_id,),
     )
     return [dict(r) for r in await cur.fetchall()]
@@ -1197,7 +1199,7 @@ async def _find_outreach_by_source(
 ) -> Optional[dict[str, Any]]:
     cur = await db._db.execute(
         "SELECT id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, recorded_by, "
-        "source_message_id, follow_up_on FROM contact_outreach WHERE contact_id = ? AND source_message_id = ?",
+        "source_message_id, follow_up_on, label FROM contact_outreach WHERE contact_id = ? AND source_message_id = ?",
         (contact_id, source_message_id),
     )
     row = await cur.fetchone()
@@ -1265,6 +1267,7 @@ async def record_outreach(
     source_message_id: str = "",
     follow_up_on: Optional[str] = None,
     application_id_hint: Optional[int] = None,
+    label: str = "",
 ) -> dict[str, Any]:
     """The one door every outreach write goes through — the direct
     ``POST /api/contacts/{contact_id}/outreach`` route, ``save_artifact``
@@ -1294,6 +1297,8 @@ async def record_outreach(
     ``"bounced"`` (outreach pack #7) is a ledger-only mark: NO timeline event, email
     channel, needs ``source_message_id`` (the bounce email's id) and takes no
     ``text`` — the server stores the contact's CURRENT email as ``text``.
+
+    ``label`` — the caller's variant name on a message version (stats ``by_outreach_variant``).
 
     ``source_message_id`` — idempotent re-read of the same email: a second
     call naming the same id returns the EXISTING row (``already_existed``),
@@ -1335,6 +1340,9 @@ async def record_outreach(
             raise SpineError(
                 422, "a bounce takes no text: Job360 stores the contact's current email as the bounced address"
             )
+    clean_label = clean_variant_label(label)
+    if clean_label and entry != "message":
+        raise SpineError(422, "label is only meaningful on a message version")
 
     if source_message_id:
         existing = await _find_outreach_by_source(db, contact_id, source_message_id)
@@ -1446,10 +1454,10 @@ async def record_outreach(
                 ins = await db._db.execute(
                     "INSERT INTO contact_outreach "
                     "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
-                    " recorded_by, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " recorded_by, source_message_id, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user_id, contact_id, entry, channel, clean_text, version_no, occurred, now, actor,
-                        source_message_id or "",
+                        source_message_id or "", clean_label,
                     ),
                 )
             except pg.IntegrityError:
@@ -1465,10 +1473,10 @@ async def record_outreach(
                 cur = await db._db.execute(
                     "INSERT INTO contact_outreach "
                     "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
-                    " recorded_by, source_message_id, follow_up_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " recorded_by, source_message_id, follow_up_on, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user_id, contact_id, entry, channel, clean_text, None, occurred, now, actor,
-                        source_message_id or "", stored_follow_up,
+                        source_message_id or "", stored_follow_up, clean_label,
                     ),
                 )
                 outreach_id = int(cur.lastrowid or 0)
@@ -1509,7 +1517,7 @@ async def record_outreach(
     outreach = {
         "id": outreach_id, "contact_id": contact_id, "entry": entry, "channel": channel, "text": clean_text,
         "version_no": version_no, "occurred_at": occurred, "recorded_at": now, "recorded_by": actor,
-        "source_message_id": source_message_id or "", "follow_up_on": stored_follow_up,
+        "source_message_id": source_message_id or "", "follow_up_on": stored_follow_up, "label": clean_label,
     }
     if entry == "message":
         # Warn-only writing checks (cv_checks.check_text): stock phrases, leaked chat.

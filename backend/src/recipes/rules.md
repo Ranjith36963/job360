@@ -421,6 +421,8 @@ nothing and never count as outreach sends. `referral_given` needs the contact li
 with application_id first); the kit's `referred_by` and stats(view="referrals") read it. A wrong one:
 record_event `note` with `corrects_event_id` = its event id (the person's own history keeps the entry).
 
+Variants and templates: pass `label` on save_artifact(contact_id=..., kind="outreach") to name the approach (for example a template's label). stats `by_outreach_variant` counts each contact once, under the label of its newest message saved before its first `sent` mark (no message or no label = "Not set"), with sent, replied and reply rate. Keep reusable wording with save_artifact(kind="outreach_template", label=..., text=...) and no application_id or contact_id: each save is a new version; get_profile `outreach_templates` returns the newest of each label. You fill a template in yourself for each person, with true facts only; Job360 never fills, renders or sends one.
+
 ## Automatic employer emails
 
 Job360 never sends mail. Your own Gmail connector sends; Job360 stores, gates and counts.

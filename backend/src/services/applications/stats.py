@@ -40,6 +40,10 @@ two above (``_group_by``):
   contacts with a sent mark (``None`` when nothing was sent — rule #29).
   One aggregate query, bounded by the closed set.
 * ``by_contact_relationship`` — the same, per current ``relationship``.
+* ``by_outreach_variant`` — CONTACTS with a sent mark, each counted once under
+  the label of its newest message version saved before its FIRST sent mark
+  (none / '' -> "Not set"); outreach_sent, outreach_replied, reply_rate,
+  small_sample. Labels are free text, so the group cap applies.
 """
 from __future__ import annotations
 
@@ -303,6 +307,56 @@ async def _contact_found_via_groups(
     return groups
 
 
+async def _outreach_variant_groups(
+    db: JobDatabase, user_id: str, since_val: Optional[str]
+) -> tuple[list[dict[str, Any]], bool]:
+    """``by_outreach_variant`` (pack #13). Per contact with a sent mark: the label
+    of its newest message version saved BEFORE its first sent mark ('' / none =
+    "Not set"), and whether any reply mark exists. Grouped in Python on
+    ``lower(trim(label))``; sorted by count; capped at ``STATS_MAX_GROUPS``."""
+    where = ["ac.user_id = ?", "NOT " + _SIMULATED_SQL.format(app="ac.application_id")]
+    where_params: list[Any] = [user_id, user_id, settings.SIMULATION_EVENT_TYPE]
+    if since_val:
+        where.append("ac.created_at >= ?")
+        where_params.append(since_val)
+    sql = f"""
+        SELECT ac.id AS contact_id,
+               (SELECT m.label FROM contact_outreach m
+                 WHERE m.contact_id = ac.id AND m.user_id = ac.user_id AND m.entry = 'message'
+                   AND m.id < fs.first_sent_id
+                 ORDER BY m.id DESC LIMIT 1) AS label,
+               CASE WHEN EXISTS (SELECT 1 FROM contact_outreach r WHERE r.contact_id = ac.id
+                                 AND r.user_id = ac.user_id AND r.entry = 'reply') THEN 1 ELSE 0 END AS replied
+        FROM application_contacts ac
+        JOIN (SELECT contact_id, MIN(id) AS first_sent_id FROM contact_outreach
+              WHERE user_id = ? AND entry = 'sent' GROUP BY contact_id) fs ON fs.contact_id = ac.id
+        WHERE {" AND ".join(where)}
+        ORDER BY ac.id ASC
+    """  # noqa: S608 — built from constants
+    cur = await db._db.execute(sql, [user_id, *where_params])
+    members: dict[Optional[str], list[dict[str, Any]]] = {}
+    for r in await cur.fetchall():
+        row = dict(r)
+        members.setdefault(_norm(row["label"]), []).append(row)
+    groups: list[dict[str, Any]] = []
+    for key, rows in members.items():
+        sent = len(rows)
+        replied = sum(int(x["replied"] or 0) for x in rows)
+        groups.append(
+            {
+                "key": key,
+                "label": NOT_SET_LABEL if key is None else str(rows[0]["label"]).strip(),
+                "outreach_sent": sent,
+                "outreach_replied": replied,
+                "reply_rate": round(replied / sent, 3),
+                "small_sample": sent < settings.STATS_SMALL_SAMPLE_N,
+            }
+        )
+    groups.sort(key=lambda g: (-g["outreach_sent"], g["key"] is None, g["key"] or ""))
+    cap = settings.STATS_MAX_GROUPS
+    return groups[:cap], len(groups) > cap
+
+
 async def _score_line_counts(user_id: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Owner decision 2026-10-10 - how many of the user's applications sit above /
     below THEIR OWN score line, and how many have no fit score (or there is no
@@ -510,6 +564,7 @@ async def compute_stats(
     by_channel, channel_truncated = _group_by(rows, lambda r: receipt_channel_key(r.get("receipt_channel")))
     by_contact_found_via = await _contact_found_via_groups(db, user_id, since_val)
     by_contact_relationship = await _contact_found_via_groups(db, user_id, since_val, field="relationship")
+    by_outreach_variant, variant_truncated = await _outreach_variant_groups(db, user_id, since_val)
     score_line = await _score_line_counts(user_id, rows)
 
     # Every view key is present on every response; a view ADDS one block, the
@@ -566,9 +621,11 @@ async def compute_stats(
         "by_channel": by_channel,
         "by_contact_found_via": by_contact_found_via,
         "by_contact_relationship": by_contact_relationship,
+        "by_outreach_variant": by_outreach_variant,
         "score_line": score_line,
         "groups_truncated": (
             cv_truncated or role_truncated or country_truncated or source_truncated or channel_truncated
+            or variant_truncated
         ),
         "applications_truncated": applications_truncated,
         **view_blocks,
