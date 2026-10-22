@@ -97,6 +97,14 @@ delete a lesson; if one stops being true, say so on its line and why.
   compared two different days. Fixed in #1058. **Rule:** a date assert derives its expected value
   from the fixture's own clock, never from a second read of the wall clock.
 
+- 2026-10-22: I closed #908 and #929 as my own and counted #933 as mine. All three belonged to another
+  session, whose `Claude-Session` commit trailer said so. I reopened them and posted corrections.
+  The GitHub list API also showed `merged:false` for PRs that were merged. **Rule:** before closing, handing
+  back or counting a PR, read its commit trailers. Read merged state with one GET of that PR, never the list.
+- 2026-10-22: commits and pushes were blocked by branch-owner-guard because old worktrees
+  (`wt902`, an agent worktree) still held the same branch names. Their "staged" files were only the branch
+  ref moving. **Rule:** `git worktree list` first; remove a stale worktree only after `git status` shows it clean.
+
 ## Handing work to another Claude session
 
 - 2026-10-15: the cloud session asked the owner's desktop "apply" session (via
