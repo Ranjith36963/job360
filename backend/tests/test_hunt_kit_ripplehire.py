@@ -38,7 +38,7 @@ def _fix(name: str):
 def _stub(list_pages: list, detail=None, list_status: int = 200):
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append((method, url, data, headers))
         if "candidatejobsearch" in url:
             n = sum(1 for c in calls if "candidatejobsearch" in c[1]) - 1

@@ -36,7 +36,7 @@ def _http(routes):
     """Fake http: the first route whose needle is in the url answers; a callable gets the url."""
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append({"url": url, "headers": headers or {}, "as_json": as_json})
         for needle, resp in routes.items():
             if needle in url:

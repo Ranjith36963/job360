@@ -34,7 +34,7 @@ def _stub(routes: dict):
     """http stub: first route whose key is in the URL wins; a callable value gets (url, method, body)."""
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         body = json.loads(data) if data else None
         calls.append((url, method, body, headers or {}))
         for frag, resp in routes.items():

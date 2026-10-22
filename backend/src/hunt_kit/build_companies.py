@@ -425,7 +425,8 @@ def probe_recruitee(http: Http, slug: str) -> dict[str, Any]:
 
 
 def probe_personio(http: Http, slug: str) -> dict[str, Any]:
-    st, text = http("https://%s.jobs.personio.de/xml" % slug, as_json=False)
+    # 5 MB: a Personio XML feed carries every posting with its description
+    st, text = http("https://%s.jobs.personio.de/xml" % slug, as_json=False, max_bytes=5_000_000)
     if st != 200 or not isinstance(text, str):
         return _miss_or_err(st)
     if "<workzag-jobs" not in text:
@@ -441,7 +442,7 @@ _TT = "{https://teamtailor.com/locations}"
 
 
 def probe_teamtailor(http: Http, slug: str) -> dict[str, Any]:
-    st, text = http("https://%s.teamtailor.com/jobs.rss" % slug, as_json=False)
+    st, text = http("https://%s.teamtailor.com/jobs.rss" % slug, as_json=False, max_bytes=5_000_000)  # RSS: full descriptions
     if st != 200 or not isinstance(text, str):
         return _miss_or_err(st)
     if "<rss" not in text:

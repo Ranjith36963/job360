@@ -166,15 +166,23 @@ def _words(s: str) -> str:
     return " ".join(re.split(r"[-_]+", s)).strip()
 
 
-def _page_st(http: Http, url: str, *, once: bool = False) -> tuple[int, str | None]:
-    """(status, text of a 200 HTML/XML page or None). ``once`` sends the request a single time (no 429/5xx retry)."""
-    st, page = _get(http, url, as_json=False, headers=_HTML, **({"once": True} if once else {}))
+_SITEMAP_MAX = 10_000_000  # a sitemap can list tens of thousands of postings; the 2 MB page default would drop it
+_FEED_MAX = 5_000_000  # an XML job feed carries a full description per item; same reason
+
+
+def _page_st(http: Http, url: str, *, once: bool = False, max_bytes: int | None = None) -> tuple[int, str | None]:
+    """(status, text of a 200 HTML/XML page or None). ``once`` sends the request a single time (no 429/5xx retry).
+    ``max_bytes`` overrides the 2 MB page default (only sent when set)."""
+    kw: dict[str, Any] = {"once": True} if once else {}
+    if max_bytes:
+        kw["max_bytes"] = max_bytes
+    st, page = _get(http, url, as_json=False, headers=_HTML, **kw)
     return st, (page if st == 200 and isinstance(page, str) else None)
 
 
-def _page(http: Http, url: str, *, once: bool = False) -> str | None:
+def _page(http: Http, url: str, *, once: bool = False, max_bytes: int | None = None) -> str | None:
     """The text of a 200 HTML/XML page, else None."""
-    return _page_st(http, url, once=once)[1]
+    return _page_st(http, url, once=once, max_bytes=max_bytes)[1]
 
 
 def _open_details(row: dict[str, Any], http: Http, items: list[tuple[str, str]], cap: int) -> dict[str, str]:
@@ -544,11 +552,11 @@ def _factorial(row: dict[str, Any], http: Http) -> list[Job] | None:
 # the URL slug against ``title_ok`` before opening a page are NOT IN REFERENCE (the reference opens every new posting).
 def _jobylon(row: dict[str, Any], http: Http) -> list[Job] | None:
     """Jobylon global jobs sitemap + one ld+json posting page per wanted job (token ignored)."""
-    index = safe_fromstring(_page(http, "https://emp.jobylon.com/sitemap.xml"))
+    index = safe_fromstring(_page(http, "https://emp.jobylon.com/sitemap.xml", max_bytes=_SITEMAP_MAX))
     if index is None:
         return None
     sub = next((u for u in _sitemap_locs(index, "sitemap") if "sitemap-jobs" in u and _https(u, "emp.jobylon.com")), "")
-    listing = safe_fromstring(_page(http, sub)) if sub else None
+    listing = safe_fromstring(_page(http, sub, max_bytes=_SITEMAP_MAX)) if sub else None
     if listing is None:
         return None
     found: dict[int, str] = {}
@@ -764,7 +772,7 @@ def _talentlyft(row: dict[str, Any], http: Http) -> list[Job] | None:
     if not _label(tenant):
         return None
     host = f"{tenant}.talentlyft.com"
-    sm = safe_fromstring(_page(http, f"https://{host}/sitemap.xml"))
+    sm = safe_fromstring(_page(http, f"https://{host}/sitemap.xml", max_bytes=_SITEMAP_MAX))
     if sm is None:
         return None
     items: list[tuple[str, str]] = []
@@ -850,7 +858,7 @@ def _trakstar(row: dict[str, Any], http: Http) -> list[Job] | None:
     tenant = str(row.get("token") or "").strip().lower()
     if not _label(tenant):
         return None
-    st, feed = _get(http, f"https://{tenant}.hire.trakstar.com/jobfeeds/{tenant}", as_json=False, headers=_XML)
+    st, feed = _get(http, f"https://{tenant}.hire.trakstar.com/jobfeeds/{tenant}", as_json=False, headers=_XML, max_bytes=_FEED_MAX)
     root = safe_fromstring(feed) if st == 200 else None
     if root is None or _local(root.tag) != "rss":
         return None

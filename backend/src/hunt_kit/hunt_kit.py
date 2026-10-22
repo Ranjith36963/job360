@@ -777,6 +777,10 @@ def _open(req: urllib.request.Request, timeout: int) -> Any:
     return _OPENER.open(req, timeout=timeout)
 
 
+PAGE_MAX_BYTES = 2_000_000  # default cap for one HTML/XML/RSS response (pages the readers parse with regexes)
+API_MAX_BYTES = 20_000_000  # default cap for one JSON API response (SimplifyJobs listings.json is ~13 MB)
+SITEMAP_MAX_BYTES = 10_000_000  # explicit cap for a sitemap (can list tens of thousands of postings)
+FEED_MAX_BYTES = 5_000_000  # explicit cap for an RSS/Atom/XML job feed (full descriptions per item)
 _STATUS_TL = threading.local()  # a board task sets .log; http_request then notes every status it returns
 
 
@@ -785,7 +789,7 @@ def http_request(
     params: Any = None,
     data: bytes | None = None,
     retries: int = RETRIES_429,
-    max_bytes: int = 20_000_000,
+    max_bytes: int = API_MAX_BYTES,
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
@@ -803,7 +807,7 @@ def _http_request(
     params: Any = None,
     data: bytes | None = None,
     retries: int = RETRIES_429,
-    max_bytes: int = 20_000_000,
+    max_bytes: int = API_MAX_BYTES,
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
@@ -834,7 +838,10 @@ def _http_request(
             try:
                 req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
                 with _open(req, TIMEOUT_S) as r:
-                    return r.status, r.geturl(), r.read(max_bytes)
+                    body = r.read(max_bytes + 1)
+                    if len(body) > max_bytes:  # oversize is a failed request, never a half-parsed body
+                        return 0, url, b""
+                    return r.status, r.geturl(), body
             except urllib.error.HTTPError as e:
                 if once:
                     return e.code, url, b""
@@ -870,14 +877,18 @@ def http(
     headers: dict[str, str] | None = None,
     as_json: bool = True,
     once: bool = False,
+    max_bytes: int | None = None,
 ) -> tuple[int, Any]:
     """The shared http helper handed to every kit module (contract signature).
 
     Returns (status, parsed_json_or_text_or_None); status 0 on network error.
     Rate limiting (3 per host), 429 backoff and the User-Agent are built in. ``once=True`` sends the request
     exactly once (no 429 backoff, no 5xx retry): kit_bigboards uses it so a refusal ends the site.
+    ``max_bytes`` caps one response (PAGE_MAX_BYTES for text, API_MAX_BYTES for JSON); a larger body is status 0.
     """
-    st, _u, body = http_request(url, data=data, method=method, headers=headers, once=once)
+    if max_bytes is None:
+        max_bytes = API_MAX_BYTES if as_json else PAGE_MAX_BYTES
+    st, _u, body = http_request(url, data=data, method=method, headers=headers, once=once, max_bytes=max_bytes)
     if not (200 <= st < 300):
         return st, None
     text = decode_body(body)

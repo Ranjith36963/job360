@@ -40,7 +40,7 @@ class FakeHttp:
     def __init__(self, routes: dict[str, object], status: int = 200) -> None:
         self.routes, self.status, self.calls = routes, status, []
 
-    def __call__(self, url, *, method="GET", data=None, headers=None, as_json=True):
+    def __call__(self, url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         self.calls.append({"url": url, "method": method, "data": data})
         for needle, body in self.routes.items():
             if needle in url:
@@ -338,7 +338,7 @@ def test_githublists_reads_both_lists_and_matches_titles():
 def _rec_http(routes):
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append((url, method, data, headers or {}))
         for frag, resp in routes.items():
             if frag in url:
