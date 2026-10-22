@@ -1117,6 +1117,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/email-change/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email Change Undo
+         * @description Undo an email change from the link mailed to the OLD address.
+         *
+         *     Public, authenticated by its one-time token (like password-reset/confirm).
+         *     On success: 204, the previous email and its previous verified state are
+         *     back, and every session, agent token and OAuth grant is revoked.
+         *     Unknown, used, expired or deleted-user token: generic 400. The previous
+         *     address now belonging to another account: 409, nothing changed.
+         *
+         *     Rate-limited per IP (429) like the password-reset request.
+         */
+        post: operations["email_change_undo_api_auth_email_change_undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -1413,6 +1441,11 @@ export interface paths {
         /**
          * Change Email
          * @description Change email. Requires current password. Invalidates session → re-login required.
+         *
+         *     The new address is unproven, so ``email_verified_at`` is cleared and the
+         *     verification mail goes to it. The OLD address gets a notice with a 24 h
+         *     one-time link that undoes the change (``/email-change/undo``). Both mails
+         *     are background work: a failed send never breaks the request.
          */
         patch: operations["change_email_api_auth_users_me_email_patch"];
         trace?: never;
@@ -4662,6 +4695,11 @@ export interface components {
              * Format: email
              */
             new_email: string;
+        };
+        /** EmailChangeUndoRequest */
+        EmailChangeUndoRequest: {
+            /** Token */
+            token: string;
         };
         /** EmailVerificationConfirmRequest */
         EmailVerificationConfirmRequest: {
@@ -10300,6 +10338,37 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    email_change_undo_api_auth_email_change_undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChangeUndoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

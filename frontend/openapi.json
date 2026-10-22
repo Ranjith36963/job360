@@ -4249,6 +4249,21 @@
         "title": "EmailChangeRequest",
         "type": "object"
       },
+      "EmailChangeUndoRequest": {
+        "properties": {
+          "token": {
+            "maxLength": 200,
+            "minLength": 20,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "EmailChangeUndoRequest",
+        "type": "object"
+      },
       "EmailVerificationConfirmRequest": {
         "properties": {
           "token": {
@@ -18566,6 +18581,41 @@
         ]
       }
     },
+    "/api/auth/email-change/undo": {
+      "post": {
+        "description": "Undo an email change from the link mailed to the OLD address.\n\nPublic, authenticated by its one-time token (like password-reset/confirm).\nOn success: 204, the previous email and its previous verified state are\nback, and every session, agent token and OAuth grant is revoked.\nUnknown, used, expired or deleted-user token: generic 400. The previous\naddress now belonging to another account: 409, nothing changed.\n\nRate-limited per IP (429) like the password-reset request.",
+        "operationId": "email_change_undo_api_auth_email_change_undo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeUndoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Email Change Undo",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/auth/login": {
       "post": {
         "operationId": "login_api_auth_login_post",
@@ -19195,7 +19245,7 @@
     },
     "/api/auth/users/me/email": {
       "patch": {
-        "description": "Change email. Requires current password. Invalidates session \u2192 re-login required.",
+        "description": "Change email. Requires current password. Invalidates session \u2192 re-login required.\n\nThe new address is unproven, so ``email_verified_at`` is cleared and the\nverification mail goes to it. The OLD address gets a notice with a 24 h\none-time link that undoes the change (``/email-change/undo``). Both mails\nare background work: a failed send never breaks the request.",
         "operationId": "change_email_api_auth_users_me_email_patch",
         "parameters": [
           {
