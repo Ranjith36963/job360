@@ -1,17 +1,25 @@
-"""Public-sector and education board fetchers for the hunt kit: NEOGOV and SchoolSpring. Same contract as
-kit_ats_eu.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only through the ``http`` callable, no file
-IO at import, standard library only. Nothing here ranks or scores a job.
+"""Public-sector and education board fetchers for the hunt kit: NEOGOV, AppliTrack, SchoolSpring and EDJOIN. Same
+contract as kit_ats_eu.py: ``fetch(row, http, stats) -> list[Job]``, never raises, network only through the ``http``
+callable, no file IO at import, standard library only. Nothing here ranks or scores a job.
 
 Board tokens (companies.json ``board`` / ``--companies-extra "ats:token"``):
   neogov        ``<domain>/<agency>[/<folder>]`` with domain schooljobs.com or governmentjobs.com
                 (``schooljobs.com/cochisecollege``): the two domains are separate tenant spaces
+  applitrack    district slug of www.applitrack.com/<slug>/onlineapp/
   schoolspring  a district host ``<district>.schoolspring.com`` (that district's board), or any other text, which is
                 a SEARCH KEYWORD on the national index (one central index serves every employer there)
+  edjoin        an EDJOIN JOB-TYPE id (digits), NOT a district: EDJOIN is one central index and the id selects a slice
 
 Endpoints, params and field names are adapted from the MIT-licensed freehire and career-ops source adapters (see
 NOTICE.md); the code is original. The container this was written in could not reach any of these hosts, so every
 parser is tested on fixtures shaped like the references' test data only. Posting pages are opened only for cards whose
 title passes the run's ``title_ok`` test, up to 25 per board, and the first refusal ends the board's detail pages.
+
+PeopleSoft HCM career sites (freehire peoplesoft.go, career-ops peoplesoft.mjs) are deliberately NOT read: the search
+list only grows by a form POSTBACK that PeopleTools accepts inside the cookie session the first GET opened (peoplesoft.go
+:35-36 "ONE cookie jar", :112-160; peoplesoft.mjs:31-40, :79-88, :244-267), and the kit's ``http`` returns (status, body)
+with no Set-Cookie and no jar, so that session cannot be carried. A /psc/<site>/<portal>/<node>/c/HRS_HRAM_FL...
+link is reported as unsupported instead (hunt_kit.board_from_job_url).
 """
 # ruff: noqa: E501
 from __future__ import annotations
@@ -34,9 +42,12 @@ from kit_ats_eu import (  # noqa: E402
     Http,
     Job,
     _body,
+    _epoch_date,
     _get,
     _iso_date,
     _job,
+    _join,
+    _ld_posting,
     _Node,
     _open_details,
     _remote_from,
@@ -54,12 +65,23 @@ _XHR = {"Accept": "text/html", "X-Requested-With": "XMLHttpRequest"}
 DETAIL_CAP = 25
 NEOGOV_PAGES = 30  # career-ops neogov.mjs:32 DEFAULT_MAX_PAGES (10 cards a page, so 300 postings)
 SCHOOLSPRING_PAGE = 100
+EDJOIN_PAGE = 500
 
 
 # --------------------------------------------------------------------------- shared helpers
 def _clean(value: Any) -> str:
     """Entity-decoded text on one line (the APIs leave entities in plain-text fields)."""
     return " ".join(html.unescape(str(value or "")).replace("�", "").split())
+
+
+def _us_date(value: str) -> str:
+    """'9/1/2026' (month/day/year, unpadded) -> '2026-09-01'; '' for anything else, free text included."""
+    if not re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", value.strip()):
+        return ""
+    try:
+        return datetime.strptime(value.strip(), "%m/%d/%Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return ""
 
 
 def _not_future(day: str, today: date | None = None) -> str:
@@ -188,6 +210,107 @@ def _neogov(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- AppliTrack
+# Borrowed from freehire internal/ingest/sources/applitrack.go:16-22 (board = tenant path segment, case-insensitive),
+# :50-58 and :261-283 (nothing is served as HTML: Output.asp answers JavaScript whose document.write('...') arguments carry the
+# page, so the text is unwrapped first; ?all=1 is the site's own "All Vacancies" list), :68-72 (a consortium lists one
+# requisition once per district under the SAME AppliTrackJobId: collapse them), :73-76 (windows-1252, handled by the kit's
+# decode_body), :285-321 (applitrackWritten: backslash escapes the next character; a call that runs off the end is a cut
+# response and refuses the page), :446-474 (fields are a span.label "<Name>:" followed by span.normal), :191-217 and :481-509
+# (detail: Output.asp?AppliTrackJobId=<id>, block id "p<id>_", the body is the first span.normal that is not inside a field
+# row; an id the board no longer carries is answered 200 with an empty list), :255-259 (permalink .../jobpostings/view.asp?
+# AppliTrackJobId=<id>), :516-518 (dates are unpadded month/day/year; "ASAP" and the like are no date), and career-ops
+# providers/applitrack.mjs:7-14 and :65 (the whole board in ONE request: jobpostings/Output.asp?all=1), :117 (a body with no
+# "function applyFor" prelude is not this endpoint), :125-136 (a posting is a <table class='title'> block holding
+# "JobID: <n>", td#wrapword = title, Location and Date Posted fields). NOT taken: freehire's technology-category crawl
+# (:24-45, :342-377: an IT catalogue's own choice; the kit's user filters by title) and career-ops' default_location (:16-19).
+_APPLITRACK_SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+_APPLITRACK_WRITE = re.compile(r"document\.write\('([^'\\]*(?:\\.[^'\\]*)*)('?)", re.S)
+_APPLITRACK_ESC = re.compile(r"\\(.)", re.S)
+_APPLITRACK_SPLIT = re.compile(r"<table\s+class=['\"]title['\"]", re.I)
+_APPLITRACK_ID = re.compile(r"JobID:\s*(\d+)", re.I)
+
+
+def _applitrack_markup(body: str) -> str | None:
+    """The markup the response's document.write('...') calls emit; None when a call is cut off or the body is not
+    an Output.asp script at all."""
+    out: list[str] = []
+    for m in _APPLITRACK_WRITE.finditer(body):
+        if not m.group(2):
+            return None  # the call never closed: a cut response must not read as a complete board
+        out.append(_APPLITRACK_ESC.sub(r"\1", m.group(1)))
+    if not out and "function applyFor" not in body:
+        return None
+    return "".join(out)
+
+
+def _label_value(root: _Node, label: str) -> str:
+    """The span.normal after the span.label '<label>:' in the same row ('' when the row is absent)."""
+    for parent in (root, *_walk(root)):
+        for i, k in enumerate(parent.kids):
+            if isinstance(k, _Node) and k.tag == "span" and k.has_class("label") and k.text().rstrip(":").strip() == label:
+                for sib in parent.kids[i + 1:i + 7]:  # the value sits right after its label; a bounded look keeps a hostile row linear
+                    if isinstance(sib, _Node) and sib.tag == "span" and sib.has_class("normal"):
+                        return str(sib.text()).replace("�", "")
+    return ""
+
+
+def _applitrack_body(page: str, jid: str) -> str:
+    """Description of one posting page: the first span.normal under block ``p<jid>_`` that is not inside a field row."""
+    block = _by_id(_tree(_applitrack_markup(page) or ""), f"p{jid}_")
+    if block is None:
+        return ""
+    stack: list[tuple[_Node, bool]] = [(block, False)]
+    while stack:
+        node, in_row = stack.pop()
+        for k in reversed(node.kids):
+            if not isinstance(k, _Node):
+                continue
+            if k.tag == "span" and k.has_class("normal") and not in_row:
+                return str(_body(k.inner_html()))
+            stack.append((k, in_row or k.tag == "li"))
+    return ""
+
+
+def _applitrack(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """AppliTrack K-12 district board: the whole list in one Output.asp?all=1 request, posting pages for wanted ones."""
+    slug = str(row.get("token") or "").strip().lower()
+    if not _APPLITRACK_SLUG.fullmatch(slug):
+        return None
+    base = f"https://www.applitrack.com/{slug}/onlineapp/jobpostings/"
+    st, body = _get(http, base + "Output.asp?all=1", as_json=False, headers=_HTMLH)
+    markup = _applitrack_markup(body) if st == 200 and isinstance(body, str) else None
+    if markup is None:
+        return None
+    postings: dict[str, dict[str, str]] = {}
+    for block in _APPLITRACK_SPLIT.split(markup)[1:]:
+        try:
+            m = _APPLITRACK_ID.search(block)
+            if m is None or m.group(1) in postings:
+                continue  # no id, or one requisition listed once per district
+            root = _tree("<table class='title'" + block)
+            title = _clean(next((n.text() for n in _walk(root) if n.attrs.get("id") == "wrapword"), ""))
+            if not title:
+                continue
+            postings[m.group(1)] = {"title": title, "location": _clean(_label_value(root, "Location")),
+                                    "posted": _us_date(_label_value(root, "Date Posted"))}
+        except Exception:  # noqa: BLE001, S112 - one bad block must not lose the board
+            continue
+    view = {i: f"{base}view.asp?AppliTrackJobId={i}" for i in postings}
+    pages = _open_details(row, http, [(f"{base}Output.asp?AppliTrackJobId={i}", p["title"]) for i, p in postings.items()],
+                          DETAIL_CAP)
+    jobs: list[Job] = []
+    for jid, p in postings.items():
+        try:
+            page = pages.get(f"{base}Output.asp?AppliTrackJobId={jid}")
+            jobs.append(_job(row, "applitrack", title=p["title"], url=view[jid], location=p["location"], posted=p["posted"],
+                             description=_applitrack_body(page, jid) if page else "", remote=_remote_from(p["location"]),
+                             extra={"job_id": jid}))
+        except Exception:  # noqa: BLE001, S112
+            continue
+    return jobs
+
+
 # --------------------------------------------------------------------------- SchoolSpring
 # Borrowed from freehire internal/ingest/sources/schoolspring.go:15-19 and :106-114 (keyless JSON API api.schoolspring.com;
 # the national domain www.schoolspring.com sees every employer, so a board there is a search KEYWORD, :20-51), :418-421
@@ -300,7 +423,80 @@ def _schoolspring(row: dict[str, Any], http: Http) -> list[Job] | None:
     return jobs
 
 
+# --------------------------------------------------------------------------- EDJOIN
+# Borrowed from freehire internal/ingest/sources/edjoin.go:13-37 (ONE central index for California K-12 / county offices /
+# community colleges; THE BOARD IS A JOB-TYPE ID, not a district: districtID is only another facet), :41-47 and :214-229 (GET
+# https://www.edjoin.org/Home/LoadJobs?rows=&page=&sort=postingDate&sortVal=0&order=desc&searchType=all&jobTypes=<board>&days=0&
+# catID=0&districtID=0&recruitmentCenterID=0; catID, districtID and recruitmentCenterID MUST be sent as 0 or the site answers an
+# HTML 500), :47-52 (totalRecords is exact; the same posting can sit on two adjacent pages, so dedup on postingID; an unknown
+# job type answers 200 with 0 rows), :103-130 (envelope {totalRecords, data[]}; row fields postingID, positionTitle,
+# districtName, city, countyName, stateName, postingDate, FullTimePartTime), :173-207 (stop on an empty page or at the total;
+# a row with no id or no district is skipped), :237-251 and :132-135 (the body only on the posting page, in its schema.org
+# JobPosting ld+json "description"), :256-291 (company = the posting's own districtName; location = city, else county, then
+# state), :278-280 (https://www.edjoin.org/Home/JobPosting/<id>), :293-312 (FullTimePartTime is a comma-joined multi-select;
+# "Remote" is the platform's own remote flag), :401-417 (postingDate is .NET "/Date(<ms>)/"; a non-positive value is unset).
+# NOT taken: pay fields (:335-399). The reference skips a posting whose page it cannot read; the kit keeps the listing row.
+_EDJOIN_DATE = re.compile(r"^/Date\((-?\d+)\)/$")
+
+
+def _edjoin_date(value: Any) -> str:
+    m = _EDJOIN_DATE.match(str(value or ""))
+    return _epoch_date(int(m.group(1)) / 1000) if m else ""
+
+
+def _edjoin(row: dict[str, Any], http: Http) -> list[Job] | None:
+    """EDJOIN (California education): LoadJobs JSON for one job-type id, ld+json posting pages for wanted ads."""
+    jt = str(row.get("token") or "").strip()
+    if not re.fullmatch(r"\d{1,6}", jt):
+        return None
+    rows: dict[int, dict[str, Any]] = {}
+    total = 0
+    for page in range(1, MAX_PAGES + 1):
+        q = urlencode({"rows": EDJOIN_PAGE, "page": page, "sort": "postingDate", "sortVal": 0, "order": "desc",
+                       "searchType": "all", "jobTypes": jt, "days": 0, "catID": 0, "districtID": 0,
+                       "recruitmentCenterID": 0})
+        st, data = _get(http, f"https://www.edjoin.org/Home/LoadJobs?{q}", headers=_JSON)
+        batch = data.get("data") if isinstance(data, dict) else None
+        if st != 200 or not isinstance(batch, list):
+            if page > 1:
+                break
+            return None
+        if page == 1 and isinstance(data.get("totalRecords"), int):
+            total = data["totalRecords"]
+        for p in batch:
+            pid = p.get("postingID") if isinstance(p, dict) else None
+            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 and pid not in rows \
+                    and str(p.get("districtName") or "").strip():
+                rows[pid] = p
+        if not batch or (total > 0 and len(rows) >= total):
+            break
+    url_of = {pid: f"https://www.edjoin.org/Home/JobPosting/{pid}" for pid in rows}
+    pages = _open_details(row, http, [(url_of[pid], _clean(p.get("positionTitle"))) for pid, p in rows.items()], DETAIL_CAP)
+    jobs: list[Job] = []
+    for pid, p in rows.items():
+        try:
+            title, company = _clean(p.get("positionTitle")), _clean(p.get("districtName"))
+            if not title or not company:
+                continue
+            desc = ""
+            if url_of[pid] in pages:
+                ld = _ld_posting(_tree(pages[url_of[pid]]))
+                desc = _body(ld.get("description")) if ld else ""
+            place = _join(_clean(p.get("city")) or _clean(p.get("countyName")), _clean(p.get("stateName")))
+            schedule = {s.strip() for s in str(p.get("FullTimePartTime") or "").split(",") if s.strip()}
+            j = _job(row, "edjoin", title=title, url=url_of[pid], location=place, posted=_edjoin_date(p.get("postingDate")),
+                     description=desc, remote=True if "Remote" in schedule else None,
+                     extra={"posting_id": str(pid), "schedule": ", ".join(sorted(schedule))})
+            j["company"] = company  # the district named in the ad, never the board (a job-type slice)
+            jobs.append(j)
+        except Exception:  # noqa: BLE001, S112 - one bad posting must not lose the board
+            continue
+    return jobs
+
+
 ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
+    "applitrack": _wrap(_applitrack),
+    "edjoin": _wrap(_edjoin),
     "neogov": _wrap(_neogov),
     "schoolspring": _wrap(_schoolspring),
 }

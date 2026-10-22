@@ -1,14 +1,17 @@
-"""Offline tests for hunt_kit/kit_pubsec.py (NEOGOV and SchoolSpring).
+"""Offline tests for hunt_kit/kit_pubsec.py (NEOGOV, AppliTrack, SchoolSpring, EDJOIN).
 
 Fixtures are shaped like the sample data in freehire's internal/ingest/sources/<name>_test.go (MIT) for each reader here
-(NEOGOV: neogov_test.go listing and detail fixtures; SchoolSpring: schoolspring_test.go and career-ops
-schoolspring.mjs envelope) and written fresh. Nothing touches the network.
+(NEOGOV: neogov_test.go listing and detail fixtures; AppliTrack: applitrack_test.go document.write bodies; SchoolSpring:
+schoolspring_test.go and career-ops schoolspring.mjs envelope; EDJOIN: edjoin_test.go LoadJobs envelope) and written
+fresh. Nothing touches the network. PeopleSoft is not read (cookie session): its link is reported as unsupported.
 """
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -30,7 +33,7 @@ ps = _load("kit_pubsec_under_test", "kit_pubsec.py")
 hk = _load("hunt_kit_pubsec_under_test", "hunt_kit.py")
 F = ps.ATS_FETCHERS
 JOB_KEYS = {"title", "company", "url", "location", "posted", "description", "source", "board", "remote", "visa_flag", "extra"}
-NAMES = ("neogov", "schoolspring")
+NAMES = ("applitrack", "edjoin", "neogov", "schoolspring")
 
 
 def _stub(routes: dict):
@@ -88,6 +91,7 @@ def test_hunt_kit_wiring():
      "schooljobs.com/cochisecollege"),
     ("https://www.governmentjobs.com/careers/LACounty/jobs/123/x", "neogov", "governmentjobs.com/lacounty"),
     ("https://schooljobs.com/careers/clarkcollege/facultypositions/jobs/9/x", "neogov", "schooljobs.com/clarkcollege"),
+    ("https://www.applitrack.com/saskatoon/onlineapp/jobpostings/view.asp?AppliTrackJobId=739", "applitrack", "saskatoon"),
     ("https://vansd.schoolspring.com/?jobid=77", "schoolspring", "vansd.schoolspring.com"),
 ])
 def test_job_links_are_read_as_these_boards(url, ats, token):
@@ -99,17 +103,26 @@ def test_job_links_are_read_as_these_boards(url, ats, token):
     ("https://www.schooljobs.com/careers/home/index", "neogov"),  # the site's own path, not an agency
     ("https://www.schoolspring.com/jobdetail?jobId=5", "schoolspring"),  # the national index: no board token in the link
     ("https://api.schoolspring.com/api/Jobs/5", "schoolspring"),
+    ("https://www.edjoin.org/Home/JobPosting/1234", "edjoin"),  # the board is a job-type id the link does not show
 ])
 def test_links_that_do_not_show_the_board_token_give_no_token(url, ats):
     info = hk.board_from_job_url(url)
     assert (info["kind"], info["ats"], info["token"]) == ("ats", ats, "")
 
 
+def test_peoplesoft_link_is_unsupported_on_any_host():
+    for url in ("https://careers.dc.gov/psc/erecruit/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL",
+                "https://erecruit.example.edu/psc/tamext/COLUM/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL"):
+        assert hk.board_from_job_url(url)["kind"] == "unsupported"
+    assert hk.board_from_job_url("https://example.org/psc/x/y/z/c/OTHER.GBL")["kind"] == "other"
+
+
 def test_parse_extra_reads_the_new_tokens():
-    rows = hk.parse_extra("neogov:schooljobs.com/cochisecollege,schoolspring:vansd.schoolspring.com")
+    rows = hk.parse_extra("neogov:schooljobs.com/cochisecollege,applitrack:camas,edjoin:25,"
+                          "schoolspring:vansd.schoolspring.com")
     assert [(r["ats"], r["token"], r["name"]) for r in rows] == [
-        ("neogov", "schooljobs.com/cochisecollege", "cochisecollege"),
-        ("schoolspring", "vansd.schoolspring.com", "vansd.schoolspring.com")]
+        ("neogov", "schooljobs.com/cochisecollege", "cochisecollege"), ("applitrack", "camas", "camas"),
+        ("edjoin", "25", "25"), ("schoolspring", "vansd.schoolspring.com", "vansd.schoolspring.com")]
 
 
 # --------------------------------------------------------------------------- NEOGOV
@@ -234,6 +247,108 @@ def test_neogov_bad_tokens_make_no_request(token):
     assert _run("neogov", _row("neogov", token), http)[0] == [] and http.calls == []
 
 
+# --------------------------------------------------------------------------- AppliTrack
+def _at_write(markup: str) -> str:
+    return "document.write('" + markup.replace("'", "\\'") + "')\n"
+
+
+def _at_block(jid, title, site, posted="9/1/2026"):
+    return (f"<table class='title'><tr><td id='wrapword'>{title}</td><td><span class='title2'> JobID: {jid} </span></td></tr>"
+            "</table><div style='position:relative;'>"
+            "<li><span class='label'>Position Type:</span><br/>&nbsp;&nbsp;<span class='normal'>Technology</span></li>"
+            f"<li><span class=\"label\" >Date Posted:</span><br/>&nbsp;&nbsp;<span class=\"normal\">{posted}</span></li>"
+            f"<li><span class=\"label\" >Location:</span><br/>&nbsp;&nbsp;<span class=\"normal\">{site}</span></li></div>")
+
+
+def _at_all(*blocks):
+    return "function applyFor(id){}\nvar x = 1\n" + _at_write("<div id='AppliTrackListContent'>" + "".join(blocks) + "</div>")
+
+
+AT_DETAIL_739 = _at_write(
+    "<div id='AppliTrackListContent'><ul class='postingsList' id='p739_'><table class='title'><tr><td id='wrapword'>"
+    "Network Engineer</td></tr></table><div style='position:relative;'>"
+    "<li><span class='label'>Location:</span><br/><span class='normal'>Central Office</span></li>"
+    "<span>&nbsp&nbsp</span><span class=\"normal\"><p>Keep the district network running.</p>"
+    "<ul><li>Cisco</li><li>Windows Server</li></ul><script>track()</script></span></div></ul></div>")
+AT_BASE = "https://www.applitrack.com/camas/onlineapp/jobpostings/"
+
+
+def _at_http(listing, details=None):
+    routes = {f"AppliTrackJobId={k}": (200, v) for k, v in (details or {}).items()}
+    routes["AppliTrackJobId="] = (200, "")  # any other posting page: empty
+    return _stub({"Output.asp?all=1": (200, listing), **routes})
+
+
+def test_applitrack_happy_path_one_request_list_and_detail_body():
+    listing = _at_all(_at_block("739", "Network Engineer", "Central Office"), _at_block("812", "Bus Driver", "Transportation", "ASAP"))
+    http = _at_http(listing, {"739": AT_DETAIL_739})
+    jobs, stats = _run("applitrack", _row("applitrack", "Camas", name="Camas School District"), http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 2}
+    j = jobs[0]
+    assert set(j) == JOB_KEYS and j["source"] == "applitrack" and j["company"] == "Camas School District"
+    assert j["title"] == "Network Engineer" and j["location"] == "Central Office" and j["posted"] == "2026-09-01"
+    assert j["url"] == AT_BASE + "view.asp?AppliTrackJobId=739" and j["extra"]["job_id"] == "739"
+    assert "Keep the district network running." in j["description"] and "Cisco" in j["description"]
+    assert "track()" not in j["description"] and "Central Office" not in j["description"]  # field rows are not the body
+    assert jobs[1]["posted"] == ""  # "ASAP" is free text, not a date
+    assert http.calls[0][0] == AT_BASE + "Output.asp?all=1"  # ONE request lists the whole board
+    assert _hosts(http) == {"www.applitrack.com"} and _job_hosts(jobs) == {"www.applitrack.com"}
+    assert all(urlsplit(j["url"]).scheme == "https" for j in jobs)
+
+
+def test_applitrack_consortium_ids_collapse_and_a_gone_posting_keeps_its_listing_row():
+    listing = _at_all(_at_block("950", "Help Desk", "Site A"), _at_block("950", "Help Desk", "Site B"), _at_block("900", "Analyst", "X"))
+    gone = _at_write("<div id='AppliTrackListContent'></div>")  # an id the board no longer carries: 200, empty list
+    jobs, _ = _run("applitrack", _row("applitrack", "camas"), _at_http(listing, {"950": gone, "900": gone}))
+    assert [(j["title"], j["description"]) for j in jobs] == [("Help Desk", ""), ("Analyst", "")]
+    assert jobs[0]["location"] == "Site A"
+
+
+def test_applitrack_unwraps_escapes_and_a_truncated_response_fails_the_board():
+    assert ps._applitrack_markup(r"document.write('<a class=\'x\'>')document.write('</a>')") == "<a class='x'></a>"
+    assert ps._applitrack_markup('document.write(unescape("%3Cscript%3E"))\nfunction applyFor(){}') == ""
+    assert ps._applitrack_markup("<html>not Output.asp</html>") is None
+    assert ps._applitrack_markup("document.write('<td>half a r") is None
+    listing = _at_all(_at_block("1", "A", "x"), _at_block("2", "B", "x"))
+    jobs, stats = _run("applitrack", _row("applitrack", "camas"), _at_http(listing[: len(listing) - 40]))
+    assert jobs == [] and stats.get("ok", 0) == 0  # the rows before the cut must not read as a whole board
+    jobs, stats = _run("applitrack", _row("applitrack", "camas"), _at_http("<html>Sign in</html>"))
+    assert jobs == [] and stats.get("ok", 0) == 0
+
+
+def test_applitrack_one_bad_block_does_not_lose_the_board():
+    bad = "<table class='title'><tr><td id='wrapword'>No id here</td></tr></table>"
+    empty = "<table class='title'><tr><td id='wrapword'></td><td> JobID: 5 </td></tr></table>"
+    listing = _at_all(bad, empty, _at_block("7", "Good", "Site"), "<table class='title'" + "<div>" * 5000)
+    jobs, stats = _run("applitrack", _row("applitrack", "camas"), _at_http(listing))
+    assert [j["title"] for j in jobs] == ["Good"] and stats["ok"] == 1
+
+
+def test_applitrack_refusal_ends_the_detail_requests_but_keeps_the_board():
+    listing = _at_all(_at_block("1", "A", "x"), _at_block("2", "B", "x"), _at_block("3", "C", "x"))
+    http = _stub({"Output.asp?all=1": (200, listing), "AppliTrackJobId=": (403, None)})
+    jobs, stats = _run("applitrack", _row("applitrack", "camas"), http)
+    assert [j["title"] for j in jobs] == ["A", "B", "C"] and stats["ok"] == 1
+    assert len([1 for u, o in http.once if "AppliTrackJobId=" in u and o]) == 1  # one refused request, sent once
+    assert _run("applitrack", _row("applitrack", "camas"), _stub({"Output.asp": (429, None)}))[0] == []
+
+
+def test_applitrack_detail_requests_are_capped_and_follow_title_ok():
+    listing = _at_all(*[_at_block(str(i), f"Role {i}", "x") for i in range(1, 41)])
+    http = _at_http(listing)
+    jobs, _ = _run("applitrack", _row("applitrack", "camas"), http)
+    assert len(jobs) == 40 and len([u for u, *_ in http.calls if "Output.asp?AppliTrackJobId=" in u]) == 25
+    http = _at_http(listing)
+    _run("applitrack", _row("applitrack", "camas", title_ok=lambda t: t == "Role 3"), http)
+    assert [u for u, *_ in http.calls if "Output.asp?AppliTrackJobId=" in u] == [AT_BASE + "Output.asp?AppliTrackJobId=3"]
+
+
+@pytest.mark.parametrize("token", ["", "ca mas", "../x", "a/b", "-x", "x" * 70])
+def test_applitrack_bad_tokens_make_no_request(token):
+    http = _stub({})
+    assert _run("applitrack", _row("applitrack", token), http)[0] == [] and http.calls == []
+
+
 # --------------------------------------------------------------------------- SchoolSpring
 def _ss_page(*rows, success=True):
     return {"success": success, "message": "" if success else "refused",
@@ -341,7 +456,102 @@ def test_schoolspring_bad_tokens_make_no_request(token):
         assert jobs == [] and http.calls == []
 
 
+# --------------------------------------------------------------------------- EDJOIN
+POSTED_MS = 1788220800000  # the fixture's own clock: the expected date below is derived from this same value
+
+
+def _ej_row(pid, title, district="Salinas Union High", city="Salinas", county="Monterey", state="California", sched="Full Time", date=None):
+    return {"postingID": pid, "positionTitle": title, "districtName": district, "city": city, "countyName": county,
+            "stateName": state, "postingDate": f"/Date({POSTED_MS if date is None else date})/", "FullTimePartTime": sched,
+            "SalaryInfoSelect": "Dependent"}
+
+
+def _ej_page(total, *rows):
+    return {"totalRecords": total, "data": list(rows)}
+
+
+def _ej_detail(desc="<p>Maintain <b>servers</b>.</p>"):
+    return ('<html><script type="application/ld+json">' + json.dumps({"@type": "JobPosting", "title": "x", "description": desc})
+            + "</script><body>page</body></html>")
+
+
+def test_edjoin_happy_path_company_is_the_district_and_the_board_is_a_job_type():
+    rows = [_ej_row(100, "Network Specialist"), _ej_row(101, "IT Technician", city="", sched="Part Time, Remote", district="Alisal Union"),
+            _ej_row(0, "No id"), _ej_row(102, "No district", district="  ")]
+    http = _stub({"/Home/JobPosting/100": (200, _ej_detail()), "/Home/JobPosting/101": (410, None),
+                  "/Home/LoadJobs": (200, _ej_page(2, *rows))})
+    jobs, stats = _run("edjoin", _row("edjoin", "25", name="EDJOIN IT slice"), http)
+    assert stats == {"tried": 1, "ok": 1, "jobs": 2}
+    a, b = jobs
+    assert set(a) == JOB_KEYS and a["source"] == "edjoin" and a["company"] == "Salinas Union High"  # never the board's name
+    assert a["location"] == "Salinas, California" and a["description"] == "Maintain servers."
+    assert a["posted"] == datetime.fromtimestamp(POSTED_MS / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    assert a["url"] == "https://www.edjoin.org/Home/JobPosting/100" and a["extra"]["posting_id"] == "100"
+    assert b["company"] == "Alisal Union" and b["location"] == "Monterey, California" and b["remote"] is True
+    assert b["description"] == "" and a["remote"] is None
+    q = parse_qs(urlsplit(http.calls[0][0]).query)
+    assert q["jobTypes"] == ["25"] and (q["catID"], q["districtID"], q["recruitmentCenterID"]) == (["0"], ["0"], ["0"])
+    assert q["rows"] == ["500"] and q["page"] == ["1"]
+    assert _hosts(http) == {"www.edjoin.org"} and _job_hosts(jobs) == {"www.edjoin.org"}
+
+
+def test_edjoin_pages_to_the_exact_total_dedups_and_unset_dates_stay_empty():
+    p1 = _ej_page(3, _ej_row(1, "A", date=-62135568000000), _ej_row(2, "B"))
+    p2 = _ej_page(3, _ej_row(2, "B"), _ej_row(3, "C"))
+    pages = [p1, p2, _ej_page(3, _ej_row(4, "D"))]
+
+    def listing(url, headers):
+        return 200, pages[int(parse_qs(urlsplit(url).query)["page"][0]) - 1]
+    http = _stub({"/Home/LoadJobs": listing})
+    jobs, _ = _run("edjoin", _row("edjoin", "25", title_ok=lambda t: False), http)
+    assert [j["title"] for j in jobs] == ["A", "B", "C"] and jobs[0]["posted"] == ""
+    assert len([u for u, *_ in http.calls]) == 2  # the total (3) was reached on page 2
+    http = _stub({"/Home/LoadJobs": (200, _ej_page(0))})
+    jobs, stats = _run("edjoin", _row("edjoin", "9999"), http)
+    assert jobs == [] and stats["ok"] == 1 and len(http.calls) == 1  # an unknown job type is an empty board
+
+
+def test_edjoin_refusals_and_the_html_error_page_fail_or_trim_the_board():
+    assert _run("edjoin", _row("edjoin", "25"), _stub({"/Home/LoadJobs": (500, None)}))[1].get("ok", 0) == 0
+    full = [_ej_row(i, f"Job {i}") for i in range(1, 501)]
+
+    def listing(url, headers):
+        return (200, _ej_page(900, *full)) if "page=1" in url else (403, None)
+    jobs, stats = _run("edjoin", _row("edjoin", "25", title_ok=lambda t: False), _stub({"/Home/LoadJobs": listing}))
+    assert len(jobs) == 500 and stats["ok"] == 1
+    http = _stub({"/Home/JobPosting/": (429, None), "/Home/LoadJobs": (200, _ej_page(3, *[_ej_row(i, f"J{i}") for i in (1, 2, 3)]))})
+    jobs, _ = _run("edjoin", _row("edjoin", "25"), http)
+    assert len(jobs) == 3 and len([1 for u, o in http.once if "/Home/JobPosting/" in u and o]) == 1
+
+
+def test_edjoin_detail_cap_and_title_ok():
+    rows = [_ej_row(i, f"Job {i}") for i in range(1, 41)]
+    http = _stub({"/Home/JobPosting/": (200, _ej_detail()), "/Home/LoadJobs": (200, _ej_page(40, *rows))})
+    jobs, _ = _run("edjoin", _row("edjoin", "25"), http)
+    assert len(jobs) == 40 and len([u for u, *_ in http.calls if "/Home/JobPosting/" in u]) == 25
+    http = _stub({"/Home/JobPosting/": (200, _ej_detail()), "/Home/LoadJobs": (200, _ej_page(40, *rows))})
+    _run("edjoin", _row("edjoin", "25", title_ok=lambda t: t == "Job 7"), http)
+    assert [u for u, *_ in http.calls if "/Home/JobPosting/" in u] == ["https://www.edjoin.org/Home/JobPosting/7"]
+
+
+@pytest.mark.parametrize("token", ["", "abc", "25; drop", "-1", "1234567", "25/../x"])
+def test_edjoin_bad_tokens_make_no_request(token):
+    http = _stub({})
+    assert _run("edjoin", _row("edjoin", token), http)[0] == [] and http.calls == []
+
+
 # --------------------------------------------------------------------------- hostile markup
+_DEEP_LD = '<html><script type="application/ld+json">' + "[" * 100000 + "</script></html>"
+
+
+def test_edjoin_one_deeply_nested_posting_page_costs_only_that_page():
+    rows = [_ej_row(1, "Good"), _ej_row(2, "Deep")]
+    http = _stub({"/Home/JobPosting/1": (200, _ej_detail()), "/Home/JobPosting/2": (200, _DEEP_LD),
+                  "/Home/LoadJobs": (200, _ej_page(2, *rows))})
+    jobs, _ = _run("edjoin", _row("edjoin", "25"), http)
+    assert [(j["title"], j["description"]) for j in jobs] == [("Good", "Maintain servers."), ("Deep", "")]
+
+
 def test_neogov_thousands_of_unclosed_tags_and_a_deep_detail_page_do_not_lose_the_board():
     t0 = time.perf_counter()
     hostile = _ng_card("1", "Good", "x") + "<ul><li class='list-item' data-job-id='2'>" * 3000 + "<div>" * 20000
@@ -352,6 +562,25 @@ def test_neogov_thousands_of_unclosed_tags_and_a_deep_detail_page_do_not_lose_th
     assert time.perf_counter() - t0 < 10.0
 
 
+def test_applitrack_realistic_one_megabyte_list_is_read_in_linear_time():
+    t0 = time.perf_counter()
+    blocks = [_at_block(str(i), f"Role {i} with a fairly long district title", "Central Office and Annex") for i in range(1, 2001)]
+    listing = _at_all(*blocks)
+    assert len(listing) > 700_000
+    jobs, _ = _run("applitrack", _row("applitrack", "camas", title_ok=lambda t: False), _at_http(listing))
+    assert len(jobs) == 2000
+    assert time.perf_counter() - t0 < 10.0
+
+
+def test_applitrack_hostile_unclosed_writes_and_labels_stay_fast():
+    t0 = time.perf_counter()
+    hostile = "<table class='title'><td id='wrapword'>X</td> JobID: 1 " + "<span class='label'>Location:</span>" * 20000
+    jobs, _ = _run("applitrack", _row("applitrack", "camas", title_ok=lambda t: False), _at_http(_at_all(hostile)))
+    assert [j["title"] for j in jobs] == ["X"]
+    assert ps._applitrack_markup("document.write('" + "\\" * 100001) is None
+    assert time.perf_counter() - t0 < 10.0
+
+
 def test_read_kit_hosts_are_not_listed_as_unsupported():
-    for host in ("schooljobs.com", "governmentjobs.com", "schoolspring.com"):
+    for host in ("schooljobs.com", "governmentjobs.com", "applitrack.com", "schoolspring.com", "edjoin.org"):
         assert not hk._UNSUPPORTED_HOSTS.search(host)
