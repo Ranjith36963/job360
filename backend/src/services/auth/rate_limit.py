@@ -31,6 +31,7 @@ import logging
 import os
 import uuid
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any, Optional
@@ -273,6 +274,149 @@ def clear_failures(key: str) -> None:
 
     with _LOCK:
         _FAILURES.pop(key, None)
+
+
+# ── Login admission: check AND count in one atomic step ─────────────────────
+#
+# Gap-audit fix #6 review (P1). Checking is_locked() and calling
+# record_failure() later, after an awaited DB read and an argon2 verify, let a
+# concurrent burst from ONE address pass the check N times before any failure
+# was recorded: 60 parallel wrong passwords were all 401 (no 429) and then
+# tripped the per-email cap, locking the owner out from every address. Now the
+# attempt is counted BEFORE anything is awaited (pre-increment), and only an
+# attempt the email+IP bucket admitted is counted toward the per-email bucket,
+# in the same step. A successful login refunds its own pre-count.
+
+LOCK_EMAIL_IP = "email_ip"
+LOCK_EMAIL = "email"
+
+# KEYS[1]=email+IP failures set, KEYS[2]=per-email failures set.
+# ARGV: now, window, ip_max, email_max (0 = no per-email cap), member, ttl.
+# Returns 0 admitted (and counted), 1 refused by email+IP, 2 refused by email.
+_LUA_ADMIT_LOGIN = """
+local cutoff = tonumber(ARGV[1]) - tonumber(ARGV[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, cutoff)
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[3]) then
+  return 1
+end
+local email_max = tonumber(ARGV[4])
+if email_max > 0 then
+  redis.call('ZREMRANGEBYSCORE', KEYS[2], 0, cutoff)
+  if redis.call('ZCARD', KEYS[2]) >= email_max then
+    return 2
+  end
+  redis.call('ZADD', KEYS[2], tonumber(ARGV[1]), ARGV[5])
+  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[6]))
+end
+redis.call('ZADD', KEYS[1], tonumber(ARGV[1]), ARGV[5])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[6]))
+return 0
+"""
+
+
+@dataclass(frozen=True)
+class LoginAdmission:
+    """The verdict of :func:`admit_login_attempt`.
+
+    ``lock`` names the bucket that refused (``LOCK_EMAIL_IP`` / ``LOCK_EMAIL``),
+    None when admitted. ``token`` identifies this attempt's pre-count so
+    :func:`refund_login_attempt` can remove exactly it on success.
+    """
+
+    admitted: bool
+    lock: Optional[str] = None
+    token: Any = None
+
+
+def admit_login_attempt(
+    ip_key: str,
+    email_key: Optional[str],
+    *,
+    ip_max: int,
+    email_max: int,
+    window_seconds: int,
+    now: Optional[datetime] = None,
+) -> LoginAdmission:
+    """Atomically decide one login attempt and, if admitted, count it.
+
+    Refused when the email+IP bucket (``ip_key``) holds ``ip_max`` failures in
+    the window, or when ``email_key`` is given, ``email_max > 0`` and the
+    per-email bucket holds ``email_max``. Admitted attempts are added to both
+    buckets at once; a refused attempt is added to neither, so an address that
+    is locked out can never push the per-email bucket further. Call it before
+    any ``await`` in the route; on a successful login call
+    :func:`clear_failures` (email+IP) and :func:`refund_login_attempt`.
+    """
+    now = now or datetime.now(timezone.utc)
+    use_email = email_key is not None and email_max > 0
+    client = _redis_client()
+    if client is not None:
+        try:
+            member = f"{now.timestamp()}:{uuid.uuid4().hex}"
+            verdict = int(
+                client.eval(
+                    _LUA_ADMIT_LOGIN,
+                    2,
+                    f"rl:fail:{ip_key}",
+                    f"rl:fail:{email_key or ip_key}",
+                    now.timestamp(),
+                    window_seconds,
+                    ip_max,
+                    email_max if use_email else 0,
+                    member,
+                    _REDIS_FAILURE_TTL_SECONDS,
+                )
+            )
+            if verdict == 1:
+                return LoginAdmission(False, LOCK_EMAIL_IP)
+            if verdict == 2:
+                return LoginAdmission(False, LOCK_EMAIL)
+            return LoginAdmission(True, None, member)
+        except Exception as exc:
+            logger.warning("rate_limit: Redis admit_login_attempt failed, fallback: %s", exc)
+
+    cutoff = now - timedelta(seconds=window_seconds)
+    with _LOCK:
+        ip_bucket = _FAILURES.setdefault(ip_key, deque())
+        while ip_bucket and ip_bucket[0] < cutoff:
+            ip_bucket.popleft()
+        if len(ip_bucket) >= ip_max:
+            return LoginAdmission(False, LOCK_EMAIL_IP)
+        if email_key is not None and email_max > 0:
+            email_bucket = _FAILURES.setdefault(email_key, deque())
+            while email_bucket and email_bucket[0] < cutoff:
+                email_bucket.popleft()
+            if len(email_bucket) >= email_max:
+                return LoginAdmission(False, LOCK_EMAIL)
+            email_bucket.append(now)
+        ip_bucket.append(now)
+        return LoginAdmission(True, None, now)
+
+
+def refund_login_attempt(key: str, admission: LoginAdmission) -> None:
+    """Remove the one pre-count ``admission`` added to ``key`` (a successful
+    login is not a failure). Other attempts' counts are untouched; a no-op when
+    the entry has already aged out or the attempt was never admitted."""
+    if not admission.admitted or admission.token is None:
+        return
+    if isinstance(admission.token, str):  # counted in Redis
+        client = _redis_client()
+        if client is not None:
+            try:
+                client.zrem(f"rl:fail:{key}", admission.token)
+            except Exception as exc:
+                logger.warning("rate_limit: Redis refund_login_attempt failed: %s", exc)
+        return
+    with _LOCK:
+        bucket = _FAILURES.get(key)
+        if bucket is None:
+            return
+        try:
+            bucket.remove(admission.token)
+        except ValueError:
+            return
+        if not bucket:
+            _FAILURES.pop(key, None)
 
 
 def reset_for_tests() -> None:
