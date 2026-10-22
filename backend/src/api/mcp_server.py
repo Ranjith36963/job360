@@ -1501,7 +1501,7 @@ def build_server(version: str = "") -> MCPServer:
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is proof, not a 2nd. Wrong date: `applied` + occurred_at + corrects_event_id.
+        `source` is proof, not a 2nd.
         `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
@@ -1515,8 +1515,8 @@ def build_server(version: str = "") -> MCPServer:
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
-        email_drafted {to, subject, attachments} (no body);
-        autofill_set {mode:"deny"}; hold_released {reason};
+        email_drafted {to, subject, attachments, gmail_draft_id} (no body);
+        autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
