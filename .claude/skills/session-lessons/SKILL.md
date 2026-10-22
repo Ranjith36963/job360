@@ -350,3 +350,12 @@ Apify web-fetch tool, before you build. Never cite from memory.
 - 2026-10-21: asked to list every PR this session opened, a GitHub search for the session URL
   `in:body` returned 3 of the 32. **Rule:** list PRs with the REST `pulls?state=all` pages and
   filter the bodies yourself; the search index misses bodies.
+- 2026-10-22: in a detached-HEAD worktree I ran `git push origin <branch>`; it pushed the old local
+  branch ("Everything up-to-date" read as success) and I told the owner the merge was pushed while
+  the PR stayed conflicted. **Rule:** push `HEAD:<branch>` from a detached worktree, then compare
+  `git ls-remote origin <branch>` with `git rev-parse HEAD` before saying it is pushed.
+- 2026-10-22: sibling hunt-kit PRs all edit the same registry lists (`BOARD_SOURCES`, `ATS_MODULES`,
+  `_HOST_RULES`, `NOTICE.md`, `companies.json`), so each merge turns the next one `dirty`.
+  **Rule:** expect that conflict; merge main in, keep both sides (add a comma between `companies.json`
+  rows), re-gate the merged tree, and re-read the PR's `mergeable_state` after the push.
+
