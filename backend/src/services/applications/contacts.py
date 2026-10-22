@@ -1252,7 +1252,7 @@ async def confirm_contact(db: JobDatabase, user_id: str, contact_id: int, actor:
                 wrote = True
     if wrote:
         get_audit_logger().info(
-            "contact_confirmed", extra={"event": "contact_confirmed", "contact_id": contact_id}
+            "contact_confirmed", extra={"event": "contact_confirmed", "contact_id": safe_log_value(contact_id)}
         )
     return await _full_contact_view(db, user_id, contact)
 
