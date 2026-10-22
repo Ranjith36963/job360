@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
 from src.repositories import pg
+from src.services import idempotency
 from src.services.applications.status import (
     PROGRESS_RANK,
     progress_rank,
@@ -284,13 +285,14 @@ def _parse_bounded_iso(
     return parsed.astimezone(timezone.utc).isoformat()
 
 
-def parse_occurred_at(raw: Optional[str]) -> str:
-    """S6 — ISO-8601 with a timezone, bounded on the future side only."""
+def parse_occurred_at(raw: Optional[str], field: str = "occurred_at") -> str:
+    """S6 — ISO-8601 with a timezone, bounded on the future side only.
+    ``field`` names the input in the 422 (record_application passes ``applied_at``)."""
     if raw is None:
         return datetime.now(timezone.utc).isoformat()
     return _parse_bounded_iso(
         raw,
-        field="occurred_at",
+        field=field,
         max_future_seconds=settings.APPLICATION_EVENT_MAX_FUTURE_SECONDS,
         max_future_setting="APPLICATION_EVENT_MAX_FUTURE_SECONDS",
     )
@@ -1269,16 +1271,20 @@ async def save_artifact(
             )
         version_no = max_version + 1
         try:
-            ins = await db._db.execute(
-                "INSERT INTO application_artifacts "
-                "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
-                " label, chars, created_at, ats_score, ats_notes, checks_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    user_id, application_id, kind, version_no, text, made_by, model,
-                    profile_version, label or "", len(text), now, ats_score, ats_notes, checks_json,
-                ),
-            )
+            # Scoped (a SAVEPOINT inside a client_key transaction, slice 25): a
+            # bare rollback() is forbidden inside an outer transaction() and
+            # would leave it aborted; the block rolls back only this INSERT.
+            async with db._db.transaction():
+                ins = await db._db.execute(
+                    "INSERT INTO application_artifacts "
+                    "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
+                    " label, chars, created_at, ats_score, ats_notes, checks_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id, application_id, kind, version_no, text, made_by, model,
+                        profile_version, label or "", len(text), now, ats_score, ats_notes, checks_json,
+                    ),
+                )
         except pg.IntegrityError:
             # C4 — a real UNIQUE(application_id, kind, version_no) violation
             # (a concurrent save landed the same version_no first); retry with
@@ -1287,7 +1293,6 @@ async def save_artifact(
             # exception type means too, so a bounded retry loop still bails
             # out via the `artifact_id is None` check below rather than
             # looping forever on something that will never succeed.
-            await db._db.rollback()
             continue
         artifact_id = int(ins.lastrowid or 0)
         break
@@ -1566,6 +1571,30 @@ async def _resolve_receipt_artifact(
     return await latest_artifact(db, user_id, application_id, kind)
 
 
+_RECEIPT_TOOL = "record_application"
+
+
+async def _receipt_replay(
+    db: JobDatabase, user_id: str, request_id: str, body: dict[str, Any]
+) -> Optional[dict[str, Any]]:
+    """The FIRST reply stored for this ``request_id`` (``already_existed: True``), or None."""
+    try:
+        stored = await idempotency.lookup(db._db, user_id, _RECEIPT_TOOL, request_id, body)
+    except idempotency.IdempotencyError as exc:
+        raise SpineError(exc.status_code, exc.detail) from None
+    if stored is None:
+        return None
+    get_audit_logger().info(
+        "receipt_replayed",
+        extra={
+            "event": "receipt_replayed", "user_id": safe_log_value(user_id),
+            "application_id": int(body["application_id"]), "receipt_id": safe_log_value(stored.get("receipt_id")),
+            "result": "ok",
+        },
+    )
+    return {**stored, "already_existed": True}
+
+
 async def record_receipt(
     db: JobDatabase,
     *,
@@ -1580,6 +1609,8 @@ async def record_receipt(
     cv_artifact_id: Optional[int] = None,
     cover_letter_artifact_id: Optional[int] = None,
     applied_at: Optional[str] = None,
+    request_id: Optional[str] = None,
+    referred_by_contact_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1591,7 +1622,20 @@ async def record_receipt(
 
     ``channel`` is a closed set for every NEW receipt (owner decision
     2026-10-04, ``normalize_receipt_channel``) — '' stays "not said".
+
+    Gap roadmap slice 10 — the receipt, its ``applied`` event and the
+    ``request_id`` row (``services/idempotency``) commit in ONE transaction:
+    a failure between them leaves no receipt. The same ``request_id`` again
+    returns the FIRST reply with ``already_existed: True`` and writes nothing;
+    with a different body it is a 409. ``applied_at`` arrives already parsed
+    (the route's ``parse_occurred_at``).
     """
+    idem_body = {
+        "application_id": application_id, "channel": channel, "note": note, "confirmation": confirmation,
+        "answers": answers or [], "fields_filled": fields_filled or {}, "cv_artifact_id": cv_artifact_id,
+        "cover_letter_artifact_id": cover_letter_artifact_id, "applied_at": applied_at,
+        "referred_by_contact_id": referred_by_contact_id,
+    }
     channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
     warnings: list[str] = []
@@ -1615,6 +1659,22 @@ async def record_receipt(
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
+    if request_id is not None:
+        replay = await _receipt_replay(db, user_id, request_id, idem_body)
+        if replay is not None:
+            return replay
+
+    # The referrer must be the caller's own contact linked to THIS application. One message for
+    # unknown, foreign and other-job contacts, so it is no existence oracle. (Not via contacts:
+    # contacts imports spine.)
+    if referred_by_contact_id is not None:
+        cur = await db._db.execute(
+            "SELECT application_id FROM application_contacts WHERE id = ? AND user_id = ?",
+            (referred_by_contact_id, user_id),
+        )
+        ref = await cur.fetchone()
+        if ref is None or dict(ref)["application_id"] != application_id:
+            raise SpineError(422, "referred_by_contact_id must be one of your contacts linked to this application")
 
     cv_artifact = await _resolve_receipt_artifact(db, user_id, application_id, "cv", cv_artifact_id)
     if cv_artifact_id is None and cv_artifact is not None:
@@ -1668,38 +1728,64 @@ async def record_receipt(
         except (ValueError, AttributeError):
             kit_sha256 = ""
 
-    cur = await db._db.execute(
-        "INSERT INTO application_receipts "
-        "(user_id, job_id, sent_at, job_title, job_company, job_location, job_apply_url, job_source, "
-        " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
-        " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
-        " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            user_id, app_row["job_id"], sent_at,
-            app_row.get("job_title") or "", app_row.get("job_company") or "",
-            app_row.get("job_location") or "", app_row.get("job_url") or "",
-            app_row.get("job_source") or "", app_row.get("job_description_snapshot") or "",
-            cv_artifact["text"] if cv_artifact else None, "artifact" if cv_artifact else None,
-            cl_artifact["text"] if cl_artifact else None, "artifact" if cl_artifact else None,
-            profile_version, channel or "", note or "", now,
-            application_id, cv_artifact["id"] if cv_artifact else None,
-            cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
-            confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
-        ),
-    )
-    receipt_id = int(cur.lastrowid or 0)
-
-    event = await append_event(
-        db, user_id=user_id, application_id=application_id, event_type="applied",
-        payload={"receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate},
-        occurred_at=sent_at, recorded_by=recorded_by,
-    )
+    try:
+        async with db._db.transaction():
+            cur = await db._db.execute(
+                "INSERT INTO application_receipts "
+                "(user_id, job_id, sent_at, job_title, job_company, job_location, job_apply_url, job_source, "
+                " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
+                " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
+                " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+                " referred_by_contact_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_id, app_row["job_id"], sent_at,
+                    app_row.get("job_title") or "", app_row.get("job_company") or "",
+                    app_row.get("job_location") or "", app_row.get("job_url") or "",
+                    app_row.get("job_source") or "", app_row.get("job_description_snapshot") or "",
+                    cv_artifact["text"] if cv_artifact else None, "artifact" if cv_artifact else None,
+                    cl_artifact["text"] if cl_artifact else None, "artifact" if cl_artifact else None,
+                    profile_version, channel or "", note or "", now,
+                    application_id, cv_artifact["id"] if cv_artifact else None,
+                    cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
+                    confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
+                    referred_by_contact_id,
+                ),
+            )
+            receipt_id = int(cur.lastrowid or 0)
+            event = await append_event(
+                db, user_id=user_id, application_id=application_id, event_type="applied",
+                payload={"receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate},
+                occurred_at=sent_at, recorded_by=recorded_by,
+            )
+            result: dict[str, Any] = {
+                "receipt_id": receipt_id, "sent_at": sent_at,
+                "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
+                "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
+                "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
+                "cover_letter_sent": cl_artifact is not None,
+                "cover_letter_version_no": cl_artifact["version_no"] if cl_artifact else None,
+                "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
+                "confirmation": confirmation or "",
+                "url": f"/applications/{application_id}", "event_id": event["event_id"],
+                "possible_duplicate": possible_duplicate, "already_existed": False,
+                "referred_by_contact_id": referred_by_contact_id,
+            }
+            if request_id is not None:
+                await idempotency.store(db._db, user_id, _RECEIPT_TOOL, request_id, idem_body, result)
+    except pg.IntegrityError:
+        # Two retries raced past the lookup: the UNIQUE key rolled this whole
+        # transaction back (no receipt, no event). Return the winner's reply.
+        replay = await _receipt_replay(db, user_id, request_id, idem_body) if request_id is not None else None
+        if replay is None:
+            raise
+        return replay
     get_audit_logger().info(
         "receipt_created",
         extra={
             "event": "receipt_created", "receipt_id": receipt_id,
             "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
+            "referred_by_contact_id": referred_by_contact_id,
         },
     )
     if possible_duplicate:
@@ -1712,18 +1798,7 @@ async def record_receipt(
                 "actor": safe_log_value(recorded_by, max_len=80), "result": "ok",
             },
         )
-    return {
-        "receipt_id": receipt_id, "sent_at": sent_at,
-        "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
-        "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
-        "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
-        "cover_letter_sent": cl_artifact is not None,
-        "cover_letter_version_no": cl_artifact["version_no"] if cl_artifact else None,
-        "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
-        "confirmation": confirmation or "",
-        "url": f"/applications/{application_id}", "event_id": event["event_id"],
-        "possible_duplicate": possible_duplicate,
-    }
+    return result
 
 
 async def write_through_legacy_receipt(
@@ -2003,7 +2078,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     """
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
-        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, referred_by_contact_id, "
         "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
@@ -2025,6 +2100,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "possible_duplicate": r.get("possible_duplicate") or "",
         "kit_event_id": r.get("kit_event_id"),
         "kit_sha256": r.get("kit_sha256") or "",
+        "referred_by_contact_id": r.get("referred_by_contact_id"),
         "cv_version_no": await _artifact_version_no(
             db, user_id, application_id, "cv", r.get("cv_artifact_id")
         ),
@@ -2099,6 +2175,7 @@ async def get_application_detail(
     from src.services.applications.asks import list_asks  # noqa: PLC0415
     from src.services.applications.contacts import list_contacts  # noqa: PLC0415
     from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
+    from src.services.applications.known_people import for_application as known_people_for  # noqa: PLC0415
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
@@ -2157,6 +2234,7 @@ async def get_application_detail(
         "interview_at": interview_at,
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
         "contacts": await list_contacts(db, user_id, application_id),
+        "known_people": await known_people_for(db, user_id, app_row),
         # "Needs you" - every ask about this job, open first (never filtered).
         "asks": await list_asks(
             db, user_id, "all", application_id=application_id, limit=settings.ASKS_MAX_OPEN_PER_USER

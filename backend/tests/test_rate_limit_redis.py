@@ -108,3 +108,41 @@ def test_flag_on_but_no_url_returns_no_client(monkeypatch):
     monkeypatch.delenv("REDIS_URL", raising=False)
     rate_limit._reset_redis_for_tests()
     assert rate_limit._redis_client() is None
+
+
+# ─── admit_login_attempt on Redis (security review P1) ──────────────────────
+
+
+def test_admit_login_attempt_maps_redis_verdicts(monkeypatch):
+    fake = FakeRedis(eval_returns=[0, 1, 2])
+    monkeypatch.setattr(rate_limit, "_redis_client", lambda: fake)
+    kw = {"ip_max": 5, "email_max": 50, "window_seconds": 900}
+    ok = rate_limit.admit_login_attempt("login:a:ip", "login_email:a", **kw)
+    ip_lock = rate_limit.admit_login_attempt("login:a:ip", "login_email:a", **kw)
+    email_lock = rate_limit.admit_login_attempt("login:a:ip", "login_email:a", **kw)
+    assert ok.admitted and isinstance(ok.token, str)
+    assert (ip_lock.admitted, ip_lock.lock) == (False, rate_limit.LOCK_EMAIL_IP)
+    assert (email_lock.admitted, email_lock.lock) == (False, rate_limit.LOCK_EMAIL)
+    # One atomic script over BOTH keys, in the failures namespace.
+    assert fake.calls[0][1][:2] == ("rl:fail:login:a:ip", "rl:fail:login_email:a")
+
+
+def test_refund_login_attempt_removes_the_redis_member(monkeypatch):
+    removed: list[tuple[str, str]] = []
+    fake = FakeRedis(eval_returns=[0])
+    fake.zrem = lambda key, member: removed.append((key, member))  # type: ignore[attr-defined]
+    monkeypatch.setattr(rate_limit, "_redis_client", lambda: fake)
+    ok = rate_limit.admit_login_attempt(
+        "login:b:ip", "login_email:b", ip_max=5, email_max=50, window_seconds=900
+    )
+    rate_limit.refund_login_attempt("login_email:b", ok)
+    assert removed == [("rl:fail:login_email:b", ok.token)]
+
+
+def test_admit_login_attempt_falls_back_to_memory(monkeypatch):
+    fake = FakeRedis(raises=True)
+    monkeypatch.setattr(rate_limit, "_redis_client", lambda: fake)
+    kw = {"ip_max": 2, "email_max": 50, "window_seconds": 900}
+    assert rate_limit.admit_login_attempt("login:c:ip", "login_email:c", **kw).admitted
+    assert rate_limit.admit_login_attempt("login:c:ip", "login_email:c", **kw).admitted
+    assert not rate_limit.admit_login_attempt("login:c:ip", "login_email:c", **kw).admitted

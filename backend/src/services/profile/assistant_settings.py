@@ -777,6 +777,10 @@ class SubmitFacts:
     # user has not verified (``ready.has_unverified_guess``, the card's ``guessed`` flag). Asks
     # ``answer_guessed`` in EVERY mode; a yes does NOT clear it - the user verifies or edits the answer.
     guessed_unverified: bool = False
+    # Owner rule 2026-10-22: the newest ``form_filled`` holds an answer to a private, legal or risky question
+    # (any country) the user has not confirmed (``ready.has_unconfirmed_sensitive``, the card's ``sensitive``
+    # flag). Asks ``sensitive_unconfirmed`` in EVERY mode; a yes does NOT clear it - the user confirms the answer.
+    sensitive_unconfirmed: bool = False
     # Gap roadmap slice 8: the newest yes for this CV no longer holds (``kit.approval_stale``): the
     # part named here changed since the user said yes - ``expired`` (older than
     # SUBMIT_APPROVAL_TTL_MINUTES), ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``.
@@ -806,8 +810,8 @@ REASONS: tuple[str, ...] = (
     "form_not_recorded", "form_not_swept", "form_host_mismatch", "form_page_mismatch", "email_not_verified",
     "held_by_other_session",
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
-    "type_first_pending", "below_score_line", "answer_guessed", "approval_stale", "required_unanswered",
-    "grant_scope",
+    "type_first_pending", "below_score_line", "answer_guessed", "sensitive_unconfirmed", "approval_stale",
+    "required_unanswered", "grant_scope",
 )
 
 # What each ``approval_stale`` part means, in the words the ask shows the user.
@@ -1041,7 +1045,7 @@ def may_submit(
     ``approval_stale`` naming the part.
     Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
-    ``below_score_line`` (4a4) and ``answer_guessed`` (4e) are NEVER cleared by a yes.
+    ``below_score_line`` (4a4), ``answer_guessed`` and ``sensitive_unconfirmed`` (4e) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
@@ -1157,6 +1161,13 @@ def may_submit(
             "An answer on this form was guessed and the user has not verified it, or the user changed it "
             "and the form still holds the guess. Do not submit; ask the user, type their answer, record a "
             "new form_filled (they can Verify or Edit it on Needs you).",
+        )
+    if application.sensitive_unconfirmed:
+        return SubmitDecision(
+            "ask", "sensitive_unconfirmed",
+            "This form asks a private, legal or risky question (identity, health, money, right to work, "
+            "criminal record...) and the user has not confirmed the answer. Do not submit; raise it with "
+            "ask_user, the user checks it on Needs you, then record a new form_filled.",
         )
     if application.other_session_hold is not None:
         held_by, session, since = application.other_session_hold
@@ -1412,7 +1423,10 @@ class OutreachFacts:
     * ``linked`` - the contact is tied to an application; ``application_closed`` -
       that application's status is closed (rejected / withdrawn / ghosted);
     * ``found_via`` - where the person was found (``None`` = not said);
-    * ``company`` - the linked job's company ("" when unlinked).
+    * ``company`` - the linked job's company ("" when unlinked);
+    * ``email_source`` - where the CURRENT email came from (``None`` = not said);
+    * ``email_bounced`` - a ``bounced`` mark exists for this user on the contact's
+      CURRENT address (on any of the user's contacts).
     """
 
     message_found: bool
@@ -1425,6 +1439,8 @@ class OutreachFacts:
     application_closed: bool = False
     found_via: Optional[str] = None
     company: str = ""
+    email_source: Optional[str] = None
+    email_bounced: bool = False
 
 
 @dataclass(frozen=True)
@@ -1439,9 +1455,9 @@ class OutreachDecision:
 
 # In the order :func:`may_send_outreach` checks them (first match wins).
 OUTREACH_REASONS: tuple[str, ...] = (
-    "paused", "message_not_found", "not_latest_draft", "not_email_channel", "no_email", "already_sent",
-    "replied", "application_closed", "daily_outreach_cap_reached", "company_cap_reached",
-    "mode_not_auto", "no_found_via", "unlinked_contact", "auto_mode",
+    "paused", "message_not_found", "not_latest_draft", "not_email_channel", "no_email", "email_bounced",
+    "already_sent", "replied", "application_closed", "daily_outreach_cap_reached", "company_cap_reached",
+    "email_guessed", "mode_not_auto", "no_found_via", "unlinked_contact", "auto_mode",
 )
 
 
@@ -1455,12 +1471,12 @@ def may_send_outreach(
 
     STOP (do not send; nothing clears these): paused, message_not_found,
     not_latest_draft, not_email_channel (LinkedIn/other: the user sends),
-    no_email, already_sent, replied, application_closed,
+    no_email, email_bounced (a bounce is recorded for this address), already_sent, replied, application_closed,
     daily_outreach_cap_reached (``OUTREACH_AUTO_SENDS_MAX_PER_DAY``),
     company_cap_reached (``OUTREACH_COMPANY_MAX`` within
     ``OUTREACH_COMPANY_WINDOW_DAYS``).
-    ASK (save a Gmail draft, ask_user): mode_not_auto (``assistant_settings.outreach_send``
-    is not ``auto``; the Gmail mode never counts), no_found_via, unlinked_contact.
+    ASK (save a Gmail draft, ask_user): email_guessed (email_source pattern_guess), mode_not_auto
+    (``assistant_settings.outreach_send`` is not ``auto``; the Gmail mode never counts), no_found_via, unlinked_contact.
     SEND: auto_mode.
     """
     if is_paused(cfg.paused_until, now):
@@ -1480,6 +1496,10 @@ def may_send_outreach(
         )
     if not facts.has_email:
         return OutreachDecision("stop", "no_email", "This person has no email address saved. Do not send.")
+    if facts.email_bounced:
+        return OutreachDecision(
+            "stop", "email_bounced", "An email to this address bounced before. Do not send; tell the user.",
+        )
     if facts.already_sent:
         return OutreachDecision("stop", "already_sent", "A message to this person is already recorded as sent.")
     if facts.replied:
@@ -1497,6 +1517,11 @@ def may_send_outreach(
             "stop", "company_cap_reached",
             f"Enough people at this company were emailed in the last {settings.OUTREACH_COMPANY_WINDOW_DAYS} days. "
             "Do not send.",
+        )
+    if facts.email_source == "pattern_guess":
+        return OutreachDecision(
+            "ask", "email_guessed",
+            "This address was guessed from a name pattern. Save a Gmail draft and ask_user; the user sends.",
         )
     if cfg.outreach_send != OUTREACH_SEND_AUTO:
         return OutreachDecision(
@@ -1819,26 +1844,21 @@ async def load_outreach_counts(
     """Count what :func:`may_send_outreach` needs: this user's recorded ``sent``
     marks today (the user's own day, same boundary as :func:`load_submit_counts`)
     and, when ``company`` is given, ``sent`` marks to contacts linked to a job at
-    that (lower-cased, trimmed) company within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
+    that company key (contacts.company_key, rule #1; cold contacts with that company
+    count) within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
     sent_today = await count_on_user_today(
         db, user_id, now,
         "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND recorded_at >= ?",
         (user_id,),
     )
     company_sent = 0
-    key = (company or "").strip().lower()
+    key = (company or "").strip()
     if key:
+        # Lazy: contacts imports this module.
+        from src.services.applications.contacts import count_company_sends  # noqa: PLC0415
+
         since = (now - timedelta(days=settings.OUTREACH_COMPANY_WINDOW_DAYS)).isoformat()
-        cur = await db._db.execute(
-            "SELECT COUNT(*) FROM contact_outreach co "
-            "JOIN application_contacts ac ON ac.id = co.contact_id "
-            "JOIN applications a ON a.id = ac.application_id "
-            "WHERE co.user_id = ? AND ac.user_id = ? AND co.entry = 'sent' AND co.recorded_at >= ? "
-            "AND LOWER(TRIM(COALESCE(a.job_company, ''))) = ?",
-            (user_id, user_id, since, key),
-        )
-        row = await cur.fetchone()
-        company_sent = int(row[0]) if row else 0
+        company_sent = await count_company_sends(db, user_id, key, since)
     return OutreachCounts(sent_today=sent_today, company_sent_in_window=company_sent)
 
 

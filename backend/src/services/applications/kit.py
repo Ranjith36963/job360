@@ -170,18 +170,21 @@ def file_stem(company: str, kind: str, version_no: int) -> str:
 
 
 def norm_url(url: str) -> str:
-    """Lowercase scheme + host, drop the fragment, strip a trailing slash;
-    the query is kept (two different ``?id=`` are two different jobs)."""
+    """Lowercase scheme + host, drop the fragment, strip a trailing slash. The query is kept (two
+    different ``?id=`` are two different jobs) minus tracking keys and secret-named keys such as a
+    token or session id (gap-audit #18, ``job_checks.redact_url``), so a receipt stored in full still
+    matches one stored redacted. An unparseable value is compared as typed."""
     text = (url or "").strip()
     if not text:
         return ""
-    try:
-        parts = urlsplit(text)
-    except ValueError:
+    from src.services.applications.job_checks import redact_url  # noqa: PLC0415
+
+    red = redact_url(text)
+    if not red:
         return text
-    path = parts.path.rstrip("/")
+    parts = urlsplit(red)
     query = f"?{parts.query}" if parts.query else ""
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}{query}"
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{query}"
 
 
 def host_needs_account(host: Optional[str], learned: set[str]) -> bool:
@@ -741,6 +744,7 @@ async def gate_facts(
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
+        sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         application_id=application_id,
     )
 
@@ -750,6 +754,13 @@ async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unverified_guess(db, user_id, app_row)
+
+
+async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest form holds an answer to a sensitive question the user has not confirmed (``ready`` reads it)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return await ready.has_unconfirmed_sensitive(db, user_id, app_row)
 
 
 def company_avoided(user_id: str, app_row: dict[str, Any], entries: Optional[list[Any]] = None) -> bool:
@@ -903,7 +914,7 @@ async def submit_verdict(
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False,
+            guessed_unverified=False, sensitive_unconfirmed=False,
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -2050,6 +2061,9 @@ async def build_kit(
         answers["approved_text"] = [it for i, it in enumerate(approved) if i in keep]
     hold = await live_hold(db, user, application_id, now, session)
     state = await controls_state(db, user.id, app_row, now)
+    from src.services.applications import known_people as known_people_service  # noqa: PLC0415
+
+    people_here = await known_people_service.for_application(db, user.id, app_row)
     events = await _events(db, user.id, application_id, ("cv_seen", "submit_approved"))
 
     docs: list[dict[str, Any]] = []
@@ -2075,9 +2089,12 @@ async def build_kit(
         # Plain facts about this ad (job_checks.py) - never a verdict, never a sort key.
         "checks": base_checks,
     }
+    from src.services.applications import contacts as contacts_service  # noqa: PLC0415 - contacts imports spine
+
     application = {
         "id": application_id, "status": app_row["status"], "follow_up_on": app_row.get("follow_up_on"),
         "submit_override": await spine.submit_override(db, user.id, application_id),
+        "referred_by": await contacts_service.referred_by(db, user.id, application_id),
     }
     host = settings_rules.parse_site_host(apply_url)
     learned = {
@@ -2126,7 +2143,7 @@ async def build_kit(
         "application_id": application_id, "kit_event_id": event["event_id"], "missing_count": len(missing),
         "hold": bool(hold), "session": safe_log_value(session, max_len=SESSION_MAX_CHARS),
         "duplicate": dup["flag"], "surface": "mcp" if user.auth_via != "session" else "web",
-        "result": "ok",
+        "result": "ok", "known_people_count": people_here["count"],
     })
     out: dict[str, Any] = {
         "kit": {"id": event["event_id"], "sha256": kit_sha, "generated_at": now.isoformat()},
@@ -2138,12 +2155,19 @@ async def build_kit(
         "hold": hold, "account_site": account_site,
         "autofill": state["autofill"]["mode"],
         "warnings": pay_warnings(profile, country),
+        "known_people": people_here,
         "instructions": list(KIT_INSTRUCTIONS),
     }
     if answers_omitted:
         out["answers_omitted"] = answers_omitted
         out["instructions"].append(
             "More approved answers: get_profile fields['user_info.answers']"
+        )
+    if people_here["count"]:
+        out["instructions"].append(
+            f"known_people: {people_here['count']} people you already stored at this company "
+            "(list_people(company=...) lists them all). Read them before finding someone new; "
+            "whether to reach out is the user's call."
         )
     if cv is None:
         out["cv_none_reason"] = NO_CV_REASON
@@ -2159,7 +2183,10 @@ FORM_NEXT_ASK = (
     "save reusable answers with update_profile (user_info.answers); never guess."
 )
 FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
-FORM_NEXT_CONFIRM = " Confirm every `needs_confirmation` answer with the user in that same message."
+FORM_NEXT_CONFIRM = (
+    " Confirm every `needs_confirmation` answer with the user in that same message, and raise each one with "
+    "ask_user so it shows on Needs you: the user checks it there before anything is sent."
+)
 FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
 # NOT IN REFERENCE (kept small, deterministic): which kit groups / which wording count as sensitive or a knock-out.
@@ -2176,7 +2203,17 @@ _SENSITIVE_RE = re.compile(
     r"vetting (?:check|process|level)|(?:undergo|pass|hold) (?:\w+ )?vetting|"
     r"day.?rate|expected (?:pay|salary)|notice period|\bitar\b|export controls?|non.?compete|"
     r"interview record(?:ing)?|record(?:ing)? (?:of )?(?:the |this )?interview|"
-    r"previously (?:been )?employed (?:by|at|with)"
+    r"previously (?:been )?employed (?:by|at|with)|"
+    # Any country, any job (owner, 2026-10-22): identity, health, money and legal history are the user's to
+    # answer, never typed from a guess. "health" and "age" alone are too broad ("healthcare", "page"), so
+    # only the asking phrases count.
+    r"nationality|citizen(?:ship)?\b|immigration status|national origin|(?:place|country) of birth|"
+    r"passport|national insurance|social security|\bssn\b|tax (?:id|number)|"
+    r"date of birth|\bdob\b|\bhow old\b|marital|pregnan|"
+    r"medical (?:condition|history|exam)|health (?:condition|issue|problem|status)|mental health|"
+    r"drug (?:test|screen)|vaccinat|transgender|\blgbt|political|trade union|union member|\bcaste\b|"
+    r"bankrupt|credit (?:check|score|history)|financial (?:history|status)|salary history|"
+    r"(?:current|previous) (?:salary|pay)\b|arrest|felony|misdemeanou?r|military|armed forces"
 )
 _KNOCKOUT_GROUPS = frozenset({"right_to_work", "salary"})
 _KNOCKOUT_RE = re.compile(

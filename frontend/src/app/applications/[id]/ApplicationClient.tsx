@@ -125,6 +125,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   }, [applicationId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     void load();
   }, [load]);
 
@@ -478,7 +479,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
           <section data-testid="section-people" className={`order-6 ${SECTION} lg:order-none`}>
             <h2 className={`mb-3 ${LABEL}`}>People</h2>
-            <Contacts applicationId={detail.id} contacts={detail.contacts} />
+            <Contacts applicationId={detail.id} contacts={detail.contacts} knownPeople={detail.known_people} />
           </section>
 
           <section data-testid="section-lessons" className={`order-7 ${SECTION} lg:order-none`}>

@@ -63,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Keep the latest pathname readable from the (stable) notifier callback
   // without re-subscribing on every navigation.
   const pathnameRef = useRef(pathname);
+  // eslint-disable-next-line react-hooks/refs -- existing working ref read; refactor tracked
   pathnameRef.current = pathname;
 
   const mountedRef = useRef(true);

@@ -138,7 +138,7 @@ async def upload_proof_via_link(token: str, request: Request, response: Response
     now = datetime.now(timezone.utc)
     try:
         async with _short_db() as db:
-            link = await proof.find_link(db, token, _ip_hash(request), now)
+            link = await proof.find_link(db, token, _ip_hash(request, throttle=True), now)
     except SpineError as exc:
         _raise(exc, _NO_STORE)
     data = await _read_body(request)

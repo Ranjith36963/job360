@@ -248,6 +248,9 @@ export type User = {
   timezone?: string;
   /** "Help improve Job360" (Settings > Account). Gates Sentry session replay. */
   analytics_consent?: boolean;
+  /** GET /api/auth/me only: false for an account only a magic link has ever
+   * signed in; the account page then deletes without a password. */
+  has_password?: boolean;
 };
 
 // M2 — register no longer returns the user or a session (no account-enumeration:
@@ -381,6 +384,22 @@ export async function confirmPasswordReset(
 }
 
 // ---------------------------------------------------------------------------
+// Email-change undo (gap roadmap slice 35)
+// ---------------------------------------------------------------------------
+//
+// Public, authenticated by the one-time token in the notice mailed to the OLD
+// address. 204 = the old email is back and every session, assistant token and
+// OAuth grant was revoked. 400 = unknown / used / expired (generic). 409 = the
+// old address now belongs to another account (nothing changed).
+
+export async function undoEmailChange(token: string): Promise<void> {
+  await request<void>("/api/auth/email-change/undo", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Email verification (Phase −2 item B)
 // ---------------------------------------------------------------------------
 //
@@ -423,10 +442,13 @@ export async function changeEmail(
   });
 }
 
-export async function deleteAccount(currentPassword: string): Promise<void> {
+/** Erase the account. Pass the password for an account that has one; an
+ * account with none (magic link only) sends no password and must be on a
+ * fresh email-link sign-in, else the server answers 403 saying so. */
+export async function deleteAccount(currentPassword?: string): Promise<void> {
   await request<void>("/api/auth/users/me", {
     method: "DELETE",
-    body: JSON.stringify({ current_password: currentPassword }),
+    body: JSON.stringify(currentPassword ? { current_password: currentPassword } : {}),
   });
 }
 
@@ -1123,6 +1145,7 @@ export async function addContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string;
+    relationship?: string;
     occurred_at?: string;
   }
 ): Promise<AddContactResult> {
@@ -1147,6 +1170,7 @@ export async function updateContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string; // "" clears it; null would mean "not given"
+    relationship?: string; // "" clears it
   }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });

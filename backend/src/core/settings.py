@@ -128,6 +128,40 @@ USER_BROUGHT_SOURCE = "user_brought"
 # is Phase 3.
 LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
 LOGIN_LOCKOUT_WINDOW_SECONDS = int(os.getenv("LOGIN_LOCKOUT_WINDOW_SECONDS", "900"))
+# Per-EMAIL cap across ALL source addresses, beside the email+IP lockout above
+# (same window). OFF BY DEFAULT (0): when on, it refuses even the right password
+# once that many failures are counted, so ~10 attacker addresses (or IPv6 /64s)
+# can keep a chosen account locked out (security review P2, gap audit #6). Turn
+# it on only as a deliberate choice, e.g. LOGIN_EMAIL_MAX_ATTEMPTS=50. When on,
+# each address adds at most LOGIN_MAX_ATTEMPTS failures before its own email+IP
+# bucket locks, so tripping it takes LOGIN_EMAIL_MAX_ATTEMPTS / LOGIN_MAX_ATTEMPTS
+# distinct addresses inside one window. ``0`` disables it.
+LOGIN_EMAIL_MAX_ATTEMPTS = int(os.getenv("LOGIN_EMAIL_MAX_ATTEMPTS", "0"))
+
+# Client address behind proxies (src/api/client_ip.py is the only reader of
+# X-Forwarded-For). JOB360_TRUSTED_PROXY_HOPS = how many trusted proxies in
+# front of the backend each APPEND one X-Forwarded-For entry (or set it). The
+# client address is the entry that many positions from the RIGHT; everything
+# left of it was written by the caller and is ignored. Never the leftmost.
+# Interaction with the older flag:
+#   * HOPS set (any integer) -> it wins; 0 means "never trust X-Forwarded-For"
+#     even when JOB360_TRUST_PROXY=1. A negative value counts as 0.
+#   * HOPS unset, JOB360_TRUST_PROXY=1 -> 1 hop: the rightmost entry, the one
+#     the nearest proxy wrote, which a caller cannot forge.
+#   * both unset -> 0: X-Forwarded-For ignored, the socket peer is the address.
+# Set it ONLY when every path to the backend crosses that many proxies; a
+# backend the public can reach without them lets the caller write the entry.
+def resolve_trusted_proxy_hops(trust_proxy_raw: str, hops_raw: str) -> int:
+    """The effective hop count from the two env values (rules above)."""
+    hops = hops_raw.strip()
+    if hops:
+        return max(0, int(hops))
+    return 1 if trust_proxy_raw.strip() == "1" else 0
+
+
+TRUSTED_PROXY_HOPS = resolve_trusted_proxy_hops(
+    os.getenv("JOB360_TRUST_PROXY", ""), os.getenv("JOB360_TRUSTED_PROXY_HOPS", "")
+)
 
 # docs/fable/01 — cross-instance rate limiting. The default limiter (services/
 # auth/rate_limit.py) keeps its sliding windows in-process, so on a multi-replica
@@ -260,6 +294,10 @@ SESSION_TOUCH_TIMEOUT_SECONDS = float(os.getenv("SESSION_TOUCH_TIMEOUT_SECONDS",
 # connection, and Postgres allows ~100. Extra touches are skipped (informational
 # only) with a rate-limited warning.
 SESSION_TOUCH_MAX_INFLIGHT = int(os.getenv("SESSION_TOUCH_MAX_INFLIGHT", "20"))
+# Account deletion for a magic-link-only account (no password to ask for, GDPR
+# Art. 17): allowed only from a session created at most this many seconds ago,
+# i.e. one the user just made by clicking a fresh email link.
+ACCOUNT_DELETE_FRESH_SESSION_SECONDS = int(os.getenv("ACCOUNT_DELETE_FRESH_SESSION_SECONDS", "600"))
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""
@@ -342,6 +380,12 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # guessed; payload {key | question, was_source}. A note: saving it to memory is a separate,
     # user-approved update_profile. Checked in the record_event ROUTE (_check_answer_corrected).
     "answer_corrected",
+    # Outreach pack #5/#6 (2026-10-20): a contact ledger entry (meeting / call / intro, a
+    # referral asked or given) mirrored onto a LINKED contact's job timeline, payload
+    # {contact_id, outreach_id, channel}. Written only by contacts.record_outreach; record_event
+    # refuses them without contact_id. Note-family: never move the status. A wrong one is
+    # retracted by a `note` with corrects_event_id (stats and the kit skip it).
+    "contact_meeting", "contact_call", "contact_intro", "referral_asked", "referral_given",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -462,9 +506,12 @@ OFFICIAL_ATS_HOSTS = (
     "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "smartrecruiters.com",
     "workable.com", "bamboohr.com", "recruitee.com", "teamtailor.com", "personio.de", "personio.com",
     "applytojob.com", "jazzhr.com", "gem.com", "dayforcehcm.com", "freshteam.com",
-    "zohorecruit.com", "zohorecruit.in", "rippling.com", "icims.com", "taleo.net",
+    "zohorecruit.com", "zohorecruit.in", "ripplehire.com", "rippling.com", "icims.com", "taleo.net",
     "ultipro.com", "careers-page.com",
 )
+# Hosts under an official ATS domain that are NOT one employer's site: RippleHire's
+# shared sandbox answers any company's token (security review 2026-10-20).
+SHARED_ATS_HOSTS = ("app.ripplehire.com", "www.ripplehire.com")
 # Gmail check slice (owner decision 2026-10-15): an employer's ATS sends its
 # emails from its OWN domain, and many never name the company in the text
 # (an Ashby confirmation signed "TALENT TEAM"), so a company-name search misses
@@ -569,6 +616,8 @@ CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
 CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
 CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
 CONTACT_SOURCE_URL_MAX_CHARS = int(os.getenv("CONTACT_SOURCE_URL_MAX_CHARS", "1000"))
+CONTACT_COMPANY_MAX_CHARS = int(os.getenv("CONTACT_COMPANY_MAX_CHARS", "200"))
+CONTACT_SHARED_MAX_CHARS = int(os.getenv("CONTACT_SHARED_MAX_CHARS", "300"))
 CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
 CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
 CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
@@ -578,6 +627,9 @@ CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 —
 # user's own assistant WRITES messages; the USER sends them (or, with assistant_settings.outreach_send = auto,
 # the assistant sends from the user's own Gmail); Job360 never sends.
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
+# contact_outreach.entry — free TEXT in the DB, closed here. `bounced` (pack #7): a
+# delivery failure for an outreach email; its `text` is the address that bounced.
+OUTREACH_ENTRIES = ("message", "sent", "reply", "bounced")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
 # LinkedIn connection-request note limits: career-ops (MIT) modes/contacto.md:168
 # "200 characters on a free account, 300 on Premium/Sales Navigator ... Default to the
@@ -598,19 +650,52 @@ OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY
 # the window, so one company is never carpet-bombed.
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
 OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
+# Outreach pack #5/#6 (2026-10-20): contact ledger entries beyond message/sent/reply. Stored
+# only — Job360 sends nothing, and these never count as sends (check_outreach reads `sent`).
+CONTACT_INTERACTION_ENTRIES = ("meeting", "call", "intro")
+CONTACT_REFERRAL_ENTRIES = ("referral_asked", "referral_given")
+CONTACT_INTERACTION_CHANNELS = ("call", "video", "in_person")
+# The ONE channel set every meeting/call/intro/referral entry accepts (a store tool refuses no
+# true fact). OUTREACH_CHANNELS itself stays narrow: it gates sends.
+CONTACT_LEDGER_CHANNELS = OUTREACH_CHANNELS + CONTACT_INTERACTION_CHANNELS
+# The job-timeline event a ledger mark appends when its contact is linked to an application.
+CONTACT_LEDGER_EVENT_TYPES = {
+    "sent": "outreach_sent", "reply": "outreach_replied", "meeting": "contact_meeting",
+    "call": "contact_call", "intro": "contact_intro", "referral_asked": "referral_asked",
+    "referral_given": "referral_given",
+}
+# Their own budgets, apart from the outreach ones: an interaction never spends a send's budget.
+CONTACT_INTERACTIONS_PER_CONTACT_MAX = int(os.getenv("CONTACT_INTERACTIONS_PER_CONTACT_MAX", "100"))
+CONTACT_INTERACTIONS_MAX_PER_HOUR = int(os.getenv("CONTACT_INTERACTIONS_MAX_PER_HOUR", "60"))  # per USER
 # Automatic employer emails (feedback loop slice 2; check_auto_email). Operator constants, not user
 # settings: how long to wait before each email, and the most that go out per user per day.
 AUTO_EMAIL_CHECKIN_DAYS = int(os.getenv("AUTO_EMAIL_CHECKIN_DAYS", "7"))
 AUTO_EMAIL_FOLLOWUP_DAYS = int(os.getenv("AUTO_EMAIL_FOLLOWUP_DAYS", "7"))
 AUTO_EMAILS_MAX_PER_DAY = int(os.getenv("AUTO_EMAILS_MAX_PER_DAY", "10"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
+# known_people: at most this many people in a bring/kit/detail payload; count is the full number.
+KNOWN_PEOPLE_MAX = int(os.getenv("KNOWN_PEOPLE_MAX", "20"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
 CONTACT_FOUND_VIA = (
     "company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event",
     "company_team_page", "github", "speaker_page", "email_finder", "other",
 )
-CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via", "source_url")
+# Outreach pack #7 — where the contact's EMAIL came from (the person's origin is
+# found_via). Closed set; unset = NULL (rule #29). `pattern_guess` makes
+# check_outreach answer ask (email_guessed). Editable like found_via (a contact_edits row).
+CONTACT_EMAIL_SOURCES = ("they_emailed", "on_company_page", "provider_verified", "pattern_guess", "user_gave")
+# Outreach pack #12 — how the user knows this person. Closed set; unset = NULL
+# (rule #29); "none" is an explicit answer. The agent judges, Job360 stores.
+CONTACT_RELATIONSHIP = (
+    "former_colleague", "classmate", "alumni", "friend", "recruiter", "hiring_manager", "interviewer", "none",
+)
+# The profile record lists a `shared` pointer may name (get_profile `fields` paths).
+CONTACT_SHARED_SOURCES = ("cv_data.cv_positions", "cv_data.cv_projects", "cv_data.education")
+CONTACT_EDIT_FIELDS = (
+    "name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company", "email_source",
+    "relationship", "shared",
+)
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
@@ -673,7 +758,7 @@ STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # a view a later slice appends (before "all") joins it automatically.
 STATS_VIEWS = (
     "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
-    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "all",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "referrals", "all",
 )
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE

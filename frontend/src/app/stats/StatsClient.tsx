@@ -163,11 +163,19 @@ function JobTable({ section }: { section: Section }) {
   );
 }
 
-function PeopleTable({ rows }: { rows: StatsResponse["by_contact_found_via"] }) {
+function PeopleTable({
+  id,
+  title,
+  rows,
+}: {
+  id: string;
+  title: string;
+  rows: StatsResponse["by_contact_found_via"];
+}) {
   return (
-    <section aria-labelledby="stats-people" data-testid="stats-section-people">
-      <h2 id="stats-people" className={`${LABEL} mb-2`}>
-        By where you found the person
+    <section aria-labelledby={`stats-${id}`} data-testid={`stats-section-${id}`}>
+      <h2 id={`stats-${id}`} className={`${LABEL} mb-2`}>
+        {title}
       </h2>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[26rem] border-collapse text-sm">
@@ -277,6 +285,7 @@ export function StatsClient() {
 
   const sections = stats ? buildSections(stats) : [];
   const people = stats?.by_contact_found_via ?? [];
+  const relationships = stats?.by_contact_relationship ?? [];
   const scoreLine = stats?.score_line;
 
   return (
@@ -304,7 +313,10 @@ export function StatsClient() {
           {sections.map((s) => (
             <JobTable key={s.id} section={s} />
           ))}
-          {people.length > 0 && <PeopleTable rows={people} />}
+          {people.length > 0 && <PeopleTable id="people" title="By where you found the person" rows={people} />}
+          {relationships.length > 0 && (
+            <PeopleTable id="people-relationship" title="By relationship" rows={relationships} />
+          )}
           {stats.sites && stats.sites.sites.length > 0 && <SitesTable data={stats.sites} />}
         </>
       )}
