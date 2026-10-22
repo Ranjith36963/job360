@@ -1,4 +1,4 @@
--- 0078_contact_phone_links: outreach pack #14 (2026-10-20). A contact's phone
+-- 0080_contact_phone_links: outreach pack #14 (2026-10-20). A contact's phone
 -- (stored normalised: an optional leading '+' then digits only; 7+ digits is an
 -- identity for add_contact's no-email dedupe) and up to CONTACT_LINKS_MAX other
 -- profile links (GitHub, a personal site): JSON text of a list of http(s) URLs.
