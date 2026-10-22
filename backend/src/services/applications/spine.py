@@ -1662,6 +1662,8 @@ async def record_receipt(
     applied_at: Optional[str] = None,
     request_id: Optional[str] = None,
     referred_by_contact_id: Optional[int] = None,
+    recipient: str = "",
+    gmail_message_id: str = "",
 ) -> dict[str, Any]:
     """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
     none named, with a warning) and the named cover letter (NONE if not named:
@@ -1693,13 +1695,30 @@ async def record_receipt(
     uploads are frozen as ``files`` [{kind, artifact_id, sha256, fmt, event_id}]. A
     named id that is not the uploaded one is kept, with ``cv_mismatch`` /
     ``cover_letter_mismatch``. No upload at all = the older behaviour.
+
+    Gap roadmap slice 31 (G078) - ``recipient`` (ONE address) and ``gmail_message_id`` are stored at
+    INSERT (M3). For ``channel`` email (given, or read off the newest ``email_drafted`` when neither a
+    channel nor a form host is known) with no ``recipient``, the newest draft since the last ``applied``
+    names it (``recipient from email_drafted#N``); a given one that differs is kept with
+    ``recipient_mismatch``. The draft's attachments count as uploads AFTER the ``document_uploaded`` ones:
+    they name (and freeze as ``files``) the CV / letter no upload covers - every file when nothing was
+    served, the letter when it was only downloaded through a kit link. Both new params join ``idem_body``
+    only when given, so a body recorded before them still replays.
     """
-    idem_body = {
+    idem_body: dict[str, Any] = {
         "application_id": application_id, "channel": channel, "note": note, "confirmation": confirmation,
         "answers": answers or [], "fields_filled": fields_filled or {}, "cv_artifact_id": cv_artifact_id,
         "cover_letter_artifact_id": cover_letter_artifact_id, "applied_at": applied_at,
         "referred_by_contact_id": referred_by_contact_id,
     }
+    if recipient:
+        idem_body["recipient"] = recipient
+    if gmail_message_id:
+        idem_body["gmail_message_id"] = gmail_message_id
+    from src.services.applications import email_channel  # noqa: PLC0415 - email_channel imports spine
+
+    recipient = email_channel.clean_recipient(recipient)
+    gmail_message_id = email_channel.clean_message_id(gmail_message_id)
     channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
     warnings: list[str] = []
@@ -1764,6 +1783,22 @@ async def record_receipt(
     if not channel_given and form_host:
         channel = _channel_for_host(form_host)
         warnings.append(f"channel not given: stored '{channel}' from the form's host {form_host}")
+    # Slice 31 - the draft of an email application names the channel (no form, no channel given),
+    # the recipient and the attached files. Decided before the INSERT (M3).
+    draft = await email_channel.newest_draft(db, user_id, application_id, since_applied=True)
+    if not channel_given and not form_host and draft is not None:
+        channel = "email"
+        warnings.append(f"channel not given: stored 'email' from email_drafted#{draft['event_id']}")
+    recipient_from = "given" if recipient else ""
+    if channel == "email" and draft is not None:
+        if not recipient:
+            recipient, recipient_from = draft["to"], "draft"
+            warnings.append(f"recipient from email_drafted#{draft['event_id']}")
+        elif recipient != draft["to"]:
+            warnings.append(
+                f"recipient_mismatch: the receipt keeps the recipient you gave ({recipient}), but the newest "
+                f"email_drafted#{draft['event_id']} was to {draft['to']}"
+            )
     # G023 - a sensitive answer the user did not agree to remember is hashed (given or frozen alike).
     answers_list, hashed = await kit_service.redact_unremembered(db, user_id, app_row, answers_list)
 
@@ -1773,6 +1808,11 @@ async def record_receipt(
     from src.services.applications import uploads as uploads_service  # noqa: PLC0415 - uploads imports spine
 
     uploads = await uploads_service.uploads_since_last_receipt(db, user_id, application_id)
+    if channel == "email" and draft is not None:
+        # Slice 31 - attaching a file to the email IS sending it. The draft's attachments come AFTER
+        # Job360's own uploads (server-written evidence wins), so they name what no upload covers: all
+        # files when nothing was served, else e.g. the letter when only a kit link download (no host) was.
+        uploads = [*uploads, *email_channel.receipt_uploads(draft)]
     up_cv = next((u for u in uploads if u["kind"] == "cv"), None)
     up_cl = next((u for u in uploads if u["kind"] == "cover_letter"), None)
     # Only an upload INTO a form (the browser's, host set) proves a letter was attached; a kit link
@@ -1795,7 +1835,8 @@ async def record_receipt(
         else:  # artifacts are append-only (M3): another id is another text, so other bytes
             warnings.append(
                 f"cv_mismatch: the receipt keeps the CV you named (artifact {cv_artifact['id']}), but the CV "
-                f"Job360 last sent was artifact {up_cv['artifact_id']} (document_uploaded#{up_cv['event_id']})"
+                f"Job360 last sent was artifact {up_cv['artifact_id']} "
+                f"({up_cv.get('source', 'document_uploaded')}#{up_cv['event_id']})"
             )
     # A receipt never guesses a letter: only a NAMED or form-uploaded letter is frozen (M3 - the
     # receipt is permanent, so a wrong "sent" claim could never be corrected; prod receipt 19).
@@ -1811,7 +1852,7 @@ async def record_receipt(
                 warnings.append(
                     f"cover_letter_mismatch: the receipt keeps the letter you named (artifact {cl_artifact['id']}), "
                     f"but the letter Job360 last sent was artifact {up_cl['artifact_id']} "
-                    f"(document_uploaded#{up_cl['event_id']})"
+                    f"({up_cl.get('source', 'document_uploaded')}#{up_cl['event_id']})"
                 )
     elif up_cl_form is not None:
         cl_artifact = await _resolve_receipt_artifact(
@@ -1869,8 +1910,9 @@ async def record_receipt(
                 " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
                 " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
                 " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
-                " referred_by_contact_id, answers_from, answers_count, files) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " referred_by_contact_id, answers_from, answers_count, files, recipient, gmail_message_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?)",
                 (
                     user_id, app_row["job_id"], sent_at,
                     app_row.get("job_title") or "", app_row.get("job_company") or "",
@@ -1882,7 +1924,8 @@ async def record_receipt(
                     application_id, cv_artifact["id"] if cv_artifact else None,
                     cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
                     confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
-                    referred_by_contact_id, answers_from, answers_count, json.dumps(files),
+                    referred_by_contact_id, answers_from, answers_count, json.dumps(files), recipient,
+                    gmail_message_id,
                 ),
             )
             receipt_id = int(cur.lastrowid or 0)
@@ -1902,6 +1945,7 @@ async def record_receipt(
                 "confirmation": confirmation or "",
                 "url": f"/applications/{application_id}", "event_id": event["event_id"],
                 "possible_duplicate": possible_duplicate, "answers_from": answers_from, "files": files,
+                "recipient": recipient, "gmail_message_id": gmail_message_id,
                 "already_existed": False,
                 "referred_by_contact_id": referred_by_contact_id,
             }
@@ -1932,6 +1976,21 @@ async def record_receipt(
                 "from_event_id": int(source["id"]) if answers_from and source is not None else None,
                 "answers_count": answers_count, "answers_missing": bool(answers_from) and not answers_list,
                 "redacted_count": hashed, "channel_from_form": bool(form_host and not channel_given),
+                "result": "ok",
+            },
+        )
+    files_from_draft = draft is not None and any(f["event_id"] == draft["event_id"] for f in files)
+    if channel == "email" or recipient or gmail_message_id:
+        # Slice 31 - the recipient's DOMAIN only, never the address.
+        get_audit_logger().info(
+            "receipt_email",
+            extra={
+                "event": "receipt_email", "user_id": safe_log_value(user_id),
+                "application_id": int(application_id), "receipt_id": receipt_id,
+                "to_domain": safe_log_value(email_channel.recipient_domain(recipient), max_len=80),
+                "recipient_from": recipient_from or "none",
+                "recipient_mismatch": any(w.startswith("recipient_mismatch") for w in warnings),
+                "gmail_message_id_given": bool(gmail_message_id), "files_from_draft": files_from_draft,
                 "result": "ok",
             },
         )
@@ -2235,7 +2294,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
         "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, referred_by_contact_id, "
-        "answers_from, files, "
+        "answers_from, files, recipient, gmail_message_id, "
         "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
@@ -2253,6 +2312,8 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "answers": _receipt_answers(r.get("answers")),
         "answers_from": r.get("answers_from") or "",
         "files": [f for f in _receipt_json(r.get("files"), list) if isinstance(f, dict)],
+        "recipient": r.get("recipient") or "",
+        "gmail_message_id": r.get("gmail_message_id") or "",
         "fields_filled": _receipt_json(r.get("fields_filled"), dict),
         "confirmation": r.get("confirmation") or None,
         "recorded_by": r.get("recorded_by") or None,
