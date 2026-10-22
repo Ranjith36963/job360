@@ -59,6 +59,7 @@
     "contact_call",
     "contact_intro",
     "referral_asked",
-    "referral_given"
+    "referral_given",
+    "document_uploaded"
   ]
 }
