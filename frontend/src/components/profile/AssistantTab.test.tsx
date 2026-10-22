@@ -378,7 +378,7 @@ describe("AssistantTab", () => {
     );
   });
 
-  it("offers no Hours to apply card; an old saved window with sending on its own reads as Straight away", async () => {
+  it("offers no Hours to apply card; an old saved window reads as Straight away, is shown, and clears", async () => {
     getAssistantSettings.mockResolvedValue(
       view({
         submit_mode: field("auto_when_sure", "auto_when_sure"),
@@ -390,6 +390,11 @@ describe("AssistantTab", () => {
     expect(screen.queryByTestId("apply-hours-from")).toBeNull();
     expect(screen.queryByTestId("apply-hours-to")).toBeNull();
     expect(screen.getByTestId("mode-straight")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("old-apply-hours")).toHaveTextContent("between 09:00 and 17:30");
+    fireEvent.click(screen.getByTestId("old-apply-hours-clear"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_hours", value: null }]),
+    );
   });
 
   it("Ask me each time turns sending on its own off", async () => {

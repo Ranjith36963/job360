@@ -23,6 +23,7 @@ import {
   grantActive,
   grantText,
   historyWhen,
+  hoursOf,
   isoToLocalInput,
   localInputToIso,
   numText,
@@ -152,6 +153,8 @@ export function BatchRuleRows({
   const savedGrantCount = view.auto_grant_count?.value;
   const savedGrantUntil = String(view.auto_grant_until?.value ?? "");
   const grantOn = grantActive(savedGrantCount, savedGrantUntil);
+  // A window saved by the removed "Hours to apply" card still limits sending; show it so it can be cleared.
+  const oldHours = hoursOf(view.apply_hours);
   // Slice 30: a grant covers only the queue the user sees here when they confirm it.
   const scope = view.auto_grant_scope;
   const queueNow = scope?.queue;
@@ -426,6 +429,20 @@ export function BatchRuleRows({
                 </button>
               ))}
             </div>
+            {oldHours.from !== "" && (
+              <span className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground" data-testid="old-apply-hours">
+                Your assistant still only applies between {oldHours.from} and {oldHours.to} (a window you saved earlier).
+                <button
+                  type="button"
+                  data-testid="old-apply-hours-clear"
+                  disabled={busy}
+                  onClick={() => void save(P_HOURS, null)}
+                  className="min-h-11 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground md:min-h-9"
+                >
+                  Clear
+                </button>
+              </span>
+            )}
             {confirmStraight && (
               <span className="mt-2 flex flex-wrap items-center gap-2 text-[13px]" data-testid="mode-straight-ask">
                 Let your assistant apply on its own, at any time? Indeed, LinkedIn and the first practice run still wait for you.
