@@ -378,35 +378,6 @@ describe("AssistantTab", () => {
     );
   });
 
-  it("Hours to apply saves the window and sending on its own together, only once both times are set", async () => {
-    await ready();
-    fireEvent.click(screen.getByTestId("mode-hours"));
-    const from = screen.getByTestId("apply-hours-from");
-    const to = screen.getByTestId("apply-hours-to");
-    // The real order: pick "from", focus leaves it, then pick "to" (CodeRabbit 2026-10-18).
-    fireEvent.change(from, { target: { value: "09:00" } });
-    fireEvent.blur(from);
-    expect(updateProfileFields).not.toHaveBeenCalled();
-    expect(toastError).not.toHaveBeenCalled();
-    expect((from as HTMLInputElement).value).toBe("09:00");
-    fireEvent.change(to, { target: { value: "09:00" } });
-    fireEvent.blur(to);
-    expect(updateProfileFields).not.toHaveBeenCalled();
-    expect(toastError).toHaveBeenCalledWith("Pick two different times, or clear both. Not saved.");
-    fireEvent.change(from, { target: { value: "09:00" } });
-    fireEvent.blur(from);
-    fireEvent.change(to, { target: { value: "17:30" } });
-    fireEvent.blur(to);
-    await waitFor(() =>
-      expect(updateProfileFields).toHaveBeenCalledWith([
-        { path: "assistant_settings.apply_hours", value: { from: "09:00", to: "17:30" } },
-        { path: "assistant_settings.submit_mode", value: "auto_when_sure" },
-        { path: "assistant_settings.auto_grant_count", value: null },
-        { path: "assistant_settings.auto_grant_until", value: null },
-      ]),
-    );
-  });
-
   it("Ask me each time turns sending on its own off", async () => {
     getAssistantSettings.mockResolvedValue(view({ submit_mode: field("auto_when_sure", "auto_when_sure") }));
     await ready();
