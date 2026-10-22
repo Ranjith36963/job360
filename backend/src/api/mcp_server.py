@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 17
-TOOLS_REV_FOR_HASH = "5e9dd224ad5e"
+TOOLS_REV = 18
+TOOLS_REV_FOR_HASH = "0df3b63474b0"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1628,6 +1628,8 @@ def build_server(version: str = "") -> MCPServer:
         source_url: Optional[str] = None,
         company: Optional[str] = None,
         email_source: Optional[str] = None,
+        relationship: Optional[str] = None,
+        shared: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
@@ -1646,7 +1648,11 @@ def build_server(version: str = "") -> MCPServer:
         (http/https); Job360 stores it, never opens it. `company` = the employer they work at: REQUIRED without
         application_id; on a job leave it out unless they work elsewhere (an agency) -
         it then follows the job's company. `email_source` = where the EMAIL came from: "they_emailed",
-        "on_company_page", "provider_verified", "pattern_guess" (name pattern) or "user_gave"; never guess it."""
+        "on_company_page", "provider_verified", "pattern_guess" (name pattern) or "user_gave"; never guess it.
+        `relationship` = how the user knows them: "former_colleague", "classmate", "alumni", "friend",
+        "recruiter", "hiring_manager", "interviewer" or "none". `shared` = what they share, as a
+        get_profile path: "cv_data.cv_positions[i]", "cv_data.cv_projects[i]" or "cv_data.education[i]";
+        Job360 refuses a record the profile lacks. Never guess either."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
@@ -1655,6 +1661,7 @@ def build_server(version: str = "") -> MCPServer:
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
                     source_url=source_url, company=company, email_source=email_source,
+                    relationship=relationship, shared=shared,
                 )
             else:
                 body = applications_route.AddContactRequest(
@@ -1662,6 +1669,7 @@ def build_server(version: str = "") -> MCPServer:
                     notes=notes, occurred_at=occurred_at, found_via=found_via, source_url=source_url,
                     company=company,
                     email_source=email_source,
+                    relationship=relationship, shared=shared,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1693,19 +1701,22 @@ def build_server(version: str = "") -> MCPServer:
         source_url: Optional[str] = None,
         company: Optional[str] = None,
         email_source: Optional[str] = None,
+        relationship: Optional[str] = None,
+        shared: Optional[str] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
         Only fields you pass are changed. `found_via` and `email_source` take the same closed
         sets as add_contact (a new `email` without `email_source` clears it); `source_url` is
         http/https; "" clears either. `company` = their employer ("" clears it; a contact with no job
-        must keep one). A foreign/unknown contact_id reads 404."""
+        must keep one). `relationship`/`shared` as add_contact. A foreign/unknown contact_id reads 404."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
             body = applications_route.UpdateContactRequest(
                 name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
                 source_url=source_url, company=company, email_source=email_source,
+                relationship=relationship, shared=shared,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1759,12 +1770,11 @@ def build_server(version: str = "") -> MCPServer:
         to get a per-variant count here), by role, by_country (the job's
         `country`; remote jobs are their own "remote" group), by_job_source
         (`found_on`), by_channel (record_application's `channel`) and
-        by_contact_found_via (contacts, reachable, outreach sent, replies, reply rate per
-        add_contact `found_via`). Applications marked with a `simulation` event are left out;
-        overall.simulations_excluded says how many. An unset value is the group with key null
+        by_contact_found_via / by_contact_relationship (contacts, reachable, outreach sent, replies,
+        reply rate per add_contact `found_via` / `relationship`). Applications marked with a `simulation` event are left
+        out; overall.simulations_excluded says how many. An unset value is the group with key null
         ("Not set"). `since` (an ISO date/datetime) scopes to applications
-        (and contacts) added on/after that date. Nothing is inferred; every
-        number is a count of what you recorded. `view` adds one block: funnel (furthest
+        (and contacts) added on/after that date. `view` adds one block: funnel (furthest
         stage reached; a rejection counts as a reply), velocity (median and p75 days per stage hop;
         still-waiting ones left out), calibration (interview rate per fit-score band
         <70/70-79/80-89/>=90, 5 per band, with a verdict to quote as printed), company (history card

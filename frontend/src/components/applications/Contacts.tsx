@@ -12,9 +12,15 @@ import { Button } from "@/components/ui/button";
 import { formatDate, formatDayMonth } from "@/lib/format-date";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
+import { RelationshipSelect } from "@/components/applications/RelationshipSelect";
 import { CopyButton } from "@/components/applications/CopyButton";
 
-const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "" };
+/** "cv_data.cv_positions[0]: Northwind Ltd" -> "Northwind Ltd" (the pointer is for agents). */
+export function sharedLabel(v: string): string {
+  return v.replace(/^cv_data\.\w+\[\d+\]:\s*/, "");
+}
+
+const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "", relationship: "" };
 // One stable empty list. An inline `= []` default would be a NEW array every
 // render, the `[contacts]` effect below would fire every render, and setList
 // would re-render forever.
@@ -168,6 +174,7 @@ function EditContact({
     name: contact.name, role: contact.role, email: contact.email, notes: contact.notes,
   });
   const [foundVia, setFoundVia] = useState(contact.found_via ?? "");
+  const [relationship, setRelationship] = useState(contact.relationship ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -175,6 +182,7 @@ function EditContact({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setForm({ name: contact.name, role: contact.role, email: contact.email, notes: contact.notes });
     setFoundVia(contact.found_via ?? "");
+    setRelationship(contact.relationship ?? "");
   }, [contact]);
 
   const save = useCallback(
@@ -190,6 +198,7 @@ function EditContact({
         // "Not set" clears it with "" (the backend reads null as "not given"),
         // never a default.
         if (foundVia !== (contact.found_via ?? "")) body.found_via = foundVia;
+        if (relationship !== (contact.relationship ?? "")) body.relationship = relationship;
         if (Object.keys(body).length === 0) {
           setOpen(false);
           return;
@@ -203,7 +212,7 @@ function EditContact({
         setSaving(false);
       }
     },
-    [contact, form, foundVia, onSaved]
+    [contact, form, foundVia, relationship, onSaved]
   );
 
   const history = contact.edit_history ?? {};
@@ -260,6 +269,16 @@ function EditContact({
             Found via
           </Label>
           <FoundViaSelect id={`edit-found-via-${contact.id}`} value={foundVia} onChange={setFoundVia} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`edit-relationship-${contact.id}`} className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+            Relationship
+          </Label>
+          <RelationshipSelect
+            id={`edit-relationship-${contact.id}`}
+            value={relationship}
+            onChange={setRelationship}
+          />
         </div>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -330,8 +349,10 @@ export function Contacts({
           linkedin_url?: string;
           notes?: string;
           found_via?: string;
+          relationship?: string;
         } = { name };
         if (form.found_via) body.found_via = form.found_via;
+        if (form.relationship) body.relationship = form.relationship;
         if (form.role.trim()) body.role = form.role.trim();
         if (form.email.trim()) body.email = form.email.trim();
         if (form.linkedin_url.trim()) body.linkedin_url = form.linkedin_url.trim();
@@ -393,6 +414,16 @@ export function Contacts({
               {contact.found_via && (
                 <p data-testid="contact-found-via" className="mt-1 font-mono text-[11px] text-faint">
                   Found via {closedSetLabel(contact.found_via)}
+                </p>
+              )}
+              {contact.relationship && (
+                <p data-testid="contact-relationship" className="mt-1 font-mono text-[11px] text-faint">
+                  {closedSetLabel(contact.relationship)}
+                </p>
+              )}
+              {contact.shared && (
+                <p data-testid="contact-shared" className="mt-1 font-mono text-[11px] text-faint">
+                  Shared: {sharedLabel(contact.shared)}
                 </p>
               )}
               {(contact.email || contact.linkedin_url) && (
@@ -489,6 +520,14 @@ export function Contacts({
             id="contact-found-via"
             value={form.found_via}
             onChange={(v) => setForm((prev) => ({ ...prev, found_via: v }))}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="contact-relationship">Relationship (optional)</Label>
+          <RelationshipSelect
+            id="contact-relationship"
+            value={form.relationship}
+            onChange={(v) => setForm((prev) => ({ ...prev, relationship: v }))}
           />
         </div>
         <div className="flex flex-col gap-1.5">
