@@ -119,7 +119,7 @@ compares, counts down and rate-limits it (`api/routes/files.py`), and
 `utils.logger.redact_path` keeps the token out of every log and Sentry event.
 Caps: the `KIT_*` and `FILE_*` constants in `core/settings.py`.
 `application_receipts` gained `possible_duplicate`, `kit_event_id`,
-`kit_sha256`, all set at INSERT; migration 0077 added `answers_from` / `answers_count`
+`kit_sha256`, all set at INSERT; migration 0078 added `answers_from` / `answers_count`
 (a receipt recorded without answers freezes the newest form event's, `spine.record_receipt`).
 The human in the loop is the note events in
 `services/applications/kit.KIT_EVENT_TYPES`, validated in the `record_event`

@@ -115,6 +115,8 @@ export const EVENT_LABEL: Record<string, string> = {
   contact_intro: "Introduced to a contact",
   referral_asked: "Asked for a referral",
   referral_given: "Referral given",
+  // Gap roadmap slice 29: the exact file sent (server-written).
+  document_uploaded: "Document file sent",
 };
 
 function relayedWords(payload: unknown): boolean {
