@@ -102,8 +102,27 @@ async def _close_quietly(conn: Any) -> None:
         logger.debug("deploy_hold connection close failed", exc_info=True)
 
 
+# /api/deployz is public: one probe answers every caller for a short while, so a flood of
+# requests costs one DB connection per window, not one each.
+_PROBE_TTL_S = 2.0
+_probe_lock = asyncio.Lock()
+_probe_cache: Optional[tuple[float, bool]] = None
+
+
 async def others_busy() -> bool:
-    """True when some process holds the shared lock. A DB error answers False (deploy)."""
+    """True when some process holds the shared lock (cached for ``_PROBE_TTL_S``)."""
+    global _probe_cache
+    async with _probe_lock:
+        now = time.monotonic()
+        if _probe_cache is not None and now - _probe_cache[0] < _PROBE_TTL_S:
+            return _probe_cache[1]
+        busy = await _probe()
+        _probe_cache = (time.monotonic(), busy)
+        return busy
+
+
+async def _probe() -> bool:
+    """One real check. A DB error answers False (deploy)."""
     try:
         async with pg.connect() as conn:
             cur = await asyncio.wait_for(

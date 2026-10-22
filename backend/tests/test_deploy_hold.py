@@ -19,6 +19,9 @@ from src.services.browser_agent.agent import BrowserPool, Session
 @pytest.fixture(autouse=True)
 def _own_key(monkeypatch):
     monkeypatch.setattr(deploy_hold, "HOLD_LOCK_KEY", random.randint(1, 2_000_000_000))
+    # These tests read the lock state straight after changing it: no probe cache here.
+    monkeypatch.setattr(deploy_hold, "_PROBE_TTL_S", 0.0)
+    monkeypatch.setattr(deploy_hold, "_probe_cache", None)
 
 
 async def _deployz():
@@ -76,6 +79,22 @@ async def test_sync_never_raises_on_a_db_error():
     with patch("src.repositories.pg.connect", side_effect=RuntimeError("down")):
         await b.sync(True)
     assert not b.held
+
+
+@pytest.mark.asyncio
+async def test_a_flood_of_probes_costs_one_db_check(monkeypatch):
+    import asyncio
+
+    calls = []
+
+    async def _probe():
+        calls.append(1)
+        return True
+
+    monkeypatch.setattr(deploy_hold, "_PROBE_TTL_S", 2.0)
+    monkeypatch.setattr(deploy_hold, "_probe", _probe)
+    results = await asyncio.gather(*(deploy_hold.others_busy() for _ in range(50)))
+    assert all(results) and len(calls) == 1
 
 
 @pytest.mark.asyncio
