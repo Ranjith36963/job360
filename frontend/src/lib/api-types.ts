@@ -6630,6 +6630,11 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /**
+             * Redacted
+             * @default false
+             */
+            redacted: boolean;
             /** Saved At */
             saved_at?: string | null;
             /** Saved By */
@@ -6718,6 +6723,11 @@ export interface components {
         Receipt: {
             /** Answers */
             answers?: components["schemas"]["ReceiptAnswerOut"][];
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Application Id */
             application_id?: number | null;
             /** Channel */
@@ -6837,8 +6847,12 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /** Redacted */
+            redacted?: boolean | null;
             /** Source */
             source?: string | null;
+            /** Value Sha256 */
+            value_sha256?: string | null;
         };
         /** ReceiptListResponse */
         ReceiptListResponse: {
@@ -6958,6 +6972,11 @@ export interface components {
              * @default false
              */
             already_existed: boolean;
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Channel */
             channel: string;
             /**

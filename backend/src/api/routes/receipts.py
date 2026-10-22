@@ -57,6 +57,8 @@ class Receipt(BaseModel):
     # 0037) reads empty / None: no defaults, no placeholders (rule #29).
     application_id: int | None = None
     answers: list[ReceiptAnswerOut] = Field(default_factory=list)
+    # Slice 11 - '<event_type>#<event_id>' the answers were frozen from; '' = given by the caller / none.
+    answers_from: str = ""
     fields_filled: dict[str, Any] = Field(default_factory=dict)
     confirmation: str | None = None
     cv_version_no: int | None = None

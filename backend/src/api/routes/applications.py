@@ -288,6 +288,10 @@ class ReceiptAnswerOut(BaseModel):
     answer: str
     source: Optional[str] = None
     key: Optional[str] = None
+    # G023 (slice 11): a sensitive answer the user did not agree to remember is stored as its
+    # sha256 only; it reads back with ``answer`` "" and these two set.
+    redacted: Optional[bool] = None
+    value_sha256: Optional[str] = None
 
     @model_serializer(mode="wrap")
     def _omit_unset(self, handler: Any):  # type: ignore[no-untyped-def]  # un-annotated keeps the OpenAPI schema typed
@@ -958,6 +962,8 @@ class RecordApplicationReceiptResponse(BaseModel):
     event_id: int
     # S3 - '' | same_job | same_role | same_company. A flag, never a block.
     possible_duplicate: str = ""
+    # Slice 11 - '<event_type>#<event_id>' the answers were frozen from when none were given; '' otherwise.
+    answers_from: str = ""
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
     referred_by_contact_id: Optional[int] = None
