@@ -185,7 +185,7 @@ async def confirm_password_reset(
             (now, row["reset_id"]),
         )
         await db.execute(
-            # has_password (migration 0069): a magic-link-only account now has one.
+            # has_password (migration 0071): a magic-link-only account now has one.
             "UPDATE users SET password_hash = ?, has_password = TRUE WHERE id = ?",
             (new_hash, row["user_id"]),
         )

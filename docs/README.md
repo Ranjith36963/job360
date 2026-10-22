@@ -40,13 +40,6 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 
 ---
 
-## Generated
-
-| Doc | What it is |
-|---|---|
-
----
-
 ## Operations
 
 | Doc | What it is |

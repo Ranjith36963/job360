@@ -12,7 +12,7 @@ launched with this proxy as its only way out (``--proxy-server`` plus
    (``services/fetch/guard.py``: ``screen_url`` for the shape,
    ``screen_host`` resolving ONCE and denying the whole host if any address
    is private);
-3. connects to one of the addresses IT approved — never resolving again —
+3. connects to the addresses IT approved, IPv4 first — never resolving again —
    so the address checked is the address used (no DNS rebinding);
 4. otherwise answers ``403`` and closes. That 403 carries ``BLOCK_HEADER`` with ``BLOCK_MARK``, a
    value fresh in each process that no site can know, so the agent can tell the proxy's refusal of
@@ -152,10 +152,19 @@ class EgressProxy:
         if not verdict.ok or not verdict.approved:
             await self._refuse(writer, host, verdict.reason or "denied")
             return
-        address = sorted(verdict.approved)[0]  # PINNED: the address screened is the address used
-        try:
-            up_reader, up_writer = await asyncio.wait_for(self._open(address, port), CONNECT_TIMEOUT_S)
-        except (OSError, asyncio.TimeoutError):
+        # PINNED: only the addresses screened above are ever used. IPv4 first, then
+        # each in turn: Railway has no outbound IPv6 unless switched on, and a
+        # string sort put a dual-stack site's IPv6 address first, so every such
+        # site was refused (CodeRabbit on #902; the fix was in #929 and lost when
+        # #933 shipped). Refuse only when all fail.
+        up_reader = up_writer = None
+        for address in sorted(verdict.approved, key=lambda a: (":" in a, a)):
+            try:
+                up_reader, up_writer = await asyncio.wait_for(self._open(address, port), CONNECT_TIMEOUT_S)
+                break
+            except (OSError, asyncio.TimeoutError):
+                continue
+        if up_reader is None or up_writer is None:
             await self._refuse(writer, host, "the site did not answer", UNREACHABLE_MARK)
             return
         if method.upper() == "CONNECT":

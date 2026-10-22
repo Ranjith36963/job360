@@ -163,7 +163,7 @@ async def test_add_contact_reply_has_top_level_contact_id(authenticated_async_co
         r = await client.post(f"/api/applications/{a['application_id']}/contacts", json={"name": "Priya"})
         assert r.status_code == 201, r.text
         assert r.json()["contact_id"] == r.json()["contact"]["id"]
-        r = await client.post("/api/contacts", json={"name": "Cold One"})
+        r = await client.post("/api/contacts", json={"name": "Cold One", "company": "Contoso"})
         assert r.json()["contact_id"] == r.json()["contact"]["id"]
 
 

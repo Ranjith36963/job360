@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { P_ABOVE, P_BELOW, P_CAP, P_OUTREACH_SEND, P_SCORE, P_EVERY, P_INBOX, ROUNDS, historyWhen, mergeHistory, valueText } from "./assistant-tab";
+import {
+  P_ABOVE, P_BELOW, P_CAP, P_OUTREACH_SEND, P_SCORE, P_EVERY, P_INBOX, ROUNDS, historyWhen, mergeHistory, scopeText, valueText,
+} from "./assistant-tab";
 import { formatFeedTime } from "./home";
 
 describe("valueText", () => {
@@ -81,5 +83,17 @@ describe("new setting words", () => {
     expect(valueText("assistant_settings.min_gap_minutes", 15)).toBe("15 minutes");
     expect(valueText("assistant_settings.apply_hours", { from: "09:00", to: "17:00" })).toBe("09:00 to 17:00");
     expect(valueText("assistant_settings.apply_hours", null)).toBe("any time");
+  });
+});
+
+describe("scopeText (slice 30)", () => {
+  it("names how many applications and their sites, and says nothing for none", () => {
+    expect(scopeText({ count: 2, hosts: ["a.example", "b.example"], no_host: 0 })).toBe(
+      "2 applications (sites: a.example, b.example)",
+    );
+    expect(scopeText({ count: 1, hosts: [], no_host: 1 })).toBe("1 application, 1 with no site yet");
+    expect(scopeText({ count: 0, hosts: [], no_host: 0 })).toBe("");
+    expect(scopeText(null)).toBe("");
+    expect(scopeText(undefined)).toBe("");
   });
 });

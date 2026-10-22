@@ -1351,7 +1351,8 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
 TAGS_PROVED_BY_CAGE = {"review": "REVIEW", "ratchets": "RATCHET"}
 
 
-def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANCH) -> list[str]:
+def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANCH,
+               author: str = "") -> list[str]:
     """Pure half of the TAGS cage, so a drill can feed it real shapes.
 
     SKIPPED is not a pass here, for the same reason it is not a pass for a
@@ -1399,6 +1400,9 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
             elif run.get("status") != "completed":
                 reasons.append(f"tag `{tag}` needs `{name}` and it has not finished "
                                f"({run.get('status')}). FIX: wait for it, then re-judge.")
+            elif (run.get("conclusion") == "skipped" and author == DEPENDABOT
+                  and name in DEPENDABOT_SKIPPED_REVIEWERS):
+                continue  # the designed skip; see DEPENDABOT above
             elif run.get("conclusion") != "success":
                 reasons.append(
                     f"tag `{tag}` needs `{name}` and it concluded `{run.get('conclusion')}`. "
@@ -1414,7 +1418,11 @@ def check_tags(pr: int, lane: dict, base_ref: str = MAIN_BRANCH) -> Verdict:
     data = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/check-runs?per_page={PER_PAGE}"]))
     runs = data.get("check_runs", [])
     requires = list(lane.get("requires") or [])
-    reasons = judge_tags(requires, runs, base_ref)
+    try:  # an unreadable author is "not Dependabot": the strict side
+        author = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".user.login"]).strip()
+    except Exception:  # noqa: BLE001
+        author = ""
+    reasons = judge_tags(requires, runs, base_ref, author)
     return Verdict("TAGS", "fail" if reasons else "pass", reasons,
                    claim=f"every tag the `{lane.get('lane', '?')}` lane demands "
                          f"({', '.join(requires) or 'none'}) really ran and really passed")
@@ -1524,9 +1532,22 @@ REVIEWER_CHECK = "CodeRabbit"
 # like anyone's, and a review it has STARTED must finish first, so its findings
 # cannot land after the merge. Skipped, rate-limited or absent: no wait.
 REVIEWER_CHECKS = ("reviewer-bugs", "reviewer-security")
+# DEPENDABOT IS REVIEWED BY ITS OWN LOOP (2026-10-20). review-*.yml skip a
+# Dependabot run on purpose: GitHub gives it no secrets, and its diff is a
+# lockfile. `dependabot-auto.yml` merges patch/minor bumps once every check is
+# green and leaves majors to the owner. Since `merge-cage` became a required
+# check, the cage read that designed skip as "the reviewer did not pass" and
+# every Dependabot PR sat red (#1040). For this author only, a SKIPPED reviewer
+# is the designed outcome; a failed or missing one still refuses, and the cage
+# never queues a Dependabot PR itself, so the major/minor call stays with
+# dependabot-auto.yml.
+DEPENDABOT = "dependabot[bot]"
+# The two reviewer jobs review-*.yml skip for this author on purpose; the `security` and `bugs`
+# lane tags name them, so they need the same exception `judge_review_evidence` already has.
+DEPENDABOT_SKIPPED_REVIEWERS = ("reviewer-security", "reviewer-bugs")
 
 
-def judge_review_evidence(check_runs: list[dict]) -> list[str]:
+def judge_review_evidence(check_runs: list[dict], author: str = "") -> list[str]:
     """Pure half: did a reviewer really look at this PR?
 
     Takes the check-run shape (`name`, `status`, `conclusion`, `output.title`);
@@ -1558,6 +1579,8 @@ def judge_review_evidence(check_runs: list[dict]) -> list[str]:
                     f"no reviewer has looked at this PR yet: `{name}` has not finished "
                     f"({r.get('status')}). A review in progress has proved nothing. "
                     f"FIX: wait for it to finish, then re-judge.")
+            elif r.get("conclusion") == "skipped" and author == DEPENDABOT:
+                continue  # the designed skip; see DEPENDABOT above
             elif r.get("conclusion") != "success":
                 reasons.append(
                     f"`{name}` did not pass ({r.get('conclusion')}): either it found a P0/P1 "
@@ -1613,7 +1636,11 @@ def check_review(pr: int) -> Verdict:
     threads = (json.loads(raw)["data"]["repository"]["pullRequest"]["reviewThreads"])
     reasons = judge_threads(threads.get("nodes") or [],
                             bool((threads.get("pageInfo") or {}).get("hasNextPage")))
-    reasons += judge_review_evidence(review_evidence(pr))
+    try:  # an unreadable author is "not Dependabot": the strict side
+        author = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".user.login"]).strip()
+    except Exception:  # noqa: BLE001
+        author = ""
+    reasons += judge_review_evidence(review_evidence(pr), author)
     return Verdict("REVIEW", "fail" if reasons else "pass", reasons,
                    claim="a reviewer really looked, and nobody is still waiting on an answer")
 
@@ -1893,6 +1920,7 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
                 "fixture_lines": exempt_lines,
                 "data_lines": changed_data,
                 "title": pr_json.get("title") or f"PR #{pr}",
+                "author": ((pr_json.get("user") or {}).get("login")) or "",
                 "base": base_ref,
                 "merge_sha": pr_json.get("merge_commit_sha") or "",
                 # The commit this verdict is about. The arm posts the `merge-cage`
@@ -2774,6 +2802,17 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("our reviewer that FAILED (a P0/P1, or it could not run) is refused",
         judge_review_evidence(done + [_ours[0], {**_ours[1], "conclusion": "failure"}]),
         "did not pass", RE)
+    _ours_skipped = [{**r, "conclusion": "skipped"} for r in _ours]
+    ok("a Dependabot PR whose reviewers SKIPPED by design passes (dependabot-auto owns it)",
+       not judge_review_evidence(done + _ours_skipped, DEPENDABOT),
+       f"got {judge_review_evidence(done + _ours_skipped, DEPENDABOT)}", RE)
+    red("...but the same skip on anyone else's PR is still refused",
+        judge_review_evidence(done + _ours_skipped, "someone"), "did not pass", RE)
+    red("...and a Dependabot PR whose reviewer FAILED is still refused",
+        judge_review_evidence(done + [_ours[0], {**_ours[1], "conclusion": "failure"}],
+                              DEPENDABOT), "did not pass", RE)
+    red("...and a Dependabot PR with no reviewer result at all is still refused",
+        judge_review_evidence(done, DEPENDABOT), "no reviewer has looked", RE)
     ok("NEGATIVE CONTROL (both our reviewers finished green, no CodeRabbit at all: passes)",
        not judge_review_evidence(done + _ours),
        f"a genuinely reviewed PR was refused: {judge_review_evidence(done + _ours)}", RE)
@@ -3278,6 +3317,18 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
 
     _verify_skipped = [r for r in _full if not r["name"].startswith("verify")] + \
         _rs([(n, "skipped") for n in TAG_CHECKS["verify"]])
+    _dep_skipped = [r for r in _full if r["name"] not in DEPENDABOT_SKIPPED_REVIEWERS] + \
+        _rs([(n, "skipped") for n in DEPENDABOT_SKIPPED_REVIEWERS])
+    ok("a Dependabot PR whose reviewer-security/bugs SKIPPED by design earns the tags",
+       not judge_tags(["security", "bugs"], _dep_skipped, author=DEPENDABOT),
+       f"got {judge_tags(['security', 'bugs'], _dep_skipped, author=DEPENDABOT)}", T)
+    ok("...and the very same skips from any other author still refuse the tags",
+       bool(judge_tags(["security", "bugs"], _dep_skipped, author="someone")),
+       "a skipped reviewer earned a tag for a non-Dependabot author", T)
+    ok("...and Dependabot cannot skip its way past CodeQL or a scanner",
+       bool(judge_tags(["security"], [r for r in _full if r["name"] != "CodeQL"] +
+                       _rs([("CodeQL", "skipped")]), author=DEPENDABOT)),
+       "Dependabot got a pass on a check that is not a designed skip", T)
     ok("...and a `verify` that SKIPPED does not earn the tag either",
        bool(judge_tags(_prod_req, _verify_skipped)),
        "a skipped job was allowed to prove something — a skip proves nothing, "
@@ -4392,6 +4443,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"SWITCHED OFF: the owner set AUTO_MERGE=off, so PR #{args.pr} is not queued "
                   f"and is taken out of the queue if it was in it.")
             allowed_to_queue = False
+        elif meta.get("author") == DEPENDABOT:
+            # dependabot-auto.yml owns the merge: patch/minor it merges, majors
+            # it leaves to the owner. The cage only posts its verdict.
+            print(f"DEPENDABOT: PR #{args.pr} is merged by dependabot-auto.yml, not queued here.")
+            allowed_to_queue = False
         else:
             allowed_to_queue = allowed
         # HOLD, DON'T WITHDRAW, once GitHub itself waits on this verdict. With
@@ -4408,7 +4464,7 @@ def main(argv: list[str] | None = None) -> int:
         if held:
             print(f"HELD: PR #{args.pr} is held by `{STATUS_CONTEXT}`, a required check on "
                   f"`{meta.get('base')}`; GitHub cannot merge it until a later run says it passes.")
-            if (lane_verdict or {}).get("auto_merge"):
+            if (lane_verdict or {}).get("auto_merge") and meta.get("author") != DEPENDABOT:
                 ok_arm, detail_arm, _ = request_auto_merge(args.pr)
                 print(f"ALWAYS ON: auto-merge {'is on' if ok_arm else 'could not be turned on'} "
                       f"for PR #{args.pr} — {detail_arm}")

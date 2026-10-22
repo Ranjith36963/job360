@@ -16,6 +16,10 @@ class LivezResponse(BaseModel):
     status: str
 
 
+class VersionResponse(BaseModel):
+    sha: str
+
+
 class StatusResponse(BaseModel):
     profile_exists: bool
 
@@ -247,6 +251,25 @@ class SetupProgressOut(BaseModel):
     next: str = "targets"
 
 
+class GrantScopeCount(BaseModel):
+    """How many applications, their distinct form hosts, and how many have no host yet."""
+
+    count: int = 0
+    hosts: list[str] = []
+    no_host: int = 0
+
+
+class GrantScopeOut(BaseModel):
+    """Gap roadmap slice 30 - what an "Auto for a while" grant covers. ``queue``: what a grant
+    confirmed NOW would cover (the user's open queue; the confirm shows it). ``granted``: what the
+    grant in force covers (``None`` = no grant in force, or ``unscoped``). ``unscoped``: a grant from
+    before snapshots, covering every application until it ends."""
+
+    queue: GrantScopeCount = GrantScopeCount()
+    granted: Optional[GrantScopeCount] = None
+    unscoped: bool = False
+
+
 class AssistantSettingsView(BaseModel):
     """The assistant settings, as the web and MCP ``get_profile`` read them.
 
@@ -266,6 +289,7 @@ class AssistantSettingsView(BaseModel):
     apply_hours: SettingFieldOut
     auto_grant_count: SettingFieldOut
     auto_grant_until: SettingFieldOut
+    auto_grant_scope: GrantScopeOut = GrantScopeOut()
     paused_until: SettingFieldOut
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut
@@ -664,3 +688,27 @@ class MissingToolResponse(BaseModel):
     id: int
 
 
+
+
+class KnownPersonOut(BaseModel):
+    """One person the user already stored at this job's company (known_people). `company` is
+    the contact's own company, else its linked job's; `application_ids` = the jobs they are linked to."""
+    contact_ids: list[int]
+    name: str
+    role: str = ""
+    company: Optional[str] = None
+    found_via: Optional[str] = None
+    reachable: bool = False
+    application_ids: list[int] = Field(default_factory=list)
+    message_count: int = 0
+    last_sent_at: Optional[str] = None
+    last_sent_channel: Optional[str] = None
+    replied: bool = False
+    last_reply_at: Optional[str] = None
+
+
+class KnownPeopleOut(BaseModel):
+    """known_people: `count` = every person found; `people` = at most KNOWN_PEOPLE_MAX; `truncated` = more exist."""
+    count: int = 0
+    people: list[KnownPersonOut] = Field(default_factory=list)
+    truncated: bool = False

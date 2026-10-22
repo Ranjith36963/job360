@@ -324,7 +324,20 @@ jobs:
           git config user.name "pr-repair-loop"
           git config user.email "actions@github.com"
           git fetch origin main
-          if git merge origin/main --no-edit; then
+          # MERGE MAIN ONLY ON A REAL CONFLICT (owner, 2026-10-22). The ruleset
+          # does not require a PR to be up to date, so a PR that is merely
+          # BEHIND main merges as it is. Merging main anyway pushed a commit
+          # that restarted the whole ~20-minute CI and fixed nothing: 45% of
+          # the commits on recently merged PRs were merges of main.
+          # `git merge-tree --write-tree` tries the merge without touching the
+          # tree: exit 0 = clean, 1 = conflicts, anything else = it could not
+          # tell, and then we merge as before (fail closed).
+          rc=0
+          git merge-tree --write-tree origin/main HEAD >/dev/null || rc=$?
+          if [ "$rc" = "0" ]; then
+            echo "conflicted=" >> "$GITHUB_OUTPUT"
+            echo "merge of main: skipped — the branch does not conflict with main, and a behind PR merges as it is" >> "$GITHUB_STEP_SUMMARY"
+          elif git merge origin/main --no-edit; then
             echo "conflicted=" >> "$GITHUB_OUTPUT"
             echo "merge of main: clean" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -893,7 +906,7 @@ jobs:
         run: |
           set -euo pipefail
           # WHAT THIS REPAIR ITSELF CHANGED starts at THE LOCAL HEAD, which is
-          # the merge of `main` that this run already made — NOT
+          # the merge of `main` this run made, if it made one — NOT
           # `origin/<branch>`, which is still the pre-merge tip.
           #
           # The difference is the whole safety of the resolver downstream.

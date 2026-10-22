@@ -517,10 +517,16 @@ export async function getTailored(jobId: number): Promise<TailorBundle> {
   return request<TailorBundle>(`/api/tailor/${jobId}`);
 }
 
-/** One line of the doc + whether it's grounded in the user's CV (their fact) or AI-added. */
+/**
+ * One line of the doc. `grounded` is true ONLY when the line is in the user's own
+ * profile (their fact). `source` says why not: "ad" = it only echoes the job ad
+ * (employer context, never a candidate fact), "none" = AI-added. Optional so an
+ * older API response (no `source`) still type-checks.
+ */
 export interface ProvenanceSegment {
   text: string;
   grounded: boolean;
+  source?: "profile" | "ad" | "none";
 }
 
 /** Per-line provenance for a saved doc — your own facts vs lines added on top. */
@@ -1097,6 +1103,18 @@ export async function resolveBlocked(applicationId: number): Promise<Application
   return request(`/api/applications/${applicationId}/blocked/resolve`, { method: "POST" });
 }
 
+/** "I submitted it" - the user pressed Submit themselves after the block: records `unblocked`
+ * {resolution: user_did_it} and a receipt (recorded_by web, the pasted confirmation). 409 once a receipt exists. */
+export async function submittedBlocked(
+  applicationId: number,
+  confirmation: string
+): Promise<_Schemas["BlockedSubmittedOut"]> {
+  return request(`/api/applications/${applicationId}/blocked/submitted`, {
+    method: "POST",
+    body: JSON.stringify({ confirmation }),
+  });
+}
+
 export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
 export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
 export type StatsResponse = _Schemas["StatsResponse"];
@@ -1127,6 +1145,7 @@ export async function addContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string;
+    relationship?: string;
     occurred_at?: string;
   }
 ): Promise<AddContactResult> {
@@ -1151,6 +1170,7 @@ export async function updateContact(
     linkedin_url?: string;
     notes?: string;
     found_via?: string; // "" clears it; null would mean "not given"
+    relationship?: string; // "" clears it
   }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });

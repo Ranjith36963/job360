@@ -43,8 +43,11 @@ MAX_PAGES = 10  # hard cap on pages per board
 SEARCH_PAGES = 2  # Workday: pages per searched title
 WORKDAY_PAGE = 20
 
-_TAG_RE = re.compile(r"<[^>]+>")
-_BLOCK_RE = re.compile(r"</?(p|div|br|li|ul|ol|h[1-6]|tr)\b[^>]*>", re.I)
+# `[^<>]` (not `[^>]`): a failed attempt stops at the next "<", so "<p " * n with no ">" is linear, not
+# quadratic (security review 2026-10-20: 40k repeats took 10.7 s, and the GIL stalls the whole run).
+_TAG_RE = re.compile(r"<[^<>]+>")
+_BLOCK_RE = re.compile(r"</?(p|div|br|li|ul|ol|h[1-6]|tr)\b[^<>]*>", re.I)
+_DANGLING_RE = re.compile(r"<[^<>]*$")
 _WS_RE = re.compile(r"[ \t\r\f\v]+")
 _NL_RE = re.compile(r"\n\s*\n+")
 
@@ -56,7 +59,7 @@ def _text(value: Any) -> str:
         return ""
     s = _BLOCK_RE.sub("\n", str(value))
     s = _TAG_RE.sub("", s)
-    s = re.sub(r"<[^>]*$", "", s)  # dangling, unterminated tag at the very end
+    s = _DANGLING_RE.sub("", s)  # dangling, unterminated tag at the very end
     s = html.unescape(s)
     s = _WS_RE.sub(" ", s)
     s = "\n".join(line.strip() for line in s.split("\n"))

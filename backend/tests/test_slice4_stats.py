@@ -224,7 +224,7 @@ async def test_simulation_is_excluded(authenticated_async_context):
         await _event(client, fake, "applied")
         add = await client.post(f"/api/applications/{fake}/contacts", json={"name": "Ann", "found_via": "linkedin"})
         assert add.status_code == 201, add.text
-        cold = await client.post("/api/contacts", json={"name": "Cleo", "found_via": "event"})
+        cold = await client.post("/api/contacts", json={"name": "Cleo", "company": "Contoso", "found_via": "event"})
         assert cold.status_code == 201, cold.text
         body = (await _stats(client)).json()
         overall = body["overall"]

@@ -26,12 +26,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
+from src.api.client_ip import client_ip, throttle_client_ip
 from src.api.dependencies import get_request_db
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -50,14 +50,12 @@ GONE_DETAIL = "link expired - ask your assistant to get the kit again"
 CHANGED_DETAIL = "this CV was changed - get the kit again"
 
 
-def _ip_hash(request: Request) -> str:
-    """A hashed client address: the rate-limit key and the log token. The raw IP
-    is personal data and never stored. ``X-Forwarded-For`` only when the operator
-    set ``JOB360_TRUST_PROXY=1`` (otherwise it is attacker-controlled)."""
-    ip = request.client.host if request.client else "unknown"
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        ip = forwarded or ip
+def _ip_hash(request: Request, *, throttle: bool = False) -> str:
+    """A hashed client address: the log token, or with ``throttle=True`` the
+    rate-limit key (an IPv6 caller counted per /64). The raw IP is personal data
+    and never stored. The address is ``src.api.client_ip``'s (X-Forwarded-For
+    only from configured trusted proxy hops)."""
+    ip = throttle_client_ip(request) if throttle else client_ip(request)
     return hashlib.sha256(ip.encode("utf-8")).hexdigest()[:16]
 
 
@@ -81,7 +79,7 @@ async def download_file(
     token: str, request: Request, db: JobDatabase = Depends(get_request_db),  # noqa: B008
 ) -> Response:
     """Serve one kit file. See the module docstring for the rules."""
-    ip = _ip_hash(request)
+    ip = _ip_hash(request, throttle=True)
     bad_key = f"files_bad:{ip}"
 
     def _bad_token(reason: str) -> HTTPException:

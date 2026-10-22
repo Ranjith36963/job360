@@ -1,4 +1,4 @@
--- 0071_receipt_answers_from: where a receipt's answers came from (gap roadmap slice 11).
+-- 0078_receipt_answers_from: where a receipt's answers came from (gap roadmap slice 11).
 --
 -- record_application with no `answers` now freezes the answers of the newest
 -- form_filled / form_swept of that application into the receipt. Two facts

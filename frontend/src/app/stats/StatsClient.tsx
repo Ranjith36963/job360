@@ -163,11 +163,19 @@ function JobTable({ section }: { section: Section }) {
   );
 }
 
-function PeopleTable({ rows }: { rows: StatsResponse["by_contact_found_via"] }) {
+function PeopleTable({
+  id,
+  title,
+  rows,
+}: {
+  id: string;
+  title: string;
+  rows: StatsResponse["by_contact_found_via"];
+}) {
   return (
-    <section aria-labelledby="stats-people" data-testid="stats-section-people">
-      <h2 id="stats-people" className={`${LABEL} mb-2`}>
-        By where you found the person
+    <section aria-labelledby={`stats-${id}`} data-testid={`stats-section-${id}`}>
+      <h2 id={`stats-${id}`} className={`${LABEL} mb-2`}>
+        {title}
       </h2>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[26rem] border-collapse text-sm">
@@ -185,6 +193,38 @@ function PeopleTable({ rows }: { rows: StatsResponse["by_contact_found_via"] }) 
               <tr key={String(r.key)} data-testid="stats-row" className="border-t border-border">
                 <th scope="row" className={`${TD} font-sans font-normal`}>{closedSetLabel(r.key)}</th>
                 <td className={TD}>{r.contacts}</td>
+                <td className={TD}>{r.outreach_sent}</td>
+                <td className={TD}>{r.outreach_replied}</td>
+                <td className={TD}>{formatRate(r.reply_rate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function OutreachVariantTable({ rows }: { rows: StatsResponse["by_outreach_variant"] }) {
+  return (
+    <section aria-labelledby="stats-outreach-variant" data-testid="stats-section-outreach-variant">
+      <h2 id="stats-outreach-variant" className={`${LABEL} mb-2`}>
+        By outreach variant
+      </h2>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[22rem] border-collapse text-sm">
+          <thead>
+            <tr>
+              <th scope="col" className={TH} />
+              <th scope="col" className={TH}>Sent (n)</th>
+              <th scope="col" className={TH}>Replied</th>
+              <th scope="col" className={TH}>Reply %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={String(r.key)} data-testid="stats-row" className="border-t border-border">
+                <th scope="row" className={`${TD} font-sans font-normal`}>{r.label}</th>
                 <td className={TD}>{r.outreach_sent}</td>
                 <td className={TD}>{r.outreach_replied}</td>
                 <td className={TD}>{formatRate(r.reply_rate)}</td>
@@ -277,6 +317,8 @@ export function StatsClient() {
 
   const sections = stats ? buildSections(stats) : [];
   const people = stats?.by_contact_found_via ?? [];
+  const relationships = stats?.by_contact_relationship ?? [];
+  const variants = stats?.by_outreach_variant ?? [];
   const scoreLine = stats?.score_line;
 
   return (
@@ -304,7 +346,11 @@ export function StatsClient() {
           {sections.map((s) => (
             <JobTable key={s.id} section={s} />
           ))}
-          {people.length > 0 && <PeopleTable rows={people} />}
+          {people.length > 0 && <PeopleTable id="people" title="By where you found the person" rows={people} />}
+          {relationships.length > 0 && (
+            <PeopleTable id="people-relationship" title="By relationship" rows={relationships} />
+          )}
+          {variants.length > 0 && <OutreachVariantTable rows={variants} />}
           {stats.sites && stats.sites.sites.length > 0 && <SitesTable data={stats.sites} />}
         </>
       )}

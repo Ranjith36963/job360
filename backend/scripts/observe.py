@@ -73,6 +73,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # S2 assistant settings (migration 0051): riskier changes waiting on the user.
     ("assistant_setting_requests", "user_id"),
     ("artifact_links", "user_id"),
+    ("user_templates", "user_id"),  # 0076: the user's own outreach templates
     # S7 proof of application (migration 0053).
     ("application_proof_screenshots", "user_id"),
     ("proof_upload_links", "user_id"),
@@ -87,7 +88,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("browser_sign_ins", "user_id"),
     # "Send starts my assistant": the user's start link, token encrypted (migration 0066).
     ("assistant_triggers", "user_id"),
-    # Write-tool idempotency keys: request_id -> the first reply (migration 0068).
+    # Write-tool idempotency keys: request_id -> the first reply (migration 0070).
     ("idempotency_keys", "user_id"),
 )
 

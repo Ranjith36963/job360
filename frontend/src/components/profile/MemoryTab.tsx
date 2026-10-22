@@ -90,6 +90,7 @@ export function MemoryTab() {
     }
   }, [loadHistory]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
   useEffect(() => { void load(); }, [load]);
 
   /** One web edit: the WHOLE block, as the web (a typed row), then re-read it. */

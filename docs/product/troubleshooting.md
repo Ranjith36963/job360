@@ -180,21 +180,17 @@ the stem you want sits:
 python -m migrations.runner down
 python -m migrations.runner up
 
-# CASE B — the stem is BURIED (e.g. you want 0010 and head is 0030).
-# There is no way to reach it without reverting 0030…0011 first, one `down` at a
-# time, re-reading `status` between each. That is ~20 destructive down-migrations
-# against real data. In dev, rebuilding the database is almost always the right
-# call instead; in prod, do neither without a backup (docs/product/RUNBOOK-backups.md).
+# CASE B — the stem is BURIED (`status` does not list it last).
+# Reaching it means reverting every stem above it, one `down` at a time, re-reading
+# `status` between each — destructive down-migrations against real data. In dev,
+# rebuilding the database is almost always the right call; in prod, do neither
+# without a backup (docs/product/RUNBOOK-backups.md).
 ```
 
-> ⚠️ **`down` takes NO migration stem.** `migrations.runner.down` reverts the *last
-> applied* migration and nothing else; the second positional argument of
-> `migrations.runner._cli` is the **db_path**, not a selector. So
-> `python -m migrations.runner down 0010` does **not** target migration 0010 — it
-> swallows `0010` as a connection path and still reverts whatever is at the head.
-> Against a head of `0030` that reverts `0030`, and following it with `up` re-applies
-> `0030`: it looks like it worked and changes nothing about 0010.
-> Pinned by `backend/tests/test_migrations_runner_cli_contract.py`.
+> ⚠️ **`down` takes NO migration stem — `down 0010` reverts the HEAD, not 0010, and
+> exits 0 while doing it.** The second positional argument of
+> `migrations.runner._cli` is the **db_path**, so `0010` is swallowed as a
+> connection path. Pinned by `backend/tests/test_migrations_runner_cli_contract.py`.
 
 Migrations are forward-only by default, and `down` is one step at a time — there is
 no `down <stem>` and no `down --all`.

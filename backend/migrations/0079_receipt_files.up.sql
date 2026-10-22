@@ -1,4 +1,4 @@
--- 0072_receipt_files: which FILES a receipt's application was sent with (gap roadmap slice 29).
+-- 0079_receipt_files: which FILES a receipt's application was sent with (gap roadmap slice 29).
 --
 -- The browser's upload and the kit's /api/files/{token} link each write a
 -- server-only `document_uploaded` event {kind, artifact_id, version, sha256,

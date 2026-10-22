@@ -99,10 +99,20 @@ BOARD_SOURCES = (
     "jibe",
     "keka",
     "zohorecruit",
+    "ripplehire",
+    "emply",
+    "manatal",
+    "talentadore",
+    "traffit",
+    "trakstar",
     "betterteam",
     "catsone",
     "clinch",
     "crelate",
+    "bullhorn",
+    "careerplug",
+    "hireology",
+    "hiringthing",
     "opencats",
     "odoo",
     "recruitingsolutions",
@@ -118,6 +128,26 @@ BOARD_SOURCES = (
     "mindsight",
     "pageup",
     "freshteam",
+    "werecruit",
+    "wantapply",
+    "workstream",
+    "hrmdirect",
+    "isolvedhire",
+    "paycom",
+    "paycor",
+    "jobscore",
+    "recruiterflow",
+    "deel",
+    "dover",
+    "wpyoast",
+    "careerspage",
+    "jobboardly",
+    "jobappnetwork",
+    "factorial",
+    "jobylon",
+    "peopleforce",
+    "talenthr",
+    "talentlyft",
 )
 FEED_SOURCES = (
     "freehire",
@@ -153,8 +183,20 @@ FEED_SOURCES = (
     "wuzzuf",
     "infojobs",
     "instaffo",
+    "airswift",
+    "briefhq",
+    "emagine",
+    "functionalworks",
     "techinasia",
     "itviec",
+    "jobdanmark",
+    "remotedotcom",
+    "work180",
+    "golangjobs",
+    "joppy",
+    "rapyd",
+    "startupandvc",
+    "techtree",
     "linkedin",
     "glassdoor",
     "googlejobs",
@@ -295,10 +337,13 @@ def _import_kit(name: str) -> Any:
 
 # Sibling modules that provide fetchers, merged in this order (a later module never
 # replaces a name an earlier one already provides).
-ATS_MODULES = ("kit_ats", "kit_ats_more", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2")
+ATS_MODULES = (
+    "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
+    "kit_sites_a",
+)
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
-    "kit_asia", "kit_sites_a",
+    "kit_asia", "kit_sites_a", "kit_sites_b",
 )
 
 
@@ -1711,8 +1756,11 @@ _SOURCE_RANK = {"user": -1, "career-ops": 0, "jobsync": 1}
 
 
 _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber")}
-# ats -> token part used as the name (comeet slug/uid, pageup id[/locale])
-_PATH_TOKEN = {"successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0}
+# ats -> token part used as the name (comeet slug/uid, pageup id[/locale], werecruit lang/slug)
+_PATH_TOKEN = {
+    "successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0,
+    "werecruit": 1, "ripplehire": 0,
+}
 
 
 def parse_extra(value: str | None) -> list[dict[str, str]]:
@@ -1734,6 +1782,8 @@ def parse_extra(value: str | None) -> list[dict[str, str]]:
             parts = tok.split("/")  # successfactors host[/brand], ultipro host/tenant/id, adp cid/ccId
             name = parts[min(_PATH_TOKEN[ats], len(parts) - 1)]
             out.append({"name": name, "ats": ats, "token": tok, "source": "user"})
+        elif ats == "bullhorn" and re.fullmatch(r"\d{1,4}:[A-Za-z0-9]{1,64}", tok):  # "<cluster>:<corpToken>"
+            out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
         elif ats in BOARD_SOURCES and ats not in _TWO_PART and ats != "workday" \
                 and re.fullmatch(r"[A-Za-z0-9_.-]+", tok):
             out.append({"name": tok, "ats": ats, "token": tok, "source": "user"})
@@ -2591,6 +2641,8 @@ WHY_VERDICTS = {
                     "or the feed needs a key you have not set",
 }
 # Job sites the kit reads as a feed (host -> feed name). Checked before the aggregator list.
+# The sites_b entries (airswift .. techtree) are anchored to the host the reader fetches: a link on another host of
+# the same domain (www.emagine.org, careers.rapyd.net) is not something the feed reads.
 _FEED_HOSTS = (
     ("reed", re.compile(r"(?:^|\.)reed\.co\.uk$", re.I)),
     ("jobstreet", re.compile(r"(?:^|\.)(?:seek\.com\.au|seek\.co\.nz|jobstreet\.com|jobsdb\.com)$", re.I)),
@@ -2603,8 +2655,20 @@ _FEED_HOSTS = (
     ("wuzzuf", re.compile(r"(?:^|\.)wuzzuf\.net$", re.I)),
     ("infojobs", re.compile(r"(?:^|\.)infojobs\.net$", re.I)),
     ("instaffo", re.compile(r"(?:^|\.)instaffo\.com$", re.I)),
+    ("airswift", re.compile(r"^(?:www\.)?airswift\.com$", re.I)),
+    ("briefhq", re.compile(r"^(?:www\.)?briefhq\.ai$", re.I)),
+    ("emagine", re.compile(r"^portal\.emagine\.org$", re.I)),
+    ("functionalworks", re.compile(r"^functional\.works-hub\.com$", re.I)),
     ("techinasia", re.compile(r"(?:^|\.)techinasia\.com$", re.I)),
     ("itviec", re.compile(r"(?:^|\.)itviec\.com$", re.I)),
+    ("jobdanmark", re.compile(r"(?:^|\.)jobdanmark\.dk$", re.I)),
+    ("remotedotcom", re.compile(r"(?:^|\.)remote\.com$", re.I)),
+    ("work180", re.compile(r"(?:^|\.)work180\.com$", re.I)),
+    ("golangjobs", re.compile(r"^(?:www\.)?golangjobs\.tech$", re.I)),
+    ("joppy", re.compile(r"^(?:www\.)?joppy\.me$", re.I)),
+    ("rapyd", re.compile(r"^(?:www\.)?rapyd\.net$", re.I)),
+    ("startupandvc", re.compile(r"^(?:www\.)?startupandvc\.com$", re.I)),
+    ("techtree", re.compile(r"^jobs\.techtree\.dev$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
@@ -2628,6 +2692,12 @@ _AGGREGATOR_HOSTS = re.compile(
 _SLUG = r"([A-Za-z0-9_.-]+)"
 _SLUG_BLOCK = {"embed", "jobs", "job", "j", "o", "share", "api", "widget", "www", "app", "v1", "careers",
                "en-us", "en-gb"}
+_NON_TENANT_SUB = {"www", "app", "help", "support", "api", "blog", "status", "docs", "admin", "login", "mail",
+                   "cdn", "static"}
+_RECRUITERFLOW_NON_BOARD = {
+    "pricing", "blog", "login", "signin", "signup", "jobs", "job", "about", "contact", "demo", "privacy",
+    "terms", "careers", "customers", "features", "product", "products", "solutions", "resources",
+    "integrations", "security", "help", "support", "api", "app", "www", "legal", "press", "partners"}
 # (ats, host regex); ordered, the first host match wins. Group 1 of the host regex is the token where it is in the host.
 _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("greenhouse", re.compile(r"(?:^|\.)greenhouse\.io$")),
@@ -2659,17 +2729,39 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("jibe", re.compile(r"^([a-z0-9-]+)\.jibeapply\.com$")),
     ("keka", re.compile(r"^([a-z0-9-]+)\.keka\.com$")),
     ("zohorecruit", re.compile(r"^([a-z0-9-]+)\.zohorecruit\.(?:in|com)$")),
+    # app.ripplehire.com is a shared sandbox host (it answers any token with another company's jobs)
+    ("ripplehire", re.compile(r"^((?!(?:app|www)\.)[a-z0-9-]+)\.ripplehire\.com$")),
+    ("emply", re.compile(r"^([a-z0-9-]+)\.career\.emply\.com$")),
+    ("manatal", re.compile(r"^(?:([a-z0-9-]+)\.)?careers-page\.com$")),
+    ("traffit", re.compile(r"^([a-z0-9-]+)\.traffit\.com$")),
+    ("trakstar", re.compile(r"^([a-z0-9-]+)\.hire\.trakstar\.com$")),
+    ("careerplug", re.compile(r"^([a-z0-9-]+)\.careerplug\.com$")),
+    ("hireology", re.compile(r"^careers\.hireology\.com$")),
+    ("hiringthing", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+)*\.hiringthing\.com)$")),
     ("hibob", re.compile(r"^([a-z0-9-]+)\.careers\.hibob\.com$")),
     ("freshteam", re.compile(r"^([a-z0-9-]+)\.freshteam\.com$")),
     ("avature", re.compile(r"^((?!www\.)[a-z0-9-]+\.avature\.net)$")),
     ("comeet", re.compile(r"^www\.comeet\.com$")),
     ("pageup", re.compile(r"^careers\.pageuppeople\.com$")),
+    ("hrmdirect", re.compile(r"^([a-z0-9-]+)\.hrmdirect\.com$")),
+    ("isolvedhire", re.compile(r"^([a-z0-9-]+)\.isolvedhire\.com$")),
+    ("paycom", re.compile(r"^(?:www\.)?paycomonline\.net$")),
+    ("paycor", re.compile(r"^recruitingbypaycor\.com$")),
+    ("jobscore", re.compile(r"^careers\.jobscore\.com$")),
+    ("recruiterflow", re.compile(r"^recruiterflow\.com$")),
+    ("deel", re.compile(r"^jobs\.deel\.com$")),
+    ("dover", re.compile(r"^app\.dover\.com$")),
+    # factorial: the board token is the whole host
+    ("factorial", re.compile(r"^([a-z0-9-]+\.(?:factorial\.it|factorialhr\.(?:com|pt|com\.br)))$")),
+    ("peopleforce", re.compile(r"^([a-z0-9-]+)\.peopleforce\.io$")),
+    ("talenthr", re.compile(r"^jobs\.talenthr\.io$")),
+    ("talentlyft", re.compile(r"^([a-z0-9-]+)\.talentlyft\.com$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
-    r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|dover\.com|"
+    r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|trakstar\.com|homerun\.co|factorialhr\.com|careers-page\.com|paycomonline\.net)$", re.I)
+    r"dayforcehcm\.com|homerun\.co)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2726,6 +2818,20 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "%s/%s" % (m.group(1), site) if site.isdigit() else ""
         elif ats == "join":  # https://join.com/companies/<slug>/...
             tok = seg[seg.index("companies") + 1] if "companies" in seg[:-1] else ""
+        elif ats == "ripplehire":  # https://<tenant>.ripplehire.com/candidate/?token=<20 chars>&source=CAREERSITE
+            ctok = (q.get("token") or [""])[0]
+            tok = "%s/%s" % (m.group(1), ctok) if re.fullmatch(r"[A-Za-z0-9]{20}", ctok) else ""
+        elif ats in ("manatal", "talenthr"):  # careers-page.com/<slug>/..., <slug>.careers-page.com, talenthr.io/<slug>
+            sub = (m.group(1) or "") if ats == "manatal" else ""
+            if sub and sub != "www":
+                tok = sub if sub.lower() not in _SLUG_BLOCK else ""
+            else:
+                tok = seg[0] if seg and re.fullmatch(_SLUG, seg[0]) and seg[0].lower() not in _SLUG_BLOCK else ""
+        elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
+        elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
+                _NON_TENANT_SUB | ({"apply"} if ats == "hrmdirect" else set())):
+            continue  # www/help/app.<vendor>.com (apply. for HRM Direct) is the vendor's own site, not a tenant board
         elif ats == "comeet":  # https://www.comeet.com/jobs/<slug>/<companyUID>/...
             ids = seg[1:3] if seg[:1] == ["jobs"] and len(seg) >= 3 else []
             tok = "/".join(ids) if ids and all(re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", x) for x in ids) else ""
@@ -2734,10 +2840,27 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             ok_lang = bool(re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?", lang))
             keep_lang = "/" + lang if ok_lang and lang.lower() != "en" else ""  # "en" is the reader's default
             tok = seg[0] + keep_lang if seg and re.fullmatch(r"\d{1,8}", seg[0]) else ""
+        elif ats == "paycom":  # https://www.paycomonline.net/v4/ats/web.php/portal/<32-character key>/jobs/<id>
+            key = seg[seg.index("portal") + 1] if "portal" in seg[:-1] else ""
+            tok = key if re.fullmatch(r"[A-Za-z0-9]{32}", key) else ""
+        elif ats == "paycor":  # https://recruitingbypaycor.com/career/CareerHome.action?clientId=<32-character id>
+            cid = (q.get("clientId") or [""])[0]
+            tok = cid if re.fullmatch(r"[A-Za-z0-9]{32}", cid) else ""
+        elif ats == "jobscore":  # https://careers.jobscore.com/careers/<slug>
+            slug = seg[seg.index("careers") + 1] if "careers" in seg[:-1] else ""
+            tok = slug if re.fullmatch(r"[A-Za-z0-9-]+", slug) else ""
+        elif ats == "recruiterflow":  # https://recruiterflow.com/<board>/jobs/<id>
+            if not seg or seg[0].lower() in _RECRUITERFLOW_NON_BOARD:
+                continue  # the vendor's own pages (/pricing, /blog, /login ...) are not a board
+            tok = seg[0] if re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
+        elif ats == "deel":  # https://jobs.deel.com/<org slug>/job-details/<id>/overview
+            tok = seg[0] if seg and re.fullmatch(_SLUG, seg[0]) else ""
+        elif ats == "dover":  # https://app.dover.com/jobs/<slug> or /apply/<slug>/<job id>
+            tok = seg[1] if len(seg) > 1 and seg[0] in ("jobs", "apply") and re.fullmatch(_SLUG, seg[1]) else ""
         else:
             tok = m.group(1)
         # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.
-        keep = ats in ("ultipro", "adp", "cornerstone", "comeet", "pageup")
+        keep = ats in ("ultipro", "adp", "cornerstone", "comeet", "pageup", "paycom", "ripplehire")
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}

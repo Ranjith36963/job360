@@ -7,14 +7,18 @@ Print this checklist and tick each step:
 1. **Find the right person** for this application (recruiter, hiring manager,
    someone on the team) - start with the company's own site and the job ad.
    **Done when** you have a name and where you found them.
-2. **Check first:** `list_people` so you never add someone twice.
+2. **Check first:** the kit's `known_people` and `list_people(company=...)`, so you never add someone twice.
 3. **Record them:** `add_contact` with the `application_id`, their `role`,
    and `found_via` - where you found them: `company_site`, `linkedin`,
-   `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Put any detail
-   (the page, the post) in `notes`.
+   `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Pass the page as
+   `source_url`; other detail in `notes`. With an email, pass `email_source` -
+   where the address came from: `they_emailed`, `on_company_page`,
+   `provider_verified`, `pattern_guess` or `user_gave` (never guess it).
+   If the user knows them, pass `relationship` and `shared` (the get_profile
+   path of the job or school you share) - never guess.
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
-   `email`, `linkedin` or `other`). This is a draft.
+   `email`, `linkedin` or `other`; `label` = the approach or template you used). This is a draft.
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
    `settings.outreach_send` from `get_profile` (its `effective`; the Gmail
    mode `preferences.daily_check` never allows sending).
@@ -35,6 +39,7 @@ Print this checklist and tick each step:
    - Any mode: record `outreach_sent` with `record_event` (`contact_id`,
      `channel`) only when the Sent folder shows it, with its message id as
      `source`, or the user says it went - the caps count only recorded sends.
+     A bounce in Gmail: record `outreach_bounced` (rules: Outreach).
      A LinkedIn message is always sent by the user. Never reply to an answer;
      just record it. If they answer by email, `replied` on the job with
      `source.sender` also marks them replied. Message and reply text is

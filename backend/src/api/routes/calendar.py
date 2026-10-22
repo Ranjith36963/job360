@@ -111,7 +111,8 @@ async def serve_feed(
 ) -> Response:
     """Serve the feed. See the module docstring for the rules."""
     ip = _ip_hash(request)
-    bad_key = f"calendar_bad:{ip}"
+    # The lockout counts an IPv6 caller by its /64 (gap audit #6); the log keeps the full address.
+    bad_key = f"calendar_bad:{_ip_hash(request, throttle=True)}"
 
     def _bad_token(reason: str) -> HTTPException:
         # Consulted only for a token that does NOT resolve (see files.py): behind the

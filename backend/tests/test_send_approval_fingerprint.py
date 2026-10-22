@@ -21,7 +21,7 @@ from src.services.profile.models import AssistantSettings, CVData, UserPreferenc
 
 CV_TEXT = "Ada Lovelace\nSenior data engineer\nPython, dbt, Snowflake."
 FORM = "https://careers.northwind.example/apply/7"
-NOTICE = {"question": "Notice period", "answer": "1 month", "source": "written"}
+NOTICE = {"question": "Preferred start date", "answer": "1 month", "source": "written"}
 _AD = {
     "title": "Data Engineer", "company": "Northwind", "location": "London", "country": "GB", "remote": False,
     "apply_url": "https://northwind.example/careers/7", "description": "Build the pipelines. Python, dbt.",
@@ -234,17 +234,17 @@ async def test_answers_the_user_changed_after_the_yes_never_void_it(authenticate
     exactly that word keeps the yes, while any other re-fill does not."""
     async with authenticated_async_context() as client:
         app_id, _ = await _approved_app(client, fixture_user_id)
-        word = {"question": "Notice period", "answer": "2 months", "approved": True}
+        word = {"question": "Preferred start date", "answer": "2 months", "approved": True}
         edit = {"path": "user_info.answers", "value": [word]}
         assert (await client.patch("/api/profile", json={"edits": [edit]})).status_code == 200, "a web edit"
         locked = await _check(client, app_id)
         assert (locked["decision"], locked["reason"]) == ("stop", "type_first_pending"), locked
-        assert locked["type_first"] == [{"question": "Notice period", "answer": "2 months"}]
+        assert locked["type_first"] == [{"question": "Preferred start date", "answer": "2 months"}]
         await _fill(client, app_id, [{**NOTICE, "answer": "2 months", "source": "approved"}])
         verdict = await _check(client, app_id)
         assert (verdict["decision"], verdict["reason"], verdict["type_first"]) == ("submit", "user_approved", [])
         # Negative control: a re-fill with an answer the user never saw is a form they have not seen.
-        salary = {"question": "Expected salary", "answer": "90000", "source": "written"}
+        salary = {"question": "Preferred team size", "answer": "5-8 people", "source": "written"}
         await _fill(client, app_id, [{**NOTICE, "answer": "2 months", "source": "approved"}, salary])
         _stale(await _check(client, app_id), "form_fill")
 

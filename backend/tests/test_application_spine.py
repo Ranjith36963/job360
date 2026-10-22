@@ -464,6 +464,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         # Bulk-apply D1 (2026-10-18).
         "submit_attempted", "submit_resolved",
         "answer_corrected",
+    # Outreach pack #5/#6 (2026-10-20): contact interactions and referrals.
+    "contact_meeting", "contact_call", "contact_intro", "referral_asked", "referral_given",
         # Gap roadmap slice 29 - the exact file sent (server-written only).
         "document_uploaded",
     }
