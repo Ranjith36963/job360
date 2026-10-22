@@ -224,7 +224,8 @@ Apify web-fetch tool, before you build. Never cite from memory.
   `--ff-only` or rebase), and tells it to stop on any conflict.
 - 2026-10-20: six PRs that each added an MCP tool parameter went red on
   `test_mcp_tools_rev` one after another: each bumped `TOOLS_REV` from the same main and
-  pinned its own hash, so every merge made the rest stale. **Rule:** after merging main into
+  pinned its own hash, so every merge made the rest stale. **Rule (superseded 2026-10-22, see
+  the hand-pinned TOOLS_REV story below):** after merging main into
   a PR that changes MCP tool names or parameters, recompute the served hash and set the rev
   to main's rev + 1 at that moment, not when the slice was written.
 - 2026-10-20, same session: the "merge through a script" rule above was followed with a
@@ -304,6 +305,36 @@ Apify web-fetch tool, before you build. Never cite from memory.
   diff). Chain wires went red with merge-cage DEAD_CONTEXT; fixed by restoring the file from
   origin/main. **Rule:** never run `ruleset_gate.py --live` on a branch (read the ruleset with
   the API instead), and run `git status` before every `git add -A`.
+
+- 2026-10-22, merge-main churn: sessions merged main into nearly every open PR "to be safe".
+  The ruleset has `strict_required_status_checks_policy: false`, so a PR that is behind main
+  still merges as is; each merge-main commit only re-ran the whole CI set and moved the PR to
+  the back of the queue. **Rule:** merge main into a PR only when `mergeable_state` is `dirty`
+  (the REST word; `CONFLICTING` is the GraphQL one), or for a migration PR (its NNNN may have
+  been taken) or a PR that changed MCP parameters (re-run the MCP tests). Re-measure the
+  share of merge-main commits from the API before quoting one.
+- 2026-10-22, [DRILL] PRs: PRs titled `[DRILL] ...` exist to be red (they prove a guard
+  fires). They carry no DRILL label (the title prefix is the only marker), only autofix and
+  lane labels, and repair workflows and sessions kept trying to fix or arm them, each attempt
+  firing more checks. On 2026-10-22 the open-PR listing showed 12 of 87 open PRs with that
+  prefix. **Rule:** a PR whose title starts with `[DRILL]` is never armed, never gets main
+  merged into it, and its CI is never "fixed". A workflow-side skip belongs in its own
+  harness PR; prose cannot stop GitHub Actions.
+- 2026-10-22, burst pushes and reopens: pushing to, or reopening, many PRs in one loop made
+  every one of them fire the full check_suite-triggered set (Auto-merge, Finding watch, CI,
+  offline suite, Security scanning) at once, so runs queued behind each other and the median
+  wait was set by the burst, not by any one PR. The same listing showed 67 of the 87 open PRs
+  numbered below 900, so closing them in bulk was tempting. Which of them are still wanted is
+  the owner's call, some are owner-lane work. **Rule:** never push to or reopen many PRs in
+  one loop; list stale PRs for the owner and never bulk-close or bulk-reopen. (No numeric
+  per-wave cap: none was measured.)
+- 2026-10-22, hand-pinned TOOLS_REV: `TOOLS_REV` and `TOOLS_REV_FOR_HASH` in `mcp_server.py`
+  are bumped by hand, so two PRs that both changed an MCP parameter each pinned "main's rev
+  + 1" from the same main and the second went red on `test_mcp_tools_rev` after the first
+  merged (the 2026-10-20 story above). A "re-pin after every merge of main" rule only taught
+  sessions to merge main more. The durable fix is to derive the rev in code (the rev PR); with
+  it, the re-pin rule is deleted from mistakes.md and the MCP-parameter case is covered by
+  "re-run the MCP tests". **Rule:** do not re-pin TOOLS_REV by hand across merges of main.
 
 ## Tooling
 

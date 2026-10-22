@@ -25,12 +25,14 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   and `test_outreach_people` (MCP tool count).
 - Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict,
   gate the merged tree, commit. A script hides the merge from the commit-gate hook.
+  Merge main into a PR only when `mergeable_state` is `dirty`, or for a migration PR (NNNN check) or a PR
+  that changed MCP parameters (re-run the MCP tests): strict checks are off, so a behind PR merges as is.
 - Run the gate as its own command and read its PASS line; never `gate && git commit` (the hook misses it).
 - Before a PR with a migration merges, merge main and check its NNNN is still free (2026-10-21: two 0067s).
 - Resolve a conflict per hunk; `git checkout --ours/--theirs <file>` also drops the other side's clean hunks.
 - A child PR's squash merge ships its stacked base too: diff the base against main, close it as shipped.
 - A stacked worker's first step merges its base branch: worktree agents start from origin/main.
-- After merging main into a PR that changes MCP tool parameters, re-pin TOOLS_REV to main's + 1.
+- A PR whose title starts with [DRILL] is red on purpose: never arm it, merge main into it, or fix its CI.
 - Every PR gets `gh pr merge <n> --auto --squash` the moment it is opened (owner, 2026-10-18):
   GitHub merges it when the required checks (13; 14 once `merge-cage` is added) are green. Never leave finished work unpushed.
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
@@ -50,6 +52,8 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - After editing any MCP tool description or the server instructions, run
   `python scripts/mcp_text_budget.py` (2,000-character cap); the gate's fast tier skips it.
 - Don't subscribe to many PRs at once; poll CI quietly. Merge one at a time (WIP limit 5).
+  Never push to or reopen many PRs in one loop: every push fires the whole check_suite set.
+  List stale PRs for the owner; never bulk-close or bulk-reopen.
 - A test proving a reader stays on its site compares exact hostnames (`urlsplit(u).hostname`),
   never `"host" in url`: CodeQL flags it high (2026-10-21: #1054 and #1060).
 - A date assert takes its expected value from the fixture's own clock, never a second `now()`
