@@ -376,6 +376,8 @@ earlier application counts toward today's `daily_cap`, `weekly_cap` and
 `min_gap_minutes` like any `applied` (Job360 counts when it was recorded):
 tell the user.
 
+EMAIL APPLICATIONS (the ad says "apply by email"): record_event email_drafted {to, subject, attachments: [{artifact_id, sha256}] from get_application_kit, gmail_draft_id?} (never the body) before check_submit, then call check_submit with `form_url` = `mailto:<to>`; send only on `submit` (or the user's yes for that exact draft: a new recipient or attachment needs a new yes); then record_application with channel "email", `recipient` and the sent email's `gmail_message_id`.
+
 ## Outreach
 
 Outreach to a person — recruiter, hiring manager, referral, cold

@@ -793,6 +793,10 @@ class SubmitFacts:
     # Gap roadmap slice 30: the application's id, matched against the grant's scope
     # (``SubmitCounts.grant_scope``). ``None`` is never in a scope.
     application_id: Optional[int] = None
+    # Gap roadmap slice 31 (G078): the ``to`` of this application's NEWEST ``email_drafted`` (``None`` = no
+    # draft). An email application (check_submit ``form_url`` = ``mailto:``) stops ``email_not_drafted``
+    # without one, or when the mailto address is not this recipient; a yes never clears it.
+    email_to: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -816,7 +820,7 @@ REASONS: tuple[str, ...] = (
     "submit_unconfirmed", "company_avoided", "duplicate_role", "new_site_first_time", "form_pages_incomplete",
     "type_first_pending", "below_score_line", "answer_guessed", "answer_unapproved", "sensitive_unconfirmed",
     "approval_stale",
-    "required_unanswered", "grant_scope",
+    "required_unanswered", "grant_scope", "email_not_drafted",
 )
 
 # What each ``approval_stale`` part means, in the words the ask shows the user.
@@ -826,6 +830,7 @@ APPROVAL_STALE_WORDS: dict[str, str] = {
     "form_fill": "the form was filled again with different answers",
     "form_page": "the form is on another page",
     "profile": "the assistant changed the profile",
+    "email": "the email draft has another recipient or attachment than the one the user said yes to",
 }
 
 
@@ -953,6 +958,47 @@ def _same_form_page(a: str, b: str) -> bool:
     return long_ == short or long_.startswith(short + "/")
 
 
+# Gap roadmap slice 31 (G078): ONE email address, the strict reading the email gate and the receipt use.
+EMAIL_ADDRESS_MAX = 254
+_EMAIL_LOCAL_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$")
+MAILTO_PREFIX = "mailto:"
+
+
+def clean_email_address(raw: Optional[str]) -> Optional[str]:
+    """``local@domain`` lower-cased, or ``None`` unless ``raw`` is plainly ONE address: ASCII, one ``@``,
+    a dot-atom local part of at most 64 characters, and a domain :func:`screen_form_url` reads as one
+    host (no IDNA, IP literal or single label). A display name (``Ada <a@b.com>``), a list (``,`` / ``;``)
+    or a quoted local part is refused, never guessed at."""
+    text = (raw or "").strip()
+    if not text or len(text) > EMAIL_ADDRESS_MAX or not text.isascii() or text.count("@") != 1:
+        return None
+    local, domain = text.split("@")
+    if not local or len(local) > 64 or not _EMAIL_LOCAL_RE.match(local):
+        return None
+    if not domain or any(ch in domain for ch in "/?#:") or screen_form_url(domain) != domain.lower().rstrip("."):
+        return None
+    return f"{local}@{domain.lower().rstrip('.')}".lower()
+
+
+def email_domain(address: str) -> str:
+    """The domain of a :func:`clean_email_address` (what logs may carry; the full address never)."""
+    return address.rsplit("@", 1)[-1] if "@" in address else ""
+
+
+def is_mailto(raw: Optional[str]) -> bool:
+    """check_submit's ``form_url`` names an EMAIL application (``mailto:`` + the recipient)."""
+    return (raw or "").strip().lower().startswith(MAILTO_PREFIX)
+
+
+def mailto_address(raw: Optional[str]) -> Optional[str]:
+    """The address of a ``mailto:`` form_url (query part dropped), ``""`` for a bare ``mailto:``,
+    ``None`` when the address cannot be read as one address (:func:`clean_email_address`)."""
+    target = (raw or "").strip()[len(MAILTO_PREFIX):].split("?", 1)[0]
+    if not target.strip():
+        return ""
+    return clean_email_address(target)
+
+
 def host_kind(host: Optional[str]) -> Literal["brand", "company", "invalid"]:
     """``brand`` when any whole label of ``host`` is an always-ask brand
     (``uk.indeed.com``, ``indeed.co.uk``, ``lnkd.in``); ``company`` for any other
@@ -987,6 +1033,10 @@ def may_submit(
         newest applied -> stop ``pace_wait`` with the exact next allowed time (fixed values, a yes never clears them)
     4a4. ``below_line`` is ``skip`` and the fit is below the user's score line -> stop
         ``below_score_line`` (owner 2026-10-19: drop the job; a yes does NOT clear it)
+    4b-email. ``form_url`` is ``mailto:<to>`` (an EMAIL application, gap roadmap slice 31): no
+        ``email_drafted`` recorded, or the mailto address is empty or not the newest draft's ``to`` -> stop
+        ``email_not_drafted`` (a yes does NOT clear it). An email application (no ``form_filled`` recorded)
+        skips 4b-4c4, 4e, 5d, 5e, 5e2 and the site rules 6, 7 and 10b (there is no form and no site).
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
@@ -1046,9 +1096,9 @@ def may_submit(
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
     ``user_approved``. A yes that no longer holds (``approval_stale``: expired, or the letter, fill,
-    page or profile changed since) clears nothing; the ask it would have cleared answers
+    page, profile or email draft changed since) clears nothing; the ask it would have cleared answers
     ``approval_stale`` naming the part.
-    Rules 1-4c (4a-4a3, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
+    Rules 1-4c (4a-4a3, 4b-email, 4c4 and 4d2 included), the auto-mode duplicate stop, the other
     session's hold (5a), the ``blocked`` ask (5b), the form-address checks (5d, 5e, 5e2), ``email_not_verified`` (4d),
     ``below_score_line`` (4a4), ``answer_guessed``, ``answer_unapproved`` and
     ``sensitive_unconfirmed`` (4e) are NEVER cleared by a yes.
@@ -1091,6 +1141,142 @@ def may_submit(
             f"This job is below your score line ({cfg.apply_min_score}) and you chose to drop those. "
             "Do not apply; leave this job.",
         )
+    # An email application has NO recorded form: a form application that passes ``mailto:`` keeps every form rule.
+    email = is_mailto(site_host) and not application.form_filled
+    if email:
+        stop = _email_stop(application, site_host)
+        if stop is not None:
+            return stop
+    else:
+        form_stop = _form_stop(application)
+        if form_stop is not None:
+            return form_stop
+    if application.submit_unconfirmed:
+        return SubmitDecision(
+            "stop", "submit_unconfirmed",
+            "A submit was started and never confirmed. Check the employer's email or site; the user "
+            "records the outcome. Do not submit again.",
+        )
+    if not application.email_verified:
+        return SubmitDecision(
+            "ask", "email_not_verified",
+            "The user has not confirmed their email address yet. Do not submit; "
+            "the user confirms it on Job360 first, or submits this one themselves.",
+        )
+    override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
+    granted = grant_active(cfg, counts, now)
+    # Slice 30: a grant makes only the applications it covers auto; any other one keeps the user's own mode.
+    outside_grant = granted and not grant_covers(counts.grant_scope, application)
+    base_mode = AUTO_SUBMIT_MODE if granted and not outside_grant else cfg.submit_mode
+    mode = override or base_mode
+    auto = mode == AUTO_SUBMIT_MODE
+    if application.duplicate_job and auto:
+        return SubmitDecision(
+            "stop", "duplicate_job",
+            "Needs you: possible duplicate - this job was already applied to. Do not submit; the user decides.",
+        )
+    # 4e, after every stop (the auto duplicate one included) so a stop is never softened to this ask.
+    # An email has no form answers, so an email application skips 4e.
+    if application.guessed_unverified and not email:
+        return SubmitDecision(
+            "ask", "answer_guessed",
+            "An answer on this form was guessed and the user has not verified it, or the user changed it "
+            "and the form still holds the guess. Do not submit; ask the user, type their answer, record a "
+            "new form_filled (they can Verify or Edit it on Needs you).",
+        )
+    if application.written_unapproved and not email:
+        return SubmitDecision(
+            "ask", "answer_unapproved",
+            "A written answer on this form is not one the user approved. Do not submit; show the draft with "
+            "ask_user, type the approved text, record a new form_filled (the user can Verify or Edit it on "
+            "Needs you).",
+        )
+    if application.sensitive_unconfirmed and not email:
+        return SubmitDecision(
+            "ask", "sensitive_unconfirmed",
+            "This form asks a private, legal or risky question (identity, health, money, right to work, "
+            "criminal record...) and the user has not confirmed the answer. Do not submit; raise it with "
+            "ask_user, the user checks it on Needs you, then record a new form_filled.",
+        )
+    if application.other_session_hold is not None:
+        held_by, session, since = application.other_session_hold
+        who = f"{held_by}/{session}" if session else held_by
+        return SubmitDecision(
+            "ask", "held_by_other_session",
+            f"Another assistant session ({who}) read this application's kit at {since}; "
+            "make sure only one session submits.",
+        )
+    if application.blocked:
+        return SubmitDecision(
+            "ask", "blocked",
+            "Your assistant got stuck on this application. Do not submit; the user resolves it first.",
+        )
+    screened: Optional[str] = None
+    if not email:
+        screened = screen_form_url(site_host)
+        if screened is None:
+            return SubmitDecision(
+                "ask", "unknown_site",
+                "The form address could not be read as one plain http(s) site. "
+                "Fill the form, stop before submit and ask yes.",
+            )
+        if screened != application.form_host:
+            return SubmitDecision(
+                "ask", "form_host_mismatch",
+                "This address is not the site where the form was filled (form_filled). "
+                "Do not submit; check the page, and ask the user.",
+            )
+        current = clean_form_url(site_host)
+        stored = clean_form_url(application.form_url)
+        if current and stored and not _same_form_page(current, stored):
+            return SubmitDecision(
+                "ask", "form_page_mismatch",
+                "This is not the page where the form was filled (form_filled / form_swept). "
+                "Do not submit; go back to that page, or fill and sweep this one, and ask the user.",
+            )
+    ask = _first_ask(
+        cfg, application, screened, counts, override=override, auto=auto,
+        outside_grant=outside_grant and cfg.submit_mode != AUTO_SUBMIT_MODE, email=email,
+    )
+    if ask is None:
+        return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
+    if application.approved:
+        return SubmitDecision(
+            "submit", "user_approved", "The user said yes to sending this application with this CV. You may submit."
+        )
+    if application.approval_stale:
+        why = APPROVAL_STALE_WORDS.get(application.approval_stale, application.approval_stale).format(
+            ttl=settings.SUBMIT_APPROVAL_TTL_MINUTES
+        )
+        return SubmitDecision(
+            "ask", "approval_stale",
+            f"The user's yes no longer counts ({application.approval_stale}: {why}). Show what changed and "
+            f"ask yes again. {ask.detail}",
+        )
+    return ask
+
+
+def _email_stop(application: SubmitFacts, site_host: Optional[str]) -> Optional[SubmitDecision]:
+    """Rule 4b-email (gap roadmap slice 31, G078): an email application needs a recorded ``email_drafted``
+    whose ``to`` is the ``mailto:`` address (a bare ``mailto:`` is refused). A yes never clears it."""
+    if application.email_to is None:
+        return SubmitDecision(
+            "stop", "email_not_drafted",
+            "Record email_drafted with the exact recipient, subject and attachments before sending, "
+            "then call check_submit again. Do not send yet.",
+        )
+    wanted = mailto_address(site_host)
+    if not wanted or wanted != application.email_to:
+        return SubmitDecision(
+            "stop", "email_not_drafted",
+            "This mailto address is not the recipient of your newest email_drafted. Record email_drafted "
+            "with the exact recipient, subject and attachments before sending, then call check_submit again.",
+        )
+    return None
+
+
+def _form_stop(application: SubmitFacts) -> Optional[SubmitDecision]:
+    """Rules 4b-4c4: the form must be recorded, swept and complete before a form submit."""
     if not application.form_filled:
         return SubmitDecision(
             "stop", "form_not_recorded",
@@ -1136,106 +1322,7 @@ def may_submit(
             "A page of this multi-page form has no sweep newer than its check. For every page 1..N: "
             "check_form, form_checked, fill, form_swept (with page and pages_total); then check_submit again.",
         )
-    if application.submit_unconfirmed:
-        return SubmitDecision(
-            "stop", "submit_unconfirmed",
-            "A submit was started and never confirmed. Check the employer's email or site; the user "
-            "records the outcome. Do not submit again.",
-        )
-    if not application.email_verified:
-        return SubmitDecision(
-            "ask", "email_not_verified",
-            "The user has not confirmed their email address yet. Do not submit; "
-            "the user confirms it on Job360 first, or submits this one themselves.",
-        )
-    override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
-    granted = grant_active(cfg, counts, now)
-    # Slice 30: a grant makes only the applications it covers auto; any other one keeps the user's own mode.
-    outside_grant = granted and not grant_covers(counts.grant_scope, application)
-    base_mode = AUTO_SUBMIT_MODE if granted and not outside_grant else cfg.submit_mode
-    mode = override or base_mode
-    auto = mode == AUTO_SUBMIT_MODE
-    if application.duplicate_job and auto:
-        return SubmitDecision(
-            "stop", "duplicate_job",
-            "Needs you: possible duplicate - this job was already applied to. Do not submit; the user decides.",
-        )
-    # 4e, after every stop (the auto duplicate one included) so a stop is never softened to this ask.
-    if application.guessed_unverified:
-        return SubmitDecision(
-            "ask", "answer_guessed",
-            "An answer on this form was guessed and the user has not verified it, or the user changed it "
-            "and the form still holds the guess. Do not submit; ask the user, type their answer, record a "
-            "new form_filled (they can Verify or Edit it on Needs you).",
-        )
-    if application.written_unapproved:
-        return SubmitDecision(
-            "ask", "answer_unapproved",
-            "A written answer on this form is not one the user approved. Do not submit; show the draft with "
-            "ask_user, type the approved text, record a new form_filled (the user can Verify or Edit it on "
-            "Needs you).",
-        )
-    if application.sensitive_unconfirmed:
-        return SubmitDecision(
-            "ask", "sensitive_unconfirmed",
-            "This form asks a private, legal or risky question (identity, health, money, right to work, "
-            "criminal record...) and the user has not confirmed the answer. Do not submit; raise it with "
-            "ask_user, the user checks it on Needs you, then record a new form_filled.",
-        )
-    if application.other_session_hold is not None:
-        held_by, session, since = application.other_session_hold
-        who = f"{held_by}/{session}" if session else held_by
-        return SubmitDecision(
-            "ask", "held_by_other_session",
-            f"Another assistant session ({who}) read this application's kit at {since}; "
-            "make sure only one session submits.",
-        )
-    if application.blocked:
-        return SubmitDecision(
-            "ask", "blocked",
-            "Your assistant got stuck on this application. Do not submit; the user resolves it first.",
-        )
-    screened = screen_form_url(site_host)
-    if screened is None:
-        return SubmitDecision(
-            "ask", "unknown_site",
-            "The form address could not be read as one plain http(s) site. "
-            "Fill the form, stop before submit and ask yes.",
-        )
-    if screened != application.form_host:
-        return SubmitDecision(
-            "ask", "form_host_mismatch",
-            "This address is not the site where the form was filled (form_filled). "
-            "Do not submit; check the page, and ask the user.",
-        )
-    current = clean_form_url(site_host)
-    stored = clean_form_url(application.form_url)
-    if current and stored and not _same_form_page(current, stored):
-        return SubmitDecision(
-            "ask", "form_page_mismatch",
-            "This is not the page where the form was filled (form_filled / form_swept). "
-            "Do not submit; go back to that page, or fill and sweep this one, and ask the user.",
-        )
-    ask = _first_ask(
-        cfg, application, screened, counts, override=override, auto=auto,
-        outside_grant=outside_grant and cfg.submit_mode != AUTO_SUBMIT_MODE,
-    )
-    if ask is None:
-        return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
-    if application.approved:
-        return SubmitDecision(
-            "submit", "user_approved", "The user said yes to sending this application with this CV. You may submit."
-        )
-    if application.approval_stale:
-        why = APPROVAL_STALE_WORDS.get(application.approval_stale, application.approval_stale).format(
-            ttl=settings.SUBMIT_APPROVAL_TTL_MINUTES
-        )
-        return SubmitDecision(
-            "ask", "approval_stale",
-            f"The user's yes no longer counts ({application.approval_stale}: {why}). Show what changed and "
-            f"ask yes again. {ask.detail}",
-        )
-    return ask
+    return None
 
 
 def grant_active(cfg: EffectiveSettings, counts: SubmitCounts, now: datetime) -> bool:
@@ -1337,9 +1424,11 @@ def _first_ask(
     override: Optional[str],
     auto: bool,
     outside_grant: bool = False,
+    email: bool = False,
 ) -> Optional[SubmitDecision]:
     """The first reason to ASK, in rule order, or ``None`` when nothing asks. ``outside_grant``: an
-    active grant does not cover this application, so the user's own confirm asks as ``grant_scope``."""
+    active grant does not cover this application, so the user's own confirm asks as ``grant_scope``. An email
+    application (``email``) has no form site: the site rules (6, 7, 10b) are skipped."""
     if application.duplicate_job:
         return SubmitDecision(
             "ask", "duplicate_job",
@@ -1369,7 +1458,7 @@ def _first_ask(
             f"The user asked to be asked for jobs {side} their score line. "
             "Fill the form, stop before submit and ask yes.",
         )
-    kind = host_kind(parse_site_host(site_host))
+    kind = "company" if email else host_kind(parse_site_host(site_host))
     if kind == "invalid":
         return SubmitDecision(
             "ask", "unknown_site", "The site could not be read. Fill the form, stop before submit and ask yes."
@@ -1401,7 +1490,7 @@ def _first_ask(
             "First application since auto-submit was turned on: a practice run. "
             "Fill the form, stop before submit and let the user check it.",
         )
-    if application.new_site:
+    if application.new_site and not email:
         return SubmitDecision(
             "ask", "new_site_first_time",
             "First application on this site: the user takes one look. "

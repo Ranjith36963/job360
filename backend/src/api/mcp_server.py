@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 19
-TOOLS_REV_FOR_HASH = "853b69b3466b"
+TOOLS_REV = 20
+TOOLS_REV_FOR_HASH = "27f231eaf9ab"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -437,6 +437,8 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "answers": [a.model_dump() for a in r.answers],
         "answers_from": r.answers_from,
         "files": [f.model_dump() for f in r.files],
+        "recipient": r.recipient,
+        "gmail_message_id": r.gmail_message_id,
         "fields_filled": r.fields_filled,
         "confirmation": r.confirmation,
         "cv_version_no": r.cv_version_no,
@@ -1047,6 +1049,8 @@ def build_server(version: str = "") -> MCPServer:
         application_id: Optional[int] = None,
         request_id: Optional[str] = None,
         referred_by_contact_id: Optional[int] = None,
+        recipient: str = "",
+        gmail_message_id: str = "",
     ) -> dict[str, Any]:
         """Record that the user has applied to this job — ONLY after they say so, or an
         employer's confirmation email in their Gmail proves it (name it in `note`). Pass
@@ -1062,13 +1066,8 @@ def build_server(version: str = "") -> MCPServer:
         the reply has `channel_given` + a `warning`). `note` is free text.
         `confirmation` = the ID only (must contain a digit); anything else is kept in the note with a warning.
         `referred_by_contact_id` = the contact linked to this job whose referral was given; leave it out otherwise.
-
-        C1 (application-spine review) — this is the SAME tool as before (`job_id`,
-        `channel`, `note` still work unchanged), rewired onto the rich
-        `POST /applications/{id}/receipt` route instead of the legacy
-        `POST /receipts/{job_id}` — the new optional fields (`confirmation`, `answers`,
-        `fields_filled`, `cv_artifact_id`, `cover_letter_artifact_id`, `applied_at`)
-        are exactly spec R8/S4's tool contract.
+        Email application: `recipient` (one address; none = the newest email_drafted's `to`, a different one
+        warns `recipient_mismatch`) and `gmail_message_id` of the sent email; the draft's attachments are `files`.
 
         cover_letter_artifact_id: pass it ONLY if a letter was actually sent; leave it out
         and the receipt records no letter (`cover_letter_sent` false, plus a warning) unless
@@ -1085,6 +1084,7 @@ def build_server(version: str = "") -> MCPServer:
                 fields_filled=fields_filled or {}, cv_artifact_id=cv_artifact_id,
                 cover_letter_artifact_id=cover_letter_artifact_id, applied_at=applied_at,
                 request_id=request_id, referred_by_contact_id=referred_by_contact_id,
+                recipient=recipient, gmail_message_id=gmail_message_id,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1501,12 +1501,12 @@ def build_server(version: str = "") -> MCPServer:
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is proof, not a 2nd. Wrong date: `applied` + occurred_at + corrects_event_id=<old id>.
+        `source` is proof, not a 2nd.
         `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (if Gmail Sent shows it, id as `source`,
-        or user says), outreach_replied, contact_meeting|contact_call|contact_intro|referral_asked|
+        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`, or user says),
+        outreach_replied, contact_meeting|contact_call|contact_intro|referral_asked|
         referral_given|outreach_bounced (bounce id as `source`); no application_id if cold.
 
         Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
@@ -1515,6 +1515,7 @@ def build_server(version: str = "") -> MCPServer:
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
         submit_declined {where}; submit_attempted {} pre-click;
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
+        email_drafted {to, subject, attachments, gmail_draft_id} (no body);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
@@ -1959,7 +1960,7 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def check_submit(application_id: int, form_url: str = "", session: str = "") -> dict[str, Any]:
-        """Call right before the FINAL submit, with `form_url` (the page the form is on) and
+        """Call right before the FINAL submit, with `form_url` (the form's page; `mailto:<to>` = email application) and
         your `session` label (as given to get_application_kit). ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
         the user yes; `stop` - do not submit. `reason` = a code, `detail` = a
@@ -1968,14 +1969,14 @@ def build_server(version: str = "") -> MCPServer:
         daily_cap_reached, company_cap_reached, weekly_cap_reached, pace_wait, outside_hours (all `stop`),
         company_avoided, form_pages_incomplete (`stop`),
         form_not_recorded (`stop`: record `form_filled`),
-        form_not_swept (`stop`: sweep, record `form_swept`),
+        form_not_swept (`stop`: record `form_swept`),
         form_count_mismatch, unreadable_fields (`stop`: sweep again), form_check_missing (`stop`: call
         check_form), required_unanswered (`stop`: ask for the answer),
         submit_unconfirmed (`stop`: submit_attempted has no outcome),
         duplicate_job (same job applied to: `stop`
         in auto mode, else `ask`), duplicate_role (`ask`: same company+title),
         new_site_first_time (`ask`: auto, new site), cv_unsupported_claims (not in profile),
-        answer_unapproved (ask: written answer not approved),
+        answer_unapproved (`ask`: essay unapproved),
         held_by_other_session,
         unknown_site (not a plain http(s) address),
         form_host_mismatch / form_page_mismatch (not the site / page you filled),
