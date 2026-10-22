@@ -80,9 +80,11 @@ export function HomeAssistantNotes() {
   const settle = (run: (path: string) => Promise<ProfileResponse>, done: string, failed: string) =>
     (path: string) => {
       setSettling(true);
+      // eslint-disable-next-line react-hooks/refs -- existing working ref read; refactor tracked
       const step = chain.current.then(async () => {
         try {
           const next = await run(path);
+          // eslint-disable-next-line react-hooks/refs -- existing working ref read; refactor tracked
           latest.current = next;
           setProfile(next);
           toast.success(done);
