@@ -2243,7 +2243,7 @@ async def _add_contact_once(
             )
         except SpineError as exc:
             _raise(exc)
-            raise AssertionError("unreachable")  # pragma: no cover
+            raise AssertionError("unreachable")  # _raise always raises
         return {**result, "contact_id": result["contact"]["id"]}
 
     key_body = {**_key_body(body), "application_id": application_id}
@@ -2330,7 +2330,7 @@ async def record_outreach(
             )
         except SpineError as exc:
             _raise(exc)
-            raise AssertionError("unreachable")  # pragma: no cover
+            raise AssertionError("unreachable")  # _raise always raises
 
     tool = "save_artifact" if body.entry == "message" else "record_event"
     key_body = {**_key_body(body), "contact_id": contact_id}

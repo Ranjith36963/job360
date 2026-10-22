@@ -70,7 +70,7 @@ async def create_ask(
             )
         except SpineError as exc:
             _raise(exc)
-            raise AssertionError("unreachable")  # pragma: no cover
+            raise AssertionError("unreachable")  # _raise always raises
 
     try:
         return await idempotency.run_once(
