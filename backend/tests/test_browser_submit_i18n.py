@@ -31,6 +31,7 @@ FINAL_SUBMITS = (
 STEPS = ("Weiter", "Zurück", "Suivant", "Précédent", "Continuer", "Siguiente", "Anterior", "Continuar",
          "Avanti", "Indietro", "Volgende", "Vorige", "Weiter zur Bewerbung", "Continuar con la solicitud")
 
+BUTTON_TYPES = ("", 'type="button"')
 ASHBY = """<!doctype html><html><head><title>Apply - Acme</title></head><body>
 <div class="ashby-application-form-container">
   <label for="n">Name</label><input id="n">
@@ -43,7 +44,9 @@ async def ashby_site():
     from aiohttp import web
 
     async def page(request):
-        html = ASHBY.replace("{name}", request.query["name"]).replace("{typ}", request.query.get("typ", ""))
+        # Picked from fixed lists by index, never echoed from the URL (no request text reaches the HTML).
+        html = ASHBY.replace("{name}", FINAL_SUBMITS[int(request.query["i"])]).replace(
+            "{typ}", BUTTON_TYPES[int(request.query["t"])])
         return web.Response(text=html, content_type="text/html")
 
     app = web.Application()
@@ -59,7 +62,7 @@ async def ashby_site():
 @needs_chromium
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
-@pytest.mark.parametrize("typ", ["", 'type="button"'])
+@pytest.mark.parametrize("typ", BUTTON_TYPES)
 @pytest.mark.parametrize("name", FINAL_SUBMITS[:6])
 async def test_a_non_english_submit_with_no_form_is_never_clicked_without_the_gate(ashby_site, name, typ):
     from urllib.parse import urlencode
@@ -68,7 +71,7 @@ async def test_a_non_english_submit_with_no_form_is_never_clicked_without_the_ga
 
     pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(ashby_site))
     try:
-        page = await run(pool, "u1", "open", url="http://jobs.example/apply?" + urlencode({"name": name, "typ": typ}))
+        page = await run(pool, "u1", "open", url="http://jobs.example/apply?" + urlencode({"i": FINAL_SUBMITS.index(name), "t": BUTTON_TYPES.index(typ)}))
         page = await run(pool, "u1", "type", ref=_ref(page, "Name"), text="Ada Lovelace")
         with pytest.raises(BrowserError) as exc:
             await run(pool, "u1", "click", ref=_ref(page, name))
