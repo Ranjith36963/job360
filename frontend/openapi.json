@@ -3382,6 +3382,13 @@
       },
       "ContactOutreachOut": {
         "properties": {
+          "interactions": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Interactions",
+            "type": "array"
+          },
           "last_reply": {
             "anyOf": [
               {
@@ -7127,7 +7134,7 @@
         "type": "object"
       },
       "OutreachEntryOut": {
-        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times).",
+        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times). Also a meeting/call/intro/referral entry (``follow_up_on``\nis set only on those).",
         "properties": {
           "channel": {
             "title": "Channel",
@@ -7140,6 +7147,17 @@
           "entry": {
             "title": "Entry",
             "type": "string"
+          },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
           },
           "id": {
             "title": "Id",
