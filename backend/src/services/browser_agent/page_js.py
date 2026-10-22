@@ -7,6 +7,18 @@ Playwright import at module level (rule #16).
 """
 from __future__ import annotations
 
+import json
+
+from src.services.browser_agent.safety import _APPLICATION_WORD, _STRONG_SUBMIT, _SUBMIT_WORDS
+
+# The words that name a final submit, as JavaScript regexes built from the gate's own patterns
+# (safety.control_kind): the look and the gate read one list, so a word added there counts here too.
+_SUBMIT_REGEX_JS = (
+    "  const strongSubmit = new RegExp(" + json.dumps(_STRONG_SUBMIT.pattern) + ", 'i');\n"
+    "  const submitWords = new RegExp(" + json.dumps(_SUBMIT_WORDS.pattern) + ", 'i');\n"
+    "  const applicationWord = new RegExp(" + json.dumps(_APPLICATION_WORD.pattern) + ", 'i');\n"
+)
+
 # Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int,
 # places: [[dist, above], ...]} (one place per element).
 # Each element: {ref, tag, type, role, name, value, checked, required, disabled, autocomplete,
@@ -116,12 +128,15 @@ SNAPSHOT_JS = r"""
   // A child frame's part of the user's screen, in its own coordinates (agent.look): an auto-sized frame as
   // tall as its form never scrolls itself, the outer page does. Its submit button is always listed.
   const vTop = Math.max(0, args.vTop ?? 0), vBottom = Math.min(vh, args.vBottom ?? vh);
+  // A button the gate could read as the final submit, in any language ("Bewerbung absenden" on a plain
+  // <button> with no <form>), is kept on the list first. One kept too many costs a line, never a click.
+""" + _SUBMIT_REGEX_JS + r"""
   const submitShaped = (el, tag, type) => {
     const isButton = tag === 'button' || el.getAttribute('role') === 'button'
       || (tag === 'input' && ['submit', 'image'].includes(type));
     if (!isButton) return false;
     const name = labelOf(el) || '';
-    return /\bsubmit/i.test(name) || (type === 'submit' && /\b(apply|send|finish|complete|confirm)\b/i.test(name));
+    return strongSubmit.test(name) || submitWords.test(name) || applicationWord.test(name);
   };
   let n = 0, hasPassword = false;
   const candidates = [];
