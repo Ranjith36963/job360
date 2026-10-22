@@ -152,6 +152,8 @@ BOARD_SOURCES = (
     "applitrack",
     "schoolspring",
     "edjoin",
+    "radancy",
+    "ukgready",
     "gupy",
     "hiringroom",
     "inhire",
@@ -349,7 +351,7 @@ def _import_kit(name: str) -> Any:
 # replaces a name an earlier one already provides).
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
-    "kit_sites_a", "kit_pubsec", "kit_latam",
+    "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -1786,7 +1788,7 @@ _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber
 # ats -> token part used as the name (comeet slug/uid, pageup id[/locale], werecruit lang/slug)
 _PATH_TOKEN = {
     "successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0,
-    "werecruit": 1, "ripplehire": 0, "neogov": 1,
+    "werecruit": 1, "ripplehire": 0, "neogov": 1, "ukgready": 1,
 }
 
 
@@ -2805,6 +2807,10 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("applitrack", re.compile(r"^(?:www\.)?applitrack\.com$")),
     ("schoolspring", re.compile(r"^([a-z0-9-]+)\.schoolspring\.com$")),
     ("edjoin", re.compile(r"^(?:www\.)?edjoin\.org$")),
+    # generic ATS: UKG Ready pod hosts (the board is host/tenant); Radancy sits on each employer's own host,
+    # so it is matched by path in board_from_job_url
+    ("ukgready", re.compile(r"^((?:[a-z0-9-]+\.)*(?:saashr\.com|entertimeonline\.com|yourpayrollhr\.com|mykronos\.com|"
+                            r"workforceready\.[a-z]{2,3}(?:\.[a-z]{2})?))$")),
     # Latin America: the tenant is the subdomain (Gupy, HiringRoom, InHire, Solides) or a path segment (Recrutei)
     ("gupy", re.compile(r"^([a-z0-9-]+)\.gupy\.io$")),
     ("hiringroom", re.compile(r"^([a-z0-9-]+)\.hiringroom\.com$")),
@@ -2813,11 +2819,13 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("solides", re.compile(r"^([a-z0-9-]+)\.vagas\.solides\.com\.br$")),
     ("vagas", re.compile(r"^(?:www\.)?vagas\.com\.br$")),
 ]
+# Career sites on an employer's own host that the URL path gives away: Radancy (TalentBrew) jobs
+_RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+/\d+/?$")
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co)$", re.I)
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2899,6 +2907,9 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = ""
         elif ats == "edjoin":  # one central index: the job link does not show the job-type id the board is
             tok = ""
+        elif ats == "ukgready":  # https://<pod host>/ta/<tenant>.careers?ShowJob=<id>
+            t = seg[1][:-len(".careers")] if len(seg) > 1 and seg[0] == "ta" and seg[1].endswith(".careers") else ""
+            tok = "%s/%s" % (m.group(1), t) if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", t) else ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
         elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
@@ -2936,6 +2947,10 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
+    rm = _RADANCY_PATH.search(u.path)
+    if rm:
+        lang = "/" + rm.group(1) if rm.group(1) not in (None, "en") else ""
+        return {"kind": "ats", "ats": "radancy", "token": host + lang, "host": host}
     # PeopleSoft HCM sites sit on each employer's own host: the path is the signature (not read, needs a cookie)
     ps = bool(re.search(r"^/psc/[^/]+/[^/]+/[^/]+/c/HRS_HRAM_FL\.", u.path, re.I))
     kind = "unsupported" if ps or _UNSUPPORTED_HOSTS.search(host) else "other"
