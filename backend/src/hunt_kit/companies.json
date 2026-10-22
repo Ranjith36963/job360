@@ -6450,6 +6450,9 @@
 {"name":"INETEC d.o.o.","ats":"talentlyft","board":"inetec","source":"freehire"},
 {"name":"Cochise College","ats":"neogov","board":"schooljobs.com/cochisecollege","source":"freehire"},
 {"name":"Clark College (Faculty)","ats":"neogov","board":"schooljobs.com/clarkcollege/facultypositions","source":"career-ops"},
+{"name":"saskatoon","ats":"applitrack","board":"saskatoon","source":"freehire"},
+{"name":"Camas School District","ats":"applitrack","board":"camas","source":"career-ops"},
 {"name":"Vancouver Public Schools","ats":"schoolspring","board":"vansd.schoolspring.com","source":"career-ops"},
-{"name":"SchoolSpring — Network administrators","ats":"schoolspring","board":"network administrator","source":"freehire"}
+{"name":"SchoolSpring — Network administrators","ats":"schoolspring","board":"network administrator","source":"freehire"},
+{"name":"EDJOIN (Information Tech. / Computer Svcs.)","ats":"edjoin","board":"25","source":"freehire"}
 ]

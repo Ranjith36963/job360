@@ -94,9 +94,14 @@ of `tenant.freshteam.com`). These boards are unofficial public endpoints: a boar
 refusal ends that board. Dayforce is not read: its listing needs a cookie-based CSRF pair that the kit's plain requests cannot
 send, so a `jobs.dayforcehcm.com` link is reported as unsupported.
 `kit_pubsec.py` adds public-sector and education boards: NEOGOV (`neogov:schooljobs.com/<agency>` or
-`neogov:governmentjobs.com/<agency>`) and SchoolSpring (`schoolspring:<district>.schoolspring.com` for one district,
-or a search keyword on the national index in `companies.json`). A posting page is opened only for a card that passes
-your title filter, at most 25 per board; the first refusal ends the board's pages.
+`neogov:governmentjobs.com/<agency>`), AppliTrack K-12 districts (`applitrack:<district>`, the slug of
+`www.applitrack.com/<district>/onlineapp/`), SchoolSpring (`schoolspring:<district>.schoolspring.com` for one district,
+or a search keyword on the national index in `companies.json`) and EDJOIN (`edjoin:<job-type id>`: the board is a
+job type of California's one central index, not a district; the employer is read from each ad). A posting page is opened
+only for a card that passes your title filter, at most 25 per board; the first refusal ends the board's pages. PeopleSoft
+HCM career sites (universities, cities, labs, each on its own host) are not read: the list only grows by a form postback
+inside a cookie session, which the kit's plain requests cannot carry, so a `/psc/<site>/.../HRS_HRAM_FL...` link is
+reported as unsupported.
 
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing

@@ -149,7 +149,9 @@ BOARD_SOURCES = (
     "talenthr",
     "talentlyft",
     "neogov",
+    "applitrack",
     "schoolspring",
+    "edjoin",
 )
 FEED_SOURCES = (
     "freehire",
@@ -2774,9 +2776,11 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("peopleforce", re.compile(r"^([a-z0-9-]+)\.peopleforce\.io$")),
     ("talenthr", re.compile(r"^jobs\.talenthr\.io$")),
     ("talentlyft", re.compile(r"^([a-z0-9-]+)\.talentlyft\.com$")),
-    # public sector / education: NEOGOV group 1 is the domain; SchoolSpring's board is the district host
+    # public sector / education: NEOGOV group 1 is the domain; AppliTrack keeps its board in the path, EDJOIN has none
     ("neogov", re.compile(r"^(?:www\.)?(governmentjobs\.com|schooljobs\.com)$")),
+    ("applitrack", re.compile(r"^(?:www\.)?applitrack\.com$")),
     ("schoolspring", re.compile(r"^([a-z0-9-]+)\.schoolspring\.com$")),
+    ("edjoin", re.compile(r"^(?:www\.)?edjoin\.org$")),
 ]
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
@@ -2852,8 +2856,12 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             agency = seg[1].lower() if len(seg) > 1 and seg[0] == "careers" else ""
             ok_agency = re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", agency) and agency != "home"
             tok = "%s/%s" % (m.group(1), agency) if ok_agency else ""
+        elif ats == "applitrack":  # https://www.applitrack.com/<district>/onlineapp/...
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", seg[0]) else ""
         elif ats == "schoolspring":  # <district>.schoolspring.com is a district board; www/api carry no board token
             tok = "" if m.group(1) in ("www", "api") else host
+        elif ats == "edjoin":  # one central index: the job link does not show the job-type id the board is
+            tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
         elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
@@ -2891,7 +2899,9 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
-    kind = "unsupported" if _UNSUPPORTED_HOSTS.search(host) else "other"
+    # PeopleSoft HCM sites sit on each employer's own host: the path is the signature (not read, needs a cookie)
+    ps = bool(re.search(r"^/psc/[^/]+/[^/]+/[^/]+/c/HRS_HRAM_FL\.", u.path, re.I))
+    kind = "unsupported" if ps or _UNSUPPORTED_HOSTS.search(host) else "other"
     return {"kind": kind, "ats": "", "token": "", "host": host}
 
 
