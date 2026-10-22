@@ -9,7 +9,7 @@ Which slices are built, and the switch that turns them on, is section 9 — the 
 Built and merged: #882, #891, #895, #916 (the one "Batch auto apply" switch).
 - **The batch** = a waiting line your AI works through, one job at a time.
 - **In it:** AI hunts and your links both go straight in. Tags: AI hunt, Your link, Pasted ad.
-- **Modes (pick one):** Straight away, Hours to apply, Auto for a while (each lets your assistant send on its own, but only within your score line and the safety checks); Ask me each time = off.
+- **Modes (pick one):** Straight away, Auto for a while (each lets your assistant send on its own, but only within your score line and the safety checks); Ask me each time = off.
 - **Limits:** per day (blank = no limit); per company and per week, each with a blue "No limit" tick; the wait between applications in minutes and seconds (0 = no wait).
 - **Needs you:** a login, CAPTCHA, missing answer or a form waiting for Submit lands there while the batch moves on.
 - **Not yet confirmed:** a real batch on production (not checked here). Next: reconnect Job360 in the AI app, set the rules, "run 360 batch 3".
