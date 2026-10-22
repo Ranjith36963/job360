@@ -123,7 +123,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
     - `page_js.py`: reads a page and tags each control with a `ref`
     - `agent.py`: the browser pool (one Chromium; an isolated context per user, plus one for their live sign-in view), plus the actions
   - `backend/src/api/routes/browser.py`: `POST /api/browser`, the route the MCP tool calls (rule M5)
-  - The MCP tool `browser` in `mcp_server.py`, always listed (it answers `off` until the switch is on). This raised `TOOLS_REV` to 9: reconnect to see it.
+  - The MCP tool `browser` in `mcp_server.py`, always listed (it answers `off` until the switch is on). This changed `tools_version` and `tools_rev`: reconnect to see it.
 - **Final submit:**
   - The tool runs `check_submit` itself and records `submit_attempted` first.
   - It clicks only on `submit`. Most asks (settings, the practice run, Indeed / LinkedIn) become a `submit` once the user clicks Send on Needs you for that CV; another session's hold, a form address that cannot be read or does not match, an open `blocked`, a guessed answer or an unverified email still asks.
@@ -308,7 +308,7 @@ sends every job still waiting on your yes. Each start gets its own session label
   screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
   yes stays saved. An unexpected error while saving answers a plain 500 with the token already cleared, Sentry scrubs every depth of a frame's variables, and FastAPI's and Starlette's own frames (one holds the raw request body) lose their variables, so the token cannot reach an error report.
 
-**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed; a client whose `tools_rev` is behind `mcp_server.TOOLS_REV` must reconnect.
+**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed; a client whose `tools_rev` differs from `mcp_server.tools_rev()` must reconnect.
 
 ## 10. Open questions for later
 

@@ -30,6 +30,7 @@ Design (docs/plans/2026-09-03-mcp-server/spec.md R4):
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import inspect
 import json
@@ -69,18 +70,16 @@ CATEGORY_LINE = (
 DAILY_CHECK_HINT = (
     "Turn on the daily check so the confirmation email gets linked (get_recipe('daily'))"
 )
-# Hand-bumped integer, like career-ops' VERSION file (update-system.mjs:1170-1172): +1 whenever a
-# tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
-# stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
-# The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 17
-TOOLS_REV_FOR_HASH = "5e9dd224ad5e"
-TOOLS_LINE = (
-    f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
-    "get_recipe = stale tool list: reconnect."
-)
-INSTRUCTIONS = "\n".join(
-    (
+# The TOOLS line (the last line of the instructions) and `tools_rev` are both DERIVED from
+# `tools_version` (the hash of tool + parameter names): nothing here is hand-pinned, so two PRs that
+# change parameters no longer conflict on a pinned number. `tools_rev` is compared only for
+# difference (doctor, rules.md: "if either differs"), never order; it is not a counter.
+_TOOLS_LINE = "TOOLS: tools_version={v}; a different one in doctor or get_recipe = stale tool list: reconnect."
+# Chosen so the hash served when the rev was derived (5e9dd224ad5e) still maps to 17, the last
+# hand-pinned rev, so connected clients see no false "stale": int("5e9dd224ad5e", 16) = 104031928495454,
+# % 999_999 = 527486, and (527486 + 472529) % 999_999 + 1 = 17. Never edit it to move the rev.
+_TOOLS_REV_OFFSET = 472_529
+_INSTRUCTION_LINES: tuple[str, ...] = (
         CATEGORY_LINE,
         "HARD LINES (they win over everything): 1) Never submit a job application unless "
         "check_submit says submit or the user said yes for that one application; always call check_submit. "
@@ -104,8 +103,6 @@ INSTRUCTIONS = "\n".join(
         "write structured fields with update_profile.",
         "NEEDS YOU: when you are stuck or would have to guess, call ask_user (and ask in chat); an answered "
         "ask is the user's word.",
-        TOOLS_LINE,
-    )
 )
 
 # Owner decision, 2026-09-28 — INSTRUCTIONS is only read at connect time, so
@@ -543,13 +540,14 @@ def _strict_server_class() -> type[MCPServer]:
     return cast("type[MCPServer]", _STRICT_SERVER_CLASS)
 
 
-def build_server(version: str = "") -> MCPServer:
+def build_server(version: str = "", *, instructions_text: Optional[str] = None) -> MCPServer:
     """Create the MCPServer with its tools and recipe prompts. Imports the SDK here (rule #16).
 
     ``version`` becomes ``serverInfo.version`` in the ``initialize`` result;
     :func:`mcp_runtime` passes :func:`tools_fingerprint` so the wire says which
     tool surface this process serves. Left empty the server reports no version,
-    exactly as before.
+    exactly as before. ``instructions_text`` overrides :func:`instructions`;
+    :func:`served_tool_parameters` passes ``""`` because the instructions are built from it.
     """
     from pydantic import ValidationError
     from starlette.responses import Response
@@ -570,7 +568,10 @@ def build_server(version: str = "") -> MCPServer:
     from src.services.profile import refusals as profile_refusals
     from src.services.profile import shapes as profile_shapes
 
-    mcp = _strict_server_class()(SERVER_NAME, description=CATEGORY_LINE, instructions=INSTRUCTIONS, version=version)
+    mcp = _strict_server_class()(
+        SERVER_NAME, description=CATEGORY_LINE,
+        instructions=instructions() if instructions_text is None else instructions_text, version=version,
+    )
 
     def _validation_error(
         exc: ValidationError, *, tool: str | None = None, message: str | None = None, **fields: Any
@@ -2335,11 +2336,23 @@ def served_tool_parameters() -> dict[str, list[str]]:
     """``{tool name: [parameter names]}`` this server advertises, sorted by tool (built once, lazily)."""
     global _SERVED_TOOL_PARAMS
     if _SERVED_TOOL_PARAMS is None:
-        tools = build_server()._tool_manager.list_tools()  # noqa: SLF001
+        # Parameter names never depend on the instructions text, and instructions() reads this map.
+        tools = build_server(instructions_text="")._tool_manager.list_tools()  # noqa: SLF001
         _SERVED_TOOL_PARAMS = {
             t.name: list((t.parameters.get("properties") or {}).keys()) for t in sorted(tools, key=lambda t: t.name)
         }
     return {name: list(params) for name, params in _SERVED_TOOL_PARAMS.items()}
+
+
+@functools.cache
+def instructions() -> str:
+    """The server instructions: the static lines plus the TOOLS line with the served ``tools_version``."""
+    return "\n".join((*_INSTRUCTION_LINES, _TOOLS_LINE.format(v=tools_version(served_tool_parameters()))))
+
+
+def tools_rev() -> int:
+    """Derived from ``tools_version``: moves exactly when it does. Compare for equality only."""
+    return (int(tools_version(served_tool_parameters()), 16) + _TOOLS_REV_OFFSET) % 999_999 + 1
 
 
 def tools_stamp() -> dict[str, Any]:
@@ -2349,7 +2362,7 @@ def tools_stamp() -> dict[str, Any]:
     ``node update-system.mjs check``); stamping it on every recipe read is Job360's own extension,
     because a cached client never sees INSTRUCTIONS again.
     """
-    return {"tools_version": tools_version(served_tool_parameters()), "tools_rev": TOOLS_REV}
+    return {"tools_version": tools_version(served_tool_parameters()), "tools_rev": tools_rev()}
 
 
 def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int] = None) -> dict[str, Any]:
@@ -2363,10 +2376,10 @@ def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int]
     given = (client_tools_version or "").strip()
     stale: Optional[bool] = (given.lower() != version) if given else None
     if client_tools_rev is not None:
-        stale = bool(stale) or client_tools_rev != TOOLS_REV
+        stale = bool(stale) or client_tools_rev != tools_rev()
     return {
         "tools_version": version,
-        "tools_rev": TOOLS_REV,
+        "tools_rev": tools_rev(),
         "tools": tools,
         "tools_stale": stale,
         "stale_hint": stale_hint_for(_current_client_name.get()),
@@ -2534,7 +2547,7 @@ class _AnnounceToolListChanged:
             "mcp_tools_list_changed_sent",
             extra={
                 "event": "mcp_tools_list_changed_sent", "user_id": user.id, "method": ctx.method,
-                "tools_rev": TOOLS_REV,
+                "tools_rev": tools_rev(),
             },
         )
 
@@ -2608,6 +2621,9 @@ async def mcp_runtime() -> AsyncIterator[None]:
     # only exist once a server is built — so build a throwaway one to read the
     # list, then the real one(s) stamped with it. Registering the
     # decorated tool functions is microseconds; the lazy imports are already warm.
+    # Build and cache the instructions here, at lifespan startup, so the cold build
+    # (several seconds) is never paid by the first connecting client.
+    instructions()
     fingerprint = tools_fingerprint(await build_server().list_tools())
     announce = settings.MCP_ANNOUNCE_TOOLS_CHANGED
 
