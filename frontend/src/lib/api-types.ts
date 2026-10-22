@@ -3005,6 +3005,8 @@ export interface components {
              * @default
              */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /**
@@ -3062,6 +3064,8 @@ export interface components {
              * @default
              */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /**
@@ -4265,6 +4269,8 @@ export interface components {
             };
             /** Email */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Id */
@@ -4288,6 +4294,8 @@ export interface components {
         };
         /** ContactOutreachOut */
         ContactOutreachOut: {
+            /** Bounced */
+            bounced?: components["schemas"]["OutreachEntryOut"][];
             /** Interactions */
             interactions?: components["schemas"]["OutreachEntryOut"][];
             last_reply: components["schemas"]["OutreachEntryOut"] | null;
@@ -5953,7 +5961,7 @@ export interface components {
          *     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
          *     (``version_no`` null — unversioned, a person can be sent to or replied
          *     to many times). Also a meeting/call/intro/referral entry (``follow_up_on``
-         *     is set only on those).
+         *     is set only on those). A ``bounced`` mark's ``text`` is the address that bounced.
          */
         OutreachEntryOut: {
             /** Channel */
@@ -6046,6 +6054,8 @@ export interface components {
             };
             /** Email */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Id */
@@ -6091,6 +6101,8 @@ export interface components {
             contact_ids: number[];
             /** Email */
             email: string;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Jobs */
@@ -8134,6 +8146,8 @@ export interface components {
             company?: string | null;
             /** Email */
             email?: string | null;
+            /** Email Source */
+            email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
             /** Linkedin Url */
