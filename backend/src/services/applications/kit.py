@@ -1040,6 +1040,77 @@ def answer_problems(raw: Any) -> list[str]:
     return problems
 
 
+# ── G023: a sensitive answer the user did not agree to remember is hashed, never copied ──
+# Events and receipts are append-only (M3): a raw value written once could never be removed.
+
+
+def redacted_answer(item: dict[str, Any]) -> dict[str, Any]:
+    """What is stored for such an answer: the question and its non-value metadata (``source``,
+    ``key``), the sha256 of the value's UTF-8 text, and ``redacted: true``. Never the value."""
+    out: dict[str, Any] = {"question": str(item.get("question") or "")}
+    for extra in ("source", "key"):
+        if isinstance(item.get(extra), str) and item[extra]:
+            out[extra] = item[extra]
+    out["value_sha256"] = sha256_text(str(item.get("answer") or ""))
+    out["redacted"] = True
+    return out
+
+
+def _sensitive_value(item: Any) -> bool:
+    """A non-blank answer to a sensitive question (:func:`_question_is_sensitive`, the same test
+    ``check_form`` flags ``needs_confirmation`` with). A blank or already-hashed answer has no value to hide."""
+    if not isinstance(item, dict) or item.get("redacted") or not str(item.get("answer") or "").strip():
+        return False
+    key = item.get("key")
+    return _question_is_sensitive(str(item.get("question") or ""), key if isinstance(key, str) else None)
+
+
+async def redact_unremembered(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], answers: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int]:
+    """``(answers to store, how many were hashed)``. A sensitive answer is KEPT as typed only when
+    Job360 already holds it with the user's OK: its ``key`` is an item of this application's kit
+    (:func:`compute_answers` leaves out a sensitive value saved without remember consent) or the
+    question is one of the user's approved answers. Every other sensitive answer - said for this
+    form only - is stored as :func:`redacted_answer`. Loads the profile only when one is sensitive."""
+    if not any(_sensitive_value(a) for a in answers):
+        return answers, 0
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports kit
+
+    profile, _country, blocks, _missing = await _answers_for(db, user_id, app_row)
+    have = {str(i["key"]) for block in blocks.values() for i in block}
+    company_key = ready._company_key(str(app_row.get("job_company") or ""))
+    out: list[dict[str, Any]] = []
+    hashed = 0
+    for a in answers:
+        if _sensitive_value(a) and not (
+            (isinstance(a.get("key"), str) and a["key"] in have)
+            or ready._approved_for(profile, str(a.get("question")), company_key) is not None
+        ):
+            out.append(redacted_answer(a))
+            hashed += 1
+        else:
+            out.append(a)
+    return out, hashed
+
+
+async def _stored_answers(
+    db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, raw: Any
+) -> list[dict[str, Any]]:
+    """A form event's ``answers`` as stored: cleaned, then G023-hashed (:func:`redact_unremembered`)."""
+    cleaned: list[dict[str, Any]] = list(clean_answers(raw))
+    if not any(_sensitive_value(a) for a in cleaned):
+        return cleaned
+    app_row = await spine.get_owned_application(db, user.id, application_id) or {}
+    stored, hashed = await redact_unremembered(db, user.id, app_row, cleaned)
+    if hashed:
+        get_audit_logger().info("answers_redacted", extra={
+            "event": "answers_redacted", "user_id": safe_log_value(user.id), "application_id": int(application_id),
+            "event_type": event_type, "redacted_count": hashed, "result": "ok",
+        })
+    return stored
+
+
 def _refuse(user: CurrentUser, event_type: str, status: int) -> None:
     get_audit_logger().warning(
         f"{event_type}_refused",
@@ -1338,7 +1409,7 @@ async def _check_kit_event(
         if page:
             stored["form_url"] = page
         if "answers" in payload:
-            stored["answers"] = clean_answers(payload["answers"])
+            stored["answers"] = await _stored_answers(db, user, application_id, event_type, payload["answers"])
         if "fields_skipped" in payload:
             stored["fields_skipped"] = clean_fields_skipped(payload["fields_skipped"])
         return stored
@@ -1368,7 +1439,7 @@ async def _check_kit_event(
         if "answers" in payload:
             # Owner decision 2026-10-19: what the form holds after the sweep. The proof that the
             # answers the user changed on the web (check_submit `type_first`) are now typed in.
-            swept["answers"] = clean_answers(payload["answers"])
+            swept["answers"] = await _stored_answers(db, user, application_id, event_type, payload["answers"])
         if paged:
             swept["page"], swept["pages_total"] = payload["page"], payload["pages_total"]
         if "form_url" in payload:  # slice 7: the page swept, cleaned (never a token or session id)
@@ -2000,10 +2071,17 @@ async def _application_answers(
 ) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """The profile, the job's country and :func:`compute_answers` for ONE application - the single
     place the kit and the form check load them (same profile, overlay, country and company key)."""
+    return await _answers_for(db, user.id, app_row)
+
+
+async def _answers_for(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any]
+) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+    """:func:`_application_answers` by user id (the receipt has no ``CurrentUser``)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
-    loaded, overlay = load_profile_with_overlay(user.id)
+    loaded, overlay = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     job_company_key = await _job_company_key(db, app_row)

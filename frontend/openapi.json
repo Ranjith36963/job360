@@ -8963,6 +8963,11 @@
             "title": "Question",
             "type": "string"
           },
+          "redacted": {
+            "default": false,
+            "title": "Redacted",
+            "type": "boolean"
+          },
           "saved_at": {
             "anyOf": [
               {
@@ -9255,6 +9260,11 @@
             "title": "Answers",
             "type": "array"
           },
+          "answers_from": {
+            "default": "",
+            "title": "Answers From",
+            "type": "string"
+          },
           "application_id": {
             "anyOf": [
               {
@@ -9377,6 +9387,13 @@
               }
             ],
             "title": "Fields Total"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
           },
           "form_host": {
             "default": "",
@@ -9575,6 +9592,17 @@
             "title": "Question",
             "type": "string"
           },
+          "redacted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redacted"
+          },
           "source": {
             "anyOf": [
               {
@@ -9585,6 +9613,17 @@
               }
             ],
             "title": "Source"
+          },
+          "value_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Sha256"
           }
         },
         "required": [
@@ -9592,6 +9631,40 @@
           "answer"
         ],
         "title": "ReceiptAnswerOut",
+        "type": "object"
+      },
+      "ReceiptFileOut": {
+        "description": "Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "fmt": {
+            "title": "Fmt",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "artifact_id",
+          "sha256",
+          "fmt",
+          "event_id"
+        ],
+        "title": "ReceiptFileOut",
         "type": "object"
       },
       "ReceiptListResponse": {
@@ -9848,6 +9921,11 @@
             "title": "Already Existed",
             "type": "boolean"
           },
+          "answers_from": {
+            "default": "",
+            "title": "Answers From",
+            "type": "string"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -9913,6 +9991,13 @@
           "event_id": {
             "title": "Event Id",
             "type": "integer"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
           },
           "possible_duplicate": {
             "default": "",

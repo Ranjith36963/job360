@@ -1574,6 +1574,57 @@ async def _resolve_receipt_artifact(
 _RECEIPT_TOOL = "record_application"
 
 
+def _event_answers_count(payload: dict[str, Any]) -> int:
+    """How many answers a form event says were typed: its own ``answers_count``, else its list's length."""
+    claimed = payload.get("answers_count")
+    if isinstance(claimed, int) and not isinstance(claimed, bool) and claimed >= 0:
+        return claimed
+    listed = payload.get("answers")
+    return len(listed) if isinstance(listed, list) else 0
+
+
+async def _form_answers_source(
+    db: JobDatabase, user_id: str, application_id: int
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Slice 11 - ``(the form event a receipt freezes its answers from, the host the form was filled on)``.
+
+    Reads this application's surviving ``form_filled`` / ``form_swept`` events (one a
+    ``corrects_event_id`` names is skipped) from the newest ``form_filled`` on, newest first: the
+    newest one listing answers wins, else the newest one that says it typed some (``answers_missing``).
+    A page's sweep (``page`` set) holds that page only, so it never stands for the whole form.
+    The host is the newest ``form_filled``'s (a sweep carries none)."""
+    cur = await db._db.execute(
+        "SELECT e.id, e.event_type, e.payload FROM application_events e "
+        "WHERE e.user_id = ? AND e.application_id = ? AND e.event_type IN ('form_filled', 'form_swept') "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "ORDER BY e.id DESC",
+        (user_id, application_id),
+    )
+    rows: list[dict[str, Any]] = []
+    for r in await cur.fetchall():
+        row = dict(r)
+        row["payload"] = _receipt_json(row.get("payload"), dict)
+        rows.append(row)
+        if row["event_type"] == "form_filled":
+            break  # an older fill is an earlier attempt at the form
+    whole = [r for r in rows if "page" not in r["payload"]]
+    source = next((r for r in whole if isinstance(r["payload"].get("answers"), list) and r["payload"]["answers"]), None)
+    if source is None:
+        source = next((r for r in whole if _event_answers_count(r["payload"]) > 0), None)
+    host = rows[-1]["payload"].get("host") if rows and rows[-1]["event_type"] == "form_filled" else None
+    return source, host if isinstance(host, str) and host else None
+
+
+def _channel_for_host(host: str) -> str:
+    """The closed channel a form's host stands for: LinkedIn = ``linkedin_easy_apply``, Indeed =
+    ``job_board`` (the always-ask brands), any other host = the employer's own form, ``company_site``
+    (the reading the ``ats_form`` / ``greenhouse`` aliases already give)."""
+    labels = host.lower().split(".")
+    if "linkedin" in labels or "lnkd" in labels:
+        return "linkedin_easy_apply"
+    return "job_board" if "indeed" in labels else "company_site"
+
+
 async def _receipt_replay(
     db: JobDatabase, user_id: str, request_id: str, body: dict[str, Any]
 ) -> Optional[dict[str, Any]]:
@@ -1629,6 +1680,19 @@ async def record_receipt(
     returns the FIRST reply with ``already_existed: True`` and writes nothing;
     with a different body it is a 409. ``applied_at`` arrives already parsed
     (the route's ``parse_occurred_at``).
+
+    Gap roadmap slice 11 — no ``answers``: the newest form event's are frozen
+    (``answers_from``, :func:`_form_answers_source`); no ``channel``: the form's
+    host picks one. Every answer, given or frozen, passes G023
+    (``kit.redact_unremembered``). ``idem_body`` stays the CALLER's body.
+
+    Gap roadmap slice 29 - no ``cv_artifact_id``: the CV of the newest
+    ``document_uploaded`` since the last ``applied`` (the browser's upload or a kit
+    link download) is frozen; no ``cover_letter_artifact_id``: the newest letter the
+    BROWSER uploaded into a form is (a download alone never claims a letter). Those
+    uploads are frozen as ``files`` [{kind, artifact_id, sha256, fmt, event_id}]. A
+    named id that is not the uploaded one is kept, with ``cv_mismatch`` /
+    ``cover_letter_mismatch``. No upload at all = the older behaviour.
     """
     idem_body = {
         "application_id": application_id, "channel": channel, "note": note, "confirmation": confirmation,
@@ -1676,23 +1740,94 @@ async def record_receipt(
         if ref is None or dict(ref)["application_id"] != application_id:
             raise SpineError(422, "referred_by_contact_id must be one of your contacts linked to this application")
 
-    cv_artifact = await _resolve_receipt_artifact(db, user_id, application_id, "cv", cv_artifact_id)
-    if cv_artifact_id is None and cv_artifact is not None:
+    # Lazy: kit imports spine.
+    from src.services.applications import kit as kit_service  # noqa: PLC0415
+
+    # Slice 11 - no answers given: freeze the ones the assistant already recorded on the form
+    # events (prod receipt 12 read "0 of 11 fields" for a form filled with 11). An empty
+    # channel reads the form's host. Both decided here, before the INSERT (M3).
+    answers_list: list[dict[str, Any]] = [dict(a) for a in (answers or [])]
+    answers_from, answers_count, form_host = "", None, None
+    source: Optional[dict[str, Any]] = None
+    if not answers_list or not channel_given:
+        source, form_host = await _form_answers_source(db, user_id, application_id)
+    if not answers_list and source is not None:
+        answers_from = f"{source['event_type']}#{int(source['id'])}"
+        answers_count = _event_answers_count(source["payload"])
+        listed = source["payload"].get("answers")
+        answers_list = [dict(a) for a in listed if isinstance(a, dict)] if isinstance(listed, list) else []
+        if not answers_list:
+            warnings.append(
+                f"answers_missing: {answers_from} says {answers_count} answers were typed but lists none; "
+                "the receipt keeps the count only"
+            )
+    if not channel_given and form_host:
+        channel = _channel_for_host(form_host)
+        warnings.append(f"channel not given: stored '{channel}' from the form's host {form_host}")
+    # G023 - a sensitive answer the user did not agree to remember is hashed (given or frozen alike).
+    answers_list, hashed = await kit_service.redact_unremembered(db, user_id, app_row, answers_list)
+
+    # Slice 29 - the files Job360 itself handed out since the last receipt (``document_uploaded``,
+    # server-written: the browser's upload, or a kit link download) name the versions when the
+    # caller names none. No upload at all = the older flow, unchanged.
+    from src.services.applications import uploads as uploads_service  # noqa: PLC0415 - uploads imports spine
+
+    uploads = await uploads_service.uploads_since_last_receipt(db, user_id, application_id)
+    up_cv = next((u for u in uploads if u["kind"] == "cv"), None)
+    up_cl = next((u for u in uploads if u["kind"] == "cover_letter"), None)
+    # Only an upload INTO a form (the browser's, host set) proves a letter was attached; a kit link
+    # download alone does not (an assistant may fetch both files for a form with no letter field).
+    up_cl_form = next((u for u in uploads if u["kind"] == "cover_letter" and u["host"]), None)
+    files: list[dict[str, Any]] = []
+
+    cv_artifact = await _resolve_receipt_artifact(
+        db, user_id, application_id, "cv",
+        up_cv["artifact_id"] if cv_artifact_id is None and up_cv is not None else cv_artifact_id,
+    )
+    if cv_artifact_id is None and up_cv is None and cv_artifact is not None:
         warnings.append(
             "cv_artifact_id not given: froze the newest CV "
             f"(artifact {cv_artifact['id']}, v{cv_artifact['version_no']})"
         )
-    # A receipt never guesses a letter: only a NAMED letter is frozen (M3 - the
-    # receipt is permanent, so a wrong "sent" claim could never be corrected).
+    if up_cv is not None and cv_artifact is not None:
+        if up_cv["artifact_id"] == cv_artifact["id"]:
+            files.append(uploads_service.file_entry(up_cv))
+        else:  # artifacts are append-only (M3): another id is another text, so other bytes
+            warnings.append(
+                f"cv_mismatch: the receipt keeps the CV you named (artifact {cv_artifact['id']}), but the CV "
+                f"Job360 last sent was artifact {up_cv['artifact_id']} (document_uploaded#{up_cv['event_id']})"
+            )
+    # A receipt never guesses a letter: only a NAMED or form-uploaded letter is frozen (M3 - the
+    # receipt is permanent, so a wrong "sent" claim could never be corrected; prod receipt 19).
     cl_artifact: Optional[dict[str, Any]] = None
-    if cover_letter_artifact_id is None:
+    if cover_letter_artifact_id is not None:
+        cl_artifact = await _resolve_receipt_artifact(
+            db, user_id, application_id, "cover_letter", cover_letter_artifact_id
+        )
+        if up_cl is not None and cl_artifact is not None:
+            if up_cl["artifact_id"] == cl_artifact["id"]:
+                files.append(uploads_service.file_entry(up_cl))
+            else:
+                warnings.append(
+                    f"cover_letter_mismatch: the receipt keeps the letter you named (artifact {cl_artifact['id']}), "
+                    f"but the letter Job360 last sent was artifact {up_cl['artifact_id']} "
+                    f"(document_uploaded#{up_cl['event_id']})"
+                )
+    elif up_cl_form is not None:
+        cl_artifact = await _resolve_receipt_artifact(
+            db, user_id, application_id, "cover_letter", up_cl_form["artifact_id"]
+        )
+        files.append(uploads_service.file_entry(up_cl_form))
+    elif up_cl is not None:
+        warnings.append(
+            f"no cover_letter_artifact_id given: a cover letter was downloaded (artifact {up_cl['artifact_id']}) "
+            "but Job360 saw no upload of it, so the receipt says no cover letter was sent. "
+            "If it was sent, record a correction note; receipts cannot be edited."
+        )
+    else:
         warnings.append(
             "no cover_letter_artifact_id given: the receipt says no cover letter was sent. "
             "If one was sent, record a correction note; receipts cannot be edited."
-        )
-    else:
-        cl_artifact = await _resolve_receipt_artifact(
-            db, user_id, application_id, "cover_letter", cover_letter_artifact_id
         )
 
     # Lazy: profile storage pulls the scoring stack transitively (rule #16),
@@ -1702,13 +1837,11 @@ async def record_receipt(
     profile_version = current_profile_version_id(user_id)
     now = datetime.now(timezone.utc).isoformat()
     sent_at = applied_at or now
-    answers_json = json.dumps(answers or [])
+    answers_json = json.dumps(answers_list)
     fields_json = json.dumps(fields_filled or {})
 
     # S3 - flag a possible duplicate and name the kit the assistant filled from.
     # Both are set HERE, at INSERT (M3): a flag never blocks the receipt.
-    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
-
     dup = await kit_service.duplicate_facts(
         db, user_id, app_row, datetime.now(timezone.utc), include_self=True
     )
@@ -1736,8 +1869,8 @@ async def record_receipt(
                 " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
                 " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
                 " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
-                " referred_by_contact_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " referred_by_contact_id, answers_from, answers_count, files) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, app_row["job_id"], sent_at,
                     app_row.get("job_title") or "", app_row.get("job_company") or "",
@@ -1749,7 +1882,7 @@ async def record_receipt(
                     application_id, cv_artifact["id"] if cv_artifact else None,
                     cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
                     confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
-                    referred_by_contact_id,
+                    referred_by_contact_id, answers_from, answers_count, json.dumps(files),
                 ),
             )
             receipt_id = int(cur.lastrowid or 0)
@@ -1768,7 +1901,8 @@ async def record_receipt(
                 "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
                 "confirmation": confirmation or "",
                 "url": f"/applications/{application_id}", "event_id": event["event_id"],
-                "possible_duplicate": possible_duplicate, "already_existed": False,
+                "possible_duplicate": possible_duplicate, "answers_from": answers_from, "files": files,
+                "already_existed": False,
                 "referred_by_contact_id": referred_by_contact_id,
             }
             if request_id is not None:
@@ -1784,10 +1918,23 @@ async def record_receipt(
         "receipt_created",
         extra={
             "event": "receipt_created", "receipt_id": receipt_id,
-            "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
+            "cv_artifact_id": cv_artifact["id"] if cv_artifact else None, "files_count": len(files),
             "referred_by_contact_id": referred_by_contact_id,
         },
     )
+    if answers_from or hashed or (form_host and not channel_given):
+        # Slice 11 - ids and counts only: never an answer, a question or the host.
+        get_audit_logger().info(
+            "receipt_from_form",
+            extra={
+                "event": "receipt_from_form", "user_id": safe_log_value(user_id),
+                "application_id": int(application_id), "receipt_id": receipt_id,
+                "from_event_id": int(source["id"]) if answers_from and source is not None else None,
+                "answers_count": answers_count, "answers_missing": bool(answers_from) and not answers_list,
+                "redacted_count": hashed, "channel_from_form": bool(form_host and not channel_given),
+                "result": "ok",
+            },
+        )
     if possible_duplicate:
         get_audit_logger().info(
             "possible_duplicate",
@@ -1977,16 +2124,20 @@ async def _list_receipts_for_application(
     return rows
 
 
-def _receipt_answers(raw: Any) -> list[dict[str, str]]:
+def _receipt_answers(raw: Any) -> list[dict[str, Any]]:
     """Only well-formed {question, answer} pairs survive — the response model
     is strict (extra="forbid"), so a malformed legacy entry would otherwise
     turn a read into a 500. ``source`` / ``key`` come back when stored (text
     only); a receipt recorded before they existed simply has neither."""
     out: list[dict[str, str]] = []
     for a in _receipt_json(raw, list):
-        if not (isinstance(a, dict) and "question" in a and "answer" in a):
+        hashed = isinstance(a, dict) and a.get("redacted") is True and isinstance(a.get("value_sha256"), str)
+        if not (isinstance(a, dict) and "question" in a and ("answer" in a or hashed)):
             continue
-        item = {"question": str(a["question"]), "answer": str(a["answer"])}
+        # G023: a hashed answer reads back with no value - ``redacted`` + the hash, never a guess.
+        item: dict[str, Any] = {"question": str(a["question"]), "answer": "" if hashed else str(a["answer"])}
+        if hashed:
+            item.update(redacted=True, value_sha256=a["value_sha256"])
         for extra in ("source", "key"):
             if isinstance(a.get(extra), str) and a[extra]:
                 item[extra] = a[extra]
@@ -2024,7 +2175,7 @@ async def receipt_summary_facts(db: JobDatabase, user_id: str, receipt_id: int) 
         "counts_line": "", "fields_total": None, "fields_skipped": 0, "guessed_count": 0, "form_host": "",
     }
     cur = await db._db.execute(
-        "SELECT application_id, created_at, job_apply_url, answers, fields_filled "
+        "SELECT application_id, created_at, job_apply_url, answers, fields_filled, answers_count "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
     )
@@ -2056,7 +2207,12 @@ async def receipt_summary_facts(db: JobDatabase, user_id: str, receipt_id: int) 
     total = form.get("fields_count")
     if isinstance(total, bool) or not isinstance(total, int):
         return out
-    done = min(len(filled) + len(answers), total)
+    # Slice 11: a receipt whose frozen form event listed no answers keeps that event's count.
+    stored_count = r.get("answers_count")
+    typed = len(answers)
+    if not typed and isinstance(stored_count, int) and not isinstance(stored_count, bool):
+        typed = stored_count
+    done = min(len(filled) + typed, total)
     skipped_list = form.get("fields_skipped")
     skipped = len(skipped_list) if isinstance(skipped_list, list) else max(total - done, 0)
     out.update(
@@ -2079,6 +2235,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
         "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, referred_by_contact_id, "
+        "answers_from, files, "
         "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
@@ -2094,6 +2251,8 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "application_id": application_id,
         "proof": (await proof_for(db, user_id, [application_id]))[application_id] if application_id else NO_PROOF,
         "answers": _receipt_answers(r.get("answers")),
+        "answers_from": r.get("answers_from") or "",
+        "files": [f for f in _receipt_json(r.get("files"), list) if isinstance(f, dict)],
         "fields_filled": _receipt_json(r.get("fields_filled"), dict),
         "confirmation": r.get("confirmation") or None,
         "recorded_by": r.get("recorded_by") or None,

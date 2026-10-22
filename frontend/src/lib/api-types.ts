@@ -6685,6 +6685,11 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /**
+             * Redacted
+             * @default false
+             */
+            redacted: boolean;
             /** Saved At */
             saved_at?: string | null;
             /** Saved By */
@@ -6773,6 +6778,11 @@ export interface components {
         Receipt: {
             /** Answers */
             answers?: components["schemas"]["ReceiptAnswerOut"][];
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Application Id */
             application_id?: number | null;
             /** Channel */
@@ -6812,6 +6822,8 @@ export interface components {
             fields_skipped: number;
             /** Fields Total */
             fields_total?: number | null;
+            /** Files */
+            files?: components["schemas"]["ReceiptFileOut"][];
             /**
              * Form Host
              * @default
@@ -6892,8 +6904,28 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /** Redacted */
+            redacted?: boolean | null;
             /** Source */
             source?: string | null;
+            /** Value Sha256 */
+            value_sha256?: string | null;
+        };
+        /**
+         * ReceiptFileOut
+         * @description Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+         */
+        ReceiptFileOut: {
+            /** Artifact Id */
+            artifact_id: number;
+            /** Event Id */
+            event_id: number;
+            /** Fmt */
+            fmt: string;
+            /** Kind */
+            kind: string;
+            /** Sha256 */
+            sha256: string;
         };
         /** ReceiptListResponse */
         ReceiptListResponse: {
@@ -7013,6 +7045,11 @@ export interface components {
              * @default false
              */
             already_existed: boolean;
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Channel */
             channel: string;
             /**
@@ -7037,6 +7074,8 @@ export interface components {
             cv_version_no: number | null;
             /** Event Id */
             event_id: number;
+            /** Files */
+            files?: components["schemas"]["ReceiptFileOut"][];
             /**
              * Possible Duplicate
              * @default

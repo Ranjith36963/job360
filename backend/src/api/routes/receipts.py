@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.routes.applications import ProofOut, ReceiptAnswerOut
+from src.api.routes.applications import ProofOut, ReceiptAnswerOut, ReceiptFileOut
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -57,6 +57,10 @@ class Receipt(BaseModel):
     # 0037) reads empty / None: no defaults, no placeholders (rule #29).
     application_id: int | None = None
     answers: list[ReceiptAnswerOut] = Field(default_factory=list)
+    # Slice 11 - '<event_type>#<event_id>' the answers were frozen from; '' = given by the caller / none.
+    answers_from: str = ""
+    # Slice 29 - the files Job360 uploaded / served for it (sha256 of the exact bytes); [] = none named.
+    files: list[ReceiptFileOut] = Field(default_factory=list)
     fields_filled: dict[str, Any] = Field(default_factory=dict)
     confirmation: str | None = None
     cv_version_no: int | None = None
