@@ -37,6 +37,7 @@ export function VisaSelect({
   // Re-hydrate whenever the stored visa changes underneath us (e.g. a fresh
   // `load()` after another save).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setSignal(visa.signal);
     setCountry(visa.country ?? "");
     setDetail(visa.detail ?? "");

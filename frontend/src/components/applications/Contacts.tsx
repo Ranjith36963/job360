@@ -172,6 +172,7 @@ function EditContact({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setForm({ name: contact.name, role: contact.role, email: contact.email, notes: contact.notes });
     setFoundVia(contact.found_via ?? "");
   }, [contact]);
@@ -298,6 +299,7 @@ export function Contacts({
   // hands down a freshly loaded list (e.g. after "Mark Applied" reloads).
   const [list, setList] = useState<Contact[]>(contacts);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setList(contacts);
   }, [contacts]);
 
