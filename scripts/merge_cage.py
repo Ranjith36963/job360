@@ -2259,11 +2259,23 @@ def advice_markdown(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict])
             "`scripts/merge_cage.py` can merge.",
         ]
     else:
-        blocks = blocks_of(verdicts)
-        head += [f"**`{LABEL_OWNER}`** — {len(blocks)} thing(s) here are yours to decide.", ""]
-        head += [f"- {b}" for b in blocks[:8]]
-        if len(blocks) > 8:
-            head += ["", f"_(+{len(blocks) - 8} more)_"]
+        all_blocks = blocks_of(verdicts)
+        # Rendering only: a check that is still running is not the owner's decision.
+        waiting = [b for b in all_blocks if any(m in b for m in _WAIT_MARKERS)]
+        blocks = [b for b in all_blocks if b not in waiting]
+        if blocks or not waiting:
+            head += [f"**`{LABEL_OWNER}`** — {len(blocks)} thing(s) here are yours to decide.", ""]
+            head += [f"- {b}" for b in blocks[:8]]
+            if len(blocks) > 8:
+                head += ["", f"_(+{len(blocks) - 8} more)_"]
+        if waiting:
+            if blocks:
+                head += [""]
+            head += [f"**`waiting`** — {len(waiting)} check(s) still running; "
+                     "nothing for you to do yet.", ""]
+            head += [f"- {b}" for b in waiting[:8]]
+            if len(waiting) > 8:
+                head += ["", f"_(+{len(waiting) - 8} more)_"]
         skipped = [v.name for v in verdicts if v.status == "not_checked"]
         if skipped:
             head += ["", f"Cages that did **not** run: {', '.join(skipped)}. "
@@ -3591,6 +3603,17 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         ok("the advice for an allowed PR is labelled agent-safe and merges nothing",
            LABEL_SAFE in md_yes and MARKER in md_yes and "no cage reported anything" not in md_yes,
            f"advice text was wrong: {md_yes[:200]}", ["advice_markdown", "advice_label"])
+
+        _w = Verdict("PROOF", "fail", ["`offline-suite` has not finished (in_progress). FIX: wait."])
+        _o = Verdict("PATH", "fail", ["`.github/merge-policy.yml` — merge it yourself."])
+        md_wait = advice_markdown(1, meta_y, False, [_w])
+        md_mix = advice_markdown(1, meta_y, False, [_w, _o])
+        ok("running checks are listed as waiting, not as owner decisions",
+           "`waiting`" in md_wait and "1 check(s) still running" in md_wait
+           and "yours to decide" not in md_wait
+           and "1 thing(s) here are yours to decide" in md_mix
+           and "1 check(s) still running" in md_mix,
+           f"advice text was wrong: {md_wait[:200]} // {md_mix[:300]}", ["advice_markdown"])
 
         # The SAME PR, one field changed: base is a feature branch. codeql.yml
         # only fires for main-targeted PRs, so `CodeQL` cannot exist here.
