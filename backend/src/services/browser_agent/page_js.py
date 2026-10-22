@@ -333,6 +333,21 @@ OWN_LIST_IDS_JS = r"""
 (el) => [el.getAttribute('aria-controls'), el.getAttribute('aria-owns')].join(' ').split(/\s+/).filter(Boolean)
 """
 
+# Can the dropdown's own field take typed text (to filter a long list)? "self": an editable <input>;
+# "inner": a role=combobox box holding a visible editable input; "": neither.
+TYPEABLE_TARGET_JS = r"""
+(el) => {
+  const ok = (i) => i.tagName === 'INPUT' && !i.disabled && !i.readOnly
+    && !/^(checkbox|radio|button|submit|reset|file|hidden|image|range|color)$/i.test(i.type);
+  if (el.tagName === 'INPUT') return ok(el) ? 'self' : '';
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  if (role !== 'combobox') return '';
+  const inner = Array.from(el.querySelectorAll('input')).find(
+    (i) => ok(i) && i.getBoundingClientRect().width > 0 && i.getBoundingClientRect().height > 0);
+  return inner ? 'inner' : '';
+}
+"""
+
 # The value a field shows now (inputs, textareas, contenteditable boxes, custom dropdown buttons).
 SHOWN_VALUE_JS = r"""
 (el) => ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '')
