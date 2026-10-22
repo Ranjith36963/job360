@@ -279,6 +279,8 @@ class RecordApplicationReceiptRequest(BaseModel):
     cover_letter_artifact_id: Optional[int] = None
     # ISO-8601 with a timezone (parse_occurred_at); malformed = 422 naming applied_at.
     applied_at: Optional[str] = None
+    # The user's own contact, linked to THIS application, whose referral got them the job.
+    referred_by_contact_id: Optional[int] = None
     # Idempotency key (1-128 printable chars): the same one again returns the FIRST
     # receipt with already_existed=true and writes nothing; a different body = 409.
     request_id: Optional[str] = None
@@ -916,6 +918,7 @@ class RecordApplicationReceiptResponse(BaseModel):
     possible_duplicate: str = ""
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
+    referred_by_contact_id: Optional[int] = None
 
 
 class WhatsNewEventOut(BaseModel):
@@ -1117,11 +1120,18 @@ class KitJobOut(BaseModel):
     found_on: Optional[str] = None
 
 
+class KitReferredByOut(BaseModel):
+    contact_id: int
+    name: str
+
+
 class KitApplicationOut(BaseModel):
     id: int
     status: str
     follow_up_on: Optional[str] = None
     submit_override: Optional[str] = None
+    # The contact whose live referral_given event names this job (current name); null = none recorded.
+    referred_by: Optional[KitReferredByOut] = None
 
 
 class KitSameJobOut(BaseModel):
@@ -1785,6 +1795,29 @@ class StatsSitesOut(BaseModel):
     note: str
 
 
+class StatsReferralGroupOut(BaseModel):
+    brought: int
+    applied: int
+    replied: int
+    interview: int
+    offer: int
+    rejected: int
+    reply_rate: Optional[float]
+    interview_rate: Optional[float]
+    offer_rate: Optional[float]
+    small_sample: bool
+
+
+class StatsReferralsOut(BaseModel):
+    """``stats(view="referrals")``: referred vs not. Facts only, never a ranking."""
+
+    n: int
+    referred: StatsReferralGroupOut
+    not_referred: StatsReferralGroupOut
+    referral_asked: int
+    note: str
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1814,6 +1847,7 @@ class StatsResponse(BaseModel):
     patterns: Optional[StatsPatternsOut] = None
     skill_gaps: Optional[StatsSkillGapsOut] = None
     sites: Optional[StatsSitesOut] = None
+    referrals: Optional[StatsReferralsOut] = None
     computed_at: str
 
 
@@ -3308,6 +3342,7 @@ async def record_application_receipt(
             answers=[a.model_dump(exclude_none=True) for a in body.answers], fields_filled=fields_filled,
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
             applied_at=applied_at, request_id=body.request_id,
+            referred_by_contact_id=body.referred_by_contact_id,
         )
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None

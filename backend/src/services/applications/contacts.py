@@ -32,6 +32,7 @@ full history ("was X") is every edit plus the base value, oldest first.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -1402,6 +1403,33 @@ async def count_company_sends(db: JobDatabase, user_id: str, key: str, since: st
         if contact_company_key({"company": own, "job_company": r.get("job_company")}) == key:
             total += 1
     return total
+
+
+async def referred_by(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
+    """The kit's ``application.referred_by``: the contact the newest LIVE (not
+    corrected) ``referral_given`` event on this application names, with its CURRENT
+    name (contact_edits overlay). None when there is none (rule #29). Read-only."""
+    cur = await db._db.execute(
+        "SELECT e.payload FROM application_events e WHERE e.user_id = ? AND e.application_id = ? "
+        "AND e.event_type = ? AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "ORDER BY e.id DESC LIMIT 1",
+        (user_id, application_id, settings.CONTACT_LEDGER_EVENT_TYPES["referral_given"]),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    try:
+        cid = json.loads(dict(row)["payload"] or "{}").get("contact_id")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(cid, int) or isinstance(cid, bool):
+        return None
+    contact = await get_owned_contact(db, user_id, cid)
+    if contact is None:
+        return None
+    current = dict(contact)
+    _apply_current_fields(current, (await _latest_edits_for_user(db, user_id)).get(cid, {}))
+    return {"contact_id": cid, "name": current["name"]}
 
 
 # ── Full-record readers ─────────────────────────────────────────────────────
