@@ -22,6 +22,7 @@ from src.api.auth_deps import (
     require_session_user,
     require_user,
 )
+from src.api.client_ip import UNKNOWN, client_ip, throttle_client_ip
 from src.api.dependencies import get_request_db
 from src.api.middleware import _is_production
 from src.core import settings
@@ -111,6 +112,13 @@ class UserResponse(BaseModel):
     analytics_consent: bool = False
 
 
+class MeResponse(UserResponse):
+    # Migration 0071 — False for an account only a magic link has ever signed
+    # in (no password the user knows). The account page then deletes without a
+    # password prompt, from a fresh email-link sign-in (``delete_account``).
+    has_password: bool = True
+
+
 class RegisterResponse(BaseModel):
     # M2 — deliberately generic and IDENTICAL whether or not the email was already
     # registered, so /register cannot be used to enumerate accounts. Carries no
@@ -123,15 +131,12 @@ class RegisterResponse(BaseModel):
 def _client_meta(request: Request) -> dict[str, Any]:
     """Extract safe client metadata for audit log extra fields.
 
-    X-Forwarded-For is only trusted when ``JOB360_TRUST_PROXY=1`` is set —
-    forwarding without this gate lets attackers spoof their source IP.
+    The address comes from ``src.api.client_ip`` (the one reader of
+    X-Forwarded-For); ``None`` when there is no address at all.
     """
-    xff_ip = None
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        xff = request.headers.get("x-forwarded-for", "")
-        xff_ip = xff.split(",")[0].strip() or None
+    ip = client_ip(request)
     return {
-        "client_ip": xff_ip or (request.client.host if request.client else None),
+        "client_ip": None if ip == UNKNOWN else ip,
         "user_agent": request.headers.get("user-agent", "")[:200],
     }
 
@@ -161,18 +166,12 @@ async def register(
     background_tasks: BackgroundTasks,
 ) -> RegisterResponse:
     # M3 — per-IP registration throttle. Without this, register had ZERO rate
-    # limit, so a single host could mass-create accounts. Derive the client IP
-    # the SAME way login does: request.client.host, trusting the first
-    # X-Forwarded-For hop ONLY behind the JOB360_TRUST_PROXY gate (else XFF is
-    # spoofable). Do NOT leak whether the email exists — this fires before any
-    # DB lookup.
-    _ip = request.client.host if request.client else "unknown"
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        _xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        if _xff:
-            _ip = _xff
+    # limit, so a single host could mass-create accounts. The address comes from
+    # src.api.client_ip, the same as login (X-Forwarded-For only from trusted
+    # proxy hops, never the caller-written leftmost entry). Do NOT leak whether
+    # the email exists — this fires before any DB lookup.
     if not auth_rate_limit.check_and_record(
-        f"register:{_ip}", max_in_window=10, window_seconds=3600
+        f"register:{throttle_client_ip(request)}", max_in_window=10, window_seconds=3600
     ):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -237,24 +236,40 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     # an attacker lock a VICTIM out of their own account by spamming failures for
     # their email. Scoping to the source IP means the attacker only locks their own
     # (email, IP) bucket; the real user, on a different IP, can still sign in.
-    # XFF is trusted only behind the JOB360_TRUST_PROXY gate (else it's spoofable).
-    _ip = request.client.host if request.client else "unknown"
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        _xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        if _xff:
-            _ip = _xff
-    throttle_key = f"login:{str(req.email).lower()}:{_ip}"
+    # The address is src.api.client_ip's (IPv6 counted per /64): a forged
+    # X-Forwarded-For entry never changes it, so rotating forged values does not
+    # buy fresh buckets.
+    email_lc = str(req.email).lower()
+    throttle_key = f"login:{email_lc}:{throttle_client_ip(request)}"
+    # Gap-audit fix #6 — plus an OPT-IN per-email cap across ALL addresses
+    # (settings.LOGIN_EMAIL_MAX_ATTEMPTS, 0 = off by default: when on it refuses
+    # even the right password, so a distributed attacker could lock the owner
+    # out). Only attempts the email+IP bucket ADMITS are counted toward it. Its count is never cleared on success, only
+    # the successful attempt's own pre-count is refunded: one sign-in by the
+    # owner must not hand a stuffing run a fresh budget.
+    email_key = f"login_email:{email_lc}"
     # Owner, 2026-09-28 — logs keep first letter + domain, never the full address.
     log_email = safe_log_value(mask_email(str(req.email)))
-    if auth_rate_limit.is_locked(
+    # Check AND count in one atomic step, BEFORE the first await (security
+    # review P1): checking here and recording after the DB read let a concurrent
+    # burst from one address pass the check many times over. The attempt is
+    # pre-counted as a failure; a successful login refunds it below.
+    admission = auth_rate_limit.admit_login_attempt(
         throttle_key,
-        max_failures=LOGIN_MAX_ATTEMPTS,
+        email_key,
+        ip_max=LOGIN_MAX_ATTEMPTS,
+        email_max=settings.LOGIN_EMAIL_MAX_ATTEMPTS,
         window_seconds=LOGIN_LOCKOUT_WINDOW_SECONDS,
-    ):
+    )
+    if not admission.admitted:
         get_audit_logger().warning(
             "auth",
-            extra={"event": "login", "status": "locked", "email": log_email, **_client_meta(request)},
+            extra={
+                "event": "login", "status": "locked", "email": log_email,
+                "lock": admission.lock, **_client_meta(request),
+            },
         )
+        # One body for both locks: which bucket refused is never revealed.
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="too many failed login attempts; try again later",
@@ -273,7 +288,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     stored_hash = row["password_hash"] if row is not None else _DUMMY_PW_HASH
     pw_ok = verify_password(stored_hash, req.password)
     if row is None or not pw_ok:
-        auth_rate_limit.record_failure(throttle_key)
+        # Already counted by admit_login_attempt above.
         get_audit_logger().warning(
             "auth",
             extra={"event": "login", "status": "fail", "email": log_email, **_client_meta(request)},
@@ -282,8 +297,11 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
         )
-    # Success — clear the failure counter so earlier typos don't accumulate.
+    # Success — clear the email+IP failure counter so earlier typos don't
+    # accumulate (this also drops this attempt's pre-count), and refund this
+    # attempt's pre-count from the per-email bucket, leaving the rest.
     auth_rate_limit.clear_failures(throttle_key)
+    auth_rate_limit.refund_login_attempt(email_key, admission)
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=row["id"], secret=_secret())
     _set_session_cookie(response, cookie)
     get_audit_logger().info(
@@ -325,17 +343,21 @@ async def logout(
     return response
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=MeResponse)
 async def me(
     user: CurrentUser = Depends(require_user),  # noqa: B008
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-) -> UserResponse:
-    cur = await db._db.execute("SELECT timezone, analytics_consent_at FROM users WHERE id = ?", (user.id,))
+) -> MeResponse:
+    cur = await db._db.execute(
+        "SELECT timezone, has_password, analytics_consent_at FROM users WHERE id = ?", (user.id,)
+    )
     row = await cur.fetchone()
     data = dict(row) if row else {}
     tz = data.get("timezone") or "UTC"
-    return UserResponse(
-        id=user.id, email=user.email, timezone=tz, analytics_consent=bool(data.get("analytics_consent_at"))
+    return MeResponse(
+        id=user.id, email=user.email, timezone=tz,
+        analytics_consent=bool(data.get("analytics_consent_at")),
+        has_password=data.get("has_password") is not False,
     )
 
 
@@ -413,9 +435,13 @@ async def set_analytics_consent(
 @router.get("/users/me/export", dependencies=AUTH_FIRST)
 async def export_my_data(
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Download everything we hold on the caller as one JSON file (Article 20).
+
+    Web session only (gap roadmap slice 3): a leaked, never-expiring agent token
+    must not be able to download the whole account. An assistant reads history
+    through ``export_history``, which leaves out the account tables.
 
     GET is correct here: it is a pure read, no state changes. Scoped to the
     session's own ``user.id`` (rule #12) — the caller can never name another user.
@@ -460,7 +486,34 @@ async def export_my_data(
 
 
 class AccountDeleteRequest(BaseModel):
-    current_password: str
+    # Optional only for an account with no password (``users.has_password`` is
+    # FALSE); an account WITH one must still send it (hard rule #26).
+    current_password: Optional[str] = None
+
+
+def _fresh_link_required() -> str:
+    """The 403 detail for a passwordless delete from a stale session: what to do next."""
+    minutes = max(1, settings.ACCOUNT_DELETE_FRESH_SESSION_SECONDS // 60)
+    return (
+        "This account has no password. To delete it, sign out, sign in again with a fresh "
+        f"email link, then delete your account within {minutes} minutes."
+    )
+
+
+async def _session_is_fresh(cookie: Optional[str]) -> bool:
+    """True when the caller's session was created inside the fresh-sign-in window.
+
+    The sessions table does not record HOW a session was made, so this reads its
+    ``created_at`` alone. For an account with no password that is enough: the
+    only way such an account gets a session is consuming a magic link.
+    """
+    if not cookie:
+        return False
+    created = await auth_sessions.session_created_at(str(DB_PATH), cookie, secret=_secret())
+    if created is None:
+        return False
+    age = (datetime.now(timezone.utc) - created).total_seconds()
+    return 0 <= age <= settings.ACCOUNT_DELETE_FRESH_SESSION_SECONDS
 
 
 @router.delete("/users/me", status_code=204, dependencies=AUTH_FIRST)
@@ -468,10 +521,16 @@ async def delete_account(
     req: AccountDeleteRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
+    job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> Response:
-    """ERASE the caller's account (GDPR Article 17). Requires current-password
-    verification (hard rule #26), then clears the session cookie.
+    """ERASE the caller's account (GDPR Article 17), then clear the session cookie.
+
+    Web session only: an agent token can never erase the account. An account
+    with a password must send it (hard rule #26). An account with NO password
+    (``has_password`` FALSE: only a magic link ever signed it in) cannot, so it
+    may delete only from a session created by a fresh email link, inside
+    ``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.
 
     Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
@@ -479,13 +538,27 @@ async def delete_account(
     async with open_db(str(DB_PATH)) as adb:
         adb.row_factory = pg.Row
         cursor = await adb.execute(
-            "SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL",
+            "SELECT password_hash, has_password FROM users WHERE id = ? AND deleted_at IS NULL",
             (user.id,),
         )
         row = await cursor.fetchone()
-    if not row or not verify_password(row["password_hash"], req.current_password):
+    if not row:
         raise HTTPException(status_code=401, detail="current password is incorrect")
+    if row["has_password"] is False:
+        if not await _session_is_fresh(job360_session):
+            get_audit_logger().info(
+                "auth", extra={"event": "account_delete", "user_id": user.id, "status": "stale_session"}
+            )
+            raise HTTPException(status_code=403, detail=_fresh_link_required())
+        verified_by = "fresh_link"
+    else:
+        if not req.current_password or not verify_password(row["password_hash"], req.current_password):
+            raise HTTPException(status_code=401, detail="current password is incorrect")
+        verified_by = "password"
     await db.hard_delete_user(user.id)
+    get_audit_logger().info(
+        "auth", extra={"event": "account_delete", "user_id": user.id, "status": "ok", "verified_by": verified_by}
+    )
     # Mutate + return the injected response so the cookie clear reaches the client
     # (returning a fresh Response drops the Set-Cookie header).
     response.delete_cookie(SESSION_COOKIE_NAME)
@@ -506,7 +579,7 @@ async def change_password(
     req: PasswordChangeRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Authenticated password change. Requires current password verification,
     then invalidates the session cookie to force re-login (hard rule #26 —
@@ -546,7 +619,7 @@ async def change_email(
     req: EmailChangeRequest,
     response: Response,
     db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_user),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> Response:
     """Change email. Requires current password. Invalidates session → re-login required."""
     async with open_db(str(DB_PATH)) as adb:
@@ -615,8 +688,7 @@ async def password_reset_request(
     """
     # Hash the IP rather than use it directly — bucket key is opaque
     # in any future log dump or telemetry export.
-    client_ip = request.client.host if request.client else "unknown"
-    ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
+    ip_hash = hashlib.sha256(throttle_client_ip(request).encode("utf-8")).hexdigest()[:16]
     key = f"password-reset:{ip_hash}"
     # Two dimensions, both must pass. The IP throttle alone lets an attacker who
     # rotates IPs email-bomb ONE address (each fresh IP is a fresh bucket). The

@@ -86,6 +86,8 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("browser_sign_ins", "user_id"),
     # "Send starts my assistant": the user's start link, token encrypted (migration 0066).
     ("assistant_triggers", "user_id"),
+    # Write-tool idempotency keys: request_id -> the first reply (migration 0070).
+    ("idempotency_keys", "user_id"),
 )
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here

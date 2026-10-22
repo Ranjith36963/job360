@@ -24,6 +24,7 @@ from typing import Literal, Optional
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 
+from src.api.client_ip import throttle_client_ip
 from src.core import settings
 from src.core.settings import DB_PATH
 from src.repositories import pg
@@ -73,16 +74,6 @@ class CurrentUser:
     actor_name: Optional[str] = None
 
 
-def _client_ip(request: Request) -> str:
-    """Same trust rule as routes/auth._client_meta: X-Forwarded-For only behind our proxy."""
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        xff = request.headers.get("x-forwarded-for", "")
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    return request.client.host if request.client else "unknown"
-
-
 def _bearer_from_header(authorization: Optional[str]) -> Optional[str]:
     """The token part of ``Authorization: Bearer <token>``; None when the header is absent."""
     if not authorization:
@@ -115,7 +106,9 @@ async def _current_user_from_personal_bearer(request: Request, token: str) -> Cu
     The token is resolved FIRST and the throttle consulted only on failure: a
     credential that verifies is never brute force, so it must never be refused
     because of someone else's junk. Behind the Next.js rewrite every agent
-    shares the proxy's IP (unless ``JOB360_TRUST_PROXY=1``), so a lock checked
+    shares the proxy's IP unless trusted proxy hops are configured
+    (``src.api.client_ip``), and even then agents behind one NAT share one
+    address, so a lock checked
     before the lookup would let one bad client 429 every valid token. The cost
     is one indexed hash lookup per junk attempt — cheap, and bounded by 429.
     """
@@ -123,7 +116,7 @@ async def _current_user_from_personal_bearer(request: Request, token: str) -> Cu
     if owner is None:
         limit = settings.API_TOKEN_FAIL_MAX_PER_MIN
         if limit > 0:
-            fail_key = f"api_token_fail:{_client_ip(request)}"
+            fail_key = f"api_token_fail:{throttle_client_ip(request)}"
             # is_locked prunes the window; checking it before recording keeps
             # the bucket bounded (same order the login route uses).
             if auth_rate_limit.is_locked(fail_key, max_failures=limit, window_seconds=60):
@@ -161,7 +154,7 @@ async def _current_user_from_oauth_bearer(request: Request, token: str) -> Curre
         if not resolution.hash_known:
             limit = settings.OAUTH_BEARER_FAIL_MAX_PER_MIN
             if limit > 0:
-                fail_key = f"oauth_bearer_fail:{_client_ip(request)}"
+                fail_key = f"oauth_bearer_fail:{throttle_client_ip(request)}"
                 if auth_rate_limit.is_locked(fail_key, max_failures=limit, window_seconds=60):
                     raise HTTPException(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,

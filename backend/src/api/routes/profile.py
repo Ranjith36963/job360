@@ -2097,20 +2097,51 @@ def _settings_riskier_to_reset(user: CurrentUser) -> frozenset[str]:
     return frozenset(riskier)
 
 
+def _snapshot_memory_then_clear(user: CurrentUser, base: UserInfo) -> None:
+    """Before the user-info memory BASE is wiped, append every non-empty field of
+    it to ``profile_edits`` (then a clearing row per ``user_info.*`` path), so a
+    clear is recoverable. The memory is in no version snapshot; the CV and the
+    preferences are (``save_profile``), and overlay values are already history.
+    Logs ``memory_snapshot`` with the user id and field NAMES, never a value."""
+    editable = set(profile_edits.editable_paths())
+    snapshot = [
+        (f"user_info.{name}", value)
+        for name, value in asdict(base).items()
+        if value and f"user_info.{name}" in editable
+    ]
+    overlay = [
+        str(row["path"]) for row in profile_edits.current_overlay(user.id)
+        if str(row["path"]).startswith("user_info.") and row["path"] in editable
+    ]
+    written = profile_edits.record_snapshot_then_clear(user.id, actor_for(user), snapshot, overlay)
+    logger.info(
+        "memory_snapshot",
+        extra={
+            "event": "memory_snapshot", "user_id": safe_log_value(user.id),
+            "fields": [path for path, _ in snapshot], "rows": written,
+        },
+    )
+
+
 @router.post("/profile/clear", response_model=ProfileResponse)
 async def clear_profile_section(
     section: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
-    user: CurrentUser = Depends(require_user),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> ProfileResponse:
     """Empty ONE input (or the whole profile), so the next upload starts clean.
+
+    WEB SESSION ONLY (gap roadmap slice 3): "all" wipes the CV, preferences,
+    memory and assistant settings at once, so a leaked agent token must not
+    reach it. An assistant clears one field with ``update_profile(null)``.
 
     ``section``: cv | linkedin | github | preferences | memory | all.
 
     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
     (``user_info.*``: contact, right to work, logistics, languages, equality
     answers, saved answers): the base column and the assistant's overlay rows.
-    It takes no version snapshot and leaves the CV, the preferences and
-    ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
+    It takes no version snapshot (it copies the memory into ``profile_edits``
+    first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+    preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
     ``github`` leave it alone; only ``all`` resets it.
 
@@ -2136,10 +2167,11 @@ async def clear_profile_section(
         )
     if section in ("preferences", "all"):
         _guard_avoid_list(user, None)
-    # S2 injection guard — this route takes a bearer token too, and "all" resets
-    # the assistant settings. A reset that would LOOSEN one (end a pause, remove a
-    # daily cap) is a riskier change: only the user's own web click may make it,
-    # so for any other caller those setting rows are left standing.
+    # S2 injection guard — "all" resets the assistant settings. A reset that would
+    # LOOSEN one (end a pause, remove a daily cap) is a riskier change: only the
+    # user's own web click may make it, so for any other caller those setting rows
+    # are left standing. The route is session-only now (a token gets 403 first);
+    # this stays as a second wall in case that gate is ever loosened.
     keep_settings = _settings_riskier_to_reset(user) if section == "all" else frozenset()
     # BASE profile (``with_overlay=False``) — this route mutates and saves, so
     # starting from the merged profile would write the agent's values into the
@@ -2150,16 +2182,10 @@ async def clear_profile_section(
 
     if section == "memory":
         # The memory has its own column and ONE writer, and is not part of a
-        # version snapshot: no save_profile, no new version.
+        # version snapshot: no save_profile, no new version. Its values go to
+        # the append-only history first, with the overlay's clearing rows.
+        _snapshot_memory_then_clear(user, profile.user_info)
         save_user_info(user.id, UserInfo(), "clear_memory")
-        _clear_overlay_paths(
-            user,
-            [
-                row["path"]
-                for row in profile_edits.current_overlay(user.id)
-                if str(row["path"]).startswith("user_info.")
-            ],
-        )
         _log_profile_cleared(user.id, section)
         return load_profile_response(user.id)[1]
 
@@ -2203,6 +2229,9 @@ async def clear_profile_section(
         _reinfer_level_from_what_remains(profile)
     save_profile(profile, user.id, f"clear_{section}")
     if section == "all":
+        # Memory first to the history (its overlay paths then read as cleared,
+        # so the prefix sweep below skips them).
+        _snapshot_memory_then_clear(user, profile.user_info)
         save_user_info(user.id, UserInfo(), "clear_all")
         # S2 — a full reset also returns the assistant settings to their safe
         # defaults and cancels every request still waiting for the user's OK.
