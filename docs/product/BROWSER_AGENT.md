@@ -226,6 +226,7 @@ the page's own requests to finish, because single-page sites (React forms) draw 
   site newly drew the file name on the page (not just the file box holding it, and not a name already on the page),
   because Greenhouse can take the file and still show an error (ApplYourself). A new "failed / error / try again /
   too large / not supported" line next to the field makes it false and comes back as `upload_error` (page text).
+  The CV goes to the page as an in-memory file, not a temp path, and `upload_confirmed` is read after waiting up to about 10 s for the site to show the file name.
 - **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
   `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); a line break (`\n` only; `\r` is refused) goes
   only into a multi-line `<textarea>`, inserted as text. Option labels quoted in an error sit inside the untrusted marker.

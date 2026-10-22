@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 12
-TOOLS_REV_FOR_HASH = "0955b0a888b9"
+TOOLS_REV = 14
+TOOLS_REV_FOR_HASH = "68129d3cbb95"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -890,6 +890,7 @@ def build_server(version: str = "") -> MCPServer:
         employer_published_at: Optional[str] = None,
         origin: Optional[str] = None,
         queue: bool = False,
+        listed_people: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
@@ -900,29 +901,29 @@ def build_server(version: str = "") -> MCPServer:
 
         Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
-        `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`
-        (e.g. "GB", "DE", "IN"). If the ad says nothing, leave it out — Job360 never
-        guesses.
+        `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`.
+        If the ad says nothing, leave it out — Job360 never guesses.
 
-        Job facts (pass them on EVERY bring when you know them; they feed the
-        user's stats): `country` = the job's ISO alpha-2 code ("FR", "US"),
+        Job facts (pass them whenever you know them): `country` = the job's ISO alpha-2 code ("FR", "US"),
         `remote` = true/false, `found_on` = where the ad was found — one of
         "indeed", "linkedin", "company_careers", "job_board", "referral",
         "visa_sponsor_list", "pasted_by_user", "other". Leave out what you do
-        not know — Job360 never guesses. Fix them later with update_job.
+        not know. Fix them later with update_job.
 
         Ad dates (pass them when the ad shows them, YYYY-MM-DD): `posted_at` =
         the date the listing says it was posted, `employer_published_at` = the
         date on the employer's own posting.
 
-        The reply carries `checks`: plain facts about this ad (is the text the
-        full ad or only a title/teaser, which kind of site the apply link is on,
-        how old the ad is, whether it was reposted, whether pay or sponsorship
-        is mentioned). Read them: if the text is title_only or partial, fetch the
+        The reply carries `checks`: plain facts about this ad (full ad or only a
+        title/teaser, the apply link's site, ad age, repost, pay or sponsorship
+        mentioned). Read them: if the text is title_only or partial, fetch the
         full ad first; if the host is unknown, tell the user. They never block a bring.
         `repost` (not null) = among jobs YOU brought, this title at this company was first
         brought on `first_seen` (1-90 days ago) under another link: tell the user; they decide.
-        `origin`: "ai_hunt" (you found it), "user_link" or "user_paste"; `queue`=true puts it in the batch."""
+        `origin`: "ai_hunt" (you found it), "user_link" or "user_paste"; `queue`=true puts it in the batch.
+        `listed_people` (max 10): people the ad names (hiring team), each {"name", "role",
+        "linkedin_url"}; saved as this job's contacts, found_via "job_ad".
+        `known_people`: see rules."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         description, visa_detail = _unfence_in(description), _unfence_in(visa_detail)
         try:
@@ -931,7 +932,7 @@ def build_server(version: str = "") -> MCPServer:
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
                 country=country, remote=remote, found_on=found_on,
                 posted_at=posted_at, employer_published_at=employer_published_at,
-                origin=origin, queue=queue,  # type: ignore[arg-type]  # the model validates the closed set
+                origin=origin, queue=queue, listed_people=listed_people,  # type: ignore[arg-type]  # the model validates the closed set and item shape
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -941,7 +942,8 @@ def build_server(version: str = "") -> MCPServer:
         except HTTPException as exc:
             _audit("bring_job", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
-        _audit("bring_job", "ok", job_id=resp.job.id, existing=resp.existing)
+        _audit("bring_job", "ok", job_id=resp.job.id, existing=resp.existing,
+               listed_people=len(resp.listed_people or []))
         out = _job_summary(resp.job, resp.application_id)
         out.update(
             {
@@ -950,6 +952,10 @@ def build_server(version: str = "") -> MCPServer:
                 "ad_posted_at": resp.ad_posted_at, "employer_published_at": resp.employer_published_at,
                 "checks": resp.checks, "repost": resp.repost,
                 "queued": resp.queued, "queue_note": resp.queue_note,
+                "listed_people": (
+                    [p.model_dump() for p in resp.listed_people] if resp.listed_people is not None else None
+                ),
+                "known_people": resp.known_people.model_dump(),
                 "assistant_hint": ASSISTANT_HINT,
             }
         )
@@ -1611,6 +1617,7 @@ def build_server(version: str = "") -> MCPServer:
         occurred_at: Optional[str] = None,
         found_via: Optional[str] = None,
         source_url: Optional[str] = None,
+        company: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
@@ -1626,7 +1633,9 @@ def build_server(version: str = "") -> MCPServer:
         `found_via` = where you found them: "company_site", "linkedin",
         "apollo", "referral", "job_ad", "email", "event" or "other" (leave it
         out if you do not know). `source_url` = the page you found them on
-        (http/https); Job360 stores it, never opens it."""
+        (http/https); Job360 stores it, never opens it. `company` = the employer they work at: REQUIRED without
+        application_id; on a job leave it out unless they work elsewhere (an agency) -
+        it then follows the job's company."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
@@ -1634,12 +1643,13 @@ def build_server(version: str = "") -> MCPServer:
                 body: Any = applications_route.AddPersonRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
-                    source_url=source_url,
+                    source_url=source_url, company=company,
                 )
             else:
                 body = applications_route.AddContactRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, found_via=found_via, source_url=source_url,
+                    company=company,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1669,18 +1679,21 @@ def build_server(version: str = "") -> MCPServer:
         notes: Optional[str] = None,
         found_via: Optional[str] = None,
         source_url: Optional[str] = None,
+        company: Optional[str] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
         Only fields you pass are changed. `found_via` takes the same closed
-        set as add_contact; `source_url` is http/https; "" clears either. A foreign/unknown contact_id reads
+        set as add_contact; `source_url` is http/https; "" clears either.
+        `company` = their employer ("" clears it; a contact with no job must
+        keep one). A foreign/unknown contact_id reads
         404."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
             body = applications_route.UpdateContactRequest(
                 name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
-                source_url=source_url,
+                source_url=source_url, company=company,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1695,21 +1708,29 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def list_people(contact_id: Optional[int] = None, email: Optional[str] = None) -> dict[str, Any]:
+    async def list_people(
+        contact_id: Optional[int] = None, email: Optional[str] = None, company: Optional[str] = None
+    ) -> dict[str, Any]:
         """Every person you've added (`people`) — grouped so the same
         recruiter linked to two jobs shows once, with both jobs listed, the
         latest message, when it was sent/replied and on what channel, and a
         message count. `email` narrows to one person. Give `contact_id` for
         that ONE record in full: every message VERSION, every sent/reply
         mark, and the detail-edit history. `reachable` = an email or LinkedIn URL is
-        saved; `source_url` = where they were found."""
+        saved; `source_url` = where they were found. `company` = only people you stored
+        at that company (a contact with no company counts at its job's company)."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.list_people(contact_id, email, db, _user())
+                resp = await applications_route.list_people(
+                    contact_id=contact_id, email=email, company=company, db=db, user=_user()
+                )
         except HTTPException as exc:
-            _audit("list_people", "error", contact_id=contact_id, http_status=exc.status_code)
+            _audit(
+                "list_people", "error", contact_id=contact_id, has_company=bool(company),
+                http_status=exc.status_code,
+            )
             raise _tool_error(exc) from None
-        _audit("list_people", "ok", contact_id=contact_id)
+        _audit("list_people", "ok", contact_id=contact_id, has_company=bool(company))
         fence = _Fence()
         fence.contacts(resp.get("people"))
         fence.record(resp.get("person"), _CONTACT_PATHS)
@@ -1932,7 +1953,7 @@ def build_server(version: str = "") -> MCPServer:
         site_refused = fix the fields; neither = never click again. `site` = that site's tips;
         page_changed false = do not repeat. Follow get_recipe("forms") and get_recipe("ats") for the rest.
         Pass your `session` on every call: another session gets busy (browser_in_use).
-        Close when done: one browser per user, closed after 10 idle minutes."""
+        Close when done: one browser per user, closed after 10 idle minutes or a Job360 update; reopen."""
         try:
             body = browser_route.BrowserActionRequest.model_validate(
                 {

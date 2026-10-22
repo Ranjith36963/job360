@@ -16,7 +16,14 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
-from src.services.applications.job_checks import apply_host, canonical_url, classify_host, job_checks
+from src.services.applications.job_checks import (
+    apply_host,
+    canonical_url,
+    classify_host,
+    job_checks,
+    redact_url,
+    redact_url_for_display,
+)
 
 TODAY = date(2026, 10, 13)
 
@@ -193,6 +200,163 @@ def test_canonical_url_folds_tracking_and_noise():
     assert canonical_url("") == "" and canonical_url("ftp://x.example/a") == "" and canonical_url("nonsense") == ""
 
 
+# ── redact_url (gap-audit #18): no secret in a stored / shown link, no real ATS key lost ──
+
+_UUID = "bd6366c8-893a-49fd-9b9a-31cb75a397d0"
+TOK = "0123456789abcdef0123456789abcdef"
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        # Workday: the id is in the path; ?source= is not a tracking key, so it stays.
+        (
+            "https://acme.wd5.myworkdayjobs.com/en-US/External/job/London/ML-Engineer_JR-1234?source=LinkedIn",
+            "https://acme.wd5.myworkdayjobs.com/en-US/External/job/London/ML-Engineer_JR-1234?source=LinkedIn",
+        ),
+        # Magic link: token goes; the email (not a secret key) stays as typed.
+        ("https://x.example/auth?token=abcdef0123456789abcdef&email=a@b.c", "https://x.example/auth?email=a@b.c"),
+        # Fragment token.
+        ("https://x.example/cb#access_token=eyJabc&token_type=bearer", "https://x.example/cb"),
+        # Job-id keys stay in their original order; tracking and secret keys go.
+        (
+            "https://co.example/careers?utm_source=x&gh_jid=123&token=abcdef0123456789abcdef&gclid=g",
+            "https://co.example/careers?gh_jid=123",
+        ),
+        # The lead's three ATS links: the job lives in a key a job-id allowlist would have lost.
+        (
+            "https://www.civilservicejobs.service.gov.uk/csr/jobs.cgi?jcode=1925234&SID=abcdef0123456789abcdef",
+            "https://www.civilservicejobs.service.gov.uk/csr/jobs.cgi?jcode=1925234&SID=abcdef0123456789abcdef",
+        ),
+        (
+            "https://career5.successfactors.eu/career?career_ns=job_listing&company=AcmeP&career_job_req_id=123"
+            "&sessionid=abcdef0123456789",
+            "https://career5.successfactors.eu/career?career_ns=job_listing&company=AcmeP&career_job_req_id=123",
+        ),
+        # Greenhouse embed: token=4567890 IS the numeric job id, so a short numeric secret-named value stays.
+        (
+            "https://boards.greenhouse.io/embed/job_app?for=acme&token=4567890",
+            "https://boards.greenhouse.io/embed/job_app?for=acme&token=4567890",
+        ),
+        (
+            f"https://boards.greenhouse.io/embed/job_app?for=acme&token={TOK}",  # 32 hex: random, dropped
+            "https://boards.greenhouse.io/embed/job_app?for=acme",
+        ),
+        ("https://x.example/j?sid=Z9&state=CA&login=bob", "https://x.example/j?sid=Z9&state=CA&login=bob"),  # short
+        ("https://x.example/j?sid=a1b2c3d4e5f6a7b8", "https://x.example/j"),  # 16 chars, letters and digits
+        # Civil Service Jobs: the job rides inside SID, so SID stays on that host (and only there).
+        (
+            "https://www.civilservicejobs.service.gov.uk/csr/index.cgi?SID=cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ1",
+            "https://www.civilservicejobs.service.gov.uk/csr/index.cgi?SID=cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ1",
+        ),
+        ("https://x.example/csr/index.cgi?SID=cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ1", "https://x.example/csr/index.cgi"),
+        # Always-secret keys go whatever the value.
+        ("https://x.example/a?email=a@b.com&code=482913", "https://x.example/a?email=a@b.com"),
+        ("https://x.example/a?otp=123456&pwd=12345678&pin=1", "https://x.example/a"),
+        # A ``;`` separates query pieces on some servers: each piece is judged alone.
+        ("https://x.example/a?a=1;token=" + "ab12" * 5, "https://x.example/a?a=1"),  # built at runtime: no literal for the secret scan
+        ("https://x.example/a?a=1;b=2&c=3;otp=9", "https://x.example/a?a=1;b=2&c=3"),
+        # Fragments: kept unless they hold a secret key or are long.
+        ("https://x.example/jobs#jobDetails=1234567_5313", "https://x.example/jobs#jobDetails=1234567_5313"),
+        ("https://x.example/cb#access_token=x", "https://x.example/cb"),
+        (f"https://x.example/cb#token={TOK}", "https://x.example/cb"),
+        (f"https://x.example/cb#{'a' * 65}", "https://x.example/cb"),
+        ("https://x.example/jobs#apply", "https://x.example/jobs#apply"),
+        # Unknown ATS keys stay.
+        ("https://x.example/j?posting=5&vacancyId=77&pid=9", "https://x.example/j?posting=5&vacancyId=77&pid=9"),
+        # Other ATS shapes.
+        (
+            "https://acme.taleo.net/careersection/2/jobdetail.ftl?job=2400123&lang=en&src=JB-10040",
+            "https://acme.taleo.net/careersection/2/jobdetail.ftl?job=2400123&lang=en&src=JB-10040",
+        ),
+        (
+            "https://www.linkedin.com/jobs/collections/recommended/?currentJobId=3912345678&refId=r&trackingId=t",
+            "https://www.linkedin.com/jobs/collections/recommended/?currentJobId=3912345678",
+        ),
+        # Signed links (S3 / GCS style).
+        ("https://x.example/f.pdf?X-Amz-Signature=abc&X-Goog-Credential=c&id=7", "https://x.example/f.pdf?id=7"),
+        # User info, a path session id, a non-default port.
+        ("https://user:pw@x.example:8443/a;jsessionid=ABC123/b?sig=zz", "https://x.example:8443/a/b"),
+    ],
+)
+def test_redact_url_is_a_denylist_that_keeps_real_ats_keys(raw: str, want: str):
+    got = redact_url(raw)
+    assert got == want
+    assert "pw@" not in got and "ABC123" not in got and "Amz" not in got
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        # What an agent is shown: scheme + host + path + job-id keys only.
+        (
+            "https://acme.wd5.myworkdayjobs.com/en-US/External/job/London/ML-Engineer_JR-1234?source=LinkedIn",
+            "https://acme.wd5.myworkdayjobs.com/en-US/External/job/London/ML-Engineer_JR-1234",
+        ),
+        ("https://x.example/auth?token=abc&email=a@b.c", "https://x.example/auth"),
+        ("https://x.example/cb#access_token=eyJabc&token_type=bearer", "https://x.example/cb"),
+        ("https://co.example/careers?utm_source=x&gh_jid=123&token=abc", "https://co.example/careers?gh_jid=123"),
+        ("https://www.civilservicejobs.service.gov.uk/csr/jobs.cgi?jcode=1925234&SID=abc",
+         "https://www.civilservicejobs.service.gov.uk/csr/jobs.cgi?jcode=1925234"),
+        (f"https://co.example/jobs?ashby_jid={_UUID}&utm_campaign=z", f"https://co.example/jobs?ashby_jid={_UUID}"),
+        ("https://acme.taleo.net/careersection/2/jobdetail.ftl?job=2400123&lang=en&src=JB-10040",
+         "https://acme.taleo.net/careersection/2/jobdetail.ftl?job=2400123"),
+        ("https://uk.indeed.com/viewjob?jk=d56bf1dbda3ddc79&from=serp", "https://uk.indeed.com/viewjob?jk=d56bf1dbda3ddc79"),
+        ("https://user:pw@x.example:8443/a;jsessionid=ABC123/b?sid=1", "https://x.example:8443/a/b"),
+        # A long value under an allowed key could be a token: not shown.
+        (f"https://x.example/j?id={'a' * 80}", "https://x.example/j"),
+    ],
+)
+def test_redact_url_for_display_shows_only_scheme_host_path_and_job_id(raw: str, want: str):
+    assert redact_url_for_display(raw) == want
+
+
+def test_redact_url_blank_and_non_http_are_empty():
+    assert redact_url("") == "" and redact_url("javascript:alert(1)") == "" and redact_url("ftp://x.example/a") == ""
+    assert redact_url("https://[bad") == ""
+
+
+def test_redact_url_for_display_handles_browser_pages():
+    assert redact_url_for_display("about:blank") == "about:blank"
+    assert redact_url_for_display("chrome-error://chromewebdata/") == "chrome-error://chromewebdata/"
+    assert redact_url_for_display("data:text/html,<p>secret</p>") == ""
+    assert redact_url_for_display("https://x.example/auth?token=abc#frag") == "https://x.example/auth"
+
+
+def test_canonical_url_matches_old_full_links_to_new_redacted_ones():
+    old = "https://boards.greenhouse.io/parisien?utm_source=x&gh_jid=123"
+    new = "https://Boards.Greenhouse.io/parisien/?gh_jid=123&token=" + "ab12" * 6  # no literal for the secret scan
+    assert canonical_url(old) == canonical_url(new) == canonical_url(redact_url(new))
+    assert canonical_url("https://x.example/j?id=2&a=1") == canonical_url("https://x.example/j?a=1&id=2")
+    assert canonical_url("https://x.example/j?id=2") != canonical_url("https://x.example/j?id=3")
+    # Two jobs that differ only by a key we do not know are two jobs.
+    assert canonical_url("https://x.example/j?posting=5") != canonical_url("https://x.example/j?posting=6")
+    assert canonical_url("https://x.example/csr/jobs.cgi?jcode=1&SID=a1b2c3d4e5f6a7b8") != canonical_url(
+        "https://x.example/csr/jobs.cgi?jcode=2&SID=a1b2c3d4e5f6a7b8"
+    )
+    assert canonical_url("https://x.example/csr/jobs.cgi?jcode=1&SID=a1b2c3d4e5f6a7b8") == canonical_url(
+        "https://x.example/csr/jobs.cgi?jcode=1&SID=b8a7f6e5d4c3b2a1"
+    )
+    # Civil Service Jobs: two different adverts differ only by SID (the job rides inside it).
+    csj = "https://www.civilservicejobs.service.gov.uk/csr/index.cgi?SID="
+    assert canonical_url(csj + "cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ1") != canonical_url(csj + "cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ2")
+    assert canonical_url(csj + "cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ1#x") == canonical_url(csj + "cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ1")
+    # The fragment is not part of the comparison; a secret ``;`` piece is not either.
+    assert canonical_url("https://x.example/j?a=1;token=abc123def456ghi789#top") == canonical_url("https://x.example/j?a=1")
+
+
+def test_kit_norm_url_keeps_two_civil_service_jobs_apart_and_ignores_secrets():
+    """norm_url feeds the duplicate check (duplicate_facts -> may_submit): two CSJ adverts that differ only by
+    SID must stay two jobs, while a session token on another host must not."""
+    from src.services.applications.kit import norm_url
+
+    csj = "https://www.civilservicejobs.service.gov.uk/csr/index.cgi?SID="
+    a, b = csj + "cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ1", csj + "cGFnZWNsYXNzPUpvYnMmam9kZT0xOTEyMzQ2"
+    assert norm_url(a) != norm_url(b) and norm_url(a) == norm_url(a + "#x")
+    assert norm_url(f"https://co.example/j?gh_jid=1&token={TOK}#t") == norm_url("https://co.example/j?gh_jid=1")
+    assert norm_url("https://co.example/j?posting=5") != norm_url("https://co.example/j?posting=6")
+
+
 # ── route level ─────────────────────────────────────────────────────────────
 
 _AD = {
@@ -277,6 +441,81 @@ async def test_same_link_with_tracking_params_is_the_same_job(authenticated_asyn
         other = (await _bring(client, {**_AD, "title": "Other", "apply_url": "https://boards.greenhouse.io/parisien/jobs/4501299"})).json()
         assert other["existing"] is False and other["application_id"] != first["application_id"]
         assert len((await client.get("/api/applications")).json()["applications"]) == 2
+
+
+async def _stored_links(application_id: int) -> tuple[str, str]:
+    from src.api import dependencies as api_deps
+
+    db = await api_deps.get_db()
+    cur = await db._db.execute(
+        "SELECT a.job_url, j.apply_url FROM applications a JOIN jobs j ON j.id = a.job_id WHERE a.id = ?",
+        (application_id,),
+    )
+    row = await cur.fetchone()
+    return str(row["job_url"]), str(row["apply_url"])
+
+
+@pytest.mark.asyncio
+async def test_bring_stores_the_link_without_the_token(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        resp = await _bring(
+            client,
+            {**_AD, "apply_url": f"https://boards.greenhouse.io/parisien/jobs/4501234?token={TOK}&sessionid=Z9&code=482913#access_token=q"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        want = "https://boards.greenhouse.io/parisien/jobs/4501234"
+        assert body["job"]["apply_url"] == want
+        assert await _stored_links(body["application_id"]) == (want, want)
+        detail = (await client.get(f"/api/applications/{body['application_id']}")).json()
+        assert "abc" not in str(detail["job"]) and "access_token" not in str(detail["job"])
+
+        magic = await _bring(
+            client, {**_AD, "title": "Other", "apply_url": f"https://x.example/auth?token={TOK}&email=a@b.c"}
+        )
+        assert magic.status_code == 200, magic.text
+        assert magic.json()["job"]["apply_url"] == "https://x.example/auth?email=a@b.c"
+        assert "token" not in magic.json()["job"]["apply_url"]
+
+
+@pytest.mark.asyncio
+async def test_update_job_stores_the_new_link_without_the_token(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client)).json()["application_id"]
+        fixed = await client.patch(
+            f"/api/applications/{app_id}/job",
+            json={"apply_url": f"https://co.example/careers?gh_jid=123&token={TOK}&utm_source=x#access_token=q"},
+        )
+        assert fixed.status_code == 200, fixed.text
+        assert (await _stored_links(app_id))[0] == "https://co.example/careers?gh_jid=123"
+
+
+@pytest.mark.asyncio
+async def test_an_old_row_stored_in_full_is_still_the_same_job_as_a_new_redacted_bring(authenticated_async_context):
+    """Rows stored before gap-audit #18 hold the full link (``?utm_source=x&gh_jid=123``). A new bring of
+    ``?gh_jid=123&token=<random>`` must still land on the same job and application, not a duplicate."""
+    from src.api import dependencies as api_deps
+
+    old = "https://co.example/careers?utm_source=x&gh_jid=123"
+    async with authenticated_async_context() as client:
+        first = (await _bring(client, {**_AD, "apply_url": "https://co.example/careers?gh_jid=123"})).json()
+        db = await api_deps.get_db()
+        await db._db.execute("UPDATE applications SET job_url = ? WHERE id = ?", (old, first["application_id"]))
+        await db._db.execute("UPDATE jobs SET apply_url = ? WHERE id = ?", (old, first["job"]["id"]))
+        await db._db.commit()
+
+        again = await _bring(
+            client,
+            {
+                **_AD, "title": "Machine Learning Engineer (Remote)", "company": "Parisien SAS",
+                "apply_url": f"https://co.example/careers?gh_jid=123&token={TOK}",
+            },
+        )
+        assert again.status_code == 200, again.text
+        second = again.json()
+        assert second["existing"] is True
+        assert second["application_id"] == first["application_id"] and second["job"]["id"] == first["job"]["id"]
+        assert len((await client.get("/api/applications")).json()["applications"]) == 1
 
 
 @pytest.mark.asyncio

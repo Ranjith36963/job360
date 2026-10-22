@@ -688,3 +688,27 @@ class MissingToolResponse(BaseModel):
     id: int
 
 
+
+
+class KnownPersonOut(BaseModel):
+    """One person the user already stored at this job's company (known_people). `company` is
+    the contact's own company, else its linked job's; `application_ids` = the jobs they are linked to."""
+    contact_ids: list[int]
+    name: str
+    role: str = ""
+    company: Optional[str] = None
+    found_via: Optional[str] = None
+    reachable: bool = False
+    application_ids: list[int] = Field(default_factory=list)
+    message_count: int = 0
+    last_sent_at: Optional[str] = None
+    last_sent_channel: Optional[str] = None
+    replied: bool = False
+    last_reply_at: Optional[str] = None
+
+
+class KnownPeopleOut(BaseModel):
+    """known_people: `count` = every person found; `people` = at most KNOWN_PEOPLE_MAX; `truncated` = more exist."""
+    count: int = 0
+    people: list[KnownPersonOut] = Field(default_factory=list)
+    truncated: bool = False

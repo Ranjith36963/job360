@@ -55,8 +55,8 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
 5. **Bring only the fits.** For each one: `bring_job` (`origin` "ai_hunt", `queue` true: the batch; title, company, location, ad, URL,
    and `posted_at` / `employer_published_at` as YYYY-MM-DD when the ad shows them) and ALWAYS the job facts you
    know: `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on` (`indeed`, `linkedin`,
-   `company_careers`, `job_board`, `referral`, `visa_sponsor_list`, `pasted_by_user` or `other`). Leave out only
-   what you truly do not know; fix it later with `update_job`. Then `save_fit`: your score, `score_source` and
+   `company_careers`, `job_board`, `referral`, `visa_sponsor_list`, `pasted_by_user` or `other`); people the ad
+   names (hiring team): `listed_people`. Leave out what you do not know (fix later: `update_job`). Then `save_fit`: your score, `score_source` and
    your one-line reason as `verdict` (140 chars max; no score = unscored, never low), gaps marked hard or soft.
    Skip the rest - never bring a job just to reject it - and keep a `url | reason` line for each skip in
    `skipped.txt` beside the kit's `seen_jobs.json` (never edit that file). **Done when** each fit is saved.

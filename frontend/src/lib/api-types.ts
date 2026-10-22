@@ -2137,6 +2137,7 @@ export interface paths {
          *     lower(email) else linkedin_url (the same recruiter on two jobs is one
          *     person here). With ``contact_id`` — that ONE row's own full record
          *     (message versions, sent/reply marks, detail-edit history), never merged.
+         *     ``company`` keeps only people whose company (or linked job's company) has the same company key as jobs (rule #1).
          */
         get: operations["list_people_api_people_get"];
         put?: never;
@@ -2979,6 +2980,8 @@ export interface components {
          *     ``added_by`` is deliberately ABSENT — ``extra="forbid"`` rejects it (S2).
          */
         AddContactRequest: {
+            /** Company */
+            company?: string | null;
             /**
              * Email
              * @default
@@ -3032,6 +3035,8 @@ export interface components {
         AddPersonRequest: {
             /** Application Id */
             application_id?: number | null;
+            /** Company */
+            company?: string | null;
             /**
              * Email
              * @default
@@ -3243,6 +3248,7 @@ export interface components {
             job: components["schemas"]["ApplicationJobOut"];
             /** Job Id */
             job_id: number;
+            known_people?: components["schemas"]["KnownPeopleOut"];
             /** Last Event At */
             last_event_at: string | null;
             next_step: components["schemas"]["NextStepOut"];
@@ -3390,6 +3396,7 @@ export interface components {
             instructions: string[];
             job: components["schemas"]["KitJobOut"];
             kit: components["schemas"]["KitIdOut"];
+            known_people?: components["schemas"]["KnownPeopleOut"];
             /** Missing */
             missing: components["schemas"]["KitMissingOut"][];
             /** Settings */
@@ -3924,6 +3931,8 @@ export interface components {
             employer_published_at?: string | null;
             /** Found On */
             found_on?: string | null;
+            /** Listed People */
+            listed_people?: components["schemas"]["ListedPerson"][] | null;
             /**
              * Location
              * @default
@@ -3968,6 +3977,9 @@ export interface components {
             /** Found On */
             found_on?: string | null;
             job: components["schemas"]["JobResponse"];
+            known_people?: components["schemas"]["KnownPeopleOut"];
+            /** Listed People */
+            listed_people?: components["schemas"]["ListedPersonOut"][] | null;
             /** Queue Note */
             queue_note?: string | null;
             /** Queued */
@@ -4216,6 +4228,8 @@ export interface components {
             added_by: string;
             /** Application Id */
             application_id: number | null;
+            /** Company */
+            company?: string | null;
             /** Created At */
             created_at: string;
             /** Edit History */
@@ -5469,6 +5483,67 @@ export interface components {
             where: string;
         };
         /**
+         * KnownPeopleOut
+         * @description known_people: `count` = every person found; `people` = at most KNOWN_PEOPLE_MAX; `truncated` = more exist.
+         */
+        KnownPeopleOut: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /** People */
+            people?: components["schemas"]["KnownPersonOut"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * KnownPersonOut
+         * @description One person the user already stored at this job's company (known_people). `company` is
+         *     the contact's own company, else its linked job's; `application_ids` = the jobs they are linked to.
+         */
+        KnownPersonOut: {
+            /** Application Ids */
+            application_ids?: number[];
+            /** Company */
+            company?: string | null;
+            /** Contact Ids */
+            contact_ids: number[];
+            /** Found Via */
+            found_via?: string | null;
+            /** Last Reply At */
+            last_reply_at?: string | null;
+            /** Last Sent At */
+            last_sent_at?: string | null;
+            /** Last Sent Channel */
+            last_sent_channel?: string | null;
+            /**
+             * Message Count
+             * @default 0
+             */
+            message_count: number;
+            /** Name */
+            name: string;
+            /**
+             * Reachable
+             * @default false
+             */
+            reachable: boolean;
+            /**
+             * Replied
+             * @default false
+             */
+            replied: boolean;
+            /**
+             * Role
+             * @default
+             */
+            role: string;
+        };
+        /**
          * LessonOut
          * @description One `lesson` event, read back across applications (slice 9, #516).
          */
@@ -5530,6 +5605,46 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+        };
+        /**
+         * ListedPerson
+         * @description Outreach pack #15 — a person the ad itself names ("Meet the hiring team").
+         *     Stored as a contact on this application, found_via='job_ad'. Lengths and the
+         *     http(s) rule are add_contact's (contacts.validate_listed_people).
+         */
+        ListedPerson: {
+            /**
+             * Linkedin Url
+             * @default
+             */
+            linkedin_url: string;
+            /** Name */
+            name: string;
+            /**
+             * Role
+             * @default
+             */
+            role: string;
+        };
+        /**
+         * ListedPersonOut
+         * @description One per ``listed_people`` item, same order. ``error`` (closed set) = not stored:
+         *     "contact_cap" (CONTACTS_PER_APPLICATION_MAX) or "rate_limited" (CONTACTS_MAX_PER_HOUR).
+         */
+        ListedPersonOut: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
+            /** Contact Id */
+            contact_id?: number | null;
+            /** Error */
+            error?: ("contact_cap" | "rate_limited") | null;
+            /** Matched On */
+            matched_on?: string | null;
+            /** Name */
+            name: string;
         };
         /** LiveActionRequest */
         LiveActionRequest: {
@@ -5803,6 +5918,8 @@ export interface components {
             added_by: string;
             /** Application Id */
             application_id: number | null;
+            /** Company */
+            company?: string | null;
             /** Created At */
             created_at: string;
             /** Edit History */
@@ -5850,6 +5967,8 @@ export interface components {
          *     underlying ``application_contacts`` row that shares that identity.
          */
         PersonOut: {
+            /** Company */
+            company?: string | null;
             /** Contact Ids */
             contact_ids: number[];
             /** Email */
@@ -7831,6 +7950,8 @@ export interface components {
          *     checks live ``settings`` values at call time.
          */
         UpdateContactRequest: {
+            /** Company */
+            company?: string | null;
             /** Email */
             email?: string | null;
             /** Found Via */
@@ -11626,6 +11747,7 @@ export interface operations {
             query?: {
                 contact_id?: number | null;
                 email?: string | null;
+                company?: string | null;
             };
             header?: {
                 authorization?: string | null;

@@ -7,7 +7,7 @@ Print this checklist and tick each step:
 1. **Find the right person** for this application (recruiter, hiring manager,
    someone on the team) - start with the company's own site and the job ad.
    **Done when** you have a name and where you found them.
-2. **Check first:** `list_people` so you never add someone twice.
+2. **Check first:** the kit's `known_people` and `list_people(company=...)`, so you never add someone twice.
 3. **Record them:** `add_contact` with the `application_id`, their `role`,
    and `found_via` - where you found them: `company_site`, `linkedin`,
    `apollo`, `referral`, `job_ad`, `email`, `event` or `other`. Pass the page as

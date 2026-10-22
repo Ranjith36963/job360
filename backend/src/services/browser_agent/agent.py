@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from src.services.applications.job_checks import redact_url_for_display
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
@@ -84,22 +85,64 @@ NAV_TIMEOUT_MS = 30_000
 ACT_TIMEOUT_S = 60.0
 # How often idle browsers are swept, started by the app's lifespan when the agent is on.
 REAP_EVERY_S = 60.0
+
+# Why each browser last closed (idle, crashed, closed, sign_in_forgotten), so the next call can say so
+# instead of a bare "no browser". In memory, bounded: the oldest record is dropped past the cap.
+_CLOSE_REASONS: dict[str, str] = {}
+_CLOSE_REASONS_MAX = 500
+# A process this young with no record of a close was most likely restarted by a deploy.
+_BOOT_AT = time.monotonic()
+RESTART_WINDOW_S = 15 * 60.0
+NO_BROWSER_NEXT = (
+    "Open the form's url again, upload the CV first, retype every answer from get_application_kit, "
+    "read back every value, and re-do form_swept."
+)
+
+
+def _note_closed(user_id: str, reason: str) -> None:
+    _CLOSE_REASONS.pop(user_id, None)
+    _CLOSE_REASONS[user_id] = reason
+    while len(_CLOSE_REASONS) > _CLOSE_REASONS_MAX:
+        _CLOSE_REASONS.pop(next(iter(_CLOSE_REASONS)))
+
+
+def _no_browser_error(user_id: str, idle_s: float) -> BrowserError:
+    """The refusal for a call with no open browser: says why it closed when we know."""
+    reason = _CLOSE_REASONS.get(user_id)
+    if reason == "idle":
+        why = f"The browser was closed after {max(1, int(idle_s // 60))} idle minutes; the page is gone."
+    elif reason == "crashed":
+        why = "The browser crashed; the page is gone."
+    elif reason == "closed":
+        why = "The browser was closed; the page is gone."
+    elif reason == "sign_in_forgotten":
+        why = "The browser was closed when a saved sign-in was forgotten; the page is gone."
+    elif time.monotonic() - _BOOT_AT < RESTART_WINDOW_S:
+        why = "Job360 restarted (an update); the page is gone."
+    else:
+        return BrowserError("refused", "no_browser", "No browser is open. Start with action open and a url.")
+    return BrowserError("refused", "no_browser", why + " Start with action open and a url.", NO_BROWSER_NEXT)
 _REF = re.compile(r"^e\d{1,4}_[a-z0-9]{1,4}$")
 
 
 class BrowserError(Exception):
     """A refusal the tool shows to the assistant: ``status`` + ``reason`` + one plain sentence."""
 
-    def __init__(self, status: str, reason: str, detail: str) -> None:
+    def __init__(self, status: str, reason: str, detail: str, next_step: str = "") -> None:
         super().__init__(detail)
         self.status = status
         self.reason = reason
         self.detail = detail
+        # Job360's own advice to the assistant (not page text); empty means none.
+        self.next_step = next_step
         # The page it happened on, for a needs_you stop: the route records ``blocked`` with its host.
         self.url = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"status": self.status, "reason": self.reason, "detail": self.detail}
+        out = {"status": self.status, "reason": self.reason, "detail": self.detail}
+        if self.next_step:
+            out["next"] = self.next_step
+        return out
 
 
 @dataclass
@@ -213,7 +256,7 @@ class BrowserPool:
         for user_id, s in list(self._sessions.items()):
             expired = s.closes_at is not None and now > s.closes_at
             if (now - s.last_used > self.idle_s or expired) and not s.lock.locked():
-                await self.close(user_id)
+                await self.close(user_id, "idle")
 
     async def get(
         self, user_id: str, *, create: bool, load_state: Optional[StateFn] = None
@@ -222,9 +265,10 @@ class BrowserPool:
         if self._browser is not None and not self._browser.is_connected():
             # Chromium died: every session was bound to it. Free them, or each one errors and
             # still counts against max_sessions until it idles out.
+            logger.warning("browser_agent chromium died; closing %d session(s)", len(self._sessions))
             for uid in list(self._sessions):
-                await self.close(uid)
-        s = self._sessions.get(user_id)
+                await self.close(uid, "crashed")
+        s =self._sessions.get(user_id)
         if s is not None or not create:
             return s
         async with self._create_lock:
@@ -306,12 +350,16 @@ class BrowserPool:
         context.on("request", _on_request)
         context.on("response", _on_response)
         self._sessions[user_id] = s
+        _CLOSE_REASONS.pop(user_id, None)
         return s
 
-    async def close(self, user_id: str) -> bool:
+    async def close(self, user_id: str, reason: Optional[str] = "closed") -> bool:
+        """Close one browser. ``reason`` is remembered for the next call's refusal (None: not recorded)."""
         s = self._sessions.pop(user_id, None)
         if s is None:
             return False
+        if reason:
+            _note_closed(user_id, reason)
         try:
             async with s.lock:  # never under an action in flight: it finishes first
                 await s.context.close()
@@ -321,7 +369,7 @@ class BrowserPool:
 
     async def shutdown(self) -> None:
         for user_id in list(self._sessions):
-            await self.close(user_id)
+            await self.close(user_id, None)
         if self._browser is not None:
             await self._browser.close()
             self._browser = None
@@ -602,6 +650,21 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:n] + "…"
 
 
+def _shown_url(url: str) -> str:
+    """The address the assistant is told (gap-audit #18): scheme + host + path + job-id query keys. A
+    magic link, session id or signed link in the query string or fragment must not reach the
+    assistant's transcript. Shown only: the browser itself still sits on, and opens, the full address."""
+    return _clip(redact_url_for_display(url), MAX_URL)
+
+
+_LINK_IN_TEXT = re.compile(r"https?://[^\s'\"<>]+")
+
+
+def _scrub_links(text: str) -> str:
+    """``text`` (a browser error line) with every http(s) link redacted: Playwright's messages quote the URL."""
+    return _LINK_IN_TEXT.sub(lambda m: redact_url_for_display(m.group(0)) or "[link]", text)
+
+
 def _within_size(
     elements: list[dict[str, Any]], places: list[tuple[float, bool]]
 ) -> tuple[list[dict[str, Any]], int, int]:
@@ -691,7 +754,7 @@ def _load_failed(page: Any, after_action: bool) -> dict[str, Any]:
     if not after_action:
         raise BrowserError("error", "load_failed", "The last page did not load. Open it again or try another link.")
     return {
-        "status": "error", "reason": "load_failed", "url": _clip(page.url, MAX_URL),
+        "status": "error", "reason": "load_failed", "url": _shown_url(page.url),
         "detail": "The page did not load after that action.",
     }
 
@@ -762,7 +825,7 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     text = "\n\n".join(texts)[:MAX_TEXT]
     out: dict[str, Any] = {
         "status": "ok",
-        "url": _clip(page.url, MAX_URL),
+        "url": _shown_url(page.url),
         "title": _clip(await page.title(), MAX_TITLE),
         "note": UNTRUSTED,
         "elements": elements,
@@ -1013,7 +1076,7 @@ async def run(
         return {"status": "ok", "closed": closed}
     s = await pool.get(user_id, create=action == "open", load_state=load_state)
     if s is None:
-        raise BrowserError("refused", "no_browser", "No browser is open. Start with action open and a url.")
+        raise _no_browser_error(user_id, pool.idle_s)
     if owner:
         # Checked and claimed with no await between: two sessions cannot both pass.
         if s.owner and s.owner != owner:
@@ -1034,7 +1097,7 @@ async def run(
         except BrowserError as exc:
             if exc.status == "needs_you" and not exc.url:
                 try:
-                    exc.url = _live_page(s).url
+                    exc.url = redact_url_for_display(_live_page(s).url)
                 except BrowserError:
                     pass
             raise
@@ -1047,7 +1110,7 @@ async def run(
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
             if getattr(exc, "status_code", None) is not None:
                 raise  # an HTTP refusal from the gate (e.g. not the caller's application) stays one
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300]
             raise BrowserError("error", "browser_error", first) from None
         s.last_used = time.monotonic()
         if action not in ("click", "look"):
@@ -1085,7 +1148,7 @@ async def _act(
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except Exception as exc:  # noqa: BLE001 - shown to the assistant in one line
-            first = (str(exc).splitlines() or [type(exc).__name__])[0][:200]
+            first = _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:200]
             raise BrowserError("error", "load_failed", f"The page did not load: {first}") from None
         await _settle(page)
         if (refusal := _refusal(s, page)) is not None:
@@ -1201,7 +1264,7 @@ async def _act(
                 raise
             out = exc.as_dict() if isinstance(exc, BrowserError) else {
                 "status": "error", "reason": "browser_error",
-                "detail": (str(exc).splitlines() or [type(exc).__name__])[0][:300],
+                "detail": _scrub_links((str(exc).splitlines() or [type(exc).__name__])[0])[:300],
             }
         out["page_changed"] = changed
         if not changed and not submitted:

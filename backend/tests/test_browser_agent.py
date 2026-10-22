@@ -1913,6 +1913,68 @@ async def test_opening_three_different_pages_is_no_repeat(pool):
     assert "3 times in a row" in (await run(pool, "u1", "open", url="http://jobs.example/form?job=1"))["repeat_warning"]
 
 
+# ── Gap-audit #18: a secret in the page address never reaches the assistant ───
+
+
+class _FakeFrame:
+    parent_frame = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    async def evaluate(self, js, arg=None):
+        return {"elements": [], "places": [], "text": "Sign in", "has_password_box": False}
+
+
+class _FakePage:
+    viewport_size = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.frames = [_FakeFrame(url)]
+        self.context = type("Ctx", (), {"pages": []})()
+
+    def is_closed(self) -> bool:
+        return False
+
+    async def title(self) -> str:
+        return "Welcome"
+
+    async def evaluate(self, js, arg=None):
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page_url", "shown"),
+    [
+        ("https://x.example/auth?token=abc&email=a@b.c", "https://x.example/auth"),
+        ("https://x.example/cb#access_token=eyJsecret", "https://x.example/cb"),
+        ("https://co.example/careers?gh_jid=123&sid=S1#frag", "https://co.example/careers?gh_jid=123"),
+        (
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1?source=LinkedIn",
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1",
+        ),
+    ],
+)
+async def test_look_shows_the_address_without_its_secret(page_url, shown):
+    from src.services.browser_agent.agent import Session, look
+
+    page = _FakePage(page_url)
+    out = await look(Session(context=page.context, page=page))
+    assert out["url"] == shown
+    assert "abc" not in str(out) and "secret" not in str(out) and "S1" not in str(out)
+
+
+def test_load_failed_and_error_text_carry_no_secret_either():
+    from src.services.browser_agent.agent import _load_failed, _scrub_links
+
+    out = _load_failed(_FakePage("https://x.example/auth?token=abc#t"), after_action=True)
+    assert out["url"] == "https://x.example/auth"
+    msg = "net::ERR_ABORTED at https://x.example/magic?token=abc&email=a@b.c#frag while loading"
+    assert _scrub_links(msg) == "net::ERR_ABORTED at https://x.example/magic while loading"
+
+
 @pytest.mark.asyncio
 async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(authenticated_async_context):
     from src.api.auth_deps import CurrentUser
@@ -1954,6 +2016,102 @@ FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
 """ + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
 <iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
 </body></html>"""
+
+
+# ── Why the browser is gone: the no_browser refusal names the reason ─────────
+
+def _closing_pool(idle_s=600):
+    from src.services.browser_agent.agent import BrowserPool, Session
+
+    class _Ctx:
+        async def close(self):
+            pass
+
+    async def resolve(host, port=0, family=socket.AF_UNSPEC):
+        return []
+
+    pool = BrowserPool(max_sessions=2, idle_s=idle_s, resolve=resolve)
+    pool._sessions = {"u1": Session(context=_Ctx(), page=None)}  # noqa: SLF001
+    return pool
+
+
+def _empty_pool():
+    pool = _closing_pool()
+    pool._sessions = {}  # noqa: SLF001
+    return pool
+
+
+@pytest.fixture
+def _fresh_reasons(monkeypatch):
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(agent, "_CLOSE_REASONS", {})
+    monkeypatch.setattr(agent, "_BOOT_AT", agent.time.monotonic() - 3600)  # long uptime unless a test says so
+    return agent
+
+
+async def _refusal(agent, pool):
+    with pytest.raises(agent.BrowserError) as exc:
+        await agent.run(pool, "u1", "look")
+    return exc.value.as_dict()
+
+
+async def test_idle_sweep_says_how_many_idle_minutes(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool(idle_s=600)
+    pool._sessions["u1"].last_used -= 1000  # noqa: SLF001
+    await pool.reap()
+    out = await _refusal(agent, pool)
+    assert out["reason"] == "no_browser" and "10 idle minutes" in out["detail"]
+    assert "get_application_kit" in out["next"] and "form_swept" in out["next"]
+
+
+async def test_a_crash_is_named_and_logged(_fresh_reasons, caplog):
+    import types
+
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    pool._browser = types.SimpleNamespace(is_connected=lambda: False)  # noqa: SLF001
+    with caplog.at_level("WARNING", logger="job360.services.browser_agent"):
+        out = await _refusal(agent, pool)
+    assert "crashed" in out["detail"] and out["next"]
+    assert any("chromium died" in r.getMessage() for r in caplog.records)
+
+
+async def test_an_explicit_close_is_named(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    assert (await agent.run(pool, "u1", "close"))["closed"] is True
+    out = await _refusal(agent, pool)
+    assert "was closed" in out["detail"] and out["next"]
+
+
+async def test_forgetting_a_sign_in_is_named(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    await pool.close("u1", "sign_in_forgotten")
+    out = await _refusal(agent, pool)
+    assert "sign-in was forgotten" in out["detail"] and out["next"]
+
+
+async def test_no_record_soon_after_boot_says_restarted(_fresh_reasons, monkeypatch):
+    agent = _fresh_reasons
+    monkeypatch.setattr(agent, "_BOOT_AT", agent.time.monotonic() - 60)
+    out = await _refusal(agent, _empty_pool())
+    assert "restarted" in out["detail"] and out["next"]
+
+
+async def test_no_record_after_long_uptime_is_the_plain_refusal(_fresh_reasons):
+    out = await _refusal(_fresh_reasons, _empty_pool())
+    assert out["detail"] == "No browser is open. Start with action open and a url." and "next" not in out
+
+
+def test_the_reason_record_is_bounded(_fresh_reasons, monkeypatch):
+    agent = _fresh_reasons
+    monkeypatch.setattr(agent, "_CLOSE_REASONS_MAX", 3)
+    for i in range(10):
+        agent._note_closed(f"u{i}", "idle")  # noqa: SLF001
+    assert list(agent._CLOSE_REASONS) == ["u7", "u8", "u9"]  # noqa: SLF001
 
 
 # ── Upload reads the file AFTER the change event (Greenhouse, Ashby) ──────────

@@ -43,6 +43,7 @@ from src.api.models import (
     FormCheckRequest,
     InterviewAgenda,
     JobResponse,
+    KnownPeopleOut,
     LessonsResponse,
 )
 from src.api.routes.bring import application_job_response
@@ -304,6 +305,8 @@ class AddContactRequest(BaseModel):
     # CONTACT_FOUND_VIA, checked by contacts._validate_found_via at call time.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
+    # the employer; REQUIRED when there is no application_id (contacts.add_contact checks it)
+    company: Optional[str] = None
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -599,6 +602,7 @@ class ContactOut(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; null = unset.
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    company: Optional[str] = None
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
     added_by: str
@@ -702,6 +706,7 @@ class ApplicationDetailOut(BaseModel):
     interview_at: Optional[str]
     receipts: list[ApplicationReceiptOut]
     contacts: list[ContactOut]
+    known_people: KnownPeopleOut = Field(default_factory=KnownPeopleOut)
     # "Needs you" - every ask about this job, open first.
     asks: list[AskOut]
     # 2026-09-20 — what to do next, read off the stored state (a state machine
@@ -1151,6 +1156,7 @@ class ApplicationKitOut(BaseModel):
     autofill: Literal["allow", "deny", "unset"]
     # Plain facts to check with the user (e.g. expected_below_current) - never a block.
     warnings: list[dict[str, str]] = []
+    known_people: KnownPeopleOut = Field(default_factory=KnownPeopleOut)
     instructions: list[str]
 
 
@@ -1326,6 +1332,7 @@ class UpdateContactRequest(BaseModel):
     # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; "" clears it.
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # "" clears it
+    company: Optional[str] = None  # "" clears it (not on a cold contact)
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1375,6 +1382,7 @@ class PersonOut(BaseModel):
     notes: str
     found_via: Optional[str] = None
     source_url: Optional[str] = None
+    company: Optional[str] = None
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
@@ -2141,7 +2149,7 @@ async def add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, company=body.company,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2173,7 +2181,7 @@ async def add_person(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url,
+            source_url=body.source_url, company=body.company,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2198,6 +2206,7 @@ async def update_contact(
             db, user.id, contact_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, found_via=body.found_via, source_url=body.source_url,
+            company=body.company,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2330,15 +2339,17 @@ async def auto_email_check(
 async def list_people(
     contact_id: Optional[int] = Query(None),
     email: Optional[str] = Query(None),
+    company: Optional[str] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     """No ``contact_id`` — every person the user has added, grouped by
     lower(email) else linkedin_url (the same recruiter on two jobs is one
     person here). With ``contact_id`` — that ONE row's own full record
-    (message versions, sent/reply marks, detail-edit history), never merged."""
+    (message versions, sent/reply marks, detail-edit history), never merged.
+    ``company`` keeps only people whose company (or linked job's company) has the same company key as jobs (rule #1)."""
     try:
-        return await contacts_service.list_people(db, user.id, contact_id=contact_id, email=email)
+        return await contacts_service.list_people(db, user.id, contact_id=contact_id, email=email, company=company)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
