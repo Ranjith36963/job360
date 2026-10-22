@@ -154,6 +154,9 @@ BOARD_SOURCES = (
     "edjoin",
     "radancy",
     "ukgready",
+    "earcu",
+    "beesite",
+    "workablemarketplace",
 )
 FEED_SOURCES = (
     "freehire",
@@ -2783,12 +2786,15 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("applitrack", re.compile(r"^(?:www\.)?applitrack\.com$")),
     ("schoolspring", re.compile(r"^([a-z0-9-]+)\.schoolspring\.com$")),
     ("edjoin", re.compile(r"^(?:www\.)?edjoin\.org$")),
-    # generic ATS: UKG Ready pod hosts (the board is host/tenant); Radancy sits on each employer's own host,
-    # so it is matched by path in board_from_job_url
+    # generic ATS: UKG Ready pod hosts (the board is host/tenant), BeeSite search hosts, the Workable marketplace;
+    # eArcu and Radancy sit on each employer's own host, so they are matched by path in board_from_job_url
     ("ukgready", re.compile(r"^((?:[a-z0-9-]+\.)*(?:saashr\.com|entertimeonline\.com|yourpayrollhr\.com|mykronos\.com|"
                             r"workforceready\.[a-z]{2,3}(?:\.[a-z]{2})?))$")),
+    ("beesite", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+){0,3}\.beesite\.de)$")),
+    ("workablemarketplace", re.compile(r"^jobs\.workable\.com$")),
 ]
-# Career sites on an employer's own host that the URL path gives away: Radancy (TalentBrew) jobs
+# Career sites on an employer's own host that the URL path gives away: eArcu vacancies and Radancy (TalentBrew) jobs
+_EARCU_PATH = re.compile(r"^/jobs/vacancy/[^/]+/\d+/description/?$")
 _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+/\d+/?$")
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
@@ -2873,6 +2879,10 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         elif ats == "ukgready":  # https://<pod host>/ta/<tenant>.careers?ShowJob=<id>
             t = seg[1][:-len(".careers")] if len(seg) > 1 and seg[0] == "ta" and seg[1].endswith(".careers") else ""
             tok = "%s/%s" % (m.group(1), t) if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", t) else ""
+        elif ats == "beesite":  # the search host itself; a portal's job page sits on the employer's domain
+            tok = m.group(1)
+        elif ats == "workablemarketplace":  # jobs.workable.com/view/<job>/...: the company hashid is not in the link
+            tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
         elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
@@ -2910,6 +2920,8 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
+    if _EARCU_PATH.search(u.path):
+        return {"kind": "ats", "ats": "earcu", "token": host, "host": host}
     rm = _RADANCY_PATH.search(u.path)
     if rm:
         lang = "/" + rm.group(1) if rm.group(1) not in (None, "en") else ""

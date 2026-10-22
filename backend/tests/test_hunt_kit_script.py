@@ -376,7 +376,7 @@ def test_companies_json_valid() -> None:
     ok |= {"emply", "manatal", "talentadore", "traffit", "trakstar",
            "factorial", "peopleforce", "talenthr", "talentlyft"}  # the kit_ats_eu types
     ok |= {"neogov", "applitrack", "schoolspring", "edjoin"}  # the kit_pubsec types
-    ok |= {"radancy", "ukgready"}  # the kit_ats_misc3 types
+    ok |= {"radancy", "ukgready", "earcu", "beesite", "workablemarketplace"}  # the kit_ats_misc3 types
     ok |= {"avature", "comeet", "hibob", "pageup", "freshteam"}  # the kit_ats_extra types
     ok |= {"betterteam", "catsone", "clinch", "crelate", "erecruiter", "gr8people", "hrmanager", "ismartrecruit", "loxo", "mindsight"}  # the kit_ats_misc1 types
     ok |= {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream", "wpyoast",
