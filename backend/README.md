@@ -116,7 +116,7 @@ records each by its full name. Two files must never share a number:
 
 How it goes wrong: two PRs open at once both take the next free number. Each PR's CI
 is green on its own, both auto-merge, and `main` ends up with two of the same number
-(2026-10-21 two 0067s, fixed in #1071; 2026-10-22 two 0077s, fixed in #1106).
+(2026-10-21 two 0067s, fixed in #1071; 2026-10-22 two 0077s, fixed in #1011).
 
 - Before your migration PR merges, merge `main` into it and check that its number is still free.
 - If `main` already has a duplicate, rename the one that merged LAST to the next free number,

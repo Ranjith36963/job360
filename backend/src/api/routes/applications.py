@@ -60,6 +60,7 @@ from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
 from src.services.applications import ready as ready_service
 from src.services.applications import stats as stats_service
+from src.services.applications import uploads as uploads_service
 from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.fit_record import fit_view
@@ -943,6 +944,17 @@ class RecordEventResponse(BaseModel):
     follow_up_on: Optional[str]
 
 
+class ReceiptFileOut(BaseModel):
+    """Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``)."""
+
+    kind: str
+    artifact_id: int
+    # sha256 of the exact bytes served (hex); the bytes themselves are never stored.
+    sha256: str
+    fmt: str
+    event_id: int
+
+
 class RecordApplicationReceiptResponse(BaseModel):
     receipt_id: int
     sent_at: str
@@ -964,6 +976,8 @@ class RecordApplicationReceiptResponse(BaseModel):
     possible_duplicate: str = ""
     # Slice 11 - '<event_type>#<event_id>' the answers were frozen from when none were given; '' otherwise.
     answers_from: str = ""
+    # Slice 29 - the uploaded / served files this receipt names ([] = none seen, or other versions named).
+    files: list[ReceiptFileOut] = Field(default_factory=list)
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
     referred_by_contact_id: Optional[int] = None
@@ -3195,6 +3209,12 @@ async def _record_event(
         spine.validate_event_type(body.event_type)
         if body.event_type in proof_service.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
+        if body.event_type in uploads_service.SERVER_ONLY_EVENTS:
+            # Slice 29: the receipt trusts it as the file that was sent, so no caller may forge one.
+            raise SpineError(
+                422, f"{body.event_type} is written by Job360 itself (its browser upload or the kit's file link), "
+                "not by a caller",
+            )
         detail = body.clamp_detail()
         # proof_text is capped in CHARACTERS (owner limit), so it skips the generic byte cap.
         if body.event_type == "proof_text":
