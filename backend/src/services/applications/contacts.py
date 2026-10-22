@@ -970,13 +970,19 @@ def _serialize_outreach(row: dict[str, Any], *, include_text: bool = True) -> di
         "recorded_at": row["recorded_at"],
         "recorded_by": row["recorded_by"],
         "source_message_id": row.get("source_message_id") or "",
+        "follow_up_on": row.get("follow_up_on"),
     }
+
+
+# Outreach pack #5/#6 (2026-10-20): the ledger entries beyond message/sent/reply.
+_OUTREACH_ENTRIES = ("message", "sent", "reply")
+_NEW_ENTRIES = settings.CONTACT_INTERACTION_ENTRIES + settings.CONTACT_REFERRAL_ENTRIES
 
 
 async def _outreach_rows(db: JobDatabase, contact_id: int) -> list[dict[str, Any]]:
     cur = await db._db.execute(
         "SELECT id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, recorded_by, "
-        "source_message_id FROM contact_outreach WHERE contact_id = ? ORDER BY id ASC",
+        "source_message_id, follow_up_on FROM contact_outreach WHERE contact_id = ? ORDER BY id ASC",
         (contact_id,),
     )
     return [dict(r) for r in await cur.fetchall()]
@@ -994,6 +1000,7 @@ def _outreach_view(rows: list[dict[str, Any]], *, include_text: bool = True) -> 
         "last_sent": sent[-1] if sent else None,
         "replied": bool(replies),
         "last_reply": replies[-1] if replies else None,
+        "interactions": [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] in _NEW_ENTRIES],
     }
 
 
@@ -1038,15 +1045,19 @@ async def _find_outreach_by_source(
 ) -> Optional[dict[str, Any]]:
     cur = await db._db.execute(
         "SELECT id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, recorded_by, "
-        "source_message_id FROM contact_outreach WHERE contact_id = ? AND source_message_id = ?",
+        "source_message_id, follow_up_on FROM contact_outreach WHERE contact_id = ? AND source_message_id = ?",
         (contact_id, source_message_id),
     )
     row = await cur.fetchone()
     return dict(row) if row else None
 
 
-async def _outreach_entry_count(db: JobDatabase, contact_id: int) -> int:
-    cur = await db._db.execute("SELECT COUNT(*) FROM contact_outreach WHERE contact_id = ?", (contact_id,))
+async def _outreach_entry_count(db: JobDatabase, contact_id: int, entries: tuple[str, ...]) -> int:
+    marks = ", ".join("?" for _ in entries)
+    cur = await db._db.execute(
+        f"SELECT COUNT(*) FROM contact_outreach WHERE contact_id = ? AND entry IN ({marks})",  # noqa: S608 - placeholders only
+        (contact_id, *entries),
+    )
     row = await cur.fetchone()
     return int(row[0]) if row else 0
 
@@ -1109,9 +1120,16 @@ async def record_outreach(
     job's status (both event types are NOTE-family — see
     ``settings.APPLICATION_NOTE_EVENT_TYPES``).
 
-    ``follow_up_on`` is only meaningful on a ``"sent"`` mark, and only for a
-    LINKED contact — a cold contact has no job to chase, so this raises 422
-    naming exactly why (owner decision).
+    ``entry`` also takes ``"meeting"``/``"call"``/``"intro"`` and
+    ``"referral_asked"``/``"referral_given"`` (outreach pack #5/#6): stored only,
+    one channel set (``CONTACT_LEDGER_CHANNELS``), their own budgets, a
+    NOTE-family timeline event when the contact is linked. ``referral_given``
+    needs a LINKED contact.
+
+    ``follow_up_on`` on a ``"sent"`` mark is only for a LINKED contact — a cold
+    contact has no job to chase, so this raises 422 naming exactly why (owner
+    decision). On a meeting/call/intro/referral entry it is kept on the ledger
+    row (a cold contact may carry one too).
 
     ``source_message_id`` — idempotent re-read of the same email: a second
     call naming the same id returns the EXISTING row (``already_existed``),
@@ -1123,16 +1141,24 @@ async def record_outreach(
     if application_id_hint is not None and contact.get("application_id") != application_id_hint:
         raise SpineError(422, "application_id does not match this contact's linked job")
 
-    if entry not in ("message", "sent", "reply"):
-        raise SpineError(422, "entry must be one of 'message', 'sent', 'reply'")
-    if channel not in settings.OUTREACH_CHANNELS:
+    if entry not in _OUTREACH_ENTRIES + _NEW_ENTRIES:
+        raise SpineError(422, "entry must be one of " + ", ".join(f"'{e}'" for e in _OUTREACH_ENTRIES + _NEW_ENTRIES))
+    is_new = entry in _NEW_ENTRIES
+    if is_new:
+        if channel not in settings.CONTACT_LEDGER_CHANNELS:
+            raise SpineError(
+                422, f"channel must be one of CONTACT_LEDGER_CHANNELS {settings.CONTACT_LEDGER_CHANNELS} for a {entry}"
+            )
+    elif channel not in settings.OUTREACH_CHANNELS:
         raise SpineError(422, f"channel must be one of OUTREACH_CHANNELS {settings.OUTREACH_CHANNELS}")
-    if follow_up_on is not None and entry != "sent":
-        raise SpineError(422, "follow_up_on is only allowed when recording a sent message")
-    if follow_up_on is not None and contact.get("application_id") is None:
+    if follow_up_on is not None and entry not in ("sent",) + _NEW_ENTRIES:
+        raise SpineError(422, "follow_up_on is only allowed on a sent mark or a meeting/call/intro/referral entry")
+    if follow_up_on is not None and entry == "sent" and contact.get("application_id") is None:
         raise SpineError(422, "cold contacts have no follow-up date")
+    if entry == "referral_given" and contact.get("application_id") is None:
+        raise SpineError(422, "referral_given needs a contact linked to the job; add_contact with application_id first")
 
-    if source_message_id and entry == "message":
+    if source_message_id and entry not in ("sent", "reply"):
         raise SpineError(422, "source_message_id is only meaningful on 'sent'/'reply' entries")
 
     if source_message_id:
@@ -1169,13 +1195,21 @@ async def record_outreach(
                 422, f"text exceeds OUTREACH_MESSAGE_MAX_CHARS ({settings.OUTREACH_MESSAGE_MAX_CHARS} chars)"
             )
 
-    total = await _outreach_entry_count(db, contact_id)
-    if total >= settings.OUTREACH_ENTRIES_PER_CONTACT_MAX:
-        raise SpineError(
-            429,
-            f"too many outreach entries; cap is OUTREACH_ENTRIES_PER_CONTACT_MAX "
-            f"({settings.OUTREACH_ENTRIES_PER_CONTACT_MAX})",
-        )
+    if is_new:
+        if await _outreach_entry_count(db, contact_id, _NEW_ENTRIES) >= settings.CONTACT_INTERACTIONS_PER_CONTACT_MAX:
+            raise SpineError(
+                429,
+                f"too many interaction entries; cap is CONTACT_INTERACTIONS_PER_CONTACT_MAX "
+                f"({settings.CONTACT_INTERACTIONS_PER_CONTACT_MAX})",
+            )
+    else:
+        total = await _outreach_entry_count(db, contact_id, _OUTREACH_ENTRIES)
+        if total >= settings.OUTREACH_ENTRIES_PER_CONTACT_MAX:
+            raise SpineError(
+                429,
+                f"too many outreach entries; cap is OUTREACH_ENTRIES_PER_CONTACT_MAX "
+                f"({settings.OUTREACH_ENTRIES_PER_CONTACT_MAX})",
+            )
 
     # Bug fix (coordinator review, 2026-09-26) — every input must be VALIDATED
     # before the rate limit is SPENT: a 422/404/429-cap answer must cost
@@ -1186,17 +1220,26 @@ async def record_outreach(
     application_id = contact.get("application_id")
 
     parsed_follow_up: Any = FOLLOW_UP_UNSET
-    if follow_up_on is not None and application_id is not None:
+    if follow_up_on is not None and (application_id is not None or is_new):
         today = await user_today(db, user_id)
         parsed_follow_up = parse_follow_up_on(follow_up_on, today)
 
     # Owner decision, 2026-09-25 — same web-session exemption as add_contact
     # above: this hourly cap is the ASSISTANT's budget, never the human's.
-    key = f"outreach:{user_id}"
-    if actor != _WEB_ACTOR and not rate_limit.check_and_record(
-        key, max_in_window=settings.OUTREACH_MAX_PER_HOUR, window_seconds=3600
+    # Interaction / referral entries spend their OWN budget, never a send's.
+    if is_new:
+        if actor != _WEB_ACTOR and not rate_limit.check_and_record(
+            f"contact_interaction:{user_id}", max_in_window=settings.CONTACT_INTERACTIONS_MAX_PER_HOUR,
+            window_seconds=3600,
+        ):
+            raise SpineError(429, "interaction rate limit exceeded; try again in an hour")
+    elif actor != _WEB_ACTOR and not rate_limit.check_and_record(
+        f"outreach:{user_id}", max_in_window=settings.OUTREACH_MAX_PER_HOUR, window_seconds=3600
     ):
         raise SpineError(429, "outreach rate limit exceeded; try again in an hour")
+    stored_follow_up: Optional[str] = (
+        parsed_follow_up if is_new and parsed_follow_up is not FOLLOW_UP_UNSET else None
+    )
 
     now = datetime.now(timezone.utc).isoformat()
     event_id: Optional[int] = None
@@ -1237,15 +1280,15 @@ async def record_outreach(
                 cur = await db._db.execute(
                     "INSERT INTO contact_outreach "
                     "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
-                    " recorded_by, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " recorded_by, source_message_id, follow_up_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user_id, contact_id, entry, channel, clean_text, None, occurred, now, actor,
-                        source_message_id or "",
+                        source_message_id or "", stored_follow_up,
                     ),
                 )
                 outreach_id = int(cur.lastrowid or 0)
                 if application_id is not None:
-                    event_type = "outreach_sent" if entry == "sent" else "outreach_replied"
+                    event_type = settings.CONTACT_LEDGER_EVENT_TYPES[entry]
                     event = await append_event(
                         db, user_id=user_id, application_id=application_id, event_type=event_type,
                         payload={"contact_id": contact_id, "outreach_id": outreach_id, "channel": channel},
@@ -1272,12 +1315,15 @@ async def record_outreach(
             # the sanitizing step is visible at this call site too.
             "entry": safe_log_value(entry), "channel": safe_log_value(channel),
             "chars": len(clean_text),
+            "follow_up_set": stored_follow_up is not None or final_follow_up_on is not None,
         },
     )
+    if final_follow_up_on is None:
+        final_follow_up_on = stored_follow_up
     outreach = {
         "id": outreach_id, "contact_id": contact_id, "entry": entry, "channel": channel, "text": clean_text,
         "version_no": version_no, "occurred_at": occurred, "recorded_at": now, "recorded_by": actor,
-        "source_message_id": source_message_id or "",
+        "source_message_id": source_message_id or "", "follow_up_on": stored_follow_up,
     }
     if entry == "message":
         # Warn-only writing checks (cv_checks.check_text): stock phrases, leaked chat.

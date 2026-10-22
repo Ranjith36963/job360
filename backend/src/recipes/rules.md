@@ -415,6 +415,14 @@ answered; the one exception is "Automatic employer emails"). A person's reply NE
 itself. When you record `replied` on a job with `source.sender`, Job360 also marks
 the person replied if that sender is a contact on the same job you sent
 outreach to - do not record both.
+A meeting, call or intro with a person, or a referral you asked them for or they gave: record_event with
+contact_id + channel and event_type `contact_meeting`, `contact_call`, `contact_intro`, `referral_asked` or
+`referral_given`; channel is any of `call`, `video`, `in_person`, `linkedin`, `email`, `other`;
+`detail` = your notes, `occurred_at` = when it happened, `follow_up_on` = the next chase (a cold contact may
+have one too: it is kept on that entry). Record only what the user told you or their mail shows. These send
+nothing and never count as outreach sends. `referral_given` needs the contact linked to the job (add_contact
+with application_id first). A wrong one:
+record_event `note` with `corrects_event_id` = its event id (the person's own history keeps the entry).
 
 ## Automatic employer emails
 

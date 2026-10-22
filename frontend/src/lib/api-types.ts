@@ -4288,6 +4288,8 @@ export interface components {
         };
         /** ContactOutreachOut */
         ContactOutreachOut: {
+            /** Interactions */
+            interactions?: components["schemas"]["OutreachEntryOut"][];
             last_reply: components["schemas"]["OutreachEntryOut"] | null;
             last_sent: components["schemas"]["OutreachEntryOut"] | null;
             /** Message Count */
@@ -5942,7 +5944,8 @@ export interface components {
          * @description One row of a contact's outreach ledger — a drafted message VERSION
          *     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
          *     (``version_no`` null — unversioned, a person can be sent to or replied
-         *     to many times).
+         *     to many times). Also a meeting/call/intro/referral entry (``follow_up_on``
+         *     is set only on those).
          */
         OutreachEntryOut: {
             /** Channel */
@@ -5951,6 +5954,8 @@ export interface components {
             contact_id: number;
             /** Entry */
             entry: string;
+            /** Follow Up On */
+            follow_up_on?: string | null;
             /** Id */
             id: number;
             /** Occurred At */

@@ -26,6 +26,9 @@ describe("eventTitle", () => {
       "Outreach sent · Jordan Lee",
     );
     expect(eventTitle({ event_type: "outreach_sent", payload: { contact_id: 4 } })).toBe("Outreach sent");
+    expect(eventTitle({ event_type: "referral_given", payload: { contact_id: 7, contact_name: "Priya Shah" } })).toBe(
+      "Referral given · Priya Shah",
+    );
   });
 });
 
