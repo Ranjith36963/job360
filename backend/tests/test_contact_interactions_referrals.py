@@ -1,6 +1,7 @@
 """Outreach pack #5/#6 (2026-10-20): meeting / call / intro and referral entries on the
-contact ledger. Helpers are COPIED from test_outreach_people.py, never imported (a
-cross-module fixture import breaks per-test schema isolation).
+contact ledger, ``referred_by_contact_id`` on the receipt, ``application.referred_by`` in the
+kit, and ``stats(view="referrals")``. Helpers are COPIED from test_outreach_people.py, never
+imported (a cross-module fixture import breaks per-test schema isolation).
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from src.repositories import pg
 from src.repositories.database import JobDatabase
 
 STEM = "0072_contact_interactions_referrals"
+STEM73 = "0073_receipt_referred_by"
 
 _AD = {
     "title": "Data Engineer",
@@ -28,6 +30,14 @@ _AD = {
 
 def _soon() -> str:
     return (date.today() + timedelta(days=7)).isoformat()
+
+
+def _ad(n: int) -> dict[str, Any]:
+    return {
+        **_AD, "title": f"Data Engineer {n}", "company": f"Northwind {n}",
+        "apply_url": f"https://northwind.example/careers/{100 + n}",
+        "description": f"Build the pipelines number {n}. Python, dbt, Snowflake. Fully remote.",
+    }
 
 
 async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
@@ -76,6 +86,36 @@ def _mcp_payload(result) -> dict:
 def _mcp_error_text(result) -> str:
     assert result.is_error, "expected a tool error"
     return result.content[0].text
+
+
+async def _second_user_session_cookie(email: str = "second-referral@example.com") -> str:
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.core import settings
+    from src.repositories import pgsync
+
+    sync_client = TestClient(app)
+    r = sync_client.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"})
+    assert r.status_code == 201, r.text
+    conn = pgsync.connect(str(settings.DB_PATH))
+    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
+    conn.commit()
+    conn.close()
+    lr = sync_client.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
+    assert lr.status_code == 200, lr.text
+    cookie = sync_client.cookies.get("job360_session")
+    assert cookie, "failed to capture second user's session cookie"
+    sync_client.close()
+    return cookie
+
+
+def _session_client(cookie: str) -> AsyncClient:
+    from src.api.main import app
+
+    return AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", cookies={"job360_session": cookie}
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -271,8 +311,141 @@ async def test_record_event_doors_for_interactions_and_referrals(authenticated_a
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Export
+# Receipt, kit, stats, export
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_record_application_stores_the_referrer_on_the_receipt(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        app_a = await _bring(client, _ad(1))
+        cid = await _linked(client, app_a)
+        app_b = await _bring(client, _ad(2))
+        b_cid = await _linked(client, app_b, name="Sam Cole", email="sam@x.example")
+        app_b2 = await _bring(client, _ad(3))
+        b2_cid = await _linked(client, app_b2, name="Lee Park", email="lee@x.example")
+
+        ok = await client.post(
+            f"/api/applications/{app_a}/receipt", json={"channel": "referral", "referred_by_contact_id": cid}
+        )
+        assert ok.status_code == 201, ok.text
+        assert ok.json()["referred_by_contact_id"] == cid
+        # No receipt_id in the legacy path: the application's receipt list carries it.
+        receipt_id = ok.json()["receipt_id"]
+        got = await client.get(f"/api/receipts/{receipt_id}")
+        assert got.status_code == 200, got.text
+        assert got.json()["referred_by_contact_id"] == cid
+
+        before = (await client.get("/api/receipts")).json()
+        wrong_job = await client.post(
+            f"/api/applications/{app_b2}/receipt", json={"channel": "referral", "referred_by_contact_id": b_cid}
+        )
+        assert wrong_job.status_code == 422, wrong_job.text
+        assert "must be one of your contacts linked to this application" in wrong_job.text
+
+        cookie = await _second_user_session_cookie()
+        async with _session_client(cookie) as other:
+            theirs = await other.post("/api/contacts", json={"name": "Foreign Person", "company": "Northwind", "email": "f@y.example"})
+            foreign_id = theirs.json()["contact"]["id"]
+        foreign = await client.post(
+            f"/api/applications/{app_b2}/receipt", json={"channel": "referral", "referred_by_contact_id": foreign_id}
+        )
+        assert foreign.status_code == 422, foreign.text
+        assert "must be one of your contacts linked to this application" in foreign.text
+        assert (await client.get("/api/receipts")).json() == before  # the refusals wrote nothing
+        token = await _mint_token(client)
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            reply = _mcp_payload(
+                await mcp.call_tool(
+                    "record_application", {"application_id": app_b2, "referred_by_contact_id": b2_cid}
+                )
+            )
+            assert reply["referred_by_contact_id"] == b2_cid
+
+
+@pytest.mark.asyncio
+async def test_kit_names_the_referrer_by_current_name_and_forgets_a_retracted_one(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        cid = await _linked(client, app_id)
+        patched = await client.patch(f"/api/contacts/{cid}", json={"name": "Priya S. Shah"})
+        assert patched.status_code == 200, patched.text
+        given = await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "referral_given", "contact_id": cid, "channel": "email"},
+        )
+        assert given.status_code == 201, given.text
+        eid = given.json()["event_id"]
+
+        kit = await client.get(f"/api/applications/{app_id}/kit")
+        assert kit.status_code == 200, kit.text
+        assert kit.json()["application"]["referred_by"] == {"contact_id": cid, "name": "Priya S. Shah"}
+
+        retract = await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "note", "detail": "Referral fell through", "corrects_event_id": eid},
+        )
+        assert retract.status_code == 201, retract.text
+        kit = await client.get(f"/api/applications/{app_id}/kit")
+        assert kit.json()["application"]["referred_by"] is None
+
+
+@pytest.mark.asyncio
+async def test_stats_referrals_view_splits_referred_from_not(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        async def event(app_id: int, **body: Any) -> dict[str, Any]:
+            resp = await client.post(f"/api/applications/{app_id}/events", json=body)
+            assert resp.status_code == 201, resp.text
+            return resp.json()
+
+        async def receipt(app_id: int, **body: Any) -> None:
+            resp = await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "referral", **body})
+            assert resp.status_code == 201, resp.text
+
+        a = await _bring(client, _ad(1))
+        a_cid = await _linked(client, a)
+        await event(a, event_type="referral_given", contact_id=a_cid, channel="email")
+        await receipt(a)
+        await event(a, event_type="replied")
+
+        b = await _bring(client, _ad(2))
+        b_cid = await _linked(client, b, name="Sam Cole", email="sam@x.example")
+        await receipt(b, referred_by_contact_id=b_cid)
+
+        c = await _bring(client, _ad(3))
+        await receipt(c)
+
+        d = await _bring(client, _ad(4))
+        d_cid = await _linked(client, d, name="Lee Park", email="lee@x.example")
+        await event(d, event_type="referral_asked", contact_id=d_cid, channel="linkedin")
+
+        e = await _bring(client, _ad(5))
+        e_cid = await _linked(client, e, name="Ann Fox", email="ann@x.example")
+        given = await event(e, event_type="referral_given", contact_id=e_cid, channel="email")
+        await event(e, event_type="note", detail="Referral fell through", corrects_event_id=given["event_id"])
+        await receipt(e)
+
+        resp = await client.get("/api/applications/stats?view=referrals")
+        assert resp.status_code == 200, resp.text
+        refs = resp.json()["referrals"]
+        assert refs["n"] == 5
+        assert refs["referred"]["applied"] == 2
+        assert refs["referred"]["replied"] == 1
+        assert refs["referred"]["reply_rate"] == 0.5
+        assert refs["referred"]["small_sample"] is True
+        assert refs["not_referred"]["applied"] == 2
+        assert refs["not_referred"]["replied"] == 0
+        assert refs["not_referred"]["reply_rate"] == 0.0
+        assert refs["referral_asked"] == 1
+        assert "never rank" in refs["note"].lower()
+
+        sites = await client.get("/api/applications/stats?view=sites")
+        assert sites.status_code == 200, sites.text
+        assert sites.json()["referrals"] is None
 
 
 @pytest.mark.asyncio
@@ -310,19 +483,21 @@ async def _has_column(path: str, table: str, column: str) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_migration_0072_up_down(tmp_path):
-    path = str(tmp_path / f"m72_{uuid.uuid4().hex[:8]}.db")
+async def test_migration_0073_up_down(tmp_path):
+    path = str(tmp_path / f"m73_{uuid.uuid4().hex[:8]}.db")
     db = JobDatabase(path)
     await db.init_db()
     await db.close()
-    await runner.up(path, target=STEM)
+    await runner.up(path, target=STEM73)
     assert await _has_column(path, "contact_outreach", "follow_up_on")
+    assert await _has_column(path, "application_receipts", "referred_by_contact_id")
 
-    assert await runner.down(path) == STEM
-    assert not await _has_column(path, "contact_outreach", "follow_up_on")
-
-    await runner.up(path, target=STEM)
+    assert await runner.down(path) == STEM73
     assert await _has_column(path, "contact_outreach", "follow_up_on")
+    assert not await _has_column(path, "application_receipts", "referred_by_contact_id")
+
+    await runner.up(path, target=STEM73)
+    assert await _has_column(path, "application_receipts", "referred_by_contact_id")
 
 
 def test_new_event_types_are_note_family():
