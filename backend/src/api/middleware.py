@@ -9,6 +9,8 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from src.api.client_ip import UNKNOWN as UNKNOWN_CLIENT
+from src.api.client_ip import client_ip
 from src.utils.logger import _request_id_var, get_logger, get_request_id, mask_ip, redact_path, set_request_id
 
 _access_log = get_logger("access")  # "job360.access" → main job360 handlers (jsonl + log file)
@@ -29,6 +31,12 @@ _CSP = (
 
 # HSTS: 1 year, include subdomains. Only sent in production (needs HTTPS).
 _HSTS = "max-age=31536000; includeSubDomains"
+
+
+def _log_client_ip(request: Request) -> str | None:
+    """The caller's address for the access log; None when there is none."""
+    ip = client_ip(request)
+    return None if ip == UNKNOWN_CLIENT else ip
 
 
 def _is_production() -> bool:
@@ -119,8 +127,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                     # than a raw client IP (M9).
                     "user_id": getattr(request.state, "user_id", None),
                     # M9 — mask the client IP before it hits the on-disk rotating
-                    # access log; see mask_ip() in src/utils/logger.py.
-                    "client": mask_ip(request.client.host if request.client else None),
+                    # access log; see mask_ip() in src/utils/logger.py. The address
+                    # is src.api.client_ip's, the same one the throttles key on.
+                    "client": mask_ip(_log_client_ip(request)),
                 },
             )
 
