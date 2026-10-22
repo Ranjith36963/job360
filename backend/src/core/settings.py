@@ -623,6 +623,9 @@ CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 —
 # user's own assistant WRITES messages; the USER sends them (or, with assistant_settings.outreach_send = auto,
 # the assistant sends from the user's own Gmail); Job360 never sends.
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
+# contact_outreach.entry — free TEXT in the DB, closed here. `bounced` (pack #7): a
+# delivery failure for an outreach email; its `text` is the address that bounced.
+OUTREACH_ENTRIES = ("message", "sent", "reply", "bounced")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
 # LinkedIn connection-request note limits: career-ops (MIT) modes/contacto.md:168
 # "200 characters on a free account, 300 on Premium/Sales Navigator ... Default to the
@@ -671,7 +674,13 @@ KNOWN_PEOPLE_MAX = int(os.getenv("KNOWN_PEOPLE_MAX", "20"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
 CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
-CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company")
+# Outreach pack #7 — where the contact's EMAIL came from (the person's origin is
+# found_via). Closed set; unset = NULL (rule #29). `pattern_guess` makes
+# check_outreach answer ask (email_guessed). Editable like found_via (a contact_edits row).
+CONTACT_EMAIL_SOURCES = ("they_emailed", "on_company_page", "provider_verified", "pattern_guess", "user_gave")
+CONTACT_EDIT_FIELDS = (
+    "name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company", "email_source",
+)
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))

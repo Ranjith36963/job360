@@ -365,7 +365,7 @@ tell the user.
 
 Outreach to a person — recruiter, hiring manager, referral, cold
 networking. add_contact them (application_id if tied to a job, omitted
-for cold networking; pass `found_via` — where you found them), write the
+for cold networking; pass `found_via` — where you found them, and `email_source` — where the EMAIL came from: they_emailed, on_company_page, provider_verified, pattern_guess (you built it from a name pattern) or user_gave; leave it out if unsure), write the
 message YOURSELF, then save_artifact(contact_id=..., kind="outreach",
 channel="linkedin"|"email"|"other", text=...) — this DRAFTS a version.
 On channel="linkedin" the reply's `checks` warns `linkedin_note_too_long` over
@@ -381,7 +381,7 @@ connector — connectors only draft.** Right before pressing Send, call
 check_outreach(contact_id, message_id) — message_id is the artifact_id
 save_artifact returned: `send` = press Send, then record outreach_sent; `ask` =
 save a Gmail draft and ask_user; `stop` = do not send. It counts only RECORDED
-sends against the daily and per-company caps. Without browser control: save it as a
+sends against the daily and per-company caps. A guessed address (email_source pattern_guess) makes check_outreach answer `ask` (email_guessed): save a Gmail draft, the user sends. When a delivery-failure email (a bounce) arrives for outreach you sent, record_event outreach_bounced with contact_id, channel "email" and the bounce's Gmail message id as `source` (no detail text); check_outreach then answers `stop` (email_bounced) for that address on every contact until update_contact gives a new email (with its email_source). Never resend to a bounced address. Without browser control: save it as a
 Gmail draft and `ask_user` "Press Send on the draft to <name>" (Needs you);
 the user sends. A LinkedIn or other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's

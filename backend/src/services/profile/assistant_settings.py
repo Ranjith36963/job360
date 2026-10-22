@@ -1412,7 +1412,10 @@ class OutreachFacts:
     * ``linked`` - the contact is tied to an application; ``application_closed`` -
       that application's status is closed (rejected / withdrawn / ghosted);
     * ``found_via`` - where the person was found (``None`` = not said);
-    * ``company`` - the linked job's company ("" when unlinked).
+    * ``company`` - the linked job's company ("" when unlinked);
+    * ``email_source`` - where the CURRENT email came from (``None`` = not said);
+    * ``email_bounced`` - a ``bounced`` mark exists for this user on the contact's
+      CURRENT address (on any of the user's contacts).
     """
 
     message_found: bool
@@ -1425,6 +1428,8 @@ class OutreachFacts:
     application_closed: bool = False
     found_via: Optional[str] = None
     company: str = ""
+    email_source: Optional[str] = None
+    email_bounced: bool = False
 
 
 @dataclass(frozen=True)
@@ -1439,9 +1444,9 @@ class OutreachDecision:
 
 # In the order :func:`may_send_outreach` checks them (first match wins).
 OUTREACH_REASONS: tuple[str, ...] = (
-    "paused", "message_not_found", "not_latest_draft", "not_email_channel", "no_email", "already_sent",
-    "replied", "application_closed", "daily_outreach_cap_reached", "company_cap_reached",
-    "mode_not_auto", "no_found_via", "unlinked_contact", "auto_mode",
+    "paused", "message_not_found", "not_latest_draft", "not_email_channel", "no_email", "email_bounced",
+    "already_sent", "replied", "application_closed", "daily_outreach_cap_reached", "company_cap_reached",
+    "email_guessed", "mode_not_auto", "no_found_via", "unlinked_contact", "auto_mode",
 )
 
 
@@ -1455,12 +1460,12 @@ def may_send_outreach(
 
     STOP (do not send; nothing clears these): paused, message_not_found,
     not_latest_draft, not_email_channel (LinkedIn/other: the user sends),
-    no_email, already_sent, replied, application_closed,
+    no_email, email_bounced (a bounce is recorded for this address), already_sent, replied, application_closed,
     daily_outreach_cap_reached (``OUTREACH_AUTO_SENDS_MAX_PER_DAY``),
     company_cap_reached (``OUTREACH_COMPANY_MAX`` within
     ``OUTREACH_COMPANY_WINDOW_DAYS``).
-    ASK (save a Gmail draft, ask_user): mode_not_auto (``assistant_settings.outreach_send``
-    is not ``auto``; the Gmail mode never counts), no_found_via, unlinked_contact.
+    ASK (save a Gmail draft, ask_user): email_guessed (email_source pattern_guess), mode_not_auto
+    (``assistant_settings.outreach_send`` is not ``auto``; the Gmail mode never counts), no_found_via, unlinked_contact.
     SEND: auto_mode.
     """
     if is_paused(cfg.paused_until, now):
@@ -1480,6 +1485,10 @@ def may_send_outreach(
         )
     if not facts.has_email:
         return OutreachDecision("stop", "no_email", "This person has no email address saved. Do not send.")
+    if facts.email_bounced:
+        return OutreachDecision(
+            "stop", "email_bounced", "An email to this address bounced before. Do not send; tell the user.",
+        )
     if facts.already_sent:
         return OutreachDecision("stop", "already_sent", "A message to this person is already recorded as sent.")
     if facts.replied:
@@ -1497,6 +1506,11 @@ def may_send_outreach(
             "stop", "company_cap_reached",
             f"Enough people at this company were emailed in the last {settings.OUTREACH_COMPANY_WINDOW_DAYS} days. "
             "Do not send.",
+        )
+    if facts.email_source == "pattern_guess":
+        return OutreachDecision(
+            "ask", "email_guessed",
+            "This address was guessed from a name pattern. Save a Gmail draft and ask_user; the user sends.",
         )
     if cfg.outreach_send != OUTREACH_SEND_AUTO:
         return OutreachDecision(
