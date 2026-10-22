@@ -2335,7 +2335,7 @@ async def confirm_contact(
         return await contacts_service.confirm_contact(db, user.id, contact_id, actor_for(user))
     except SpineError as exc:
         _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+        raise AssertionError("unreachable")  # _raise always raises
 
 
 @router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
