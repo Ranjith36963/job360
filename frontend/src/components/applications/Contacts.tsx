@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/format-date";
+import { formatDate, formatDayMonth } from "@/lib/format-date";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
 import { CopyButton } from "@/components/applications/CopyButton";
@@ -42,7 +42,22 @@ export function LinkedinCell({ url }: { url: string }) {
   return <span className="break-all">{url}</span>;
 }
 
-const CHANNEL_LABEL: Record<string, string> = { linkedin: "LinkedIn", email: "email", other: "" };
+const CHANNEL_LABEL: Record<string, string> = {
+  linkedin: "LinkedIn",
+  email: "email",
+  other: "",
+  call: "phone",
+  video: "video",
+  in_person: "in person",
+};
+
+const INTERACTION_LABEL: Record<string, string> = {
+  meeting: "Meeting",
+  call: "Call",
+  intro: "Intro",
+  referral_asked: "Asked for a referral",
+  referral_given: "Referral given",
+};
 
 function channelLabel(channel: string): string {
   return CHANNEL_LABEL[channel] ?? channel;
@@ -78,6 +93,28 @@ function RepliedLine({ contact }: { contact: Contact }) {
   const last = contact.outreach?.last_reply;
   if (!last) return <p className="font-mono text-[11px] text-faint">No reply yet.</p>;
   return <p className="font-mono text-[11px] text-faint">Replied on {formatDate(last.occurred_at)}.</p>;
+}
+
+/** Meetings, calls, intros and referrals the user's assistant recorded: read-only lines,
+ * notes as plain text (never HTML). */
+function InteractionLines({ contact }: { contact: Contact }) {
+  const rows = contact.outreach?.interactions ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <ul data-testid="contact-interactions" className="mt-1 flex flex-col gap-0.5 font-mono text-[11px] text-faint">
+      {rows.map((r) => {
+        const via = channelLabel(r.channel);
+        return (
+          <li key={r.id} data-testid="contact-interaction">
+            {INTERACTION_LABEL[r.entry] ?? r.entry} on {formatDate(r.occurred_at)}
+            {via && ` via ${via}`}
+            {r.follow_up_on && ` · follow up ${formatDayMonth(r.follow_up_on)}`}
+            {r.text && <span className="block whitespace-pre-wrap text-muted-foreground">{r.text}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** The latest message text, with earlier versions folded away — plain text
@@ -378,6 +415,7 @@ export function Contacts({
                 <SentLine contact={contact} />
                 <RepliedLine contact={contact} />
               </div>
+              <InteractionLines contact={contact} />
               <EditContact
                 contact={contact}
                 onSaved={(updated) =>

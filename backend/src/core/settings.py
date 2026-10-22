@@ -380,6 +380,12 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # guessed; payload {key | question, was_source}. A note: saving it to memory is a separate,
     # user-approved update_profile. Checked in the record_event ROUTE (_check_answer_corrected).
     "answer_corrected",
+    # Outreach pack #5/#6 (2026-10-20): a contact ledger entry (meeting / call / intro, a
+    # referral asked or given) mirrored onto a LINKED contact's job timeline, payload
+    # {contact_id, outreach_id, channel}. Written only by contacts.record_outreach; record_event
+    # refuses them without contact_id. Note-family: never move the status. A wrong one is
+    # retracted by a `note` with corrects_event_id (stats and the kit skip it).
+    "contact_meeting", "contact_call", "contact_intro", "referral_asked", "referral_given",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -637,6 +643,23 @@ OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY
 # the window, so one company is never carpet-bombed.
 OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
 OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
+# Outreach pack #5/#6 (2026-10-20): contact ledger entries beyond message/sent/reply. Stored
+# only — Job360 sends nothing, and these never count as sends (check_outreach reads `sent`).
+CONTACT_INTERACTION_ENTRIES = ("meeting", "call", "intro")
+CONTACT_REFERRAL_ENTRIES = ("referral_asked", "referral_given")
+CONTACT_INTERACTION_CHANNELS = ("call", "video", "in_person")
+# The ONE channel set every meeting/call/intro/referral entry accepts (a store tool refuses no
+# true fact). OUTREACH_CHANNELS itself stays narrow: it gates sends.
+CONTACT_LEDGER_CHANNELS = OUTREACH_CHANNELS + CONTACT_INTERACTION_CHANNELS
+# The job-timeline event a ledger mark appends when its contact is linked to an application.
+CONTACT_LEDGER_EVENT_TYPES = {
+    "sent": "outreach_sent", "reply": "outreach_replied", "meeting": "contact_meeting",
+    "call": "contact_call", "intro": "contact_intro", "referral_asked": "referral_asked",
+    "referral_given": "referral_given",
+}
+# Their own budgets, apart from the outreach ones: an interaction never spends a send's budget.
+CONTACT_INTERACTIONS_PER_CONTACT_MAX = int(os.getenv("CONTACT_INTERACTIONS_PER_CONTACT_MAX", "100"))
+CONTACT_INTERACTIONS_MAX_PER_HOUR = int(os.getenv("CONTACT_INTERACTIONS_MAX_PER_HOUR", "60"))  # per USER
 # Automatic employer emails (feedback loop slice 2; check_auto_email). Operator constants, not user
 # settings: how long to wait before each email, and the most that go out per user per day.
 AUTO_EMAIL_CHECKIN_DAYS = int(os.getenv("AUTO_EMAIL_CHECKIN_DAYS", "7"))
@@ -711,7 +734,7 @@ STATS_COMPANY_MAX_CHARS = int(os.getenv("STATS_COMPANY_MAX_CHARS", "200"))
 # a view a later slice appends (before "all") joins it automatically.
 STATS_VIEWS = (
     "funnel", "velocity", "calibration", "company", "lesson_effect", "followups",
-    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "all",
+    "digest", "friction", "assessments", "patterns", "skill_gaps", "sites", "referrals", "all",
 )
 # Furthest-stage ladder (funnel-stages.mjs:3-6) in Job360 names. Rank 3
 # (assessment) stays EMPTY for good: slice 4 records `assessment` as a NOTE

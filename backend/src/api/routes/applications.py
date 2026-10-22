@@ -76,7 +76,9 @@ def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
-_OUTREACH_EVENT_TYPES = ("outreach_sent", "outreach_replied")
+# Every event a contact ledger mark writes (outreach pack #5/#6): event_type -> ledger entry.
+CONTACT_EVENT_ENTRY = {event: entry for entry, event in settings.CONTACT_LEDGER_EVENT_TYPES.items()}
+_OUTREACH_EVENT_TYPES = tuple(CONTACT_EVENT_ENTRY)
 OUTREACH_NEEDS_CONTACT = "outreach events need contact_id — call add_contact first and pass its contact_id"
 
 
@@ -212,7 +214,8 @@ class RecordEventRequest(BaseModel):
     follow_up_on: Optional[str] = None
     # Owner decision, 2026-09-25 — a `contact_id` here means "record this as
     # OUTREACH for that person too, in the same transaction": `event_type`
-    # must then be `outreach_sent`/`outreach_replied` and `channel` is
+    # must then be `outreach_sent`/`outreach_replied` (or contact_meeting/
+    # contact_call/contact_intro/referral_asked/referral_given) and `channel` is
     # required. The contact must be linked to THIS route's `application_id`
     # (a cold contact reads as 422 — there is no job to scope this call by;
     # use `POST /api/contacts/{contact_id}/outreach` for a cold contact).
@@ -276,6 +279,8 @@ class RecordApplicationReceiptRequest(BaseModel):
     cover_letter_artifact_id: Optional[int] = None
     # ISO-8601 with a timezone (parse_occurred_at); malformed = 422 naming applied_at.
     applied_at: Optional[str] = None
+    # The user's own contact, linked to THIS application, whose referral got them the job.
+    referred_by_contact_id: Optional[int] = None
     # Idempotency key (1-128 printable chars): the same one again returns the FIRST
     # receipt with already_existed=true and writes nothing; a different body = 409.
     request_id: Optional[str] = None
@@ -566,7 +571,8 @@ class OutreachEntryOut(BaseModel):
     """One row of a contact's outreach ledger — a drafted message VERSION
     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
     (``version_no`` null — unversioned, a person can be sent to or replied
-    to many times)."""
+    to many times). Also a meeting/call/intro/referral entry (``follow_up_on``
+    is set only on those)."""
 
     id: int
     contact_id: int
@@ -578,6 +584,7 @@ class OutreachEntryOut(BaseModel):
     recorded_at: str
     recorded_by: str
     source_message_id: str
+    follow_up_on: Optional[str] = None
 
 
 class ContactOutreachOut(BaseModel):
@@ -588,6 +595,8 @@ class ContactOutreachOut(BaseModel):
     last_sent: Optional[OutreachEntryOut]
     replied: bool
     last_reply: Optional[OutreachEntryOut]
+    # Meeting / call / intro / referral entries (outreach pack #5/#6), oldest first.
+    interactions: list[OutreachEntryOut] = Field(default_factory=list)
 
 
 class ContactOut(BaseModel):
@@ -909,6 +918,7 @@ class RecordApplicationReceiptResponse(BaseModel):
     possible_duplicate: str = ""
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
+    referred_by_contact_id: Optional[int] = None
 
 
 class WhatsNewEventOut(BaseModel):
@@ -1110,11 +1120,18 @@ class KitJobOut(BaseModel):
     found_on: Optional[str] = None
 
 
+class KitReferredByOut(BaseModel):
+    contact_id: int
+    name: str
+
+
 class KitApplicationOut(BaseModel):
     id: int
     status: str
     follow_up_on: Optional[str] = None
     submit_override: Optional[str] = None
+    # The contact whose live referral_given event names this job (current name); null = none recorded.
+    referred_by: Optional[KitReferredByOut] = None
 
 
 class KitSameJobOut(BaseModel):
@@ -1354,8 +1371,8 @@ class RecordOutreachRequest(BaseModel):
     text: str = ""
     occurred_at: Optional[str] = None
     source: Optional[EventSource] = None
-    # Owner decision, 2026-09-25 — only meaningful on entry="sent", and only
-    # for a contact linked to a job; `contacts.record_outreach` enforces both.
+    # Owner decision, 2026-09-25 — sent (linked only) or any meeting/call/intro/referral entry
+    # (cold too); `contacts.record_outreach` enforces it.
     follow_up_on: Optional[str] = None
     # A caller going through /applications/{id}/events can only ever touch a
     # contact linked to THAT SAME application — set by the wrapper below,
@@ -1778,6 +1795,29 @@ class StatsSitesOut(BaseModel):
     note: str
 
 
+class StatsReferralGroupOut(BaseModel):
+    brought: int
+    applied: int
+    replied: int
+    interview: int
+    offer: int
+    rejected: int
+    reply_rate: Optional[float]
+    interview_rate: Optional[float]
+    offer_rate: Optional[float]
+    small_sample: bool
+
+
+class StatsReferralsOut(BaseModel):
+    """``stats(view="referrals")``: referred vs not. Facts only, never a ranking."""
+
+    n: int
+    referred: StatsReferralGroupOut
+    not_referred: StatsReferralGroupOut
+    referral_asked: int
+    note: str
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1807,6 +1847,7 @@ class StatsResponse(BaseModel):
     patterns: Optional[StatsPatternsOut] = None
     skill_gaps: Optional[StatsSkillGapsOut] = None
     sites: Optional[StatsSitesOut] = None
+    referrals: Optional[StatsReferralsOut] = None
     computed_at: str
 
 
@@ -3005,7 +3046,8 @@ async def record_event(
         if body.contact_id is not None:
             # Owner decision, 2026-09-25 — record this as OUTREACH for a
             # person too, in the same transaction as the job-timeline event.
-            # Only the two outreach event types are allowed here; a cold
+            # Only the contact ledger event types (outreach_sent/replied and the
+            # meeting/call/intro/referral ones) are allowed here; a cold
             # contact (no application_id of its own) can never match THIS
             # route's application_id, so it reads as 422 — use
             # POST /api/contacts/{contact_id}/outreach for a cold contact.
@@ -3017,13 +3059,13 @@ async def record_event(
                 raise SpineError(
                     422, "corrects_event_id/payload/scheduled_at are not supported for outreach (contact_id)"
                 )
-            if body.event_type not in ("outreach_sent", "outreach_replied"):
+            if body.event_type not in CONTACT_EVENT_ENTRY:
                 raise SpineError(
-                    422, "event_type must be 'outreach_sent' or 'outreach_replied' when contact_id is given"
+                    422, f"event_type must be one of {', '.join(CONTACT_EVENT_ENTRY)} when contact_id is given"
                 )
             if not body.channel:
                 raise SpineError(422, "channel is required when contact_id is given")
-            entry = "sent" if body.event_type == "outreach_sent" else "reply"
+            entry = CONTACT_EVENT_ENTRY[body.event_type]
             result = await contacts_service.record_outreach(
                 db, user.id, body.contact_id, actor_for(user),
                 entry=entry, channel=body.channel, text=body.detail, occurred_at=body.occurred_at,
@@ -3300,6 +3342,7 @@ async def record_application_receipt(
             answers=[a.model_dump(exclude_none=True) for a in body.answers], fields_filled=fields_filled,
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
             applied_at=applied_at, request_id=body.request_id,
+            referred_by_contact_id=body.referred_by_contact_id,
         )
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
