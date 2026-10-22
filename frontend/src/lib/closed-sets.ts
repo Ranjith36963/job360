@@ -24,6 +24,10 @@ export const CLOSED_SET_LABEL: Record<string, string> = {
   apollo: "Apollo",
   job_ad: "Job ad",
   event: "Event",
+  company_team_page: "Company team page",
+  github: "GitHub",
+  speaker_page: "Speaker page",
+  email_finder: "Email finder",
   other: "Other",
 };
 
@@ -46,6 +50,10 @@ export const CONTACT_FOUND_VIA_VALUES = [
   "job_ad",
   "email",
   "event",
+  "company_team_page",
+  "github",
+  "speaker_page",
+  "email_finder",
   "other",
 ] as const;
 

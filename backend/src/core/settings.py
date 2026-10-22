@@ -606,7 +606,10 @@ AUTO_EMAILS_MAX_PER_DAY = int(os.getenv("AUTO_EMAILS_MAX_PER_DAY", "10"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
-CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
+CONTACT_FOUND_VIA = (
+    "company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event",
+    "company_team_page", "github", "speaker_page", "email_finder", "other",
+)
 CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via", "source_url")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.

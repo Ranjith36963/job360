@@ -72,6 +72,9 @@ def test_recipes_keep_the_product_rules():
     reach = flat(load_recipe("reach").text)
     assert "the user sends it" in reach and "never send it yourself" in reach
     assert "draft only" in reach
+    # Owner 2026-10-20: people are a source like jobs; try several before giving up, never guess an email.
+    assert "at least four" in reach and "never guess an email" in reach
+    assert "never scrape or automate linkedin" in reach
     assert "channel `email`" in reach and "gmail sent folder" in reach
     # S4 (owner 2026-10-09): auto sends ONLY by pressing Send in Gmail in the
     # user's browser; a Gmail connector only drafts; no browser -> Needs you.
