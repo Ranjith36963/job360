@@ -124,7 +124,7 @@ def test_the_look_builds_its_submit_regex_from_the_gates_patterns():
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_the_look_and_the_gate_name_the_same_buttons_as_the_end():
-    async_api = pytest.importorskip("playwright.async_api")
+    from playwright import async_api  # needs_chromium already guards this test
     names = (*FINAL_SUBMITS, *STEPS, "Submit", "Upload CV", "Bewerbungsunterlagen", "Apply", "Senden")
     async with async_api.async_playwright() as p:
         browser = await p.chromium.launch()
@@ -151,7 +151,8 @@ TALL_FRAME = """<!doctype html><html><body>
 @pytest.mark.parametrize("name", FINAL_SUBMITS[:3])
 async def test_a_tall_frame_keeps_its_non_english_submit_on_the_list(name):
     # A frame's part of the screen shows only its first questions; its submit is always listed.
-    async_api = pytest.importorskip("playwright.async_api")
+    from playwright import async_api  # needs_chromium already guards this test
+
     from src.services.browser_agent.page_js import SNAPSHOT_JS
 
     async with async_api.async_playwright() as p:
