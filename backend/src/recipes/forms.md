@@ -13,7 +13,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    No browser of your own: Job360's `browser` tool (open, look, then act on the `ref`s; `upload` with `doc_kind`
    "cv" and this job's `application_id` sends the saved CV). After a page changes, use the refs it returned.
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
-   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten. **Done when** the form is loaded and in front.
+   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten; essay: draft, ask_user, type only the approved text. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
    freeze the tab. Wait for the parse to finish, then re-read the page. **Done when** the file name shows and the
    page is idle.

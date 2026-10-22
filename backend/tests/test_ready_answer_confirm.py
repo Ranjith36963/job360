@@ -307,7 +307,7 @@ async def test_verify_memory_an_assistant_saved_makes_it_the_users_own(authentic
 async def test_refusals_write_nothing(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        await _fill(client, app_id, [GUESS, {"question": "Middle name", "answer": "", "source": "written"}])
+        await _fill(client, app_id, [GUESS, {"question": "Middle name", "answer": "", "source": "profile"}])
         fill = (await _card(client, app_id))["form_filled_event_id"]
         assert (await _confirm(client, app_id, 0, fill + 999)).status_code == 409
         assert (await _confirm(client, app_id, 7, fill)).status_code == 422

@@ -757,6 +757,7 @@ sexual_orientation, transgender}; "prefer not to say" is valid.
 recorded_at, company (optional), topic (optional)}] — set `approved: true` only after the user agrees to that exact
 wording, and send `recorded_at` back as stored. An answer given for ONE employer (consent,
 why-this-company, a referral there) gets `company`: that job's company; it is reused only for that company.
+A company-specific written answer always carries `company`; never a claim the profile lacks (a written answer is typed only after the user approves it: `check_submit` asks `answer_unapproved`).
 `topic` = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. `work_from.IN`,
 `notice_period_days`): save it with every answer; a gap's own `topic` goes in unchanged. An approved answer
 closes a gap when its topic matches, or its question equals the gap's text ignoring case and punctuation.
