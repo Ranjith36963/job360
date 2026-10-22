@@ -712,7 +712,7 @@ class JobDatabase:
         "idempotency_keys", "missing_tool_reports",
         "oauth_grants",
         "password_resets", "proof_upload_links", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
-        "user_profile_versions", "user_profiles",
+        "user_profile_versions", "user_profiles", "user_templates",
     )
 
     # Tables included in a GDPR Article 20 export (docs/fable/05 C7). This is the
@@ -734,7 +734,7 @@ class JobDatabase:
         "assistant_setting_requests", "audit_log", "contact_edits", "contact_outreach",
         "idempotency_keys", "missing_tool_reports", "oauth_grants", "profile_edits", "tailored_documents",
         "tailored_usage",
-        "user_profile_versions", "user_profiles",
+        "user_profile_versions", "user_profiles", "user_templates",
     )
 
     # Secret-bearing columns are redacted even inside exported tables — e.g. the

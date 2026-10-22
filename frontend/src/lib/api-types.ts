@@ -2929,6 +2929,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Templates */
+        get: operations["list_templates_api_templates_get"];
+        put?: never;
+        /** Save Template */
+        post: operations["save_template_api_templates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tokens": {
         parameters: {
             query?: never;
@@ -5757,6 +5775,11 @@ export interface components {
              */
             truncated: boolean;
         };
+        /** ListTemplatesResponse */
+        ListTemplatesResponse: {
+            /** Templates */
+            templates: components["schemas"]["TemplateOut"][];
+        };
         /**
          * ListedPerson
          * @description Outreach pack #15 — a person the ad itself names ("Meet the hiring team").
@@ -6024,6 +6047,11 @@ export interface components {
             follow_up_on?: string | null;
             /** Id */
             id: number;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Occurred At */
             occurred_at: string;
             /** Recorded At */
@@ -7042,6 +7070,11 @@ export interface components {
             entry: string;
             /** Follow Up On */
             follow_up_on?: string | null;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Occurred At */
             occurred_at?: string | null;
             source?: components["schemas"]["EventSource"] | null;
@@ -7143,6 +7176,11 @@ export interface components {
             event_id: number | null;
             /** Kind */
             kind: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Made By */
             made_by: string;
             /** Model */
@@ -7211,6 +7249,17 @@ export interface components {
             fit: components["schemas"]["ApplicationFitOut"];
             line: components["schemas"]["SaveFitLineOut"];
             visa?: components["schemas"]["ApplicationVisaOut"] | null;
+        };
+        /** SaveTemplateRequest */
+        SaveTemplateRequest: {
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Model */
+            model?: string | null;
+            /** Text */
+            text: string;
         };
         /**
          * SetVisaRequest
@@ -7658,6 +7707,27 @@ export interface components {
             /** Still Waiting */
             still_waiting: number;
         };
+        /**
+         * StatsOutreachVariantGroupOut
+         * @description Pack #13 — per outreach `label` (lower(trim)): contacts with a sent mark, counted
+         *     once under the label of their newest message version saved BEFORE their first sent
+         *     mark ('' / none = key null, "Not set"); of those, how many have a reply mark;
+         *     reply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N.
+         */
+        StatsOutreachVariantGroupOut: {
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string;
+            /** Outreach Replied */
+            outreach_replied: number;
+            /** Outreach Sent */
+            outreach_sent: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+        };
         /** StatsOverallOut */
         StatsOverallOut: {
             /** Applied */
@@ -7851,6 +7921,11 @@ export interface components {
             by_cv_version: components["schemas"]["StatsCvVersionGroupOut"][];
             /** By Job Source */
             by_job_source: components["schemas"]["StatsKeyedGroupOut"][];
+            /**
+             * By Outreach Variant
+             * @default []
+             */
+            by_outreach_variant: components["schemas"]["StatsOutreachVariantGroupOut"][];
             /** By Role */
             by_role: components["schemas"]["StatsRoleGroupOut"][];
             calibration?: components["schemas"]["StatsCalibrationOut"] | null;
@@ -8132,6 +8207,27 @@ export interface components {
             receipt_id?: number | null;
             /** Title */
             title: string;
+        };
+        /** TemplateOut */
+        TemplateOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model?: string | null;
+            /** Template Id */
+            template_id: number;
+            /** Text */
+            text: string;
+            /** Version No */
+            version_no: number;
         };
         /** TimezoneRequest */
         TimezoneRequest: {
@@ -13075,6 +13171,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvenanceSegment"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_templates_api_templates_get: {
+        parameters: {
+            query?: {
+                kind?: string;
+                label?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListTemplatesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_template_api_templates_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateOut"];
                 };
             };
             /** @description Validation Error */

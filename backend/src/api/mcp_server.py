@@ -565,6 +565,7 @@ def build_server(version: str = "") -> MCPServer:
     from src.api.routes import receipts as receipts_route
     from src.api.routes import recipes as recipes_route
     from src.api.routes import tailor as tailor_route
+    from src.api.routes import templates as templates_route
     from src.services.applications import spine as applications_spine
     from src.services.applications.authorship import actor_for
     from src.services.profile import refusals as profile_refusals
@@ -702,6 +703,11 @@ def build_server(version: str = "") -> MCPServer:
             out["more"] = more
         return out
 
+    async def _outreach_templates() -> list[dict[str, Any]]:
+        async with _request_db() as db:
+            resp = await templates_route.list_templates(kind="outreach_template", label=None, db=db, user=_user())
+        return list(resp["templates"])
+
     @mcp.tool()
     async def get_profile(
         include_raw: bool = False, raw_section: str = "", raw_offset: int = 0
@@ -731,7 +737,8 @@ def build_server(version: str = "") -> MCPServer:
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true, topic: the gap's topic}), then search.
 
         No profile yet: `profile_exists` false + `next` (ask for the CV, or update_profile).
-        Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
+        Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint,
+        outreach_templates.
         Full rules and shapes: get_recipe("rules")."""
         # ONE profile read for the whole tool call. `load_profile_response` is
         # the same function `GET /profile` itself is (same 404, same rendering),
@@ -760,6 +767,7 @@ def build_server(version: str = "") -> MCPServer:
 
                 editable = list(profile_edits.editable_paths())
                 view = profile_route.settings_view(UserProfile(), user_id)
+                tpl = await _outreach_templates()
                 return {
                     "profile_exists": False,
                     "next": (
@@ -771,6 +779,8 @@ def build_server(version: str = "") -> MCPServer:
                     "profile_edit_id": profile_edits.current_edit_id(user_id),
                     "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable},
                     "assistant_hint": ASSISTANT_HINT,
+                    # Pack #13 - newest version per label; absent when none (rule #29). Job360 never fills one.
+                    **({"outreach_templates": tpl} if tpl else {}),
                 }
             _audit("get_profile", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -793,6 +803,7 @@ def build_server(version: str = "") -> MCPServer:
             cvd.raw_text or cvd.linkedin_raw_text or cvd.github_bio or cvd.github_profile_readme
             or cvd.github_repos_brief
         )
+        tpl = await _outreach_templates()
         return {
             # Owner decision, 2026-09-28 — see ASSISTANT_HINT's own comment
             # and this tool's docstring: reaches an assistant that connected
@@ -870,6 +881,8 @@ def build_server(version: str = "") -> MCPServer:
             # generous enough that a real CV or LinkedIn export is never cut,
             # and `truncated` says so out loud when one is.
             "raw_available": raw_present,
+            # Pack #13 - newest version per label; absent when none (rule #29). Job360 never fills one.
+            **({"outreach_templates": tpl} if tpl else {}),
             "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable_paths},
             **({"raw": _raw_block(profile.cv_data, raw_section, raw_offset)} if include_raw else {}),
         }
@@ -1267,12 +1280,12 @@ def build_server(version: str = "") -> MCPServer:
         ats_notes: Optional[str] = None,
         client_key: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Save a CV / cover letter / answers / outreach note for this application.
-        Write the tailored text YOURSELF from get_profile + get_job — Job360 has no
-        LLM — then save it here (kind = "cv" | "cover_letter" | "answers" |
+        """Save a CV, cover letter, answers or outreach note for this application.
+        Write the text YOURSELF from get_profile + get_job (Job360 has no
+        LLM), then save it here (kind = "cv" | "cover_letter" | "answers" |
         "outreach" | "story_bank" | "interview_transcript" | "redflag_analysis" | "skill_gap_report").
-        Every save is a NEW version: nothing is overwritten, Job360
-        versions it and renders DOCX / PDF from it.
+        Every save is a NEW version, never overwritten; Job360
+        renders DOCX / PDF from it.
 
         ATS check: run your OWN ATS check on EVERY CV you save and pass
         `ats_score` (a whole number 0-100) and `ats_notes` (what would trip an
@@ -1289,15 +1302,42 @@ def build_server(version: str = "") -> MCPServer:
         Give `contact_id` (a person from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and
         `channel` ("linkedin" | "email" | "other") is required. Works for a
-        cold contact (no job) too: leave `application_id` out. Recording that
-        the message actually SENT is a separate step — record_event with the
+        cold contact (no job) too: leave `application_id` out. Recording the
+        SEND is a separate step — record_event with the
         same `contact_id`, once it actually went: the USER says so (mode ask/paused/off), or you
         sent it yourself from the user's Gmail (mode auto — pass the Gmail
         message id as `source`). Job360 itself never sends.
         A message version writes no timeline event; only sent/reply do.
+
+        kind "outreach_template" + `label`, no application_id or contact_id: a reusable template; each save
+        is a new version, get_profile `outreach_templates` returns the newest.
+        Give outreach messages a `label` for stats by variant.
         `client_key` (optional): a retry with the same key returns the first reply."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         text, ats_notes = _unfence_in(text), _unfence_in(ats_notes)
+        if kind in settings.USER_TEMPLATE_KINDS:
+            if application_id is not None or contact_id is not None:
+                _audit("save_artifact", "error", kind=kind, http_status=422)
+                raise _tool_error(HTTPException(422, templates_route.TEMPLATE_NOT_TIED))
+            if channel:
+                _audit("save_artifact", "error", kind=kind, http_status=422)
+                raise _tool_error(HTTPException(422, templates_route.TEMPLATE_NO_CHANNEL))
+            try:
+                applications_spine.validate_ats(kind, ats_score, ats_notes)
+            except applications_spine.SpineError as exc:
+                raise _tool_error(HTTPException(exc.status_code, exc.detail)) from None
+            try:
+                tbody = templates_route.SaveTemplateRequest(kind=kind, label=label, text=text, model=model)
+            except ValidationError as exc:
+                raise _validation_error(exc) from None
+            try:
+                async with _request_db() as db:
+                    resp = await templates_route.save_template(tbody, db, _user())
+            except HTTPException as exc:
+                _audit("save_artifact", "error", kind=kind, http_status=exc.status_code)
+                raise _tool_error(exc) from None
+            _audit("save_artifact", "ok", kind=kind, template_id=resp["template_id"], version_no=resp["version_no"])
+            return resp
         if contact_id is not None and application_id is None:
             # Bug fix (coordinator review, 2026-09-26) — the linked branch
             # below already refuses a non-"outreach" kind via
@@ -1315,7 +1355,8 @@ def build_server(version: str = "") -> MCPServer:
                 raise _tool_error(HTTPException(exc.status_code, exc.detail)) from None
             try:
                 body = applications_route.RecordOutreachRequest(
-                    entry="message", channel=channel or "", text=text, client_key=client_key
+                    entry="message", channel=channel or "", text=text, label=label,
+                    client_key=client_key,
                 )
             except ValidationError as exc:
                 raise _validation_error(exc) from None
@@ -1331,7 +1372,7 @@ def build_server(version: str = "") -> MCPServer:
                 "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
                 "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": model,
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": resp["event_id"],
-                "contact_id": contact_id, "checks": outreach.get("checks", []),
+                "contact_id": contact_id, "checks": outreach.get("checks", []), "label": outreach["label"],
                 "already_existed": resp["already_existed"],
             }
         if contact_id is None and kind == "outreach":
@@ -1780,8 +1821,9 @@ def build_server(version: str = "") -> MCPServer:
         to get a per-variant count here), by role, by_country (the job's
         `country`; remote jobs are their own "remote" group), by_job_source
         (`found_on`), by_channel (record_application's `channel`) and
-        by_contact_found_via / by_contact_relationship (contacts, reachable, outreach sent, replies,
-        reply rate per add_contact `found_via` / `relationship`). Applications marked with a `simulation` event are left
+        by_contact_found_via / by_contact_relationship (contacts, reachable, sent, replies, reply rate per
+        add_contact `found_via` / `relationship`), by_outreach_variant (per outreach `label`).
+        Applications marked with a `simulation` event are left
         out; overall.simulations_excluded says how many. An unset value is the group with key null
         ("Not set"). `since` (an ISO date/datetime) scopes to applications
         (and contacts) added on/after that date. `view` adds one block: funnel (furthest

@@ -37,6 +37,9 @@ function stats(over: Partial<StatsResponse> = {}): StatsResponse {
     by_contact_relationship: [
       { key: "former_colleague", label: "former_colleague", contacts: 2, outreach_sent: 2, outreach_replied: 1, reply_rate: 0.5 },
     ],
+    by_outreach_variant: [
+      { key: "short ask", label: "Short ask", outreach_sent: 4, outreach_replied: 1, reply_rate: 0.25, small_sample: true },
+    ],
     ...over,
   } as unknown as StatsResponse;
 }
@@ -126,13 +129,28 @@ describe("StatsClient", () => {
     expect(section).toHaveTextContent("50%");
   });
 
+  it("shows the outreach variant table", async () => {
+    getStats.mockResolvedValue(stats());
+    render(<StatsClient />);
+    const section = await screen.findByTestId("stats-section-outreach-variant");
+    expect(screen.getByText("By outreach variant")).toBeInTheDocument();
+    const row = within(section).getByTestId("stats-row");
+    expect(row).toHaveTextContent("Short ask");
+    expect(row).toHaveTextContent("4");
+    expect(row).toHaveTextContent("25%");
+    expect(within(section).getByText("Sent (n)")).toBeInTheDocument();
+    expect(within(section).getByText("Replied")).toBeInTheDocument();
+    expect(within(section).getByText("Reply %")).toBeInTheDocument();
+  });
+
   it("omits an empty section", async () => {
-    getStats.mockResolvedValue(stats({ by_country: [], by_contact_found_via: [], by_contact_relationship: [] }));
+    getStats.mockResolvedValue(stats({ by_country: [], by_contact_found_via: [], by_contact_relationship: [], by_outreach_variant: [] }));
     render(<StatsClient />);
     await screen.findByTestId("stats-overall");
     expect(screen.queryByTestId("stats-section-country")).toBeNull();
     expect(screen.queryByTestId("stats-section-people")).toBeNull();
     expect(screen.queryByTestId("stats-section-people-relationship")).toBeNull();
+    expect(screen.queryByTestId("stats-section-outreach-variant")).toBeNull();
     expect(screen.getByTestId("stats-section-role")).toBeInTheDocument();
   });
 
