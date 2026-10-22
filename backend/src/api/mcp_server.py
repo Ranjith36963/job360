@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 15
-TOOLS_REV_FOR_HASH = "7b6c6ea1a8ad"
+TOOLS_REV = 14
+TOOLS_REV_FOR_HASH = "68129d3cbb95"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -449,7 +449,6 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "possible_duplicate": r.possible_duplicate,
         "kit_event_id": r.kit_event_id,
         "kit_sha256": r.kit_sha256,
-        "referred_by_contact_id": r.referred_by_contact_id,
         "proof": r.proof.model_dump(),
         "url": _receipt_url(r.id),
     }
@@ -1027,7 +1026,6 @@ def build_server(version: str = "") -> MCPServer:
         cover_letter_artifact_id: Optional[int] = None,
         applied_at: Optional[str] = None,
         application_id: Optional[int] = None,
-        referred_by_contact_id: Optional[int] = None,
     ) -> dict[str, Any]:
         """Record that the user has applied to this job — ONLY after they say so, or an
         employer's confirmation email in their Gmail proves it (name it in `note`). Pass
@@ -1041,7 +1039,6 @@ def build_server(version: str = "") -> MCPServer:
         greenhouse etc. = company_site; other text is stored as "other" (never refused;
         the reply has `channel_given` + a `warning`). `note` is free text.
         `confirmation` = the ID only (must contain a digit); anything else is kept in the note with a warning.
-        `referred_by_contact_id` = the contact linked to this job whose referral was given; leave it out otherwise.
 
         C1 (application-spine review) — this is the SAME tool as before (`job_id`,
         `channel`, `note` still work unchanged), rewired onto the rich
@@ -1061,7 +1058,6 @@ def build_server(version: str = "") -> MCPServer:
                 answers=[applications_route.ReceiptAnswer(**a) for a in (answers or [])],
                 fields_filled=fields_filled or {}, cv_artifact_id=cv_artifact_id,
                 cover_letter_artifact_id=cover_letter_artifact_id, applied_at=applied_at,
-                referred_by_contact_id=referred_by_contact_id,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1101,10 +1097,7 @@ def build_server(version: str = "") -> MCPServer:
                 http_status=exc.status_code,
             )
             raise _tool_error(exc) from None
-        _audit(
-            "record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"],
-            referred_by_contact_id=referred_by_contact_id,
-        )
+        _audit("record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"])
         # The spine's url is site-relative; every other tool hands out the absolute one.
         resp = {**resp, "url": _application_url(application["id"])}
         reply: dict[str, Any] = {"job_id": job_id, **resp}
@@ -1769,8 +1762,7 @@ def build_server(version: str = "") -> MCPServer:
         agency/direct, needs 5 sent; `signals` need 2 decided; ghosted is no answer, never a rejection;
         `rejection_reasons` are exact words, group them yourself), skill_gaps (the gaps you saved with
         save_fit, counted and tiered; needs 5 scored fits), sites (per form host: forms filled, applied,
-        blocked by reason, with n), referrals (referred vs not: reply and interview rates), or all.
-        Every rate has its n; small_sample
+        blocked by reason, with n), or all. Every rate has its n; small_sample
         is true under 10. Facts only: never rank or skip a job or company on these numbers."""
         try:
             async with _request_db() as db:

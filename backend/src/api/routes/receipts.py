@@ -75,7 +75,6 @@ class Receipt(BaseModel):
     possible_duplicate: str = ""
     kit_event_id: int | None = None
     kit_sha256: str = ""
-    referred_by_contact_id: int | None = None
     # S7 - how well this application is backed up; "none" when there is no application.
     proof: ProofOut = Field(default_factory=ProofOut)
 

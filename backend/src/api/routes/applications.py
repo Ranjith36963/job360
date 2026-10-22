@@ -277,8 +277,6 @@ class RecordApplicationReceiptRequest(BaseModel):
     cv_artifact_id: Optional[int] = None
     cover_letter_artifact_id: Optional[int] = None
     applied_at: Optional[str] = None
-    # The user's own contact, linked to THIS application, whose referral got them the job.
-    referred_by_contact_id: Optional[int] = None
 
     def clamp_fields_filled(self) -> dict[str, Any]:
         cap = settings.APPLICATION_RECEIPT_FIELDS_MAX_BYTES
@@ -911,7 +909,6 @@ class RecordApplicationReceiptResponse(BaseModel):
     event_id: int
     # S3 - '' | same_job | same_role | same_company. A flag, never a block.
     possible_duplicate: str = ""
-    referred_by_contact_id: Optional[int] = None
 
 
 class WhatsNewEventOut(BaseModel):
@@ -1113,18 +1110,11 @@ class KitJobOut(BaseModel):
     found_on: Optional[str] = None
 
 
-class KitReferredByOut(BaseModel):
-    contact_id: int
-    name: str
-
-
 class KitApplicationOut(BaseModel):
     id: int
     status: str
     follow_up_on: Optional[str] = None
     submit_override: Optional[str] = None
-    # The contact whose live referral_given event names this job (current name); null = none recorded.
-    referred_by: Optional[KitReferredByOut] = None
 
 
 class KitSameJobOut(BaseModel):
@@ -1788,29 +1778,6 @@ class StatsSitesOut(BaseModel):
     note: str
 
 
-class StatsReferralGroupOut(BaseModel):
-    brought: int
-    applied: int
-    replied: int
-    interview: int
-    offer: int
-    rejected: int
-    reply_rate: Optional[float]
-    interview_rate: Optional[float]
-    offer_rate: Optional[float]
-    small_sample: bool
-
-
-class StatsReferralsOut(BaseModel):
-    """``stats(view="referrals")``: referred vs not. Facts only, never a ranking."""
-
-    n: int
-    referred: StatsReferralGroupOut
-    not_referred: StatsReferralGroupOut
-    referral_asked: int
-    note: str
-
-
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1840,7 +1807,6 @@ class StatsResponse(BaseModel):
     patterns: Optional[StatsPatternsOut] = None
     skill_gaps: Optional[StatsSkillGapsOut] = None
     sites: Optional[StatsSitesOut] = None
-    referrals: Optional[StatsReferralsOut] = None
     computed_at: str
 
 
@@ -3331,7 +3297,7 @@ async def record_application_receipt(
             channel=body.channel, note=body.note, confirmation=body.confirmation,
             answers=[a.model_dump(exclude_none=True) for a in body.answers], fields_filled=fields_filled,
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
-            applied_at=body.applied_at, referred_by_contact_id=body.referred_by_contact_id,
+            applied_at=body.applied_at,
         )
     except SpineError as exc:
         _raise(exc)
