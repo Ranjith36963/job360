@@ -22,6 +22,17 @@
         "additionalProperties": false,
         "description": "Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md \u00a7Tool contracts).\n\nNo length/shape constraints declared here (unlike ``SaveArtifactRequest``'s\n``label``): every cap is a live ``settings`` value a test can monkeypatch,\nso ``contacts.add_contact`` checks them at call time \u2014 the same pattern\n``SaveFitRequest.clamp_reasoning``/``RecordEventRequest.clamp_detail`` use.\n``added_by`` is deliberately ABSENT \u2014 ``extra=\"forbid\"`` rejects it (S2).",
         "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "email": {
             "default": "",
             "title": "Email",
@@ -145,6 +156,17 @@
               }
             ],
             "title": "Application Id"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
           },
           "email": {
             "default": "",
@@ -722,6 +744,9 @@
             "title": "Job Id",
             "type": "integer"
           },
+          "known_people": {
+            "$ref": "#/components/schemas/KnownPeopleOut"
+          },
           "last_event_at": {
             "anyOf": [
               {
@@ -1235,6 +1260,9 @@
           },
           "kit": {
             "$ref": "#/components/schemas/KitIdOut"
+          },
+          "known_people": {
+            "$ref": "#/components/schemas/KnownPeopleOut"
           },
           "missing": {
             "items": {
@@ -2752,6 +2780,9 @@
           "job": {
             "$ref": "#/components/schemas/JobResponse"
           },
+          "known_people": {
+            "$ref": "#/components/schemas/KnownPeopleOut"
+          },
           "listed_people": {
             "anyOf": [
               {
@@ -3253,6 +3284,17 @@
               }
             ],
             "title": "Application Id"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
           },
           "created_at": {
             "title": "Created At",
@@ -6245,6 +6287,134 @@
         "title": "KitSeenOut",
         "type": "object"
       },
+      "KnownPeopleOut": {
+        "description": "known_people: `count` = every person found; `people` = at most KNOWN_PEOPLE_MAX; `truncated` = more exist.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/KnownPersonOut"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "title": "KnownPeopleOut",
+        "type": "object"
+      },
+      "KnownPersonOut": {
+        "description": "One person the user already stored at this job's company (known_people). `company` is\nthe contact's own company, else its linked job's; `application_ids` = the jobs they are linked to.",
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "contact_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Contact Ids",
+            "type": "array"
+          },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
+          },
+          "last_reply_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reply At"
+          },
+          "last_sent_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sent At"
+          },
+          "last_sent_channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sent Channel"
+          },
+          "message_count": {
+            "default": 0,
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
+          "replied": {
+            "default": false,
+            "title": "Replied",
+            "type": "boolean"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact_ids",
+          "name"
+        ],
+        "title": "KnownPersonOut",
+        "type": "object"
+      },
       "LessonOut": {
         "description": "One `lesson` event, read back across applications (slice 9, #516).",
         "properties": {
@@ -7158,6 +7328,17 @@
             ],
             "title": "Application Id"
           },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -7276,6 +7457,17 @@
       "PersonOut": {
         "description": "``list_people``'s no-``contact_id`` shape \u2014 one row per PERSON\n(grouped by lower(email) else linkedin_url), aggregated across every\nunderlying ``application_contacts`` row that shares that identity.",
         "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "contact_ids": {
             "items": {
               "type": "integer"
@@ -12870,6 +13062,17 @@
         "additionalProperties": false,
         "description": "``PATCH /api/contacts/{contact_id}`` \u2014 every field optional; only the\nones given are appended to ``contact_edits`` (owner decision, 2026-09-25:\ncontacts ARE editable, old values kept). No length caps declared here \u2014\nsame reasoning as ``AddContactRequest``: ``contacts.update_contact``\nchecks live ``settings`` values at call time.",
         "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "email": {
             "anyOf": [
               {
@@ -20740,7 +20943,7 @@
     },
     "/api/people": {
       "get": {
-        "description": "No ``contact_id`` \u2014 every person the user has added, grouped by\nlower(email) else linkedin_url (the same recruiter on two jobs is one\nperson here). With ``contact_id`` \u2014 that ONE row's own full record\n(message versions, sent/reply marks, detail-edit history), never merged.",
+        "description": "No ``contact_id`` \u2014 every person the user has added, grouped by\nlower(email) else linkedin_url (the same recruiter on two jobs is one\nperson here). With ``contact_id`` \u2014 that ONE row's own full record\n(message versions, sent/reply marks, detail-edit history), never merged.\n``company`` keeps only people whose company (or linked job's company) has the same company key as jobs (rule #1).",
         "operationId": "list_people_api_people_get",
         "parameters": [
           {
@@ -20773,6 +20976,22 @@
                 }
               ],
               "title": "Email"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company"
             }
           },
           {

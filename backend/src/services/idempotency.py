@@ -1,4 +1,4 @@
-"""One idempotency store for the write tools (gap roadmap slice 10, migration 0069).
+"""One idempotency store for the write tools (gap roadmap slice 10, migration 0070).
 
 A write that takes a ``request_id`` keeps one ``idempotency_keys`` row per
 (user, tool, key): the sha256 of the canonical JSON request body and the reply

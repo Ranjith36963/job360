@@ -54,6 +54,14 @@ is safe" into "ship it". The TARGET was never the point -- "a machine does not
 decide this" was.) This repo has shipped ten guards that
 could not fire, every one of them a check that reported success about a question
 it was not actually asking. `else: allow` is that bug in one word.
+
+THE NEW-PACKAGE TRIPWIRE (owner, 2026-10-20)
+--------------------------------------------
+A path cannot say "this manifest adds a package". `content_pins()` compares a
+dependency manifest at base and head, and a change that ADDS a package name
+moves that file to `product_human` (the owner merges it, it is still watched).
+A version bump of a name already there keeps the file's own lane. A pin can
+only TIGHTEN a lane, so with no revisions, or a file it cannot read, it fires.
 """
 
 from __future__ import annotations
@@ -61,6 +69,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -179,13 +188,260 @@ def apply_data_exemptions(
     return kept, exempted
 
 
-def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
+# ── CONTENT PINS: THE NEW-PACKAGE TRIPWIRE (owner, 2026-10-20) ──────────────
+# The mirror of the data exemption above: that one can only LOOSEN a lane, a
+# pin can only TIGHTEN one. The policy's `content_pins:` names the manifests and
+# this compares each at base and head. An agent can invent a package name, and a
+# typo-squat runs its install scripts on the build host (slopsquatting).
+#
+# THE STRICT DEFAULT IS THE OPPOSITE OF THE EXEMPTION'S, ON PURPOSE. With no
+# revisions, an unreadable revision or an unparseable file, an exemption is
+# withheld -- and a pin FIRES. Both are the safe direction for what they do.
+PIN_KINDS = ("new_dependency",)
+MANIFEST_KINDS = ("pyproject", "package_json", "package_lock", "requirements")
+_PACKAGE_JSON_TABLES = ("dependencies", "devDependencies", "optionalDependencies",
+                        "peerDependencies")
+_REQ_NAME = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+# `--break-checker pins` sets this, so the drill can be watched going red.
+_PINS_BLINDED = False
+
+
+class PinUnreadableError(RuntimeError):
+    """git could not answer for a revision -- the pin fires rather than guess."""
+
+
+def _pins_config(policy: dict[str, Any]) -> dict[str, Any]:
+    """`content_pins:` from the policy, shape-checked. Absent means no pins."""
+    cfg = policy.get("content_pins")
+    if cfg is None:
+        return {}
+    if not isinstance(cfg, dict) or set(cfg) - set(PIN_KINDS):
+        raise PolicyError(f"`content_pins:` must be a mapping of {', '.join(PIN_KINDS)}")
+    for kind, block in cfg.items():
+        lane = (block or {}).get("lane") if isinstance(block, dict) else None
+        if lane not in policy["lanes"]:
+            raise PolicyError(f"content_pins.{kind}.lane `{lane}` is not a lane in the policy")
+        # A pin into a lane a machine may merge is a pin that changes nothing.
+        if policy["lanes"][lane].get("auto_merge") is not False:
+            raise PolicyError(f"content_pins.{kind} pins to `{lane}`, which a machine may merge")
+    for pattern, kind in ((cfg.get("new_dependency") or {}).get("manifests") or {}).items():
+        if kind not in MANIFEST_KINDS:
+            raise PolicyError(f"content_pins manifest `{pattern}` has unknown kind `{kind}`")
+    return cfg
+
+
+def _norm_package(name: str, kind: str) -> str:
+    # PEP 503 for Python, so `Foo_Bar` -> `foo-bar` is a bump, not a new name.
+    if kind in ("pyproject", "requirements"):
+        return re.sub(r"[-_.]+", "-", name).lower()
+    return name.lower()
+
+
+def _requirement_names(text: str) -> list[str]:
+    """Names in a pip requirements file (pip-compile/uv lock files included).
+
+    An OPTION line (`--extra-index-url`, `-r`, `-e`) and a bare URL are kept
+    verbatim as a pseudo-name, so adding a new index or source fires too.
+    `--hash` lines are continuations of a requirement and are joined first.
+    """
+    names: list[str] = []
+    for raw in text.replace("\\\n", " ").splitlines():
+        line = re.sub(r"(^|\s)#.*$", "", raw).strip()
+        if not line:
+            continue
+        if line.startswith("-") or ("://" in line and " @ " not in line):
+            names.append("source:" + " ".join(line.split()))
+            continue
+        names.extend(_pep508(line))
+    return names
+
+
+# A SOURCE SWAP IS A NEW PACKAGE TOO (reviewer P2 on #998). `next` -> a git
+# repo keeps the name and changes what installs, so a dependency whose spec is
+# not a registry version is recorded again as `name@<source>`: a new or changed
+# source fires the pin, a version/range/tag bump does not.
+_DIRECT_REF = re.compile(r"^[^@;]*?@\s*(\S+)")
+
+
+def _pep508(req: str) -> list[str]:
+    """`[name]`, plus `name@<url>` for a PEP 508 direct reference."""
+    m = _REQ_NAME.match(req)
+    if not m:
+        raise ValueError(f"cannot read a package name from {req[:60]!r}")
+    ref = _DIRECT_REF.match(req)
+    return [m.group(1)] + ([f"{m.group(1)}@{ref.group(1)}"] if ref else [])
+
+
+def _npm_source(name: str, spec: object) -> list[str]:
+    """`name@<spec>` when the spec is not a registry range (git, github:, npm:, file:, a path)."""
+    if isinstance(spec, str) and ":" not in spec and "/" not in spec:
+        return []
+    return [f"{name}@{json.dumps(spec, sort_keys=True)}"]
+
+
+def dependency_names(text: str, kind: str) -> set[str]:
+    """Every package NAME a manifest declares. Raises ValueError if unreadable."""
+    names: list[str] = []
+    if kind in ("package_json", "package_lock"):
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError(f"{kind} is not an object")
+        tables = [data]
+        if kind == "package_lock":
+            packages = data.get("packages")
+            if not isinstance(packages, dict):
+                raise ValueError("no `packages` table (a v1 lockfile is not read)")
+            # Every installed name, transitive ones included: `npm ci` installs
+            # what the lock says, so a name added only here is still a new one.
+            for key, meta in packages.items():
+                if not key:
+                    continue
+                name = key.rsplit("node_modules/", 1)[-1]
+                names.append(name)
+                got = (meta or {}).get("resolved") if isinstance(meta, dict) else None
+                if got and not str(got).startswith("https://registry.npmjs.org/"):
+                    names.append(f"{name}@{got}")
+            tables = [packages.get("") or {}]
+        for table_owner in tables:
+            for table in _PACKAGE_JSON_TABLES:
+                deps = table_owner.get(table) or {}
+                if not isinstance(deps, dict):
+                    raise ValueError(f"`{table}` is not an object")
+                for name, spec in deps.items():
+                    names += [name, *_npm_source(name, spec)]
+    elif kind == "requirements":
+        names = _requirement_names(text)
+    elif kind == "pyproject":
+        try:
+            import tomllib  # noqa: PLC0415 - 3.11+, and only this path needs it
+        except ImportError as exc:  # pragma: no cover - CI runs 3.12
+            raise ValueError("no TOML parser on this Python") from exc
+        data = tomllib.loads(text)
+        project = data.get("project") or {}
+        reqs: list[object] = list(project.get("dependencies") or [])
+        for group in (project.get("optional-dependencies") or {}).values():
+            reqs.extend(group)
+        for group in (data.get("dependency-groups") or {}).values():
+            reqs.extend(r for r in group if not isinstance(r, dict))  # skip {include-group}
+        reqs.extend((data.get("build-system") or {}).get("requires") or [])
+        for req in reqs:
+            if not isinstance(req, str):
+                raise ValueError(f"cannot read a package name from {req!r}")
+            names.extend(_pep508(req))
+        # uv sources and poetry tables: every name, and any non-version spec
+        # (git, url, path, a named source) as `name@<spec>`.
+        tool = data.get("tool") or {}
+        poetry = tool.get("poetry") or {}
+        tables = [(tool.get("uv") or {}).get("sources") or {},
+                  poetry.get("dependencies") or {}, poetry.get("dev-dependencies") or {},
+                  *((g or {}).get("dependencies") or {}
+                    for g in (poetry.get("group") or {}).values())]
+        for table in tables:
+            for name, spec in table.items():
+                if name.lower() != "python":
+                    names += [name] + ([] if isinstance(spec, str) and table is not tables[0]
+                                       else [f"{name}@{json.dumps(spec, sort_keys=True)}"])
+    else:
+        raise ValueError(f"unknown manifest kind {kind!r}")
+    return {_norm_entry(n, kind) for n in names}
+
+
+def _norm_entry(entry: str, kind: str) -> str:
+    """Normalise the NAME only; a `name@<source>` keeps its source verbatim."""
+    if entry.startswith("source:"):
+        return entry
+    cut = entry.find("@", 1)            # skip a scoped npm name's leading `@`
+    if cut < 0:
+        return _norm_package(entry, kind)
+    return _norm_package(entry[:cut], kind) + entry[cut:]
+
+
+def _git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+
+
+def _read_side(repo: str, rev: str, path: str) -> str | None:
+    """The file at `rev`, or None when it is absent there. Raises if git cannot say."""
+    listed = _git(repo, "ls-tree", rev, "--", path)
+    if listed.returncode != 0:
+        raise PinUnreadableError(f"git ls-tree {rev} failed: {listed.stderr.strip()[:120]}")
+    if not listed.stdout.strip():
+        return None
+    shown = _git(repo, "show", f"{rev}:{path}")
+    if shown.returncode != 0:
+        raise PinUnreadableError(f"git show {rev}:{path} failed: {shown.stderr.strip()[:120]}")
+    return shown.stdout
+
+
+def content_pins(
+    files: list[str],
+    policy: dict[str, Any],
+    base: str | None,
+    head: str | None,
+    repo: str = ".",
+) -> dict[str, tuple[str, str]]:
+    """file -> (lane, reason) for every manifest that gains a package name."""
+    cfg = _pins_config(policy)
+    if _PINS_BLINDED or not cfg:
+        return {}
+    dep = cfg.get("new_dependency") or {}
+    todo: list[tuple[str, str]] = []   # (file, manifest kind)
+    for f in files:
+        kind = next((k for pat, k in (dep.get("manifests") or {}).items()
+                     if path_matches(f, pat)), None)
+        if kind:
+            todo.append((f, kind))
+    if not todo:
+        return {}
+    lane = dep["lane"]
+    if not base or not head:
+        return {f: (lane, "no base/head revisions to compare, so this change cannot be shown "
+                          "to add no package -- the owner's") for f, _k in todo}
+    for rev in (base, head):
+        if _git(repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}").returncode != 0:
+            return {f: (lane, f"revision `{rev}` is unreadable, so nothing could be compared")
+                    for f, _k in todo}
+
+    pins: dict[str, tuple[str, str]] = {}
+    for f, kind in todo:
+        try:
+            before = _read_side(repo, base, f)
+            after = _read_side(repo, head, f)
+        except PinUnreadableError as exc:
+            pins[f] = (lane, f"could not read it to compare ({exc})")
+            continue
+        if after is None:
+            continue                      # a deleted manifest adds nothing
+        try:
+            was = dependency_names(before, kind) if before is not None else set()
+            now = dependency_names(after, kind)
+        except ValueError as exc:         # json/toml errors are ValueErrors too
+            pins[f] = (lane, f"could not read its dependency tables ({exc})")
+            continue
+        added = sorted(now - was)
+        if added:
+            pins[f] = (lane, f"adds a NEW package ({', '.join(added[:5])}) -- a name nobody "
+                             f"has installed here before is the owner's call (slopsquatting)")
+    return pins
+
+
+def classify(
+    files: list[str],
+    policy: dict[str, Any],
+    pins: dict[str, tuple[str, str]] | None = None,
+) -> dict[str, Any]:
     """Classify a whole changeset.
 
     Returns the lane, the requirements that lane demands, and -- always -- the
     specific files that caused the answer. A verdict you cannot trace to a file
     is a verdict nobody can argue with, which sounds good and is not.
+
+    `pins` (from `content_pins()`) can only move a file to a STRICTER lane: the
+    stricter of its own lane and the pin's wins, and an unknown file still
+    escalates.
     """
+    pins = pins or {}
     # THE ESCALATION TARGET, NAMED ONCE. Both fall-throughs below send a
     # changeset nobody has classified to this lane, and the property that has to
     # hold is `auto_merge: false`, not the lane's name. It was `product_owner`
@@ -225,7 +481,10 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
 
     by_lane: dict[str, list[str]] = {}
     for f in files:
-        by_lane.setdefault(lane_of_file(f, policy), []).append(f)
+        own = lane_of_file(f, policy)
+        if f in pins and own != "unknown":
+            own = min(own, pins[f][0], key=PRECEDENCE.index)
+        by_lane.setdefault(own, []).append(f)
 
     # An unknown path takes the lane no machine may merge, and says which file
     # made it so.
@@ -248,6 +507,7 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
         if by_lane.get(lane):
             cfg = policy["lanes"][lane]
             hits = sorted(by_lane[lane])
+            pinned = {f: pins[f][1] for f in hits if f in pins and pins[f][0] == lane}
             return {
                 "lane": lane,
                 "requires": cfg.get("requires") or [],
@@ -258,8 +518,10 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
                     f"lane `{lane}` -- {cfg.get('description', '')}".rstrip(" -"),
                     f"decided by {len(hits)} file(s), e.g. {', '.join(hits[:4])}"
                     + (" ..." if len(hits) > 4 else ""),
+                    *(f"`{f}` is pinned here: {why}" for f, why in sorted(pinned.items())),
                 ],
                 "by_lane": by_lane,
+                "pinned": pinned,
             }
 
     raise PolicyError("unreachable: every file classified but no lane matched")
@@ -738,6 +1000,123 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
           classify([".claude/skills/debug/SKILL.md",
                     ".claude/hooks/commit-gate.sh"], policy)["lane"], "harness_owner")
 
+    # 13. THE NEW-PACKAGE TRIPWIRE (owner, 2026-10-20). A manifest that ADDS a
+    #     package name is `product_human`; a version bump keeps its own lane.
+    #     Built on real throwaway repos so `git show` is exercised, as in 9.
+    #     `--break-checker pins` blinds `content_pins()` and these go red.
+    human = ("product_human", False)
+
+    def lane_auto(paths: list[str], pins: dict[str, tuple[str, str]] | None = None) -> tuple:
+        v = classify(paths, policy, pins)
+        return v["lane"], v["auto_merge"]
+
+    def pinned_lane(rel: str, before: dict[str, str], after: dict[str, str]) -> tuple:
+        tmp = tempfile.mkdtemp(prefix="lane-pin-drill-")
+        run = lambda *a: subprocess.run(  # noqa: E731
+            a, cwd=tmp, capture_output=True, text=True, check=True,
+            encoding="utf-8", errors="replace",
+        )
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "drill@local")
+        run("git", "config", "user.name", "drill")
+        shas = []
+        for files in (before, after):
+            for p, text in files.items():
+                (Path(tmp) / p).parent.mkdir(parents=True, exist_ok=True)
+                (Path(tmp) / p).write_text(text, encoding="utf-8")
+            run("git", "add", "-A")
+            run("git", "commit", "-qm", "x", "--allow-empty")
+            shas.append(run("git", "rev-parse", "HEAD").stdout.strip())
+        return lane_auto([rel], content_pins([rel], policy, shas[0], shas[1], tmp))
+
+    check("content pin `new_dependency` exists and pins to a lane a machine may not merge",
+          policy["lanes"][((policy.get("content_pins") or {}).get("new_dependency") or {})
+                          .get("lane", "product")].get("auto_merge"), False)
+    pkg = "frontend/package.json"
+    pj = lambda deps, dev: json.dumps({"name": "x", "dependencies": deps,  # noqa: E731
+                                       "devDependencies": dev})
+    base_pj = pj({"next": "16.0.0"}, {"vitest": "3.0.0"})
+    check("package.json: a version BUMP stays product_owner",
+          pinned_lane(pkg, {pkg: base_pj}, {pkg: pj({"next": "16.1.0"}, {"vitest": "3.0.0"})}),
+          ("product_owner", True))
+    check("package.json: a NEW dependency is the owner's",
+          pinned_lane(pkg, {pkg: base_pj},
+                      {pkg: pj({"next": "16.0.0", "reqeusts": "1.0.0"}, {"vitest": "3.0.0"})}), human)
+    check("package.json: a REMOVED dependency is not a new one",
+          pinned_lane(pkg, {pkg: base_pj}, {pkg: pj({}, {"vitest": "3.0.0"})}), ("product_owner", True))
+    check("package.json: unparseable after the change -> the owner's (strict)",
+          pinned_lane(pkg, {pkg: base_pj}, {pkg: "{ not json"}), human)
+    lock = "frontend/package-lock.json"
+    pl = lambda pk: json.dumps({"lockfileVersion": 3, "packages": pk})  # noqa: E731
+    base_pl = pl({"": {"dependencies": {"next": "16"}}, "node_modules/next": {"version": "16.0.0"}})
+    check("package-lock.json: a version BUMP stays product_owner",
+          pinned_lane(lock, {lock: base_pl}, {lock: pl({"": {"dependencies": {"next": "16"}},
+                                                         "node_modules/next": {"version": "16.1.0"}})}),
+          ("product_owner", True))
+    check("package-lock.json: a NEW installed name (even transitive) is the owner's",
+          pinned_lane(lock, {lock: base_pl},
+                      {lock: pl({"": {"dependencies": {"next": "16"}}, "node_modules/next": {},
+                                 "node_modules/next/node_modules/@evil/pkg": {}})}), human)
+    req = "backend/requirements.lock.txt"
+    base_rq = "fastapi==0.115.0 \\\n    --hash=sha256:aa\nPython_Dotenv==1.0  # via x\n"
+    check("requirements lock: a version BUMP (and a PEP 503 respelling) stays product_owner",
+          pinned_lane(req, {req: base_rq},
+                      {req: "fastapi==0.120.0 \\\n    --hash=sha256:bb\npython-dotenv==1.1\n"}),
+          ("product_owner", True))
+    check("requirements lock: a NEW package is the owner's",
+          pinned_lane(req, {req: base_rq}, {req: base_rq + "fastapi-helpers-pro==1.0\n"}), human)
+    check("requirements: a NEW index URL is the owner's too",
+          pinned_lane("backend/requirements-dev.txt", {"backend/requirements-dev.txt": "pytest\n"},
+                      {"backend/requirements-dev.txt": "--extra-index-url https://x.example\npytest\n"}),
+          human)
+    pyp = "backend/pyproject.toml"
+    tm = lambda deps, dev: (  # noqa: E731
+        "[project]\nname = \"x\"\ndependencies = [" + ", ".join(f'"{d}"' for d in deps) + "]\n"
+        "[project.optional-dependencies]\ndev = [" + ", ".join(f'"{d}"' for d in dev) + "]\n")
+    base_tm = tm(["fastapi>=0.115", "psycopg[binary,pool]>=3.2"], ["pytest>=8"])
+    check("pyproject: a version BUMP stays product_owner",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: tm(["fastapi>=0.120", "psycopg[binary,pool]>=3.3"], ["pytest>=9"])}),
+          ("product_owner", True))
+    check("pyproject: a NEW optional (dev) dependency is the owner's",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: tm(["fastapi>=0.115", "psycopg[binary,pool]>=3.2"],
+                               ["pytest>=8", "pytest-magic"])}), human)
+    # A SOURCE SWAP keeps the name and changes what installs (reviewer P2, #998).
+    check("package.json: a range bump (^16.0.0 -> ^16.1.0) stays product_owner",
+          pinned_lane(pkg, {pkg: pj({"next": "^16.0.0"}, {})}, {pkg: pj({"next": "^16.1.0"}, {})}),
+          ("product_owner", True))
+    check("package.json: a SOURCE swap of an existing name is the owner's",
+          pinned_lane(pkg, {pkg: base_pj},
+                      {pkg: pj({"next": "github:evil/next"}, {"vitest": "3.0.0"})}), human)
+    check("package.json: an npm: alias of an existing name is the owner's",
+          pinned_lane(pkg, {pkg: base_pj},
+                      {pkg: pj({"next": "npm:nexxt@16.0.0"}, {"vitest": "3.0.0"})}), human)
+    check("pyproject: a direct reference (`pkg @ git+https`) is the owner's",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: tm(["fastapi @ git+https://x.example/fastapi",
+                                "psycopg[binary,pool]>=3.2"], ["pytest>=8"])}), human)
+    check("pyproject: a new [tool.uv.sources] entry is the owner's",
+          pinned_lane(pyp, {pyp: base_tm},
+                      {pyp: base_tm + "[tool.uv.sources]\nfastapi = { git = \"https://x.example\" }\n"}),
+          human)
+    check("requirements: a `pkg @ https://` line for an existing name is the owner's",
+          pinned_lane(req, {req: base_rq},
+                      {req: base_rq.replace("fastapi==0.115.0", "fastapi @ https://x.example/f.whl")}),
+          human)
+    check("NEGATIVE CONTROL: a harmless neighbour of a manifest keeps its lane",
+          pinned_lane("frontend/src/lib/api.ts", {"frontend/src/lib/api.ts": "a"},
+                      {"frontend/src/lib/api.ts": "b"}), ("product", True))
+    no_rev = classify([pkg], policy, content_pins([pkg], policy, None, None))
+    check("no revisions -> the pin FIRES (strict, the opposite of the exemption)",
+          (no_rev["lane"], no_rev["auto_merge"], sorted(no_rev.get("pinned") or {})),
+          ("product_human", False, [pkg]))
+    check("a pin never LOOSENS: a cage file pinned to product_human stays harness_owner",
+          lane_auto([".github/workflows/ci.yml"],
+                    {".github/workflows/ci.yml": ("product_human", "drill")}), ("harness_owner", False))
+    check("the verdict NAMES the pin, so the owner knows what to read",
+          any("NEW package" in w for w in classify(
+              [pkg], policy, {pkg: ("product_human", "adds a NEW package (x)")})["why"]), True)
 
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n{passed}/{len(cases)}")
@@ -752,16 +1131,32 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", help="revision before the change (enables data exemptions)")
     ap.add_argument("--head", help="revision after the change (enables data exemptions)")
     ap.add_argument("--repo", default=".", help="repository root")
+    # SEPARATE FROM --base/--head ON PURPOSE (2026-10-20). Those also switch on
+    # the data exemptions, which only LOOSEN; pr-advisor and the arm withhold
+    # them. A pin only tightens, so a caller can hand it revisions without
+    # granting an exemption. Defaults to --base/--head when those are given.
+    ap.add_argument("--pin-base", help="revision before the change, for the content pins")
+    ap.add_argument("--pin-head", help="revision after the change, for the content pins")
+    ap.add_argument("--pin-repo", help="repository the pin revisions live in (default --repo)")
+    ap.add_argument("--break-checker", choices=["pins"],
+                    help="drill only: blind the content pins, so the drill must go red")
     args = ap.parse_args(argv)
 
+    if args.break_checker and not args.drill:
+        ap.error("--break-checker is a drill flag")
     if args.drill:
+        if args.break_checker == "pins":
+            global _PINS_BLINDED
+            _PINS_BLINDED = True
         return _drill()
 
     policy = load_policy()
     files, exempted = apply_data_exemptions(
         args.files, policy, args.base, args.head, args.repo
     )
-    verdict = classify(files, policy)
+    pins = content_pins(files, policy, args.pin_base or args.base, args.pin_head or args.head,
+                        args.pin_repo or args.repo)
+    verdict = classify(files, policy, pins)
     if exempted:
         verdict["data_exempted"] = exempted
         verdict["why"].append(

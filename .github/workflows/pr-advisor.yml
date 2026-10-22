@@ -457,7 +457,18 @@ jobs:
           # the data exemptions, which is its own documented STRICT default. An
           # exemption can only ever LOOSEN a lane, so the safe direction when
           # this job cannot verify one is to withhold it.
-          python scripts/lane.py --json verdict.json $(tr '\n' ' ' < changed.txt)
+          #
+          # THE NEW-PACKAGE TRIPWIRE DOES GET REVISIONS (2026-10-20). A pin only
+          # TIGHTENS (a manifest adding a package name -> product_human), and
+          # without revisions it fires on every manifest bump. `_pr` is the
+          # merge ref with full history, so HEAD^1 is the base it was built on.
+          # Feature-detected: a main whose lane.py predates the flags is asked
+          # the old question rather than handed a flag it would reject.
+          pins=()
+          if grep -q -- '--pin-base' scripts/lane.py; then
+            pins=(--pin-repo _pr --pin-base HEAD^1 --pin-head HEAD)
+          fi
+          python scripts/lane.py --json verdict.json "${pins[@]}" $(tr '\n' ' ' < changed.txt)
 
       # ── THE LANE, WHERE THE OWNER CAN SEE IT (2026-08-27) ─────────────────
       # The lane decided everything and appeared nowhere he looks. It was

@@ -1,4 +1,4 @@
--- 0069_idempotency_keys: one store for "the same write, sent twice" (gap roadmap slice 10).
+-- 0070_idempotency_keys: one store for "the same write, sent twice" (gap roadmap slice 10).
 --
 -- A write tool that takes a `request_id` keeps one row per (user, tool, key): the
 -- sha256 of the canonical request body and the reply it gave. The same key with the

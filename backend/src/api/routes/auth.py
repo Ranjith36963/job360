@@ -112,7 +112,7 @@ class UserResponse(BaseModel):
 
 
 class MeResponse(UserResponse):
-    # Migration 0070 — False for an account only a magic link has ever signed
+    # Migration 0071 — False for an account only a magic link has ever signed
     # in (no password the user knows). The account page then deletes without a
     # password prompt, from a fresh email-link sign-in (``delete_account``).
     has_password: bool = True
