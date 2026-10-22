@@ -446,8 +446,8 @@ export interface paths {
          * Add Contact
          * @description 201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
          *     for the same person seen again on this application (R2): same email, else
-         *     (no email) same normalised LinkedIn URL, else same name unless both carry
-         *     different LinkedIn URLs; also a repeated ``client_key``. The status code is
+         *     (no email) same normalised LinkedIn URL, else same phone (7+ digits), else same name unless
+         *     both carry different LinkedIn URLs or phones; also a repeated ``client_key``. The status code is
          *     set dynamically since the same call can legitimately answer either.
          */
         post: operations["add_contact_api_applications__application_id__contacts_post"];
@@ -1719,8 +1719,8 @@ export interface paths {
          *     networking), or a linked one when ``application_id`` is given. Same
          *     idempotency/cap/rate-limit rules as the per-application route, just
          *     scoped to the USER instead of an application when there is none. Cold
-         *     scope without an email: same LinkedIn URL, else same name only when
-         *     neither side has a LinkedIn URL. ``source_url`` is stored, never fetched.
+         *     scope without an email: same LinkedIn URL, else same phone (7+ digits),
+         *     else same name only when neither side has a LinkedIn URL or a phone. ``source_url`` is stored, never fetched.
          */
         post: operations["add_person_api_contacts_post"];
         delete?: never;
@@ -1750,6 +1750,26 @@ export interface paths {
          *     per field) plus the full history. A foreign/unknown id reads 404 (S2).
          */
         patch: operations["update_contact_api_contacts__contact_id__patch"];
+        trace?: never;
+    };
+    "/api/contacts/{contact_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Contact
+         * @description The user's own Confirm on a person their assistant added. Session only; no MCP twin.
+         */
+        post: operations["confirm_contact_api_contacts__contact_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/contacts/{contact_id}/outreach": {
@@ -3065,6 +3085,8 @@ export interface components {
              * @default
              */
             linkedin_url: string;
+            /** Links */
+            links?: string[] | null;
             /** Name */
             name: string;
             /**
@@ -3074,6 +3096,8 @@ export interface components {
             notes: string;
             /** Occurred At */
             occurred_at?: string | null;
+            /** Phone */
+            phone?: string | null;
             /** Relationship */
             relationship?: string | null;
             /**
@@ -3128,6 +3152,8 @@ export interface components {
              * @default
              */
             linkedin_url: string;
+            /** Links */
+            links?: string[] | null;
             /** Name */
             name: string;
             /**
@@ -3137,6 +3163,8 @@ export interface components {
             notes: string;
             /** Occurred At */
             occurred_at?: string | null;
+            /** Phone */
+            phone?: string | null;
             /** Relationship */
             relationship?: string | null;
             /**
@@ -4320,6 +4348,11 @@ export interface components {
             application_id: number | null;
             /** Company */
             company?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
             /** Created At */
             created_at: string;
             /** Edit History */
@@ -4336,11 +4369,15 @@ export interface components {
             id: number;
             /** Linkedin Url */
             linkedin_url: string;
+            /** Links */
+            links?: string[];
             /** Name */
             name: string;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            /** Phone */
+            phone?: string | null;
             /**
              * Reachable
              * @default false
@@ -6124,6 +6161,11 @@ export interface components {
             application_id: number | null;
             /** Company */
             company?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
             /** Created At */
             created_at: string;
             /** Edit History */
@@ -6142,11 +6184,15 @@ export interface components {
             jobs: components["schemas"]["PersonJobOut"][];
             /** Linkedin Url */
             linkedin_url: string;
+            /** Links */
+            links?: string[];
             /** Name */
             name: string;
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            /** Phone */
+            phone?: string | null;
             /**
              * Reachable
              * @default false
@@ -6179,6 +6225,11 @@ export interface components {
         PersonOut: {
             /** Company */
             company?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
             /** Contact Ids */
             contact_ids: number[];
             /** Email */
@@ -6193,12 +6244,16 @@ export interface components {
             last_sent: components["schemas"]["OutreachEntryOut"] | null;
             /** Linkedin Url */
             linkedin_url: string;
+            /** Links */
+            links?: string[];
             /** Message Count */
             message_count: number;
             /** Name */
             name: string;
             /** Notes */
             notes: string;
+            /** Phone */
+            phone?: string | null;
             /**
              * Reachable
              * @default false
@@ -8308,10 +8363,14 @@ export interface components {
             found_via?: string | null;
             /** Linkedin Url */
             linkedin_url?: string | null;
+            /** Links */
+            links?: string[] | null;
             /** Name */
             name?: string | null;
             /** Notes */
             notes?: string | null;
+            /** Phone */
+            phone?: string | null;
             /** Relationship */
             relationship?: string | null;
             /** Role */
@@ -11497,6 +11556,41 @@ export interface operations {
                 "application/json": components["schemas"]["UpdateContactRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_contact_api_contacts__contact_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

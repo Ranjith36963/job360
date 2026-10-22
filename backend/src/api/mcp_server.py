@@ -73,8 +73,8 @@ DAILY_CHECK_HINT = (
 # tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
 # stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
 # The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 19
-TOOLS_REV_FOR_HASH = "853b69b3466b"
+TOOLS_REV = 20
+TOOLS_REV_FOR_HASH = "9346e21ec5cf"
 TOOLS_LINE = (
     f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
     "get_recipe = stale tool list: reconnect."
@@ -1679,6 +1679,8 @@ def build_server(version: str = "") -> MCPServer:
         email_source: Optional[str] = None,
         relationship: Optional[str] = None,
         shared: Optional[str] = None,
+        phone: Optional[str] = None,
+        links: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
@@ -1686,10 +1688,10 @@ def build_server(version: str = "") -> MCPServer:
         later by adding them again with an application_id). Adding the SAME
         person again (same application, or same user when cold) returns the
         existing contact (already_existed=true, matched_on = "email",
-        "linkedin_url" or "name") instead of a duplicate, so re-running this
-        never doubles up: same email; else same LinkedIn URL; else same name
-        (on a job: unless both have different LinkedIn URLs; cold: only when
-        neither has one). A match changes nothing: use update_contact to add
+        "linkedin_url", "phone" or "name") instead of a duplicate, so re-running this
+        never doubles up: same email; else same LinkedIn URL; else same phone (7+ digits); else
+        same name (on a job: unless both have different LinkedIn URLs or phones; cold: only when
+        neither has either). A match changes nothing: use update_contact to add
         what is new. Draft outreach for them with save_artifact(contact_id=...).
         `found_via` = where you found them: "company_site", "linkedin",
         "apollo", "referral", "job_ad", "email", "event" or "other" (leave it
@@ -1702,6 +1704,7 @@ def build_server(version: str = "") -> MCPServer:
         "recruiter", "hiring_manager", "interviewer" or "none". `shared` = what they share, as a
         get_profile path: "cv_data.cv_positions[i]", "cv_data.cv_projects[i]" or "cv_data.education[i]";
         Job360 refuses a record the profile lacks. Never guess either.
+        `phone` is kept as + and digits; `links` = up to 5 other http/https profile URLs.
         `client_key` (optional): a retry with the same key returns the first reply."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
@@ -1711,7 +1714,7 @@ def build_server(version: str = "") -> MCPServer:
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
                     source_url=source_url, company=company, email_source=email_source,
-                    relationship=relationship, shared=shared,
+                    relationship=relationship, shared=shared, phone=phone, links=links,
                     client_key=client_key,
                 )
             else:
@@ -1721,6 +1724,7 @@ def build_server(version: str = "") -> MCPServer:
                     company=company,
                     email_source=email_source,
                     relationship=relationship, shared=shared, client_key=client_key,
+                    phone=phone, links=links,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1754,20 +1758,23 @@ def build_server(version: str = "") -> MCPServer:
         email_source: Optional[str] = None,
         relationship: Optional[str] = None,
         shared: Optional[str] = None,
+        phone: Optional[str] = None,
+        links: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
         Only fields you pass are changed. `found_via` and `email_source` take the same closed
         sets as add_contact (a new `email` without `email_source` clears it); `source_url` is
         http/https; "" clears either. `company` = their employer ("" clears it; a contact with no job
-        must keep one). `relationship`/`shared` as add_contact. A foreign/unknown contact_id reads 404."""
+        must keep one). `relationship`/`shared` as add_contact. `phone`; `links` (the whole
+        list, max 5); "" or [] clears. A foreign/unknown contact_id reads 404."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
             body = applications_route.UpdateContactRequest(
                 name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
                 source_url=source_url, company=company, email_source=email_source,
-                relationship=relationship, shared=shared,
+                relationship=relationship, shared=shared, phone=phone, links=links,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1792,7 +1799,8 @@ def build_server(version: str = "") -> MCPServer:
         that ONE record in full: every message VERSION, every sent/reply
         mark, every meeting/call/intro/referral entry (`interactions`),
         and the detail-edit history. `reachable` = an email or LinkedIn URL is
-        saved; `source_url` = where they were found. `company` = only people you stored
+        saved; `source_url` = where they were found. `confirmed` = the user confirmed this
+        person on the website; `phone`/`links` as saved. `company` = only people you stored
         at that company (a contact with no company counts at its job's company)."""
         try:
             async with _request_db() as db:

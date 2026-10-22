@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { addContact, updateContact } from "@/lib/api";
+import { addContact, confirmContact, updateContact } from "@/lib/api";
 import type { ApplicationDetail, Contact } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,11 @@ export function sharedLabel(v: string): string {
   return v.replace(/^cv_data\.\w+\[\d+\]:\s*/, "");
 }
 
-const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "", relationship: "" };
+const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "",
+  relationship: "",
+  phone: "",
+  links: "",
+};
 // One stable empty list. An inline `= []` default would be a NEW array every
 // render, the `[contacts]` effect below would fire every render, and setList
 // would re-render forever.
@@ -46,6 +50,40 @@ export function LinkedinCell({ url }: { url: string }) {
     );
   }
   return <span className="break-all">{url}</span>;
+}
+
+/** An extra profile link: same rule as `LinkedinCell` — an `<a href>` ONLY for
+ * `https://`; anything else (a stored `http://` or `javascript:`) is plain text. */
+function LinkCell({ url }: { url: string }) {
+  let label = url;
+  try {
+    label = new URL(url).hostname || url;
+  } catch {
+    label = url;
+  }
+  if (url.startsWith("https://")) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        data-testid="contact-link"
+        className="text-foreground underline underline-offset-2 hover:text-muted-foreground"
+      >
+        {label}
+      </a>
+    );
+  }
+  return (
+    <span data-testid="contact-link" className="break-all">
+      {url}
+    </span>
+  );
+}
+
+/** One link per line -> a clean list (blank lines dropped). */
+function parseLinks(text: string): string[] {
+  return text.split("\n").map((l) => l.trim()).filter(Boolean);
 }
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -175,6 +213,8 @@ function EditContact({
   });
   const [foundVia, setFoundVia] = useState(contact.found_via ?? "");
   const [relationship, setRelationship] = useState(contact.relationship ?? "");
+  const [phone, setPhone] = useState(contact.phone ?? "");
+  const [links, setLinks] = useState((contact.links ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -183,6 +223,8 @@ function EditContact({
     setForm({ name: contact.name, role: contact.role, email: contact.email, notes: contact.notes });
     setFoundVia(contact.found_via ?? "");
     setRelationship(contact.relationship ?? "");
+    setPhone(contact.phone ?? "");
+    setLinks((contact.links ?? []).join("\n"));
   }, [contact]);
 
   const save = useCallback(
@@ -191,7 +233,7 @@ function EditContact({
       setError(null);
       setSaving(true);
       try {
-        const body: Record<string, string | null> = {};
+        const body: Record<string, string | string[] | null> = {};
         for (const field of EDITABLE_FIELDS) {
           if (form[field] !== contact[field]) body[field] = form[field];
         }
@@ -199,6 +241,9 @@ function EditContact({
         // never a default.
         if (foundVia !== (contact.found_via ?? "")) body.found_via = foundVia;
         if (relationship !== (contact.relationship ?? "")) body.relationship = relationship;
+        if (phone.trim() !== (contact.phone ?? "")) body.phone = phone.trim();
+        const nextLinks = parseLinks(links);
+        if (nextLinks.join("\n") !== (contact.links ?? []).join("\n")) body.links = nextLinks;
         if (Object.keys(body).length === 0) {
           setOpen(false);
           return;
@@ -212,7 +257,7 @@ function EditContact({
         setSaving(false);
       }
     },
-    [contact, form, foundVia, relationship, onSaved]
+    [contact, form, foundVia, relationship, phone, links, onSaved]
   );
 
   const history = contact.edit_history ?? {};
@@ -280,6 +325,18 @@ function EditContact({
             onChange={setRelationship}
           />
         </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`edit-phone-${contact.id}`} className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+            Phone
+          </Label>
+          <Input id={`edit-phone-${contact.id}`} value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`edit-links-${contact.id}`} className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+            Other links
+          </Label>
+          <Textarea id={`edit-links-${contact.id}`} value={links} onChange={(e) => setLinks(e.target.value)} rows={2} />
+        </div>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="flex gap-2">
@@ -322,6 +379,19 @@ export function Contacts({
     setList(contacts);
   }, [contacts]);
 
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const confirm = useCallback(async (id: number) => {
+    setConfirming(id);
+    try {
+      const updated = await confirmContact(id);
+      setList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Could not confirm this person."));
+    } finally {
+      setConfirming(null);
+    }
+  }, []);
+
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
@@ -350,6 +420,8 @@ export function Contacts({
           notes?: string;
           found_via?: string;
           relationship?: string;
+          phone?: string;
+          links?: string[];
         } = { name };
         if (form.found_via) body.found_via = form.found_via;
         if (form.relationship) body.relationship = form.relationship;
@@ -357,6 +429,9 @@ export function Contacts({
         if (form.email.trim()) body.email = form.email.trim();
         if (form.linkedin_url.trim()) body.linkedin_url = form.linkedin_url.trim();
         if (form.notes.trim()) body.notes = form.notes.trim();
+        if (form.phone.trim()) body.phone = form.phone.trim();
+        const links = parseLinks(form.links);
+        if (links.length) body.links = links;
 
         const result = await addContact(applicationId, body);
         setList((prev) =>
@@ -426,7 +501,7 @@ export function Contacts({
                   Shared: {sharedLabel(contact.shared)}
                 </p>
               )}
-              {(contact.email || contact.linkedin_url) && (
+              {(contact.email || contact.linkedin_url || contact.phone || (contact.links ?? []).length > 0) && (
                 <div className="mt-1 flex flex-wrap gap-3 text-xs">
                   {contact.email && (
                     <a href={`mailto:${contact.email}`} className="text-foreground underline underline-offset-2 hover:text-muted-foreground">
@@ -434,6 +509,18 @@ export function Contacts({
                     </a>
                   )}
                   <LinkedinCell url={contact.linkedin_url} />
+                  {contact.phone && (
+                    <a
+                      data-testid="contact-phone"
+                      href={`tel:${contact.phone}`}
+                      className="text-foreground underline underline-offset-2 hover:text-muted-foreground"
+                    >
+                      {contact.phone}
+                    </a>
+                  )}
+                  {(contact.links ?? []).map((url) => (
+                    <LinkCell key={url} url={url} />
+                  ))}
                 </div>
               )}
               {contact.notes && (
@@ -443,6 +530,22 @@ export function Contacts({
                 added by {addedByLabel(contact.added_by)} ·{" "}
                 {formatDate(contact.created_at)}
               </p>
+              {contact.confirmed === false && (
+                <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                  <span data-testid="contact-unconfirmed" className="font-mono text-[11px] text-faint">
+                    Not confirmed yet
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="contact-confirm"
+                    disabled={confirming === contact.id}
+                    onClick={() => void confirm(contact.id)}
+                    className="font-mono text-[11px] text-faint underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              )}
               <MessageVersions contact={contact} />
               <div className="mt-1 flex flex-col gap-0.5">
                 <SentLine contact={contact} />
@@ -513,6 +616,24 @@ export function Contacts({
               placeholder="https://linkedin.com/in/…"
             />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="contact-phone">Phone</Label>
+            <Input
+              id="contact-phone"
+              value={form.phone}
+              onChange={setField("phone")}
+              placeholder="+44 7700 900123"
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="contact-links">Other links (one per line, up to 5)</Label>
+          <Textarea
+            id="contact-links"
+            value={form.links}
+            onChange={setField("links")}
+            rows={2}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="contact-found-via">Found via (optional)</Label>
