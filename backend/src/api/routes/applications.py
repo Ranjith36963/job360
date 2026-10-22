@@ -77,7 +77,12 @@ def _raise(exc: SpineError) -> None:
 
 
 # Every event a contact ledger mark writes (outreach pack #5/#6): event_type -> ledger entry.
-CONTACT_EVENT_ENTRY = {event: entry for entry, event in settings.CONTACT_LEDGER_EVENT_TYPES.items()}
+# `outreach_bounced` (pack #7) is a ledger entry only, NOT an application event type (no timeline row).
+CONTACT_EVENT_ENTRY = {
+    **{event: entry for entry, event in settings.CONTACT_LEDGER_EVENT_TYPES.items()},
+    "outreach_bounced": "bounced",
+}
+OUTREACH_ENTRY_BY_EVENT = CONTACT_EVENT_ENTRY
 _OUTREACH_EVENT_TYPES = tuple(CONTACT_EVENT_ENTRY)
 OUTREACH_NEEDS_CONTACT = "outreach events need contact_id — call add_contact first and pass its contact_id"
 
@@ -317,6 +322,7 @@ class AddContactRequest(BaseModel):
     source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
     # the employer; REQUIRED when there is no application_id (contacts.add_contact checks it)
     company: Optional[str] = None
+    email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -572,7 +578,7 @@ class OutreachEntryOut(BaseModel):
     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
     (``version_no`` null — unversioned, a person can be sent to or replied
     to many times). Also a meeting/call/intro/referral entry (``follow_up_on``
-    is set only on those)."""
+    is set only on those). A ``bounced`` mark's ``text`` is the address that bounced."""
 
     id: int
     contact_id: int
@@ -591,6 +597,7 @@ class ContactOutreachOut(BaseModel):
     messages: list[OutreachEntryOut]
     sent: list[OutreachEntryOut]
     replies: list[OutreachEntryOut]
+    bounced: list[OutreachEntryOut] = Field(default_factory=list)
     message_count: int
     last_sent: Optional[OutreachEntryOut]
     replied: bool
@@ -617,6 +624,7 @@ class ContactOut(BaseModel):
     found_via: Optional[str] = None
     source_url: Optional[str] = None
     company: Optional[str] = None
+    email_source: Optional[str] = None
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
     added_by: str
@@ -1357,6 +1365,7 @@ class UpdateContactRequest(BaseModel):
     found_via: Optional[str] = None
     source_url: Optional[str] = None  # "" clears it
     company: Optional[str] = None  # "" clears it (not on a cold contact)
+    email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES; "" clears it
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1407,6 +1416,7 @@ class PersonOut(BaseModel):
     found_via: Optional[str] = None
     source_url: Optional[str] = None
     company: Optional[str] = None
+    email_source: Optional[str] = None
     reachable: bool = False
     jobs: list[PersonJobOut]
     message_count: int
@@ -2197,7 +2207,7 @@ async def add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url, company=body.company,
+            source_url=body.source_url, company=body.company, email_source=body.email_source,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2229,7 +2239,7 @@ async def add_person(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url, company=body.company,
+            source_url=body.source_url, company=body.company, email_source=body.email_source,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2255,6 +2265,7 @@ async def update_contact(
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
             notes=body.notes, found_via=body.found_via, source_url=body.source_url,
             company=body.company,
+            email_source=body.email_source,
         )
     except SpineError as exc:
         _raise(exc)
