@@ -47,6 +47,9 @@ class ReadyAnswer(BaseModel):
     # what was typed (verified), or differs (changed_to = what they said instead).
     verified: bool = False
     changed_to: Optional[str] = None
+    # G023 (slice 11): a sensitive answer the user did not agree to remember - stored as its
+    # sha256 only, so ``answer`` is "" (Verify cannot see it; Edit types it again).
+    redacted: bool = False
 
 
 class ReadyFlag(BaseModel):

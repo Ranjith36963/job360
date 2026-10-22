@@ -235,6 +235,8 @@ the same `request_id` again returns the FIRST receipt with `already_existed: tru
 and writes nothing; the same `request_id` with different fields is refused (409
 `idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
 After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
+Leave `answers` out and the receipt freezes the newest form_filled / form_swept answers (`answers_from`);
+an empty `channel` reads the form's host. A sensitive answer the user did not agree to remember is kept as its hash only.
 
 Write tools take an optional `client_key` the same way: `save_artifact`,
 `record_event`, `bring_job`, `add_contact` and `ask_user` (your own id for this
@@ -428,6 +430,8 @@ have one too: it is kept on that entry). Record only what the user told you or t
 nothing and never count as outreach sends. `referral_given` needs the contact linked to the job (add_contact
 with application_id first); the kit's `referred_by` and stats(view="referrals") read it. A wrong one:
 record_event `note` with `corrects_event_id` = its event id (the person's own history keeps the entry).
+
+Variants and templates: pass `label` on save_artifact(contact_id=..., kind="outreach") to name the approach (for example a template's label). stats `by_outreach_variant` counts each contact once, under the label of its newest message saved before its first `sent` mark (no message or no label = "Not set"), with sent, replied and reply rate. Keep reusable wording with save_artifact(kind="outreach_template", label=..., text=...) and no application_id or contact_id: each save is a new version; get_profile `outreach_templates` returns the newest of each label. You fill a template in yourself for each person, with true facts only; Job360 never fills, renders or sends one.
 
 ## Automatic employer emails
 

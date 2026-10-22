@@ -18,7 +18,7 @@ Print this checklist and tick each step:
    path of the job or school you share) - never guess.
 4. **Write the message yourself** - short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
-   `email`, `linkedin` or `other`). This is a draft.
+   `email`, `linkedin` or `other`; `label` = the approach or template you used). This is a draft.
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
    `settings.outreach_send` from `get_profile` (its `effective`; the Gmail
    mode `preferences.daily_check` never allows sending).
