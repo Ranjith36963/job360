@@ -109,6 +109,12 @@ export const EVENT_LABEL: Record<string, string> = {
   submit_resolved: "Submit marked as not sent",
   // Bulk-apply F4 (2026-10-18).
   answer_corrected: "Answer corrected by you",
+  // Outreach pack #5/#6 (2026-10-20): contact interactions and referrals.
+  contact_meeting: "Meeting with a contact",
+  contact_call: "Call with a contact",
+  contact_intro: "Introduced to a contact",
+  referral_asked: "Asked for a referral",
+  referral_given: "Referral given",
 };
 
 function relayedWords(payload: unknown): boolean {

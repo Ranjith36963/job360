@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { addContact, updateContact } from "@/lib/api";
-import type { Contact } from "@/lib/api";
+import type { ApplicationDetail, Contact } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/format-date";
+import { formatDate, formatDayMonth } from "@/lib/format-date";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
 import { CopyButton } from "@/components/applications/CopyButton";
@@ -20,10 +20,12 @@ const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "",
 // would re-render forever.
 const NO_CONTACTS: Contact[] = [];
 
+type KnownPeople = NonNullable<ApplicationDetail["known_people"]>;
+
 /** S5: `linkedin_url` is rendered as text everywhere, an `<a href>` ONLY when
  * it actually starts with `https://` — a stored `javascript:` (or bare
  * `http://`) value must never become a clickable script. */
-function LinkedinCell({ url }: { url: string }) {
+export function LinkedinCell({ url }: { url: string }) {
   if (!url) return null;
   if (url.startsWith("https://")) {
     return (
@@ -40,7 +42,22 @@ function LinkedinCell({ url }: { url: string }) {
   return <span className="break-all">{url}</span>;
 }
 
-const CHANNEL_LABEL: Record<string, string> = { linkedin: "LinkedIn", email: "email", other: "" };
+const CHANNEL_LABEL: Record<string, string> = {
+  linkedin: "LinkedIn",
+  email: "email",
+  other: "",
+  call: "phone",
+  video: "video",
+  in_person: "in person",
+};
+
+const INTERACTION_LABEL: Record<string, string> = {
+  meeting: "Meeting",
+  call: "Call",
+  intro: "Intro",
+  referral_asked: "Asked for a referral",
+  referral_given: "Referral given",
+};
 
 function channelLabel(channel: string): string {
   return CHANNEL_LABEL[channel] ?? channel;
@@ -51,7 +68,7 @@ function channelLabel(channel: string): string {
  * never changes; this is just plain words for it. `"web"` -> "you" (the
  * seeker added it in the browser); a token/agent actor -> its name, since
  * that is more useful here than the generic word "assistant". */
-function addedByLabel(addedBy: string): string {
+export function addedByLabel(addedBy: string): string {
   if (addedBy === "web") return "you";
   const idx = addedBy.indexOf(":");
   if (idx >= 0) return addedBy.slice(idx + 1).trim() || "your assistant";
@@ -76,6 +93,28 @@ function RepliedLine({ contact }: { contact: Contact }) {
   const last = contact.outreach?.last_reply;
   if (!last) return <p className="font-mono text-[11px] text-faint">No reply yet.</p>;
   return <p className="font-mono text-[11px] text-faint">Replied on {formatDate(last.occurred_at)}.</p>;
+}
+
+/** Meetings, calls, intros and referrals the user's assistant recorded: read-only lines,
+ * notes as plain text (never HTML). */
+function InteractionLines({ contact }: { contact: Contact }) {
+  const rows = contact.outreach?.interactions ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <ul data-testid="contact-interactions" className="mt-1 flex flex-col gap-0.5 font-mono text-[11px] text-faint">
+      {rows.map((r) => {
+        const via = channelLabel(r.channel);
+        return (
+          <li key={r.id} data-testid="contact-interaction">
+            {INTERACTION_LABEL[r.entry] ?? r.entry} on {formatDate(r.occurred_at)}
+            {via && ` via ${via}`}
+            {r.follow_up_on && ` · follow up ${formatDayMonth(r.follow_up_on)}`}
+            {r.text && <span className="block whitespace-pre-wrap text-muted-foreground">{r.text}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** The latest message text, with earlier versions folded away — plain text
@@ -243,8 +282,12 @@ function EditContact({
 export function Contacts({
   applicationId,
   contacts = NO_CONTACTS,
+  knownPeople,
 }: {
   applicationId: number;
+  /** People the user already stored at this job's company (a display of stored
+   * records, never a lookup). Nothing renders at 0 or when absent. */
+  knownPeople?: KnownPeople;
   /** Optional on purpose: a detail payload without `contacts` (older backend,
    * a cached response, a test double) must render "no people yet", never
    * take the whole record page down with `undefined.length`. */
@@ -312,6 +355,25 @@ export function Contacts({
 
   return (
     <div className="flex flex-col gap-4">
+      {knownPeople && knownPeople.count > 0 && (
+        <div>
+          <p data-testid="known-people-count" className="text-sm">
+            {knownPeople.count === 1
+              ? "You already know 1 person here"
+              : `You already know ${knownPeople.count} people here`}
+          </p>
+          <ul data-testid="known-people-list" className="mt-1 font-mono text-[11px] text-faint">
+            {(knownPeople.people ?? []).map((p) => (
+              <li key={p.contact_ids[0]}>
+                {p.name}
+                {p.role ? ` · ${p.role}` : ""} ·{" "}
+                {p.last_sent_at ? `Sent ${formatDate(p.last_sent_at)}` : "Not contacted yet"}
+                {p.replied ? " · replied" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {list.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No people yet. Your assistant can add one, or use the button below.
@@ -353,6 +415,7 @@ export function Contacts({
                 <SentLine contact={contact} />
                 <RepliedLine contact={contact} />
               </div>
+              <InteractionLines contact={contact} />
               <EditContact
                 contact={contact}
                 onSaved={(updated) =>

@@ -5,7 +5,8 @@ Three layers, each pinned here:
 1. The hard lines as pure rules (``safety.py``) — no browser, no network.
 2. The switch: OFF by default, the route and the MCP tool both answer ``off``.
 3. A real Chromium run against a local test site (skipped when Playwright or
-   its Chromium is not installed, as on CI). The site is served on loopback.
+   its Chromium is not installed; CI installs both and fails if they skip).
+   The site is served on loopback.
    Chromium reaches it only through the egress proxy: a fake resolver gives
    ``jobs.example`` a public address and the proxy's injected connector maps
    that address to the loopback site, so nothing leaves the machine (rule #4).
@@ -156,6 +157,10 @@ FORM = """<!doctype html><html><head><title>Apply - Acme</title></head><body>
   <button type="submit">Submit application</button>
 </form></body></html>"""
 CAPTCHA = """<!doctype html><html><body><p>Checking your browser before you continue.</p></body></html>"""
+LINKS = """<!doctype html><html><head><title>Links - Acme</title></head><body>
+<a href="/to-private">Partner site</a>
+<a href="/to-private" target="_blank">Apply in a new tab</a>
+<a href="/links" target="_blank">Careers in a new tab</a></body></html>"""
 
 
 def _chromium_available() -> bool:
@@ -185,11 +190,31 @@ async def site():
     async def to_private(_):
         raise web.HTTPFound(f"http://127.0.0.1:{site_port[0]}/form")
 
+    async def links(_):
+        return web.Response(text=LINKS, content_type="text/html")
+
+    async def to_dead(_):
+        raise web.HTTPFound("http://dead.example/")
+
+    async def to_nowhere(_):
+        raise web.HTTPFound("http://nowhere.example/")
+
+    async def fake_block(_):
+        # A site's own 403 that copies the proxy's header name and words, without the proxy's mark.
+        from src.services.browser_agent.egress import BLOCK_HEADER
+
+        return web.Response(status=403, text="Job360's browser only reaches the public internet.",
+                            headers={BLOCK_HEADER: "forged"})
+
     site_port: list[int] = []
     app = web.Application()
     app.router.add_get("/form", form)
     app.router.add_get("/captcha", captcha)
     app.router.add_get("/to-private", to_private)
+    app.router.add_get("/links", links)
+    app.router.add_get("/fake-block", fake_block)
+    app.router.add_get("/to-dead", to_dead)
+    app.router.add_get("/to-nowhere", to_nowhere)
     runner = web.AppRunner(app)
     await runner.setup()
     tcp = web.TCPSite(runner, "127.0.0.1", 0)
@@ -216,15 +241,93 @@ def _site_resolver():
     return resolve
 
 
-def _to_site(port: int):
-    """The proxy's connector: the public test address is really the loopback test site."""
+def _to_site(port: int, tls_port: int = 0):
+    """The proxy's connector: the public test address is really the loopback test site.
+    With ``tls_port``, a connection to port 443 goes to the site's HTTPS listener (``_serve``)."""
     import asyncio
 
     async def open_connection(host, p):
         assert host == "93.184.216.34", f"the proxy tried to connect to {host}"
-        return await asyncio.open_connection("127.0.0.1", port)
+        return await asyncio.open_connection("127.0.0.1", tls_port if (tls_port and p == 443) else port)
 
     return open_connection
+
+
+# Real applicant-system hosts the tests open (sites.py names a site by its real host). Chromium forces
+# HTTPS for every host on its HSTS preload list (ashbyhq.com and icims.com are, with subdomains), but
+# only while the build is under 10 weeks old (net/http/transport_security_state.cc IsBuildTimely), so
+# plain http to these hosts passed on an old Chromium and failed with ERR_SSL_PROTOCOL_ERROR on a fresh
+# one. These hosts are therefore opened over https, as the real sites are, from a throwaway certificate.
+ATS_HOSTS = ("jobs.lever.co", "jobs.ashbyhq.com", "acme.wd3.myworkdayjobs.com", "careers-acme.icims.com")
+_TLS: list[tuple] = []
+
+
+def _test_tls():
+    """(server SSL context, Chromium flag trusting only this certificate's key), made once per process."""
+    if not _TLS:
+        import base64
+        import datetime
+        import hashlib
+        import os
+        import ssl
+        import tempfile
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "job360 browser test site")])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = (
+            x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(days=1)).not_valid_after(now + datetime.timedelta(days=7))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(h) for h in ATS_HOSTS]), critical=False)
+            .sign(key, hashes.SHA256())
+        )
+        pem = cert.public_bytes(serialization.Encoding.PEM) + key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+        with tempfile.NamedTemporaryFile("wb", suffix=".pem", delete=False) as f:
+            f.write(pem)
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        try:
+            ctx.load_cert_chain(f.name)
+        finally:
+            os.unlink(f.name)
+        spki = cert.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        flag = "--ignore-certificate-errors-spki-list=" + base64.b64encode(hashlib.sha256(spki).digest()).decode()
+        _TLS.append((ctx, flag))
+    ctx, flag = _TLS[0]
+    return ctx, [flag]
+
+
+async def _serve(app):
+    """Start ``app`` on loopback over http and https: (runner, http port, https port)."""
+    from aiohttp import web
+
+    ctx, _ = _test_tls()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    plain = web.TCPSite(runner, "127.0.0.1", 0)
+    await plain.start()
+    tls = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=ctx)
+    await tls.start()
+    ports = [s._server.sockets[0].getsockname()[1] for s in (plain, tls)]  # noqa: SLF001 - the site's own ports
+    return runner, ports[0], ports[1]
+
+
+def _ats_pool(resolve, ports):
+    """A pool whose Chromium reaches the test site's https listener and trusts its certificate only."""
+    from src.services.browser_agent.agent import BrowserPool
+
+    return BrowserPool(
+        max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(*ports), launch_args=_test_tls()[1]
+    )
 
 
 def _ref(page: dict, name: str) -> str:
@@ -326,16 +429,83 @@ async def test_one_browser_per_user_and_a_cap_on_live_browsers(pool):
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_a_redirect_to_a_private_address_never_reaches_the_page(pool, site):
-    """CodeRabbit on #902: route() never sees redirect hops. The egress proxy does."""
+    """CodeRabbit on #902: route() never sees redirect hops. The egress proxy does. And its refusal is
+    never read as a loaded page (production: an open that redirected to 127.0.0.1 came back "ok" with
+    the proxy's 403 text): open, click and back answer blocked_address, as a direct private open does."""
     from src.services.browser_agent.agent import BrowserError, run
 
-    try:
-        page = await run(pool, "u1", "open", url="http://jobs.example/to-private")
-    except BrowserError as exc:
-        assert exc.reason == "load_failed"
-    else:
-        assert "Senior Engineer" not in page["text"]
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "open", url="http://jobs.example/to-private")
+    assert exc.value.status == "refused" and exc.value.reason == "blocked_address"
+    # A look at that tab says the same, never "ok" with the proxy's text.
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "look")
+    assert exc.value.reason == "blocked_address"
     assert any(d.startswith("127.0.0.1") for d in pool.egress.denied)
+
+    page = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(page, "Partner site"))
+    assert out["status"] == "refused" and out["reason"] == "blocked_address"
+    assert "text" not in out and "elements" not in out
+
+    # Only the proxy's own mark counts: a site's 403 with the same header name and words is a page.
+    page = await run(pool, "u1", "open", url="http://jobs.example/fake-block")
+    assert page["status"] == "ok" and "public internet" in page["text"]
+
+    # Back onto the refused address (history holds 127.0.0.1 itself) is refused the same way.
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    await run(pool, "u1", "click", ref=_ref(links, "Partner site"))
+    await run(pool, "u1", "open", url="http://jobs.example/links")
+    with pytest.raises(BrowserError) as exc:
+        await run(pool, "u1", "back")
+    assert exc.value.reason == "blocked_address"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_new_tab_that_redirects_to_a_private_address_is_refused_too(pool):
+    """Review of the small-truths branch: an "Apply" link with target=_blank opens a new tab, and for a
+    new tab's first load Playwright cannot name the frame, so the proxy's 403 came back "ok"."""
+    from src.services.browser_agent.agent import run
+
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(links, "Apply in a new tab"))
+    assert out["status"] == "refused" and out["reason"] == "blocked_address"
+    assert "text" not in out and "elements" not in out
+
+    # A new tab onto a public page is still a page.
+    links = await run(pool, "u1", "open", url="http://jobs.example/links")
+    out = await run(pool, "u1", "click", ref=_ref(links, "Careers in a new tab"))
+    assert out["status"] == "ok" and out["title"] == "Links - Acme"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_public_site_that_cannot_be_found_or_does_not_answer_is_load_failed_not_private(site):
+    """The proxy also refuses a host it cannot resolve or reach: that is a dead link, not a private
+    address, so it answers load_failed with no "private" wording."""
+    import asyncio
+
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    resolve, _ = _resolver({"jobs.example": "93.184.216.34", "dead.example": "93.184.216.35"})
+
+    async def open_connection(host, p):
+        if host == "93.184.216.35":
+            raise ConnectionRefusedError("nobody home")
+        return await asyncio.open_connection("127.0.0.1", site)
+
+    p = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=open_connection)
+    try:
+        for url in ("http://jobs.example/to-dead", "http://jobs.example/to-nowhere", "http://dead.example/"):
+            with pytest.raises(BrowserError) as exc:
+                await run(p, "u1", "open", url=url)
+            assert exc.value.status == "error" and exc.value.reason == "load_failed", url
+            assert "private" not in exc.value.detail, url
+    finally:
+        await p.shutdown()
 
 
 @needs_chromium
@@ -593,6 +763,8 @@ async def test_a_captcha_refusal_on_an_action_also_records_blocked(authenticated
             )
             rows = [json.loads(r["payload"]) for r in await cur.fetchall()]
         assert len(rows) == 1 and rows[0]["reason"] == "captcha" and rows[0]["page_host"] == "jobs.acme.com"
+        # "ChatGPT agent" was retired by OpenAI: the hand-off names a browser that survives renames.
+        assert "ChatGPT's own browser" in rows[0]["detail"] and "ChatGPT agent" not in rows[0]["detail"]
 
 
 @pytest.mark.asyncio
@@ -1111,11 +1283,8 @@ async def ats_site():
     app.router.add_post("/acme/123/apply", lever_post)
     app.router.add_get("/acme/123/thanks", thanks)
     app.router.add_get("/acme/456/application", ashby)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    tcp = web.TCPSite(runner, "127.0.0.1", 0)
-    await tcp.start()
-    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    runner, port, tls_port = await _serve(app)
+    yield port, tls_port
     await runner.cleanup()
 
 
@@ -1123,11 +1292,11 @@ async def ats_site():
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site):
-    from src.services.browser_agent.agent import BrowserPool, Gate, run
+    from src.services.browser_agent.agent import Gate, run
 
     table = {"jobs.lever.co": "93.184.216.34", "jobs.ashbyhq.com": "93.184.216.34"}
     resolve, _ = _resolver(table)
-    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(ats_site))
+    pool = _ats_pool(resolve, ats_site)
 
     async def mark():
         return None
@@ -1137,7 +1306,7 @@ async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site
 
     gate = Gate(check=go, mark_attempt=mark)
     try:
-        page = await run(pool, "u1", "open", url="http://jobs.lever.co/acme/123/apply")
+        page = await run(pool, "u1", "open", url="https://jobs.lever.co/acme/123/apply")
         assert page["site"]["name"] == "lever" and any("suggestion" in t for t in page["site"]["tips"])
         assert any("cookie banner" in w for w in page["site_warnings"])
         page = await run(pool, "u1", "click", ref=_ref(page, "Allow cookies"))
@@ -1152,7 +1321,7 @@ async def test_lever_and_ashby_pages_carry_their_tips_traps_and_outcome(ats_site
         assert out["url"].endswith("/acme/123/thanks") and out["confirmation_seen"] is True
         assert out["next"] == "The site shows a confirmation: call record_application."
 
-        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme/456/application")
+        page = await run(pool, "u1", "open", url="https://jobs.ashbyhq.com/acme/456/application")
         assert page["site"]["name"] == "ashby" and "confirmation_seen" not in page
         yes = next(e for e in page["elements"] if e["name"] == "Yes")
         no = next(e for e in page["elements"] if e["name"] == "No")
@@ -1195,7 +1364,7 @@ WORKDAY = """<!doctype html><html><head><title>My Information - Workday</title><
 </script></body></html>"""
 ICIMS_HOST_PAGE = """<!doctype html><html><head><title>Careers - Acme</title></head><body>
 <h1>Careers at Acme</h1>
-<iframe id="icims_content_iframe" src="http://careers-acme.icims.com/jobs/1/apply?in_iframe=1"
+<iframe id="icims_content_iframe" src="https://careers-acme.icims.com/jobs/1/apply?in_iframe=1"
   style="width:800px;height:400px"></iframe></body></html>"""
 ICIMS_FORM = """<!doctype html><html><body><form>
 <label for="email">Email Address</label><input id="email" type="email">
@@ -1217,11 +1386,8 @@ async def wizard_site():
     app.router.add_get("/en-US/External/job/1/apply", page(WORKDAY))
     app.router.add_get("/careers", page(ICIMS_HOST_PAGE))
     app.router.add_get("/jobs/1/apply", page(ICIMS_FORM))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    tcp = web.TCPSite(runner, "127.0.0.1", 0)
-    await tcp.start()
-    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    runner, port, tls_port = await _serve(app)
+    yield port, tls_port
     await runner.cleanup()
 
 
@@ -1229,14 +1395,14 @@ async def wizard_site():
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_workday_steps_invalid_marks_keyed_typing_and_an_icims_frame(wizard_site):
-    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+    from src.services.browser_agent.agent import BrowserError, run
 
     public = "93.184.216.34"
     table = {"acme.wd3.myworkdayjobs.com": public, "jobs.example": public, "careers-acme.icims.com": public}
     resolve, _ = _resolver(table)
-    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(wizard_site))
+    pool = _ats_pool(resolve, wizard_site)
     try:
-        page = await run(pool, "u1", "open", url="http://acme.wd3.myworkdayjobs.com/en-US/External/job/1/apply")
+        page = await run(pool, "u1", "open", url="https://acme.wd3.myworkdayjobs.com/en-US/External/job/1/apply")
         assert page["site"]["name"] == "workday" and page["form_step"] == {"current": 2, "total": 3}
         assert any("Month and Year" in t for t in page["site"]["tips"])
         page = await run(pool, "u1", "click", ref=_ref(page, "Save and Continue"))   # a step, not the submit
@@ -1360,11 +1526,11 @@ async def test_a_dead_click_is_named_never_repeated_blind_and_a_submit_never_twi
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_a_confirmation_is_kept_as_a_proof_screenshot_and_a_refused_submit_may_be_retried(ats_site):
-    from src.services.browser_agent.agent import BrowserPool, Gate, run
+    from src.services.browser_agent.agent import Gate, run
 
     table = {"jobs.lever.co": "93.184.216.34", "jobs.ashbyhq.com": "93.184.216.34"}
     resolve, _ = _resolver(table)
-    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=resolve, open_connection=_to_site(ats_site))
+    pool = _ats_pool(resolve, ats_site)
     proofs: list[bytes] = []
 
     async def mark():
@@ -1378,13 +1544,13 @@ async def test_a_confirmation_is_kept_as_a_proof_screenshot_and_a_refused_submit
 
     gate = Gate(check=go, mark_attempt=mark, save_proof=keep)
     try:
-        page = await run(pool, "u1", "open", url="http://jobs.lever.co/acme/123/apply")
+        page = await run(pool, "u1", "open", url="https://jobs.lever.co/acme/123/apply")
         page = await run(pool, "u1", "click", ref=_ref(page, "Allow cookies"))   # the banner covers the button
         out = await run(pool, "u1", "click", ref=_ref(page, "Submit application"), gate=gate)
         assert out["confirmation_seen"] is True and out["proof_saved"] is True
         assert len(proofs) == 1 and proofs[0].startswith(b"\xff\xd8\xff")   # a JPEG of the thank-you page
 
-        page = await run(pool, "u1", "open", url="http://jobs.ashbyhq.com/acme/456/application")
+        page = await run(pool, "u1", "open", url="https://jobs.ashbyhq.com/acme/456/application")
         submit = _ref(page, "Submit Application")
         out = await run(pool, "u1", "click", ref=submit, gate=gate)
         assert out["site_refused"] and "proof_saved" not in out and len(proofs) == 1
@@ -1745,3 +1911,275 @@ async def test_opening_three_different_pages_is_no_repeat(pool):
     for _ in range(2):
         await run(pool, "u1", "open", url="http://jobs.example/form?job=1")
     assert "3 times in a row" in (await run(pool, "u1", "open", url="http://jobs.example/form?job=1"))["repeat_warning"]
+
+
+# ── Gap-audit #18: a secret in the page address never reaches the assistant ───
+
+
+class _FakeFrame:
+    parent_frame = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    async def evaluate(self, js, arg=None):
+        return {"elements": [], "places": [], "text": "Sign in", "has_password_box": False}
+
+
+class _FakePage:
+    viewport_size = None
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.frames = [_FakeFrame(url)]
+        self.context = type("Ctx", (), {"pages": []})()
+
+    def is_closed(self) -> bool:
+        return False
+
+    async def title(self) -> str:
+        return "Welcome"
+
+    async def evaluate(self, js, arg=None):
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page_url", "shown"),
+    [
+        ("https://x.example/auth?token=abc&email=a@b.c", "https://x.example/auth"),
+        ("https://x.example/cb#access_token=eyJsecret", "https://x.example/cb"),
+        ("https://co.example/careers?gh_jid=123&sid=S1#frag", "https://co.example/careers?gh_jid=123"),
+        (
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1?source=LinkedIn",
+            "https://acme.wd5.myworkdayjobs.com/en-US/X/job/L/T_JR-1",
+        ),
+    ],
+)
+async def test_look_shows_the_address_without_its_secret(page_url, shown):
+    from src.services.browser_agent.agent import Session, look
+
+    page = _FakePage(page_url)
+    out = await look(Session(context=page.context, page=page))
+    assert out["url"] == shown
+    assert "abc" not in str(out) and "secret" not in str(out) and "S1" not in str(out)
+
+
+def test_load_failed_and_error_text_carry_no_secret_either():
+    from src.services.browser_agent.agent import _load_failed, _scrub_links
+
+    out = _load_failed(_FakePage("https://x.example/auth?token=abc#t"), after_action=True)
+    assert out["url"] == "https://x.example/auth"
+    msg = "net::ERR_ABORTED at https://x.example/magic?token=abc&email=a@b.c#frag while loading"
+    assert _scrub_links(msg) == "net::ERR_ABORTED at https://x.example/magic while loading"
+
+
+@pytest.mark.asyncio
+async def test_the_upload_file_name_is_the_kits_name_else_the_plain_default(authenticated_async_context):
+    from src.api.auth_deps import CurrentUser
+    from src.api.routes import browser as browser_route
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+    from src.services.profile.storage import save_profile, save_user_info
+
+    async with authenticated_async_context() as client:
+        brought = await client.post("/api/jobs/bring", json={
+            "title": "Engineer", "company": "Acme", "location": "London",
+            "description": "Build services. " * 10, "apply_url": "https://jobs.acme.com/apply/9",
+        })
+        app_id = brought.json()["application_id"]
+        for kind in ("cv", "cover_letter"):
+            saved = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": kind, "text": "Hello"})
+            assert saved.status_code in (200, 201)
+        user_id = authenticated_async_context.fixture_user_id
+        user = CurrentUser(id=user_id, email="ada@example.com", auth_via="token", actor_name="claude")
+        _, files = browser_route._gate_and_files(user, app_id, "")  # noqa: SLF001
+        # No name known yet: the plain defaults.
+        assert [(await files(k))[0] for k in ("cv", "cover_letter")] == ["CV.pdf", "Cover_letter.pdf"]
+        save_profile(
+            UserProfile(cv_data=CVData(raw_text="Data engineer.", name="Ranjith Maliga-Guruprakash")),
+            user_id, source_action="cv_upload",
+        )
+        name, pdf = await files("cv")
+        assert name == "Ranjith_Maliga-Guruprakash_CV.pdf" and pdf.startswith(b"%PDF")
+        assert (await files("cover_letter"))[0] == "Ranjith_Maliga-Guruprakash_Cover_Letter.pdf"
+        # Two 200-character legal names must not make a file name the disk refuses.
+        save_user_info(
+            user_id, UserInfo(contact={"legal_first_name": "A" * 200, "legal_last_name": "B" * 200}), "test"
+        )
+        for kind, tail in (("cv", "_CV.pdf"), ("cover_letter", "_Cover_Letter.pdf")):
+            long_name = (await files(kind))[0]
+            assert len(long_name.encode()) <= 150 and long_name.startswith("AAAA") and long_name.endswith(tail)
+
+
+FRAMES = """<!doctype html><html><head><title>Frames - Acme</title></head><body>
+""" + "".join(f'<iframe style="display:none" srcdoc="<p>ad {i}</p>"></iframe>' for i in range(25)) + """
+<iframe style="width:600px;height:200px" srcdoc="<label for='e'>Work email</label><input id='e'>"></iframe>
+</body></html>"""
+
+
+# ── Why the browser is gone: the no_browser refusal names the reason ─────────
+
+def _closing_pool(idle_s=600):
+    from src.services.browser_agent.agent import BrowserPool, Session
+
+    class _Ctx:
+        async def close(self):
+            pass
+
+    async def resolve(host, port=0, family=socket.AF_UNSPEC):
+        return []
+
+    pool = BrowserPool(max_sessions=2, idle_s=idle_s, resolve=resolve)
+    pool._sessions = {"u1": Session(context=_Ctx(), page=None)}  # noqa: SLF001
+    return pool
+
+
+def _empty_pool():
+    pool = _closing_pool()
+    pool._sessions = {}  # noqa: SLF001
+    return pool
+
+
+@pytest.fixture
+def _fresh_reasons(monkeypatch):
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(agent, "_CLOSE_REASONS", {})
+    monkeypatch.setattr(agent, "_BOOT_AT", agent.time.monotonic() - 3600)  # long uptime unless a test says so
+    return agent
+
+
+async def _refusal(agent, pool):
+    with pytest.raises(agent.BrowserError) as exc:
+        await agent.run(pool, "u1", "look")
+    return exc.value.as_dict()
+
+
+async def test_idle_sweep_says_how_many_idle_minutes(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool(idle_s=600)
+    pool._sessions["u1"].last_used -= 1000  # noqa: SLF001
+    await pool.reap()
+    out = await _refusal(agent, pool)
+    assert out["reason"] == "no_browser" and "10 idle minutes" in out["detail"]
+    assert "get_application_kit" in out["next"] and "form_swept" in out["next"]
+
+
+async def test_a_crash_is_named_and_logged(_fresh_reasons, caplog):
+    import types
+
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    pool._browser = types.SimpleNamespace(is_connected=lambda: False)  # noqa: SLF001
+    with caplog.at_level("WARNING", logger="job360.services.browser_agent"):
+        out = await _refusal(agent, pool)
+    assert "crashed" in out["detail"] and out["next"]
+    assert any("chromium died" in r.getMessage() for r in caplog.records)
+
+
+async def test_an_explicit_close_is_named(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    assert (await agent.run(pool, "u1", "close"))["closed"] is True
+    out = await _refusal(agent, pool)
+    assert "was closed" in out["detail"] and out["next"]
+
+
+async def test_forgetting_a_sign_in_is_named(_fresh_reasons):
+    agent = _fresh_reasons
+    pool = _closing_pool()
+    await pool.close("u1", "sign_in_forgotten")
+    out = await _refusal(agent, pool)
+    assert "sign-in was forgotten" in out["detail"] and out["next"]
+
+
+async def test_no_record_soon_after_boot_says_restarted(_fresh_reasons, monkeypatch):
+    agent = _fresh_reasons
+    monkeypatch.setattr(agent, "_BOOT_AT", agent.time.monotonic() - 60)
+    out = await _refusal(agent, _empty_pool())
+    assert "restarted" in out["detail"] and out["next"]
+
+
+async def test_no_record_after_long_uptime_is_the_plain_refusal(_fresh_reasons):
+    out = await _refusal(_fresh_reasons, _empty_pool())
+    assert out["detail"] == "No browser is open. Start with action open and a url." and "next" not in out
+
+
+def test_the_reason_record_is_bounded(_fresh_reasons, monkeypatch):
+    agent = _fresh_reasons
+    monkeypatch.setattr(agent, "_CLOSE_REASONS_MAX", 3)
+    for i in range(10):
+        agent._note_closed(f"u{i}", "idle")  # noqa: SLF001
+    assert list(agent._CLOSE_REASONS) == ["u7", "u8", "u9"]  # noqa: SLF001
+
+
+# ── Upload reads the file AFTER the change event (Greenhouse, Ashby) ──────────
+
+SLOW_UPLOAD = """<!doctype html><html><head><title>Upload - Acme</title></head><body>
+<label for="plain">Resume file</label><input id="plain" type="file">
+<label for="cv">Resume</label><input id="cv" type="file" style="display:none">
+<button type="button" id="attach" onclick="document.getElementById('cv').click()">Attach</button>
+<div id="status"></div>
+<script>
+  for (const id of ['plain', 'cv']) {
+    document.getElementById(id).addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      await new Promise(r => setTimeout(r, 300));   // the site reads the file later, as Ashby does
+      try {
+        const buf = await file.arrayBuffer();
+        await fetch('/up', {method: 'POST', body: buf});
+        document.getElementById('status').textContent = file.name + ' ' + buf.byteLength;
+      } catch (err) { document.getElementById('status').textContent = 'Upload failed'; }
+    });
+  }
+</script></body></html>"""
+
+
+@pytest.fixture
+async def slow_upload_site():
+    from aiohttp import web
+
+    got: list[bytes] = []
+
+    async def page(_):
+        return web.Response(text=SLOW_UPLOAD, content_type="text/html")
+
+    async def up(request):
+        got.append(await request.read())
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/upload", page)
+    app.router.add_post("/up", up)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1], got  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+@pytest.mark.parametrize("control", ["Attach", "Resume file"])
+async def test_upload_sends_the_exact_bytes_the_site_reads_late(slow_upload_site, control):
+    from src.services.browser_agent.agent import BrowserPool, run
+
+    port, got = slow_upload_site
+    data = b"%PDF-1.4 exact bytes \x00\x01\xff"
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(port))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/upload")
+
+        async def pdf(kind):
+            return "Ada_CV.pdf", data
+
+        page = await run(pool, "u1", "upload", ref=_ref(page, control), doc_kind="cv", files=pdf)
+        assert page["upload_confirmed"] is True
+        assert got == [data]
+        s = pool._sessions["u1"]  # noqa: SLF001
+        assert await s.page.locator("#status").inner_text() == f"Ada_CV.pdf {len(data)}"
+    finally:
+        await pool.shutdown()

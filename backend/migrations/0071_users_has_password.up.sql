@@ -1,4 +1,4 @@
--- 0069_users_has_password: does this account have a password the user knows?
+-- 0071_users_has_password: does this account have a password the user knows?
 --
 -- A magic-link sign-in creates the account with an argon2 hash of a random secret
 -- (the schema needs one; services/auth/magic_link.py), so `password_hash` alone

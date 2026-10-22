@@ -92,6 +92,7 @@ def normalize_apply_url(value: Any) -> str:
     unknown_site / form_host checks use). Never cleared: "" / null are 422."""
     from urllib.parse import urlsplit  # noqa: PLC0415
 
+    from src.services.applications.job_checks import redact_url  # noqa: PLC0415
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
 
     text = str(value).strip() if value is not None else ""
@@ -106,7 +107,8 @@ def normalize_apply_url(value: Any) -> str:
         raise SpineError(422, bad) from None
     if scheme not in ("http", "https") or settings_rules.parse_site_host(text) is None:
         raise SpineError(422, bad)
-    return text
+    # Gap-audit #18: store without the fragment, tracking keys and secret-named keys (token, sid, session ...).
+    return redact_url(text) or text.split("?", 1)[0].split("#", 1)[0]
 
 
 def validate_job_facts(given: Mapping[str, Any]) -> dict[str, Any]:

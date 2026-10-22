@@ -87,6 +87,15 @@ describe("middleware — backend outage (F4)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("/people is protected: no cookie bounces to login", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await middleware(new NextRequest("http://localhost:3000/people"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("lets a verified session through", async () => {
     vi.stubGlobal(
       "fetch",

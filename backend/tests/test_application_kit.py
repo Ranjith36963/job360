@@ -370,7 +370,7 @@ async def test_the_kit_carries_the_cv_letter_job_and_hashes(authenticated_async_
         assert kit["job"]["title"] == "Data Engineer" and kit["job"]["company"] == "Northwind"
         assert kit["job"]["country"] == "GB" and kit["job"]["remote"] is False
         assert kit["application"] == {
-            "id": app_id, "status": "considering", "follow_up_on": None, "submit_override": None,
+            "id": app_id, "status": "considering", "follow_up_on": None, "submit_override": None, "referred_by": None,
         }
         file = kit["cv"]["file"]
         assert file["filename"] == "Ada_Lovelace_CV.pdf" and file["mime"] == "application/pdf"

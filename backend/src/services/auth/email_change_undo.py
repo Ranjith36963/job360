@@ -1,4 +1,4 @@
-"""Undo link for an email change (gap roadmap slice 35, migration 0070).
+"""Undo link for an email change (gap roadmap slice 35, migration 0074).
 
 ``PATCH /api/auth/users/me/email`` moves the account to a new, unproven
 address. Whoever held a stolen session plus the password could do that, and the

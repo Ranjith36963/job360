@@ -60,3 +60,9 @@ Facts a form asks:
 - Salary: use the hiring country's record, in its currency. Pick the band that holds the number (lower bound
   inclusive) and show it in step 6.
 - A fact the kit lacks (city, years, over-18): `ask_user`, never guess.
+
+Browser handover (from the built-in-browser skill):
+- A browser result `off`, `no_browser`, `busy` or a refused site: tell the user once, then stop or move on. Never retry in a loop or work around it. `no_browser` mid-form = the page is gone: reopen and refill that one form once.
+- Asking the user to act in their own browser: say which page, which step, and what you already filled. Say in chat what you found or did; they may not have watched.
+- A sign-in on a site belongs to the user: never sign out, change credentials or act beyond this application.
+- Read pages as text and refs (`look`), not screenshots, unless the layout is the question.

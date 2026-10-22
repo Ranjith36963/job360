@@ -1,4 +1,4 @@
-"""record_application is atomic and idempotent (gap roadmap slice 10, migration 0068).
+"""record_application is atomic and idempotent (gap roadmap slice 10, migration 0070).
 
 The receipt, its `applied` event and the `request_id` row commit in ONE
 transaction, so a network retry can no longer write a second permanent receipt

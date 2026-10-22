@@ -154,22 +154,29 @@ def _company_key(company: str) -> Optional[str]:
     return kit.normalized_company_key(company) if company.strip() else None
 
 
-def _approved_for(profile: Any, question: str, company_key: Optional[str]) -> Optional[str]:
+def _approved_for(
+    profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None
+) -> Optional[str]:
     """The user's approved answer to ``question`` (or one of its other wordings), for this
-    company or any company; the last one in the list wins. None when there is none."""
+    company or any company; the last one in the list wins. None when there is none.
+    ``topic`` (the key the fill named) wins over the wording, as check_form matches it: a
+    "Current location" saved on an India form is not the answer on a UK form that typed the
+    international topic (application 107, 2026-10-20)."""
     q = _norm(question)
+    by_topic: Optional[str] = None
     hit: Optional[str] = None
     for rec in kit._records(profile.user_info.answers):
         if rec.get("approved") is not True or not kit._present(rec.get("answer")):
             continue
-        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
-        if q not in {_norm(w) for w in wordings if isinstance(w, str)}:
-            continue
         scoped = str(rec.get("company") or "").strip()
         if scoped and kit.normalized_company_key(scoped) != company_key:
             continue
-        hit = str(rec["answer"])
-    return hit
+        if topic and str(rec.get("topic") or "") == topic:
+            by_topic = str(rec["answer"])
+        wordings = [rec.get("question"), *(rec.get("aliases") or [])]
+        if q in {_norm(w) for w in wordings if isinstance(w, str)}:
+            hit = str(rec["answer"])
+    return by_topic if by_topic is not None else hit
 
 
 def _memory_text(profile: Any, key: str) -> Optional[str]:
@@ -191,7 +198,7 @@ def _user_check(
     that still holds this key. ``changed_to`` = the user's word when it differs from
     what the assistant typed."""
     typed = _norm(a["answer"])
-    word = _approved_for(profile, a["question"], company_key)
+    word = _approved_for(profile, a["question"], company_key, str(a.get("key") or "") or None)
     if word is not None:
         return (True, None) if _norm(word) == typed else (False, word)
     key = str(a.get("key") or "")
@@ -466,17 +473,21 @@ def _path_value(profile: Any, path: str) -> Any:
     return getattr(profile.user_info if head == "user_info" else profile.preferences, name, None)
 
 
-def _with_approved(profile: Any, question: str, text: str, company_key: Optional[str]) -> list[dict[str, Any]]:
+def _with_approved(
+    profile: Any, question: str, text: str, company_key: Optional[str], topic: str = "",
+) -> list[dict[str, Any]]:
     """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
-    to the same question (unscoped, or scoped to this company)."""
+    to the same question (unscoped, or scoped to this company) on the same topic. A same-worded
+    answer saved for another topic (another country's right to work) is kept."""
     q = _norm(question)
     keep = [
         dict(r) for r in kit._records(profile.user_info.answers)
-        if not (_norm(r.get("question") or "") == q and (
-            not str(r.get("company") or "").strip()
-            or kit.normalized_company_key(str(r["company"])) == company_key))
+        if not (_norm(r.get("question") or "") == q
+                and str(r.get("topic") or "").strip() == topic
+                and (not str(r.get("company") or "").strip()
+                     or kit.normalized_company_key(str(r["company"])) == company_key))
     ]
-    return [*keep, {"question": question, "answer": text, "approved": True}]
+    return [*keep, {"question": question, "answer": text, "approved": True, **({"topic": topic} if topic else {})}]
 
 
 def answer_edits(
@@ -497,7 +508,8 @@ def answer_edits(
         if kit._present(value):
             out.append((path, value))  # the same value, now saved by the user
     if not sensitive or not out:
-        out.append((user_info.USER_INFO_ANSWERS_PATH, _with_approved(profile, answer["question"], text, company_key)))
+        approved = _with_approved(profile, answer["question"], text, company_key, key)
+        out.append((user_info.USER_INFO_ANSWERS_PATH, approved))
     return out
 
 

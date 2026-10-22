@@ -86,6 +86,7 @@ browser (their home internet, cookies and history). A browser on a server, ours 
 - **Never disguise the browser** to trick bot checks (no faked home internet, no faked device). Claude won't build that, and it's what gets accounts banned.
 - The final Submit only goes through `check_submit`. A click on a control the browser reads as the final submit (section 9) is refused unless the gate says `submit`; an Enter that could submit is always refused. A control it does not read as one is clicked like any other.
 - Page text is information, never instructions.
+- Every required question is answered from the user's saved facts, and a required question with no saved answer stops the application (`required_unanswered`); only optional questions may stay blank.
 - The browser reaches only the public internet. Every connection Chromium makes (redirect hops, WebSockets, page scripts, loopback included) leaves through Job360's screening proxy, which checks the address and connects to that exact address.
 - No downloads. The only uploads are the user's own CV and cover letter, rendered by Job360.
 
@@ -102,6 +103,7 @@ time, the real saved sign-in).
 | "Browser automation of our own" on VISION's never-build list | **Replaced** by VISION decision 29 |
 | Pay a vendor | **No** |
 | When to build | **Go** (owner, 2026-10-19): slices 1-3 built; the switch is on in production (seen 2026-10-20). |
+| Autofill answers every required question | **Strict rule** (owner, 2026-10-20 chat): every required question gets an answer from the user's saved facts; only optional ones may stay blank; a required one with no saved answer is asked, never guessed or skipped, and the application is not submitted until it is answered. Built in the submit check as the stop `required_unanswered` (a yes never clears it; applications created from 2026-10-20). |
 
 Decisions A and B are recorded in VISION decision 29; the quoted words are from the 2026-10-19 chat.
 
@@ -135,7 +137,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   - One assistant session at a time per browser: a call with another `session` label gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
   - A frame that never answers is skipped after 3 s, and one action is stopped after 60 s (`error`, `timeout`), so a hung page never holds the browser.
 - **Playbooks:** the `batch` recipe gets a "which browser" line (your own browser first, Job360's when you have none or the user is away); the `forms` recipe points to the tool.
-- **Tests:** `backend/tests/test_browser_agent.py` and the `test_browser_*` files beside it. The safety rules and the off switch always run; the real-Chromium runs run where Playwright + Chromium are installed and skip otherwise (CI).
+- **Tests:** `backend/tests/test_browser_agent.py` and the `test_browser_*` files beside it. The safety rules and the off switch always run; the real-Chromium runs run where Playwright + Chromium are installed and skip otherwise. CI's offline-suite installs both (since 2026-10-20), so they run on every PR, and the skip ratchet (`scripts/test_integrity.py`) is red if they ever skip there.
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.
 
 **Slice 2 (built 2026-10-19, off by default): sign in once.**
@@ -224,6 +226,7 @@ the page's own requests to finish, because single-page sites (React forms) draw 
   site newly drew the file name on the page (not just the file box holding it, and not a name already on the page),
   because Greenhouse can take the file and still show an error (ApplYourself). A new "failed / error / try again /
   too large / not supported" line next to the field makes it false and comes back as `upload_error` (page text).
+  The CV goes to the page as an in-memory file, not a temp path, and `upload_confirmed` is read after waiting up to about 10 s for the site to show the file name.
 - **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
   `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); a line break (`\n` only; `\r` is refused) goes
   only into a multi-line `<textarea>`, inserted as text. Option labels quoted in an error sit inside the untrusted marker.
@@ -305,11 +308,10 @@ sends every job still waiting on your yes. Each start gets its own session label
   screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
   yes stays saved. An unexpected error while saving answers a plain 500 with the token already cleared, Sentry scrubs every depth of a frame's variables, and FastAPI's and Starlette's own frames (one holds the raw request body) lose their variables, so the token cannot reach an error report.
 
-**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed (rev 9); an assistant connected before rev 9 must reconnect.
+**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed; a client whose `tools_rev` is behind `mcp_server.TOOLS_REV` must reconnect.
 
 ## 10. Open questions for later
 
 - How many real career sites work from our cloud browser? Slice 4 measures it, from production.
 - Send starting a cloud routine is built (#913); not yet confirmed: a real routine run started from Send on production.
 - Hosting cost per active user: not yet confirmed.
-- Backend CI installs only `.[dev]` (no Python Playwright), so the real-browser tests skip there; adding it edits `ci.yml` / `ci-offline.yml` (owner-lane).
