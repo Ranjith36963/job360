@@ -44,7 +44,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
 Per ATS (only what was seen):
 | ATS | What to do |
 |---|---|
-| Greenhouse | Embed URL `job-boards.greenhouse.io/embed/job_app?for=<board>&token=<id>`; the company page is heavy. CV input is hidden behind a button. City is a places picker: type, pick a suggestion (country text is rejected). react-select dropdowns need the tab in front. |
+| Greenhouse | Job360's browser `open` switches a `boards.`/`job-boards.greenhouse.io/<board>/jobs/<id>` link to the light embed form `job-boards.greenhouse.io/embed/job_app?for=<board>&token=<id>` (`opened_as` says so); company pages and eu. hosts stay as given. CV input is hidden behind a button. City is a places picker: type, pick a suggestion (country text is rejected). react-select dropdowns need the tab in front. |
 | Ashby | Yes/no are button pairs with a hidden checkbox: real click, read the checkbox. Submit shows ONE missing field at a time: read all errors first. Picture CAPTCHA: `blocked`, Needs you. Re-type fields it calls missing. |
 | Lever | CV parser overwrites typed fields: upload, wait, then type, read back last. Location is a picker: pick the suggestion (Escape clears it). |
 | Rippling | A required consent radio can sit below the fold; Apply then does nothing, no message. Scan `aria-invalid`. Client-rendered: needs the browser. |

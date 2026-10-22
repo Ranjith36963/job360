@@ -1,4 +1,4 @@
--- 0071 down: reverses the DDL only. No other `application_receipts` column is touched.
+-- 0078 down: reverses the DDL only. No other `application_receipts` column is touched.
 --
 -- WHAT THIS COSTS, STATED PLAINLY: receipts forget which form event their answers
 -- were copied from and the count that event gave. The answers themselves stay.

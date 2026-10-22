@@ -78,6 +78,31 @@ def _host(url: str) -> str:
         return ""
 
 
+# The company's own job page on Greenhouse is heavy; the embed form is the light page the recipe
+# (recipes/forms.md) tells agents to use. Only the two non-EU hosts are rewritten: the EU embed host
+# is not confirmed, so eu. pages stay as they are. A company-hosted page with gh_jid has no board name
+# in its path and is never touched.
+_GREENHOUSE_JOB_HOSTS = ("boards.greenhouse.io", "job-boards.greenhouse.io")
+_GREENHOUSE_JOB_PATH = re.compile(r"^/([A-Za-z0-9_-]+)/jobs/(\d+)/?$")
+
+
+def greenhouse_embed_url(url: str) -> str:
+    """The embed form URL for a Greenhouse job page, or ``url`` unchanged for anything else."""
+    try:
+        parts = urlsplit((url or "").strip())
+        port = parts.port
+    except ValueError:
+        return url
+    if parts.scheme not in ("http", "https") or port is not None or "@" in parts.netloc:
+        return url
+    if (parts.hostname or "").lower().rstrip(".") not in _GREENHOUSE_JOB_HOSTS:
+        return url
+    m = _GREENHOUSE_JOB_PATH.match(parts.path)
+    if not m or m.group(1).lower() == "embed":
+        return url
+    return f"https://job-boards.greenhouse.io/embed/job_app?for={m.group(1)}&token={m.group(2)}"
+
+
 def _matches(site: Site, host: str) -> bool:
     if not host or host in site.deny_hosts:
         return False

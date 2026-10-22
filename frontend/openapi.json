@@ -9269,6 +9269,13 @@
             ],
             "title": "Fields Total"
           },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
+          },
           "form_host": {
             "default": "",
             "title": "Form Host",
@@ -9505,6 +9512,40 @@
           "answer"
         ],
         "title": "ReceiptAnswerOut",
+        "type": "object"
+      },
+      "ReceiptFileOut": {
+        "description": "Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "fmt": {
+            "title": "Fmt",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "artifact_id",
+          "sha256",
+          "fmt",
+          "event_id"
+        ],
+        "title": "ReceiptFileOut",
         "type": "object"
       },
       "ReceiptListResponse": {
@@ -9831,6 +9872,13 @@
           "event_id": {
             "title": "Event Id",
             "type": "integer"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
           },
           "possible_duplicate": {
             "default": "",
