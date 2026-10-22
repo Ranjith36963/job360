@@ -343,3 +343,27 @@ def test_why_missed_cli_prints_and_exits_zero(
     out = capsys.readouterr().out
     assert rc == 0 and "Verdict: board_not_in_list" in out and "Change: add --companies-extra" in out
     assert not (tmp_path / "seen.json").exists()  # read-only
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_visible_text_is_linear_on_unclosed_blocks():
+    assert hk._visible_text("<style>a{}</style><p>Hi <b>there</b></p><!-- c --><script>x()</script>end") == "Hi there end"
+    assert hk._visible_text("a<script>never closed") == "a never closed"  # no closer: only the tag goes
+    for evil in ("<script>", "<!--", "<svg", '<a href="', "<"):
+        _grows_linearly(hk._visible_text, lambda k, e=evil: e * k)

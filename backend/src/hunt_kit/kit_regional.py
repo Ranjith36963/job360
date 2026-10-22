@@ -196,12 +196,14 @@ def _first(node: _Node, test: Callable[[_Node], bool]) -> _Node | None:
 
 
 # ------------------------------------------------------------- schema.org JobPosting in a page
-_LD = re.compile(r"""<script[^>]+type=["']application/ld\+json["'][^>]*>(.*?)</script>""", re.I | re.S)
+_LD = re.compile(r"""<script[^<>]+type=["']application/ld\+json["'][^<>]*>(.*?)</script>""", re.I | re.S)
+_LD_END = re.compile(r"</script>", re.I)
+_finditer_closed: Callable[..., Iterator[Any]] = _kf.finditer_closed  # lazy match stops at the last closer: linear
 
 
 def _ld_posting(page: str) -> dict[str, Any]:
     """The page's first schema.org JobPosting object ({} when there is none)."""
-    for m in _LD.finditer(page or ""):
+    for m in _finditer_closed(_LD, _LD_END, page or ""):
         try:
             data = json.loads(m.group(1), strict=False)
         except ValueError:
