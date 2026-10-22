@@ -56,6 +56,7 @@ from src.services.browser_agent.page_js import (
 from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
 from src.services.browser_agent.sites import (
     account_step,
+    greenhouse_embed_url,
     is_honeypot,
     looks_like_application,
     outcome_for,
@@ -1161,6 +1162,8 @@ async def _act(
     gate: Optional[Gate], files: Optional[FileFn],
 ) -> dict[str, Any]:
     if action == "open":
+        requested = url
+        url = greenhouse_embed_url(url)  # before the screen: the guard sees the URL that is opened
         verdict = await pool.screen.screen(url)
         if not verdict.ok:
             raise BrowserError(
@@ -1179,7 +1182,12 @@ async def _act(
         await _settle(page)
         if (refusal := _refusal(s, page)) is not None:
             raise refusal
-        return await look(s)
+        result = await look(s)
+        if url != requested:
+            result["opened_as"] = (
+                "Greenhouse embed form (lighter page for the same job): " + redact_url_for_display(url)
+            )
+        return result
     if action == "look":
         return await look(s)
     if action == "back":
