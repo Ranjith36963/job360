@@ -1685,6 +1685,14 @@ async def record_receipt(
     (``answers_from``, :func:`_form_answers_source`); no ``channel``: the form's
     host picks one. Every answer, given or frozen, passes G023
     (``kit.redact_unremembered``). ``idem_body`` stays the CALLER's body.
+
+    Gap roadmap slice 29 - no ``cv_artifact_id``: the CV of the newest
+    ``document_uploaded`` since the last ``applied`` (the browser's upload or a kit
+    link download) is frozen; no ``cover_letter_artifact_id``: the newest letter the
+    BROWSER uploaded into a form is (a download alone never claims a letter). Those
+    uploads are frozen as ``files`` [{kind, artifact_id, sha256, fmt, event_id}]. A
+    named id that is not the uploaded one is kept, with ``cv_mismatch`` /
+    ``cover_letter_mismatch``. No upload at all = the older behaviour.
     """
     idem_body = {
         "application_id": application_id, "channel": channel, "note": note, "confirmation": confirmation,
@@ -1759,23 +1767,67 @@ async def record_receipt(
     # G023 - a sensitive answer the user did not agree to remember is hashed (given or frozen alike).
     answers_list, hashed = await kit_service.redact_unremembered(db, user_id, app_row, answers_list)
 
-    cv_artifact = await _resolve_receipt_artifact(db, user_id, application_id, "cv", cv_artifact_id)
-    if cv_artifact_id is None and cv_artifact is not None:
+    # Slice 29 - the files Job360 itself handed out since the last receipt (``document_uploaded``,
+    # server-written: the browser's upload, or a kit link download) name the versions when the
+    # caller names none. No upload at all = the older flow, unchanged.
+    from src.services.applications import uploads as uploads_service  # noqa: PLC0415 - uploads imports spine
+
+    uploads = await uploads_service.uploads_since_last_receipt(db, user_id, application_id)
+    up_cv = next((u for u in uploads if u["kind"] == "cv"), None)
+    up_cl = next((u for u in uploads if u["kind"] == "cover_letter"), None)
+    # Only an upload INTO a form (the browser's, host set) proves a letter was attached; a kit link
+    # download alone does not (an assistant may fetch both files for a form with no letter field).
+    up_cl_form = next((u for u in uploads if u["kind"] == "cover_letter" and u["host"]), None)
+    files: list[dict[str, Any]] = []
+
+    cv_artifact = await _resolve_receipt_artifact(
+        db, user_id, application_id, "cv",
+        up_cv["artifact_id"] if cv_artifact_id is None and up_cv is not None else cv_artifact_id,
+    )
+    if cv_artifact_id is None and up_cv is None and cv_artifact is not None:
         warnings.append(
             "cv_artifact_id not given: froze the newest CV "
             f"(artifact {cv_artifact['id']}, v{cv_artifact['version_no']})"
         )
-    # A receipt never guesses a letter: only a NAMED letter is frozen (M3 - the
-    # receipt is permanent, so a wrong "sent" claim could never be corrected).
+    if up_cv is not None and cv_artifact is not None:
+        if up_cv["artifact_id"] == cv_artifact["id"]:
+            files.append(uploads_service.file_entry(up_cv))
+        else:  # artifacts are append-only (M3): another id is another text, so other bytes
+            warnings.append(
+                f"cv_mismatch: the receipt keeps the CV you named (artifact {cv_artifact['id']}), but the CV "
+                f"Job360 last sent was artifact {up_cv['artifact_id']} (document_uploaded#{up_cv['event_id']})"
+            )
+    # A receipt never guesses a letter: only a NAMED or form-uploaded letter is frozen (M3 - the
+    # receipt is permanent, so a wrong "sent" claim could never be corrected; prod receipt 19).
     cl_artifact: Optional[dict[str, Any]] = None
-    if cover_letter_artifact_id is None:
+    if cover_letter_artifact_id is not None:
+        cl_artifact = await _resolve_receipt_artifact(
+            db, user_id, application_id, "cover_letter", cover_letter_artifact_id
+        )
+        if up_cl is not None and cl_artifact is not None:
+            if up_cl["artifact_id"] == cl_artifact["id"]:
+                files.append(uploads_service.file_entry(up_cl))
+            else:
+                warnings.append(
+                    f"cover_letter_mismatch: the receipt keeps the letter you named (artifact {cl_artifact['id']}), "
+                    f"but the letter Job360 last sent was artifact {up_cl['artifact_id']} "
+                    f"(document_uploaded#{up_cl['event_id']})"
+                )
+    elif up_cl_form is not None:
+        cl_artifact = await _resolve_receipt_artifact(
+            db, user_id, application_id, "cover_letter", up_cl_form["artifact_id"]
+        )
+        files.append(uploads_service.file_entry(up_cl_form))
+    elif up_cl is not None:
+        warnings.append(
+            f"no cover_letter_artifact_id given: a cover letter was downloaded (artifact {up_cl['artifact_id']}) "
+            "but Job360 saw no upload of it, so the receipt says no cover letter was sent. "
+            "If it was sent, record a correction note; receipts cannot be edited."
+        )
+    else:
         warnings.append(
             "no cover_letter_artifact_id given: the receipt says no cover letter was sent. "
             "If one was sent, record a correction note; receipts cannot be edited."
-        )
-    else:
-        cl_artifact = await _resolve_receipt_artifact(
-            db, user_id, application_id, "cover_letter", cover_letter_artifact_id
         )
 
     # Lazy: profile storage pulls the scoring stack transitively (rule #16),
@@ -1817,8 +1869,8 @@ async def record_receipt(
                 " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
                 " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
                 " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
-                " referred_by_contact_id, answers_from, answers_count) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " referred_by_contact_id, answers_from, answers_count, files) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, app_row["job_id"], sent_at,
                     app_row.get("job_title") or "", app_row.get("job_company") or "",
@@ -1830,7 +1882,7 @@ async def record_receipt(
                     application_id, cv_artifact["id"] if cv_artifact else None,
                     cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
                     confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
-                    referred_by_contact_id, answers_from, answers_count,
+                    referred_by_contact_id, answers_from, answers_count, json.dumps(files),
                 ),
             )
             receipt_id = int(cur.lastrowid or 0)
@@ -1849,7 +1901,8 @@ async def record_receipt(
                 "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
                 "confirmation": confirmation or "",
                 "url": f"/applications/{application_id}", "event_id": event["event_id"],
-                "possible_duplicate": possible_duplicate, "answers_from": answers_from, "already_existed": False,
+                "possible_duplicate": possible_duplicate, "answers_from": answers_from, "files": files,
+                "already_existed": False,
                 "referred_by_contact_id": referred_by_contact_id,
             }
             if request_id is not None:
@@ -1865,7 +1918,7 @@ async def record_receipt(
         "receipt_created",
         extra={
             "event": "receipt_created", "receipt_id": receipt_id,
-            "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
+            "cv_artifact_id": cv_artifact["id"] if cv_artifact else None, "files_count": len(files),
             "referred_by_contact_id": referred_by_contact_id,
         },
     )
@@ -2182,7 +2235,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
         "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, referred_by_contact_id, "
-        "answers_from, "
+        "answers_from, files, "
         "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
@@ -2199,6 +2252,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "proof": (await proof_for(db, user_id, [application_id]))[application_id] if application_id else NO_PROOF,
         "answers": _receipt_answers(r.get("answers")),
         "answers_from": r.get("answers_from") or "",
+        "files": [f for f in _receipt_json(r.get("files"), list) if isinstance(f, dict)],
         "fields_filled": _receipt_json(r.get("fields_filled"), dict),
         "confirmation": r.get("confirmation") or None,
         "recorded_by": r.get("recorded_by") or None,
