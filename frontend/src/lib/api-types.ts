@@ -1808,6 +1808,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/deployz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deployz
+         * @description Deploy healthcheck (2026-10-22): readyz's DB check, then the browser hold.
+         *
+         *     A new container answers 503 ``holding`` while the OLD process still has a recently active
+         *     cloud browser, for at most ``DEPLOY_HOLD_MAX_SECONDS`` after this process booted, so Railway
+         *     keeps the old container (and its half-filled form) serving. See
+         *     ``services/browser_agent/deploy_hold.py``. Public, since Railway's healthcheck sends no
+         *     credentials; the body carries no user data and no counts.
+         *
+         *     200 ``{"status": "ready"}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}`` (wins over the hold)
+         *     503 ``{"status": "holding", "reason": "browser_busy", "held_s": <seconds since boot>}``
+         */
+        get: operations["deployz_api_deployz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/doctor": {
         parameters: {
             query?: never;
@@ -11618,6 +11648,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deployz_api_deployz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

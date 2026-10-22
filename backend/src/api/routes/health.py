@@ -78,6 +78,14 @@ async def readyz() -> JSONResponse:
     ``pool`` is null. Redis is no longer checked: the service was deleted
     2026-09-02 and the auth rate limiter falls back without it.
     """
+    pool_stats, failure = await _db_check()
+    if failure is not None:
+        return failure
+    return JSONResponse(content={"status": "ready", "pool": pool_stats}, status_code=200)
+
+
+async def _db_check() -> tuple[dict[str, int] | None, JSONResponse | None]:
+    """The DB check readyz and deployz share: (pool stats, None) or (None, the 503 answer)."""
     timeout = settings.READYZ_POOL_TIMEOUT_S
     pool_stats: dict[str, int] | None = None
     try:
@@ -90,10 +98,38 @@ async def readyz() -> JSONResponse:
                 await asyncio.wait_for(conn.execute("SELECT 1"), timeout)
             pool_stats = pool.stats(request_pool)
     except PoolTimeout as exc:
-        return _not_ready("pool_timeout", exc)
+        return None, _not_ready("pool_timeout", exc)
     except Exception as exc:  # any DB failure must answer 503, never a 500
-        return _not_ready("db_error", exc)
-    return JSONResponse(content={"status": "ready", "pool": pool_stats}, status_code=200)
+        return None, _not_ready("db_error", exc)
+    return pool_stats, None
+
+
+@router.get("/deployz")
+async def deployz() -> JSONResponse:
+    """Deploy healthcheck (2026-10-22): readyz's DB check, then the browser hold.
+
+    A new container answers 503 ``holding`` while the OLD process still has a recently active
+    cloud browser, for at most ``DEPLOY_HOLD_MAX_SECONDS`` after this process booted, so Railway
+    keeps the old container (and its half-filled form) serving. See
+    ``services/browser_agent/deploy_hold.py``. Public, since Railway's healthcheck sends no
+    credentials; the body carries no user data and no counts.
+
+    200 ``{"status": "ready"}``
+    503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}`` (wins over the hold)
+    503 ``{"status": "holding", "reason": "browser_busy", "held_s": <seconds since boot>}``
+    """
+    _, failure = await _db_check()
+    if failure is not None:
+        return failure
+    from src.services.browser_agent import deploy_hold  # noqa: PLC0415 - lazy, house style
+
+    reason = await deploy_hold.hold_reason()
+    if reason is not None:
+        return JSONResponse(
+            content={"status": "holding", "reason": reason, "held_s": deploy_hold.seconds_since_boot()},
+            status_code=503,
+        )
+    return JSONResponse(content={"status": "ready"}, status_code=200)
 
 
 def _not_ready(reason: str, exc: BaseException) -> JSONResponse:

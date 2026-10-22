@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from src.services.applications.job_checks import redact_url_for_display
+from src.services.browser_agent.deploy_hold import Beacon
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
     CHOSEN_NEARBY_JS,
@@ -258,6 +259,11 @@ class BrowserPool:
             if (now - s.last_used > self.idle_s or expired) and not s.lock.locked():
                 await self.close(user_id, "idle")
 
+    def busy_count(self, quiet_s: float, now: Optional[float] = None) -> int:
+        """Sessions used within ``quiet_s`` seconds, or running an action now (deploy hold)."""
+        now = time.monotonic() if now is None else now
+        return sum(1 for s in self._sessions.values() if now - s.last_used <= quiet_s or s.lock.locked())
+
     async def get(
         self, user_id: str, *, create: bool, load_state: Optional[StateFn] = None
     ) -> Optional[Session]:
@@ -351,6 +357,9 @@ class BrowserPool:
         context.on("response", _on_response)
         self._sessions[user_id] = s
         _CLOSE_REASONS.pop(user_id, None)
+        # Tell a deploying container a form is open now, not at the next sweep. Never raises, and
+        # is bounded, so a DB trouble cannot hold up the browser.
+        await beacon.sync(True)
         return s
 
     async def close(self, user_id: str, reason: Optional[str] = "closed") -> bool:
@@ -1561,6 +1570,8 @@ async def live(
 # ── The process-wide pool ─────────────────────────────────────────────────────
 
 _pool: Optional[BrowserPool] = None
+# The deploy-hold lock holder, owned by the pool's lifetime (one per process).
+beacon = Beacon()
 
 
 def get_pool() -> BrowserPool:
@@ -1584,13 +1595,18 @@ async def reap_forever(every_s: float = REAP_EVERY_S) -> None:
     while True:
         await asyncio.sleep(every_s)
         try:
-            await get_pool().reap()
+            pool = get_pool()
+            await pool.reap()
+            from src.core import settings  # noqa: PLC0415 - live read, house style
+
+            await beacon.sync(pool.busy_count(settings.DEPLOY_HOLD_QUIET_SECONDS) > 0)
         except Exception:  # noqa: BLE001 - one failed sweep must not end the sweeping
             logger.warning("browser_agent idle sweep failed", exc_info=True)
 
 
 async def shutdown_pool() -> None:
     global _pool
+    await beacon.close()
     if _pool is not None:
         await _pool.shutdown()
         _pool = None
