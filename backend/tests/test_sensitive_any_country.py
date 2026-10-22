@@ -97,7 +97,8 @@ async def test_the_card_and_the_gate_read_a_private_answer_the_same_way(authenti
         assert "sensitive" in [f["code"] for f in card["flags"]]
         assert await gate_says_sensitive() is True
         confirm = await client.post(f"/api/applications/{app_id}/answers/0/confirm",
-                                    json={"form_filled_event_id": card["form_filled_event_id"]})
+                                    json={"form_filled_event_id": card["form_filled_event_id"],
+                                          "answer": "Canadian"})  # G023: not in memory, so only its hash was kept
         assert confirm.status_code == 200, confirm.text
         await fill([NATIONALITY])  # the next fill types the now-confirmed answer
         assert await gate_says_sensitive() is False, "the user's Verify clears the gate too"
