@@ -367,3 +367,10 @@ def test_visible_text_is_linear_on_unclosed_blocks():
     assert hk._visible_text("a<script>never closed") == "a never closed"  # no closer: only the tag goes
     for evil in ("<script>", "<!--", "<svg", '<a href="', "<"):
         _grows_linearly(hk._visible_text, lambda k, e=evil: e * k)
+
+
+def test_visible_text_ends_a_comment_at_either_closer_browsers_accept():
+    # HTML ends a comment at --> or --!> ; a comment closed by --!> must not leak its text (CodeQL: bad HTML filtering)
+    assert hk._visible_text("A<!-- hidden note --!>B") == "A B"
+    assert hk._visible_text("A<!-- hidden note -->B") == "A B"
+    assert hk._visible_text("A<!-- one --!>B<!-- two -->C") == "A B C"

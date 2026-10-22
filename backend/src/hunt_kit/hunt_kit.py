@@ -2461,7 +2461,7 @@ _VIS_OPEN = re.compile(r"<(script(?=\b)|style(?=\b)|noscript(?=\b)|template(?=\b
 
 
 def _vis_closer(name: str) -> re.Pattern[str]:
-    return re.compile(r"</%s\s*>" % name if name != "!--" else "-->", re.I)
+    return re.compile(r"</%s\s*>" % name if name != "!--" else "--!?>", re.I)  # browsers end a comment at --> or --!>
 
 
 def _visible_text(raw: str) -> str:
