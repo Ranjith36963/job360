@@ -1,4 +1,4 @@
-"""Tests for /livez, /readyz, and validate_required_env().
+"""Tests for /livez, /version, /readyz, and validate_required_env().
 
 TDD for the Phase 2 ops-hardening health probes.
 """
@@ -41,6 +41,59 @@ async def test_livez_succeeds_even_when_db_is_broken():
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/api/livez")
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# /version — the deployed commit (post-merge-watch.yml polls it, 2026-10-20)
+# ---------------------------------------------------------------------------
+
+_SHA = "e5323944" + "ab" * 16
+
+
+async def _get_version():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.get("/api/version")
+
+
+@pytest.mark.asyncio
+async def test_version_reports_the_railway_commit_sha(monkeypatch):
+    """Value, not just the key: the SHA Railway injected is what comes back."""
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", _SHA.upper())
+    resp = await _get_version()
+    assert resp.status_code == 200
+    assert resp.json() == {"sha": _SHA}
+    # A cached SHA after the container swap would be exactly the lie this route ends.
+    assert resp.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_version_is_unknown_when_railway_did_not_set_it(monkeypatch):
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    resp = await _get_version()
+    assert resp.status_code == 200
+    assert resp.json() == {"sha": "unknown"}
+
+
+@pytest.mark.asyncio
+async def test_version_never_echoes_a_value_that_is_not_a_sha(monkeypatch):
+    """Public route: whatever lands in the variable, only a hex SHA is ever served."""
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "postgres://user:secret@db/x")
+    resp = await _get_version()
+    assert resp.json() == {"sha": "unknown"}
+    assert "secret" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_version_needs_no_session_and_no_database(monkeypatch):
+    """Anonymous, and data-free: it must answer even with the DB gone."""
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", _SHA)
+    with patch("src.repositories.pg.connect") as mock_connect:
+        mock_connect.side_effect = RuntimeError("DB is gone")
+        resp = await _get_version()
+    assert resp.status_code == 200
+    assert resp.json() == {"sha": _SHA}
+    mock_connect.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from src.api.auth_deps import (
     require_session_user,
     require_user,
 )
+from src.api.client_ip import UNKNOWN, client_ip, throttle_client_ip
 from src.api.dependencies import get_request_db
 from src.api.middleware import _is_production
 from src.core import settings
@@ -35,6 +36,7 @@ from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
+from src.services.auth.security_notices import send_security_notice
 from src.utils.logger import get_audit_logger, mask_email, safe_log_value
 
 logger = logging.getLogger("job360.api.auth")
@@ -111,7 +113,7 @@ class UserResponse(BaseModel):
 
 
 class MeResponse(UserResponse):
-    # Migration 0069 — False for an account only a magic link has ever signed
+    # Migration 0071 — False for an account only a magic link has ever signed
     # in (no password the user knows). The account page then deletes without a
     # password prompt, from a fresh email-link sign-in (``delete_account``).
     has_password: bool = True
@@ -129,15 +131,12 @@ class RegisterResponse(BaseModel):
 def _client_meta(request: Request) -> dict[str, Any]:
     """Extract safe client metadata for audit log extra fields.
 
-    X-Forwarded-For is only trusted when ``JOB360_TRUST_PROXY=1`` is set —
-    forwarding without this gate lets attackers spoof their source IP.
+    The address comes from ``src.api.client_ip`` (the one reader of
+    X-Forwarded-For); ``None`` when there is no address at all.
     """
-    xff_ip = None
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        xff = request.headers.get("x-forwarded-for", "")
-        xff_ip = xff.split(",")[0].strip() or None
+    ip = client_ip(request)
     return {
-        "client_ip": xff_ip or (request.client.host if request.client else None),
+        "client_ip": None if ip == UNKNOWN else ip,
         "user_agent": request.headers.get("user-agent", "")[:200],
     }
 
@@ -167,18 +166,12 @@ async def register(
     background_tasks: BackgroundTasks,
 ) -> RegisterResponse:
     # M3 — per-IP registration throttle. Without this, register had ZERO rate
-    # limit, so a single host could mass-create accounts. Derive the client IP
-    # the SAME way login does: request.client.host, trusting the first
-    # X-Forwarded-For hop ONLY behind the JOB360_TRUST_PROXY gate (else XFF is
-    # spoofable). Do NOT leak whether the email exists — this fires before any
-    # DB lookup.
-    _ip = request.client.host if request.client else "unknown"
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        _xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        if _xff:
-            _ip = _xff
+    # limit, so a single host could mass-create accounts. The address comes from
+    # src.api.client_ip, the same as login (X-Forwarded-For only from trusted
+    # proxy hops, never the caller-written leftmost entry). Do NOT leak whether
+    # the email exists — this fires before any DB lookup.
     if not auth_rate_limit.check_and_record(
-        f"register:{_ip}", max_in_window=10, window_seconds=3600
+        f"register:{throttle_client_ip(request)}", max_in_window=10, window_seconds=3600
     ):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -243,24 +236,40 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     # an attacker lock a VICTIM out of their own account by spamming failures for
     # their email. Scoping to the source IP means the attacker only locks their own
     # (email, IP) bucket; the real user, on a different IP, can still sign in.
-    # XFF is trusted only behind the JOB360_TRUST_PROXY gate (else it's spoofable).
-    _ip = request.client.host if request.client else "unknown"
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        _xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        if _xff:
-            _ip = _xff
-    throttle_key = f"login:{str(req.email).lower()}:{_ip}"
+    # The address is src.api.client_ip's (IPv6 counted per /64): a forged
+    # X-Forwarded-For entry never changes it, so rotating forged values does not
+    # buy fresh buckets.
+    email_lc = str(req.email).lower()
+    throttle_key = f"login:{email_lc}:{throttle_client_ip(request)}"
+    # Gap-audit fix #6 — plus an OPT-IN per-email cap across ALL addresses
+    # (settings.LOGIN_EMAIL_MAX_ATTEMPTS, 0 = off by default: when on it refuses
+    # even the right password, so a distributed attacker could lock the owner
+    # out). Only attempts the email+IP bucket ADMITS are counted toward it. Its count is never cleared on success, only
+    # the successful attempt's own pre-count is refunded: one sign-in by the
+    # owner must not hand a stuffing run a fresh budget.
+    email_key = f"login_email:{email_lc}"
     # Owner, 2026-09-28 — logs keep first letter + domain, never the full address.
     log_email = safe_log_value(mask_email(str(req.email)))
-    if auth_rate_limit.is_locked(
+    # Check AND count in one atomic step, BEFORE the first await (security
+    # review P1): checking here and recording after the DB read let a concurrent
+    # burst from one address pass the check many times over. The attempt is
+    # pre-counted as a failure; a successful login refunds it below.
+    admission = auth_rate_limit.admit_login_attempt(
         throttle_key,
-        max_failures=LOGIN_MAX_ATTEMPTS,
+        email_key,
+        ip_max=LOGIN_MAX_ATTEMPTS,
+        email_max=settings.LOGIN_EMAIL_MAX_ATTEMPTS,
         window_seconds=LOGIN_LOCKOUT_WINDOW_SECONDS,
-    ):
+    )
+    if not admission.admitted:
         get_audit_logger().warning(
             "auth",
-            extra={"event": "login", "status": "locked", "email": log_email, **_client_meta(request)},
+            extra={
+                "event": "login", "status": "locked", "email": log_email,
+                "lock": admission.lock, **_client_meta(request),
+            },
         )
+        # One body for both locks: which bucket refused is never revealed.
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="too many failed login attempts; try again later",
@@ -279,7 +288,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     stored_hash = row["password_hash"] if row is not None else _DUMMY_PW_HASH
     pw_ok = verify_password(stored_hash, req.password)
     if row is None or not pw_ok:
-        auth_rate_limit.record_failure(throttle_key)
+        # Already counted by admit_login_attempt above.
         get_audit_logger().warning(
             "auth",
             extra={"event": "login", "status": "fail", "email": log_email, **_client_meta(request)},
@@ -288,8 +297,11 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
         )
-    # Success — clear the failure counter so earlier typos don't accumulate.
+    # Success — clear the email+IP failure counter so earlier typos don't
+    # accumulate (this also drops this attempt's pre-count), and refund this
+    # attempt's pre-count from the per-email bucket, leaving the rest.
     auth_rate_limit.clear_failures(throttle_key)
+    auth_rate_limit.refund_login_attempt(email_key, admission)
     cookie = await auth_sessions.create_session(str(DB_PATH), user_id=row["id"], secret=_secret())
     _set_session_cookie(response, cookie)
     get_audit_logger().info(
@@ -586,6 +598,7 @@ async def change_password(
     # Terminate ALL of the user's sessions server-side (other devices / stolen
     # cookies), not just clear this browser's cookie — full intent of rule #26.
     await auth_sessions.revoke_all_for_user(str(DB_PATH), user.id)
+    await send_security_notice(str(DB_PATH), user.id, "password_changed")
     # Mutate + return the injected response (returning a fresh Response would
     # drop the Set-Cookie, the latent bug this fix also corrects for email/delete).
     response.delete_cookie(SESSION_COOKIE_NAME)
@@ -675,8 +688,7 @@ async def password_reset_request(
     """
     # Hash the IP rather than use it directly — bucket key is opaque
     # in any future log dump or telemetry export.
-    client_ip = request.client.host if request.client else "unknown"
-    ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
+    ip_hash = hashlib.sha256(throttle_client_ip(request).encode("utf-8")).hexdigest()[:16]
     key = f"password-reset:{ip_hash}"
     # Two dimensions, both must pass. The IP throttle alone lets an attacker who
     # rotates IPs email-bomb ONE address (each fresh IP is a fresh bucket). The
@@ -730,6 +742,7 @@ async def password_reset_confirm(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="invalid or expired reset token",
         )
+    await send_security_notice(str(DB_PATH), user_id, "password_changed")
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

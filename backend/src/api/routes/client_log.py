@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, optional_user
+from src.api.client_ip import client_ip, throttle_ip
 from src.services.auth import rate_limit as auth_rate_limit
 from src.utils.logger import get_logger
 
@@ -39,10 +40,11 @@ async def client_log(
     user: Optional[CurrentUser] = Depends(optional_user),  # noqa: B008
 ) -> None:
     """Record a browser-side log event into the server's data/logs/ stream."""
-    ip = request.client.host if request.client else "unknown"
+    ip = client_ip(request)  # the full address, as the log lines record it
     # Per-IP cap (60/min): a runaway client can't flood the logs. Over the cap we
     # silently drop but still return 204 — logging must not cause a client error.
-    key = "client-log:" + hashlib.sha256(ip.encode()).hexdigest()[:16]
+    # The key counts an IPv6 caller per /64 (throttle_ip).
+    key = "client-log:" + hashlib.sha256(throttle_ip(ip).encode()).hexdigest()[:16]
     if not auth_rate_limit.check_and_record(key, max_in_window=60, window_seconds=60):
         return None
 

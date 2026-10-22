@@ -208,14 +208,6 @@ lanes:
       - "docs/README.md"
       - "backend/README.md"
       - "frontend/README.md"
-      # docs/GENERATED.md is machine-written (`gen_doc_blocks.py --write`) and
-      # machine-proven (`--check` is a required gate), so it is the harness's
-      # own record. Until 2026-09-19 it matched NO lane, and every product PR
-      # that added a route or a test file regenerated it and escalated to
-      # harness_owner -- the owner merged product PRs by hand for that alone
-      # (#588). Harness is the LOWEST precedence, so a product PR that also
-      # regenerates it still rides the product lane.
-      - "docs/GENERATED.md"
       # ── ROOT MARKDOWN, NAMED ONE BY ONE. NOT `*.md`. ──────────────────────
       # `*.md` sat here and looked harmless. It was not -- but the reason
       # written down here was WRONG, and being wrong about the mechanism is why
@@ -399,6 +391,13 @@ lanes:
   #   * `rollback: railway` — `deploymentRollback` restores the previous image
   #     AND its variables in seconds, and the watcher CONFIRMS `canRollback`
   #     before anything in this lane is allowed to merge at all.
+  #     It restores the IMAGE, never the schema or rows: a migration that
+  #     committed stays applied under the rolled-back code. migrations/runner.py
+  #     bounds each migration (lock_timeout / statement_timeout; a timeout rolls
+  #     it back whole and fails the boot, so the old container keeps serving) and
+  #     first copies every table it touches to `migration_snapshots."<table>__<id>"`,
+  #     kept MIGRATION_SNAPSHOT_RETENTION_DAYS (14). A new DROP COLUMN / DROP TABLE
+  #     needs `-- allow-drop: <reason>` (tests/test_migration_safety.py).
   # Speed still comes from being able to UNDO. Nothing here merges on the
   # strength of looking safe.
   #
@@ -411,16 +410,16 @@ lanes:
     description: "The product's sharp end — merged by a machine only under the watcher."
     paths:
       # irreversible against live data
-      - "backend/migrations/**"
       - "backend/src/models.py"          # normalized_key -> dedup -> lost rows
       # secrets and infrastructure
       - "**/*.env*"
       - "**/railway.json"
       - "**/*docker-compose*"
       - "**/*Dockerfile*"
-      - "backend/src/core/settings.py"   # flags change prod behaviour globally
       # dependency manifests run postinstall scripts on the build host;
-      # dependabot-auto.yml already owns the safe subset of this decision
+      # dependabot-auto.yml already owns the safe subset of this decision.
+      # A change that ADDS a package name leaves this lane for product_human
+      # (`content_pins.new_dependency` below); a version bump stays here.
       - "**/package.json"
       - "**/package-lock.json"
       - "**/pyproject.toml"
@@ -451,14 +450,33 @@ lanes:
       - "backend/src/services/uk_gate.py"
       - "backend/src/services/visa_signal.py"
       - "backend/src/services/profile/**"
-      - "backend/src/api/routes/auth.py"
-      - "backend/src/services/auth/**"
-      - "backend/src/api/routes/account*.py"
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
     requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true           # FLIPPED 2026-09-17 — the watcher below is the argument
     watch_minutes: 15          # ...and it is not optional; this is what buys the speed
+    rollback: railway
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PRODUCT_HUMAN — reaches users AND waits for your hand (owner, 2026-10-20).
+  #
+  # "Only migration, auth ... for those things harness owner should come, not
+  # for everything." A schema change cannot be undone by a Railway rollback (it
+  # restores the image, not the tables), and the login path can lock every user
+  # out. So these two wait for a person -- and, because they still reach live
+  # users, they keep product_owner's full gate, the 15-minute watcher and the
+  # Railway rollback after he merges. Everything else stays machine-merged.
+  # ─────────────────────────────────────────────────────────────────────────
+  product_human:
+    paths:
+      - "backend/migrations/**"
+      - "backend/src/core/settings.py"   # flags change prod behaviour globally (owner, 2026-10-20)
+      - "backend/src/api/routes/auth.py"
+      - "backend/src/services/auth/**"
+      - "backend/src/api/routes/account*.py"
+    requires: [ci, review, security, verify, ratchets, bugs]
+    auto_merge: false          # your hand -- migrations and auth only
+    watch_minutes: 15          # still reaches users, so still watched
     rollback: railway
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -611,6 +629,10 @@ lanes:
       # map said fast-lane -- two systems, two answers, and the drill agreeing
       # with neither because it only derived membership from imports.
       - "backend/scripts/mypy_ratchet.py"
+      # 2026-10-20: the test-integrity judge and its skip baseline. ci.yml runs
+      # the BASE copy, so a PR cannot blind it for itself; this stops a machine
+      # merging a weakened copy that every later PR would then be judged by.
+      - "scripts/test_integrity.py"
       - ".github/workflows/auto-merge.yml"
       - ".github/workflows/verify-live.yml"
       # THE WORKFLOW THAT RUNS THE UNDO, not just the script it runs. I locked
@@ -684,22 +706,22 @@ data_exemptions:
       guard gets registered, which is the workflow this repo wants to be fast.
       Everything else in that file is the enforcement law and stays owner-lane.
 
-# ── WIP limit ──────────────────────────────────────────────────────────────
-# OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)"; raised to 5 by the
-# owner on 2026-10-17 ("Make it 5"); raised to 10 on 2026-10-20, when PRs were
-# arriving at about 10 an hour and 20 of 35 open PRs sat parked. `limit: 10`
-# means an 11th open, non-draft, non-dependabot, non-revert, non-human-only PR is PARKED, not refused
-# outright: `scripts/wip_gate.py` (wired into `.github/workflows/pr-advisor.yml`,
-# job `wip`, on `opened`/`ready_for_review` only -- never `synchronize`, so an
-# already-accepted PR is never parked later by a push) converts it to a DRAFT,
-# comments why, and Slacks the owner once to `needs-your-decision`. Drafts are
-# already invisible to `auto-merge.yml`'s filter, so parking IS the refusal --
-# there is no second "block merge" switch. Nothing is lost: `gh pr ready N`
-# un-parks it the moment a slot frees. Dependabot (its own loop) and
-# `revert/*` branches (emergency undos) never count toward the limit and are
-# never themselves parked -- see scripts/wip_gate.py's module docstring.
-wip:
-  limit: 10
+# ── Content pins: the new-package tripwire (owner, 2026-10-20) ─────────────
+# The mirror of `data_exemptions`: an exemption can only LOOSEN a lane, a pin
+# can only TIGHTEN one. `scripts/lane.py content_pins()` reads each matching
+# manifest at base and head; a change that ADDS a package NAME (slopsquatting:
+# an agent can invent a name, and a typo-squat runs install scripts on the build
+# host) moves that file to `lane`. A version bump of a name already there keeps
+# the file's own lane (`product_owner` above). With no revisions, or a file it
+# cannot parse, the pin FIRES: unmeasurable reads as "the owner's".
+content_pins:
+  new_dependency:
+    lane: product_human
+    manifests:
+      "**/pyproject.toml": pyproject           # [project] deps + optional, [dependency-groups], [build-system]
+      "**/package.json": package_json          # dependencies, dev/optional/peerDependencies
+      "**/package-lock.json": package_lock     # every installed name, transitive ones included
+      "**/requirements*.txt": requirements     # *.lock.txt too; a new index/-r/-e line counts
 
 # ── Size ceiling ───────────────────────────────────────────────────────────
 # Not a quality judgement — a REVIEWABILITY one. Past this, no reviewer (human
@@ -713,6 +735,21 @@ size:
   # past ~200-400 changed lines, so aim well under this; past it a change is
   # split into slices or the owner merges it.
   max_lines: 1000
+  # DATA GETS A WIDER CAP (owner, 2026-10-20: "3000 for data, 1000 for code").
+  # A hunt-kit batch of company boards is mostly JSON rows nobody reads line by
+  # line, and splitting it at 1000 turned 8 PRs into 25. Lines in files with one
+  # of `data_extensions` count toward `max_data_lines` only, and the PR's
+  # total may not pass it. Code still counts against `max_lines`. A data file has a data
+  # extension AND lives under `data_paths`. Never data, wherever it sits: anything under
+  # `.github/` (workflows and this policy are code) and lockfiles (a hand-edited
+  # `integrity` line must not ride under a cap).
+  max_data_lines: 3000
+  data_extensions: [".json", ".csv", ".yaml", ".yml", ".txt"]
+  # AND the file must sit in one of these folders (reviewer-security P2 on #1014).
+  # An extension alone let `package.json`, `requirements.txt` or a compose file
+  # carry dependency and config changes past the 1000-line code cap. A path
+  # prefix, never a glob; add a folder here when real data lives somewhere new.
+  data_paths: ["backend/src/hunt_kit/", "backend/src/data/", "backend/data/"]
   # Files a script writes and nobody reads line by line. Their lines are reported
   # in the verdict but not counted against max_lines. EXACT paths only: a glob is
   # a bypass waiting for a file. `frontend/package-lock.json` is NOT here: no
@@ -721,7 +758,6 @@ size:
   generated:
     - frontend/openapi.json
     - frontend/src/lib/api-types.ts
-    - docs/GENERATED.md
 
 # ── Ratchets ───────────────────────────────────────────────────────────────
 # A ratchet is a number that may HOLD or IMPROVE and may never get worse.

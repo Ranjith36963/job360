@@ -128,6 +128,40 @@ USER_BROUGHT_SOURCE = "user_brought"
 # is Phase 3.
 LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
 LOGIN_LOCKOUT_WINDOW_SECONDS = int(os.getenv("LOGIN_LOCKOUT_WINDOW_SECONDS", "900"))
+# Per-EMAIL cap across ALL source addresses, beside the email+IP lockout above
+# (same window). OFF BY DEFAULT (0): when on, it refuses even the right password
+# once that many failures are counted, so ~10 attacker addresses (or IPv6 /64s)
+# can keep a chosen account locked out (security review P2, gap audit #6). Turn
+# it on only as a deliberate choice, e.g. LOGIN_EMAIL_MAX_ATTEMPTS=50. When on,
+# each address adds at most LOGIN_MAX_ATTEMPTS failures before its own email+IP
+# bucket locks, so tripping it takes LOGIN_EMAIL_MAX_ATTEMPTS / LOGIN_MAX_ATTEMPTS
+# distinct addresses inside one window. ``0`` disables it.
+LOGIN_EMAIL_MAX_ATTEMPTS = int(os.getenv("LOGIN_EMAIL_MAX_ATTEMPTS", "0"))
+
+# Client address behind proxies (src/api/client_ip.py is the only reader of
+# X-Forwarded-For). JOB360_TRUSTED_PROXY_HOPS = how many trusted proxies in
+# front of the backend each APPEND one X-Forwarded-For entry (or set it). The
+# client address is the entry that many positions from the RIGHT; everything
+# left of it was written by the caller and is ignored. Never the leftmost.
+# Interaction with the older flag:
+#   * HOPS set (any integer) -> it wins; 0 means "never trust X-Forwarded-For"
+#     even when JOB360_TRUST_PROXY=1. A negative value counts as 0.
+#   * HOPS unset, JOB360_TRUST_PROXY=1 -> 1 hop: the rightmost entry, the one
+#     the nearest proxy wrote, which a caller cannot forge.
+#   * both unset -> 0: X-Forwarded-For ignored, the socket peer is the address.
+# Set it ONLY when every path to the backend crosses that many proxies; a
+# backend the public can reach without them lets the caller write the entry.
+def resolve_trusted_proxy_hops(trust_proxy_raw: str, hops_raw: str) -> int:
+    """The effective hop count from the two env values (rules above)."""
+    hops = hops_raw.strip()
+    if hops:
+        return max(0, int(hops))
+    return 1 if trust_proxy_raw.strip() == "1" else 0
+
+
+TRUSTED_PROXY_HOPS = resolve_trusted_proxy_hops(
+    os.getenv("JOB360_TRUST_PROXY", ""), os.getenv("JOB360_TRUSTED_PROXY_HOPS", "")
+)
 
 # docs/fable/01 — cross-instance rate limiting. The default limiter (services/
 # auth/rate_limit.py) keeps its sliding windows in-process, so on a multi-replica
@@ -572,16 +606,24 @@ CONTACT_NAME_MAX_CHARS = int(os.getenv("CONTACT_NAME_MAX_CHARS", "200"))
 CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
 CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
 CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
+CONTACT_SOURCE_URL_MAX_CHARS = int(os.getenv("CONTACT_SOURCE_URL_MAX_CHARS", "1000"))
+CONTACT_COMPANY_MAX_CHARS = int(os.getenv("CONTACT_COMPANY_MAX_CHARS", "200"))
 CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
 CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
 CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
 
 # ── Outreach tracking (owner decisions, 2026-09-25) ─────────────────────────
 # People: a contact can be linked to a job or to none (cold networking). The
-# user's own assistant WRITES messages; the USER sends them (or, in daily_check
-# mode auto, the assistant sends from the user's own Gmail); Job360 never sends.
+# user's own assistant WRITES messages; the USER sends them (or, with assistant_settings.outreach_send = auto,
+# the assistant sends from the user's own Gmail); Job360 never sends.
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
+# LinkedIn connection-request note limits: career-ops (MIT) modes/contacto.md:168
+# "200 characters on a free account, 300 on Premium/Sales Navigator ... Default to the
+# safer 200-char budget unless the user has confirmed". LinkedIn's own facts, not
+# operator knobs (no env). Warn-only save check: cv_checks.linkedin_note_too_long.
+LINKEDIN_NOTE_MAX_CHARS = 200
+LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_MAX", "200"))
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
@@ -601,10 +643,12 @@ AUTO_EMAIL_CHECKIN_DAYS = int(os.getenv("AUTO_EMAIL_CHECKIN_DAYS", "7"))
 AUTO_EMAIL_FOLLOWUP_DAYS = int(os.getenv("AUTO_EMAIL_FOLLOWUP_DAYS", "7"))
 AUTO_EMAILS_MAX_PER_DAY = int(os.getenv("AUTO_EMAILS_MAX_PER_DAY", "10"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
+# known_people: at most this many people in a bring/kit/detail payload; count is the full number.
+KNOWN_PEOPLE_MAX = int(os.getenv("KNOWN_PEOPLE_MAX", "20"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
 CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
-CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via")
+CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
@@ -741,6 +785,9 @@ PROFILE_EDITABLE_PATHS = (
     # Owner decision 2026-10-03 — how often that check runs (3h/6h/12h/24h);
     # daily_check also holds the inbox mode auto/ask/paused. Both stored by Job360.
     "preferences.check_every",
+    # S16 - the user's LinkedIn tier (bool): true = Premium / Sales Navigator, so a
+    # connection note may run to 300 characters instead of 200. Overlay-only.
+    "preferences.linkedin_premium",
     # Slice B2 (decision 28) — dated work history and projects, as lists of
     # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
     "cv_data.cv_positions", "cv_data.cv_projects",
@@ -782,6 +829,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
     # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
     "assistant_settings.auto_employer_emails",
+    # Owner 2026-10-20 (G087) - may the assistant send outreach itself (draft_only | auto); its own consent.
+    "assistant_settings.outreach_send",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

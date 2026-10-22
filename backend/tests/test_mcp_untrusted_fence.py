@@ -357,7 +357,7 @@ async def test_a_fenced_read_written_back_through_every_mcp_door_stores_plain_te
             _payload(await mcp.call_tool("update_contact", {
                 "contact_id": contact_id, "notes": person["notes"] + "\nFollowed up",
             }))
-            cold = _payload(await mcp.call_tool("add_contact", {"name": "Sam", "notes": person["notes"]}))
+            cold = _payload(await mcp.call_tool("add_contact", {"name": "Sam", "company": "Northwind", "notes": person["notes"]}))
 
             # ask_user / save_artifact / record_application: fenced text quoted into the agent's own writing.
             _payload(await mcp.call_tool("ask_user", {

@@ -89,6 +89,10 @@ PUBLIC_ROUTES: dict[str, str] = {
     "/api/health": "liveness probe — Railway and uptime checks call it anonymously",
     "/api/livez": "Kubernetes-style liveness probe — must answer before auth exists",
     "/api/readyz": "readiness probe — the load balancer calls it with no session",
+    "/api/version": (
+        "deployed commit SHA only (routes/health.py): post-merge-watch.yml polls it anonymously to prove "
+        "THIS commit is live; no user data, no DB, the SHA is already public on GitHub (2026-10-20)"
+    ),
     # --- authentication: must be reachable BEFORE you have a session ---
     "/api/auth/login": "you cannot be logged in in order to log in",
     "/api/auth/register": "account creation happens before any session exists",

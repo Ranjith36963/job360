@@ -30,7 +30,7 @@ def _keys(tool: str) -> int:
 
 
 async def _cold_contact(client) -> int:
-    resp = await client.post("/api/contacts", json={"name": "Sam Lee"})
+    resp = await client.post("/api/contacts", json={"name": "Sam Lee", "company": "Acme"})
     assert resp.status_code == 201, resp.text
     return int(resp.json()["contact_id"])
 
@@ -70,7 +70,7 @@ def _cases(app_id: int, contact_id: int) -> list[dict[str, Any]]:
             "tool": "add_contact", "path": f"/api/applications/{app_id}/contacts",
             "body": {"name": "Priya Shah", "role": "Recruiter"}, "other": {"name": "Priya Shah", "role": "HR"},
             "mcp": {"name": "Priya Shah", "role": "Recruiter", "application_id": app_id},
-            "id": "contact_id",
+            "id": "contact_id", "vary": "name",
             "rows": lambda: _count("SELECT COUNT(*) FROM application_contacts WHERE application_id = ?", app_id),
         },
         {
@@ -82,6 +82,12 @@ def _cases(app_id: int, contact_id: int) -> list[dict[str, Any]]:
             "rows": lambda: _count("SELECT COUNT(*) FROM application_asks WHERE application_id = ?", app_id),
         },
     ]
+
+
+def _vary(case: dict[str, Any], args: dict[str, Any], n: int) -> dict[str, Any]:
+    """A contact with no email is matched by name (#987), so calls that must each write their own row
+    name a different person. Other tools have no such identity match and send the body unchanged."""
+    return {**args, "name": f"{args['name']} {n}"} if case.get("vary") == "name" else args
 
 
 def _first_id(case: dict[str, Any], reply: dict[str, Any]) -> int:
@@ -103,7 +109,7 @@ async def test_route_repeat_writes_one_row_and_a_new_body_is_409(authenticated_a
         again = await client.post(case["path"], json={**case["body"], "client_key": "k-1"})
         clash = await client.post(case["path"], json={**case["other"], "client_key": "k-1"})
         after_keyed = rows()
-        plain = [await client.post(case["path"], json=case["body"]) for _ in range(2)]
+        plain = [await client.post(case["path"], json=_vary(case, case["body"], n)) for n in (1, 2)]
     assert first.status_code == 201, first.text
     assert again.status_code in (200, 201), again.text
     assert first.json()["already_existed"] is False
@@ -136,9 +142,10 @@ async def test_mcp_tool_shares_the_route_key_and_refuses_a_new_body(authenticate
         async with _mcp_client(token) as mcp:
             again = _payload(await mcp.call_tool(case["tool"], {**case["mcp"], "client_key": "shared"}))
             clash = _error_text(await mcp.call_tool(case["tool"], {**other_args, "client_key": "shared"}))
-            fresh = _payload(await mcp.call_tool(case["tool"], {**case["mcp"], "client_key": "mcp-2"}))
-            replay = _payload(await mcp.call_tool(case["tool"], {**case["mcp"], "client_key": "mcp-2"}))
-            plain = [_payload(await mcp.call_tool(case["tool"], case["mcp"])) for _ in range(2)]
+            fresh_args = {**_vary(case, case["mcp"], 3), "client_key": "mcp-2"}
+            fresh = _payload(await mcp.call_tool(case["tool"], fresh_args))
+            replay = _payload(await mcp.call_tool(case["tool"], fresh_args))
+            plain = [_payload(await mcp.call_tool(case["tool"], _vary(case, case["mcp"], n))) for n in (4, 5)]
     route_id = _first_id(case, route)
     again_id = int(again["artifact_id"] if case["id"] is None else again[case["id"]])
     assert route["already_existed"] is False
