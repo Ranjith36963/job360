@@ -96,10 +96,32 @@
             ],
             "title": "Occurred At"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -253,10 +275,32 @@
             ],
             "title": "Occurred At"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -3420,9 +3464,31 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -7707,9 +7773,31 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -7857,6 +7945,17 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "replied": {
             "title": "Replied",
             "type": "boolean"
@@ -7864,6 +7963,17 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -12487,6 +12597,13 @@
             "title": "By Contact Found Via",
             "type": "array"
           },
+          "by_contact_relationship": {
+            "items": {
+              "$ref": "#/components/schemas/StatsContactFoundViaGroupOut"
+            },
+            "title": "By Contact Relationship",
+            "type": "array"
+          },
           "by_country": {
             "items": {
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
@@ -12674,6 +12791,7 @@
           "by_job_source",
           "by_channel",
           "by_contact_found_via",
+          "by_contact_relationship",
           "score_line",
           "groups_truncated",
           "applications_truncated",
@@ -13650,6 +13768,17 @@
             ],
             "title": "Notes"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "anyOf": [
               {
@@ -13660,6 +13789,17 @@
               }
             ],
             "title": "Role"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [

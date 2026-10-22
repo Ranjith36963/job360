@@ -31,6 +31,7 @@ export function BatchRulesCard() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     void load();
     (async () => {
       try {

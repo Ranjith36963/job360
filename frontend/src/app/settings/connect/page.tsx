@@ -833,6 +833,7 @@ export default function ConnectAgentPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     refresh();
     refreshGrants();
     refreshDailyCheck();

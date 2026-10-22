@@ -3023,11 +3023,15 @@ export interface components {
             notes: string;
             /** Occurred At */
             occurred_at?: string | null;
+            /** Relationship */
+            relationship?: string | null;
             /**
              * Role
              * @default
              */
             role: string;
+            /** Shared */
+            shared?: string | null;
             /** Source Url */
             source_url?: string | null;
         };
@@ -3082,11 +3086,15 @@ export interface components {
             notes: string;
             /** Occurred At */
             occurred_at?: string | null;
+            /** Relationship */
+            relationship?: string | null;
             /**
              * Role
              * @default
              */
             role: string;
+            /** Shared */
+            shared?: string | null;
             /** Source Url */
             source_url?: string | null;
         };
@@ -4287,8 +4295,12 @@ export interface components {
              * @default false
              */
             reachable: boolean;
+            /** Relationship */
+            relationship?: string | null;
             /** Role */
             role: string;
+            /** Shared */
+            shared?: string | null;
             /** Source Url */
             source_url?: string | null;
         };
@@ -6074,8 +6086,12 @@ export interface components {
              * @default false
              */
             reachable: boolean;
+            /** Relationship */
+            relationship?: string | null;
             /** Role */
             role: string;
+            /** Shared */
+            shared?: string | null;
             /** Source Url */
             source_url?: string | null;
         };
@@ -6122,10 +6138,14 @@ export interface components {
              * @default false
              */
             reachable: boolean;
+            /** Relationship */
+            relationship?: string | null;
             /** Replied */
             replied: boolean;
             /** Role */
             role: string;
+            /** Shared */
+            shared?: string | null;
             /** Source Url */
             source_url?: string | null;
         };
@@ -7785,6 +7805,8 @@ export interface components {
             by_channel: components["schemas"]["StatsKeyedGroupOut"][];
             /** By Contact Found Via */
             by_contact_found_via: components["schemas"]["StatsContactFoundViaGroupOut"][];
+            /** By Contact Relationship */
+            by_contact_relationship: components["schemas"]["StatsContactFoundViaGroupOut"][];
             /** By Country */
             by_country: components["schemas"]["StatsKeyedGroupOut"][];
             /** By Cv Version */
@@ -8156,8 +8178,12 @@ export interface components {
             name?: string | null;
             /** Notes */
             notes?: string | null;
+            /** Relationship */
+            relationship?: string | null;
             /** Role */
             role?: string | null;
+            /** Shared */
+            shared?: string | null;
             /** Source Url */
             source_url?: string | null;
         };

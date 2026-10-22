@@ -116,6 +116,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setLoading(true);
     setError(null);
     setActiveTab(initialKind);

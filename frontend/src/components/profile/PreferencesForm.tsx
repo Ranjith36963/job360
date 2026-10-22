@@ -397,6 +397,7 @@ export function PreferencesForm({
   useEffect(() => {
     if (!preferences) return;
     const p = prefsFromRaw(preferences);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     setTargetTitles(p.target_job_titles ?? []);
     setAdditionalSkills(p.additional_skills ?? []);
     setExcludedSkills(p.excluded_skills ?? []);
