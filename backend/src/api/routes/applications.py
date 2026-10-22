@@ -49,6 +49,7 @@ from src.api.models import (
 from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
+from src.services import idempotency
 from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
@@ -276,7 +277,11 @@ class RecordApplicationReceiptRequest(BaseModel):
     fields_filled: dict[str, Any] = Field(default_factory=dict)
     cv_artifact_id: Optional[int] = None
     cover_letter_artifact_id: Optional[int] = None
+    # ISO-8601 with a timezone (parse_occurred_at); malformed = 422 naming applied_at.
     applied_at: Optional[str] = None
+    # Idempotency key (1-128 printable chars): the same one again returns the FIRST
+    # receipt with already_existed=true and writes nothing; a different body = 409.
+    request_id: Optional[str] = None
 
     def clamp_fields_filled(self) -> dict[str, Any]:
         cap = settings.APPLICATION_RECEIPT_FIELDS_MAX_BYTES
@@ -909,6 +914,8 @@ class RecordApplicationReceiptResponse(BaseModel):
     event_id: int
     # S3 - '' | same_job | same_role | same_company. A flag, never a block.
     possible_duplicate: str = ""
+    # True when this request_id was already recorded: the FIRST receipt, nothing written.
+    already_existed: bool = False
 
 
 class WhatsNewEventOut(BaseModel):
@@ -3292,13 +3299,18 @@ async def record_application_receipt(
 ) -> dict[str, Any]:
     try:
         fields_filled = body.clamp_fields_filled()
+        applied_at = spine.parse_occurred_at(body.applied_at, field="applied_at") if body.applied_at else None
+        if body.request_id is not None:
+            idempotency.check_key(body.request_id)
         return await spine.record_receipt(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             channel=body.channel, note=body.note, confirmation=body.confirmation,
             answers=[a.model_dump(exclude_none=True) for a in body.answers], fields_filled=fields_filled,
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
-            applied_at=body.applied_at,
+            applied_at=applied_at, request_id=body.request_id,
         )
+    except idempotency.IdempotencyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
