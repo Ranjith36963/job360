@@ -37,7 +37,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # On a PR this IS the default (the merge tree), written out so that
+      # gate_wiring_check G4 can see the `--baseline` below is measured on
+      # `refs/pull/<N>/merge`; without it G4 fired and every merge-cage run
+      # errored (2026-10-22, after #1095). On a push it stays the pushed ref.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
 
       # THE PR'S BASE COMMIT, outside the workspace (a copy inside it would be
       # read as part of this tree). Owner decision 2026-10-22: a PR goes red
