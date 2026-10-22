@@ -1,0 +1,50 @@
+name: Migration sweep (re-judge open PRs when main gains a migration)
+
+# BLOCKER B30 (scripts/cage_blockers.py). The MIGRATIONS cage numbers a PR's new
+# migration against live main, but only when it runs. A PR already queued for
+# auto-merge is not re-judged when main gains a migration, so GitHub could land
+# it on a number taken after it queued (two 0077s reached main on 2026-10-22).
+#
+# This runs only when a push to main touches backend/migrations, re-reads main
+# once, and for every open PR that now clashes: `merge-cage` = failure on its
+# head, and auto-merge withdrawn. It NEVER merges or queues (rule G2: a
+# post-merge trigger may detect and refuse, never merge), and withdraws via the
+# GraphQL mutation rather than a `gh pr merge` command for that reason.
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/migrations/**"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report clashes without touching any PR"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write # withdraw auto-merge on a clashing PR
+  statuses: write # `merge-cage` = failure on a clashing PR's head
+
+concurrency:
+  group: migration-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The default branch: the rules that judge come from main, never a PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Re-judge every open PR's new migration numbers against main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python scripts/migration_sweep.py $DRY_RUN | tee -a "$GITHUB_STEP_SUMMARY"
