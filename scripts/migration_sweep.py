@@ -77,7 +77,63 @@ def sweep(dry_run: bool = False) -> int:
     return 0
 
 
+def drill(blind: bool = False) -> int:
+    """Replay #1088 then #1006 through a fake GitHub. Must flag only the clash.
+
+    `--blind` turns the judge off; the drill must then go RED (exit 1).
+    """
+    mig = "backend/migrations/"
+    main_tree = [{"path": f"{mig}{s}.{d}.sql", "sha": f"{s}.{d}"}
+                 for s in ("0076_email_change_undos", "0077_outreach_variants") for d in ("up", "down")]
+    prs = [{"number": 1006, "node_id": "N1006", "auto_merge": {"x": 1}, "base": {"ref": "main"},
+            "head": {"sha": "a" * 40}},
+           {"number": 2, "node_id": "N2", "auto_merge": {"x": 1}, "base": {"ref": "main"},
+            "head": {"sha": "b" * 40}},
+           {"number": 3, "node_id": "N3", "auto_merge": None, "base": {"ref": "main"},
+            "head": {"sha": "c" * 40}}]
+    files = {1006: [{"filename": f"{mig}0077_receipt_answers_from.up.sql", "status": "added", "sha": "x"}],
+             2: [{"filename": "docs/README.md", "status": "modified"}],
+             3: [{"filename": f"{mig}0078_free.up.sql", "status": "added", "sha": "y"}]}
+    calls: list[str] = []
+
+    def fake_gh(a: list[str]) -> str:
+        j = " ".join(a)
+        calls.append(j)
+        if "git/trees/" in j:
+            return json.dumps({"truncated": False, "tree": main_tree})
+        if "pulls?state=open" in j:
+            return json.dumps(prs)
+        for n, f in files.items():
+            if f"pulls/{n}/files" in j:
+                return json.dumps(f)
+        return "{}"
+
+    saved_gh, saved_judge = cage.gh, cage.judge_migration_numbers
+    try:
+        cage.gh = fake_gh
+        if blind:
+            cage.judge_migration_numbers = lambda *_a, **_k: []
+        sweep()
+    finally:
+        cage.gh, cage.judge_migration_numbers = saved_gh, saved_judge
+    failed = [c for c in calls if "state=failure" in c]
+    withdrawn = [c for c in calls if "disablePullRequestAutoMerge" in c]
+    checks = [
+        ("#1006's 0077 gets merge-cage=failure", any("a" * 40 in c for c in failed)),
+        ("#1006's auto-merge is withdrawn", any("id=N1006" in c for c in withdrawn)),
+        ("the no-migration PR and the free-number PR are left alone", len(failed) == 1),
+        ("nothing is merged or queued", not any(" merge" in c and "graphql" not in c for c in calls)),
+    ]
+    for name, passed in checks:
+        print(f"  [{'PASS' if passed else 'FAIL'}] {name}")
+    ok = all(p for _, p in checks)
+    print(f"DRILL RESULT: {sum(p for _, p in checks)}/{len(checks)} passed")
+    return 0 if ok else 1
+
+
 def main(argv: list[str]) -> int:
+    if "--drill" in argv:
+        return drill(blind="--blind" in argv)
     try:
         return sweep(dry_run="--dry-run" in argv)
     except Exception as exc:  # a sweep that could not look must say so, loudly
