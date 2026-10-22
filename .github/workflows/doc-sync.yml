@@ -19,6 +19,11 @@ name: doc-sync
 on:
   workflow_dispatch: {}
   pull_request: {}
+  # Main is judged on its own (2026-10-22): a PR is red only for drift it adds
+  # (see the base checkout below), so drift already on main is reported here,
+  # on the push, instead of on every open PR.
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -33,6 +38,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # THE PR'S BASE COMMIT, outside the workspace (a copy inside it would be
+      # read as part of this tree). Owner decision 2026-10-22: a PR goes red
+      # only for drift its OWN change adds; on 2026-10-21 drift on main turned
+      # 28 PRs red at once. If this fails, the drift step below judges every
+      # finding as this PR's, exactly as before (fail closed).
+      - name: Check out the PR base (to tell this PR's drift from main's)
+        id: base
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/base" FETCH_HEAD
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
@@ -63,13 +83,18 @@ jobs:
         run: python scripts/doc_sync_mutation_test.py
 
       - name: Run doc drift check
+        env:
+          BASE_OUTCOME: ${{ steps.base.outcome }}
+          BASE_DIR: ${{ runner.temp }}/base
         run: |
+          [ "$BASE_OUTCOME" != failure ] || echo "::warning::could not check out the PR base; every finding counts as this PR's"
+          [ "$BASE_OUTCOME" = success ] || BASE_DIR=""
           set +e
-          python scripts/doc_sync_check.py > drift.md 2>&1
+          python scripts/doc_sync_check.py ${BASE_DIR:+--baseline "$BASE_DIR"} > drift.md 2>&1
           code=$?
           set -e
           cat drift.md
-          cat drift.md >> "$GITHUB_STEP_SUMMARY"
+          grep -v '^::' drift.md >> "$GITHUB_STEP_SUMMARY" || true
           # BLOCKING: exit 1 = real drift, exit 2 = the checker itself
           # crashed — either way the PR must not merge with docs that
           # disagree with the code they describe. Fix the doc in this PR.
