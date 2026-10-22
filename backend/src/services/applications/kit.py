@@ -2053,6 +2053,9 @@ async def build_kit(
         answers["approved_text"] = [it for i, it in enumerate(approved) if i in keep]
     hold = await live_hold(db, user, application_id, now, session)
     state = await controls_state(db, user.id, app_row, now)
+    from src.services.applications import known_people as known_people_service  # noqa: PLC0415
+
+    people_here = await known_people_service.for_application(db, user.id, app_row)
     events = await _events(db, user.id, application_id, ("cv_seen", "submit_approved"))
 
     docs: list[dict[str, Any]] = []
@@ -2129,7 +2132,7 @@ async def build_kit(
         "application_id": application_id, "kit_event_id": event["event_id"], "missing_count": len(missing),
         "hold": bool(hold), "session": safe_log_value(session, max_len=SESSION_MAX_CHARS),
         "duplicate": dup["flag"], "surface": "mcp" if user.auth_via != "session" else "web",
-        "result": "ok",
+        "result": "ok", "known_people_count": people_here["count"],
     })
     out: dict[str, Any] = {
         "kit": {"id": event["event_id"], "sha256": kit_sha, "generated_at": now.isoformat()},
@@ -2141,12 +2144,19 @@ async def build_kit(
         "hold": hold, "account_site": account_site,
         "autofill": state["autofill"]["mode"],
         "warnings": pay_warnings(profile, country),
+        "known_people": people_here,
         "instructions": list(KIT_INSTRUCTIONS),
     }
     if answers_omitted:
         out["answers_omitted"] = answers_omitted
         out["instructions"].append(
             "More approved answers: get_profile fields['user_info.answers']"
+        )
+    if people_here["count"]:
+        out["instructions"].append(
+            f"known_people: {people_here['count']} people you already stored at this company "
+            "(list_people(company=...) lists them all). Read them before finding someone new; "
+            "whether to reach out is the user's call."
         )
     if cv is None:
         out["cv_none_reason"] = NO_CV_REASON
