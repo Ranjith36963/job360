@@ -1,7 +1,7 @@
 """drift-check fails a PR only for drift the PR itself adds (owner, 2026-10-22).
 
 On 2026-10-21 one duplicate migration prefix on main turned 28 open PRs red on
-`drift-check`. `doc_sync_check.py --baseline BASE_DIR` runs the base's own
+`drift-check`. `doc_sync_check.py --inherited-from BASE_DIR` runs the base's own
 checker on the base tree and fails only on findings the base does not have.
 These tests pin the three answers that matter: inherited -> pass, new -> fail,
 base not comparable -> fail as before (fail closed).

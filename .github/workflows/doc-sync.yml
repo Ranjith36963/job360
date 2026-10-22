@@ -90,7 +90,7 @@ jobs:
           [ "$BASE_OUTCOME" != failure ] || echo "::warning::could not check out the PR base; every finding counts as this PR's"
           [ "$BASE_OUTCOME" = success ] || BASE_DIR=""
           set +e
-          python scripts/doc_sync_check.py ${BASE_DIR:+--baseline "$BASE_DIR"} > drift.md 2>&1
+          python scripts/doc_sync_check.py ${BASE_DIR:+--inherited-from "$BASE_DIR"} > drift.md 2>&1
           code=$?
           set -e
           cat drift.md
