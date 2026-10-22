@@ -949,7 +949,7 @@ async def test_send_this_one_records_seen_and_approved_and_an_edit_voids_it(
         assert resp.status_code == 201, resp.text
         state = resp.json()
         assert state["cv"]["seen"]["where"] == "web" and state["cv"]["approved"]["where"] == "web"
-        verdict = await _check(client, app_id)
+        verdict = await _check(client, app_id, fill=False)  # slice 8: a re-fill after the yes voids it
         assert (verdict["decision"], verdict["reason"]) == ("submit", "user_approved")
         detail = (await client.get(f"/api/applications/{app_id}")).json()
         types = [e["event_type"] for e in detail["events"]]
@@ -959,9 +959,12 @@ async def test_send_this_one_records_seen_and_approved_and_an_edit_voids_it(
         after = await _check(client, app_id)
         assert (after["decision"], after["reason"]) == ("ask", "submit_mode_confirm")
         assert (await _controls(client, app_id))["cv"]["approved"] is None
-        # Indeed also clears on a fresh yes (owner answer 2)
+        # Indeed also clears on a fresh yes (owner answer 2), given for the form filled there
+        indeed_url = "https://uk.indeed.com/viewjob?jk=1"
+        assert (await _event(client, app_id, "form_filled", {"form_url": indeed_url, "fields_count": 1})).status_code == 201
+        await _sweep(client, app_id)
         assert (await client.post(f"/api/applications/{app_id}/send/approve")).status_code == 201
-        indeed = await _check(client, app_id, "https://uk.indeed.com/viewjob?jk=1")
+        indeed = await _check(client, app_id, indeed_url, fill=False)
         assert (indeed["decision"], indeed["reason"]) == ("submit", "user_approved")
     approved_logs = _events(log_capture, "submit_approved")
     assert approved_logs and approved_logs[0]["user_id"] == fixture_user_id and approved_logs[0]["where"] == "web"
@@ -999,7 +1002,7 @@ async def test_dont_send_stops_until_a_later_send(authenticated_async_context, f
         assert (await _kit(client, app_id)).json()["settings"]["submit_preview"]["reason"] == "user_declined"
         assert (await client.post(f"/api/applications/{app_id}/send/approve")).status_code == 201
         assert (await _controls(client, app_id))["declined"] is None
-        assert (await _check(client, app_id))["reason"] == "user_approved"
+        assert (await _check(client, app_id, fill=False))["reason"] == "user_approved"
 
 
 @pytest.mark.asyncio

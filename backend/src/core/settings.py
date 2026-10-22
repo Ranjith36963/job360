@@ -568,16 +568,24 @@ CONTACT_NAME_MAX_CHARS = int(os.getenv("CONTACT_NAME_MAX_CHARS", "200"))
 CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
 CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
 CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
+CONTACT_SOURCE_URL_MAX_CHARS = int(os.getenv("CONTACT_SOURCE_URL_MAX_CHARS", "1000"))
+CONTACT_COMPANY_MAX_CHARS = int(os.getenv("CONTACT_COMPANY_MAX_CHARS", "200"))
 CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
 CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
 CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
 
 # ── Outreach tracking (owner decisions, 2026-09-25) ─────────────────────────
 # People: a contact can be linked to a job or to none (cold networking). The
-# user's own assistant WRITES messages; the USER sends them (or, in daily_check
-# mode auto, the assistant sends from the user's own Gmail); Job360 never sends.
+# user's own assistant WRITES messages; the USER sends them (or, with assistant_settings.outreach_send = auto,
+# the assistant sends from the user's own Gmail); Job360 never sends.
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
+# LinkedIn connection-request note limits: career-ops (MIT) modes/contacto.md:168
+# "200 characters on a free account, 300 on Premium/Sales Navigator ... Default to the
+# safer 200-char budget unless the user has confirmed". LinkedIn's own facts, not
+# operator knobs (no env). Warn-only save check: cv_checks.linkedin_note_too_long.
+LINKEDIN_NOTE_MAX_CHARS = 200
+LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_MAX", "200"))
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
@@ -597,10 +605,12 @@ AUTO_EMAIL_CHECKIN_DAYS = int(os.getenv("AUTO_EMAIL_CHECKIN_DAYS", "7"))
 AUTO_EMAIL_FOLLOWUP_DAYS = int(os.getenv("AUTO_EMAIL_FOLLOWUP_DAYS", "7"))
 AUTO_EMAILS_MAX_PER_DAY = int(os.getenv("AUTO_EMAILS_MAX_PER_DAY", "10"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
+# known_people: at most this many people in a bring/kit/detail payload; count is the full number.
+KNOWN_PEOPLE_MAX = int(os.getenv("KNOWN_PEOPLE_MAX", "20"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
 CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
-CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via")
+CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
@@ -737,6 +747,9 @@ PROFILE_EDITABLE_PATHS = (
     # Owner decision 2026-10-03 — how often that check runs (3h/6h/12h/24h);
     # daily_check also holds the inbox mode auto/ask/paused. Both stored by Job360.
     "preferences.check_every",
+    # S16 - the user's LinkedIn tier (bool): true = Premium / Sales Navigator, so a
+    # connection note may run to 300 characters instead of 200. Overlay-only.
+    "preferences.linkedin_premium",
     # Slice B2 (decision 28) — dated work history and projects, as lists of
     # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
     "cv_data.cv_positions", "cv_data.cv_projects",
@@ -778,6 +791,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
     # Feedback loop slice 2 - the owner's switch for automatic employer emails (bool).
     "assistant_settings.auto_employer_emails",
+    # Owner 2026-10-20 (G087) - may the assistant send outreach itself (draft_only | auto); its own consent.
+    "assistant_settings.outreach_send",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )
@@ -856,6 +871,9 @@ CALENDAR_ALARM_FOLLOW_UP_HOUR = int(os.getenv("CALENDAR_ALARM_FOLLOW_UP_HOUR", "
 # "Another assistant is on this application": a kit read by someone else this
 # recently warns (never blocks).
 KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
+# Gap roadmap slice 8: the user's Send yes (``submit_approved``) counts for this many minutes
+# after it was recorded; an older yes is ``approval_stale`` (expired) and check_submit asks again.
+SUBMIT_APPROVAL_TTL_MINUTES = int(os.getenv("SUBMIT_APPROVAL_TTL_MINUTES", "120"))
 # A second application at the same company inside this window is flagged.
 DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
 # Bulk-apply D3: the same role (same normalized company AND title) applied to inside this window
@@ -904,6 +922,9 @@ PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))
 USER_INFO_QUESTION_MAX_CHARS = int(os.getenv("USER_INFO_QUESTION_MAX_CHARS", "300"))
 USER_INFO_ANSWER_MAX_CHARS = int(os.getenv("USER_INFO_ANSWER_MAX_CHARS", "2000"))
 USER_INFO_ANSWERS_MAX_CHARS = int(os.getenv("USER_INFO_ANSWERS_MAX_CHARS", "120000"))
+# Gap 4 (slice 26) - saved answers grow by one or two per application, so they
+# get their own record cap; every other list keeps PROFILE_EDIT_MAX_RECORDS.
+USER_INFO_ANSWERS_MAX_RECORDS = int(os.getenv("USER_INFO_ANSWERS_MAX_RECORDS", "500"))
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
@@ -1003,11 +1024,10 @@ URL_FETCH_MAX_JSONLD_BYTES = int(os.getenv("URL_FETCH_MAX_JSONLD_BYTES", str(256
 
 # Owner decision, 2026-09-28 — two funnel events only the backend can see
 # (`first_tool_call`, `first_bring`) fire through `src/services/analytics.py`.
-# The frontend's consent banner (fable/05 C3) stores its choice in the
-# BROWSER only — there is no per-user consent flag in the database for the
-# backend to read — so this is the owner's own opt-in for every user, off by
-# default, not a per-user consent check. Off, every `capture_event` call is a
-# no-op: nothing is sent, nothing is queued.
+# This is the owner's global switch, off by default; on top of it each user
+# must have turned on "Help improve Job360" (`users.analytics_consent_at`,
+# migration 0067) or nothing is sent for them. Off, every `capture_event`
+# call is a no-op: nothing is sent, nothing is queued.
 ANALYTICS_BACKEND_ENABLED = _env_flag("ANALYTICS_BACKEND_ENABLED", False)
 # The SAME PostHog project the frontend posts to (its keys are
 # NEXT_PUBLIC_POSTHOG_KEY / NEXT_PUBLIC_POSTHOG_HOST, PostHogProviderWrapper.tsx)
@@ -1056,3 +1076,20 @@ BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
 # Live sign-in views (Settings -> Job sites) have their own cap, apart from the assistants' browsers.
 BROWSER_AGENT_MAX_LIVE = int(os.getenv("BROWSER_AGENT_MAX_LIVE", "2"))
 BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))
+
+
+# -- Migration safety (gap roadmap slice 20). Migrations auto-apply on boot and
+# every merge to main deploys, so one bad migration must fail fast, not stall
+# production. migrations/runner.py issues SET LOCAL lock_timeout / statement_timeout
+# inside each migration's own transaction (0 = Postgres "no limit"). Before applying
+# pending migrations it copies every existing table their up.sql alters, drops,
+# updates, deletes from or truncates into the `migration_snapshots` schema as
+# `<table>__<migration_id>`, skipping tables over the row cap. Snapshots never run in
+# test mode (pg.TEST_MODE), whatever this flag says.
+MIGRATION_LOCK_TIMEOUT_S = int(os.getenv("MIGRATION_LOCK_TIMEOUT_S", "5"))
+MIGRATION_STATEMENT_TIMEOUT_S = int(os.getenv("MIGRATION_STATEMENT_TIMEOUT_S", "120"))
+MIGRATION_SNAPSHOTS_ENABLED = _env_flag("MIGRATION_SNAPSHOTS_ENABLED", True)
+MIGRATION_SNAPSHOT_MAX_ROWS = int(os.getenv("MIGRATION_SNAPSHOT_MAX_ROWS", "200000"))
+# Snapshots hold whole tables (users, applications, receipts), outside the erasure
+# path, so they must not outlive the backups: every up() drops those older than this.
+MIGRATION_SNAPSHOT_RETENTION_DAYS = int(os.getenv("MIGRATION_SNAPSHOT_RETENTION_DAYS", "14"))

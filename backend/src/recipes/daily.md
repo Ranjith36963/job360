@@ -4,7 +4,7 @@
 Print this checklist and tick each step:
 [ ] 0 Mode  [ ] 0b Pause  [ ] 1 Open  [ ] 2 Gmail  [ ] 3 Record  [ ] 3b Cursor
 [ ] 4 Sent folder  [ ] 5 Proof  [ ] 5b Due emails  [ ] 6 7-day ask  [ ] 7 Hunt and apply
-[ ] 8 Deadlines  [ ] 9 Due and quiet  [ ] 10 Open asks  [ ] 11 Report
+[ ] 8 Deadlines  [ ] 9 Due and quiet  [ ] 10 Asks, interviews  [ ] 11 Report
 
 Report first: your message starts "Did / Skipped / Needs you" with counts and links, then details. Blocked or a tool is
 missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, outreach, events): `get_recipe("rules")`.
@@ -66,5 +66,5 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    `get_recipe("feedback")` post-mortem for each.
    doctor `silent_after_interview` not empty -> `get_recipe("debrief")` step 8 (confirm first; drafts only).
 9. **Due and quiet:** `list_applications(due=true)` and `(quiet_days=7)`.
-10. **Open asks:** `open_asks` from `whats_new`; one line each. An answered ask is the user's word.
+10. **Open asks and interviews:** `open_asks` from `whats_new`; one line each. An answered ask is the user's word. `whats_new` `interviews`: each `upcoming` -> prep (`get_recipe("prep")`); each `just_passed` -> ask how it went, record it.
 11. **Report:** counts and names, no cheering. **Done when** it started with "Did / Skipped / Needs you".

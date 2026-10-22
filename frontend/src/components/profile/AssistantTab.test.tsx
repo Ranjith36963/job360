@@ -143,6 +143,33 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("automatic outreach emails: turning on asks to confirm first", async () => {
+    await ready();
+    const toggle = screen.getByTestId("outreach-send-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("outreach-send-confirm"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.outreach_send", value: "auto" }]),
+    );
+  });
+
+  it("automatic outreach emails: Cancel sends nothing; off is one click", async () => {
+    await ready();
+    fireEvent.click(screen.getByTestId("outreach-send-toggle"));
+    fireEvent.click(screen.getByTestId("outreach-send-cancel"));
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    getAssistantSettings.mockResolvedValue(view({ outreach_send: field("auto", "auto") }));
+    await ready();
+    const on = screen.getAllByTestId("outreach-send-toggle").find((t) => t.getAttribute("aria-checked") === "true");
+    expect(on).toBeTruthy();
+    fireEvent.click(on!);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.outreach_send", value: "draft_only" }]),
+    );
+  });
+
   it("a blank daily limit clears it (no limit)", async () => {
     getAssistantSettings.mockResolvedValue(view({ daily_cap: field(10, 10) }));
     await ready();
@@ -393,12 +420,19 @@ describe("AssistantTab", () => {
   });
 
   it("auto for my next N applications: asks to confirm, then saves count and time together", async () => {
+    const queue = { count: 2, hosts: ["boards.greenhouse.io", "jobs.lever.co"], no_host: 0 };
+    getAssistantSettings.mockResolvedValue(view({ auto_grant_scope: { queue, granted: null, unscoped: false } }));
     await ready();
     fireEvent.click(screen.getByTestId("mode-while"));
     fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "5" } });
     fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: "2099-01-02T18:00" } });
     fireEvent.click(screen.getByTestId("auto-grant-save"));
     expect(updateProfileFields).not.toHaveBeenCalled();
+    // Slice 30: the confirm names exactly what the grant will cover.
+    expect(screen.getByTestId("auto-grant-scope")).toHaveTextContent(
+      "Auto-submit the 2 applications (sites: boards.greenhouse.io, jobs.lever.co) in your queue now, at most 5, until",
+    );
+    expect(screen.getByTestId("auto-grant-scope")).toHaveTextContent("Jobs you queue later");
     fireEvent.click(screen.getByTestId("auto-grant-confirm"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
     const sent = updateProfileFields.mock.calls[0][0] as { path: string; value: unknown }[];
@@ -411,11 +445,30 @@ describe("AssistantTab", () => {
     ]);
   });
 
+  it("an empty queue cannot be granted: nothing would be sent on its own", async () => {
+    const queue = { count: 0, hosts: [], no_host: 0 };
+    getAssistantSettings.mockResolvedValue(view({ auto_grant_scope: { queue, granted: null, unscoped: false } }));
+    await ready();
+    fireEvent.click(screen.getByTestId("mode-while"));
+    fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "5" } });
+    fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: "2099-01-02T18:00" } });
+    fireEvent.click(screen.getByTestId("auto-grant-save"));
+    expect(screen.getByTestId("auto-grant-scope")).toHaveTextContent("Your queue is empty");
+    expect(screen.getByTestId("auto-grant-confirm")).toBeDisabled();
+  });
+
   it("a running grant is shown in words and can be stopped", async () => {
     const until = new Date(Date.now() + 3_600_000).toISOString();
-    getAssistantSettings.mockResolvedValue(view({ auto_grant_count: field(5, 5), auto_grant_until: field(until, until) }));
+    const granted = { count: 1, hosts: ["jobs.lever.co"], no_host: 1 };
+    getAssistantSettings.mockResolvedValue(view({
+      auto_grant_count: field(5, 5), auto_grant_until: field(until, until),
+      auto_grant_scope: { queue: granted, granted, unscoped: false },
+    }));
     await ready();
     expect(screen.getByTestId("assistant-tab")).toHaveTextContent("Auto for my next 5 applications until");
+    expect(screen.getByTestId("auto-grant-on")).toHaveTextContent(
+      "It covers the 1 application (sites: jobs.lever.co), 1 with no site yet that were in your queue when you said yes.",
+    );
     fireEvent.click(screen.getByTestId("auto-grant-stop"));
     await waitFor(() =>
       expect(updateProfileFields).toHaveBeenCalledWith([

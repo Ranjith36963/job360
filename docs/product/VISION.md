@@ -20,6 +20,24 @@ changed, what worked".
 
 Job boards find jobs. Agents think and act. Job360 remembers.
 
+## The house (the owner's analogy, 2026-10-20)
+
+The lifecycle is a house. Each part has one name, and one owner of the work:
+
+| Part | Name | What it is | Who does the work |
+|---|---|---|---|
+| Soul | **The assistant** | Whichever AI the seeker already uses — Claude, ChatGPT, Gemini — with its connectors. It thinks, finds, writes, reads the inbox, fills the form. | The seeker's AI, never Job360 |
+| Heart | **Job360** | The memory and context: profile, every version, every event, every receipt. | Job360 stores and remembers |
+| Source 1 | **Jobs** | Where an opening comes from: the assistant finds it, or the seeker brings a link or pasted text. | `bring_job` |
+| Source 2 | **People (outreach)** | Where a connection comes from: recruiters, hiring managers, referrals, found by the assistant through its own connectors (Apollo, Vibe Prospecting, Sprouts, company pages and others). Most jobs come through people, so this source matters as much as Jobs. | `add_contact` |
+| Process | **Application** | One object per job. Both sources feed it, and a person can start one. Everything after the click lives here. | the spine (`services/applications/`) |
+| Wiring | **Gmail, calendar, events** | What joins the parts: replies read from the inbox, interview dates, the event log. | the assistant's connector reads, `record_event` stores |
+
+The assistant is the soul that runs the house; Job360 is the heart it runs with.
+The better the context in the heart, the more the soul can do alone. We never
+source, rank or recommend (rule 4): a new source is a list of places the
+assistant tries and a field that records where it came from, never a Job360 finder.
+
 ## How a job gets in (decided 2026-10-16, the owner)
 
 Jobs enter the apply process in two ways:

@@ -472,13 +472,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
           </section>
 
-          <section data-testid="section-proof" className={`order-3 ${SECTION} lg:order-none`}>
+          <section id="proof" data-testid="section-proof" className={`order-3 ${SECTION} lg:order-none`}>
             <ProofDropZone applicationId={detail.id} />
           </section>
 
           <section data-testid="section-people" className={`order-6 ${SECTION} lg:order-none`}>
             <h2 className={`mb-3 ${LABEL}`}>People</h2>
-            <Contacts applicationId={detail.id} contacts={detail.contacts} />
+            <Contacts applicationId={detail.id} contacts={detail.contacts} knownPeople={detail.known_people} />
           </section>
 
           <section data-testid="section-lessons" className={`order-7 ${SECTION} lg:order-none`}>

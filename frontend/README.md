@@ -7,7 +7,7 @@ finds the job; Job360 remembers it.
 
 ## Prerequisites
 
-- Node 20+ (LTS)
+- Node 22 (LTS; the Docker image and CI both run 22)
 - npm (bundled with Node). pnpm or yarn also work — lockfile is npm.
 
 ## Install

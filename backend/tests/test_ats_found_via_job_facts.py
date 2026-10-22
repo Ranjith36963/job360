@@ -168,7 +168,7 @@ async def test_found_via_closed_set_add_update_and_read_back(authenticated_async
         unset = await client.post(f"/api/applications/{app_id}/contacts", json={"name": "Bob"})
         assert unset.json()["contact"]["found_via"] is None, "unset stays null (rule #29)"
 
-        cold = await client.post("/api/contacts", json={"name": "Cleo", "found_via": "event"})
+        cold = await client.post("/api/contacts", json={"name": "Cleo", "company": "Contoso", "found_via": "event"})
         assert cold.status_code == 201 and cold.json()["contact"]["found_via"] == "event"
 
         upd = await client.patch(f"/api/contacts/{cid}", json={"found_via": "company site"})
@@ -452,7 +452,7 @@ async def test_stats_by_contact_found_via(authenticated_async_context):
         app_id = (await _bring(client, _AD_FR))["application_id"]
 
         async def add(name: str, found_via: Any = None, cold: bool = False) -> int:
-            body: dict[str, Any] = {"name": name}
+            body: dict[str, Any] = {"name": name, **({"company": "Contoso"} if cold else {})}
             if found_via:
                 body["found_via"] = found_via
             url = "/api/contacts" if cold else f"/api/applications/{app_id}/contacts"
@@ -479,7 +479,7 @@ async def test_stats_by_contact_found_via(authenticated_async_context):
     by = _by_key(groups)
     assert set(by) == {"linkedin", "event", None}, "the edit overlay wins over the base row"
     assert by["linkedin"] == {
-        "key": "linkedin", "label": "linkedin", "contacts": 2, "outreach_sent": 2,
+        "key": "linkedin", "label": "linkedin", "contacts": 2, "reachable": 0, "outreach_sent": 2,
         "outreach_replied": 1, "reply_rate": 0.5,
     }
     assert by["event"]["contacts"] == 1 and by["event"]["outreach_sent"] == 0 and by["event"]["reply_rate"] is None
