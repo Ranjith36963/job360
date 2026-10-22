@@ -104,6 +104,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # On a PR, HEAD is the merge commit; depth 2 brings its first parent,
+          # the exact base the PR is merged onto (read by the base audit below).
+          fetch-depth: 2
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"  # 2026-10-20: matches frontend/Dockerfile and ci.yml (Node 20 is end of life)
@@ -113,9 +117,46 @@ jobs:
       # BLOCKING gate — production dependencies only. These are the packages
       # that actually ship in the Next.js bundle and run in front of users, so a
       # high/critical here must stop the build.
+      #
+      # On main (push, schedule, dispatch) this blocks on ANY high+ advisory, as
+      # always: main's own problems are reported on main.
       - name: Audit PRODUCTION dependencies (blocking, high+)
+        if: github.event_name != 'pull_request'
         working-directory: frontend
         run: npm audit --omit=dev --audit-level=high
+
+      # On a PR it blocks only on advisories the PR brings in (owner, 2026-10-22).
+      # A new advisory against a package main already ships turned 38 open PRs
+      # red on 2026-10-21. Same audit, run on the PR's lockfile and on the base
+      # commit's; scripts/npm_audit_baseline.py fails on head-only advisories and
+      # warns on inherited ones. No usable base report -> fail on all (as before).
+      - name: Audit PRODUCTION dependencies of the PR (high+)
+        if: github.event_name == 'pull_request'
+        working-directory: frontend
+        run: |
+          set +e
+          npm audit --omit=dev --audit-level=high --json > "$RUNNER_TEMP/audit-head.json"
+          echo "npm audit (PR) exit code: $? -- the comparison step decides"
+      - name: Audit PRODUCTION dependencies of the base commit (high+)
+        if: github.event_name == 'pull_request'
+        run: |
+          set +e
+          base_dir="$RUNNER_TEMP/audit-base"
+          mkdir -p "$base_dir"
+          if git show HEAD^1:frontend/package.json > "$base_dir/package.json" \
+             && git show HEAD^1:frontend/package-lock.json > "$base_dir/package-lock.json"; then
+            cd "$base_dir" || exit 1
+            npm audit --package-lock-only --omit=dev --audit-level=high --json > "$RUNNER_TEMP/audit-base.json"
+            echo "npm audit (base) exit code: $?"
+          else
+            echo "::warning::no frontend lockfile at the base commit -- every advisory counts as this PR's"
+          fi
+      - name: Fail only on advisories this PR introduces
+        if: github.event_name == 'pull_request'
+        run: >-
+          python3 scripts/npm_audit_baseline.py --level high
+          --head "$RUNNER_TEMP/audit-head.json"
+          --base "$RUNNER_TEMP/audit-base.json"
 
       # NON-BLOCKING — dev/build tooling (eslint, vitest, openapi-typescript).
       # These never reach a user: they run on this runner and on a developer's
