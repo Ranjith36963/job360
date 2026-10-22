@@ -334,7 +334,7 @@ OWN_LIST_IDS_JS = r"""
 """
 
 # Can the dropdown's own field take typed text (to filter a long list)? "self": an editable <input>;
-# "inner": a role=combobox box holding a visible editable input; "": neither.
+# "inner:<i>": a role=combobox box whose i-th <input> is visible and editable (the one to type into); "": neither.
 TYPEABLE_TARGET_JS = r"""
 (el) => {
   const ok = (i) => i.tagName === 'INPUT' && !i.disabled && !i.readOnly
@@ -343,9 +343,11 @@ TYPEABLE_TARGET_JS = r"""
   if (el.tagName === 'INPUT') return ok(el) ? 'self' : '';
   const role = (el.getAttribute('role') || '').toLowerCase();
   if (role !== 'combobox') return '';
-  const inner = Array.from(el.querySelectorAll('input')).find(
+  // The index of the exact input that passed, so the typing lands in that one and no other.
+  const inputs = Array.from(el.querySelectorAll('input'));
+  const at = inputs.findIndex(
     (i) => ok(i) && i.getBoundingClientRect().width > 0 && i.getBoundingClientRect().height > 0);
-  return inner ? 'inner' : '';
+  return at >= 0 ? 'inner:' + at : '';
 }
 """
 

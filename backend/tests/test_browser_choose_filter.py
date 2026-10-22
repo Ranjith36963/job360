@@ -53,7 +53,22 @@ SECRET = """<!doctype html><html><head><title>Secret - Acme</title></head><body>
 <div role="combobox" aria-label="Region" aria-expanded="false" tabindex="-1">
   <input id="pw" type="password" aria-label="search"></div>
 <ul role="listbox"><li role="option">Europe</li></ul></body></html>"""
-PAGES = {"/secret": SECRET, "/virtual": VIRTUAL, "/inner": INNER, "/combo": "<html><body>" + COMBO + "</body></html>"}
+# A password box sits BEFORE the real search input inside the same combobox box.
+MIXED = """<!doctype html><html><head><title>Mixed - Acme</title></head><body>
+<div role="combobox" aria-label="Region" aria-expanded="false" tabindex="-1">
+  <span id="picked"></span><input id="pw" type="password" aria-label="pin"><input id="q" aria-label="search" oninput="draw(this.value)"></div>
+<ul id="ml" role="listbox"></ul>
+<script>
+function draw(q) {
+  const list = document.getElementById('ml'); list.innerHTML = '';
+  for (const c of ["Europe", "Asia"].filter(x => x.toLowerCase().includes(q.toLowerCase()))) {
+    const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = c;
+    li.onclick = () => { document.getElementById('picked').textContent = c; list.innerHTML = ''; };
+    list.appendChild(li);
+  }
+}
+</script></body></html>"""
+PAGES = {"/mixed": MIXED, "/secret": SECRET, "/virtual": VIRTUAL, "/inner": INNER, "/combo": "<html><body>" + COMBO + "</body></html>"}
 
 
 @pytest.fixture
@@ -157,5 +172,23 @@ async def test_choose_never_types_into_a_password_box_or_keys_control_text(filte
             await run(pool, "u1", "choose", ref=_ref(page, "Country code"), text="Zimbabwe\n")
         assert exc.value.reason == "option_not_found"
         assert await tab.eval_on_selector("#cc", "el => el.value") == ""
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_choose_types_into_the_input_it_checked_not_an_earlier_password_box(filter_site):
+    from src.services.browser_agent.agent import run
+
+    pool = _pool(filter_site)
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/mixed")
+        await run(pool, "u1", "choose", ref=_ref(page, "Region"), text="Asia")
+        tab = pool._sessions["u1"].page  # noqa: SLF001
+        assert await tab.eval_on_selector("#pw", "el => el.value") == ""   # the password box got nothing
+        assert await tab.eval_on_selector("#q", "el => el.value") == "Asia"   # typed into the checked input
+        assert (await tab.locator("#picked").inner_text()) == "Asia"
     finally:
         await pool.shutdown()

@@ -553,7 +553,7 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
         if len(text) <= KEYED_MAX_CHARS and not _CONTROL_CHARS.search(text) else ""
     )
     if typeable:
-        field = loc if typeable == "self" else loc.locator("input:visible").first
+        field = loc if typeable == "self" else loc.locator("input").nth(int(typeable.split(":", 1)[1]))
         await field.fill("")  # clear old text first (never ctrl+a: in an empty field it types an "a")
         await field.press_sequentially(text, delay=25)
         await _settle(page)
