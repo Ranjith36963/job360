@@ -288,9 +288,10 @@ def test_login_per_email_cap_trips_across_addresses(temp_db, monkeypatch):
     from src.core import settings
 
     monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    monkeypatch.setattr(settings, "LOGIN_EMAIL_MAX_ATTEMPTS", 50)  # opt-in: off by default
     per_ip = settings.LOGIN_MAX_ATTEMPTS
     cap = settings.LOGIN_EMAIL_MAX_ATTEMPTS
-    assert cap == 50 and cap > per_ip  # the documented default, larger than per-IP
+    assert cap > per_ip  # larger than the per-IP limit
     _register_victim(_client_from_ip("192.0.2.1"))
 
     n_addresses = cap // per_ip  # 10 distinct addresses at the defaults
@@ -304,6 +305,21 @@ def test_login_per_email_cap_trips_across_addresses(temp_db, monkeypatch):
     assert r.status_code == 429, r.text
     assert "Retry-After" in r.headers
     assert _login(fresh, _LOGIN_PW).status_code == 429
+
+
+def test_login_per_email_cap_is_off_by_default(temp_db, monkeypatch):
+    """Shipped default: no per-email cap, so distributed wrong guesses from many
+    addresses never lock the owner out of the right password."""
+    from src.core import settings
+
+    assert settings.LOGIN_EMAIL_MAX_ATTEMPTS == 0
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    _register_victim(_client_from_ip("192.0.2.1"))
+    for a in range(12):
+        c = _client_from_ip(f"10.8.{a}.1")
+        for _ in range(settings.LOGIN_MAX_ATTEMPTS):
+            assert _login(c, "wrong").status_code == 401
+    assert _login(_client_from_ip("10.9.9.9"), _LOGIN_PW).status_code == 200
 
 
 def test_login_per_email_cap_needs_many_addresses(temp_db, monkeypatch):

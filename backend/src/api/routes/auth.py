@@ -234,11 +234,10 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     # buy fresh buckets.
     email_lc = str(req.email).lower()
     throttle_key = f"login:{email_lc}:{throttle_client_ip(request)}"
-    # Gap-audit fix #6 — plus a per-email cap across ALL addresses
-    # (settings.LOGIN_EMAIL_MAX_ATTEMPTS, 50 by default). Only attempts the
-    # email+IP bucket ADMITS are counted toward it, so it needs >= 10 distinct
-    # real addresses to trip: it slows distributed stuffing without letting one
-    # attacker lock the victim out. Its count is never cleared on success, only
+    # Gap-audit fix #6 — plus an OPT-IN per-email cap across ALL addresses
+    # (settings.LOGIN_EMAIL_MAX_ATTEMPTS, 0 = off by default: when on it refuses
+    # even the right password, so a distributed attacker could lock the owner
+    # out). Only attempts the email+IP bucket ADMITS are counted toward it. Its count is never cleared on success, only
     # the successful attempt's own pre-count is refunded: one sign-in by the
     # owner must not hand a stuffing run a fresh budget.
     email_key = f"login_email:{email_lc}"

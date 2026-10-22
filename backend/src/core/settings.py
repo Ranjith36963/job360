@@ -129,15 +129,14 @@ USER_BROUGHT_SOURCE = "user_brought"
 LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
 LOGIN_LOCKOUT_WINDOW_SECONDS = int(os.getenv("LOGIN_LOCKOUT_WINDOW_SECONDS", "900"))
 # Per-EMAIL cap across ALL source addresses, beside the email+IP lockout above
-# (same window). The email+IP key exists so one attacker cannot lock a victim
-# out; this cap only slows DISTRIBUTED stuffing against one account. Each
-# address can add at most LOGIN_MAX_ATTEMPTS failures before its own email+IP
-# bucket locks (and a locked bucket records nothing more), so tripping this cap
-# takes at least LOGIN_EMAIL_MAX_ATTEMPTS / LOGIN_MAX_ATTEMPTS distinct real
-# addresses (10 at the defaults) inside one window: never a user's own typos,
-# never one attacker on one connection. It bounds guesses on one account to 50
-# per 15 minutes instead of 5 per address per 15 minutes. ``0`` disables it.
-LOGIN_EMAIL_MAX_ATTEMPTS = int(os.getenv("LOGIN_EMAIL_MAX_ATTEMPTS", "50"))
+# (same window). OFF BY DEFAULT (0): when on, it refuses even the right password
+# once that many failures are counted, so ~10 attacker addresses (or IPv6 /64s)
+# can keep a chosen account locked out (security review P2, gap audit #6). Turn
+# it on only as a deliberate choice, e.g. LOGIN_EMAIL_MAX_ATTEMPTS=50. When on,
+# each address adds at most LOGIN_MAX_ATTEMPTS failures before its own email+IP
+# bucket locks, so tripping it takes LOGIN_EMAIL_MAX_ATTEMPTS / LOGIN_MAX_ATTEMPTS
+# distinct addresses inside one window. ``0`` disables it.
+LOGIN_EMAIL_MAX_ATTEMPTS = int(os.getenv("LOGIN_EMAIL_MAX_ATTEMPTS", "0"))
 
 # Client address behind proxies (src/api/client_ip.py is the only reader of
 # X-Forwarded-For). JOB360_TRUSTED_PROXY_HOPS = how many trusted proxies in
