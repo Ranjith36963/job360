@@ -315,3 +315,27 @@ def test_naukri_minimum_experience_is_the_stated_floor() -> None:
     got = kr.parse_naukri({"noOfJobs": 2, "jobDetails": [{**NAUKRI_ROW, "minimumExperience": "12"},
                                                           {**NAUKRI_ROW, "jobId": "9", "minimumExperience": "0"}]})
     assert got[0]["extra"]["years_min"] == 12 and "years_min" not in got[1]["extra"]
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_ld_posting_scan_is_linear_on_unclosed_scripts():
+    page = '<script type="application/ld+json">{"@type": "JobPosting", "title": "T"}</script>'
+    assert kr._ld_posting(page) == {"@type": "JobPosting", "title": "T"}
+    _grows_linearly(kr._ld_posting, lambda k: '<script type="application/ld+json">' * k)
+    _grows_linearly(kr._ld_posting, lambda k: "<script " * k)
