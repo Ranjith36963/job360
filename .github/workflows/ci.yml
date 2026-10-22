@@ -263,22 +263,33 @@ jobs:
       # any diff over 800 lines, and an output written only on the success path
       # left the outage unannounced. Nothing watched the wires, because every
       # individual workflow was green. This job watches the wires.
-      # On a PR, red only for wires THIS PR breaks (owner, 2026-10-22): the PR's
+      # On a PR, red only for findings THIS PR adds (owner, 2026-10-22): the PR's
       # base is judged by its own checker and shared findings print as inherited.
-      # Push to main has no base, so main's own breaks still fail on main. No
-      # base checkout -> every finding counts as this PR's (fail closed).
-      - name: Every wire connects
-        if: needs.scope.outputs.scope == 'full'
+      # The base is the tested merge commit's first parent (the main it was built
+      # on), else the event's base sha. Push to main has no base, so main's own
+      # findings still fail on main. No base checkout -> every finding counts as
+      # this PR's (fail closed). Used by the three --baseline steps below.
+      - name: Check out the PR's base
+        id: base
+        if: needs.scope.outputs.scope == 'full' && github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ -n "$BASE_SHA" ] && git fetch -q --no-tags --depth=1 origin "$BASE_SHA" \
+          parent=$(git log -1 --format=%P HEAD | awk 'NF==2{print $1}')
+          sha=${parent:-$BASE_SHA}
+          if [ -n "$sha" ] && git fetch -q --no-tags --depth=1 origin "$sha" \
               && git worktree add -q --detach "$RUNNER_TEMP/base" FETCH_HEAD; then
-            python scripts/chain_check.py --no-map --baseline "$RUNNER_TEMP/base"
+            echo "dir=$RUNNER_TEMP/base" >> "$GITHUB_OUTPUT"
+            echo "PR base $sha checked out: findings it shares are inherited, not this PR's."
           else
-            [ -z "$BASE_SHA" ] || echo "::warning::could not check out the PR base; every finding counts as this PR's"
-            python scripts/chain_check.py --no-map
+            echo "::warning::could not check out the PR base; every finding counts as this PR's"
           fi
+
+      - name: Every wire connects
+        if: needs.scope.outputs.scope == 'full'
+        env:
+          BASE_DIR: ${{ steps.base.outputs.dir }}
+        run: python scripts/chain_check.py --no-map ${BASE_DIR:+--baseline "$BASE_DIR"}
 
       # And this is the part that matters: a checker nobody has watched fail is
       # indistinguishable from a checker that cannot fail. The drill breaks three
@@ -364,7 +375,9 @@ jobs:
         run: python scripts/ruleset_gate.py --drill
       - name: Would the ruleset wedge the repo?
         if: needs.scope.outputs.scope == 'full'
-        run: python scripts/ruleset_gate.py --check --scope ruleset
+        env:
+          BASE_DIR: ${{ steps.base.outputs.dir }}
+        run: python scripts/ruleset_gate.py --check --scope ruleset ${BASE_DIR:+--baseline "$BASE_DIR"}
       # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
       # from commented-out example lines, so `drill_registry.discover()` counted
       # them as invoked and certified two guards that NOTHING RAN. #362 taught
@@ -403,7 +416,9 @@ jobs:
 
       - name: Every guard declares its drill
         if: needs.scope.outputs.scope == 'full'
-        run: python scripts/drill_registry.py --run-drills
+        env:
+          BASE_DIR: ${{ steps.base.outputs.dir }}
+        run: python scripts/drill_registry.py --run-drills ${BASE_DIR:+--baseline "$BASE_DIR"}
 
   # ─── GitHub's own parser, run before GitHub does ──────────────────────────
   # 2026-10-02: review-security.yml shipped an empty `${{ }}` inside a prompt

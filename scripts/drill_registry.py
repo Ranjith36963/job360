@@ -1066,6 +1066,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--break-checker", metavar="RULE", action="append", default=[],
                     help=f"blind one rule ({', '.join(RULES)}) — used to prove this file's own "
                          f"DRILL can still fail")
+    ap.add_argument("--baseline", default=None, metavar="DIR",
+                    help="with --run-drills on a PR: a checkout of the PR's base; fail only on "
+                         "registry failures the base's own --run-drills does not have")
     args = ap.parse_args(argv)
 
     bad = [r for r in args.break_checker if r not in RULES]
@@ -1135,11 +1138,38 @@ def main(argv: list[str] | None = None) -> int:
         print("-" * 72)
         for f in fails:
             print(f"  {f}")
+        if args.baseline and args.run_drills and not disabled:
+            import pr_baseline  # noqa: PLC0415 - scripts/ is sys.path[0]; needed only on a red PR
+            argv_base = ["--run-drills"] + (["--only", args.only] if args.only else [])
+            return pr_baseline.against_base(fails, Path(args.baseline).resolve(), "drill_registry.py",
+                                            argv_base, parse_failures, "drill registry", ROOT)
         return 1
 
     print()
     print("Every guard CI runs is declared, every declaration points at a real file.")
     return 0
+
+
+def parse_failures(rc: int, out: str) -> set[str] | None:
+    """The REGISTRY FAILURES entries of a --run-drills report (the base's verdict).
+
+    Each entry is a 2-space line plus its 6-space continuation (the drill's tail),
+    compared whole: a PR that adds a new reason to a drill main already fails is new.
+    A red base with no entry is not something this can compare: None (fail closed).
+    """
+    import pr_baseline  # noqa: PLC0415
+
+    if rc == 0:
+        return set()
+    if rc != 1 or "REGISTRY FAILURES" not in out:
+        return None
+    entries: list[list[str]] = []
+    for line in out.split("REGISTRY FAILURES", 1)[1].splitlines()[2:]:
+        if line.startswith("      ") and entries:
+            entries[-1].append(line)
+        elif line.startswith("  ") and line.strip():
+            entries.append([line])
+    return {pr_baseline.comparable("\n".join(e)) for e in entries} or None
 
 
 if __name__ == "__main__":
