@@ -86,3 +86,6 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - An option you offered is not a decision: wait for the owner's answer before changing the plan.
 - A weak spot is closed only after a real run on production exercises it.
 - Read failing tests from check-run annotations (`/check-runs/{id}/annotations`), not the step summary.
+- Re-read `origin/main`'s migration list in the minute before every merge call (2026-10-22: two 0077 files on main).
+- After editing an MCP description, also run `tests/test_tools_states_recipes.py`; cut prose a recipe carries, never a
+  closed value set or a payload key.

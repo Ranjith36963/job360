@@ -36,6 +36,10 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
     "hold_released": {"reason": "done"},
     "submit_attempted": {},
     "submit_resolved": {"outcome": "not_sent"},
+    "email_drafted": {
+        "to": "jobs@example.com", "subject": "Application: Data Engineer - Ada Lovelace",
+        "attachments": [{"artifact_id": 7, "sha256": "9f2c" + "0" * 60}], "gmail_draft_id": "r-123456789",
+    },
     "site_account": {"host": "jobs.example.com"},
     "account_needed": {"host": "jobs.example.com"},
     "blocked": {

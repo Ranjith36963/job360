@@ -284,3 +284,26 @@ def test_keyed_registry_and_stats(monkeypatch):
         assert {"reed", "usajobs", "whatjobs"} <= set(hk.FEED_SOURCES) and "kit_keyed" in hk.FEED_MODULES
     finally:
         sys.path.remove(str(_KIT))
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_whatjobs_marker_strip_is_linear_on_a_blank_run():
+    assert kk._wj_clean("Great job   #J-18808-Ljbffr \n") == "Great job"
+    assert kk._wj_clean("  keep me  ") == "  keep me  "
+    _grows_linearly(kk._wj_clean, lambda k: " " * (4 * k) + "x")

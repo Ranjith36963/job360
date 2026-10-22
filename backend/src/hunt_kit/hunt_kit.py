@@ -494,7 +494,7 @@ def html_to_text(raw: str | None) -> str:
     """Turn an HTML fragment into plain text, keeping line breaks between blocks."""
     h = html.unescape(raw or "")
     h = re.sub(r"(?i)</(p|li|div|h[1-6]|ul|ol|tr)>|<br\s*/?>", "\n", h)
-    h = re.sub(r"<[^>]+>", " ", h)
+    h = re.sub(r"<[^<>]+>", " ", h)  # [^<>]: a "<" with no ">" stops at the next "<" (linear on "<a " * n)
     h = html.unescape(h)
     h = re.sub(r"[ \t\r\f\v\xa0]+", " ", h)
     h = re.sub(r"\s*\n\s*", "\n", h)
@@ -1563,7 +1563,7 @@ class Collector:
             # a company board's token names the company; a feed's board is the feed itself ("eures"), never one
             "company": raw.get("company") or (raw.get("board") if raw.get("board") != source else "") or "",
             "url": url,
-            "location": re.sub(r"\s*\|\s*", " | ", (raw.get("loc") or "").strip(" |")),
+            "location": _respace((raw.get("loc") or "").strip(" |"), "|", " | "),
             "posted": raw.get("posted", ""),
             "source": rec_source or source,
             "board": raw.get("board", ""),
@@ -2465,10 +2465,26 @@ def _stated_closed(lines: str) -> re.Pattern[str] | None:
     return None
 
 
+def _respace(text: str, sep: str, joiner: str) -> str:
+    """``re.sub(\\s*SEP\\s*, joiner, text)`` without the regex (it is quadratic on a long run of blanks)."""
+    parts = text.split(sep)
+    if len(parts) == 1:
+        return text
+    parts[0], parts[-1] = parts[0].rstrip(), parts[-1].lstrip()
+    return joiner.join(parts[:1] + [p.strip() for p in parts[1:-1]] + parts[-1:])
+
+
+_VIS_OPEN = re.compile(r"<(script(?=\b)|style(?=\b)|noscript(?=\b)|template(?=\b)|svg(?=\b)|!--)", re.I)
+
+
+def _vis_closer(name: str) -> re.Pattern[str]:
+    return re.compile(r"</%s\s*>" % name if name != "!--" else "--!?>", re.I)  # browsers end a comment at --> or --!>
+
+
 def _visible_text(raw: str) -> str:
     """Text a visitor would see: scripts, styles, comments and tags removed (freehire measures visible text)."""
-    t = re.sub(r"(?is)<(script|style|noscript|template|svg)\b.*?</\1\s*>|<!--.*?-->", " ", raw)
-    t = html.unescape(re.sub(r"<[^>]+>", " ", t))
+    t = _import_kit("kit_xml").drop_blocks(raw, _VIS_OPEN, _vis_closer, " ")  # one linear pass, not a lazy regex
+    t = html.unescape(re.sub(r"<[^<>]+>", " ", t))
     return re.sub(r"\s+", " ", t).strip()
 
 

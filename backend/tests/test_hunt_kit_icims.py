@@ -127,3 +127,32 @@ def test_gate_does_not_spend_the_detail_cap_on_non_matching_cards(monkeypatch):
     http = _stub(_routes())
     jobs = kit_ats.fetch_icims({**ROW, "title_ok": lambda t: "Analyst" in t or "Location" in t}, http, {})
     assert [bool(j["description"]) for j in jobs] == [False, True, False]  # cap of 1 goes to the first match
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_icims_card_and_ld_scans_are_linear_on_unclosed_markup():
+    origin = "https://careers-x.icims.com"
+    card = 'iCIMS_JobCardItem <a href="/jobs/12/engineer/job"><h3>Engineer</h3></a>'
+    assert kit_ats._icims_cards(card, origin)[0]["title"] == "Engineer"
+    head = 'iCIMS_JobCardItem <a href="/jobs/12/engineer/job">'
+    _grows_linearly(lambda p: kit_ats._icims_cards(p, origin), lambda k: head + "<h3>" * k)
+    ld = '<script type="application/ld+json">{"@type": "JobPosting"}</script>'
+    assert kit_ats._icims_nodes(ld) == [{"@type": "JobPosting"}]
+    _grows_linearly(kit_ats._icims_nodes, lambda k: '<script type="application/ld+json">' * k)
+    _grows_linearly(kit_ats._icims_nodes, lambda k: "<script " * k)
