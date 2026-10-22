@@ -547,7 +547,11 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
     # A long or virtualized list draws only part of its options until something is typed (a phone-country
     # list of ~250). Once, never a loop: type the asked-for text with the real keyboard, let the list
     # redraw, read the options again and pick again.
-    typeable = await loc.evaluate(TYPEABLE_TARGET_JS)
+    # Only option-shaped text is keyed: short, and no control character (as keys "\n" is Enter).
+    typeable = (
+        await loc.evaluate(TYPEABLE_TARGET_JS)
+        if len(text) <= KEYED_MAX_CHARS and not _CONTROL_CHARS.search(text) else ""
+    )
     if typeable:
         field = loc if typeable == "self" else loc.locator("input:visible").first
         await field.fill("")  # clear old text first (never ctrl+a: in an empty field it types an "a")
@@ -1353,6 +1357,11 @@ async def _act(
         )
 
     if action == "choose":
+        if kind == "password":
+            raise BrowserError(
+                "refused", "password_field",
+                "That is a password box. Job360 never types a password: the user signs in themselves.",
+            )
         await _choose(s, loc, text)
         return await look(s, after_action=True)
 

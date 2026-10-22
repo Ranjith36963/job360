@@ -338,7 +338,8 @@ OWN_LIST_IDS_JS = r"""
 TYPEABLE_TARGET_JS = r"""
 (el) => {
   const ok = (i) => i.tagName === 'INPUT' && !i.disabled && !i.readOnly
-    && !/^(checkbox|radio|button|submit|reset|file|hidden|image|range|color)$/i.test(i.type);
+    && !/^(checkbox|radio|button|submit|reset|file|hidden|image|range|color|password)$/i.test(i.type)
+    && !/password/i.test(i.getAttribute('autocomplete') || '');
   if (el.tagName === 'INPUT') return ok(el) ? 'self' : '';
   const role = (el.getAttribute('role') || '').toLowerCase();
   if (role !== 'combobox') return '';

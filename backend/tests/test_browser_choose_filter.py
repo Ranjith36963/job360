@@ -48,7 +48,12 @@ function draw(q) {
   list.hidden = false;
 }
 </script></body></html>"""
-PAGES = {"/virtual": VIRTUAL, "/inner": INNER, "/combo": "<html><body>" + COMBO + "</body></html>"}
+# A combobox box whose only input is a password box: choose must never type into it.
+SECRET = """<!doctype html><html><head><title>Secret - Acme</title></head><body>
+<div role="combobox" aria-label="Region" aria-expanded="false" tabindex="-1">
+  <input id="pw" type="password" aria-label="search"></div>
+<ul role="listbox"><li role="option">Europe</li></ul></body></html>"""
+PAGES = {"/secret": SECRET, "/virtual": VIRTUAL, "/inner": INNER, "/combo": "<html><body>" + COMBO + "</body></html>"}
 
 
 @pytest.fixture
@@ -128,5 +133,29 @@ async def test_choose_does_not_type_into_a_box_that_is_not_typeable(filter_site)
         with pytest.raises(BrowserError) as exc:
             await run(pool, "u1", "choose", ref=_ref(page, "City"), text="Berlin")   # a div: nothing to type into
         assert exc.value.reason == "option_not_found" and "Paris" in exc.value.detail
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_choose_never_types_into_a_password_box_or_keys_control_text(filter_site):
+    from src.services.browser_agent.agent import BrowserError, run
+
+    pool = _pool(filter_site)
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/secret")
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "choose", ref=_ref(page, "Region"), text="hunter2")
+        assert exc.value.reason == "option_not_found"
+        tab = pool._sessions["u1"].page  # noqa: SLF001
+        assert await tab.eval_on_selector("#pw", "el => el.value") == ""   # nothing typed into the password box
+        # Text with a control character (as keys "\n" is Enter) is never keyed into a typeable list either.
+        page = await run(pool, "u1", "open", url="http://jobs.example/virtual")
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "choose", ref=_ref(page, "Country code"), text="Zimbabwe\n")
+        assert exc.value.reason == "option_not_found"
+        assert await tab.eval_on_selector("#cc", "el => el.value") == ""
     finally:
         await pool.shutdown()
