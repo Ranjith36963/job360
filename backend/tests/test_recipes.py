@@ -88,7 +88,7 @@ def test_setup_is_six_short_rounds_and_forms_ask_only_what_is_missing():
     """Owner, 2026-10-08/09 (S4): setup is SIX short rounds, one topic each,
     read back, saved after each round, resumable; personal facts a form needs
     are asked at apply time only when missing."""
-    from src.api.mcp_server import INSTRUCTIONS
+    from src.api.mcp_server import instructions
     from src.api.routes.recipes import load_recipe
 
     setup = flat(load_recipe("setup").text)
@@ -119,7 +119,7 @@ def test_setup_is_six_short_rounds_and_forms_ask_only_what_is_missing():
     # used for that one form and stored nowhere (PR fixer, 2026-10-05).
     assert "the user agreed to remember it" in apply
     assert "use the answer for this form only and store nothing" in apply
-    text = flat(INSTRUCTIONS)
+    text = flat(instructions())
     for words in ("run 360", 'get_recipe("rules")', "never type or ask for a password"):
         assert words in text, words
 
@@ -248,12 +248,12 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
 @pytest.mark.asyncio
 async def test_mcp_tool_and_prompts_serve_the_same_text(authenticated_async_context):
     pytest.importorskip("mcp")
-    from src.api.mcp_server import INSTRUCTIONS, mcp_runtime
+    from src.api.mcp_server import instructions, mcp_runtime
     from src.api.routes.recipes import RECIPE_NAMES, load_recipe
 
-    assert 'get_recipe("setup")' in INSTRUCTIONS and 'get_recipe("rules")' in INSTRUCTIONS
-    assert "never search for jobs" not in INSTRUCTIONS.lower()
-    assert "job360 itself never searches" in INSTRUCTIONS.lower()
+    assert 'get_recipe("setup")' in instructions() and 'get_recipe("rules")' in instructions()
+    assert "never search for jobs" not in instructions().lower()
+    assert "job360 itself never searches" in instructions().lower()
 
     token = await _mint_token(authenticated_async_context)
     async with mcp_runtime():

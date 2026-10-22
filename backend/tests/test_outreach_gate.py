@@ -565,10 +565,10 @@ async def test_mcp_check_outreach_parity(authenticated_async_context, fixture_us
 
 
 def test_instructions_and_recipes_carry_the_outreach_gate():
-    from src.api.mcp_server import INSTRUCTIONS
+    from src.api.mcp_server import instructions
     from src.api.routes.recipes import load_recipe
 
-    hard = " ".join(INSTRUCTIONS.split("\n")[1].lower().split())
+    hard = " ".join(instructions().split("\n")[1].lower().split())
     assert "never send outreach unless check_outreach says send" in hard
     reach = " ".join(load_recipe("reach").text.lower().split())
     assert "check_outreach(contact_id, message_id)" in reach
