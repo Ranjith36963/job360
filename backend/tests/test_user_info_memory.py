@@ -824,6 +824,10 @@ async def test_clear_cv_leaves_the_memory_and_clear_all_resets_it(authenticated_
         for path in (*SIX, SALARY):
             rows = (await client.get("/api/profile/edits/history", params={"path": path})).json()["rows"]
             assert rows[0]["value"] is None, path
+            if path == CONTACT:
+                # The base memory the clear wiped is copied into history first (slice 3).
+                assert rows[1]["value"] == {"preferred_name": "Base Ada"} and len(rows) == 3, rows
+                continue
             assert len(rows) == 2, f"{path}: one write + one clearing row, history kept"
 
 

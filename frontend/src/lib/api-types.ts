@@ -1379,8 +1379,13 @@ export interface paths {
         post?: never;
         /**
          * Delete Account
-         * @description ERASE the caller's account (GDPR Article 17). Requires current-password
-         *     verification (hard rule #26), then clears the session cookie.
+         * @description ERASE the caller's account (GDPR Article 17), then clear the session cookie.
+         *
+         *     Web session only: an agent token can never erase the account. An account
+         *     with a password must send it (hard rule #26). An account with NO password
+         *     (``has_password`` FALSE: only a magic link ever signed it in) cannot, so it
+         *     may delete only from a session created by a fresh email link, inside
+         *     ``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.
          *
          *     Uses hard_delete_user (docs/fable/05) — actually erases all per-user data
          *     (CV, profile, channels, feed, actions, …), not a soft `deleted_at` flag that
@@ -1422,6 +1427,10 @@ export interface paths {
         /**
          * Export My Data
          * @description Download everything we hold on the caller as one JSON file (Article 20).
+         *
+         *     Web session only (gap roadmap slice 3): a leaked, never-expiring agent token
+         *     must not be able to download the whole account. An assistant reads history
+         *     through ``export_history``, which leaves out the account tables.
          *
          *     GET is correct here: it is a pure read, no state changes. Scoped to the
          *     session's own ``user.id`` (rule #12) — the caller can never name another user.
@@ -2221,13 +2230,18 @@ export interface paths {
          * Clear Profile Section
          * @description Empty ONE input (or the whole profile), so the next upload starts clean.
          *
+         *     WEB SESSION ONLY (gap roadmap slice 3): "all" wipes the CV, preferences,
+         *     memory and assistant settings at once, so a leaked agent token must not
+         *     reach it. An assistant clears one field with ``update_profile(null)``.
+         *
          *     ``section``: cv | linkedin | github | preferences | memory | all.
          *
          *     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
          *     (``user_info.*``: contact, right to work, logistics, languages, equality
          *     answers, saved answers): the base column and the assistant's overlay rows.
-         *     It takes no version snapshot and leaves the CV, the preferences and
-         *     ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
+         *     It takes no version snapshot (it copies the memory into ``profile_edits``
+         *     first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+         *     preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
          *     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
          *     ``github`` leave it alone; only ``all`` resets it.
          *
@@ -2967,7 +2981,7 @@ export interface components {
         /** AccountDeleteRequest */
         AccountDeleteRequest: {
             /** Current Password */
-            current_password: string;
+            current_password?: string | null;
         };
         /**
          * AddContactRequest
@@ -5711,6 +5725,28 @@ export interface components {
             /** Next */
             next?: string | null;
         };
+        /** MeResponse */
+        MeResponse: {
+            /**
+             * Analytics Consent
+             * @default false
+             */
+            analytics_consent: boolean;
+            /** Email */
+            email: string;
+            /**
+             * Has Password
+             * @default true
+             */
+            has_password: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
+        };
         /**
          * MissingToolRequest
          * @description ``POST /api/missing-tools`` body. ``name`` must match
@@ -6728,9 +6764,16 @@ export interface components {
              * @default
              */
             note: string;
+            /** Request Id */
+            request_id?: string | null;
         };
         /** RecordApplicationReceiptResponse */
         RecordApplicationReceiptResponse: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
             /** Channel */
             channel: string;
             /**
@@ -10317,7 +10360,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserResponse"];
+                    "application/json": components["schemas"]["MeResponse"];
                 };
             };
             /** @description Validation Error */

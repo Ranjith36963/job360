@@ -4,13 +4,17 @@
       "AccountDeleteRequest": {
         "properties": {
           "current_password": {
-            "title": "Current Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
           }
         },
-        "required": [
-          "current_password"
-        ],
         "title": "AccountDeleteRequest",
         "type": "object"
       },
@@ -6785,6 +6789,39 @@
         "title": "MagicLinkRequest",
         "type": "object"
       },
+      "MeResponse": {
+        "properties": {
+          "analytics_consent": {
+            "default": false,
+            "title": "Analytics Consent",
+            "type": "boolean"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "has_password": {
+            "default": true,
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "UTC",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "MeResponse",
+        "type": "object"
+      },
       "MissingToolRequest": {
         "additionalProperties": false,
         "description": "``POST /api/missing-tools`` body. ``name`` must match\n``^[a-z][a-z0-9_]{1,59}$``; ``why`` is at most 280 characters.",
@@ -9182,6 +9219,17 @@
             "maxLength": 2000,
             "title": "Note",
             "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
           }
         },
         "title": "RecordApplicationReceiptRequest",
@@ -9189,6 +9237,11 @@
       },
       "RecordApplicationReceiptResponse": {
         "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -18302,7 +18355,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/MeResponse"
                 }
               }
             },
@@ -18660,7 +18713,7 @@
     },
     "/api/auth/users/me": {
       "delete": {
-        "description": "ERASE the caller's account (GDPR Article 17). Requires current-password\nverification (hard rule #26), then clears the session cookie.\n\nUses hard_delete_user (docs/fable/05) \u2014 actually erases all per-user data\n(CV, profile, channels, feed, actions, \u2026), not a soft `deleted_at` flag that\nleft the data in place and could be resurrected on a later magic-link consume.",
+        "description": "ERASE the caller's account (GDPR Article 17), then clear the session cookie.\n\nWeb session only: an agent token can never erase the account. An account\nwith a password must send it (hard rule #26). An account with NO password\n(``has_password`` FALSE: only a magic link ever signed it in) cannot, so it\nmay delete only from a session created by a fresh email link, inside\n``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.\n\nUses hard_delete_user (docs/fable/05) \u2014 actually erases all per-user data\n(CV, profile, channels, feed, actions, \u2026), not a soft `deleted_at` flag that\nleft the data in place and could be resurrected on a later magic-link consume.",
         "operationId": "delete_account_api_auth_users_me_delete",
         "parameters": [
           {
@@ -18798,7 +18851,7 @@
     },
     "/api/auth/users/me/export": {
       "get": {
-        "description": "Download everything we hold on the caller as one JSON file (Article 20).\n\nGET is correct here: it is a pure read, no state changes. Scoped to the\nsession's own ``user.id`` (rule #12) \u2014 the caller can never name another user.\nSecrets (password hash, encrypted channel creds) are redacted and the\nsecurity-token tables are omitted entirely; see ``export_user_data``.",
+        "description": "Download everything we hold on the caller as one JSON file (Article 20).\n\nWeb session only (gap roadmap slice 3): a leaked, never-expiring agent token\nmust not be able to download the whole account. An assistant reads history\nthrough ``export_history``, which leaves out the account tables.\n\nGET is correct here: it is a pure read, no state changes. Scoped to the\nsession's own ``user.id`` (rule #12) \u2014 the caller can never name another user.\nSecrets (password hash, encrypted channel creds) are redacted and the\nsecurity-token tables are omitted entirely; see ``export_user_data``.",
         "operationId": "export_my_data_api_auth_users_me_export_get",
         "parameters": [
           {
@@ -21217,7 +21270,7 @@
     },
     "/api/profile/clear": {
       "post": {
-        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot and leaves the CV, the preferences and\n``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\nWEB SESSION ONLY (gap roadmap slice 3): \"all\" wipes the CV, preferences,\nmemory and assistant settings at once, so a leaked agent token must not\nreach it. An assistant clears one field with ``update_profile(null)``.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot (it copies the memory into ``profile_edits``\nfirst instead, ``_snapshot_memory_then_clear``) and leaves the CV, the\npreferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
         "operationId": "clear_profile_section_api_profile_clear_post",
         "parameters": [
           {

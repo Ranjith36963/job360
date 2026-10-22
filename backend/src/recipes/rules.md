@@ -225,6 +225,13 @@ immutable receipt. Name `cover_letter_artifact_id` only when the form took a let
 of: a confirmation email, the thank-you page text, or the application ID /
 portal reference; with none yet the application is "claimed, unverified".
 
+Give `record_application` a `request_id`: your own id for this one submit (1-128
+characters, e.g. the application id plus the time you clicked submit). Sending
+the same `request_id` again returns the FIRST receipt with `already_existed: true`
+and writes nothing; the same `request_id` with different fields is refused (409
+`idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
+After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
+
 An ask can also be answered by the user on the Job360 Needs-you page.
 
 When the user answered in chat, pass `user_words` (their exact words) to `answer_ask`: the answer then shows as theirs, via you.
