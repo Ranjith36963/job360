@@ -391,6 +391,13 @@ lanes:
   #   * `rollback: railway` — `deploymentRollback` restores the previous image
   #     AND its variables in seconds, and the watcher CONFIRMS `canRollback`
   #     before anything in this lane is allowed to merge at all.
+  #     It restores the IMAGE, never the schema or rows: a migration that
+  #     committed stays applied under the rolled-back code. migrations/runner.py
+  #     bounds each migration (lock_timeout / statement_timeout; a timeout rolls
+  #     it back whole and fails the boot, so the old container keeps serving) and
+  #     first copies every table it touches to `migration_snapshots."<table>__<id>"`,
+  #     kept MIGRATION_SNAPSHOT_RETENTION_DAYS (14). A new DROP COLUMN / DROP TABLE
+  #     needs `-- allow-drop: <reason>` (tests/test_migration_safety.py).
   # Speed still comes from being able to UNDO. Nothing here merges on the
   # strength of looking safe.
   #
