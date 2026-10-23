@@ -35,6 +35,8 @@ STATUS_FILTERS = ("open", "answered", "all")
 
 # The user's exact chat words relayed with an answer (answer_ask `user_words`).
 ASKS_USER_WORDS_MAX_CHARS = 2000
+# Why an ask was taken back (owner, 2026-10-23); required when an assistant withdraws its own ask.
+ASKS_WITHDRAW_REASON_MAX_CHARS = 200
 
 # Same banned set spine.validate_source uses (Cc/Zl/Zp + bidi overrides),
 # except a plain newline and tab are kept: a question or answer is prose and
@@ -90,13 +92,17 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         # and None again if the answer was changed after the confirmation.
         "confirmed_at": confirmed_at if relayed and confirmed_at and confirmed_at >= answered_at else None,
         "withdrawn_at": withdrawn_at,
+        # Who took the ask back and why (0081; "" = not withdrawn, or before 0081 / no reason given).
+        "withdrawn_by": row.get("withdrawn_by") or "",
+        "withdrawn_reason": row.get("withdrawn_reason") or "",
         "status": status,
     }
 
 
 _SELECT = (
     "SELECT k.id, k.application_id, a.job_title, a.job_company, k.question, k.context, k.asked_by, "
-    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at, k.user_words, k.confirmed_at "
+    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at, k.user_words, k.confirmed_at, "
+    "k.withdrawn_by, k.withdrawn_reason "
     "FROM application_asks k LEFT JOIN applications a ON a.id = k.application_id AND a.user_id = k.user_id "
 )
 
@@ -288,12 +294,37 @@ async def confirm_ask(db: JobDatabase, user_id: str, ask_id: int) -> dict[str, A
     return ask
 
 
-async def withdraw_ask(db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str) -> dict[str, Any]:
+def clean_withdraw_reason(raw: Any) -> str:
+    """The reason an ask was taken back: one line of plain text, at most
+    :data:`ASKS_WITHDRAW_REASON_MAX_CHARS` characters (422 otherwise)."""
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        raise SpineError(422, "withdraw reason must be text")
+    text = " ".join(clean_text(raw).split())
+    if len(text) > ASKS_WITHDRAW_REASON_MAX_CHARS:
+        raise SpineError(422, f"withdraw reason must be at most {ASKS_WITHDRAW_REASON_MAX_CHARS} characters")
+    return text
+
+
+async def withdraw_ask(
+    db: JobDatabase, user_id: str, ask_id: int, withdrawn_by: str, reason: str = "", *, own_only: bool = False
+) -> dict[str, Any]:
     """Take an OPEN ask back (no longer needed). 404 if not the caller's,
-    409 if it is already answered or already withdrawn."""
+    409 if it is already answered or already withdrawn. ``own_only`` (an
+    assistant calling, owner 2026-10-23): only an ask ``withdrawn_by`` itself
+    asked (403 otherwise), and only with a ``reason`` (422 when empty). The
+    reason is stored on the ask and shown on the application's timeline."""
+    clean_reason = clean_withdraw_reason(reason)
     existing = await _get_ask(db, user_id, ask_id)
     if existing is None:
         raise SpineError(404, "ask not found")
+    if own_only and existing["asked_by"] != withdrawn_by:
+        raise SpineError(403, "only the user can withdraw an ask you did not ask; ask them to, on Needs you")
+    if own_only and not clean_reason:
+        raise SpineError(
+            422, f"say why the ask is out of date (withdraw reason, at most {ASKS_WITHDRAW_REASON_MAX_CHARS} chars)"
+        )
     if existing["withdrawn_at"]:
         raise SpineError(409, "already withdrawn")
     if existing["answered_at"]:
@@ -301,17 +332,19 @@ async def withdraw_ask(db: JobDatabase, user_id: str, ask_id: int, withdrawn_by:
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
         cur = await db._db.execute(
-            "UPDATE application_asks SET withdrawn_at = ? "
+            "UPDATE application_asks SET withdrawn_at = ?, withdrawn_by = ?, withdrawn_reason = ? "
             "WHERE id = ? AND user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL",
-            (now, ask_id, user_id),
+            (now, withdrawn_by, clean_reason, ask_id, user_id),
         )
         if not cur.rowcount:
             raise SpineError(409, "ask is no longer open")
         if existing["application_id"] is not None:
+            shown = f"Why: {clean_reason}. Asked: {existing['question']}" if clean_reason else existing["question"]
             await append_event(
                 db, user_id=user_id, application_id=int(existing["application_id"]), event_type="ask_withdrawn",
-                detail=existing["question"][: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
-                payload={"ask_id": ask_id}, occurred_at=now, recorded_by=withdrawn_by,
+                detail=shown[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
+                payload={"ask_id": ask_id, **({"reason": clean_reason} if clean_reason else {})},
+                occurred_at=now, recorded_by=withdrawn_by,
             )
     # Same path-parameter taint as ``ask_answered`` above -- see the note there.
     get_audit_logger().info(

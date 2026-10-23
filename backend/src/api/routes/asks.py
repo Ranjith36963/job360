@@ -127,15 +127,28 @@ async def confirm_ask(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+class WithdrawAskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Why the ask is out of date; required when an assistant withdraws (owner, 2026-10-23).
+    reason: str = Field(default="", max_length=asks_service.ASKS_WITHDRAW_REASON_MAX_CHARS)
+
+
 @router.post("/asks/{ask_id}/withdraw", response_model=AskOut, dependencies=AUTH_FIRST)
 async def withdraw_ask(
     ask_id: int,
+    body: Optional[WithdrawAskRequest] = None,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """Take an open ask back. Web only - there is deliberately no MCP tool."""
+    """Take an open ask back. The user (web) may withdraw any ask, reason optional. An assistant
+    (the MCP ``answer_ask`` ``withdraw``) may withdraw only an ask it asked itself, and must say why
+    (owner, 2026-10-23); an ask the user or another assistant raised stays the user's to close."""
+    actor = actor_for(user)
     try:
-        return await asks_service.withdraw_ask(db, user.id, ask_id, actor_for(user))
+        return await asks_service.withdraw_ask(
+            db, user.id, ask_id, actor, body.reason if body else "", own_only=actor != "web"
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

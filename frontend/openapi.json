@@ -2313,6 +2313,16 @@
               }
             ],
             "title": "Withdrawn At"
+          },
+          "withdrawn_by": {
+            "default": "",
+            "title": "Withdrawn By",
+            "type": "string"
+          },
+          "withdrawn_reason": {
+            "default": "",
+            "title": "Withdrawn Reason",
+            "type": "string"
           }
         },
         "required": [
@@ -3885,6 +3895,16 @@
               }
             ],
             "title": "Withdrawn At"
+          },
+          "withdrawn_by": {
+            "default": "",
+            "title": "Withdrawn By",
+            "type": "string"
+          },
+          "withdrawn_reason": {
+            "default": "",
+            "title": "Withdrawn Reason",
+            "type": "string"
           }
         },
         "required": [
@@ -14583,6 +14603,19 @@
         ],
         "title": "WhatsNewResponse",
         "type": "object"
+      },
+      "WithdrawAskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "WithdrawAskRequest",
+        "type": "object"
       }
     }
   },
@@ -18427,7 +18460,7 @@
     },
     "/api/asks/{ask_id}/withdraw": {
       "post": {
-        "description": "Take an open ask back. Web only - there is deliberately no MCP tool.",
+        "description": "Take an open ask back. The user (web) may withdraw any ask, reason optional. An assistant\n(the MCP ``answer_ask`` ``withdraw``) may withdraw only an ask it asked itself, and must say why\n(owner, 2026-10-23); an ask the user or another assistant raised stays the user's to close.",
         "operationId": "withdraw_ask_api_asks__ask_id__withdraw_post",
         "parameters": [
           {
@@ -18472,6 +18505,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/WithdrawAskRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

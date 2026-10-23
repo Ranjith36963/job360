@@ -32,6 +32,7 @@ import re
 import secrets
 import unicodedata
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit
@@ -519,20 +520,63 @@ def _page_of(event: dict[str, Any]) -> Optional[int]:
     return page if isinstance(page, int) and not isinstance(page, bool) else None
 
 
+def _current_checks(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Newest-first events with every UNPAGED one older than the newest PAGED one dropped; when the newest
+    event has no page, only it is left (owner, 2026-10-23: newest form check wins). Paged events are kept."""
+    if not events:
+        return []
+    if _page_of(events[0]) is None:
+        return events[:1]
+    newest_paged = max(e["id"] for e in events if _page_of(e) is not None)
+    return [e for e in events if _page_of(e) is not None or e["id"] > newest_paged]
+
+
 async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) -> tuple[bool, bool, bool]:
-    """``(count_short, unreadable, pages_incomplete)`` from the NEWEST ``form_checked`` / ``form_swept``.
-    ``count_short``: the sweep read fewer fields than the form check listed questions.
+    """``(count_short, unreadable, pages_incomplete)`` of :func:`_sweep_report`."""
+    report = await _sweep_report(db, user_id, application_id)
+    return report.short, report.unreadable, report.incomplete
+
+
+@dataclass(frozen=True)
+class SweepReport:
+    short: bool = False
+    unreadable: bool = False
+    incomplete: bool = False
+    # For the ``form_count_mismatch`` message: questions the sweep accounted for (``fields_checked`` plus the
+    # newest ``form_filled``'s ``fields_skipped``) of how many check_form listed. None on a paged shortfall.
+    counted: Optional[int] = None
+    listed: Optional[int] = None
+
+
+def _flat_count(
+    check: Optional[dict[str, Any]], sweep: dict[str, Any], skipped: int
+) -> tuple[bool, Optional[int], Optional[int]]:
+    """``(short, counted, listed)`` of one unpaged sweep against one unpaged check. The blank optional fields
+    the fill named in ``fields_skipped`` count as checked (owner, 2026-10-23: Job360 counts them itself)."""
+    want = (check or {"payload": {}})["payload"].get("questions_count")
+    got = sweep["payload"].get("fields_checked")
+    if not (isinstance(want, int) and isinstance(got, int)):
+        return False, None, None
+    return got + skipped < want, got + skipped, want
+
+
+async def _sweep_report(db: JobDatabase, user_id: str, application_id: int) -> SweepReport:
+    """The NEWEST ``form_checked`` / ``form_swept`` judged. ``short``: the sweep read fewer fields than the
+    form check listed questions; the ``fields_skipped`` of the newest ``form_filled`` count as read.
     NOT IN REFERENCE (career-ops apply.md:315-321 asserts each required control holds a value, it never
     compares an earlier count). No ``form_checked`` on record = no shortfall (older applications).
     A multi-page form (bulk-apply F2: ``page`` / ``pages_total`` on the newest check or sweep) is judged page
     by page in :func:`_paged_shortfalls`; an application with no ``page`` anywhere is judged exactly as before."""
     events = await _events(db, user_id, application_id, ("form_checked", "form_swept"))
+    fills = await _events(db, user_id, application_id, ("form_filled",))
+    skipped_raw = fills[0]["payload"].get("fields_skipped") if fills else None
+    skipped = len(skipped_raw) if isinstance(skipped_raw, list) else 0
     checked = next((e for e in events if e["event_type"] == "form_checked"), None)
     swept = next((e for e in events if e["event_type"] == "form_swept"), None)
     # Once ANY event carries a page the form is judged page by page (security review 2026-10-18: dropping
     # back to unpaged events must not switch the per-page rule off).
-    if any(_page_of(e) is not None for e in events):
-        fills = await _events(db, user_id, application_id, ("form_filled",))
+    paged_ids = [e["id"] for e in events if _page_of(e) is not None]
+    if paged_ids:
         filled = fills[0]["payload"].get("fields_count") if fills else None
         # A RE-fill (a second form_filled) reopens every page swept before it (CodeRabbit 2026-10-18); the
         # first form_filled, recorded once after the last page, does not.
@@ -541,26 +585,25 @@ async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) 
             events, filled if isinstance(filled, int) else None, refill_id
         )
         # A mix of paged and unpaged events must never switch the unpaged checks OFF (review 2026-10-18):
-        # the newest UNPAGED sweep's unreadable list always counts, and so does its count against the
-        # newest unpaged check (a whole-form re-check that found more questions).
-        flat = [e for e in events if _page_of(e) is None]
+        # the newest UNPAGED sweep's unreadable list counts, and so does its count against the newest unpaged
+        # check (a whole-form re-check that found more questions) - but only unpaged events NEWER than the
+        # newest paged one (owner, 2026-10-23: an old whole-form check must not outvote newer page checks).
+        flat = [e for e in events if _page_of(e) is None and e["id"] > max(paged_ids)]
         flat_sweep = next((e for e in flat if e["event_type"] == "form_swept"), None)
         flat_check = next((e for e in flat if e["event_type"] == "form_checked"), None)
         if flat_sweep is not None:
             unreadable = unreadable or bool(flat_sweep["payload"].get("unreadable"))
-            want, got = (flat_check or {"payload": {}})["payload"].get("questions_count"), flat_sweep["payload"].get(
-                "fields_checked"
-            )
-            short = short or (isinstance(want, int) and isinstance(got, int) and got < want)
-        return short, unreadable, incomplete
+            flat_short, counted, listed = _flat_count(flat_check, flat_sweep, skipped)
+            if flat_short and not short:
+                return SweepReport(True, unreadable, incomplete, counted, listed)
+        return SweepReport(short, unreadable, incomplete)
     if swept is None:
-        return False, False, False
+        return SweepReport()
     unreadable = bool(swept["payload"].get("unreadable"))
     if checked is None:
-        return False, unreadable, False
-    want, got = checked["payload"].get("questions_count"), swept["payload"].get("fields_checked")
-    short = isinstance(want, int) and isinstance(got, int) and got < want
-    return short, unreadable, False
+        return SweepReport(unreadable=unreadable)
+    short, counted, listed = _flat_count(checked, swept, skipped)
+    return SweepReport(short, unreadable, False, counted, listed)
 
 
 def _paged_shortfalls(
@@ -663,11 +706,14 @@ async def _required_unanswered(db: JobDatabase, user_id: str, app_row: dict[str,
     """The newest ``form_checked`` of a page (or of the unpaged form) still lists a required question with
     no answer. ``missing_required`` is the count check_form returned; a check that reports ``missing``
     questions without saying how many are required counts as unanswered too (it must say). A later
-    ``form_checked`` of the same page, recorded after the user answered, clears it."""
+    ``form_checked`` of the same page, recorded after the user answered, clears it.
+    Newest check wins (owner, 2026-10-23): when the newest ``form_checked`` has no ``page`` only it counts;
+    otherwise every unpaged check older than the newest paged one is ignored (an old whole-form check
+    must not outvote a newer page check)."""
     if not required_answers_enforced(app_row.get("created_at")):
         return False
     newest: dict[Optional[int], dict[str, Any]] = {}
-    for e in await _events(db, user_id, int(app_row["id"]), ("form_checked",)):  # newest first
+    for e in _current_checks(await _events(db, user_id, int(app_row["id"]), ("form_checked",))):
         newest.setdefault(_page_of(e), e)
     for e in newest.values():
         required = e["payload"].get("missing_required")
@@ -715,7 +761,7 @@ async def gate_facts(
     has_receipt = await cur.fetchone() is not None
     now = datetime.now(timezone.utc)
     state = await controls_state(db, user_id, app_row, now)
-    shortfalls = await _sweep_shortfalls(db, user_id, application_id)
+    shortfalls = await _sweep_report(db, user_id, application_id)
     cv = state["cv"]
     stale = state["approval_stale"]
     approved = cv["approved"] is not None if cv else stale is None and await _approved_without_cv(
@@ -740,9 +786,11 @@ async def gate_facts(
         blocked=state["blocked"] is not None,
         form_filled=await _filled_with_latest_cv(db, user_id, application_id),
         form_swept=await _swept_after_fill(db, user_id, application_id),
-        form_count_short=shortfalls[0],
-        unreadable_fields=shortfalls[1],
-        form_pages_incomplete=shortfalls[2],
+        form_count_short=shortfalls.short,
+        form_count_counted=shortfalls.counted,
+        form_count_listed=shortfalls.listed,
+        unreadable_fields=shortfalls.unreadable,
+        form_pages_incomplete=shortfalls.incomplete,
         form_check_missing=await _form_check_missing(db, user_id, app_row),
         required_unanswered=await _required_unanswered(db, user_id, app_row),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
@@ -2119,6 +2167,15 @@ async def _answers_for(
     return profile, country, answers, missing
 
 
+def kit_missing(missing: list[dict[str, str]]) -> list[dict[str, str]]:
+    """The kit's ``missing`` without salary (owner, 2026-10-23): a form that never asks about pay made it
+    noise, and check_form reports salary when a live form does ask. Every other entry stays."""
+    return [
+        m for m in missing
+        if m["key"] not in ("salary", _SENSITIVE_PATH["salary"]) and not m["key"].startswith("salary.")
+    ]
+
+
 async def build_kit(
     db: JobDatabase, user: CurrentUser, application_id: int, *, now: datetime, include_text: bool = True,
     session: str = "",
@@ -2159,6 +2216,7 @@ async def build_kit(
         )
 
     profile, country, answers, missing = await _application_answers(db, user, app_row)
+    missing = kit_missing(missing)
     answers_omitted = 0
     approved = answers["approved_text"]
     if len(approved) > settings.KIT_APPROVED_TEXT_MAX:
