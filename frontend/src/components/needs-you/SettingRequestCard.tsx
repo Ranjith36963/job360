@@ -150,6 +150,14 @@ export function describeSettingRequest(
             ? "Let your assistant send the outreach emails it writes from your Gmail, in your name"
             : "Only draft outreach emails; I send them myself",
       };
+    case "assistant_settings.hunt_every_hours":
+      return {
+        title: "Job hunt",
+        change:
+          value == null || value === "" || value === 0
+            ? "Stop the scheduled job hunt"
+            : `Let your assistant hunt for jobs on its own every ${String(value)} hour${value === 1 ? "" : "s"}`,
+      };
     case "assistant_settings.paused_until":
       if (value === "" || value === null || value === undefined) {
         return { title: "Pause", change: "Start applying again" };

@@ -2383,6 +2383,9 @@
           "daily_cap": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "hunt_every_hours": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "inbox_mode": {
             "default": "",
             "title": "Inbox Mode",
@@ -2456,6 +2459,7 @@
           "pause_reason",
           "auto_employer_emails",
           "outreach_send",
+          "hunt_every_hours",
           "paused",
           "practice_run"
         ],
