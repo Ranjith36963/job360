@@ -216,3 +216,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+- Not built, reported as unsupported (applypilot, AGPL, facts only, no code copied): Randstad Canada, CareerJet Canada, Dice, JustRemote and Remote.co. `src/applypilot/config/sites.yaml:59-139` names only each site's search or category page URL; applypilot reads those pages with a browser and an LLM-written selector (`discovery/smartextract.py:1-9`), so no endpoint, field name or page structure is recorded to re-write. Dice is also an official assistant connector and is never read.
