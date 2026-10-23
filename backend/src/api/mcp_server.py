@@ -1274,6 +1274,29 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
+    async def match_email(sender: str = "", thread_id: str = "", subject: str = "") -> dict[str, Any]:
+        """Which of the user's applications an email may belong to, from what Job360 already stores.
+        Give any of `sender` (the From header), `thread_id` (the mail thread id), `subject`.
+        Returns `candidates`: each application with `reasons` - same_thread (an event already
+        recorded with this source.thread_id), contact_email (the sender is a saved contact on it),
+        sender_domain_in_email_senders (the sender's domain is one of its `email_senders`),
+        company_in_subject (its company is named in the subject). Facts, not a verdict: read the
+        email and choose. One clear match: record_event with `source` (pass `thread_id`). Several
+        or none: ONE ask_user, record nothing. Job360 reads no email; nothing is written."""
+        try:
+            body = applications_route.MatchEmailIn(sender=sender, thread_id=thread_id, subject=subject)
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.match_email(body, db, _user())
+        except HTTPException as exc:
+            _audit("match_email", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("match_email", "ok", count=len(resp.get("candidates", [])))
+        return resp
+
+    @mcp.tool()
     async def save_artifact(
         kind: str,
         text: str,
@@ -1499,7 +1522,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Append an event.
 
-        `source` {kind, message_id, sender, subject, received_at} = the email; repeat message_id = no-op.
+        `source` {kind, message_id, thread_id?, sender, subject, received_at} = the email; repeat message_id = no-op.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email

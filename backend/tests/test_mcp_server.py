@@ -32,6 +32,7 @@ EXPECTED_TOOLS = {
     "get_application",
     "list_applications",
     "mark_inbox_checked",
+    "match_email",  # Route an email back to its application from stored facts (feature 8) - 33 -> 34.
     "save_artifact",
     "save_fit",
     "record_event",

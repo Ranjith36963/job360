@@ -4759,6 +4759,11 @@
             "default": "",
             "title": "Subject",
             "type": "string"
+          },
+          "thread_id": {
+            "default": "",
+            "title": "Thread Id",
+            "type": "string"
           }
         },
         "required": [
@@ -4796,6 +4801,17 @@
           "subject": {
             "title": "Subject",
             "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
           }
         },
         "required": [
@@ -7415,6 +7431,110 @@
           "email"
         ],
         "title": "MagicLinkRequest",
+        "type": "object"
+      },
+      "MatchEmailCandidateOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "contact_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Contact Ids",
+            "type": "array"
+          },
+          "email_senders": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "thread_event_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Thread Event Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "application_id",
+          "job_title",
+          "job_company",
+          "status",
+          "reasons",
+          "thread_event_ids",
+          "contact_ids",
+          "email_senders"
+        ],
+        "title": "MatchEmailCandidateOut",
+        "type": "object"
+      },
+      "MatchEmailIn": {
+        "additionalProperties": false,
+        "description": "feature 8 - the email the assistant already read; any of the three (at least one).",
+        "properties": {
+          "sender": {
+            "default": "",
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
+            "type": "string"
+          },
+          "thread_id": {
+            "default": "",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "title": "MatchEmailIn",
+        "type": "object"
+      },
+      "MatchEmailOut": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/MatchEmailCandidateOut"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "candidates",
+          "truncated"
+        ],
+        "title": "MatchEmailOut",
         "type": "object"
       },
       "MeResponse": {
@@ -15509,6 +15629,82 @@
           }
         },
         "summary": "List Lessons",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/match-email": {
+      "post": {
+        "description": "Feature 8 (G088): the user's applications that a STORED fact links to this email -\nsame thread, a saved contact's email, a sender domain in email_senders, the company named\nin the subject - each with its reasons. Facts, not a verdict: the assistant decides\n(VISION rule 5). Read-only. POST so the sender and subject never sit in a URL or access log.",
+        "operationId": "match_email_api_applications_match_email_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MatchEmailIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchEmailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Match Email",
         "tags": [
           "applications"
         ]

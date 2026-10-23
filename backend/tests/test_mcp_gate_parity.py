@@ -67,6 +67,7 @@ TOOL_ROUTES = {
     "get_application": ("applications", "get_application", {"application_id": 987654321}),
     "list_applications": ("applications", "list_applications", {}),
     "mark_inbox_checked": ("applications", "mark_inbox_checked", {"application_ids": [987654321]}),
+    "match_email": ("applications", "match_email", {"sender": "recruiter@acme.example"}),  # feature 8 - require_user, read-only, no email gate.
     "save_artifact": (
         "applications", "save_artifact", {"application_id": 987654321, "kind": "cv", "text": "x"}
     ),

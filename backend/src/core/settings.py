@@ -419,6 +419,10 @@ APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS = int(
 )
 APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS", "320"))
 APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS", "500"))
+APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS", "256"))
+# match_email (feature 8): at most this many candidate applications per call, newest
+# first; `truncated` says more existed.
+MATCH_EMAIL_MAX_CANDIDATES = int(os.getenv("MATCH_EMAIL_MAX_CANDIDATES", "20"))
 
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)

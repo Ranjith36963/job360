@@ -165,6 +165,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/match-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Match Email
+         * @description Feature 8 (G088): the user's applications that a STORED fact links to this email -
+         *     same thread, a saved contact's email, a sender domain in email_senders, the company named
+         *     in the subject - each with its reasons. Facts, not a verdict: the assistant decides
+         *     (VISION rule 5). Read-only. POST so the sender and subject never sit in a URL or access log.
+         */
+        post: operations["match_email_api_applications_match_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/stats": {
         parameters: {
             query?: never;
@@ -4934,6 +4957,11 @@ export interface components {
              * @default
              */
             subject: string;
+            /**
+             * Thread Id
+             * @default
+             */
+            thread_id: string;
         };
         /**
          * EventSourceOut
@@ -4951,6 +4979,8 @@ export interface components {
             sender: string;
             /** Subject */
             subject: string;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /** ExportApplicationOut */
         ExportApplicationOut: {
@@ -6004,6 +6034,53 @@ export interface components {
             email: string;
             /** Next */
             next?: string | null;
+        };
+        /** MatchEmailCandidateOut */
+        MatchEmailCandidateOut: {
+            /** Application Id */
+            application_id: number;
+            /** Contact Ids */
+            contact_ids: number[];
+            /** Email Senders */
+            email_senders: string[];
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Reasons */
+            reasons: string[];
+            /** Status */
+            status: string;
+            /** Thread Event Ids */
+            thread_event_ids: number[];
+        };
+        /**
+         * MatchEmailIn
+         * @description feature 8 - the email the assistant already read; any of the three (at least one).
+         */
+        MatchEmailIn: {
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
+            /**
+             * Thread Id
+             * @default
+             */
+            thread_id: string;
+        };
+        /** MatchEmailOut */
+        MatchEmailOut: {
+            /** Candidates */
+            candidates: components["schemas"]["MatchEmailCandidateOut"][];
+            /** Truncated */
+            truncated: boolean;
         };
         /** MeResponse */
         MeResponse: {
@@ -8945,6 +9022,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LessonsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    match_email_api_applications_match_email_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MatchEmailIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchEmailOut"];
                 };
             };
             /** @description Validation Error */

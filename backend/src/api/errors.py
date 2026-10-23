@@ -70,6 +70,8 @@ async def log_http_exception(request: Request, exc: StarletteHTTPException) -> J
 async def log_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Log a 422 validation failure (which field / why), then return the standard 422."""
     errors = jsonable_encoder(exc.errors())
+    # ``input``/``ctx`` echo the caller's raw values (sender, subject, thread id): never log them.
+    logged = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in errors]
     _err_log.warning(
         "validation_error",
         extra={
@@ -77,7 +79,7 @@ async def log_validation_error(request: Request, exc: RequestValidationError) ->
             "method": request.method,
             "path": redact_path(request.url.path),
             "status_code": 422,
-            "errors": errors[:10],
+            "errors": logged[:10],
             "request_id": _rid(request),
         },
     )
