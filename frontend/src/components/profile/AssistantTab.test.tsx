@@ -170,6 +170,37 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("job hunt: blank means off and writes nothing; a number of hours saves it", async () => {
+    await ready();
+    const box = screen.getByTestId("hunt-every");
+    expect(box).toHaveValue(null);
+    fireEvent.blur(box);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: "6" } });
+    fireEvent.blur(box);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.hunt_every_hours", value: 6 }]),
+    );
+  });
+
+  it("job hunt: out of range is refused; clearing a saved one turns it off", async () => {
+    getAssistantSettings.mockResolvedValue(view({ hunt_every_hours: field(6, 6) }));
+    await ready();
+    expect(screen.getByTestId("assistant-rail")).toHaveTextContent("every 6 hours");
+    const box = screen.getByTestId("hunt-every");
+    expect(box).toHaveValue(6);
+    fireEvent.change(box, { target: { value: "169" } });
+    fireEvent.blur(box);
+    expect(toastError).toHaveBeenCalled();
+    expect(updateProfileFields).not.toHaveBeenCalled();
+    expect(box).toHaveValue(6);
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.hunt_every_hours", value: null }]),
+    );
+  });
+
   it("a blank daily limit clears it (no limit)", async () => {
     getAssistantSettings.mockResolvedValue(view({ daily_cap: field(10, 10) }));
     await ready();

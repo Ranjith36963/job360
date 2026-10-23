@@ -901,6 +901,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.auto_employer_emails",
     # Owner 2026-10-20 (G087) - may the assistant send outreach itself (draft_only | auto); its own consent.
     "assistant_settings.outreach_send",
+    # Owner 2026-10-23 - hunt for jobs every N hours (1-168; null / 0 = off). Turning it on is riskier.
+    "assistant_settings.hunt_every_hours",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

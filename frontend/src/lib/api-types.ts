@@ -3971,6 +3971,7 @@ export interface components {
             company_cap: components["schemas"]["SettingFieldOut"];
             company_cap_days: components["schemas"]["SettingFieldOut"];
             daily_cap: components["schemas"]["SettingFieldOut"];
+            hunt_every_hours: components["schemas"]["SettingFieldOut"];
             /**
              * Inbox Mode
              * @default
