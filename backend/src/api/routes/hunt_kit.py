@@ -43,6 +43,7 @@ KIT_FILES: dict[str, str] = {
     "kit_pubsec.py": "text/plain; charset=utf-8",
     "kit_ats_misc3.py": "text/plain; charset=utf-8",
     "kit_ats_misc4.py": "text/plain; charset=utf-8",
+    "kit_ats_misc5.py": "text/plain; charset=utf-8",
     "kit_latam.py": "text/plain; charset=utf-8",
     "kit_feeds.py": "text/plain; charset=utf-8",
     "kit_gov.py": "text/plain; charset=utf-8",
