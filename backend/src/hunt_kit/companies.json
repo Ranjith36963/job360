@@ -6474,5 +6474,12 @@
 {"name":"Porsche","ats":"beesite","board":"porsche-beesite-production-gjb.app.beesite.de","source":"freehire"},
 {"name":"Intuition Machines","ats":"workablemarketplace","board":"ix7jhWd4JnugmXDK5RaQSZ","source":"freehire"},
 {"name":"Yourator (Taiwan startup board)","ats":"yourator","board":"all","source":"career-ops"},
-{"name":"CareerViet (Vietnam)","ats":"careerviet","board":"all","source":"career-ops"}
+{"name":"CareerViet (Vietnam)","ats":"careerviet","board":"all","source":"career-ops"},
+{"name":"Stellantis","ats":"adpmyjobs","board":"stellantisexternalcx","source":"freehire"},
+{"name":"PEI Group","ats":"eploy","board":"careers.pei.group","source":"freehire"},
+{"name":"Dressup","ats":"selfrecruit","board":"dressup","source":"freehire"},
+{"name":"Tributo Devido","ats":"enlizt","board":"tributodevido","source":"freehire"},
+{"name":"ScrumLaunch","ats":"hurma","board":"scrumlaunch","source":"freehire"},
+{"name":"WA FENIX","ats":"compleo","board":"wafx","source":"freehire"},
+{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"}
 ]

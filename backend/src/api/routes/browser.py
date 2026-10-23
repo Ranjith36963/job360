@@ -30,7 +30,7 @@ with the caller's assistant; the safety stays here and in
 from __future__ import annotations
 
 import contextlib
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -230,6 +230,11 @@ HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. Finish it with your own assistant's browser when your computer is on "
     "(Claude in Chrome, Gemini in Chrome, ChatGPT's own browser), or sign in once on Settings, Job sites."
 )
+# A human check: the filled form is kept open for the user to finish here (agent.hold_for_user).
+CAPTCHA_DETAIL = (
+    "The site asked for a human check. Your filled form is kept open for 30 minutes: press Finish it here, "
+    "solve the check yourself, then press Done. After that, finish it in your own browser."
+)
 
 
 async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:
@@ -241,12 +246,15 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
     from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
 
     reason = _BLOCKED_REASON.get(str(result.get("reason")), "other")
+    held = reason == "captcha" and browser_agent.hold_for_user(browser_agent.get_pool(), user.id)
     async with _db() as db:
         current = await blocked_service.open_block(db, user.id, application_id)
         if current is not None and current["reason"] == reason:
             return False
         # "Job360 browser" is read by the web (ApplicationDecisions.tsx) to offer "Sign in once on Job sites".
-        payload: dict[str, Any] = {"reason": reason, "step": "Job360 browser", "detail": HAND_OFF_DETAIL}
+        payload: dict[str, Any] = {
+            "reason": reason, "step": "Job360 browser", "detail": CAPTCHA_DETAIL if held else HAND_OFF_DETAIL,
+        }
         host = site_host(str(result.get("url", "")))
         if host and "." in host:
             payload["page_host"] = host
@@ -269,6 +277,11 @@ class LiveActionRequest(BaseModel):
     text: str = Field("", max_length=browser_agent.MAX_TYPE_CHARS)
     key: str = Field("", max_length=16)
     dy: float = 0
+    # "finish": the hand-off view, in the user's own assistant browser (a CAPTCHA the user solves).
+    mode: Literal["sign_in", "finish"] = "sign_in"
+
+
+_LIVE_AUDIT = {"sign_in": "live", "finish": "finish"}
 
 
 @router.post("/browser/live")
@@ -278,9 +291,10 @@ async def browser_live(
 ) -> dict[str, Any]:
     """One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
-    logged or returned; the audit line names the action only."""
+    logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
+    human check in their assistant's browser instead (shot, click, type, key, scroll, done)."""
     if not settings.BROWSER_AGENT_ENABLED:
-        _audit(user, f"live_{body.action}", "off")
+        _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", "off")
         return dict(OFF)
     from src.services.browser_agent import sign_ins  # noqa: PLC0415
 
@@ -296,12 +310,12 @@ async def browser_live(
     try:
         result = await browser_agent.live(
             browser_agent.get_pool(), user.id, body.action, url=body.url, x=body.x, y=body.y, text=body.text,
-            key=body.key, dy=body.dy, load_state=_loader(user), keep=_keep,
+            key=body.key, dy=body.dy, load_state=_loader(user), keep=_keep, finish=body.mode == "finish",
         )
     except browser_agent.BrowserError as exc:
-        _audit(user, f"live_{body.action}", exc.status, exc.reason)
+        _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", exc.status, exc.reason)
         return exc.as_dict()
-    _audit(user, f"live_{body.action}", str(result.get("status", "")))
+    _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", str(result.get("status", "")))
     return result
 
 
