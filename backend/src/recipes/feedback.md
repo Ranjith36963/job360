@@ -17,11 +17,14 @@ Send nothing except step 6. Full payload rules: `get_recipe("rules")`.
 2. **Then record the outcome at once. Do not ask first.** `record_event` with
    `rejected`, `offer`, `hired`, `offer_declined` or `withdrawn` (or
    `replied` / `interview_*`). Always pass `source` (kind `email`, or `pasted`
-   with your own stable `message_id`; add the mail's `thread_id`). Payload: `verbatim_feedback` = the
+   with your own stable `message_id`; add the mail's `thread_id`, and `quote` = the one sentence that decides it,
+   copied verbatim, <= 500). Payload: `verbatim_feedback` = the
    employer's exact words (copy, never paraphrase), `reasons` = plain words
    they gave (no fixed list), `stage` (where it ended), `reply_type`,
    `evidence`, `confidence`. A company-wide rejection = one event per
-   application. **Done when** each outcome has its event.
+   application. Not sure what the email means? Record `outcome_suggested` instead (payload `event_type`, `quote`,
+   `why`; same `source`): it waits on Needs you and changes nothing until the user accepts.
+   **Done when** each outcome has its event.
 3. **Post-mortem right away**, and for each id in doctor `ghosted_now`.
    `get_application`; read what was sent (CV and letter versions, answers).
    Write ONE `post_mortem` note: `outcome_event_id`, `what_was_sent`,

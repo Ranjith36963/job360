@@ -121,6 +121,10 @@ def test_every_example_payload_is_valid():
                 raise AssertionError(f"{event_type}: {exc.detail}") from None
         elif event_type == "proof_text":
             proof.check_proof_text(_U_PROOF, example)
+        elif event_type == "outcome_suggested":
+            from src.services.applications import outcome_suggestions
+
+            outcome_suggestions.check_suggestion_payload(dict(example))
         elif event_type in ("interview_session", "process_friction", "assessment"):
             from src.services.applications import interview_payloads
 

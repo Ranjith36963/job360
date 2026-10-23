@@ -6,6 +6,11 @@ import { actorLabel } from "@/lib/event-labels";
 import { WhoChip } from "@/components/applications/WhoChip";
 import { formatDateTime } from "@/lib/format-date";
 
+function suggestedQuote(payload: unknown): string {
+  const q = payload && typeof payload === "object" ? (payload as Record<string, unknown>).quote : "";
+  return typeof q === "string" ? q : "";
+}
+
 /** The whole append-only event log, in `occurred_at` order (spec R3/R11). A
  * superseded event (retired by a correcting event, spec R3) is shown struck
  * through rather than hidden — the log itself never drops a row. */
@@ -60,6 +65,22 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
             <p data-testid="event-interview" className="mt-1 text-xs text-muted-foreground">
               {interviewDetails(event)}
             </p>
+          )}
+          {event.source?.quote && (
+            <blockquote
+              data-testid="event-source-quote"
+              className="mt-1 border-l-2 border-border pl-2 text-xs italic text-muted-foreground"
+            >
+              {`“${event.source.quote}”`}
+            </blockquote>
+          )}
+          {event.event_type === "outcome_suggested" && suggestedQuote(event.payload) && (
+            <blockquote
+              data-testid="event-suggested-quote"
+              className="mt-1 border-l-2 border-border pl-2 text-xs italic text-muted-foreground"
+            >
+              {`“${suggestedQuote(event.payload)}”`}
+            </blockquote>
           )}
           {event.scheduled_at && (
             <p className="mt-1 font-mono text-xs text-foreground">

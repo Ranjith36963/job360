@@ -54,7 +54,7 @@ from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
-from src.services.applications import interview_payloads, queue_preflight, spine
+from src.services.applications import interview_payloads, outcome_suggestions, queue_preflight, spine
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
@@ -222,6 +222,7 @@ class EventSource(BaseModel):
     sender: str = ""
     subject: str = ""
     received_at: Optional[str] = None
+    quote: Optional[str] = None
 
 
 class RecordEventRequest(BaseModel):
@@ -476,6 +477,7 @@ class EventSourceOut(BaseModel):
     sender: str
     subject: str
     received_at: Optional[str]
+    quote: Optional[str] = None
 
 
 class ApplicationEventOut(BaseModel):
@@ -2047,6 +2049,47 @@ async def stats(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+class OutcomeSuggestionOut(BaseModel):
+    event_id: int
+    application_id: int
+    job_title: str
+    job_company: str
+    status: str
+    event_type: str
+    quote: str
+    why: str
+    occurred_at: str
+    recorded_at: str
+    recorded_by: str
+    email: EventSourceOut
+
+
+class OutcomeSuggestionsOut(BaseModel):
+    suggestions: list[OutcomeSuggestionOut]
+    truncated: bool
+
+
+@router.get("/applications/outcome-suggestions", response_model=OutcomeSuggestionsOut, dependencies=AUTH_FIRST)
+async def list_outcome_suggestions(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Feature 9: open outcome_suggested events (not ignored, and their email not yet recorded
+    on the application), newest first. Read-only; web only (an assistant reads them on
+    get_application / whats_new)."""
+    items, truncated = await outcome_suggestions.open_suggestions(
+        db, user.id, settings.OUTCOME_SUGGESTIONS_LIST_MAX
+    )
+    get_audit_logger().info(
+        "outcome_suggestions_listed",
+        extra={
+            "event": "outcome_suggestions_listed", "user_id": safe_log_value(user.id), "count": len(items),
+            "event_ids": [i["event_id"] for i in items], "truncated": truncated, "result": "ok",
+        },
+    )
+    return {"suggestions": items, "truncated": truncated}
+
+
 @router.get("/applications", response_model=ListApplicationsResponse, dependencies=AUTH_FIRST)
 async def list_applications(
     status: Optional[str] = Query(None),
@@ -2551,7 +2594,7 @@ async def record_outreach(
 
     async def _write() -> dict[str, Any]:
         try:
-            source = spine.validate_source(body.source.model_dump() if body.source else None)
+            source = spine.validate_source(body.source.model_dump() if body.source else None, allow_quote=False)
             return await contacts_service.record_outreach(
                 db, user.id, contact_id, actor_for(user),
                 entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
@@ -3338,7 +3381,9 @@ async def _record_event(
     try:
         if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:
             raise _outreach_needs_contact("record_event", user.id, application_id=application_id)
-        source = spine.validate_source(body.source.model_dump() if body.source else None)
+        source = spine.validate_source(
+            body.source.model_dump() if body.source else None, allow_quote=body.contact_id is None
+        )
         if body.contact_id is not None:
             # Owner decision, 2026-09-25 — record this as OUTREACH for a
             # person too, in the same transaction as the job-timeline event.
@@ -3430,6 +3475,14 @@ async def _record_event(
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             # S3: closed payloads + who may write which (the MCP tool inherits this).
             payload = await kit_service.check_kit_event(db, user, application_id, body.event_type, payload)
+        if body.event_type in outcome_suggestions.EVENT_TYPES:
+            # Feature 9: a suggestion never moves status; checks + dedupe live in the service,
+            # in the ROUTE function, so the MCP record_event tool inherits them (M5).
+            return await outcome_suggestions.record(
+                db, user, application_id, body.event_type, payload, source, detail=detail,
+                occurred_at=occurred_at, follow_up_on_set=body.follow_up_on is not None,
+                corrects_event_id=body.corrects_event_id,
+            )
         if body.event_type in blocked_service.BLOCKED_EVENT_TYPES:
             # S6: closed payloads; `blocked` opens one Needs-you ask, `unblocked`
             # closes it - ask + event in ONE transaction (the MCP tool inherits this).

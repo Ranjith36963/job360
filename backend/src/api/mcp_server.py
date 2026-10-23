@@ -1555,32 +1555,33 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Append an event.
 
-        `source` {kind, message_id, thread_id?, sender, subject, received_at} = the email; repeat id = no-op.
+        `source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op;
+        quote = deciding line, verbatim. Unsure: outcome_suggested (rules).
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is proof, not a 2nd.
+        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
+        is proof, not a 2nd.
         `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`, or user says),
-        outreach_replied, contact_meeting|contact_call|contact_intro|referral_asked|
-        referral_given|outreach_bounced (bounce id as `source`); no application_id if cold.
+        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`),
+        outreach_replied, contact_meeting|_call|_intro, referral_asked|_given, outreach_bounced
+        (bounce id as `source`); no application_id if cold.
 
         Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
-        submit_declined {where}; submit_attempted {} pre-click;
+        submit_declined {where}; submit_attempted {};
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
-        email_drafted {to, subject, attachments, gmail_draft_id} (no body);
+        email_drafted {to, subject, attachments, gmail_draft_id};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped, note?}.
-        proof_text {text, page_host}; simulation {} = test app, not counted; unqueued {reason?};
+        proof_text {text, page_host}; simulation {} = test app; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
