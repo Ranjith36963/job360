@@ -1255,7 +1255,7 @@ export type BrowserLiveShot = {
 };
 export type BrowserLiveAction =
   | { action: "start"; url: string }
-  | { action: "shot" | "keep" | "cancel" }
+  | { action: "shot" | "keep" | "cancel" | "done" }
   | { action: "click"; x: number; y: number }
   | { action: "type"; text: string }
   | { action: "key"; key: string }
@@ -1270,8 +1270,12 @@ export async function forgetBrowserSignIn(host: string): Promise<{ forgotten: st
 }
 
 /** One step of the user's own sign-in. What is typed goes to the page and is never kept. */
-export async function browserLive(step: BrowserLiveAction): Promise<BrowserLiveShot> {
-  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify(step) });
+/** `mode: "finish"`: the hand-off view, in the assistant's own browser on the form it stopped on. */
+export async function browserLive(
+  step: BrowserLiveAction,
+  mode: "sign_in" | "finish" = "sign_in",
+): Promise<BrowserLiveShot> {
+  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify({ ...step, mode }) });
 }
 
 // ---- Send starts my assistant (browser agent, "Send trigger"; website only, never a token) ----

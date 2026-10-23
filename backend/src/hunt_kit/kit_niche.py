@@ -101,11 +101,15 @@ def _walk(http: Any, stats: Any, url_for: Callable[[int], str], parse: Callable[
     return jobs
 
 
+_FEED_MAX = 5_000_000  # an XML/RSS job feed carries a full description per item; the 2 MB page default would drop it
+
+
 def _one(url: str, parse: Callable[[Any], list[Job]], *, text: bool = False) -> Callable[..., list[Job]]:
     """Fetcher for a board whose whole list is a single request, keyword-matched locally."""
     @_feed
     def fetch(queries: list[str], http: Any, stats: Any, *, days: int, countries: list[str]) -> list[Job]:
-        return _keep(parse(_get(http, stats, url, as_json=not text)), queries, days)
+        return _keep(parse(_get(http, stats, url, as_json=not text,
+                                **({"max_bytes": _FEED_MAX} if text else {}))), queries, days)
     return fetch
 
 

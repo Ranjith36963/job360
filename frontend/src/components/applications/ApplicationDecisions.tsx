@@ -8,6 +8,7 @@ import { toast } from "@/lib/toast";
 import { formatDate } from "@/lib/format-date";
 import { allowedActions } from "@/lib/application-actions";
 import { describeMark } from "@/components/applications/CvSeenButton";
+import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
 const BTN =
   "rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50";
@@ -30,7 +31,8 @@ function stamp(mark: DecisionMark): string {
  *  - Your assistant got stuck (S6) - shown at the top while a block is recorded
  *    (CAPTCHA, sign-in...), with who / when; "Mark resolved" clears it, and
  *    "I submitted it" also records the receipt (with the pasted confirmation)
- *    when the person pressed Submit themselves.
+ *    when the person pressed Submit themselves. A CAPTCHA in Job360's own browser
+ *    adds "Finish it here": the person solves it on the filled form (FinishInBrowser).
  *
  * `newFillWaiting`: the assistant filled the form AFTER the last yes / no (the
  * Ready card is showing), so that old answer is not the current one.
@@ -56,6 +58,7 @@ export function ApplicationDecisions({
   changesSinceApproved?: number;
 }) {
   const [busy, setBusy] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [receiptId, setReceiptId] = useState<number | null>(null);
 
@@ -111,6 +114,18 @@ export function ApplicationDecisions({
               {`Sign in once${blocked.page_host ? ` to ${blocked.page_host}` : ""} on Job sites`}
             </Link>
           )}
+          {/* Job360's own browser met a human check: the person solves it on that same filled form. */}
+          {blocked.step === "Job360 browser" && blocked.reason === "captcha" && !finishing && (
+            <button
+              type="button"
+              data-testid="blocked-finish-here"
+              onClick={() => setFinishing(true)}
+              className={`${BTN} self-start`}
+            >
+              Finish it here
+            </button>
+          )}
+          {finishing && <FinishInBrowser onDone={() => setFinishing(false)} />}
           <label className={`${NOTE} flex flex-col gap-1`}>
             Pressed Submit yourself? Paste the confirmation text (optional).
             <textarea

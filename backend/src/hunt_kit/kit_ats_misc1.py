@@ -296,9 +296,12 @@ def _on_host(url: str, host: str) -> bool:
     return parts.scheme == "https" and parts.netloc.lower() == host.lower()
 
 
-def _page(http: Http, url: str) -> tuple[int, str | None]:
-    """GET a page as text: (status, text) with text None on any failure."""
-    st, page = _get(http, url, as_json=False, headers=_HTML)
+_SITEMAP_MAX = 10_000_000  # a sitemap can list tens of thousands of postings; the 2 MB page default would drop it
+
+
+def _page(http: Http, url: str, **kw: Any) -> tuple[int, str | None]:
+    """GET a page as text: (status, text) with text None on any failure. ``kw`` (e.g. max_bytes) goes to http."""
+    st, page = _get(http, url, as_json=False, headers=_HTML, **kw)
     return st, page if st == 200 and isinstance(page, str) else None
 
 
@@ -471,7 +474,7 @@ def _clinch(row: dict[str, Any], http: Http) -> list[Job] | None:
     board = _token(row)
     if not _HOST.fullmatch(board):
         return None
-    _, xml = _page(http, f"https://{board}/sitemap.xml")
+    _, xml = _page(http, f"https://{board}/sitemap.xml", max_bytes=_SITEMAP_MAX)
     if xml is None:
         return None
     tree = safe_fromstring(xml.lstrip("\ufeff").strip())

@@ -49,12 +49,14 @@ from src.services.browser_agent.page_js import (
     SUBMIT_GUARD_READ_JS,
     SUBMIT_GUARD_START_JS,
     TICK_VIA_LABEL_JS,
+    TYPEABLE_TARGET_JS,
     WATCH_READ_JS,
     WATCH_START_JS,
 )
 from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
 from src.services.browser_agent.sites import (
     account_step,
+    greenhouse_embed_url,
     is_honeypot,
     looks_like_application,
     outcome_for,
@@ -192,6 +194,9 @@ class Session:
     blocked_urls: dict[str, str] = field(default_factory=dict)
     # The assistant session (its `session` label) driving this browser: another one is refused.
     owner: str = ""
+    # Kept open past idle_s until this time (monotonic): a form stopped on a human check waits for the
+    # user to finish it themselves in the hand-off view (hold_for_user). None = no hold.
+    held_until: Optional[float] = None
 
 
 class BrowserPool:
@@ -255,7 +260,8 @@ class BrowserPool:
         now = time.monotonic()
         for user_id, s in list(self._sessions.items()):
             expired = s.closes_at is not None and now > s.closes_at
-            if (now - s.last_used > self.idle_s or expired) and not s.lock.locked():
+            held = s.held_until is not None and now < s.held_until
+            if (now - s.last_used > self.idle_s or expired) and not held and not s.lock.locked():
                 await self.close(user_id, "idle")
 
     async def get(
@@ -540,8 +546,34 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
     page = _live_page(s)
     if not await loc.evaluate("(el) => el.getAttribute('aria-expanded') === 'true'"):
         await loc.click()
-    own_lists = [i for i in await loc.evaluate(OWN_LIST_IDS_JS) if _LIST_ID.match(i)]
     seen: list[str] = []
+    if await _pick_in_frames(s, page, loc, text, seen):
+        return
+    # A long or virtualized list draws only part of its options until something is typed (a phone-country
+    # list of ~250). Once, never a loop: type the asked-for text with the real keyboard, let the list
+    # redraw, read the options again and pick again.
+    # Only option-shaped text is keyed: short, and no control character (as keys "\n" is Enter).
+    typeable = (
+        await loc.evaluate(TYPEABLE_TARGET_JS)
+        if len(text) <= KEYED_MAX_CHARS and not _CONTROL_CHARS.search(text) else ""
+    )
+    if typeable:
+        field = loc if typeable == "self" else loc.locator("input").nth(int(typeable.split(":", 1)[1]))
+        await field.fill("")  # clear old text first (never ctrl+a: in an empty field it types an "a")
+        await field.press_sequentially(text, delay=25)
+        await _settle(page)
+        seen = []
+        if await _pick_in_frames(s, page, loc, text, seen):
+            return
+    await page.keyboard.press("Escape")
+    raise _option_not_found(text, seen)
+
+
+async def _pick_in_frames(s: Session, page: Any, loc: Any, text: str, seen: list[str]) -> bool:
+    """Read the options drawn now (the field's own frame first), click the one ``text`` names and check
+    the field shows it. True when picked and confirmed; False when no drawn option matches (``seen`` gets
+    every label read)."""
+    own_lists = [i for i in await loc.evaluate(OWN_LIST_IDS_JS) if _LIST_ID.match(i)]
     for frame in await _option_frames(page, loc):
         options, scoped = frame.locator(VISIBLE_OPTIONS), False
         for list_id in own_lists:  # the list the field names as its own, when it is in this frame
@@ -577,14 +609,13 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
             if shown.strip() else bool(await loc.evaluate(CHOSEN_NEARBY_JS, texts[i].casefold()))
         )
         if confirmed:
-            return
+            return True
         raise BrowserError(
             "error", "choose_unconfirmed",
             f"Clicked option {i + 1} but the field does not show it. The field shows: "
             + (_wrap_untrusted(shown[:60]) if shown.strip() else "nothing"),
         )
-    await page.keyboard.press("Escape")
-    raise _option_not_found(text, seen)
+    return False
 
 
 async def _option_frames(page: Any, loc: Any) -> list[Any]:
@@ -1135,6 +1166,8 @@ async def _act(
     gate: Optional[Gate], files: Optional[FileFn],
 ) -> dict[str, Any]:
     if action == "open":
+        requested = url
+        url = greenhouse_embed_url(url)  # before the screen: the guard sees the URL that is opened
         verdict = await pool.screen.screen(url)
         if not verdict.ok:
             raise BrowserError(
@@ -1153,7 +1186,12 @@ async def _act(
         await _settle(page)
         if (refusal := _refusal(s, page)) is not None:
             raise refusal
-        return await look(s)
+        result = await look(s)
+        if url != requested:
+            result["opened_as"] = (
+                "Greenhouse embed form (lighter page for the same job): " + redact_url_for_display(url)
+            )
+        return result
     if action == "look":
         return await look(s)
     if action == "back":
@@ -1331,6 +1369,11 @@ async def _act(
         )
 
     if action == "choose":
+        if kind == "password":
+            raise BrowserError(
+                "refused", "password_field",
+                "That is a password box. Job360 never types a password: the user signs in themselves.",
+            )
         await _choose(s, loc, text)
         return await look(s, after_action=True)
 
@@ -1433,6 +1476,23 @@ def live_key(user_id: str) -> str:
 # The site the user started signing in on, per user: Keep saves it (and where the sign-in ended up).
 _live_hosts: dict[str, str] = {}
 
+# The hand-off view: the USER finishes a step only a human may do (a CAPTCHA) in the assistant's own
+# browser, on the page it stopped on. Unlike the sign-in view it acts on the assistant's browser (the
+# form stays filled), but it is reached the same way: from the website with a browser session only,
+# never a token, so no assistant can drive it. No start (it never opens a page) and no keep.
+FINISH_ACTIONS = ("shot", "click", "type", "key", "scroll", "done")
+# How long a form stopped on a human check stays open for the user, however idle.
+HANDOFF_HOLD_SECONDS = 30 * 60
+
+
+def hold_for_user(pool: Optional[BrowserPool], user_id: str, seconds: float = HANDOFF_HOLD_SECONDS) -> bool:
+    """Keep the user's assistant browser open ``seconds`` more for the hand-off view. False: none is open."""
+    s = pool._sessions.get(user_id) if pool is not None else None
+    if s is None:
+        return False
+    s.held_until = time.monotonic() + seconds
+    return True
+
 
 SHOT_TRIES = 3
 
@@ -1480,18 +1540,32 @@ async def live(
     dy: float = 0,
     load_state: Optional[StateFn] = None,
     keep: Optional[Callable[[str, dict[str, Any]], Awaitable[int]]] = None,
+    finish: bool = False,
 ) -> dict[str, Any]:
-    """One step of the user's own sign-in, returning a fresh picture of the page."""
-    if action not in LIVE_ACTIONS:
-        raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(LIVE_ACTIONS) + ".")
-    if action == "cancel":
-        _live_hosts.pop(user_id, None)
-        return {"status": "ok", "closed": await pool.close(live_key(user_id))}
-    s = await pool.get(live_key(user_id), create=action == "start", load_state=load_state)
-    if s is None:
-        raise BrowserError("refused", "no_browser", "Start again: type the job site's address and press Start.")
-    if s.closes_at is None or action == "start":  # each Start is a new sign-in: its full time
-        s.closes_at = time.monotonic() + LIVE_MAX_SECONDS
+    """One step of the user's own sign-in, returning a fresh picture of the page. ``finish``: one step
+    of the hand-off view instead, in the user's assistant browser (FINISH_ACTIONS)."""
+    actions = FINISH_ACTIONS if finish else LIVE_ACTIONS
+    if action not in actions:
+        raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(actions) + ".")
+    if finish:
+        s = await pool.get(user_id, create=False)
+        if s is None:
+            raise BrowserError(
+                "refused", "no_form", "The form has closed. Ask your assistant to fill it again, or apply yourself.",
+            )
+        if action == "done":  # the user is finished: the browser goes back to its idle clock
+            s.held_until = None
+            s.last_used = time.monotonic()
+            return {"status": "ok", "done": True}
+    else:
+        if action == "cancel":
+            _live_hosts.pop(user_id, None)
+            return {"status": "ok", "closed": await pool.close(live_key(user_id))}
+        s = await pool.get(live_key(user_id), create=action == "start", load_state=load_state)
+        if s is None:
+            raise BrowserError("refused", "no_browser", "Start again: type the job site's address and press Start.")
+        if s.closes_at is None or action == "start":  # each Start is a new sign-in: its full time
+            s.closes_at = time.monotonic() + LIVE_MAX_SECONDS
     # The page refreshes its picture every 1.5 s: only the user's own steps keep the view open.
     by_user = action != "shot"
     async with s.lock:

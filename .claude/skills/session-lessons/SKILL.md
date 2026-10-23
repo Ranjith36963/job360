@@ -97,6 +97,34 @@ delete a lesson; if one stops being true, say so on its line and why.
   compared two different days. Fixed in #1058. **Rule:** a date assert derives its expected value
   from the fixture's own clock, never from a second read of the wall clock.
 
+- 2026-10-22: I closed #908 and #929 as my own and counted #933 as mine. All three belonged to another
+  session, whose `Claude-Session` commit trailer said so. I reopened them and posted corrections.
+  The GitHub list API also showed `merged:false` for PRs that were merged. **Rule:** before closing, handing
+  back or counting a PR, read its commit trailers. Read merged state with one GET of that PR, never the list.
+- 2026-10-22: commits and pushes were blocked by branch-owner-guard because old worktrees
+  (`wt902`, an agent worktree) still held the same branch names. Their "staged" files were only the branch
+  ref moving. **Rule:** `git worktree list` first; remove a stale worktree only after `git status` shows it clean.
+
+- 2026-10-22: I renumbered slice 11's migration to 0077 against main, then merged it an hour later, after
+  another session's #1088 had also taken 0077. Main held two 0077 files and the numbering check went red
+  for everyone; #1011 had to renumber mine. **Rule:** read `origin/main`'s migration list again in the
+  minute before the merge call, not at build time; when a slice sits waiting on CI, assume the number is
+  taken and check.
+- 2026-10-22: I trimmed `record_event`'s MCP text to get under 2,000 characters by cutting the `hold_released`
+  reasons and `gmail_draft_id`. `tests/test_tools_states_recipes.py` requires every closed value set and
+  payload key in that text, and the fast gate does not run it, so CI caught four failures. **Rule:** after
+  editing an MCP description, run `tests/test_tools_states_recipes.py` and `tests/test_mcp_text_budget.py`
+  with `scripts/mcp_text_budget.py`; to make room, cut prose that a recipe already carries, never a value
+  set or payload key.
+- 2026-10-22: slice 31's `mailto:` path let a web-form application skip every form gate, because the email
+  branch keyed on the URL alone (found by `reviewer-bugs`, fixed in #1110). **Rule:** a gate branch for a
+  special channel must also require the facts that make the application that channel (no recorded form,
+  a non-empty address equal to the draft's), never only a caller-supplied string.
+- 2026-10-22: my gate helper symlinked `frontend/node_modules` into a worktree that already had its own,
+  which loaded React twice and failed 19 account tests ("Invalid hook call") on a correct change.
+  **Rule:** link a shared `node_modules` only when the worktree has none; a frontend failure that is
+  "Invalid hook call" is a duplicate React, not a code bug.
+
 ## Handing work to another Claude session
 
 - 2026-10-15: the cloud session asked the owner's desktop "apply" session (via
@@ -322,3 +350,12 @@ Apify web-fetch tool, before you build. Never cite from memory.
 - 2026-10-21: asked to list every PR this session opened, a GitHub search for the session URL
   `in:body` returned 3 of the 32. **Rule:** list PRs with the REST `pulls?state=all` pages and
   filter the bodies yourself; the search index misses bodies.
+- 2026-10-22: in a detached-HEAD worktree I ran `git push origin <branch>`; it pushed the old local
+  branch ("Everything up-to-date" read as success) and I told the owner the merge was pushed while
+  the PR stayed conflicted. **Rule:** push `HEAD:<branch>` from a detached worktree, then compare
+  `git ls-remote origin <branch>` with `git rev-parse HEAD` before saying it is pushed.
+- 2026-10-22: sibling hunt-kit PRs all edit the same registry lists (`BOARD_SOURCES`, `ATS_MODULES`,
+  `_HOST_RULES`, `NOTICE.md`, `companies.json`), so each merge turns the next one `dirty`.
+  **Rule:** expect that conflict; merge main in, keep both sides (add a comma between `companies.json`
+  rows), re-gate the merged tree, and re-read the PR's `mergeable_state` after the push.
+

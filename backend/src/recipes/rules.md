@@ -376,6 +376,8 @@ earlier application counts toward today's `daily_cap`, `weekly_cap` and
 `min_gap_minutes` like any `applied` (Job360 counts when it was recorded):
 tell the user.
 
+EMAIL APPLICATIONS (the ad says "apply by email"): record_event email_drafted {to, subject, attachments: [{artifact_id, sha256}] from get_application_kit, gmail_draft_id?} (never the body) before check_submit, then call check_submit with `form_url` = `mailto:<to>`; send only on `submit` (or the user's yes for that exact draft: a new recipient or attachment needs a new yes); then record_application with channel "email", `recipient` and the sent email's `gmail_message_id`.
+
 ## Outreach
 
 Outreach to a person — recruiter, hiring manager, referral, cold
@@ -755,6 +757,7 @@ sexual_orientation, transgender}; "prefer not to say" is valid.
 recorded_at, company (optional), topic (optional)}] — set `approved: true` only after the user agrees to that exact
 wording, and send `recorded_at` back as stored. An answer given for ONE employer (consent,
 why-this-company, a referral there) gets `company`: that job's company; it is reused only for that company.
+A company-specific written answer always carries `company`; never a claim the profile lacks (a written answer is typed only after the user approves it: `check_submit` asks `answer_unapproved`).
 `topic` = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. `work_from.IN`,
 `notice_period_days`): save it with every answer; a gap's own `topic` goes in unchanged. An approved answer
 closes a gap when its topic matches, or its question equals the gap's text ignoring case and punctuation.

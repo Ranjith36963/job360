@@ -1,4 +1,4 @@
--- 0080 down: reverses the DDL only. No other column or row is touched.
+-- 0081 down: reverses the DDL only. No other column or row is touched.
 --
 -- WHAT THIS COSTS, STATED PLAINLY: every contact's base phone and links are
 -- dropped and NOT recoverable except from a backup. Corrections recorded as

@@ -343,3 +343,63 @@ def test_why_missed_cli_prints_and_exits_zero(
     out = capsys.readouterr().out
     assert rc == 0 and "Verdict: board_not_in_list" in out and "Change: add --companies-extra" in out
     assert not (tmp_path / "seen.json").exists()  # read-only
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_visible_text_is_linear_on_unclosed_blocks():
+    assert hk._visible_text("<style>a{}</style><p>Hi <b>there</b></p><!-- c --><script>x()</script>end") == "Hi there end"
+    assert hk._visible_text("a<script>never closed") == "a never closed"  # no closer: only the tag goes
+    for evil in ("<script>", "<!--", "<svg", '<a href="', "<"):
+        _grows_linearly(hk._visible_text, lambda k, e=evil: e * k)
+
+
+def test_visible_text_ends_a_comment_at_either_closer_browsers_accept():
+    # HTML ends a comment at --> or --!> ; a comment closed by --!> must not leak its text (CodeQL: bad HTML filtering)
+    assert hk._visible_text("A<!-- hidden note --!>B") == "A B"
+    assert hk._visible_text("A<!-- hidden note -->B") == "A B"
+    assert hk._visible_text("A<!-- one --!>B<!-- two -->C") == "A B C"
+
+
+def test_check_live_still_classifies_a_page_longer_than_its_300kb_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    # check_live reads only the head of a page. The response cap must not turn "longer than 300 KB" into a failed
+    # fetch, or every closed job page with a big inlined state would stay in the results as "unknown".
+    class _Resp:
+        status = 200
+
+        def __init__(self, body: bytes) -> None:
+            self._body = body
+
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def geturl(self) -> str:
+            return "https://a/closed"
+
+        def read(self, n: int = -1) -> bytes:
+            return self._body if n < 0 else self._body[:n]
+
+    page = b"This job is no longer available. " + b"x" * 400_000
+    monkeypatch.setattr(hk, "_open", lambda req, timeout: _Resp(page))
+    monkeypatch.setattr(hk, "check_url", lambda u: True)
+    col = hk.Collector(_args())
+    kept = hk.check_live(col, [{"url": "https://a/closed", "source": "t"}])
+    assert kept == [] and col.stats["t"]["live_dead"] == 1 and "live_unknown" not in col.stats["t"]

@@ -27,7 +27,11 @@ import os
 import re
 
 try:  # shared safe-XML helper (same folder)
-    from kit_xml import safe_fromstring  # type: ignore[import-not-found]  # sibling file, not a package module
+    from kit_xml import (  # type: ignore[import-not-found]  # sibling file, not a package module
+        drop_blocks,
+        finditer_closed,
+        safe_fromstring,
+    )
 except ImportError:  # loaded by file path: find the sibling file
     import importlib.util as _ilu
     from pathlib import Path as _Path
@@ -37,7 +41,7 @@ except ImportError:  # loaded by file path: find the sibling file
         raise ImportError("kit_xml.py not found next to this file")
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
-    safe_fromstring = _mod.safe_fromstring
+    safe_fromstring, drop_blocks, finditer_closed = _mod.safe_fromstring, _mod.drop_blocks, _mod.finditer_closed
 
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -70,17 +74,33 @@ _UA_NOTE = "hunt-kit"
 
 
 # --------------------------------------------------------------------------- helpers
+def _respace(text: str, sep: str, joiner: str) -> str:
+    """``re.sub(\\s*SEP\\s*, joiner, text)`` without the regex (it is quadratic on a long run of blanks)."""
+    parts = text.split(sep)
+    if len(parts) == 1:
+        return text
+    parts[0], parts[-1] = parts[0].rstrip(), parts[-1].lstrip()
+    return joiner.join(parts[:1] + [p.strip() for p in parts[1:-1]] + parts[-1:])
+
+
+_SCRIPT_OPEN = re.compile(r"<(script|style)(?=\b)", re.I)
+
+
+def _script_closer(name: str) -> re.Pattern[str]:
+    return re.compile(rf"</{name}>", re.I)
+
+
 def strip_html(text: str | None) -> str:
     """Turn an HTML fragment into plain text (block tags become newlines)."""
     if not text:
         return ""
     s = str(text)
-    s = re.sub(r"(?is)<(script|style)\b.*?</\1>", "", s)
+    s = drop_blocks(s, _SCRIPT_OPEN, _script_closer)  # one linear pass: the lazy regex was quadratic on "<script>" * n
     s = re.sub(r"(?i)<br\s*/?>", "\n", s)
-    s = re.sub(r"(?i)<p\b[^>]*>", "\n\n", s)
+    s = re.sub(r"(?i)<p\b[^<>]*>", "\n\n", s)
     s = re.sub(r"(?i)</(p|div|h[1-6]|ul|ol|tr)\s*>", "\n", s)
-    s = re.sub(r"(?i)<li\b[^>]*>", "\n- ", s)
-    s = re.sub(r"<[^>]+>", "", s)
+    s = re.sub(r"(?i)<li\b[^<>]*>", "\n- ", s)
+    s = re.sub(r"<[^<>]+>", "", s)  # [^<>]: a "<" with no ">" stops at the next "<", so "<a " * n is linear
     s = _html.unescape(s).replace("\xa0", " ")
     s = re.sub(r"[ \t\r\f\v]+", " ", s)
     s = re.sub(r" ?\n ?", "\n", s)
@@ -146,6 +166,9 @@ def _keep(jobs: list[Job], queries: list[str], days: int, *, search: bool = True
     """Drop jobs without title/url, too old, or (when ``search``) not matching any query."""
     return [j for j in jobs if j["title"] and j["url"] and _recent(j, days)
             and (not search or _matches(j, queries))]
+
+
+_FEED_MAX = 5_000_000  # an XML/RSS job feed carries a full description per item; the 2 MB page default would drop it
 
 
 def _get(http: HttpFn, stats: Stats, url: str, **kw: Any) -> Any:
@@ -225,7 +248,7 @@ def parse_hn_comment(raw_html: str, comment_id: Any, created_at: str = "") -> Jo
     text = strip_html(raw_html)
     if not text:
         return None
-    first = text.split("\n", 1)[0].strip()
+    first = text.split("\n", 1)[0].strip()[:2000]  # a header line is short; the cap keeps "(" * n from rescanning
     parts = [p.strip() for p in re.split(r"\s+[|—–]\s+|\s*\|\s*", first) if p.strip()]
     company = parts[0] if parts else first
     loc_bits: list[str] = []
@@ -299,7 +322,7 @@ def parse_jobicy(payload: dict[str, Any]) -> list[Job]:
     """Parse a Jobicy v2 response."""
     out: list[Job] = []
     for r in (payload or {}).get("jobs") or []:
-        geo = re.sub(r"\s*,\s*", ", ", str(r.get("jobGeo") or "")).strip()
+        geo = _respace(str(r.get("jobGeo") or ""), ",", ", ").strip()
         out.append(_job(
             title=r.get("jobTitle"), company=r.get("companyName"), url=r.get("url"),
             location=geo, posted=_date(r.get("pubDate")),
@@ -379,7 +402,7 @@ def fetch_wwr(queries: list[str], http: HttpFn, stats: Stats, *, days: int, coun
     """We Work Remotely: four programming-related category feeds, keyword-matched locally."""
     jobs: list[Job] = []
     for cat in WWR_CATEGORIES:
-        body = _get(http, stats, f"https://weworkremotely.com/categories/{cat}.rss", as_json=False)
+        body = _get(http, stats, f"https://weworkremotely.com/categories/{cat}.rss", as_json=False, max_bytes=_FEED_MAX)
         jobs += parse_wwr(body if isinstance(body, str) else "")
     seen: set[str] = set()
     uniq: list[Job] = []
@@ -830,7 +853,7 @@ def fetch_jobbank(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
     for q in _queries(queries):
         for page in range(1, NATIONAL_PAGES + 1):
             qs = urlencode({"searchstring": q, "locationstring": "", "page": page})
-            body = _get(http, stats, f"{JOBBANK_URL}?{qs}", as_json=False)
+            body = _get(http, stats, f"{JOBBANK_URL}?{qs}", as_json=False, max_bytes=_FEED_MAX)
             known = {j["url"] for j in jobs}
             got = [j for j in parse_jobbank(body if isinstance(body, str) else "") if j["url"] not in known]
             jobs += got

@@ -771,7 +771,8 @@ export interface paths {
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
          *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
          *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-         *     (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
+         *     or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+         *     event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
          *     nothing is recorded (the yes must name what the user saw).
@@ -826,7 +827,9 @@ export interface paths {
          *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
          *     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
          *     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
-         *     clears none of them. An unconfirmed email answers ``ask`` /
+         *     clears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form
+         *     rules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.
+         *     An unconfirmed email answers ``ask`` /
          *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
          *     ``get_application_kit``; 422 when malformed): another session's live kit hold
          *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -1592,7 +1595,8 @@ export interface paths {
          * Browser Live
          * @description One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
          *     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
-         *     logged or returned; the audit line names the action only.
+         *     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
+         *     human check in their assistant's browser instead (shot, click, type, key, scroll, done).
          */
         post: operations["browser_live_api_browser_live_post"];
         delete?: never;
@@ -5872,6 +5876,12 @@ export interface components {
              */
             key: string;
             /**
+             * Mode
+             * @default sign_in
+             * @enum {string}
+             */
+            mode: "sign_in" | "finish";
+            /**
              * Text
              * @default
              */
@@ -6830,6 +6840,11 @@ export interface components {
              */
             form_host: string;
             /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
+            /**
              * Guessed Count
              * @default 0
              */
@@ -6867,6 +6882,11 @@ export interface components {
             /** Profile Version */
             profile_version: number | null;
             proof?: components["schemas"]["ProofOut"];
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Recorded By */
             recorded_by?: string | null;
             /** Referred By Contact Id */
@@ -6914,6 +6934,8 @@ export interface components {
         /**
          * ReceiptFileOut
          * @description Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+         *     Slice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is
+         *     of the artifact's TEXT and ``fmt`` is '' (the email's file format is not known).
          */
         ReceiptFileOut: {
             /** Artifact Id */
@@ -7029,10 +7051,20 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
+            /**
              * Note
              * @default
              */
             note: string;
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Referred By Contact Id */
             referred_by_contact_id?: number | null;
             /** Request Id */
@@ -7077,12 +7109,22 @@ export interface components {
             /** Files */
             files?: components["schemas"]["ReceiptFileOut"][];
             /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
+            /**
              * Possible Duplicate
              * @default
              */
             possible_duplicate: string;
             /** Receipt Id */
             receipt_id: number;
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Referred By Contact Id */
             referred_by_contact_id?: number | null;
             /** Sent At */
