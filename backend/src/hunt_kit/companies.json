@@ -6492,5 +6492,9 @@
 {"name":"Tributo Devido","ats":"enlizt","board":"tributodevido","source":"freehire"},
 {"name":"ScrumLaunch","ats":"hurma","board":"scrumlaunch","source":"freehire"},
 {"name":"WA FENIX","ats":"compleo","board":"wafx","source":"freehire"},
-{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"}
+{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"},
+{"name":"DOIT Software","ats":"cleverstaff","board":"doit-software1","source":"freehire"},
+{"name":"IT Geo","ats":"friendwork","board":"c656f1c111eb44075d21d77f57216c72","source":"freehire"},
+{"name":"WowVendor","ats":"friendwork","board":"wowvendor","source":"freehire"},
+{"name":"joinup.ch (newest page)","ats":"joinup","board":"all","source":"career-ops"}
 ]

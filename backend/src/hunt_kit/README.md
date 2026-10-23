@@ -107,6 +107,10 @@ Recrutei (`recrutei:<tenant>` of `jobs.recrutei.com.br/<tenant>`), InHire (`inhi
 Vagas.com.br (`vagas:all`, the national board's three tech listings). A posting page or detail call is made only for a card that
 passes your title filter, at most 25 per board, and the first refusal ends the board's detail requests. Gupy, InHire and HiringRoom
 list a posting without its description when it was not opened; Vagas.com.br lists only the postings it opened.
+`kit_w4c.py` adds CleverStaff (`cleverstaff:<alias>`), FriendWork (`friendwork:<token>` of `jobs.friend.work/<token>`) and joinup.ch
+(`joinup:all`, only the newest results page the site renders). Each returns its description inline or none, so no posting page is
+opened. Eluta (eluta.ca) and Talent.com are not read: the only reference is a search-URL template, with no result markup, fields or
+paging, so a link on either host is reported as unsupported.
 
 `kit_markets4.py` adds three national job sites: Yourator, Taiwan (`yourator:all`, the whole board by its public JSON pages),
 CareerViet, Vietnam (`careerviet:all`, or one keyword slug such as `careerviet:ke-toan`) and OCC Mundial, Mexico (`occ:<keyword>`,
@@ -356,7 +360,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_w4c.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
