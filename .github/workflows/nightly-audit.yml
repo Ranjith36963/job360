@@ -1,0 +1,276 @@
+name: Nightly dependency audit
+
+# WHY THIS EXISTS (owner, 2026-10-23)
+# ------------------------------------
+# Twice on 2026-10-22 a new upstream advisory (Next.js, then DOMPurify via
+# posthog-js) turned `npm audit` red on every open PR at once, and a human had
+# to write the bump PR. `npm audit fix` crashes on this tree ("Cannot read
+# properties of null (reading 'edgesOut')"); what worked both times was
+# `npm update <pkg>`, which changed the lockfile only. This runs that same fix
+# every night, before the PRs wake up red.
+#
+# WHAT IT DOES
+#   npm  - the same audit as security.yml's npm-audit job on main
+#          (`npm audit --omit=dev --audit-level=high` in frontend/). On a high+
+#          finding it runs `npm update <each affected package>`; if the audit is
+#          then clean and only frontend/package*.json changed, it opens ONE PR
+#          from `bot/npm-audit-<date>`. Never `npm audit fix`, never `--force`.
+#   pip  - the same audit as security.yml's pip-audit job (the three hashed
+#          backend locks). There is no safe automatic fix for a lock, so a
+#          finding goes to the issue below.
+#   Anything it cannot fix opens, or comments on, the ONE open issue labelled
+#   `security-audit`.
+#
+# NEVER TWO PRS. Before opening one it checks `gh pr list --head <today's
+# branch>` and every open `bot/npm-audit-*` head; one already open means it
+# comments nothing and stops.
+#
+# NOTHING HERE MERGES. The PR goes through the normal gate like any other.
+#
+# GITHUB_TOKEN PUSH PARKS CI. A push and PR made with GITHUB_TOKEN raise no
+# workflow runs of their own beyond a parked `action_required` set (the
+# recursion rule pr-repair.yml documents). Like claude-md-apply.yml, the ship
+# step approves them so the PR proves itself instead of showing no checks;
+# that is the only reason for `actions: write`.
+
+on:
+  schedule:
+    - cron: "23 3 * * *" # 03:23 UTC daily (off the hour: GitHub delays :00 crons)
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-audit
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    name: npm audit + update (frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # push the bot/npm-audit-* branch
+      pull-requests: write # open the PR
+      issues: write # open or comment on the security-audit issue
+      actions: write # approve the CI runs our own push parks in action_required
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22" # matches security.yml, ci.yml and frontend/Dockerfile
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Audit, then npm update the affected packages
+        id: fix
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          set +e
+          npm audit --omit=dev --audit-level=high --json > "$RUNNER_TEMP/audit-before.json"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "state=clean" >> "$GITHUB_OUTPUT"
+            echo "### npm: clean (no high+ production advisory)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Every high+ package, plus the non-major parent npm names as the fix.
+          # Names are checked against npm's own name shape before they reach argv.
+          python3 - "$RUNNER_TEMP/audit-before.json" > "$RUNNER_TEMP/pkgs.txt" <<'EOF'
+          import json, re, sys
+          vulns = json.load(open(sys.argv[1])).get("vulnerabilities", {})
+          ok = re.compile(r"^(@[a-z0-9._-]+/)?[a-z0-9._-]+$")
+          names = set()
+          for name, v in vulns.items():
+              if v.get("severity") not in ("high", "critical"):
+                  continue
+              names.add(name)
+              fix = v.get("fixAvailable")
+              if isinstance(fix, dict) and not fix.get("isSemVerMajor") and fix.get("name"):
+                  names.add(fix["name"])
+          for n in sorted(names):
+              if ok.match(n):
+                  print(n)
+          EOF
+          if [ ! -s "$RUNNER_TEMP/pkgs.txt" ]; then
+            echo "state=unfixed" >> "$GITHUB_OUTPUT"
+            echo "### npm: audit failed but named no package to update" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          mapfile -t pkgs < "$RUNNER_TEMP/pkgs.txt"
+          echo "npm update ${pkgs[*]}"
+          npm update "${pkgs[@]}"
+          set +e
+          npm audit --omit=dev --audit-level=high > "$RUNNER_TEMP/audit-after.txt" 2>&1
+          after=$?
+          set -e
+          changed=$(git status --porcelain)
+          {
+            echo "### npm: high+ advisories found; ran \`npm update ${pkgs[*]}\`"
+            echo '```'
+            echo "$changed"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$after" -ne 0 ] || [ -z "$changed" ]; then
+            echo "state=unfixed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Path cage: npm update may touch only the frontend manifest + lockfile.
+          if printf '%s\n' "$changed" | grep -v -E '^ M frontend/package(-lock)?\.json$' >/dev/null; then
+            echo "::error::npm update changed files outside frontend/package*.json: $changed"
+            echo "state=unfixed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The updated lockfile must still install exactly (what CI and the Dockerfile run).
+          npm ci
+          echo "state=fixed" >> "$GITHUB_OUTPUT"
+          echo "pkgs=${pkgs[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Open the lockfile PR (one at a time)
+        id: ship
+        if: steps.fix.outputs.state == 'fixed'
+        env:
+          PKGS: ${{ steps.fix.outputs.pkgs }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          branch="bot/npm-audit-$today"
+          same=$(gh pr list --head "$branch" --state open --json number --jq 'length')
+          any=$(gh pr list --state open --limit 200 --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("bot/npm-audit-"))] | length')
+          if [ "$same" != "0" ] || [ "$any" != "0" ]; then
+            echo "### npm: a bot/npm-audit-* PR is already open; not opening another" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "::error::branch $branch already exists with no open PR; refusing to overwrite it"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add frontend/package.json frontend/package-lock.json
+          git commit -m "fix(deps): npm update $PKGS for high+ advisories ($today)" \
+            -m "Opened by nightly-audit.yml: npm audit --omit=dev --audit-level=high was red on main and is clean after this update."
+          git push origin "$branch"
+          {
+            echo "Nightly dependency audit ($today). \`npm audit --omit=dev --audit-level=high\` was red on main; \`npm update $PKGS\` clears it."
+            echo
+            echo "Only \`frontend/package.json\` / \`frontend/package-lock.json\` change (path-caged), and \`npm ci\` passed on the result. No \`npm audit fix\`, no \`--force\`."
+            echo
+            echo "Generated by [nightly-audit.yml](${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID})."
+          } > "$RUNNER_TEMP/pr-body.md"
+          pr_url=$(gh pr create --base main --head "$branch" \
+            --title "fix(deps): npm update for high+ advisories ($today)" \
+            --body-file "$RUNNER_TEMP/pr-body.md" | tail -1)
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+          echo "### npm: opened $pr_url" >> "$GITHUB_STEP_SUMMARY"
+          sleep 30
+          for id in $(gh run list --branch "$branch" --limit 10 \
+              --json databaseId,conclusion \
+              --jq '.[] | select(.conclusion == "action_required") | .databaseId'); do
+            if gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" >/dev/null 2>&1; then
+              echo "approved parked run $id" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::could not approve run $id - approve it in the UI or CI will not report on this PR"
+            fi
+          done
+
+      # Runs when npm update could not clear the audit, and also when any step
+      # above died, so a broken night is never silent.
+      - name: Open or comment on the security-audit issue (npm)
+        if: failure() || steps.fix.outputs.state == 'unfixed'
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "**npm (frontend), $(date -u +%Y-%m-%d):** \`npm audit --omit=dev --audit-level=high\` is red and the nightly \`npm update\` did not clear it, or the run broke. A human bump is needed."
+            echo
+            echo "Run: $run_url"
+            if [ -s "$RUNNER_TEMP/audit-after.txt" ]; then
+              echo; echo '```'; tail -n 60 "$RUNNER_TEMP/audit-after.txt"; echo '```'
+            fi
+          } > "$RUNNER_TEMP/issue-body.md"
+          if ! gh label list --search security-audit --json name --jq '.[].name' | grep -qx security-audit; then
+            gh label create security-audit --color B60205 --description "Nightly dependency audit found something it could not fix"
+          fi
+          num=$(gh issue list --label security-audit --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file "$RUNNER_TEMP/issue-body.md"
+          else
+            gh issue create --title "Security audit: dependency advisories need a human" \
+              --label security-audit --body-file "$RUNNER_TEMP/issue-body.md"
+          fi
+
+  pip:
+    name: pip-audit (backend locks)
+    # After npm, whatever npm's result: one job at a time writes the one issue.
+    needs: npm
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write # open or comment on the security-audit issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-audit
+      # Same command as security.yml's pip-audit job: the hashed locks as written.
+      - name: Audit the locked dependencies (runtime, browser, dev)
+        id: audit
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          set +e
+          python -m pip_audit --progress-spinner off --require-hashes --disable-pip \
+            -r requirements.lock.txt -r requirements-browser.lock.txt -r requirements-dev.lock.txt \
+            > "$RUNNER_TEMP/pip-audit.txt" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/pip-audit.txt"
+          if [ "$rc" -eq 0 ]; then
+            echo "state=clean" >> "$GITHUB_OUTPUT"
+            echo "### pip: clean" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "state=found" >> "$GITHUB_OUTPUT"
+            echo "### pip: pip-audit exit $rc (see the security-audit issue)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Open or comment on the security-audit issue (pip)
+        if: failure() || steps.audit.outputs.state == 'found'
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "**pip (backend locks), $(date -u +%Y-%m-%d):** pip-audit is red on the hashed locks, or the run broke. Bump the package in pyproject and regenerate the locks (there is no safe automatic fix)."
+            echo
+            echo "Run: $run_url"
+            if [ -s "$RUNNER_TEMP/pip-audit.txt" ]; then
+              echo; echo '```'; tail -n 60 "$RUNNER_TEMP/pip-audit.txt"; echo '```'
+            fi
+          } > "$RUNNER_TEMP/issue-body.md"
+          if ! gh label list --search security-audit --json name --jq '.[].name' | grep -qx security-audit; then
+            gh label create security-audit --color B60205 --description "Nightly dependency audit found something it could not fix"
+          fi
+          num=$(gh issue list --label security-audit --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file "$RUNNER_TEMP/issue-body.md"
+          else
+            gh issue create --title "Security audit: dependency advisories need a human" \
+              --label security-audit --body-file "$RUNNER_TEMP/issue-body.md"
+          fi
