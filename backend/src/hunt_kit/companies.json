@@ -6492,5 +6492,12 @@
 {"name":"Tributo Devido","ats":"enlizt","board":"tributodevido","source":"freehire"},
 {"name":"ScrumLaunch","ats":"hurma","board":"scrumlaunch","source":"freehire"},
 {"name":"WA FENIX","ats":"compleo","board":"wafx","source":"freehire"},
-{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"}
+{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"},
+{"name":"Telegram","ats":"telegramcareers","board":"telegram.org","source":"freehire"},
+{"name":"BairesDev","ats":"bairesdev","board":"talent.bairesdev.com","source":"freehire"},
+{"name":"Vention","ats":"vention","board":"join.ventionteams.com","source":"freehire"},
+{"name":"Revun","ats":"northstone","board":"www.revun.com/careers","source":"freehire"},
+{"name":"Langford Staffing","ats":"northstone","board":"www.langfordstaffing.com/careers","source":"freehire"},
+{"name":"EnzRossi","ats":"northstone","board":"vetted.enzrossi.com/positions","source":"freehire"},
+{"name":"Deutsche Bahn","ats":"avature","board":"jobs.deutschebahngroup.careers","source":"career-ops"}
 ]
