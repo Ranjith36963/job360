@@ -6508,5 +6508,12 @@
 {"name":"GeekJob","ats":"geekjob","board":"all","source":"freehire"},
 {"name":"Skyeng","ats":"potok","board":"skyengteam","source":"freehire"},
 {"name":"Banki.ru","ats":"huntflow","board":"banki","source":"freehire"},
-{"name":"Tripster","ats":"huntflow","board":"tripster","source":"freehire"}
+{"name":"Tripster","ats":"huntflow","board":"tripster","source":"freehire"},
+{"name":"Telegram","ats":"telegramcareers","board":"telegram.org","source":"freehire"},
+{"name":"BairesDev","ats":"bairesdev","board":"talent.bairesdev.com","source":"freehire"},
+{"name":"Vention","ats":"vention","board":"join.ventionteams.com","source":"freehire"},
+{"name":"Revun","ats":"northstone","board":"www.revun.com/careers","source":"freehire"},
+{"name":"Langford Staffing","ats":"northstone","board":"www.langfordstaffing.com/careers","source":"freehire"},
+{"name":"EnzRossi","ats":"northstone","board":"vetted.enzrossi.com/positions","source":"freehire"},
+{"name":"Deutsche Bahn","ats":"avature","board":"jobs.deutschebahngroup.careers","source":"career-ops"}
 ]

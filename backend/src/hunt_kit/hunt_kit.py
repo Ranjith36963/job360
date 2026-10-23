@@ -199,6 +199,10 @@ BOARD_SOURCES = (
     "applicantpro",
     "potok",
     "huntflow",
+    "telegramcareers",
+    "bairesdev",
+    "vention",
+    "northstone",
 )
 FEED_SOURCES = (
     "freehire",
@@ -395,7 +399,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b",
+    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -1832,7 +1836,7 @@ _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber
 # ats -> token part used as the name (comeet slug/uid, pageup id[/locale], werecruit lang/slug)
 _PATH_TOKEN = {
     "successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0,
-    "werecruit": 1, "ripplehire": 0, "neogov": 1, "ukgready": 1, "mokahr": 0,
+    "werecruit": 1, "ripplehire": 0, "neogov": 1, "ukgready": 1, "mokahr": 0, "northstone": 0,
 }
 
 
@@ -2913,6 +2917,11 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("applicantpro", re.compile(r"^([a-z0-9-]+)\.applicantpro\.com$")),
     ("potok", re.compile(r"^([a-z0-9-]+)\.potok\.io$")),
     ("huntflow", re.compile(r"^([a-z0-9-]+)\.huntflow\.io$")),
+    # Paylocity's reader had no rule (a recruiting.paylocity.com link was reported as unsupported); wave 4 part F boards
+    ("paylocity", re.compile(r"^recruiting\.paylocity\.com$")),
+    ("telegramcareers", re.compile(r"^telegram\.org$")),
+    ("bairesdev", re.compile(r"^(?:talent|applicants)\.bairesdev\.com$")),
+    ("vention", re.compile(r"^(join\.ventionteams\.com)$")),
 ]
 _BOARD_SLUG = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}"  # a path slug that cannot be . or ..
 # Career sites on an employer's own host that the URL path gives away: eArcu vacancies and Radancy (TalentBrew) jobs
@@ -2921,7 +2930,7 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
-    r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
+    r"ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
     r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com|"
     r"getconsider\.com|jobs\.gusto\.com|jobleads\.com)$", re.I)
 
@@ -3032,6 +3041,15 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         elif ats == "compleo":  # https://jobs.compleo.app/<tenant>/jobdetail/<code>
             ok_t = len(seg) > 2 and seg[1] == "jobdetail" and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", seg[0])
             tok = seg[0] if ok_t else ""
+        elif ats == "paylocity":  # .../Recruiting/Jobs/All/<company guid>; /Details/<n> has no guid
+            g = seg[seg.index("All") + 1] if "All" in seg[:-1] else ""
+            tok = g if re.fullmatch(r"[A-Za-z0-9-]{1,80}", g) else ""
+        elif ats == "telegramcareers":  # only telegram.org/jobs is the board; the rest of telegram.org is not
+            if seg[:1] != ["jobs"]:
+                continue
+            tok = "telegram.org"
+        elif ats == "bairesdev":  # the one talent site; applicants.bairesdev.com/job/<career>/<id>/apply is its posting
+            tok = "talent.bairesdev.com"
         elif ats == "workablemarketplace":  # jobs.workable.com/view/<job>/...: the company hashid is not in the link
             tok = ""
         elif ats == "geekhunter":  # https://www.geekhunter.com/pt/<company slug>/jobs/<posting slug>
