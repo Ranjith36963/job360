@@ -125,6 +125,21 @@ your title filter, at most 25 per board; the first refusal ends the board's page
 about 5.6 MB, over the kit's page limit, so a `jobs.humanbit.ai` link is reported as unsupported. A Radancy or eArcu link on
 an employer's own domain is recognised by its path.
 
+`kit_market5.py` adds five marketplace and recruiting sites: GeekHunter (`geekhunter:<company slug>` of
+`geekhunter.com/pt/<slug>/jobs`), Likeit (`likeit:<tenant>` of `<tenant>.likeit.fi`, the tenant's RSS feed, every posting inline),
+and three one-site boards, Strider (`onstrider:all`, open vacancies only), micro1 (`micro1:all`) and Alignerr (`alignerr:all`). A
+posting page is opened only for a card that passes your title filter, at most 25 per board; the first refusal ends the board's
+pages. Energy Jobline is not read: its ad pages answer only a client that calls itself Googlebot, which the kit never does, so an
+`energyjobline.com` link is reported as unsupported. The references' referral-code links for Strider, micro1 and Alignerr are not
+used: the kit lists the plain posting page.
+
+`kit_asia2.py` adds Asian boards: MokaHR (`mokahr:<orgId>/<siteId>` of `app.mokahr.com/social-recruitment/<orgId>/<siteId>`, or
+`mokahr:<orgId>/<siteId>/r1` for the international host `hire-r1.mokahr.com`), HRMOS (`hrmos:<slug>` of `hrmos.co/pages/<slug>/jobs`),
+HERP (`herp:<slug>` of `herp.careers/v1/<slug>`), Quickin (`quickin:<slug>` of `jobs.quickin.io/<slug>`), and PyjamaHR (`pyjamahr:<slug>`
+of `jobs.pyjamahr.com/<slug>`). MokaHR and Quickin list whole postings; HRMOS, HERP
+and PyjamaHR list a posting without its description unless it was opened, which happens only for a card that passes your title
+filter, at most 25 per board, and the first refusal ends the board's detail requests. Two MokaHR tenants that app.mokahr.com's robots.txt excludes are not read. A `herkey.com` link is reported as unsupported (one boardless index behind a session token, not read).
+
 `kit_ats_misc4.py` adds two platforms: ADP MyJobs (`adpmyjobs:<career site slug>`, e.g. `adpmyjobs:stellantisexternalcx`; a different product
 from Workforce Now, which is `adp`) and Eploy career sites (`eploy:<careers host>`, e.g. `eploy:careers.pei.group`, read from the site's
 `live-jobs.xml`). A requisition detail or vacancy page is opened only for a card that passes your title filter, at most 25 per board;
@@ -195,6 +210,8 @@ South-East Asia (`kit_asia.py`; unofficial site endpoints, so a site that refuse
 More job sites (`kit_sites_a.py`; unofficial site endpoints, so a site that refuses scripts is skipped): Djinni (`djinni`: Ukrainian-run tech board, worldwide, each ad names where the candidate may live), remote.com (`remotedotcom`: remote jobs, newest pages), WORK180 (`work180`: employers endorsed for supporting women; AU NZ GB US; pages are fetched 5 seconds apart, as its robots.txt asks), WUZZUF (`wuzzuf`: EG SA AE), InfoJobs (`infojobs`: ES, IT category), Instaffo (`instaffo`: DE) and JobiDanmark (`jobdanmark`: DK). A country-gated site sends nothing unless one of its countries is in your countries (or `*`; your own countries go first). At most 25 requests per site per run; the first answer that is not HTTP 200 ends that site. Two employer-board types live in the same file: Deel (`deel:slug`, from `jobs.deel.com/slug`) and Dover (`dover:slug`, from `app.dover.com/jobs/slug`); they only exist per employer, so add them with `--companies-extra`.
 
 More niche sites (`kit_sites_b.py`; unofficial site endpoints, so a site that refuses scripts is skipped): Airswift (`airswift`, oil, gas and engineering; its sitemap, then at most 8 ad pages 15 seconds apart, because the site answers 429 to anything faster), Brief's careers page (`briefhq`, one request), emagine (`emagine`, freelance contracts; only with DE PL FR PT SE GB or IN in your countries), Functional Works (`functionalworks`, functional-programming jobs, one request), Golang Jobs (`golangjobs`, Go roles, read the way the site's own page reads them, ads older than 60 days dropped), Joppy (`joppy`, Spain; only with ES in your countries; the 25 newest company pages), Rapyd's careers site (`rapyd`), StartupAndVC (`startupandvc`, venture-capital roles, linking to the original posting) and TechTree (`techtree`, AI-recruiting board). Every ad names its own employer; a place that names a country you did not choose is dropped, a remote ad is kept. At most 30 requests per site per run; the first refusal or CAPTCHA page ends that site.
+
+Global marketplaces (`kit_markets3.py`; unofficial site endpoints, so a site that refuses scripts is skipped): EchoJobs (`echojobs`, tech jobs; the newest sitemap shards, then at most 15 ad pages), Torre (`torre`, LatAm-heavy marketplace; its sitemaps, then at most 15 post pages), Tecla (`tecla`, remote roles for LatAm talent; the first 10 pages of its public list) and Japan Dev (`japandev`, tech jobs in Japan; its posting sitemap, then at most 15 ad pages). Every ad names its own employer, and the job link is always on the board's own https host. Not built: Gradcracker (Cloudflare serves it only to a Chrome TLS fingerprint, which urllib cannot imitate; `gradcracker.com` is reported as unsupported); 4 Day Week and CryptocurrencyJobs are already read by `kit_niche.py`.
 
 Official APIs with a free key (skipped silently if the key is not set):
 - Adzuna: get a free key at https://developer.adzuna.com/signup . Set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Countries Adzuna supports: au be br ca ch de es fr gb in it mx nl nz pl sg us za (taken from `--work-countries` / `--only-countries`). Adzuna gives short snippets.
@@ -339,7 +356,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)

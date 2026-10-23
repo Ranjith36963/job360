@@ -706,6 +706,25 @@ BLOCKERS: list[Blocker] = [
         "deliberately left alone: the LANE cage refuses an `auto_merge: false` lane before "
         "the TAGS cage is consulted, so a tag there would change no verdict.",
     ),
+    Blocker(
+        id="B30",
+        met="2026-10-22",
+        what="TWO GREEN PRS PUT TWO 0077 MIGRATIONS ON MAIN. #1088 merged "
+        "`0077_outreach_variants`; 16 minutes later #1006 merged `0077_receipt_answers_from`. "
+        "Each was green against the main it last merged, and no cage read main at judge time, "
+        "so the clash was invisible until #1011 renamed one to 0078. Second time in two days "
+        "(two 0067s on 21 Oct, fixed by #1071).",
+        repro="git show --name-status 4c1b326 67103b6 -- backend/migrations\n"
+        "  -> A 0077_outreach_variants.*  then  A 0077_receipt_answers_from.*",
+        rule="A PR THAT ADDS A MIGRATION IS NUMBERED AGAINST LIVE MAIN, NOT AGAINST THE MAIN "
+        "IT LAST SAW. The MIGRATIONS cage reads main's tree at judge time and refuses a "
+        "number that exists there or is at or below main's highest, naming the free number. "
+        "A push to main that adds a migration re-judges every open PR "
+        "(`scripts/migration_sweep.py`) and fails `merge-cage` + withdraws auto-merge on any "
+        "PR that now clashes, so a queued PR cannot land on a number taken after it queued.",
+        drill="MIGRATIONS: replaying #1088 then #1006 turns the second red (main already has 0077)",
+        severity="too-permissive",
+    ),
 ]
 
 
