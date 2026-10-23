@@ -1392,7 +1392,8 @@ async def add_contacts_batch(
     get_audit_logger().info(
         "contacts_batch",
         extra={
-            "event": "contacts_batch", "application_id": safe_log_value(application_id), "dry_run": dry_run,
+            "event": "contacts_batch", "application_id": safe_log_value(application_id),
+            "dry_run": safe_log_value(dry_run),
             "total": len(people), "would_add": len(would_add), "added": len(added),
             "duplicates": len(duplicates), "invalid": len(invalid),
         },
