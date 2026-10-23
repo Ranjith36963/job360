@@ -6492,5 +6492,9 @@
 {"name":"Tributo Devido","ats":"enlizt","board":"tributodevido","source":"freehire"},
 {"name":"ScrumLaunch","ats":"hurma","board":"scrumlaunch","source":"freehire"},
 {"name":"WA FENIX","ats":"compleo","board":"wafx","source":"freehire"},
-{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"}
+{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"},
+{"name":"GeekJob","ats":"geekjob","board":"all","source":"freehire"},
+{"name":"Skyeng","ats":"potok","board":"skyengteam","source":"freehire"},
+{"name":"Banki.ru","ats":"huntflow","board":"banki","source":"freehire"},
+{"name":"Tripster","ats":"huntflow","board":"tripster","source":"freehire"}
 ]
