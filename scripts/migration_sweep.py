@@ -131,7 +131,16 @@ def drill(blind: bool = False) -> int:
     return 0 if ok else 1
 
 
+_USAGE = "usage: migration_sweep.py [--dry-run | --drill [--blind]]  (no flag = live sweep: writes statuses)"
+
+
 def main(argv: list[str]) -> int:
+    # An unknown flag (even `--help`) must never fall through to the live sweep,
+    # which writes `merge-cage` statuses and withdraws auto-merge on real PRs.
+    unknown = [a for a in argv if a not in ("--dry-run", "--drill", "--blind")]
+    if unknown or ("--blind" in argv and "--drill" not in argv):
+        print(_USAGE, file=sys.stderr)
+        return 0 if unknown in (["--help"], ["-h"]) else 2
     if "--drill" in argv:
         return drill(blind="--blind" in argv)
     try:
