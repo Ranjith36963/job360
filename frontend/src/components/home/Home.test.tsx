@@ -152,6 +152,20 @@ describe("Home", () => {
     }
   });
 
+  it("names the last application you confirmed, under the sentence", async () => {
+    happy({ events: [event(1, "agent:Claude"), { ...event(2, "agent:Claude"), event_type: "applied" }] });
+    render(<Home />);
+    const line = await screen.findByTestId("home-subline");
+    expect(line.textContent).toMatch(/^The last application you confirmed was Mistral AI, today at .+\.$/);
+  });
+
+  it("no applied event: no subline", async () => {
+    happy();
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /wrote 1 record/ });
+    expect(screen.queryByTestId("home-subline")).toBeNull();
+  });
+
   it("no asks: the section is silent", async () => {
     happy();
     render(<Home />);

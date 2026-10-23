@@ -31,7 +31,7 @@ def _stub(routes: dict):
     """http stub: substring-of-url -> (status, payload); unknown -> (404, None). Records calls."""
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append((url, method, data))
         for frag, resp in routes.items():
             if frag in url:

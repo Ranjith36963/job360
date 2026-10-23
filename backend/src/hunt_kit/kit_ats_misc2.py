@@ -267,9 +267,12 @@ def _https(url: Any, host: str | None = None) -> str:
     return p.geturl() if ok else ""
 
 
-def _page(http: Http, url: str) -> tuple[int, str | None]:
-    """(status, text) of an HTML/text GET; text is None unless the answer was a 200 string."""
-    st, page = _get(http, url, as_json=False, headers=_HTMLH)
+_SITEMAP_MAX = 10_000_000  # a sitemap can list tens of thousands of postings; the 2 MB page default would drop it
+
+
+def _page(http: Http, url: str, **kw: Any) -> tuple[int, str | None]:
+    """(status, text) of an HTML/text GET; text is None unless the answer was a 200 string. ``kw`` (max_bytes) goes to http."""
+    st, page = _get(http, url, as_json=False, headers=_HTMLH, **kw)
     return st, page if st == 200 and isinstance(page, str) else None
 
 
@@ -601,7 +604,8 @@ _WA_RESERVED = frozenset({"create", "sign-in", "sign-up", "privacy-policy", "ter
 
 def _wantapply(row: dict[str, Any], http: Http) -> list[Job] | None:
     """Wantapply aggregator via the wantapply.cy mirror: sitemap, then each vacancy's JobPosting (capped; token ignored)."""
-    st, xml = _get(http, f"https://{_WA_HOST}/sitemap.xml", as_json=False, headers={"Accept": "application/xml, text/xml"})
+    st, xml = _get(http, f"https://{_WA_HOST}/sitemap.xml", as_json=False,
+                  headers={"Accept": "application/xml, text/xml"}, max_bytes=_SITEMAP_MAX)
     if st != 200 or not isinstance(xml, str):
         return None
     slugs: list[tuple[str, str]] = []
@@ -821,13 +825,13 @@ def _wpyoast(row: dict[str, Any], http: Http) -> list[Job] | None:
     host = str(row.get("token") or "").strip().lower()
     if not _HOST.fullmatch(host):
         return None
-    _st, index = _page(http, f"https://{host}/sitemap.xml")
+    _st, index = _page(http, f"https://{host}/sitemap.xml", max_bytes=_SITEMAP_MAX)
     if index is None:
         return None
     sub = next((u for u in _locs(index, "sitemap") if "job_listing" in u and _https(u, host)), "")
     if not sub:
         return []
-    _st, jobmap = _page(http, sub)
+    _st, jobmap = _page(http, sub, max_bytes=_SITEMAP_MAX)
     if jobmap is None:
         return None
     jobs: list[Job] = []

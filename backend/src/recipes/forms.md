@@ -13,7 +13,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    No browser of your own: Job360's `browser` tool (open, look, then act on the `ref`s; `upload` with `doc_kind`
    "cv" and this job's `application_id` sends the saved CV). After a page changes, use the refs it returned.
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
-   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten. **Done when** the form is loaded and in front.
+   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten; essay: draft, ask_user, type only the approved text. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
    freeze the tab. Wait for the parse to finish, then re-read the page. **Done when** the file name shows and the
    page is idle.
@@ -44,7 +44,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
 Per ATS (only what was seen):
 | ATS | What to do |
 |---|---|
-| Greenhouse | Embed URL `job-boards.greenhouse.io/embed/job_app?for=<board>&token=<id>`; the company page is heavy. CV input is hidden behind a button. City is a places picker: type, pick a suggestion (country text is rejected). react-select dropdowns need the tab in front. |
+| Greenhouse | Job360's browser `open` switches a `boards.`/`job-boards.greenhouse.io/<board>/jobs/<id>` link to the light embed form `job-boards.greenhouse.io/embed/job_app?for=<board>&token=<id>` (`opened_as` says so); company pages and eu. hosts stay as given. CV input is hidden behind a button. City is a places picker: type, pick a suggestion (country text is rejected). react-select dropdowns need the tab in front. |
 | Ashby | Yes/no are button pairs with a hidden checkbox: real click, read the checkbox. Submit shows ONE missing field at a time: read all errors first. Picture CAPTCHA: `blocked`, Needs you. Re-type fields it calls missing. |
 | Lever | CV parser overwrites typed fields: upload, wait, then type, read back last. Location is a picker: pick the suggestion (Escape clears it). |
 | Rippling | A required consent radio can sit below the fold; Apply then does nothing, no message. Scan `aria-invalid`. Client-rendered: needs the browser. |

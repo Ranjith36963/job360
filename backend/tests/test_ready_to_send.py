@@ -21,7 +21,7 @@ FULL = [
     MEM,
     {"question": "Salary", "answer": "85000 GBP", "source": "memory", "key": "salary.GB"},
     {"question": "Full name", "answer": "Ada Lovelace", "source": "profile", "key": "contact.name"},
-    {"question": "Why Northwind?", "answer": "I like pipelines.", "source": "written"},
+    {"question": "Why Northwind?", "answer": "I like pipelines.", "source": "profile"},
 ]
 
 
@@ -87,7 +87,7 @@ async def test_a_clean_card_carries_job_versions_answers_and_who_saved_them(auth
         assert by_key["right_to_work.GB.work_authorization"]["saved_by"] == "web"
         assert by_key["right_to_work.GB.work_authorization"]["saved_at"]
         assert by_key["contact.name"]["saved_by"] is None, "a profile answer has no memory author"
-        assert [a["source"] for a in card["answers"]] == ["memory", "memory", "profile", "written"]
+        assert [a["source"] for a in card["answers"]] == ["memory", "memory", "profile", "profile"]
 
 
 @pytest.mark.asyncio
@@ -103,7 +103,7 @@ async def test_each_flag_fires_on_its_own_row_and_is_absent_otherwise(authentica
             await _cv(client, app_id)
         await _fill(client, none)
         await _fill(client, guess, [*FULL, {"question": "Visa?", "answer": "no", "source": "guessed"}])
-        await _fill(client, blank, [*FULL, {"question": "Middle name", "answer": "", "source": "written"}])
+        await _fill(client, blank, [*FULL, {"question": "Middle name", "answer": "", "source": "profile"}])
         await _fill(client, gone, [*FULL, {"question": "Fax", "answer": "1", "source": "memory", "key": "contact.fax"}])
         await _fill(client, german, FULL)
         await _fill(client, nocv, FULL)
@@ -111,7 +111,8 @@ async def test_each_flag_fires_on_its_own_row_and_is_absent_otherwise(authentica
         await _fill(client, dup_b, FULL)
         cards = {c["application_id"]: c for c in (await _ready(client))["items"]}
         assert _codes(cards[none]) == ["no_answers"]
-        assert _codes(cards[guess]) == ["guessed"] and cards[guess]["flags"][0]["text"] == "An answer was guessed: Visa?"
+        assert _codes(cards[guess]) == ["guessed", "sensitive"]  # "Visa?" is also a private question
+        assert cards[guess]["flags"][0]["text"] == "An answer was guessed: Visa?"
         assert _codes(cards[blank]) == ["blank"] and cards[blank]["flags"][0]["text"] == "An answer is blank: Middle name"
         assert _codes(cards[gone]) == ["not_in_memory"]
         assert _codes(cards[nocv]) == ["no_cv"]
@@ -234,7 +235,7 @@ async def test_the_log_carries_counts_never_answers(authenticated_async_context)
     try:
         async with authenticated_async_context() as client:
             app_id = await _bring(client)
-            await _fill(client, app_id, [{"question": "Secretq", "answer": "Zebrasecret", "source": "written"}])
+            await _fill(client, app_id, [{"question": "Secretq", "answer": "Zebrasecret", "source": "profile"}])
             await _ready(client)
     finally:
         audit.removeHandler(handler)
@@ -249,7 +250,7 @@ async def test_the_log_carries_counts_never_answers(authenticated_async_context)
 async def test_timeline_and_export_carry_answers_count_never_the_answers(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        await _fill(client, app_id, [{"question": "Secretq", "answer": "Zebrasecret", "source": "written"}, MEM])
+        await _fill(client, app_id, [{"question": "Secretq", "answer": "Zebrasecret", "source": "profile"}, MEM])
         got = await client.get(f"/api/applications/{app_id}")
         export = await client.get("/api/applications/export")
         ready = await _ready(client)

@@ -62,6 +62,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # per-user table nobody registers here is one this layer silently cannot see.
     ("email_verifications", "user_id"),
     ("password_resets", "user_id"),
+    ("email_change_undos", "user_id"),
     ("oauth_states", "user_id"),
     ("oauth_grants", "user_id"),
     ("audit_log", "user_id"),
@@ -72,6 +73,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # S2 assistant settings (migration 0051): riskier changes waiting on the user.
     ("assistant_setting_requests", "user_id"),
     ("artifact_links", "user_id"),
+    ("user_templates", "user_id"),  # 0076: the user's own outreach templates
     # S7 proof of application (migration 0053).
     ("application_proof_screenshots", "user_id"),
     ("proof_upload_links", "user_id"),

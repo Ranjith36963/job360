@@ -37,7 +37,7 @@ def _stub(routes: dict[str, tuple[int, Any]]):
     """http stub: first route whose key is in the URL wins; unknown URLs answer 404."""
     calls: list[str] = []
 
-    def http(url: str, *, as_json: bool = True, headers: dict[str, str] | None = None) -> tuple[int, Any]:
+    def http(url: str, *, as_json: bool = True, headers: dict[str, str] | None = None, max_bytes: int | None = None) -> tuple[int, Any]:
         calls.append(url)
         for frag, resp in routes.items():
             if frag in url:

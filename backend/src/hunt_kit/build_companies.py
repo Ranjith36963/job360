@@ -425,7 +425,8 @@ def probe_recruitee(http: Http, slug: str) -> dict[str, Any]:
 
 
 def probe_personio(http: Http, slug: str) -> dict[str, Any]:
-    st, text = http("https://%s.jobs.personio.de/xml" % slug, as_json=False)
+    # 5 MB: a Personio XML feed carries every posting with its description
+    st, text = http("https://%s.jobs.personio.de/xml" % slug, as_json=False, max_bytes=5_000_000)
     if st != 200 or not isinstance(text, str):
         return _miss_or_err(st)
     if "<workzag-jobs" not in text:
@@ -441,7 +442,7 @@ _TT = "{https://teamtailor.com/locations}"
 
 
 def probe_teamtailor(http: Http, slug: str) -> dict[str, Any]:
-    st, text = http("https://%s.teamtailor.com/jobs.rss" % slug, as_json=False)
+    st, text = http("https://%s.teamtailor.com/jobs.rss" % slug, as_json=False, max_bytes=5_000_000)  # RSS: full descriptions
     if st != 200 or not isinstance(text, str):
         return _miss_or_err(st)
     if "<rss" not in text:
@@ -646,8 +647,12 @@ def run_probes(
 def make_http(kit: Any) -> Http:
     """The kit's http helper (public hosts only, honest User-Agent, per-host limit) without its quick 429 retries."""
 
-    def h(url: str, *, as_json: bool = True, headers: dict[str, str] | None = None) -> tuple[int, Any]:
-        st, _u, body = kit.http_request(url, retries=0, headers=headers)
+    def h(
+        url: str, *, as_json: bool = True, headers: dict[str, str] | None = None, max_bytes: int | None = None
+    ) -> tuple[int, Any]:
+        if max_bytes is None:  # same defaults as the kit's own http(): 2 MB for pages, 20 MB for JSON
+            max_bytes = kit.API_MAX_BYTES if as_json else kit.PAGE_MAX_BYTES
+        st, _u, body = kit.http_request(url, retries=0, headers=headers, max_bytes=max_bytes)
         if not 200 <= st < 300:
             return st, None
         text = kit.decode_body(body)

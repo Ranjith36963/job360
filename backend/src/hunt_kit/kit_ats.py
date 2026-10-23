@@ -21,7 +21,13 @@ import sys
 import xml.etree.ElementTree as ET
 
 try:  # shared safe-XML helper (same folder)
-    from kit_xml import safe_fromstring  # type: ignore[import-not-found]  # sibling file, not a package module
+    from kit_xml import (  # type: ignore[import-not-found]  # sibling file, not a package module
+        closed_end,
+        drop_blocks,
+        finditer_closed,
+        safe_fromstring,
+        search_closed,
+    )
 except ImportError:  # loaded by file path: find the sibling file
     import importlib.util as _ilu
     from pathlib import Path as _Path
@@ -31,7 +37,8 @@ except ImportError:  # loaded by file path: find the sibling file
         raise ImportError("kit_xml.py not found next to this file")
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
-    safe_fromstring = _mod.safe_fromstring
+    safe_fromstring, drop_blocks = _mod.safe_fromstring, _mod.drop_blocks
+    finditer_closed, search_closed, closed_end = _mod.finditer_closed, _mod.search_closed, _mod.closed_end
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, cast
 from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
@@ -139,6 +146,9 @@ def _remote_from(*texts: Any) -> bool | None:
         if t and "remote" in str(t).lower():
             return True
     return None
+
+
+_FEED_MAX = 5_000_000  # an XML/RSS job feed carries a full description per item; the 2 MB page default would drop it
 
 
 def _get(http: Http, url: str, *, as_json: bool = True, **kw: Any) -> tuple[int, Any]:
@@ -335,7 +345,7 @@ def fetch_personio(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> li
         _count(stats, ok=False)
         return []
     try:
-        status, data = _get(http, f"https://{token}.jobs.personio.de/xml", as_json=False)
+        status, data = _get(http, f"https://{token}.jobs.personio.de/xml", as_json=False, max_bytes=_FEED_MAX)
         if status != 200 or not isinstance(data, str) or "<workzag-jobs" not in data:
             _count(stats, ok=False)
             return []
@@ -375,7 +385,7 @@ def fetch_teamtailor(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> 
         _count(stats, ok=False)
         return []
     try:
-        status, data = _get(http, f"https://{token}.teamtailor.com/jobs.rss", as_json=False)
+        status, data = _get(http, f"https://{token}.teamtailor.com/jobs.rss", as_json=False, max_bytes=_FEED_MAX)
         if status != 200 or not isinstance(data, str) or "<rss" not in data:
             _count(stats, ok=False)
             return []
@@ -463,12 +473,14 @@ def fetch_bamboohr(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> li
 ICIMS_DETAIL_CAP = 20  # detail-page requests per board (the rest come back undated)
 _ICIMS_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9-]*", re.I)
 _ICIMS_HREF_RE = re.compile(r"""href=["']([^"']*/jobs/\d+/[^"'/]+/job[^"']*)["']""", re.I)
-_ICIMS_H3_RE = re.compile(r"<h3\b[^>]*>\s*([\s\S]*?)</h3>", re.I)
+_ICIMS_H3_RE = re.compile(r"<h3\b[^<>]*>\s*([\s\S]*?)</h3>", re.I)
+_ICIMS_H3_END = re.compile(r"</h3>", re.I)  # a lazy match ends at or before the last one: see kit_xml.search_closed
 _ICIMS_LOC_RE = re.compile(
     r"""<span\b[^>]*class=["'][^"']*(?<![\w-])field-label(?![\w-])[^"']*["'][^>]*>\s*Location\s*</span>"""
     r"""\s*<span\b[^>]*>\s*([\s\S]*?)</span>""", re.I)
 _ICIMS_LD_RE = re.compile(
-    r"""<script\b[^>]*(?<![\w-])type=["']application/ld\+json["'][^>]*>([\s\S]*?)</script>""", re.I)
+    r"""<script\b[^<>]*(?<![\w-])type=["']application/ld\+json["'][^<>]*>([\s\S]*?)</script>""", re.I)
+_SCRIPT_END = re.compile(r"</script>", re.I)
 _ICIMS_COUNTRY = {"US": "United States", "CA": "Canada"}
 
 
@@ -487,7 +499,7 @@ def _icims_cards(page: str, origin: str) -> list[dict[str, str]]:
     cards: list[dict[str, str]] = []
     for card in str(page).split("iCIMS_JobCardItem")[1:]:
         m = _ICIMS_HREF_RE.search(card)
-        t = _ICIMS_H3_RE.search(card)
+        t = search_closed(_ICIMS_H3_RE, _ICIMS_H3_END, card)
         if not m or not t:
             continue
         url = urljoin(origin + "/", html.unescape(m.group(1)).strip())
@@ -506,7 +518,8 @@ def _icims_cards(page: str, origin: str) -> list[dict[str, str]]:
 def _icims_nodes(page: str) -> list[Any]:
     """Flatten every JSON-LD block (object, array or @graph) of a detail page."""
     nodes: list[Any] = []
-    for raw in _ICIMS_LD_RE.findall(str(page)):
+    for lm in finditer_closed(_ICIMS_LD_RE, _SCRIPT_END, str(page)):
+        raw = lm.group(1)
         try:
             data = json.loads(html.unescape(raw) if "&quot;" in raw else raw)
         except ValueError:
@@ -726,6 +739,7 @@ SF_CSB_DEFAULT_LOCALES = ("de_DE", "en_US")
 SF_CSB_LOCALE_PRIORITY = ("de_DE", "en_US", "en_GB", "en_EN")
 SF_CSB_MONTH_FIRST = ("en_US", "es_US")
 _SF_TILE_RE = re.compile(r'<li class="job-tile job-id-(\d+)\b[\s\S]*?</li>')
+_LI_END = re.compile(r"</li>")
 _SF_URL_RE = re.compile(r'data-url="([^"]+)"')
 _SF_TITLE_RE = re.compile(r'class="jobTitle-link[^"]*"[^>]*>([\s\S]*?)</a>')
 _SF_CITY_RE = re.compile(r'id="[^"]*-section-city-value">([\s\S]*?)</div>')
@@ -778,7 +792,7 @@ def _sf_city_from_slug(data_url: str, title: str) -> str:
 
 def _sf_parse_tiles(page: str, origin: str) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
-    for t in _SF_TILE_RE.finditer(page):
+    for t in finditer_closed(_SF_TILE_RE, _LI_END, page):
         block = t.group(0)
         um, tm = _SF_URL_RE.search(block), _SF_TITLE_RE.search(block)
         title = _sf_clean(tm.group(1)) if tm else ""
@@ -923,7 +937,7 @@ _TALEO_PORTAL_RES = (
     re.compile(r"""portalNo["']?\s*[:=]\s*["']?([0-9]+)""", re.I),
 )
 _TALEO_LDJSON_RE = re.compile(
-    r"""<script\b[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>([\s\S]*?)</script>""", re.I)
+    r"""<script\b[^<>]*type\s*=\s*["']application/ld\+json["'][^<>]*>([\s\S]*?)</script>""", re.I)
 _TALEO_DATE_FORMATS = ("%Y-%m-%d", "%b %d, %Y", "%B %d, %Y", "%d-%b-%Y", "%d %b %Y", "%d %B %Y",
                        "%m/%d/%Y", "%d/%m/%Y")
 
@@ -937,13 +951,25 @@ def _taleo_portal(page: Any) -> str:
     return ""
 
 
+_TALEO_TABLE_OPEN = re.compile(r"""<table\b[^<>]*id=["']jobs["'][^<>]*>""", re.I)
+_TALEO_THEAD_RE = re.compile(
+    r"""<table\b[^<>]*id=["']jobs["'][^<>]*>[\s\S]*?<thead\b[^<>]*>([\s\S]*?)</thead>""", re.I)
+_THEAD_END = re.compile(r"</thead>", re.I)
+_TALEO_HEAD_CELL = re.compile(r"<(?:th|label)[^<>]*>([\s\S]*?)</(?:th|label)>", re.I)
+_TALEO_CELL_END = re.compile(r"</(?:th|label)>", re.I)
+
+
 def _taleo_headings(page: Any) -> list[str]:
     """Column labels from the shell's jobs table header (or any th/label), icon/action dropped."""
     page = str(page or "")
-    m = re.search(r"""<table\b[^>]*id=["']jobs["'][^>]*>[\s\S]*?<thead\b[^>]*>([\s\S]*?)</thead>""", page, re.I)
+    m = None
+    opener = _TALEO_TABLE_OPEN.search(page)
+    end = closed_end(page, _THEAD_END)
+    if opener and end >= 0:  # a later <table id=jobs> can only match where this one could, so try the first only
+        m = _TALEO_THEAD_RE.match(page, opener.start(), end)
     src = m.group(1) if m else page
     out: list[str] = []
-    for h in re.finditer(r"<(?:th|label)[^>]*>([\s\S]*?)</(?:th|label)>", src, re.I):
+    for h in finditer_closed(_TALEO_HEAD_CELL, _TALEO_CELL_END, src):
         label = _text(h.group(1))
         if label and not re.fullmatch(r"(?:icons?|actions?)", label, re.I):
             out.append(label)
@@ -1037,7 +1063,7 @@ def _taleo_description(page: Any) -> str:
             return node
         return find(node["@graph"]) if node.get("@graph") else None
 
-    for m in _TALEO_LDJSON_RE.finditer(str(page or "")):
+    for m in finditer_closed(_TALEO_LDJSON_RE, _SCRIPT_END, str(page or "")):
         try:
             posting = find(json.loads(m.group(1)))
         except (ValueError, RecursionError):
@@ -1310,7 +1336,7 @@ def fetch_jobvite(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> lis
                 _count(stats, ok=False)
                 return []
             eid = m.group(1)
-        status, data = _get(http, f"{JOBVITE_FEED}?c={quote(eid, safe='')}", as_json=False)
+        status, data = _get(http, f"{JOBVITE_FEED}?c={quote(eid, safe='')}", as_json=False, max_bytes=_FEED_MAX)
         if status != 200 or not isinstance(data, str) or "<result" not in data:
             _count(stats, ok=False)
             return []
