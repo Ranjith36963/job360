@@ -255,7 +255,8 @@ def test_eploy_opens_pages_for_passing_titles_only_and_reads_ld_json():
     assert "evil" not in by["442"]["description"] and "<" not in by["442"]["description"]
     assert by["470"]["description"] == "" and by["470"]["title"] == "Conference Producer"
     assert _hosts(http) == {"careers.pei.group", "peigroupweb.eploy.net"}
-    assert [urlsplit(u).path for u, *_ in http.calls if "eploy.net" in u] == ["/vacancies/442/senior-reporter--private-equity.html"]
+    eploy_paths = [urlsplit(u).path for u, *_ in http.calls if urlsplit(u).hostname == "peigroupweb.eploy.net"]
+    assert eploy_paths == ["/vacancies/442/senior-reporter--private-equity.html"]
 
 
 def test_eploy_page_without_ld_json_reads_markup():
