@@ -263,6 +263,10 @@ FEED_SOURCES = (
     "powertofly",
     "jobstash",
     "higheredjobs",
+    "echojobs",
+    "torre",
+    "tecla",
+    "japandev",
 )
 SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn", "simplify": "githublists"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
@@ -374,7 +378,7 @@ ATS_MODULES = (
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
-    "kit_asia", "kit_sites_a", "kit_sites_b",
+    "kit_asia", "kit_sites_a", "kit_sites_b", "kit_markets3",
 )
 
 
@@ -2734,6 +2738,10 @@ _FEED_HOSTS = (
     ("rapyd", re.compile(r"^(?:www\.)?rapyd\.net$", re.I)),
     ("startupandvc", re.compile(r"^(?:www\.)?startupandvc\.com$", re.I)),
     ("techtree", re.compile(r"^jobs\.techtree\.dev$", re.I)),
+    ("echojobs", re.compile(r"^echojobs\.io$", re.I)),
+    ("torre", re.compile(r"^torre\.ai$", re.I)),
+    ("tecla", re.compile(r"^(?:app|api)\.tecla\.io$", re.I)),
+    ("japandev", re.compile(r"^japan-dev\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
@@ -2865,7 +2873,7 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com)$", re.I)
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:

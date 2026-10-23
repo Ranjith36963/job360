@@ -728,4 +728,4 @@ def test_the_batch_recipe_is_listed_short_and_names_the_gate():
 def test_run_360_batch_is_in_the_mcp_instructions():
     from src.api import mcp_server
 
-    assert "run 360 <daily|hunt|batch>" in mcp_server.INSTRUCTIONS
+    assert "run 360 <daily|hunt|batch>" in mcp_server.instructions()

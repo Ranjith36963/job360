@@ -370,9 +370,9 @@ async def test_answered_history_pages_with_offset_and_is_never_capped(authentica
 @pytest.mark.asyncio
 async def test_mcp_round_trip_ask_list_answer(authenticated_async_context):
     pytest.importorskip("mcp")
-    from src.api.mcp_server import INSTRUCTIONS, mcp_runtime
+    from src.api.mcp_server import instructions, mcp_runtime
 
-    assert "NEEDS YOU" in INSTRUCTIONS and "ask_user" in INSTRUCTIONS
+    assert "NEEDS YOU" in instructions() and "ask_user" in instructions()
 
     token = await _mint_token(authenticated_async_context)
     async with authenticated_async_context() as web:
