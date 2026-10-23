@@ -163,6 +163,9 @@ BOARD_SOURCES = (
     "earcu",
     "beesite",
     "workablemarketplace",
+    "yourator",
+    "careerviet",
+    "occ",
     "adpmyjobs",
     "eploy",
     "selfrecruit",
@@ -361,7 +364,7 @@ def _import_kit(name: str) -> Any:
 # replaces a name an earlier one already provides).
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
-    "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4",
+    "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2830,6 +2833,9 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("vagas", re.compile(r"^(?:www\.)?vagas\.com\.br$")),
     ("beesite", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+){0,3}\.beesite\.de)$")),
     ("workablemarketplace", re.compile(r"^jobs\.workable\.com$")),
+    ("yourator", re.compile(r"^(?:www\.)?yourator\.co$")),
+    ("careerviet", re.compile(r"^(?:www\.)?careerviet\.vn$")),
+    ("occ", re.compile(r"^(?:www\.)?occ\.com\.mx$")),
     ("adpmyjobs", re.compile(r"^myjobs\.adp\.com$")),
     ("eploy", re.compile(r"^([a-z0-9-]+\.eploy\.net)$")),
     # generic ATS, part 5: the tenant is the subdomain (SelfRecruit, Enlizt, Hurma, Spark) or a path segment (Compleo)
@@ -2846,7 +2852,7 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co|humanbit\.ai)$", re.I)
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2924,7 +2930,7 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "" if m.group(1) in ("www", "api", "portal", "private-api", "employability-portal") else m.group(1)
         elif ats == "recrutei":  # https://jobs.recrutei.com.br/<tenant>/vacancy/<id>-<slug>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
-        elif ats == "vagas":  # one national board: the job link carries no board token
+        elif ats in ("vagas", "yourator", "careerviet", "occ"):  # one national board: no token in the link
             tok = ""
         elif ats == "edjoin":  # one central index: the job link does not show the job-type id the board is
             tok = ""

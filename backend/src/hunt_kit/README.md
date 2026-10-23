@@ -108,6 +108,13 @@ Vagas.com.br (`vagas:all`, the national board's three tech listings). A posting 
 passes your title filter, at most 25 per board, and the first refusal ends the board's detail requests. Gupy, InHire and HiringRoom
 list a posting without its description when it was not opened; Vagas.com.br lists only the postings it opened.
 
+`kit_markets4.py` adds three national job sites: Yourator, Taiwan (`yourator:all`, the whole board by its public JSON pages),
+CareerViet, Vietnam (`careerviet:all`, or one keyword slug such as `careerviet:ke-toan`) and OCC Mundial, Mexico (`occ:<keyword>`,
+one keyword slug is required; the site has no all-jobs listing; the first 3 result pages). Listings only, no description; every
+link stays on the board's own site (Yourator's employer links are not followed), and a refusal ends the board. OCC answers
+Cloudflare's challenge from outside Mexico, which shows as a failed board. AIJobs (aijobs.net) is not read: its list is a CSRF-protected
+POST that needs a cookie jar, so a link there is reported as unsupported.
+
 `kit_ats_misc3.py` adds five generic platforms: Radancy / TalentBrew career sites (`radancy:<career-site host>`, e.g.
 `radancy:careers.ing.com`, optionally `host/<lang>`; the site's results fragment, else its sitemap), UKG Ready
 (`ukgready:<pod host>/<tenant>`, e.g. `secure4.saashr.com/6162397`; a different product from UKG Pro Recruiting, which is
