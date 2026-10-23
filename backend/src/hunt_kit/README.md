@@ -155,6 +155,11 @@ a posting that was not opened is not listed; the first refusal ends the board's 
 only when it passes your title filter, at most 25 per board; Spark carries the whole posting in its list. Zoho Recruit is
 already read by `zohorecruit`, so it is not built again.
 
+`kit_fh5.py` adds Vouch (`vouch:<company cuid>` of `vouch.careers/companies/<cuid>`: one page carries every posting) and the BDJobs
+feed (Bangladesh, `bdjobs`; runs when BD is one of your countries; the site's keyword search, up to 4 pages a title, then a description
+request for up to 15 kept postings). HelloWork is not read (it needs a Chrome TLS fingerprint), so `hellowork.com` links are reported
+as unsupported; SEEK and Python.org jobs are already read by `jobstreet` and `pythonjobs`.
+
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
 (`hiringthing:host`, the full careers host, e.g. `acme.hiringthing.com`, because the product is white-labelled),
