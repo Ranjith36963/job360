@@ -1733,6 +1733,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contacts/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Contacts Batch
+         * @description Many people in one call: ``dry_run`` previews ``would_add`` /
+         *     ``duplicates`` / ``invalid`` by index and writes nothing; without it each
+         *     person is stored in its own transaction (idempotent, like ``add_contact``).
+         *     A bad row lands in ``invalid`` and never fails the rest. Status 200 always.
+         */
+        post: operations["add_contacts_batch_api_contacts_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contacts/{contact_id}": {
         parameters: {
             query?: never;
@@ -3127,6 +3150,38 @@ export interface components {
             matched_on?: string | null;
         };
         /**
+         * AddContactsBatchRequest
+         * @description ``POST /api/contacts/batch`` — the agent parsed the user's list (CSV/vCard);
+         *     Job360 previews (dry_run) or stores it. Items are raw dicts so one bad row
+         *     is reported in ``invalid`` instead of failing the whole call.
+         */
+        AddContactsBatchRequest: {
+            /** Application Id */
+            application_id?: number | null;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** People */
+            people: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** AddContactsBatchResponse */
+        AddContactsBatchResponse: {
+            /** Added */
+            added: components["schemas"]["BatchContactRowOut"][];
+            /** Dry Run */
+            dry_run: boolean;
+            /** Duplicates */
+            duplicates: components["schemas"]["BatchContactRowOut"][];
+            /** Invalid */
+            invalid: components["schemas"]["BatchContactRowOut"][];
+            /** Would Add */
+            would_add: components["schemas"]["BatchContactRowOut"][];
+        };
+        /**
          * AddPersonRequest
          * @description ``POST /api/contacts`` — a job-less (cold) contact when
          *     ``application_id`` is omitted, a linked one otherwise (owner decision,
@@ -3979,6 +4034,23 @@ export interface components {
              * @enum {string}
              */
             mode: "allow" | "deny";
+        };
+        /** BatchContactRowOut */
+        BatchContactRowOut: {
+            /** Contact Id */
+            contact_id?: number | null;
+            /** Detail */
+            detail?: string | null;
+            /** Duplicate Of Index */
+            duplicate_of_index?: number | null;
+            /** Index */
+            index: number;
+            /** Matched On */
+            matched_on?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Status */
+            status?: number | null;
         };
         /**
          * BlockedSubmittedOut
@@ -11606,6 +11678,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddContactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_contacts_batch_api_contacts_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddContactsBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddContactsBatchResponse"];
                 };
             };
             /** @description Validation Error */

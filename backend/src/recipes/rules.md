@@ -385,6 +385,11 @@ networking. add_contact them (application_id if tied to a job, omitted
 for cold networking; pass `found_via` — where you found them, and `email_source` — where the EMAIL came from: they_emailed, on_company_page, provider_verified, pattern_guess (you built it from a name pattern) or user_gave; leave it out if unsure), write the
 message YOURSELF, then save_artifact(contact_id=..., kind="outreach",
 channel="linkedin"|"email"|"other", text=...) — this DRAFTS a version.
+Adding the same person twice returns the existing contact (`already_existed: true`, `matched_on`): same email; else
+same LinkedIn URL; else same phone (7+ digits); else same name (on a job: unless both have different LinkedIn URLs or
+phones; cold: only when neither has either). A match changes nothing: update_contact adds what is new.
+A LIST of people (the user's CSV/vCard): parse it yourself, call add_contact(people=[...], dry_run=true), show the
+user would_add/duplicates/invalid, then the same call without dry_run.
 On channel="linkedin" the reply's `checks` warns `linkedin_note_too_long` over
 200 characters (a free account's connection-request note) or over 300 when
 `preferences.linkedin_premium` is true; set that to true with update_profile

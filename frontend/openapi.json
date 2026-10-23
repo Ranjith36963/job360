@@ -211,6 +211,86 @@
         "title": "AddContactResponse",
         "type": "object"
       },
+      "AddContactsBatchRequest": {
+        "additionalProperties": false,
+        "description": "``POST /api/contacts/batch`` \u2014 the agent parsed the user's list (CSV/vCard);\nJob360 previews (dry_run) or stores it. Items are raw dicts so one bad row\nis reported in ``invalid`` instead of failing the whole call.",
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "people": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "People",
+            "type": "array"
+          }
+        },
+        "required": [
+          "people"
+        ],
+        "title": "AddContactsBatchRequest",
+        "type": "object"
+      },
+      "AddContactsBatchResponse": {
+        "properties": {
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/BatchContactRowOut"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "duplicates": {
+            "items": {
+              "$ref": "#/components/schemas/BatchContactRowOut"
+            },
+            "title": "Duplicates",
+            "type": "array"
+          },
+          "invalid": {
+            "items": {
+              "$ref": "#/components/schemas/BatchContactRowOut"
+            },
+            "title": "Invalid",
+            "type": "array"
+          },
+          "would_add": {
+            "items": {
+              "$ref": "#/components/schemas/BatchContactRowOut"
+            },
+            "title": "Would Add",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dry_run",
+          "would_add",
+          "added",
+          "duplicates",
+          "invalid"
+        ],
+        "title": "AddContactsBatchResponse",
+        "type": "object"
+      },
       "AddPersonRequest": {
         "additionalProperties": false,
         "description": "``POST /api/contacts`` \u2014 a job-less (cold) contact when\n``application_id`` is omitted, a linked one otherwise (owner decision,\n2026-09-25). Kept as a SEPARATE model from ``AddContactRequest`` (used by\nthe per-application route, where the id comes off the URL) so that route\nkeeps refusing an ``application_id`` in its body (S3 \u2014 the id there is\nnever caller-supplied).",
@@ -2567,6 +2647,85 @@
           "mode"
         ],
         "title": "AutofillRequest",
+        "type": "object"
+      },
+      "BatchContactRowOut": {
+        "properties": {
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "duplicate_of_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of Index"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "matched_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched On"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "title": "BatchContactRowOut",
         "type": "object"
       },
       "BlockedSubmittedOut": {
@@ -20924,6 +21083,82 @@
           }
         },
         "summary": "Add Person",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/contacts/batch": {
+      "post": {
+        "description": "Many people in one call: ``dry_run`` previews ``would_add`` /\n``duplicates`` / ``invalid`` by index and writes nothing; without it each\nperson is stored in its own transaction (idempotent, like ``add_contact``).\nA bad row lands in ``invalid`` and never fails the rest. Status 200 always.",
+        "operationId": "add_contacts_batch_api_contacts_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddContactsBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddContactsBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Contacts Batch",
         "tags": [
           "applications"
         ]

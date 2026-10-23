@@ -1257,6 +1257,143 @@ async def confirm_contact(db: JobDatabase, user_id: str, contact_id: int, actor:
     return await _full_contact_view(db, user_id, contact)
 
 
+_BATCH_FIELDS = (
+    "name", "role", "email", "linkedin_url", "notes", "occurred_at", "found_via", "source_url", "phone", "links",
+)
+
+
+async def add_contacts_batch(
+    db: JobDatabase,
+    user_id: str,
+    application_id: Optional[int],
+    actor: str,
+    *,
+    people: list[dict[str, Any]],
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Many ``add_contact`` calls in one: ``dry_run`` previews (nothing written,
+    no rate limit spent), a real run stores each person in its own transaction
+    (each ``add_contact`` is idempotent, so a retry never doubles up). Items are
+    already-validated ``AddContactRequest`` field dicts carrying ``index``.
+    Counts only in the log, never a name, phone or link."""
+    if application_id is not None:
+        if await get_owned_application(db, user_id, application_id) is None:
+            raise SpineError(404, "application not found")
+    cold = application_id is None
+
+    would_add: list[dict[str, Any]] = []
+    added: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
+    invalid: list[dict[str, Any]] = []
+
+    clean_items: list[dict[str, Any]] = []
+    for raw in people:
+        item = dict(raw)
+        index = int(item.pop("index"))
+        kwargs = {k: item[k] for k in _BATCH_FIELDS if k in item}
+        try:
+            parse_occurred_at(kwargs.get("occurred_at"))
+            clean = {
+                "index": index,
+                "name": _validate_name(kwargs.get("name") or ""),
+                "email": _validate_email(kwargs.get("email") or ""),
+                "linkedin": _validate_linkedin_url(kwargs.get("linkedin_url") or ""),
+                "phone": _validate_phone(kwargs.get("phone")),
+                "kwargs": kwargs,
+            }
+            _validate_role(kwargs.get("role") or "")
+            _validate_notes(kwargs.get("notes") or "")
+            _validate_found_via(kwargs.get("found_via"))
+            _validate_source_url(kwargs.get("source_url"))
+            _validate_links(kwargs.get("links"))
+        except SpineError as exc:
+            invalid.append({"index": index, "status": exc.status_code, "detail": exc.detail})
+            continue
+        clean_items.append(clean)
+
+    if dry_run:
+        # (index, li_key, ph_key, nm_key, email) of every earlier would-add item.
+        earlier: list[tuple[int, str, str, str, str]] = []
+        db_keyed = await _keyed_identity_candidates(db, application_id, user_id)
+        for c in clean_items:
+            li_key = linkedin_identity_key(c["linkedin"])
+            ph_key = phone_identity_key(c["phone"])
+            nm_key = name_identity_key(c["name"])
+            if c["email"]:
+                hit = await _find_contact_by_current_email(db, application_id, user_id, c["email"])
+                if hit is not None:
+                    duplicates.append({"index": c["index"], "contact_id": hit["id"], "matched_on": "email"})
+                    continue
+                twin = next((e for e in earlier if e[4] == c["email"]), None)
+                if twin is not None:
+                    duplicates.append(
+                        {"index": c["index"], "duplicate_of_index": twin[0], "matched_on": "email"}
+                    )
+                    continue
+            else:
+                # ONE id-ordered list (DB rows, then earlier would-add items),
+                # exactly what add_contact sees in a real run.
+                combined = [(("db", r["id"]), li, ph, nm) for r, li, ph, nm in db_keyed] + [
+                    (("batch", e[0]), e[1], e[2], e[3]) for e in earlier
+                ]
+                tag, matched = match_identity(combined, li_key, ph_key, nm_key, cold=cold)
+                if tag is not None:
+                    if tag[0] == "db":
+                        duplicates.append({"index": c["index"], "contact_id": tag[1], "matched_on": matched})
+                    else:
+                        duplicates.append(
+                            {"index": c["index"], "duplicate_of_index": tag[1], "matched_on": matched}
+                        )
+                    continue
+            earlier.append((c["index"], li_key, ph_key, nm_key, c["email"]))
+            would_add.append({"index": c["index"], "name": c["name"]})
+        if cold:
+            cap, current = settings.CONTACTS_UNLINKED_MAX, await _count_unlinked_contacts(db, user_id)
+            cap_detail = f"cold-contact cap reached; CONTACTS_UNLINKED_MAX is {cap}"
+        else:
+            cap, current = settings.CONTACTS_PER_APPLICATION_MAX, await _count_contacts(db, int(application_id))  # type: ignore[arg-type]
+            cap_detail = f"contact cap reached; CONTACTS_PER_APPLICATION_MAX is {cap}"
+        remaining = max(cap - current, 0)
+        for over in would_add[remaining:]:
+            invalid.append({"index": over["index"], "status": 409, "detail": cap_detail})
+        would_add = would_add[:remaining]
+    else:
+        created_by_contact: dict[int, int] = {}
+        for c in clean_items:
+            try:
+                res = await add_contact(db, user_id, application_id, actor, **c["kwargs"])
+            except SpineError as exc:
+                invalid.append({"index": c["index"], "status": exc.status_code, "detail": exc.detail})
+                continue
+            contact_id = int(res["contact"]["id"])
+            if res["already_existed"]:
+                duplicates.append(
+                    {
+                        "index": c["index"], "contact_id": contact_id, "matched_on": res["matched_on"],
+                        "duplicate_of_index": created_by_contact.get(contact_id),
+                    }
+                )
+            else:
+                created_by_contact[contact_id] = c["index"]
+                added.append({"index": c["index"], "contact_id": contact_id})
+
+    def by_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(rows, key=lambda r: r["index"])
+
+    get_audit_logger().info(
+        "contacts_batch",
+        extra={
+            "event": "contacts_batch", "application_id": application_id, "dry_run": dry_run,
+            "total": len(people), "would_add": len(would_add), "added": len(added),
+            "duplicates": len(duplicates), "invalid": len(invalid),
+        },
+    )
+    return {
+        "dry_run": dry_run, "would_add": by_index(would_add), "added": by_index(added),
+        "duplicates": by_index(duplicates), "invalid": by_index(invalid),
+    }
+
+
 # ── Outreach ledger (owner decisions, 2026-09-25) ───────────────────────────
 # ``contact_outreach`` — append-only: a message VERSION the assistant drafted
 # (``entry="message"``), a ``sent`` mark (the USER told the assistant it went
