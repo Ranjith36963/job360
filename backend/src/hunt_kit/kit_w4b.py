@@ -177,10 +177,14 @@ def _applicantpro(row: dict[str, Any], http: Http) -> list[Job] | None:
     if sm is None or any(n in sm[:512].lower() for n in _AP_GONE):
         return None
     ids: list[str] = []
+    seen: set[str] = set()  # a set, not `in ids`: a 10 MB sitemap holds ~250k locs and a list scan is quadratic
     for loc in _AP_LOC.findall(sm):
         m = _AP_ID.search(_path(html.unescape(loc.strip())))
-        if m and m.group(1) not in ids:
+        if m and m.group(1) not in seen:
+            seen.add(m.group(1))
             ids.append(m.group(1))
+            if len(ids) >= ID_ONLY_CAP:  # only the first ID_ONLY_CAP are ever opened
+                break
     jobs: list[Job] = []
     for jid in ids[:ID_ONLY_CAP]:
         url = f"https://{host}/jobs/{jid}"

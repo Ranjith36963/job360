@@ -222,6 +222,21 @@ def test_applicantpro_hostile_sitemap_is_fast():
     assert time.perf_counter() - t0 < 1.0 and jobs == [] and len(http.calls) <= 1 + w4.ID_ONLY_CAP
 
 
+def test_applicantpro_many_distinct_sitemap_ids_scale_linearly_and_open_only_the_cap():
+    host = "acme.applicantpro.com"
+
+    def run(n):
+        http = _stub({"/sitemap.xml": (200, _ap_sitemap(host, *[str(i) for i in range(1, n + 1)])), "/jobs/": (404, None)})
+        t0 = time.perf_counter()
+        _run("applicantpro", _row("applicantpro", "acme"), http)
+        return time.perf_counter() - t0, http
+
+    t1, _ = run(25000)
+    t2, http = run(100000)
+    assert t2 < 1.0 and t2 < t1 * 8  # a list scan would cost ~16x for 4x the ids
+    assert len(http.calls) == 1 + w4.ID_ONLY_CAP
+
+
 # ------------------------------------------------------------------ Potok
 def _pk_listing(rows, team="Отдел", wrapper=True):
     cards = "".join(
