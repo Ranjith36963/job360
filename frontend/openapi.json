@@ -1482,6 +1482,14 @@
           "known_people": {
             "$ref": "#/components/schemas/KnownPeopleOut"
           },
+          "last_fill": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/KitLastFillOut"
+            },
+            "title": "Last Fill",
+            "type": "array"
+          },
           "missing": {
             "items": {
               "$ref": "#/components/schemas/KitMissingOut"
@@ -3208,6 +3216,14 @@
             "title": "Doc Kind",
             "type": "string"
           },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FillField"
+            },
+            "maxItems": 40,
+            "title": "Fields",
+            "type": "array"
+          },
           "on": {
             "default": true,
             "title": "On",
@@ -4252,6 +4268,49 @@
           }
         },
         "title": "CvSeenRequest",
+        "type": "object"
+      },
+      "CvToApproveOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CvToApproveRow"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CvToApproveOut",
+        "type": "object"
+      },
+      "CvToApproveRow": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "cv": {
+            "$ref": "#/components/schemas/ReadyDoc"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "job_title",
+          "job_company",
+          "cv"
+        ],
+        "title": "CvToApproveRow",
         "type": "object"
       },
       "DoctorAuth": {
@@ -5314,6 +5373,28 @@
           "message"
         ],
         "title": "FetchUrlResponse",
+        "type": "object"
+      },
+      "FillField": {
+        "additionalProperties": false,
+        "description": "One field for action fill: a ref from the latest look and its value.",
+        "properties": {
+          "ref": {
+            "maxLength": 32,
+            "title": "Ref",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "maxLength": 5000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "title": "FillField",
         "type": "object"
       },
       "FitAxisIn": {
@@ -6879,6 +6960,46 @@
           "recorded_at"
         ],
         "title": "KitKnownAccountOut",
+        "type": "object"
+      },
+      "KitLastFillOut": {
+        "description": "One answer of the newest ``form_filled``, as stored (``redacted``: hashed, ``answer`` is \"\").",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "redacted": {
+            "default": false,
+            "title": "Redacted",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer",
+          "source"
+        ],
+        "title": "KitLastFillOut",
         "type": "object"
       },
       "KitMissingOut": {
@@ -20832,7 +20953,7 @@
     },
     "/api/browser": {
       "post": {
-        "description": "One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,\nclose). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant\nreads them like any page; a 404 from the gate (not the caller's application) stays a 404.",
+        "description": "One action in the caller's cloud browser (open, look, click, type, choose, tick, fill, upload, back,\nclose). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant\nreads them like any page; a 404 from the gate (not the caller's application) stays a 404.",
         "operationId": "browser_action_api_browser_post",
         "parameters": [
           {
@@ -21924,6 +22045,72 @@
         "summary": "Outreach Check",
         "tags": [
           "applications"
+        ]
+      }
+    },
+    "/api/cv-to-approve": {
+      "get": {
+        "description": "Approve CV on Needs you (owner decision 2026-10-23): the caller's open applications whose newest CV\nthey have not seen yet, from chat or the web. \"CV OK\" is ``POST /applications/{id}/cv-seen``.",
+        "operationId": "cv_to_approve_api_cv_to_approve_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CvToApproveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cv To Approve",
+        "tags": [
+          "ready-to-send"
         ]
       }
     },
