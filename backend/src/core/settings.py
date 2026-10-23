@@ -627,6 +627,10 @@ CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS",
 CONTACT_SOURCE_URL_MAX_CHARS = int(os.getenv("CONTACT_SOURCE_URL_MAX_CHARS", "1000"))
 CONTACT_COMPANY_MAX_CHARS = int(os.getenv("CONTACT_COMPANY_MAX_CHARS", "200"))
 CONTACT_SHARED_MAX_CHARS = int(os.getenv("CONTACT_SHARED_MAX_CHARS", "300"))
+CONTACT_PHONE_MAX_CHARS = int(os.getenv("CONTACT_PHONE_MAX_CHARS", "40"))
+CONTACT_PHONE_DEDUPE_MIN_DIGITS = int(os.getenv("CONTACT_PHONE_DEDUPE_MIN_DIGITS", "7"))
+CONTACT_LINKS_MAX = int(os.getenv("CONTACT_LINKS_MAX", "5"))
+CONTACT_LINK_MAX_CHARS = int(os.getenv("CONTACT_LINK_MAX_CHARS", "500"))
 CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
 CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
 CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
@@ -712,7 +716,7 @@ CONTACT_RELATIONSHIP = (
 CONTACT_SHARED_SOURCES = ("cv_data.cv_positions", "cv_data.cv_projects", "cv_data.education")
 CONTACT_EDIT_FIELDS = (
     "name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company", "email_source",
-    "relationship", "shared",
+    "relationship", "shared", "phone", "links",
 )
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
@@ -896,6 +900,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.auto_employer_emails",
     # Owner 2026-10-20 (G087) - may the assistant send outreach itself (draft_only | auto); its own consent.
     "assistant_settings.outreach_send",
+    # Owner 2026-10-23 - hunt for jobs every N hours (1-168; null / 0 = off). Turning it on is riskier.
+    "assistant_settings.hunt_every_hours",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

@@ -85,10 +85,13 @@ export const P_AUTO_EMAILS = "assistant_settings.auto_employer_emails";
 export const P_OUTREACH_SEND = "assistant_settings.outreach_send";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
+/** Owner 2026-10-23: hunt for jobs every N hours (1-168); empty or 0 = off. */
+export const P_HUNT_EVERY = "assistant_settings.hunt_every_hours";
+export const HUNT_EVERY_MAX = 168;
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
   P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND,
-  P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL,
+  P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
 ] as const;
 export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
 export const HISTORY_PATHS: string[] = [...SETTING_HISTORY_PATHS, ...PREF_HISTORY_PATHS];
@@ -110,6 +113,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_GRANT_UNTIL]: "Auto lasts until",
   [P_INBOX]: "Gmail check",
   [P_EVERY]: "Inbox check",
+  [P_HUNT_EVERY]: "Job hunt",
 };
 
 /** "auto"/"scheduled" -> auto, "declined" -> paused (Off); anything else as stored. */
@@ -121,6 +125,13 @@ export function inboxKey(v: unknown): string {
 export function everyText(v: unknown): string {
   const n = typeof v === "string" ? /^(\d+)h$/.exec(v)?.[1] : undefined;
   return n === "1" ? "every hour" : n ? `every ${n} hours` : "";
+}
+
+/** A saved hunt interval in words: 6 -> "every 6 hours"; empty or 0 -> "off". */
+export function huntText(v: unknown): string {
+  const n = typeof v === "number" ? v : Number.NaN;
+  if (!Number.isInteger(n) || n < 1) return "off";
+  return n === 1 ? "every hour" : `every ${n} hours`;
 }
 
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
@@ -135,6 +146,7 @@ export function valueText(path: string, v: unknown): string {
     return h && typeof h === "object" && h.from && h.to ? `${String(h.from)} to ${String(h.to)}` : "any time";
   }
   if (path === P_GRANT_UNTIL) return empty ? "not set" : historyWhen(String(v));
+  if (path === P_HUNT_EVERY) return huntText(v);
   if (empty) return "not set";
   if (path === P_ABOVE || path === P_BELOW) return LINE_SWITCH_LABEL[String(v)] ?? String(v);
   if (path === P_SUBMIT) return SUBMIT_MODE_LABEL[String(v)] ?? String(v);

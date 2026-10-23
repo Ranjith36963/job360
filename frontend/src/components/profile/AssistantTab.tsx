@@ -14,6 +14,7 @@ import type { AssistantSettingsView, MorningCheck } from "@/lib/api";
 import {
   CHECK_EVERY,
   HARD_STOPS,
+  HUNT_EVERY_MAX,
   HISTORY_PATHS,
   INBOX_MODES,
   AUTO_EMAILS_HELP,
@@ -21,11 +22,13 @@ import {
   P_AUTO_EMAILS,
   P_OUTREACH_SEND,
   P_EVERY,
+  P_HUNT_EVERY,
   P_INBOX,
   P_SCORE,
   PREF_HISTORY_PATHS,
   everyText,
   historyWhen,
+  huntText,
   inboxKey,
   mergeHistory,
   settingAutoEmails,
@@ -108,6 +111,7 @@ export function AssistantTab() {
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [score, setScore] = useState("");
+  const [hunt, setHunt] = useState("");
   const [confirmAuto, setConfirmAuto] = useState(false);
   const [confirmOutreach, setConfirmOutreach] = useState(false);
   const enterDone = useRef(false);
@@ -129,6 +133,7 @@ export function AssistantTab() {
   const apply = useCallback((v: AssistantSettingsView) => {
     setView(v);
     setScore(settingScore(v.apply_min_score) == null ? "" : String(settingScore(v.apply_min_score)));
+    setHunt(settingScore(v.hunt_every_hours) == null ? "" : String(settingScore(v.hunt_every_hours)));
   }, []);
 
   const load = useCallback(async () => {
@@ -215,6 +220,7 @@ export function AssistantTab() {
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
   const savedScore: number | null = settingScore(view.apply_min_score);
+  const savedHunt: number | null = settingScore(view.hunt_every_hours);
   const liveState = { apply_min_score: savedScore, above_line: aboveLine, below_line: belowLine, submit_mode };
   function commitScore() {
     const t = score.trim();
@@ -230,6 +236,22 @@ export function AssistantTab() {
       return;
     }
     if (n !== savedScore) void save(P_SCORE, n);
+  }
+  function commitHunt() {
+    const t = hunt.trim();
+    if (t === "" || t === "0") {
+      // Off: nothing is written unless something was saved (rule #29).
+      setHunt("");
+      if (savedHunt !== null) void save(P_HUNT_EVERY, null);
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isInteger(n) || n < 1 || n > HUNT_EVERY_MAX) {
+      toast.error(`The job hunt runs every 1 to ${HUNT_EVERY_MAX} hours, or blank for off. Not saved.`);
+      setHunt(savedHunt === null ? "" : String(savedHunt));
+      return;
+    }
+    if (n !== savedHunt) void save(P_HUNT_EVERY, n);
   }
   /** Enter commits exactly like blur; the blur that may follow must not commit twice. */
   const onEnter = (commit: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -348,6 +370,33 @@ export function AssistantTab() {
                 ))}
               </select>
               {every === "1h" ? "hour" : "hours"}
+            </label>
+          </Row>
+          <Row
+            title="Job hunt"
+            sub="Your assistant looks for new jobs on a schedule you set, from its own task. Blank = off."
+          >
+            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+              every
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={HUNT_EVERY_MAX}
+                aria-label="Hunt every"
+                data-testid="hunt-every"
+                placeholder="Off"
+                value={hunt}
+                disabled={busy}
+                onChange={(e) => {
+                  enterDone.current = false;
+                  setHunt(e.target.value);
+                }}
+                onBlur={onBlurCommit(commitHunt)}
+                onKeyDown={onEnter(commitHunt)}
+                className={NUMBOX}
+              />
+              {savedHunt === 1 ? "hour" : "hours"}
             </label>
           </Row>
         </Section>
@@ -503,6 +552,7 @@ export function AssistantTab() {
                 ["Below the line", LINE_SWITCH_LABEL[belowLine] ?? belowLine],
                 ...(today ? [["Today", quotaText(today.state.applied_today, today.state.daily_cap).replace(/ today$/, "")]] : []),
                 ...(inbox ? [["Gmail check", [INBOX_MODES.find((m) => m.value === inbox)?.label, everyText(every)].filter(Boolean).join(", ")]] : []),
+                ...(savedHunt !== null ? [["Job hunt", huntText(savedHunt)]] : []),
               ] as [string, string][]
             ).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3">

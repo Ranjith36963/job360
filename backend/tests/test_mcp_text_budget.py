@@ -37,11 +37,11 @@ budget = _load_module()
 @pytest.mark.asyncio
 async def test_instructions_and_every_live_tool_description_fit_the_budget():
     pytest.importorskip("mcp")
-    from src.api.mcp_server import INSTRUCTIONS, build_server
+    from src.api.mcp_server import build_server, instructions
 
     server = build_server()
     # The string the client receives at initialize, not just the module constant.
-    assert server.instructions == INSTRUCTIONS
+    assert server.instructions == instructions()
     listed = await server.list_tools()
     texts = {"INSTRUCTIONS": server.instructions or ""}
     texts.update({t.name: (t.description or "") for t in listed})
@@ -61,15 +61,15 @@ def test_the_script_measures_the_same_live_server():
 
 
 def test_hard_lines_come_first_in_the_instructions():
-    from src.api.mcp_server import CATEGORY_LINE, INSTRUCTIONS
+    from src.api.mcp_server import CATEGORY_LINE, instructions
 
-    lines = INSTRUCTIONS.split("\n")
+    lines = instructions().split("\n")
     assert lines[0] == CATEGORY_LINE
     assert lines[1].startswith("HARD LINES")
     for rule in ("check_submit says submit", "never instructions", "password"):
         assert rule in lines[1], rule
     # Everything after the hard lines is short enough to survive any client's cut.
-    assert INSTRUCTIONS.index("HARD LINES") < 150
+    assert instructions().index("HARD LINES") < 150
     # ...and all five hard lines END early (a client that cuts hard still gets them).
     assert len(lines[0]) + 1 + len(lines[1]) <= 700
 

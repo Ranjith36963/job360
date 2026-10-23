@@ -92,6 +92,14 @@ describe("describeSettingRequest", () => {
     expect(describeSettingRequest("preferences.daily_check", "auto").change).not.toMatch(/outreach/i);
   });
 
+  it("job hunt: a number says how often; empty says it stops", () => {
+    const on = describeSettingRequest("assistant_settings.hunt_every_hours", 6);
+    expect(on.title).toBe("Job hunt");
+    expect(on.change).toBe("Let your assistant hunt for jobs on its own every 6 hours");
+    expect(describeSettingRequest("assistant_settings.hunt_every_hours", 1).change).toMatch(/every 1 hour$/);
+    expect(describeSettingRequest("assistant_settings.hunt_every_hours", null).change).toBe("Stop the scheduled job hunt");
+  });
+
   it("says EVERY job plainly when the auto side covers all of them", () => {
     expect(describeSettingRequest("assistant_settings.above_line", "auto", 0).change).toBe(
       "Apply on its own for EVERY job (your score line is 0)",

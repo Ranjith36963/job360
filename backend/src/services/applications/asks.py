@@ -92,7 +92,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         # and None again if the answer was changed after the confirmation.
         "confirmed_at": confirmed_at if relayed and confirmed_at and confirmed_at >= answered_at else None,
         "withdrawn_at": withdrawn_at,
-        # Who took the ask back and why (0081; "" = not withdrawn, or before 0081 / no reason given).
+        # Who took the ask back and why (0082; "" = not withdrawn, or before 0082 / no reason given).
         "withdrawn_by": row.get("withdrawn_by") or "",
         "withdrawn_reason": row.get("withdrawn_reason") or "",
         "status": status,

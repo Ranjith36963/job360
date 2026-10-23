@@ -1015,6 +1015,77 @@ def check_paths(files: list[str]) -> Verdict:
     )
 
 
+# ── THE MIGRATION NUMBER, READ AGAINST LIVE MAIN (2026-10-22) ───────────────
+# Measured on main: #1088 merged `0077_outreach_variants`, then #1006 merged
+# `0077_receipt_answers_from` 16 minutes later. Each PR was green against the
+# main it last saw; nothing re-read main at judge time, so main held two 0077s
+# until #1011 renamed one. Twice in four days (0067 on 21 Oct, 0077 on 22 Oct).
+#
+# So a PR that ADDS a migration is judged against main AS IT IS NOW: its number
+# must be new and above main's highest. One exemption, and it is narrow: a file
+# main already holds BYTE FOR BYTE (same path, same blob sha) is a stacked PR's
+# copy of a migration that already merged, not a clash.
+MIGRATION_RE = re.compile(r"^backend/migrations/(\d{4})_[^/]+\.(?:up|down)\.sql$")
+
+
+def judge_migration_numbers(pr_files: list[dict], main_tree: list[dict],
+                            truncated: bool = False) -> list[str]:
+    """Reasons a PR's NEW migrations clash with main. Pure: files in, reasons out.
+
+    `pr_files` is GitHub's PR files list ({filename, status, sha}); `main_tree`
+    is the `git/trees` entries of main ({path, sha}). No reasons = no clash.
+    """
+    on_main = {e.get("path", ""): e.get("sha", "") for e in main_tree
+               if MIGRATION_RE.match(e.get("path", ""))}
+    added = [f for f in pr_files
+             if f.get("status") in ("added", "renamed", "copied")
+             and MIGRATION_RE.match(f.get("filename", ""))
+             and on_main.get(f["filename"]) != f.get("sha")]
+    if not added:
+        return []
+    if truncated:
+        return ["GitHub truncated main's tree, so I could not see every migration on main — "
+                "a number I cannot compare is not a number that is free. FIX: re-run; if it "
+                "persists, read backend/migrations with a non-recursive tree call."]
+    if not on_main:
+        return ["I read main's tree and found no migrations at all, which cannot be true — "
+                "refusing rather than calling every number free. FIX: re-run."]
+    taken: dict[int, list[str]] = {}
+    for path in on_main:
+        m = MIGRATION_RE.match(path)
+        if m:
+            taken.setdefault(int(m.group(1)), []).append(path.rsplit("/", 1)[-1])
+    top = max(taken)
+    new_nums = sorted({int(MIGRATION_RE.match(f["filename"]).group(1)) for f in added})
+    rename = {n: top + 1 + i for i, n in enumerate(new_nums)}
+    reasons: list[str] = []
+    for n in new_nums:
+        if n > top:
+            continue
+        stem = sorted({p.split(".")[0] for p in taken.get(n, [])})
+        where = (f"main already has {n:04d} ({', '.join(stem)})" if stem
+                 else f"{n:04d} is at or below main's highest migration ({top:04d})")
+        reasons.append(
+            f"migration {n:04d} clashes with main: {where}. Two PRs that are each green "
+            f"against an older main put two 0077s on main on 2026-10-22. "
+            f"FIX: rename to {rename[n]:04d} (both the .up.sql and .down.sql), then push.")
+    if reasons and any(n > top for n in new_nums):
+        reasons.append(f"FIX (whole set): renumber this PR's new migrations to "
+                       f"{', '.join(f'{rename[n]:04d}' for n in new_nums)} so they stay in order.")
+    return reasons
+
+
+def check_migrations(files_json: list[dict]) -> Verdict:
+    """The MIGRATIONS cage: reads live main only when the PR adds a migration."""
+    if not any(MIGRATION_RE.match(f.get("filename", "")) for f in files_json):
+        return Verdict("MIGRATIONS", "pass", [], claim="no new migration to number")
+    tree = json.loads(gh(["api", f"repos/{REPO}/git/trees/{MAIN_BRANCH}?recursive=1"]))
+    reasons = judge_migration_numbers(files_json, tree.get("tree") or [],
+                                      bool(tree.get("truncated")))
+    return Verdict("MIGRATIONS", "fail" if reasons else "pass", reasons,
+                   claim="every new migration number is free and above live main's highest")
+
+
 # ── WHAT THE SIZE CAP IS ACTUALLY MEASURING ─────────────────────────────────
 # The cap is a REVIEWABILITY budget: "past this, no reviewer human or machine is
 # actually reading it, they are skimming." So the number it counts must be the
@@ -1942,6 +2013,13 @@ def decide(pr: int, base_values: dict[str, int] | None = None,
     verdicts.append(check_size(len(files), changed_lines, deletions, exempt_lines,
                                meta.get("data_lines", 0)))
     verdicts.append(check_paths(files))
+    try:
+        verdicts.append(check_migrations(files_json))
+    except Exception as exc:
+        verdicts.append(Verdict("MIGRATIONS", "fail", [
+            f"the MIGRATIONS cage could not read main ({type(exc).__name__}: {exc}) — a "
+            f"number I could not compare is not a free number. FIX: re-run once the GitHub "
+            f"API is reachable."]))
 
     for name, fn in (("PROOF", lambda p: check_proof(p, base_ref)), ("REVIEW", check_review)):
         try:
@@ -2301,7 +2379,8 @@ def advice_markdown(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict])
 # Every function `decide()` calls, by name. Adding a call here without a drill
 # case that touches it turns the drill red.
 DECISION_PATH = [
-    "check_size", "check_paths", "judge_check_runs", "check_proof", "judge_threads",
+    "check_size", "check_paths", "judge_migration_numbers", "check_migrations",
+    "judge_check_runs", "check_proof", "judge_threads",
     "check_review", "measure_ratchets", "check_ratchets", "is_worse", "ground_problem",
     # DID ANYONE ACTUALLY LOOK. On the decision path because "no unresolved
     # threads" passed vacuously for as long as CodeRabbit has been skipping.
@@ -3956,6 +4035,58 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        _held == ["arm"], f"calls {_held}", ["status_for"])
     ok("a refused PR that changes .github/ is withdrawn, never held",
        "withdraw" in _wf and "arm" not in _wf, f"calls {_wf}", ["status_for"])
+
+    # ── CAGE: MIGRATIONS — the live-main number check (2026-10-22) ───────────
+    # Replays the real clash: #1088 (0077_outreach_variants) merged, then #1006
+    # (0077_receipt_answers_from) merged on top of it, green against an older main.
+    M = ["judge_migration_numbers", "check_migrations"]
+    _mig = "backend/migrations/"
+
+    def _tree(*stems: str) -> list[dict]:
+        return [{"path": f"{_mig}{s}.{d}.sql", "sha": f"{s}.{d}"} for s in stems for d in ("up", "down")]
+
+    def _adds(*stems: str) -> list[dict]:
+        return [{"filename": f"{_mig}{s}.{d}.sql", "status": "added", "sha": f"{s}.{d}"}
+                for s in stems for d in ("up", "down")]
+
+    _before_1088 = _tree("0075_contact_company", "0076_email_change_undos")
+    _after_1088 = _before_1088 + _tree("0077_outreach_variants")
+    ok("MIGRATIONS: #1088's 0077 against the main it merged into is free",
+       judge_migration_numbers(_adds("0077_outreach_variants"), _before_1088) == [],
+       "refused a free number", M)
+    red("MIGRATIONS: replaying #1088 then #1006 turns the second red (main already has 0077)",
+        judge_migration_numbers(_adds("0077_receipt_answers_from"), _after_1088),
+        "rename to 0078", M)
+    red("MIGRATIONS: a number BELOW main's highest is refused even when unused",
+        judge_migration_numbers(_adds("0070_old_branch"), _after_1088),
+        "at or below main's highest migration (0077)", M)
+    ok("MIGRATIONS: two PRs with different new numbers both stay green",
+       judge_migration_numbers(_adds("0077_a"), _before_1088) == []
+       and judge_migration_numbers(_adds("0078_b"), _before_1088) == []
+       and judge_migration_numbers(_adds("0078_b"), _before_1088 + _tree("0077_a")) == [],
+       "refused one of two non-clashing numbers", M)
+    ok("MIGRATIONS: a stacked PR carrying main's own migration byte for byte is not a clash",
+       judge_migration_numbers(_adds("0076_email_change_undos") + _adds("0078_x"),
+                               _after_1088) == [],
+       "read an already-merged migration as a clash", M)
+    red("MIGRATIONS: a truncated main tree refuses, never guesses",
+        judge_migration_numbers(_adds("0078_x"), _after_1088, truncated=True),
+        "truncated", M)
+    saved_gh_m = globals()["gh"]
+    try:
+        def _no_gh(a: list[str]) -> str:
+            raise RuntimeError(f"a PR with no migration must not read main: {' '.join(a)}")
+
+        globals()["gh"] = _no_gh
+        _v_none = check_migrations([{"filename": "docs/README.md", "status": "modified"}])
+        ok("MIGRATIONS: a PR with no migration stays green and never reads main",
+           _v_none.status == "pass", f"got {_v_none.status}: {_v_none.reasons}", M)
+
+        globals()["gh"] = lambda a: json.dumps({"truncated": False, "tree": _after_1088})
+        red("MIGRATIONS: the cage itself reads live main and refuses #1006's 0077",
+            check_migrations(_adds("0077_receipt_answers_from")), "main already has 0077", M)
+    finally:
+        globals()["gh"] = saved_gh_m
 
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]

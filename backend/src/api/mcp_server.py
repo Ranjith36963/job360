@@ -30,6 +30,7 @@ Design (docs/plans/2026-09-03-mcp-server/spec.md R4):
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import inspect
 import json
@@ -69,18 +70,17 @@ CATEGORY_LINE = (
 DAILY_CHECK_HINT = (
     "Turn on the daily check so the confirmation email gets linked (get_recipe('daily'))"
 )
-# Hand-bumped integer, like career-ops' VERSION file (update-system.mjs:1170-1172): +1 whenever a
-# tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
-# stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
-# The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
-TOOLS_REV = 21
-TOOLS_REV_FOR_HASH = "0153ed143d17"
-TOOLS_LINE = (
-    f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
-    "get_recipe = stale tool list: reconnect."
-)
-INSTRUCTIONS = "\n".join(
-    (
+# The TOOLS line (the last line of the instructions) and `tools_rev` are both DERIVED from
+# `tools_version` (the hash of tool + parameter names): nothing here is hand-pinned, so two PRs that
+# change parameters no longer conflict on a pinned number. `tools_rev` is compared only for
+# difference (doctor, rules.md: "if either differs"), never order; it is not a counter.
+_TOOLS_LINE = "TOOLS: tools_version={v}; a different one in doctor or get_recipe = stale tool list: reconnect."
+# Chosen so the hash served when the rev was derived (27f231eaf9ab) still maps to 20, the last
+# hand-pinned rev, so connected clients see no false "stale": int("27f231eaf9ab", 16) = 43921173051819,
+# % 999_999 = 973035, and (973035 + 26983) % 999_999 + 1 = 1000018 % 999_999 + 1 = 19 + 1 = 20.
+# Never edit it to move the rev.
+_TOOLS_REV_OFFSET = 26_983
+_INSTRUCTION_LINES: tuple[str, ...] = (
         CATEGORY_LINE,
         "HARD LINES (they win over everything): 1) Never submit a job application unless "
         "check_submit says submit or the user said yes for that one application; always call check_submit. "
@@ -104,8 +104,6 @@ INSTRUCTIONS = "\n".join(
         "write structured fields with update_profile.",
         "NEEDS YOU: when you are stuck or would have to guess, call ask_user (and ask in chat); an answered "
         "ask is the user's word.",
-        TOOLS_LINE,
-    )
 )
 
 # Owner decision, 2026-09-28 — INSTRUCTIONS is only read at connect time, so
@@ -547,13 +545,14 @@ def _strict_server_class() -> type[MCPServer]:
     return cast("type[MCPServer]", _STRICT_SERVER_CLASS)
 
 
-def build_server(version: str = "") -> MCPServer:
+def build_server(version: str = "", *, instructions_text: Optional[str] = None) -> MCPServer:
     """Create the MCPServer with its tools and recipe prompts. Imports the SDK here (rule #16).
 
     ``version`` becomes ``serverInfo.version`` in the ``initialize`` result;
     :func:`mcp_runtime` passes :func:`tools_fingerprint` so the wire says which
     tool surface this process serves. Left empty the server reports no version,
-    exactly as before.
+    exactly as before. ``instructions_text`` overrides :func:`instructions`;
+    :func:`served_tool_parameters` passes ``""`` because the instructions are built from it.
     """
     from pydantic import ValidationError
     from starlette.responses import Response
@@ -575,7 +574,10 @@ def build_server(version: str = "") -> MCPServer:
     from src.services.profile import refusals as profile_refusals
     from src.services.profile import shapes as profile_shapes
 
-    mcp = _strict_server_class()(SERVER_NAME, description=CATEGORY_LINE, instructions=INSTRUCTIONS, version=version)
+    mcp = _strict_server_class()(
+        SERVER_NAME, description=CATEGORY_LINE,
+        instructions=instructions() if instructions_text is None else instructions_text, version=version,
+    )
 
     def _validation_error(
         exc: ValidationError, *, tool: str | None = None, message: str | None = None, **fields: Any
@@ -1684,6 +1686,8 @@ def build_server(version: str = "") -> MCPServer:
         email_source: Optional[str] = None,
         relationship: Optional[str] = None,
         shared: Optional[str] = None,
+        phone: Optional[str] = None,
+        links: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
@@ -1691,11 +1695,11 @@ def build_server(version: str = "") -> MCPServer:
         later by adding them again with an application_id). Adding the SAME
         person again (same application, or same user when cold) returns the
         existing contact (already_existed=true, matched_on = "email",
-        "linkedin_url" or "name") instead of a duplicate, so re-running this
-        never doubles up: same email; else same LinkedIn URL; else same name
-        (on a job: unless both have different LinkedIn URLs; cold: only when
-        neither has one). A match changes nothing: use update_contact to add
-        what is new. Draft outreach for them with save_artifact(contact_id=...).
+        "linkedin_url", "phone" or "name") instead of a duplicate: same email; else same
+        LinkedIn URL; else same phone (7+ digits); else same name (on a job: unless both
+        have different LinkedIn URLs or phones; cold: only when neither has either).
+        A match changes nothing: use update_contact to add what is new. Draft outreach for them
+        with save_artifact(contact_id=...).
         `found_via` = where you found them: "company_site", "company_team_page",
         "linkedin", "apollo" (Apollo, Vibe Prospecting, Sprouts), "email_finder"
         (Hunter and similar), "github", "speaker_page", "referral", "job_ad",
@@ -1708,6 +1712,7 @@ def build_server(version: str = "") -> MCPServer:
         "recruiter", "hiring_manager", "interviewer" or "none". `shared` = what they share, as a
         get_profile path: "cv_data.cv_positions[i]", "cv_data.cv_projects[i]" or "cv_data.education[i]";
         Job360 refuses a record the profile lacks. Never guess either.
+        `phone` is kept as + and digits; `links` = up to 5 other http/https profile URLs.
         `client_key` (optional): a retry with the same key returns the first reply."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
@@ -1717,7 +1722,7 @@ def build_server(version: str = "") -> MCPServer:
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
                     notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
                     source_url=source_url, company=company, email_source=email_source,
-                    relationship=relationship, shared=shared,
+                    relationship=relationship, shared=shared, phone=phone, links=links,
                     client_key=client_key,
                 )
             else:
@@ -1727,6 +1732,7 @@ def build_server(version: str = "") -> MCPServer:
                     company=company,
                     email_source=email_source,
                     relationship=relationship, shared=shared, client_key=client_key,
+                    phone=phone, links=links,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1760,20 +1766,23 @@ def build_server(version: str = "") -> MCPServer:
         email_source: Optional[str] = None,
         relationship: Optional[str] = None,
         shared: Optional[str] = None,
+        phone: Optional[str] = None,
+        links: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
         Only fields you pass are changed. `found_via` and `email_source` take the same closed
         sets as add_contact (a new `email` without `email_source` clears it); `source_url` is
         http/https; "" clears either. `company` = their employer ("" clears it; a contact with no job
-        must keep one). `relationship`/`shared` as add_contact. A foreign/unknown contact_id reads 404."""
+        must keep one). `relationship`/`shared` as add_contact. `phone`; `links` (the whole
+        list, max 5); "" or [] clears. A foreign/unknown contact_id reads 404."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
             body = applications_route.UpdateContactRequest(
                 name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
                 source_url=source_url, company=company, email_source=email_source,
-                relationship=relationship, shared=shared,
+                relationship=relationship, shared=shared, phone=phone, links=links,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1798,7 +1807,8 @@ def build_server(version: str = "") -> MCPServer:
         that ONE record in full: every message VERSION, every sent/reply
         mark, every meeting/call/intro/referral entry (`interactions`),
         and the detail-edit history. `reachable` = an email or LinkedIn URL is
-        saved; `source_url` = where they were found. `company` = only people you stored
+        saved; `source_url` = where they were found. `confirmed` = the user confirmed this
+        person on the website; `phone`/`links` as saved. `company` = only people you stored
         at that company (a contact with no company counts at its job's company)."""
         try:
             async with _request_db() as db:
@@ -2419,11 +2429,23 @@ def served_tool_parameters() -> dict[str, list[str]]:
     """``{tool name: [parameter names]}`` this server advertises, sorted by tool (built once, lazily)."""
     global _SERVED_TOOL_PARAMS
     if _SERVED_TOOL_PARAMS is None:
-        tools = build_server()._tool_manager.list_tools()  # noqa: SLF001
+        # Parameter names never depend on the instructions text, and instructions() reads this map.
+        tools = build_server(instructions_text="")._tool_manager.list_tools()  # noqa: SLF001
         _SERVED_TOOL_PARAMS = {
             t.name: list((t.parameters.get("properties") or {}).keys()) for t in sorted(tools, key=lambda t: t.name)
         }
     return {name: list(params) for name, params in _SERVED_TOOL_PARAMS.items()}
+
+
+@functools.cache
+def instructions() -> str:
+    """The server instructions: the static lines plus the TOOLS line with the served ``tools_version``."""
+    return "\n".join((*_INSTRUCTION_LINES, _TOOLS_LINE.format(v=tools_version(served_tool_parameters()))))
+
+
+def tools_rev() -> int:
+    """Derived from ``tools_version``: moves exactly when it does. Compare for equality only."""
+    return (int(tools_version(served_tool_parameters()), 16) + _TOOLS_REV_OFFSET) % 999_999 + 1
 
 
 def tools_stamp() -> dict[str, Any]:
@@ -2433,7 +2455,7 @@ def tools_stamp() -> dict[str, Any]:
     ``node update-system.mjs check``); stamping it on every recipe read is Job360's own extension,
     because a cached client never sees INSTRUCTIONS again.
     """
-    return {"tools_version": tools_version(served_tool_parameters()), "tools_rev": TOOLS_REV}
+    return {"tools_version": tools_version(served_tool_parameters()), "tools_rev": tools_rev()}
 
 
 def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int] = None) -> dict[str, Any]:
@@ -2447,10 +2469,10 @@ def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int]
     given = (client_tools_version or "").strip()
     stale: Optional[bool] = (given.lower() != version) if given else None
     if client_tools_rev is not None:
-        stale = bool(stale) or client_tools_rev != TOOLS_REV
+        stale = bool(stale) or client_tools_rev != tools_rev()
     return {
         "tools_version": version,
-        "tools_rev": TOOLS_REV,
+        "tools_rev": tools_rev(),
         "tools": tools,
         "tools_stale": stale,
         "stale_hint": stale_hint_for(_current_client_name.get()),
@@ -2618,7 +2640,7 @@ class _AnnounceToolListChanged:
             "mcp_tools_list_changed_sent",
             extra={
                 "event": "mcp_tools_list_changed_sent", "user_id": user.id, "method": ctx.method,
-                "tools_rev": TOOLS_REV,
+                "tools_rev": tools_rev(),
             },
         )
 
@@ -2692,6 +2714,9 @@ async def mcp_runtime() -> AsyncIterator[None]:
     # only exist once a server is built — so build a throwaway one to read the
     # list, then the real one(s) stamped with it. Registering the
     # decorated tool functions is microseconds; the lazy imports are already warm.
+    # Build and cache the instructions here, at lifespan startup, so the cold build
+    # (several seconds) is never paid by the first connecting client.
+    instructions()
     fingerprint = tools_fingerprint(await build_server().list_tools())
     announce = settings.MCP_ANNOUNCE_TOOLS_CHANGED
 

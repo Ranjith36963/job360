@@ -313,7 +313,7 @@ sends every job still waiting on your yes. Each start gets its own session label
   screened by the SSRF guard with the address pinned and no redirects followed; a failed start is shown, and your
   yes stays saved. An unexpected error while saving answers a plain 500 with the token already cleared, Sentry scrubs every depth of a frame's variables, and FastAPI's and Starlette's own frames (one holds the raw request body) lose their variables, so the token cannot reach an error report.
 
-**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed; a client whose `tools_rev` is behind `mcp_server.TOOLS_REV` must reconnect.
+**To turn it on:** Railway, backend service, set `BROWSER_AGENT_ENABLED=1`, then redeploy (done on production, seen 2026-10-20). The tool is already listed; a client whose `tools_rev` differs from `mcp_server.tools_rev()` must reconnect.
 
 ## 10. Open questions for later
 

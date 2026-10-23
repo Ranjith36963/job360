@@ -93,9 +93,9 @@ def test_recipes_and_instructions_carry_the_new_lines():
     assert "answer_corrected" in apply_text and "remember this for next time?" in apply_text
     assert "only on a yes" in apply_text and "user_said" in apply_text
     assert len(load_recipe("apply").text.splitlines()) <= 70
-    assert 'run 360 batch N' in mcp_server.INSTRUCTIONS
-    assert "run 360 <daily|hunt|batch>" in mcp_server.INSTRUCTIONS
-    assert len(mcp_server.INSTRUCTIONS) <= 2000
+    assert 'run 360 batch N' in mcp_server.instructions()
+    assert "run 360 <daily|hunt|batch>" in mcp_server.instructions()
+    assert len(mcp_server.instructions()) <= 2000
 
 
 # ═══════════════════════════════════════════════════════════════════════════

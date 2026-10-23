@@ -294,6 +294,7 @@ class AssistantSettingsView(BaseModel):
     pause_reason: SettingFieldOut
     auto_employer_emails: SettingFieldOut
     outreach_send: SettingFieldOut
+    hunt_every_hours: SettingFieldOut
     paused: bool
     inbox_mode: str = ""
     check_every: str = ""
