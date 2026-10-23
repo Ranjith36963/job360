@@ -5,10 +5,12 @@ import type { Contact } from "@/lib/api";
 
 const addContact = vi.fn();
 const updateContact = vi.fn();
+const confirmContact = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   addContact: (...args: unknown[]) => addContact(...args),
   updateContact: (...args: unknown[]) => updateContact(...args),
+  confirmContact: (...args: unknown[]) => confirmContact(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -28,6 +30,9 @@ function makeContact(overrides: Partial<Contact> = {}): Contact {
     email: "priya@northwind.example",
     linkedin_url: "",
     notes: "",
+    phone: null,
+    links: [],
+    confirmed: true,
     added_by: "web",
     created_at: "2026-09-20T10:00:00+00:00",
     edit_history: {},
@@ -40,6 +45,7 @@ describe("Contacts", () => {
   beforeEach(() => {
     addContact.mockReset();
     updateContact.mockReset();
+    confirmContact.mockReset();
   });
 
   it("shows the latest drafted message with earlier versions folded", () => {
@@ -330,5 +336,65 @@ describe("Contacts", () => {
       rerender(<Contacts applicationId={42} contacts={[]} />);
       expect(screen.queryByTestId("known-people-count")).toBeNull();
     });
+  });
+
+  it("shows phone and links; a non-https link is plain text", () => {
+    render(
+      <Contacts
+        applicationId={42}
+        contacts={[
+          makeContact({ phone: "+447700900123", links: ["https://github.com/priya", "http://priya.example"] }),
+        ]}
+      />
+    );
+    expect(screen.getByTestId("contact-phone")).toHaveAttribute("href", "tel:+447700900123");
+    const links = screen.getAllByTestId("contact-link");
+    expect(links[0].tagName).toBe("A");
+    expect(links[0]).toHaveTextContent("github.com");
+    expect(links[1].tagName).not.toBe("A");
+    expect(links[1]).toHaveTextContent("http://priya.example");
+  });
+
+  it("an unconfirmed assistant-added contact shows Confirm and calls confirmContact", async () => {
+    confirmContact.mockResolvedValue(makeContact({ added_by: "token:cc", confirmed: true }));
+    render(
+      <Contacts applicationId={42} contacts={[makeContact({ added_by: "token:cc", confirmed: false })]} />
+    );
+    expect(screen.getByTestId("contact-unconfirmed")).toHaveTextContent("Not confirmed yet");
+    fireEvent.click(screen.getByTestId("contact-confirm"));
+    await waitFor(() => expect(confirmContact).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(screen.queryByTestId("contact-confirm")).toBeNull());
+  });
+
+  it("no Confirm for a confirmed contact", () => {
+    render(<Contacts applicationId={42} contacts={[makeContact()]} />);
+    expect(screen.queryByTestId("contact-confirm")).toBeNull();
+    expect(screen.queryByTestId("contact-unconfirmed")).toBeNull();
+  });
+
+  it("the add form sends phone and links only when given", async () => {
+    addContact.mockResolvedValue({ contact: makeContact({ id: 9, name: "Sam" }), already_existed: false });
+    render(<Contacts applicationId={42} contacts={[]} />);
+    fireEvent.click(screen.getByTestId("contacts-add-toggle"));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sam" } });
+    fireEvent.change(screen.getByLabelText("Phone"), { target: { value: "+44 7700 900123" } });
+    fireEvent.change(screen.getByLabelText("Other links (one per line, up to 5)"), {
+      target: { value: "https://a.example\n\nhttps://b.example" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add person" }));
+    await waitFor(() =>
+      expect(addContact).toHaveBeenCalledWith(42, {
+        name: "Sam",
+        phone: "+44 7700 900123",
+        links: ["https://a.example", "https://b.example"],
+      })
+    );
+
+    addContact.mockClear();
+    addContact.mockResolvedValue({ contact: makeContact({ id: 10, name: "Tia" }), already_existed: false });
+    fireEvent.click(screen.getByTestId("contacts-add-toggle"));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Tia" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add person" }));
+    await waitFor(() => expect(addContact).toHaveBeenCalledWith(42, { name: "Tia" }));
   });
 });

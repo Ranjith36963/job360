@@ -76,6 +76,20 @@
             "title": "Linkedin Url",
             "type": "string"
           },
+          "links": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Links"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -95,6 +109,17 @@
               }
             ],
             "title": "Occurred At"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           },
           "relationship": {
             "anyOf": [
@@ -255,6 +280,20 @@
             "title": "Linkedin Url",
             "type": "string"
           },
+          "links": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Links"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -274,6 +313,17 @@
               }
             ],
             "title": "Occurred At"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           },
           "relationship": {
             "anyOf": [
@@ -3400,6 +3450,11 @@
             ],
             "title": "Company"
           },
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -3448,6 +3503,13 @@
             "title": "Linkedin Url",
             "type": "string"
           },
+          "links": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Links",
+            "type": "array"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -3458,6 +3520,17 @@
           },
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           },
           "reachable": {
             "default": false,
@@ -7747,6 +7820,11 @@
             ],
             "title": "Company"
           },
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -7802,6 +7880,13 @@
             "title": "Linkedin Url",
             "type": "string"
           },
+          "links": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Links",
+            "type": "array"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -7812,6 +7897,17 @@
           },
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           },
           "reachable": {
             "default": false,
@@ -7909,6 +8005,11 @@
             ],
             "title": "Company"
           },
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
           "contact_ids": {
             "items": {
               "type": "integer"
@@ -7973,6 +8074,13 @@
             "title": "Linkedin Url",
             "type": "string"
           },
+          "links": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Links",
+            "type": "array"
+          },
           "message_count": {
             "title": "Message Count",
             "type": "integer"
@@ -7984,6 +8092,17 @@
           "notes": {
             "title": "Notes",
             "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           },
           "reachable": {
             "default": false,
@@ -14076,6 +14195,20 @@
             ],
             "title": "Linkedin Url"
           },
+          "links": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Links"
+          },
           "name": {
             "anyOf": [
               {
@@ -14097,6 +14230,17 @@
               }
             ],
             "title": "Notes"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
           },
           "relationship": {
             "anyOf": [
@@ -16336,7 +16480,7 @@
     },
     "/api/applications/{application_id}/contacts": {
       "post": {
-        "description": "201 for a new contact, 200 (``already_existed: true``, ``matched_on``)\nfor the same person seen again on this application (R2): same email, else\n(no email) same normalised LinkedIn URL, else same name unless both carry\ndifferent LinkedIn URLs; also a repeated ``client_key``. The status code is\nset dynamically since the same call can legitimately answer either.",
+        "description": "201 for a new contact, 200 (``already_existed: true``, ``matched_on``)\nfor the same person seen again on this application (R2): same email, else\n(no email) same normalised LinkedIn URL, else same phone (7+ digits), else same name unless\nboth carry different LinkedIn URLs or phones; also a repeated ``client_key``. The status code is\nset dynamically since the same call can legitimately answer either.",
         "operationId": "add_contact_api_applications__application_id__contacts_post",
         "parameters": [
           {
@@ -20701,7 +20845,7 @@
     },
     "/api/contacts": {
       "post": {
-        "description": "Owner decision, 2026-09-25 \u2014 a person with no job yet (cold\nnetworking), or a linked one when ``application_id`` is given. Same\nidempotency/cap/rate-limit rules as the per-application route, just\nscoped to the USER instead of an application when there is none. Cold\nscope without an email: same LinkedIn URL, else same name only when\nneither side has a LinkedIn URL. ``source_url`` is stored, never fetched.",
+        "description": "Owner decision, 2026-09-25 \u2014 a person with no job yet (cold\nnetworking), or a linked one when ``application_id`` is given. Same\nidempotency/cap/rate-limit rules as the per-application route, just\nscoped to the USER instead of an application when there is none. Cold\nscope without an email: same LinkedIn URL, else same phone (7+ digits),\nelse same name only when neither side has a LinkedIn URL or a phone. ``source_url`` is stored, never fetched.",
         "operationId": "add_person_api_contacts_post",
         "parameters": [
           {
@@ -20865,6 +21009,81 @@
           }
         },
         "summary": "Update Contact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/contacts/{contact_id}/confirm": {
+      "post": {
+        "description": "The user's own Confirm on a person their assistant added. Session only; no MCP twin.",
+        "operationId": "confirm_contact_api_contacts__contact_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Contact",
         "tags": [
           "applications"
         ]
