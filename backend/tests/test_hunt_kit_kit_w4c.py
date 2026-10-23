@@ -272,6 +272,18 @@ def test_joinup_hostile_markup_is_linear_and_loses_nothing():
     assert big < max(small * 12, 0.5)
 
 
+def test_joinup_repeated_next_data_ids_in_one_unclosed_tag_are_linear():
+    def cost(n: int) -> float:
+        page = "<html><script " + 'id="__NEXT_DATA__" ' * n
+        t = time.perf_counter()
+        jobs, _ = _run("joinup", _row("joinup", "all"), _stub({"joinup.ch": (200, page)}))
+        assert jobs == []
+        return time.perf_counter() - t
+    cost(1000)
+    small, big = cost(25_000), cost(100_000)  # a span regex retried at every id costs ~16x for 4x the ids
+    assert big < 1.0 and big < max(small * 8, 0.3)
+
+
 def test_http_that_raises_never_raises_out_of_a_fetcher():
     def boom(url, **_):
         raise RuntimeError("network down")

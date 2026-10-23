@@ -201,19 +201,24 @@ def _friendwork(row: dict[str, Any], http: Http) -> list[Job] | None:
 # headline; company is startup; location is a string or location.name / location.city). The reference gives no description.
 _JU_URL = "https://joinup.ch/browse/jobs"
 _JU_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,199}")
-_NEXT_OPEN = re.compile(r'<script\b[^<>]*\bid="__NEXT_DATA__"[^<>]*>', re.I)
+_NEXT_ID = 'id="__next_data__"'
 
 
 def _next_data(page: str) -> Any:
-    """The JSON inside the __NEXT_DATA__ script, found with two linear searches (no pattern spans the page); None if absent."""
-    m = _NEXT_OPEN.search(page)
-    if not m:
+    """The JSON inside the __NEXT_DATA__ script, found with plain searches (no pattern spans the page); None if absent."""
+    low = page.lower()
+    i = low.find(_NEXT_ID)
+    if i < 0:
         return None
-    end = page.lower().find("</script", m.end())
+    start = low.rfind("<script", 0, i)  # the tag that carries the id: nothing between its name and the id may open or close a tag
+    gt = low.find(">", i)
+    if start < 0 or gt < 0 or "<" in low[start + 1:i] or ">" in low[start:i]:
+        return None
+    end = low.find("</script", gt)
     if end < 0:
         return None
     try:
-        return json.loads(page[m.end():end])
+        return json.loads(page[gt + 1:end])
     except (ValueError, RecursionError):
         return None
 
