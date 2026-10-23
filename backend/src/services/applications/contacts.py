@@ -1259,6 +1259,7 @@ async def confirm_contact(db: JobDatabase, user_id: str, contact_id: int, actor:
 
 _BATCH_FIELDS = (
     "name", "role", "email", "linkedin_url", "notes", "occurred_at", "found_via", "source_url", "phone", "links",
+    "company", "email_source", "relationship", "shared",
 )
 
 
@@ -1306,6 +1307,14 @@ async def add_contacts_batch(
             _validate_found_via(kwargs.get("found_via"))
             _validate_source_url(kwargs.get("source_url"))
             _validate_links(kwargs.get("links"))
+            # What add_contact would check, so a dry run never promises a row the real run refuses.
+            clean_company = _validate_company(kwargs.get("company"))
+            if _validate_email_source(kwargs.get("email_source")) and not clean["email"]:
+                raise SpineError(422, "email_source needs an email: pass email too, or leave email_source out")
+            _validate_relationship(kwargs.get("relationship"))
+            if cold and not company_key(clean_company or ""):
+                raise SpineError(422, COLD_COMPANY_REQUIRED)
+            await _validate_shared(user_id, kwargs.get("shared"))
         except SpineError as exc:
             invalid.append({"index": index, "status": exc.status_code, "detail": exc.detail})
             continue

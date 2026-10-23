@@ -382,6 +382,41 @@ async def test_batch_size_and_cap(authenticated_async_context, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_batch_cold_rows_need_a_company_and_keep_it(authenticated_async_context):
+    rows = [
+        {"name": "Cold Ann", "company": "Northwind", "email": "cold.ann@northwind.example"},
+        {"name": "Cold Bo"},
+        {"name": "Cold Cy", "company": "Northwind", "email_source": "user_gave"},
+        {"name": "Cold Di", "company": "Northwind", "relationship": "not-a-relationship"},
+    ]
+    async with authenticated_async_context() as client:
+        dry = await client.post("/api/contacts/batch", json={"people": rows, "dry_run": True})
+        assert dry.status_code == 200, dry.text
+        assert [r["index"] for r in dry.json()["would_add"]] == [0]
+        assert [r["index"] for r in dry.json()["invalid"]] == [1, 2, 3]
+        assert "company" in dry.json()["invalid"][0]["detail"]
+        assert "email_source" in dry.json()["invalid"][1]["detail"]
+        real = await client.post("/api/contacts/batch", json={"people": rows, "dry_run": False})
+        body = real.json()
+        # The dry run and the real run agree: one stored, the same three refused.
+        assert [r["index"] for r in body["added"]] == [0]
+        assert [r["index"] for r in body["invalid"]] == [1, 2, 3]
+        assert _sql("SELECT company FROM application_contacts WHERE name = %s", ("Cold Ann",))[0][0] == "Northwind"
+
+
+@pytest.mark.asyncio
+async def test_batch_on_a_job_keeps_a_supplied_company(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        resp = await client.post(
+            "/api/contacts/batch",
+            json={"application_id": app_id, "people": [{"name": "Agency Ann", "company": "Acme Staffing"}]},
+        )
+        assert [r["index"] for r in resp.json()["added"]] == [0], resp.text
+        assert _sql("SELECT company FROM application_contacts WHERE name = %s", ("Agency Ann",))[0][0] == "Acme Staffing"
+
+
+@pytest.mark.asyncio
 async def test_mcp_add_contact_batch_phone_links(authenticated_async_context):
     import httpx2
     from mcp.client import Client
