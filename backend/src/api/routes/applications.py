@@ -715,6 +715,9 @@ class AskOut(BaseModel):
     # When the user confirmed the relayed answer on the web (None = not yet).
     confirmed_at: Optional[str] = None
     withdrawn_at: Optional[str]
+    # Who took the ask back and why ("" = not withdrawn, or no reason given).
+    withdrawn_by: str = ""
+    withdrawn_reason: str = ""
     status: str
 
 

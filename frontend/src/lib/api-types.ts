@@ -951,7 +951,9 @@ export interface paths {
         put?: never;
         /**
          * Withdraw Ask
-         * @description Take an open ask back. Web only - there is deliberately no MCP tool.
+         * @description Take an open ask back. The user (web) may withdraw any ask, reason optional. An assistant
+         *     (the MCP ``answer_ask`` ``withdraw``) may withdraw only an ask it asked itself, and must say why
+         *     (owner, 2026-10-23); an ask the user or another assistant raised stays the user's to close.
          */
         post: operations["withdraw_ask_api_asks__ask_id__withdraw_post"];
         delete?: never;
@@ -3935,6 +3937,16 @@ export interface components {
             user_words: string;
             /** Withdrawn At */
             withdrawn_at: string | null;
+            /**
+             * Withdrawn By
+             * @default
+             */
+            withdrawn_by: string;
+            /**
+             * Withdrawn Reason
+             * @default
+             */
+            withdrawn_reason: string;
         };
         /**
          * AssistantSettingsView
@@ -4588,6 +4600,16 @@ export interface components {
             user_words: string;
             /** Withdrawn At */
             withdrawn_at: string | null;
+            /**
+             * Withdrawn By
+             * @default
+             */
+            withdrawn_by: string;
+            /**
+             * Withdrawn Reason
+             * @default
+             */
+            withdrawn_reason: string;
         };
         /** CreateAskRequest */
         CreateAskRequest: {
@@ -8699,6 +8721,14 @@ export interface components {
             /** Truncated */
             truncated: boolean;
         };
+        /** WithdrawAskRequest */
+        WithdrawAskRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -10398,7 +10428,11 @@ export interface operations {
                 job360_session?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WithdrawAskRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

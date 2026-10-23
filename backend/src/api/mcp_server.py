@@ -1523,7 +1523,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
-        retried|user_did_it|skipped}.
+        retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {} = test app, not counted; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
@@ -2345,20 +2345,29 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
-    async def answer_ask(ask_id: int, answer: str, user_words: str = "") -> dict[str, Any]:
+    async def answer_ask(ask_id: int, answer: str = "", user_words: str = "", withdraw: str = "") -> dict[str, Any]:
         """Record the answer the user gave you in chat to an ask. Only record an
         answer the user actually gave you in chat, in their words; never invent
         or infer one. Pass `user_words`: the user's exact words from chat (at
         most 2000 chars). Then the answer shows as theirs (via you). Calling it
         again changes the answer (the earlier answers stay in the application's
-        history)."""
+        history). `withdraw` (instead of `answer`): close an out-of-date ask YOU
+        asked, saying why (at most 200 chars); an ask you did not ask is 403."""
+        if withdraw and (answer or user_words):
+            raise _tool_error(HTTPException(status_code=422, detail="pass either `answer` or `withdraw`, not both"))
         try:
-            body = asks_route.AnswerAskRequest(answer=answer, user_words=user_words)
+            if withdraw:
+                wbody = asks_route.WithdrawAskRequest(reason=withdraw)
+            else:
+                body = asks_route.AnswerAskRequest(answer=answer, user_words=user_words)
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:
             async with _request_db() as db:
-                resp = await asks_route.answer_ask(ask_id, body, db, _user())
+                if withdraw:
+                    resp = await asks_route.withdraw_ask(ask_id, wbody, db, _user())
+                else:
+                    resp = await asks_route.answer_ask(ask_id, body, db, _user())
         except HTTPException as exc:
             _audit("answer_ask", "error", ask_id=ask_id, http_status=exc.status_code)
             raise _tool_error(exc) from None

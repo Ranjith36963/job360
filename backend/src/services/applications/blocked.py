@@ -58,6 +58,9 @@ NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_paymen
 BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
 STEP_MAX_CHARS = 120
 DETAIL_MAX_CHARS = 300
+# Owner, 2026-10-23: clearing a block may say why (shown on the timeline).
+UNBLOCKED_KEYS = frozenset({"resolution", "note"})
+NOTE_MAX_CHARS = 200
 _HOST_RE = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 
 
@@ -95,13 +98,15 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
         problems.append(f"{event_type} keeps its text in the payload; leave the event detail empty")
     actor = actor_for(user)
     if event_type == "unblocked":
-        if set(payload) != {"resolution"} or payload.get("resolution") not in UNBLOCK_RESOLUTIONS:
+        if not set(payload) <= UNBLOCKED_KEYS or payload.get("resolution") not in UNBLOCK_RESOLUTIONS:
             problems.append(
-                'unblocked needs payload {"resolution": "retried" | "user_did_it" | "skipped"} and nothing else'
+                'unblocked needs payload {"resolution": "retried" | "user_did_it" | "skipped"} and an optional '
+                f'"note" (why, plain text, at most {NOTE_MAX_CHARS} characters), nothing else'
             )
+        note = event_examples.collect(problems, _plain, "note", payload.get("note"), NOTE_MAX_CHARS)
         if problems:
             raise event_examples.refusal(event_type, problems)
-        return {"resolution": payload["resolution"], "assistant": actor}
+        return {"resolution": payload["resolution"], **({"note": note} if note else {}), "assistant": actor}
     unknown = set(payload) - BLOCKED_KEYS
     if unknown:
         problems.append(f"blocked payload keys are {sorted(BLOCKED_KEYS)}; unknown: {sorted(unknown)}")
@@ -170,12 +175,26 @@ async def _block_events(db: JobDatabase, user_id: str, application_id: int) -> l
     return out
 
 
+async def _uploaded_after(db: JobDatabase, user_id: str, application_id: int, event_id: int) -> bool:
+    """A ``document_uploaded`` event on this application is newer than event ``event_id``."""
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'document_uploaded' AND id > ? LIMIT 1",
+        (application_id, user_id, event_id),
+    )
+    return await cur.fetchone() is not None
+
+
 async def open_block(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
-    """The newest ``blocked`` with no later ``unblocked`` (what the page shows), else None."""
+    """The newest ``blocked`` with no later ``unblocked`` (what the page shows), else None.
+    An ``upload_failed`` block counts as cleared once a ``document_uploaded`` for this application is
+    newer than it (owner, 2026-10-23: the later upload worked). Read-only: nothing is written here (M3)."""
     events = await _block_events(db, user_id, application_id)
     if not events or events[0]["event_type"] != "blocked":
         return None
     p = events[0]["payload"]
+    if p.get("reason") == "upload_failed" and await _uploaded_after(db, user_id, application_id, int(events[0]["id"])):
+        return None
     reason = p.get("reason") if p.get("reason") in BLOCKED_REASONS else "other"
     return {
         "reason": reason, "reason_label": BLOCKED_REASONS[reason], "step": p.get("step") or "",
@@ -248,7 +267,10 @@ async def after_append(
         events = await _block_events(db, user.id, application_id)
         for ask_id in sorted(await _open_ask_ids(db, user.id, _ask_ids(events))):
             try:
-                await asks_service.withdraw_ask(db, user.id, ask_id, stored["assistant"])
+                await asks_service.withdraw_ask(
+                    db, user.id, ask_id, stored["assistant"],
+                    str(stored.get("note") or ""),
+                )
             except SpineError:  # pragma: no cover - answered or withdrawn in between
                 pass
     _log(user, application_id, event_type, stored, "ok")
@@ -270,6 +292,8 @@ async def record(
         stored = await before_append(db, user, application_id, event_type, stored)
         result = await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=event_type,
+            # The timeline shows an event's detail: an `unblocked` note is why the block was cleared.
+            detail=str(stored.get("note") or "") if event_type == "unblocked" else "",
             payload=stored, occurred_at=occurred_at, recorded_by=actor_for(user), follow_up_on=follow_up_on,
         )
         await after_append(db, user, application_id, event_type, stored)

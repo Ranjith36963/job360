@@ -576,7 +576,7 @@ and `source`/`key` are returned when you read the receipt. Examples:
 `form_filled` {"form_url":"https://jobs.example.com/apply/1","fields_count":1,"answers":[{"question":"Right to work?","answer":"Yes","source":"profile","key":"work_authorization"}]};
 `form_swept` {"fields_checked":12,"fixed":1,"notes":"fixed phone"}; `cv_seen` {"artifact_id":7,"sha256":"<from the kit>","where":"chat"};
 `hold_released` {"reason":"done"}; `site_account` {"host":"jobs.example.com"};
-`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried"};
+`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried","note":"upload worked"} (`note`: optional why, at most 200 chars);
 `proof_text` {"text":"Thank you, application received.","page_host":"jobs.example.com"}.
 A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared`, `submit_resolved` and where="web" need the user's own click
@@ -599,7 +599,8 @@ ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and nev
 login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with
-reason `blocked`. `unblocked` closes the ask; with nothing blocked it is 409.
+reason `blocked`. An `upload_failed` block clears itself once a later
+`document_uploaded` is recorded. `unblocked` closes the ask; with nothing blocked it is 409.
 When the user answers a blocked ask, do what they said, then record
 `unblocked`. If Needs-you is full no ask opens (`check_submit` still asks):
 tell the user in chat.
