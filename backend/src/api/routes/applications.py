@@ -2062,12 +2062,16 @@ async def mark_inbox_checked(
     cursor forward. The assistant read the mail; Job360 only remembers how far
     (VISION rule 5). All or nothing; never rewinds a newer cursor."""
     from src.services.applications.inbox import mark_checked  # noqa: PLC0415
+    from src.services.profile import schedule  # noqa: PLC0415
 
     try:
-        return await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
+        resp = await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+    # The inbox duty is done (owner 2026-10-23): whats_due counts the next check from now.
+    await schedule.mark(db, user.id, "inbox", datetime.now(timezone.utc))
+    return resp
 
 
 @router.get("/applications/job/{job_id}", response_model=JobResponse, dependencies=AUTH_FIRST)
