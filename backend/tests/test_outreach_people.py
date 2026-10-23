@@ -559,7 +559,7 @@ async def test_bug1_mcp_tools_list_has_no_extra_tools(authenticated_async_contex
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             listed = await mcp.list_tools()
-            assert len(listed.tools) == 34  # 26 -> 29: check_outreach, doctor + report_missing_tool; 30: check_form (weak spot #1); 31: mark_inbox_checked (Gmail check); 32: check_auto_email; 33: browser (decision 29); 34: match_email (feature 8)
+            assert len(listed.tools) == 36  # 26 -> 29: check_outreach, doctor + report_missing_tool; 30: check_form (weak spot #1); 31: mark_inbox_checked (Gmail check); 32: check_auto_email; 33: browser (decision 29); 34: match_email (feature 8); 36: whats_due + mark_done (schedule, 2026-10-23)
 
 
 # ── Bug 2 [P1] — list_people / add_contact ignored contact edits ───────────

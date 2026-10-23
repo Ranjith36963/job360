@@ -480,10 +480,11 @@ async def test_missing_is_for_the_jobs_country_and_unknown_country_is_missing_to
         )).status_code == 200
         assert (await _kit(client, gb)).json()["missing"] == [], "everything for GB is known"
         german = {m["key"] for m in (await _kit(client, de)).json()["missing"]}
-        assert german == {"right_to_work.DE.work_authorization", "right_to_work.DE.needs_sponsorship", "salary.DE"}
+        # Owner, 2026-10-23: salary is left to check_form (it reports it when a live form asks).
+        assert german == {"right_to_work.DE.work_authorization", "right_to_work.DE.needs_sponsorship"}
         no_country = {m["key"] for m in (await _kit(client, unknown)).json()["missing"]}
         assert "job_country" in no_country and "right_to_work.work_authorization" in no_country
-        assert "salary" in no_country and "right_to_work.GB.work_authorization" not in no_country
+        assert "salary" not in no_country and "right_to_work.GB.work_authorization" not in no_country
 
 
 @pytest.mark.asyncio

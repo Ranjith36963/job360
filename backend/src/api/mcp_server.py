@@ -567,6 +567,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     from src.api.routes import proof as proof_route
     from src.api.routes import receipts as receipts_route
     from src.api.routes import recipes as recipes_route
+    from src.api.routes import schedule as schedule_route
     from src.api.routes import tailor as tailor_route
     from src.api.routes import templates as templates_route
     from src.services.applications import spine as applications_spine
@@ -1274,6 +1275,38 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
+    async def whats_due() -> dict[str, Any]:
+        """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
+        from the user's settings. `due` lists {duty: hunt|inbox|batch, recipe, reason} in run order;
+        run each recipe, then mark_done(duty). `nothing_due` true: stop. Read-only; never a reason to
+        change a setting, and never an approval to submit (check_submit stays the gate)."""
+        try:
+            async with _request_db() as db:
+                resp = await schedule_route.whats_due(db, _user())
+        except HTTPException as exc:
+            _audit("whats_due", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("whats_due", "ok", count=len(resp.due))
+        return resp.model_dump()
+
+    @mcp.tool()
+    async def mark_done(duty: str) -> dict[str, Any]:
+        """After a scheduled duty finished, stamp it: `duty` = hunt | inbox | batch. whats_due then
+        counts the next one from now. mark_inbox_checked also stamps inbox."""
+        try:
+            body = schedule_route.MarkDoneIn.model_validate({"duty": duty})
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await schedule_route.mark_done(body, db, _user())
+        except HTTPException as exc:
+            _audit("mark_done", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("mark_done", "ok", duty=body.duty)
+        return resp.model_dump()
+
+    @mcp.tool()
     async def match_email(sender: str = "", thread_id: str = "", subject: str = "") -> dict[str, Any]:
         """Which of the user's applications an email may belong to, from what Job360 already stores.
         Give any of `sender` (the From header), `thread_id` (the mail thread id), `subject`.
@@ -1522,7 +1555,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Append an event.
 
-        `source` {kind, message_id, thread_id?, sender, subject, received_at} = the email; repeat message_id = no-op.
+        `source` {kind, message_id, thread_id?, sender, subject, received_at} = the email; repeat id = no-op.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
         furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
@@ -1546,7 +1579,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
-        retried|user_did_it|skipped}.
+        retried|user_did_it|skipped, note?}.
         proof_text {text, page_host}; simulation {} = test app, not counted; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
@@ -2368,20 +2401,29 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
-    async def answer_ask(ask_id: int, answer: str, user_words: str = "") -> dict[str, Any]:
+    async def answer_ask(ask_id: int, answer: str = "", user_words: str = "", withdraw: str = "") -> dict[str, Any]:
         """Record the answer the user gave you in chat to an ask. Only record an
         answer the user actually gave you in chat, in their words; never invent
         or infer one. Pass `user_words`: the user's exact words from chat (at
         most 2000 chars). Then the answer shows as theirs (via you). Calling it
         again changes the answer (the earlier answers stay in the application's
-        history)."""
+        history). `withdraw` (instead of `answer`): close an out-of-date ask YOU
+        asked, saying why (at most 200 chars); an ask you did not ask is 403."""
+        if withdraw and (answer or user_words):
+            raise _tool_error(HTTPException(status_code=422, detail="pass either `answer` or `withdraw`, not both"))
         try:
-            body = asks_route.AnswerAskRequest(answer=answer, user_words=user_words)
+            if withdraw:
+                wbody = asks_route.WithdrawAskRequest(reason=withdraw)
+            else:
+                body = asks_route.AnswerAskRequest(answer=answer, user_words=user_words)
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:
             async with _request_db() as db:
-                resp = await asks_route.answer_ask(ask_id, body, db, _user())
+                if withdraw:
+                    resp = await asks_route.withdraw_ask(ask_id, wbody, db, _user())
+                else:
+                    resp = await asks_route.answer_ask(ask_id, body, db, _user())
         except HTTPException as exc:
             _audit("answer_ask", "error", ask_id=ask_id, http_status=exc.status_code)
             raise _tool_error(exc) from None

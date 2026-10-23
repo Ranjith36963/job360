@@ -1,4 +1,4 @@
--- 0082 down: reverses the DDL only. Every stored thread id, including any
+-- 0084 down: reverses the DDL only. Every stored thread id, including any
 -- recorded after this migration, is dropped with its column and is NOT
 -- recoverable except from a backup. The events themselves survive untouched;
 -- match_email then loses its `same_thread` reason (the route must be reverted first).

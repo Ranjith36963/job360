@@ -1,4 +1,4 @@
--- 0082_event_source_thread: feature 8 (G088) - an event's email source can name its THREAD.
+-- 0084_event_source_thread: feature 8 (G088) - an event's email source can name its THREAD.
 --
 -- WHY. A recruiter's reply arrives in the same mail thread as the message we
 -- already recorded. With the thread id stored, `match_email` can name the

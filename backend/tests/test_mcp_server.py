@@ -33,6 +33,9 @@ EXPECTED_TOOLS = {
     "list_applications",
     "mark_inbox_checked",
     "match_email",  # Route an email back to its application from stored facts (feature 8) - 33 -> 34.
+    # Owner 2026-10-23 - the scheduled run: what is due, and stamp a duty done (migration 0082).
+    "whats_due",
+    "mark_done",
     "save_artifact",
     "save_fit",
     "record_event",

@@ -2443,6 +2443,16 @@
               }
             ],
             "title": "Withdrawn At"
+          },
+          "withdrawn_by": {
+            "default": "",
+            "title": "Withdrawn By",
+            "type": "string"
+          },
+          "withdrawn_reason": {
+            "default": "",
+            "title": "Withdrawn Reason",
+            "type": "string"
           }
         },
         "required": [
@@ -4121,6 +4131,16 @@
               }
             ],
             "title": "Withdrawn At"
+          },
+          "withdrawn_by": {
+            "default": "",
+            "title": "Withdrawn By",
+            "type": "string"
+          },
+          "withdrawn_reason": {
+            "default": "",
+            "title": "Withdrawn Reason",
+            "type": "string"
           }
         },
         "required": [
@@ -4677,6 +4697,44 @@
         "title": "DoctorSilentItem",
         "type": "object"
       },
+      "DueItemOut": {
+        "properties": {
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch"
+            ],
+            "title": "Duty",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "never_done",
+              "interval_elapsed",
+              "queue_waiting"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "recipe": {
+            "enum": [
+              "hunt",
+              "daily",
+              "batch"
+            ],
+            "title": "Recipe",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty",
+          "recipe",
+          "reason"
+        ],
+        "title": "DueItemOut",
+        "type": "object"
+      },
       "EmailChangeRequest": {
         "properties": {
           "current_password": {
@@ -4761,9 +4819,15 @@
             "type": "string"
           },
           "thread_id": {
-            "default": "",
-            "title": "Thread Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
           }
         },
         "required": [
@@ -7431,6 +7495,53 @@
           "email"
         ],
         "title": "MagicLinkRequest",
+        "type": "object"
+      },
+      "MarkDoneIn": {
+        "additionalProperties": false,
+        "properties": {
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch"
+            ],
+            "title": "Duty",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty"
+        ],
+        "title": "MarkDoneIn",
+        "type": "object"
+      },
+      "MarkDoneOut": {
+        "properties": {
+          "done_at": {
+            "title": "Done At",
+            "type": "string"
+          },
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch"
+            ],
+            "title": "Duty",
+            "type": "string"
+          },
+          "last_tick_at": {
+            "title": "Last Tick At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty",
+          "done_at",
+          "last_tick_at"
+        ],
+        "title": "MarkDoneOut",
         "type": "object"
       },
       "MatchEmailCandidateOut": {
@@ -14807,6 +14918,89 @@
         "title": "VersionResponse",
         "type": "object"
       },
+      "WhatsDueOut": {
+        "properties": {
+          "batch_hold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Hold"
+          },
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "due": {
+            "items": {
+              "$ref": "#/components/schemas/DueItemOut"
+            },
+            "title": "Due",
+            "type": "array"
+          },
+          "expected_every_hours": {
+            "title": "Expected Every Hours",
+            "type": "integer"
+          },
+          "last_done_at": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Last Done At",
+            "type": "object"
+          },
+          "last_tick_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tick At"
+          },
+          "next_due_at": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Next Due At",
+            "type": "object"
+          },
+          "nothing_due": {
+            "title": "Nothing Due",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "due",
+          "nothing_due",
+          "next_due_at",
+          "last_done_at",
+          "expected_every_hours",
+          "checked_at"
+        ],
+        "title": "WhatsDueOut",
+        "type": "object"
+      },
       "WhatsNewApplicationOut": {
         "properties": {
           "id": {
@@ -15009,6 +15203,19 @@
           "proof_missing"
         ],
         "title": "WhatsNewResponse",
+        "type": "object"
+      },
+      "WithdrawAskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "WithdrawAskRequest",
         "type": "object"
       }
     }
@@ -18930,7 +19137,7 @@
     },
     "/api/asks/{ask_id}/withdraw": {
       "post": {
-        "description": "Take an open ask back. Web only - there is deliberately no MCP tool.",
+        "description": "Take an open ask back. The user (web) may withdraw any ask, reason optional. An assistant\n(the MCP ``answer_ask`` ``withdraw``) may withdraw only an ask it asked itself, and must say why\n(owner, 2026-10-23); an ask the user or another assistant raised stays the user's to close.",
         "operationId": "withdraw_ask_api_asks__ask_id__withdraw_post",
         "parameters": [
           {
@@ -18975,6 +19182,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/WithdrawAskRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -21700,6 +21924,26 @@
         "summary": "Outreach Check",
         "tags": [
           "applications"
+        ]
+      }
+    },
+    "/api/deployz": {
+      "get": {
+        "description": "Deploy healthcheck (2026-10-22): readyz's DB check, then the browser hold.\n\nA new container answers 503 ``holding`` while the OLD process still has a recently active\ncloud browser, for at most ``DEPLOY_HOLD_MAX_SECONDS`` after this process booted, so Railway\nkeeps the old container (and its half-filled form) serving. See\n``services/browser_agent/deploy_hold.py``. Public, since Railway's healthcheck sends no\ncredentials; the body carries no user data and no counts.\n\n200 ``{\"status\": \"ready\"}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}`` (wins over the hold)\n503 ``{\"status\": \"holding\", \"reason\": \"browser_busy\", \"held_s\": <seconds since boot>}``",
+        "operationId": "deployz_api_deployz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Deployz",
+        "tags": [
+          "health"
         ]
       }
     },
@@ -24444,6 +24688,148 @@
         "summary": "Get Recipe",
         "tags": [
           "recipes"
+        ]
+      }
+    },
+    "/api/schedule/done": {
+      "post": {
+        "description": "Stamp one duty (hunt | inbox | batch) as done now, and the tick. A slot, never history.",
+        "operationId": "mark_done_api_schedule_done_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkDoneIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkDoneOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Done",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/schedule/due": {
+      "get": {
+        "description": "The duties due NOW for the signed-in user, each with its recipe. Read-only: changes no setting\nand stamps nothing.",
+        "operationId": "whats_due_api_schedule_due_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsDueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Whats Due",
+        "tags": [
+          "schedule"
         ]
       }
     },

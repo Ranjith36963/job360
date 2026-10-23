@@ -218,7 +218,7 @@ class EventSource(BaseModel):
 
     kind: str = "email"
     message_id: str
-    thread_id: str = ""
+    thread_id: Optional[str] = None
     sender: str = ""
     subject: str = ""
     received_at: Optional[str] = None
@@ -717,6 +717,9 @@ class AskOut(BaseModel):
     # When the user confirmed the relayed answer on the web (None = not yet).
     confirmed_at: Optional[str] = None
     withdrawn_at: Optional[str]
+    # Who took the ask back and why ("" = not withdrawn, or no reason given).
+    withdrawn_by: str = ""
+    withdrawn_reason: str = ""
     status: str
 
 
@@ -2086,12 +2089,16 @@ async def mark_inbox_checked(
     cursor forward. The assistant read the mail; Job360 only remembers how far
     (VISION rule 5). All or nothing; never rewinds a newer cursor."""
     from src.services.applications.inbox import mark_checked  # noqa: PLC0415
+    from src.services.profile import schedule  # noqa: PLC0415
 
     try:
-        return await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
+        resp = await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+    # The inbox duty is done (owner 2026-10-23): whats_due counts the next check from now.
+    await schedule.mark(db, user.id, "inbox", datetime.now(timezone.utc))
+    return resp
 
 
 @router.post("/applications/match-email", response_model=MatchEmailOut, dependencies=AUTH_FIRST)
