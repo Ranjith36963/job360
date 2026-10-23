@@ -10,6 +10,7 @@ import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
 import { CvToApprove } from "./CvToApprove";
 import { BatchApplyPanel } from "./BatchApplyPanel";
+import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
@@ -393,6 +394,7 @@ export function NeedsYou() {
           </ul>
         )}
       </section>
+      <UnmatchedMail />
 
       {answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">
