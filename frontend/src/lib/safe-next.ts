@@ -65,7 +65,7 @@ export function readReturnCookie(): string | null {
       }
     }
   } catch {
-    /* malformed cookie — ignore */
+    /* malformed cookie â€” ignore */
   }
   return null;
 }
