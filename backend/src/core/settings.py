@@ -695,7 +695,10 @@ LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
 KNOWN_PEOPLE_MAX = int(os.getenv("KNOWN_PEOPLE_MAX", "20"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
-CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
+CONTACT_FOUND_VIA = (
+    "company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event",
+    "company_team_page", "github", "speaker_page", "email_finder", "other",
+)
 # Outreach pack #7 — where the contact's EMAIL came from (the person's origin is
 # found_via). Closed set; unset = NULL (rule #29). `pattern_guess` makes
 # check_outreach answer ask (email_guessed). Editable like found_via (a contact_edits row).

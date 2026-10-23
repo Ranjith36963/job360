@@ -1696,9 +1696,10 @@ def build_server(version: str = "") -> MCPServer:
         (on a job: unless both have different LinkedIn URLs; cold: only when
         neither has one). A match changes nothing: use update_contact to add
         what is new. Draft outreach for them with save_artifact(contact_id=...).
-        `found_via` = where you found them: "company_site", "linkedin",
-        "apollo", "referral", "job_ad", "email", "event" or "other" (leave it
-        out if you do not know). `source_url` = the page you found them on
+        `found_via` = where you found them: "company_site", "company_team_page",
+        "linkedin", "apollo" (Apollo, Vibe Prospecting, Sprouts), "email_finder"
+        (Hunter and similar), "github", "speaker_page", "referral", "job_ad",
+        "email", "event" or "other" (leave it out if you do not know). `source_url` = the page you found them on
         (http/https); Job360 stores it, never opens it. `company` = the employer they work at: REQUIRED without
         application_id; on a job leave it out unless they work elsewhere (an agency) -
         it then follows the job's company. `email_source` = where the EMAIL came from: "they_emailed",
