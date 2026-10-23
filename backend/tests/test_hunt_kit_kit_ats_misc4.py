@@ -348,3 +348,25 @@ def test_eploy_large_sitemap_is_asked_for_with_a_raised_cap():
 
     jobs, _ = _run("eploy", _row("eploy", "careers.pei.group", title_ok=lambda t: False), http)
     assert len(jobs) == 2000 and seen["https://careers.pei.group/live-jobs.xml"] == 10_000_000
+
+
+def test_eploy_reads_only_the_first_description_block(monkeypatch):
+    """Nested description blocks with no text used to be re-read one by one (quadratic); the first one is read once."""
+    node = type(m4._tree("<div></div>"))  # the node class this module really uses (the test loads its own copy)
+    calls = []
+    depth = []
+    real = node.inner_html
+
+    def counting(self):  # inner_html calls itself for child nodes: count only the outermost call
+        if not depth:
+            calls.append(1)
+        depth.append(1)
+        try:
+            return real(self)
+        finally:
+            depth.pop()
+
+    monkeypatch.setattr(node, "inner_html", counting)
+    page = "<div class=vac-details__description>" * 150 + "<script>x</script>"
+    assert m4._eploy_detail(page)["description"] == ""
+    assert len(calls) == 1

@@ -214,10 +214,12 @@ def _eploy_detail(page: str) -> dict[str, str]:
     title = _clean(ld.get("title"))
     desc = _body(ld.get("description"))
     if not title or not desc:
+        read_markup = not desc  # only the FIRST description block is read: re-reading each nested one is quadratic
         for n in _walk(root):
             if not title and n.tag == "h1" and n.attrs.get("id", "").endswith("h1JobTitle"):
                 title = n.text()
-            elif not desc and n.tag == "div" and n.has_class("vac-details__description"):
+            elif read_markup and n.tag == "div" and n.has_class("vac-details__description"):
+                read_markup = False
                 desc = _body(n.inner_html())
     return {"title": title, "description": desc, "location": _ld_places(ld, region=True) if ld else "",
             "posted": _iso_date(ld.get("datePosted"))}
