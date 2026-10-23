@@ -168,6 +168,9 @@ BOARD_SOURCES = (
     "onstrider",
     "micro1",
     "alignerr",
+    "scalis",
+    "senior",
+    "profession",
     "herp",
     "hrmos",
     "mokahr",
@@ -379,7 +382,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5",
+    "kit_asia2", "kit_market5", "kit_fh4",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2865,6 +2868,10 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("onstrider", re.compile(r"^(?:www\.)?onstrider\.com$")),
     ("micro1", re.compile(r"^jobs\.micro1\.ai$")),
     ("alignerr", re.compile(r"^www\.alignerr\.com$")),
+    # freehire batch A (kit_fh4): Scalis and Senior Portal de Talentos (tenant subdomain), Profession.hu (one site)
+    ("scalis", re.compile(r"^([a-z0-9-]+)\.scalis\.ai$")),
+    ("senior", re.compile(r"^([a-z0-9-]+)\.portaldetalentos\.senior\.com\.br$")),
+    ("profession", re.compile(r"^(?:www\.)?profession\.hu$")),
     ("yourator", re.compile(r"^(?:www\.)?yourator\.co$")),
     ("careerviet", re.compile(r"^(?:www\.)?careerviet\.vn$")),
     ("occ", re.compile(r"^(?:www\.)?occ\.com\.mx$")),
@@ -2885,7 +2892,8 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com)$", re.I)
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com|"
+    r"jobs\.gusto\.com|jobleads\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2996,6 +3004,8 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = gh if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", gh) else ""
         elif ats == "likeit":  # https://<tenant>.likeit.fi/jsp/duuni/AdvertShow.jsp?id=<id>
             tok = "" if m.group(1) == "www" else m.group(1)
+        elif ats == "profession":  # https://www.profession.hu/allas/<slug>-<id>: the category is not in the link
+            tok = ""
         elif ats in ("onstrider", "micro1", "alignerr"):  # one site each: the job link carries no board token
             tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>

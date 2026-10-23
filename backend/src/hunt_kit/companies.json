@@ -6492,5 +6492,9 @@
 {"name":"Tributo Devido","ats":"enlizt","board":"tributodevido","source":"freehire"},
 {"name":"ScrumLaunch","ats":"hurma","board":"scrumlaunch","source":"freehire"},
 {"name":"WA FENIX","ats":"compleo","board":"wafx","source":"freehire"},
-{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"}
+{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"},
+{"name":"BOLD Business","ats":"scalis","board":"boldbusiness","source":"freehire"},
+{"name":"Intelbras","ats":"senior","board":"intelbras","source":"freehire"},
+{"name":"Profession.hu IT development","ats":"profession","board":"itdev","source":"freehire"},
+{"name":"Profession.hu IT operations","ats":"profession","board":"itops","source":"freehire"}
 ]
