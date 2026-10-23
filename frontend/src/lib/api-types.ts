@@ -1878,6 +1878,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/deployz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deployz
+         * @description Deploy healthcheck (2026-10-22): readyz's DB check, then the browser hold.
+         *
+         *     A new container answers 503 ``holding`` while the OLD process still has a recently active
+         *     cloud browser, for at most ``DEPLOY_HOLD_MAX_SECONDS`` after this process booted, so Railway
+         *     keeps the old container (and its half-filled form) serving. See
+         *     ``services/browser_agent/deploy_hold.py``. Public, since Railway's healthcheck sends no
+         *     credentials; the body carries no user data and no counts.
+         *
+         *     200 ``{"status": "ready"}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}`` (wins over the hold)
+         *     503 ``{"status": "holding", "reason": "browser_busy", "held_s": <seconds since boot>}``
+         */
+        get: operations["deployz_api_deployz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/doctor": {
         parameters: {
             query?: never;
@@ -2846,6 +2876,47 @@ export interface paths {
          *     name never reaches the filesystem otherwise (no path traversal).
          */
         get: operations["get_recipe_api_recipes__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedule/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Done
+         * @description Stamp one duty (hunt | inbox | batch) as done now, and the tick. A slot, never history.
+         */
+        post: operations["mark_done_api_schedule_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedule/due": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whats Due
+         * @description The duties due NOW for the signed-in user, each with its recipe. Read-only: changes no setting
+         *     and stamps nothing.
+         */
+        get: operations["whats_due_api_schedule_due_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4952,6 +5023,24 @@ export interface components {
             /** Last Interview Event Id */
             last_interview_event_id: number;
         };
+        /** DueItemOut */
+        DueItemOut: {
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch";
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "never_done" | "interval_elapsed" | "queue_waiting";
+            /**
+             * Recipe
+             * @enum {string}
+             */
+            recipe: "hunt" | "daily" | "batch";
+        };
         /** EmailChangeRequest */
         EmailChangeRequest: {
             /** Current Password */
@@ -6101,6 +6190,26 @@ export interface components {
             email: string;
             /** Next */
             next?: string | null;
+        };
+        /** MarkDoneIn */
+        MarkDoneIn: {
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch";
+        };
+        /** MarkDoneOut */
+        MarkDoneOut: {
+            /** Done At */
+            done_at: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch";
+            /** Last Tick At */
+            last_tick_at: string;
         };
         /** MeResponse */
         MeResponse: {
@@ -8724,6 +8833,29 @@ export interface components {
         VersionResponse: {
             /** Sha */
             sha: string;
+        };
+        /** WhatsDueOut */
+        WhatsDueOut: {
+            /** Batch Hold */
+            batch_hold?: string | null;
+            /** Checked At */
+            checked_at: string;
+            /** Due */
+            due: components["schemas"]["DueItemOut"][];
+            /** Expected Every Hours */
+            expected_every_hours: number;
+            /** Last Done At */
+            last_done_at: {
+                [key: string]: string | null;
+            };
+            /** Last Tick At */
+            last_tick_at?: string | null;
+            /** Next Due At */
+            next_due_at: {
+                [key: string]: string | null;
+            };
+            /** Nothing Due */
+            nothing_due: boolean;
         };
         /** WhatsNewApplicationOut */
         WhatsNewApplicationOut: {
@@ -12030,6 +12162,26 @@ export interface operations {
             };
         };
     };
+    deployz_api_deployz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     doctor_api_doctor_get: {
         parameters: {
             query?: {
@@ -13393,6 +13545,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_done_api_schedule_done_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkDoneIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkDoneOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    whats_due_api_schedule_due_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsDueOut"];
                 };
             };
             /** @description Validation Error */

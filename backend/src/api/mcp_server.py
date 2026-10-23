@@ -567,6 +567,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     from src.api.routes import proof as proof_route
     from src.api.routes import receipts as receipts_route
     from src.api.routes import recipes as recipes_route
+    from src.api.routes import schedule as schedule_route
     from src.api.routes import tailor as tailor_route
     from src.api.routes import templates as templates_route
     from src.services.applications import spine as applications_spine
@@ -1272,6 +1273,38 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             raise _tool_error(exc) from None
         _audit("mark_inbox_checked", "ok", count=len(resp.get("application_ids", [])))
         return resp
+
+    @mcp.tool()
+    async def whats_due() -> dict[str, Any]:
+        """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
+        from the user's settings. `due` lists {duty: hunt|inbox|batch, recipe, reason} in run order;
+        run each recipe, then mark_done(duty). `nothing_due` true: stop. Read-only; never a reason to
+        change a setting, and never an approval to submit (check_submit stays the gate)."""
+        try:
+            async with _request_db() as db:
+                resp = await schedule_route.whats_due(db, _user())
+        except HTTPException as exc:
+            _audit("whats_due", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("whats_due", "ok", count=len(resp.due))
+        return resp.model_dump()
+
+    @mcp.tool()
+    async def mark_done(duty: str) -> dict[str, Any]:
+        """After a scheduled duty finished, stamp it: `duty` = hunt | inbox | batch. whats_due then
+        counts the next one from now. mark_inbox_checked also stamps inbox."""
+        try:
+            body = schedule_route.MarkDoneIn.model_validate({"duty": duty})
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await schedule_route.mark_done(body, db, _user())
+        except HTTPException as exc:
+            _audit("mark_done", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("mark_done", "ok", duty=body.duty)
+        return resp.model_dump()
 
     @mcp.tool()
     async def save_artifact(
