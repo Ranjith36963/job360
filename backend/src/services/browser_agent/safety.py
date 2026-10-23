@@ -31,16 +31,23 @@ _STRONG_SUBMIT = re.compile(r"\bsubmit", re.IGNORECASE)
 _STRONG_SUBMIT_WORD = re.compile(r"\bsubmit\b", re.IGNORECASE)
 # These mean the end on a button in a form, or on any page where answers have
 # been typed; a job ad's "Apply for this job" (nothing typed yet) just opens the form.
-# The common EU send / apply verbs count the same ("Bewerbung absenden", "Postuler").
+# The common EU send / apply verbs count the same ("Bewerbung absenden", "Postuler"), in the forms
+# buttons use: infinitive and imperative ("Invia", "Verstuur", "Solliciteer"). A verb missing here let
+# "Invia candidatura" on a page with no <form> through ungated.
+# The page script's look (page_js.SNAPSHOT_JS) builds its regex from these same pattern strings, so the
+# two cannot drift: every word must start and end with an ASCII letter (JavaScript's \b is ASCII only).
 _SUBMIT_WORDS = re.compile(
-    r"\b(apply|send|finish|complete|confirm|absenden|senden|bewerben|envoyer|postuler|soumettre|enviar|"
-    r"solicitar|inviare|candidati|verzenden|solliciteren)\b",
+    r"\b(apply|send|finish|complete|confirm|absenden|abschicken|senden|einreichen|bewerben|envoyer|postuler|"
+    r"soumettre|enviar|postular|solicitar|candidatar|submeter|invia|inviare|candidati|verzenden|verzend|"
+    r"versturen|verstuur|indienen|solliciteren|solliciteer)\b",
     re.IGNORECASE,
 )
 # Words that make a submit-shaped button a step, not the end: multi-page forms
-# (Workday, SmartRecruiters) use <button type=submit> for "Next".
+# (Workday, SmartRecruiters) use <button type=submit> for "Next". The EU next / back / continue words too.
 _STEP_WORDS = re.compile(
-    r"\b(next|continue|back|previous|save|search|sign in|log in|login|upload|add|edit|remove|cancel|close)\b",
+    r"\b(next|continue|back|previous|save|search|sign in|log in|login|upload|add|edit|remove|cancel|close|"
+    r"weiter|zurück|suivant|précédent|continuer|retour|siguiente|anterior|continuar|volver|avanti|indietro|"
+    r"continua|volgende|vorige|verder|terug)\b",
     re.IGNORECASE,
 )
 _PASSWORD_NAME = re.compile(
@@ -69,6 +76,12 @@ _INVISIBLE_CHARS = re.compile(r"[\u00ad\u200b-\u200d\u2060\ufeff]")
 _PASSWORD_AUTOCOMPLETE = frozenset({"current-password", "new-password", "one-time-code"})
 # "Save and send application": the step word does not make it a step.
 _APPLICATION = re.compile(r"\b(application|bewerbung|candidature|candidatura|solicitud|sollicitatie)", re.IGNORECASE)
+# The same nouns as whole words: a button naming the application ("Valider ma candidature", "Bewerbung
+# abschicken") on a page with answers is the end whatever its verb, unless a step word names it a step
+# ("Weiter zur Bewerbung"). The safe side: a verb we do not know still reaches the gate.
+_APPLICATION_WORD = re.compile(
+    r"\b(application|bewerbung|candidature|candidatura|solicitud|sollicitatie)\b", re.IGNORECASE
+)
 # Roles the look lists that are clicked like a link: named the way a link is.
 _LINK_ROLES = ("link", "tab", "switch", "option")
 
@@ -136,6 +149,9 @@ def control_kind(
         return "submit"
     if toggle:
         return "field"
+    # Not a tab ("Overview | Application") and not the bare noun, a section's own toggle.
+    if (in_form or page_has_answers) and not tab_button and len(name.split()) > 1 and _APPLICATION_WORD.search(name):
+        return "submit"
     # A button that submits its form, whatever its name ("Done"): the safe side.
     if owns and ((tag == "button" and input_type in ("submit", "")) or input_type in ("submit", "image")):
         return "submit"

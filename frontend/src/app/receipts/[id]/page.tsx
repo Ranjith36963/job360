@@ -209,7 +209,7 @@ export default function ReceiptDetailPage() {
                 <div key={i} data-testid="receipt-answer" className="receipt-fact">
                   <dt className="text-[13px] text-paper-dim">{qa.question}</dt>
                   <dd className="mt-0.5 whitespace-pre-wrap font-heading text-[17px] leading-snug [overflow-wrap:anywhere]">
-                    {qa.answer}
+                    {qa.redacted ? "Not kept (sensitive, not remembered)" : qa.answer}
                   </dd>
                 </div>
               ))}

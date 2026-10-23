@@ -16,7 +16,7 @@ ROW = {"name": "ZF", "ats": "successfactors", "token": "https://jobs.zf.com/sear
 def _stub(routes):
     calls = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append((url, method, data))
         for frag, resp in routes.items():
             if frag in url:
@@ -132,3 +132,28 @@ def test_rejects_unsafe_token_and_locale():
     row = {"name": "x", "token": "https://a.com", "variant": "csb", "locales": ["x/../y?", "en_US"]}
     kit_ats.fetch_successfactors(row, http, {})
     assert len(calls) == 1 and b'en_US' in calls[0][1]
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_sf_tile_scan_is_linear_on_unclosed_tiles():
+    tile = '<li class="job-tile job-id-5"><a class="jobTitle-link" data-url="/job/Berlin-Eng/5/">Engineer</a></li>'
+    got = kit_ats._sf_parse_tiles(tile, "https://jobs.example.com")
+    assert [(t["id"], t["title"]) for t in got] == [("5", "Engineer")]
+    _grows_linearly(lambda p: kit_ats._sf_parse_tiles(p, "https://jobs.example.com"),
+                    lambda k: '<li class="job-tile job-id-1" ' * k)

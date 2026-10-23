@@ -26,7 +26,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Merge main step by step, never through a script: gate, `git merge --no-commit`, stop on any conflict,
   gate the merged tree, commit. A script hides the merge from the commit-gate hook.
 - Run the gate as its own command and read its PASS line; never `gate && git commit` (the hook misses it).
-- Before a PR with a migration merges, merge main and check its NNNN is still free (2026-10-21: two 0067s).
+- Before a PR with a migration merges, merge main and check its NNNN is still free (two 0067s 10-21, two 0077s 10-22). Rules: backend/README.md "Numbering".
 - Resolve a conflict per hunk; `git checkout --ours/--theirs <file>` also drops the other side's clean hunks.
 - A child PR's squash merge ships its stacked base too: diff the base against main, close it as shipped.
 - A stacked worker's first step merges its base branch: worktree agents start from origin/main.
@@ -36,6 +36,9 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   Which files a machine may not merge is `lane.classify` (`python scripts/lane.py`), never a prefix list:
   every `**/CLAUDE.md` is human-only, so a CLAUDE.md fix (even a `last-verified` stamp) goes in its own PR.
 - A PR with few check runs is probably CONFLICTING (no CI runs): read `mergeable_state`.
+- Before closing a PR as yours, read its commits' `Claude-Session` trailer; a matching title is not proof (2026-10-22).
+- Read a PR's merged state with a single GET (`pull_request_read` get); the list API's `merged` flag lies.
+- A branch checked out in a stale worktree blocks git writes (branch-owner-guard): `git worktree list`, remove only clean ones.
 - One PR per slice, at most 1000 read lines (aim for 400 or fewer) (`size.max_lines` in `.github/merge-policy.yml`;
   generated files don't count). Never keep pushing new slices onto an open PR: open the next.
 - Auto-merge is always on (owner, 2026-10-19), but the cage HOLDS a refused PR armed only once
@@ -65,6 +68,9 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - Call a site "blocked" only after testing the exact endpoint the reader uses, and name it
   (2026-10-19: Bayt/GulfTalent web pages gave 403; the readers' endpoints worked).
 - A test run gets a NEW folder: check it does not exist (`test -e`) before downloading into it.
+- Store only the token a PUBLIC careers page hands out today, never an archived one with more
+  jobs: it may be an internal or referral site (2026-10-20: eClerx 559 archived vs 17 public).
+- After editing `companies.json`, run every test that reads it (`grep -l companies.json tests/`).
 - Rate limits are per SERVICE, not per subdomain: Workable and Recruitee 429 the whole ATS.
   Worker briefs say "stop that ATS on the first 429", never "per host" (2026-10-20: 90 refusals).
 - A new doc's kind is LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED only; run
@@ -80,3 +86,9 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - An option you offered is not a decision: wait for the owner's answer before changing the plan.
 - A weak spot is closed only after a real run on production exercises it.
 - Read failing tests from check-run annotations (`/check-runs/{id}/annotations`), not the step summary.
+- Re-read `origin/main`'s migration list in the minute before every merge call (2026-10-22: two 0077 files on main).
+- After editing an MCP description, also run `tests/test_tools_states_recipes.py`; cut prose a recipe carries, never a
+  closed value set or a payload key.
+- From a detached worktree push `HEAD:<branch>` and compare `git ls-remote` with `git rev-parse HEAD`; "Everything up-to-date" is not proof (2026-10-22).
+- Sibling hunt-kit PRs conflict in the shared registries after each merge: merge main in, keep both sides, re-gate, re-read `mergeable_state`.
+

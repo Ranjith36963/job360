@@ -205,6 +205,38 @@ function PeopleTable({
   );
 }
 
+function OutreachVariantTable({ rows }: { rows: StatsResponse["by_outreach_variant"] }) {
+  return (
+    <section aria-labelledby="stats-outreach-variant" data-testid="stats-section-outreach-variant">
+      <h2 id="stats-outreach-variant" className={`${LABEL} mb-2`}>
+        By outreach variant
+      </h2>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[22rem] border-collapse text-sm">
+          <thead>
+            <tr>
+              <th scope="col" className={TH} />
+              <th scope="col" className={TH}>Sent (n)</th>
+              <th scope="col" className={TH}>Replied</th>
+              <th scope="col" className={TH}>Reply %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={String(r.key)} data-testid="stats-row" className="border-t border-border">
+                <th scope="row" className={`${TD} font-sans font-normal`}>{r.label}</th>
+                <td className={TD}>{r.outreach_sent}</td>
+                <td className={TD}>{r.outreach_replied}</td>
+                <td className={TD}>{formatRate(r.reply_rate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 type SitesBlock = NonNullable<StatsResponse["sites"]>;
 
 /** "Login page 2, Captcha 1" - the blocked counts by reason, facts only. */
@@ -286,6 +318,7 @@ export function StatsClient() {
   const sections = stats ? buildSections(stats) : [];
   const people = stats?.by_contact_found_via ?? [];
   const relationships = stats?.by_contact_relationship ?? [];
+  const variants = stats?.by_outreach_variant ?? [];
   const scoreLine = stats?.score_line;
 
   return (
@@ -317,6 +350,7 @@ export function StatsClient() {
           {relationships.length > 0 && (
             <PeopleTable id="people-relationship" title="By relationship" rows={relationships} />
           )}
+          {variants.length > 0 && <OutreachVariantTable rows={variants} />}
           {stats.sites && stats.sites.sites.length > 0 && <SitesTable data={stats.sites} />}
         </>
       )}

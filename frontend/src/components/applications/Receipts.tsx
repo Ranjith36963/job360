@@ -68,7 +68,9 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
                   {answers.map((qa, i) => (
                     <div key={i} data-testid="receipt-answer">
                       <dt className="text-xs text-muted-foreground">{qa.question}</dt>
-                      <dd className="whitespace-pre-wrap font-heading text-[15px] leading-snug">{qa.answer}</dd>
+                      <dd className="whitespace-pre-wrap font-heading text-[15px] leading-snug">
+                        {qa.redacted ? "Not kept (sensitive, not remembered)" : qa.answer}
+                      </dd>
                     </div>
                   ))}
                 </dl>

@@ -384,6 +384,22 @@ export async function confirmPasswordReset(
 }
 
 // ---------------------------------------------------------------------------
+// Email-change undo (gap roadmap slice 35)
+// ---------------------------------------------------------------------------
+//
+// Public, authenticated by the one-time token in the notice mailed to the OLD
+// address. 204 = the old email is back and every session, assistant token and
+// OAuth grant was revoked. 400 = unknown / used / expired (generic). 409 = the
+// old address now belongs to another account (nothing changed).
+
+export async function undoEmailChange(token: string): Promise<void> {
+  await request<void>("/api/auth/email-change/undo", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Email verification (Phase −2 item B)
 // ---------------------------------------------------------------------------
 //
@@ -1229,7 +1245,7 @@ export type BrowserLiveShot = {
 };
 export type BrowserLiveAction =
   | { action: "start"; url: string }
-  | { action: "shot" | "keep" | "cancel" }
+  | { action: "shot" | "keep" | "cancel" | "done" }
   | { action: "click"; x: number; y: number }
   | { action: "type"; text: string }
   | { action: "key"; key: string }
@@ -1244,8 +1260,12 @@ export async function forgetBrowserSignIn(host: string): Promise<{ forgotten: st
 }
 
 /** One step of the user's own sign-in. What is typed goes to the page and is never kept. */
-export async function browserLive(step: BrowserLiveAction): Promise<BrowserLiveShot> {
-  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify(step) });
+/** `mode: "finish"`: the hand-off view, in the assistant's own browser on the form it stopped on. */
+export async function browserLive(
+  step: BrowserLiveAction,
+  mode: "sign_in" | "finish" = "sign_in",
+): Promise<BrowserLiveShot> {
+  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify({ ...step, mode }) });
 }
 
 // ---- Send starts my assistant (browser agent, "Send trigger"; website only, never a token) ----

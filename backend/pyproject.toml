@@ -100,7 +100,7 @@ dev = [
     # it. Pinned to the 0.x line the backlog was drained against; ruff's rule set
     # changes between releases, so bump deliberately (an unpinned bump flags
     # previously-clean code and reds CI on unrelated PRs).
-    "ruff>=0.15,<0.17",
+    "ruff>=0.15,<0.18",
 ]
 # The Job360 browser agent (docs/product/BROWSER_AGENT.md). Optional and
 # heavy (Chromium is installed by `playwright install`, not pip): the Docker

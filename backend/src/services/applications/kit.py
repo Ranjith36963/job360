@@ -38,7 +38,7 @@ from urllib.parse import urlsplit
 
 from src.core import settings
 from src.services.applications import blocked as blocked_service
-from src.services.applications import event_examples, spine
+from src.services.applications import email_channel, event_examples, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
@@ -55,6 +55,8 @@ KIT_EVENT_TYPES = frozenset({
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
     "form_filled", "form_swept", "hold_released", "site_account", "account_needed", "form_checked",
     "submit_attempted", "submit_resolved",
+    # Gap roadmap slice 31 (G078): the exact email an EMAIL application sends (services/applications/email_channel).
+    "email_drafted",
 })
 # `blocked` is NOT here (review 2026-10-18): a block recorded after the click cannot prove the click sent
 # nothing, and the user's later `unblocked` would let the same application be submitted twice.
@@ -411,7 +413,7 @@ async def controls_state(
         },
         "duplicate": {**dup, "cleared": _who(cleared_ev) if cleared_ev else None},
         "blocked": await blocked_service.open_block(db, user_id, application_id),
-        # Slice 8: the part of the newest yes for this CV that no longer holds (None = it holds,
+        # Slice 8 / 31: the part of the newest yes for this CV that no longer holds (None = it holds,
         # or there is none). Read by gate_facts; the web response model does not carry it.
         "approval_stale": stale,
     }
@@ -434,10 +436,12 @@ async def _assistant_edit_id(db: JobDatabase, user_id: str) -> int:
 async def approval_fingerprint(db: JobDatabase, user_id: str, application_id: int) -> dict[str, Any]:
     """What a web Send yes is bound to besides the CV id + hash: the cover letter, the newest
     ``form_filled``, the form page (:func:`latest_form_url`) and the newest assistant profile edit.
-    The approve route stores it on ``submit_approved``; :func:`approval_stale` compares it again."""
+    Slice 31 (G078) adds the newest ``email_drafted`` (event id, ``email_to``, ``attachments``). The
+    approve route stores it on ``submit_approved``; :func:`approval_stale` compares it again."""
     letter = await spine.latest_artifact(db, user_id, application_id, "cover_letter")
     fills = await _events(db, user_id, application_id, ("form_filled",))
     return {
+        **email_channel.fingerprint(await email_channel.newest_draft(db, user_id, application_id)),
         "cover_letter_id": letter["id"] if letter else None,
         "cover_letter_sha256": sha256_text(letter["text"]) if letter else None,
         "form_filled_event_id": int(fills[0]["id"]) if fills else None,
@@ -457,7 +461,9 @@ async def approval_stale(
 ) -> Optional[str]:
     """``None`` while a ``submit_approved`` (already matched to the latest CV) still holds, else the
     part that no longer does: ``expired`` (older than ``SUBMIT_APPROVAL_TTL_MINUTES``),
-    ``cover_letter``, ``form_fill``, ``form_page`` or ``profile``. A yes without a ``fingerprint``
+    ``cover_letter``, ``form_fill``, ``form_page``, ``profile`` or (slice 31) ``email``: the newest
+    ``email_drafted`` has another recipient or
+    attachment than the draft the yes was given on. A yes without a ``fingerprint``
     (a chat yes, or one from before slice 8) is bound to the CV and the time only. A part that was
     unknown at the yes (no fill, no page yet) is not compared. A newer fill still holds when it differs
     only by answers that are now the user's own words (:func:`ready.refill_keeps_answers`)."""
@@ -482,6 +488,8 @@ async def approval_stale(
         return "form_page"
     if now_fp["profile_edit_id"] > int(stamp.get("profile_edit_id") or 0):
         return "profile"
+    if email_channel.draft_changed(stamp, now_fp):
+        return "email"
     return None
 
 
@@ -715,6 +723,7 @@ async def gate_facts(
     )
     dup = state["duplicate"]
     form_host = await _newest_form_host(db, user_id, application_id)
+    draft = await email_channel.newest_draft(db, user_id, application_id)
     return settings_rules.SubmitFacts(
         status=str(app_row["status"]),
         has_receipt=has_receipt,
@@ -744,7 +753,10 @@ async def gate_facts(
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
+        sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
+        written_unapproved=await _written_unapproved(db, user_id, app_row),
         application_id=application_id,
+        email_to=draft["to"] if draft else None,
     )
 
 
@@ -753,6 +765,20 @@ async def _guessed_unverified(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unverified_guess(db, user_id, app_row)
+
+
+async def _written_unapproved(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest form holds a written answer the user has not approved (``ready`` owns the reading)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return await ready.has_unapproved_written(db, user_id, app_row)
+
+
+async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """The newest form holds an answer to a sensitive question the user has not confirmed (``ready`` reads it)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return await ready.has_unconfirmed_sensitive(db, user_id, app_row)
 
 
 def company_avoided(user_id: str, app_row: dict[str, Any], entries: Optional[list[Any]] = None) -> bool:
@@ -867,12 +893,12 @@ async def _cv_unsupported(db: JobDatabase, user_id: str, artifact_id: int) -> bo
     return any(c.get("code") in _UNSUPPORTED_CODES for c in _stored_checks(got[0] if got else None))
 
 
-async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
-    """No CV saved: a yes recorded with ``artifact_id`` null still counts."""
+async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
+    """No CV saved: the newest yes recorded with ``artifact_id`` null (it still counts), or ``None``."""
     for ev in await _events(db, user_id, application_id, ("submit_approved",)):
         if ev["payload"].get("artifact_id") is None:
-            return True
-    return False
+            return ev
+    return None
 
 
 async def submit_verdict(
@@ -906,7 +932,7 @@ async def submit_verdict(
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False,
+            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False,
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -947,6 +973,7 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
+    "email_drafted": email_channel.REQUIRED | email_channel.OPTIONAL,
 }
 FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
 FORM_FILLED_OPTIONAL = frozenset({"answers", "fields_skipped"})
@@ -1030,6 +1057,77 @@ def answer_problems(raw: Any) -> list[str]:
     for i, item in enumerate(items or []):
         event_examples.collect(problems, _clean_answer, item, prefix=f"answers[{i}]: ")
     return problems
+
+
+# ── G023: a sensitive answer the user did not agree to remember is hashed, never copied ──
+# Events and receipts are append-only (M3): a raw value written once could never be removed.
+
+
+def redacted_answer(item: dict[str, Any]) -> dict[str, Any]:
+    """What is stored for such an answer: the question and its non-value metadata (``source``,
+    ``key``), the sha256 of the value's UTF-8 text, and ``redacted: true``. Never the value."""
+    out: dict[str, Any] = {"question": str(item.get("question") or "")}
+    for extra in ("source", "key"):
+        if isinstance(item.get(extra), str) and item[extra]:
+            out[extra] = item[extra]
+    out["value_sha256"] = sha256_text(str(item.get("answer") or ""))
+    out["redacted"] = True
+    return out
+
+
+def _sensitive_value(item: Any) -> bool:
+    """A non-blank answer to a sensitive question (:func:`_question_is_sensitive`, the same test
+    ``check_form`` flags ``needs_confirmation`` with). A blank or already-hashed answer has no value to hide."""
+    if not isinstance(item, dict) or item.get("redacted") or not str(item.get("answer") or "").strip():
+        return False
+    key = item.get("key")
+    return _question_is_sensitive(str(item.get("question") or ""), key if isinstance(key, str) else None)
+
+
+async def redact_unremembered(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], answers: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int]:
+    """``(answers to store, how many were hashed)``. A sensitive answer is KEPT as typed only when
+    Job360 already holds it with the user's OK: its ``key`` is an item of this application's kit
+    (:func:`compute_answers` leaves out a sensitive value saved without remember consent) or the
+    question is one of the user's approved answers. Every other sensitive answer - said for this
+    form only - is stored as :func:`redacted_answer`. Loads the profile only when one is sensitive."""
+    if not any(_sensitive_value(a) for a in answers):
+        return answers, 0
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports kit
+
+    profile, _country, blocks, _missing = await _answers_for(db, user_id, app_row)
+    have = {str(i["key"]) for block in blocks.values() for i in block}
+    company_key = ready._company_key(str(app_row.get("job_company") or ""))
+    out: list[dict[str, Any]] = []
+    hashed = 0
+    for a in answers:
+        if _sensitive_value(a) and not (
+            (isinstance(a.get("key"), str) and a["key"] in have)
+            or ready._approved_for(profile, str(a.get("question")), company_key) is not None
+        ):
+            out.append(redacted_answer(a))
+            hashed += 1
+        else:
+            out.append(a)
+    return out, hashed
+
+
+async def _stored_answers(
+    db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, raw: Any
+) -> list[dict[str, Any]]:
+    """A form event's ``answers`` as stored: cleaned, then G023-hashed (:func:`redact_unremembered`)."""
+    cleaned: list[dict[str, Any]] = list(clean_answers(raw))
+    if not any(_sensitive_value(a) for a in cleaned):
+        return cleaned
+    app_row = await spine.get_owned_application(db, user.id, application_id) or {}
+    stored, hashed = await redact_unremembered(db, user.id, app_row, cleaned)
+    if hashed:
+        get_audit_logger().info("answers_redacted", extra={
+            "event": "answers_redacted", "user_id": safe_log_value(user.id), "application_id": int(application_id),
+            "event_type": event_type, "redacted_count": hashed, "result": "ok",
+        })
+    return stored
 
 
 def _refuse(user: CurrentUser, event_type: str, status: int) -> None:
@@ -1220,6 +1318,8 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
             problems.append("missing_required cannot be more than missing")
         if "answers" in payload:
             _checked_answers(payload["answers"], problems)
+    elif event_type == email_channel.EVENT_TYPE:
+        problems += email_channel.payload_problems(payload)
     return problems
 
 
@@ -1330,7 +1430,7 @@ async def _check_kit_event(
         if page:
             stored["form_url"] = page
         if "answers" in payload:
-            stored["answers"] = clean_answers(payload["answers"])
+            stored["answers"] = await _stored_answers(db, user, application_id, event_type, payload["answers"])
         if "fields_skipped" in payload:
             stored["fields_skipped"] = clean_fields_skipped(payload["fields_skipped"])
         return stored
@@ -1360,7 +1460,7 @@ async def _check_kit_event(
         if "answers" in payload:
             # Owner decision 2026-10-19: what the form holds after the sweep. The proof that the
             # answers the user changed on the web (check_submit `type_first`) are now typed in.
-            swept["answers"] = clean_answers(payload["answers"])
+            swept["answers"] = await _stored_answers(db, user, application_id, event_type, payload["answers"])
         if paged:
             swept["page"], swept["pages_total"] = payload["page"], payload["pages_total"]
         if "form_url" in payload:  # slice 7: the page swept, cleaned (never a token or session id)
@@ -1408,6 +1508,10 @@ async def _check_kit_event(
     if event_type in ("site_account", "account_needed"):
         _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])  # a password key can never fit here
         return {"host": _host(event_type, payload.get("host")), "by": actor}
+    if event_type == email_channel.EVENT_TYPE:
+        # Slice 31: recipient, subject and the attached versions (never the body); attachments must be
+        # this application's CV / letter with the kit's text hash.
+        return await email_channel.check(db, user.id, application_id, payload, actor)
     raise SpineError(422, f"{event_type} is not a kit event")  # pragma: no cover
 
 
@@ -1424,6 +1528,11 @@ def log_kit_event(
             extra[key] = safe_log_value(stored[key], max_len=80)
     if isinstance(stored.get("answers"), list):
         extra["answers_count"] = len(stored["answers"])  # a count, never the answers
+    if event_type == email_channel.EVENT_TYPE:
+        # Slice 31: the recipient's domain and the attachment count - never the address or the subject.
+        audit = email_channel.audit_fields(stored)
+        extra["to_domain"] = safe_log_value(audit["to_domain"], max_len=80)
+        extra["attachments_count"] = int(audit["attachments_count"])
     get_audit_logger().info(event_type, extra=extra)
 
 
@@ -1992,10 +2101,17 @@ async def _application_answers(
 ) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """The profile, the job's country and :func:`compute_answers` for ONE application - the single
     place the kit and the form check load them (same profile, overlay, country and company key)."""
+    return await _answers_for(db, user.id, app_row)
+
+
+async def _answers_for(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any]
+) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+    """:func:`_application_answers` by user id (the receipt has no ``CurrentUser``)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
-    loaded, overlay = load_profile_with_overlay(user.id)
+    loaded, overlay = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     job_company_key = await _job_company_key(db, app_row)
@@ -2175,7 +2291,10 @@ FORM_NEXT_ASK = (
     "save reusable answers with update_profile (user_info.answers); never guess."
 )
 FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
-FORM_NEXT_CONFIRM = " Confirm every `needs_confirmation` answer with the user in that same message."
+FORM_NEXT_CONFIRM = (
+    " Confirm every `needs_confirmation` answer with the user in that same message, and raise each one with "
+    "ask_user so it shows on Needs you: the user checks it there before anything is sent."
+)
 FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
 # NOT IN REFERENCE (kept small, deterministic): which kit groups / which wording count as sensitive or a knock-out.
@@ -2192,7 +2311,17 @@ _SENSITIVE_RE = re.compile(
     r"vetting (?:check|process|level)|(?:undergo|pass|hold) (?:\w+ )?vetting|"
     r"day.?rate|expected (?:pay|salary)|notice period|\bitar\b|export controls?|non.?compete|"
     r"interview record(?:ing)?|record(?:ing)? (?:of )?(?:the |this )?interview|"
-    r"previously (?:been )?employed (?:by|at|with)"
+    r"previously (?:been )?employed (?:by|at|with)|"
+    # Any country, any job (owner, 2026-10-22): identity, health, money and legal history are the user's to
+    # answer, never typed from a guess. "health" and "age" alone are too broad ("healthcare", "page"), so
+    # only the asking phrases count.
+    r"nationality|citizen(?:ship)?\b|immigration status|national origin|(?:place|country) of birth|"
+    r"passport|national insurance|social security|\bssn\b|tax (?:id|number)|"
+    r"date of birth|\bdob\b|\bhow old\b|marital|pregnan|"
+    r"medical (?:condition|history|exam)|health (?:condition|issue|problem|status)|mental health|"
+    r"drug (?:test|screen)|vaccinat|transgender|\blgbt|political|trade union|union member|\bcaste\b|"
+    r"bankrupt|credit (?:check|score|history)|financial (?:history|status)|salary history|"
+    r"(?:current|previous) (?:salary|pay)\b|arrest|felony|misdemeanou?r|military|armed forces"
 )
 _KNOCKOUT_GROUPS = frozenset({"right_to_work", "salary"})
 _KNOCKOUT_RE = re.compile(

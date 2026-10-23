@@ -51,6 +51,7 @@ from src.api.routes import (
     receipts,
     recipes,
     tailor,
+    templates,
     tokens,
     well_known,
 )
@@ -267,6 +268,7 @@ app.include_router(profile.router, prefix="/api")
 app.include_router(bring.router, prefix="/api")
 app.include_router(receipts.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
+app.include_router(templates.router, prefix="/api")  # user-level outreach templates (pack #13)
 app.include_router(proof.router, prefix="/api")  # S7: PUBLIC token upload + per-user proof routes
 app.include_router(files.router, prefix="/api")  # PUBLIC token download for application-kit file links (S3)
 app.include_router(calendar.router, prefix="/api")  # PUBLIC token .ics feed + session-only feed management (0058)

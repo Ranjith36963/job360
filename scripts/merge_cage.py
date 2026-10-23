@@ -1351,7 +1351,8 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
 TAGS_PROVED_BY_CAGE = {"review": "REVIEW", "ratchets": "RATCHET"}
 
 
-def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANCH) -> list[str]:
+def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANCH,
+               author: str = "") -> list[str]:
     """Pure half of the TAGS cage, so a drill can feed it real shapes.
 
     SKIPPED is not a pass here, for the same reason it is not a pass for a
@@ -1399,6 +1400,9 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
             elif run.get("status") != "completed":
                 reasons.append(f"tag `{tag}` needs `{name}` and it has not finished "
                                f"({run.get('status')}). FIX: wait for it, then re-judge.")
+            elif (run.get("conclusion") == "skipped" and author == DEPENDABOT
+                  and name in DEPENDABOT_SKIPPED_REVIEWERS):
+                continue  # the designed skip; see DEPENDABOT above
             elif run.get("conclusion") != "success":
                 reasons.append(
                     f"tag `{tag}` needs `{name}` and it concluded `{run.get('conclusion')}`. "
@@ -1414,7 +1418,11 @@ def check_tags(pr: int, lane: dict, base_ref: str = MAIN_BRANCH) -> Verdict:
     data = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/check-runs?per_page={PER_PAGE}"]))
     runs = data.get("check_runs", [])
     requires = list(lane.get("requires") or [])
-    reasons = judge_tags(requires, runs, base_ref)
+    try:  # an unreadable author is "not Dependabot": the strict side
+        author = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".user.login"]).strip()
+    except Exception:  # noqa: BLE001
+        author = ""
+    reasons = judge_tags(requires, runs, base_ref, author)
     return Verdict("TAGS", "fail" if reasons else "pass", reasons,
                    claim=f"every tag the `{lane.get('lane', '?')}` lane demands "
                          f"({', '.join(requires) or 'none'}) really ran and really passed")
@@ -1534,6 +1542,9 @@ REVIEWER_CHECKS = ("reviewer-bugs", "reviewer-security")
 # never queues a Dependabot PR itself, so the major/minor call stays with
 # dependabot-auto.yml.
 DEPENDABOT = "dependabot[bot]"
+# The two reviewer jobs review-*.yml skip for this author on purpose; the `security` and `bugs`
+# lane tags name them, so they need the same exception `judge_review_evidence` already has.
+DEPENDABOT_SKIPPED_REVIEWERS = ("reviewer-security", "reviewer-bugs")
 
 
 def judge_review_evidence(check_runs: list[dict], author: str = "") -> list[str]:
@@ -3318,6 +3329,18 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
 
     _verify_skipped = [r for r in _full if not r["name"].startswith("verify")] + \
         _rs([(n, "skipped") for n in TAG_CHECKS["verify"]])
+    _dep_skipped = [r for r in _full if r["name"] not in DEPENDABOT_SKIPPED_REVIEWERS] + \
+        _rs([(n, "skipped") for n in DEPENDABOT_SKIPPED_REVIEWERS])
+    ok("a Dependabot PR whose reviewer-security/bugs SKIPPED by design earns the tags",
+       not judge_tags(["security", "bugs"], _dep_skipped, author=DEPENDABOT),
+       f"got {judge_tags(['security', 'bugs'], _dep_skipped, author=DEPENDABOT)}", T)
+    ok("...and the very same skips from any other author still refuse the tags",
+       bool(judge_tags(["security", "bugs"], _dep_skipped, author="someone")),
+       "a skipped reviewer earned a tag for a non-Dependabot author", T)
+    ok("...and Dependabot cannot skip its way past CodeQL or a scanner",
+       bool(judge_tags(["security"], [r for r in _full if r["name"] != "CodeQL"] +
+                       _rs([("CodeQL", "skipped")]), author=DEPENDABOT)),
+       "Dependabot got a pass on a check that is not a designed skip", T)
     ok("...and a `verify` that SKIPPED does not earn the tag either",
        bool(judge_tags(_prod_req, _verify_skipped)),
        "a skipped job was allowed to prove something — a skip proves nothing, "

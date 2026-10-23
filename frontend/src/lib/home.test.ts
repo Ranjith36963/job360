@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LAST_VISIT_KEY,
   buildSentence,
+  dayAt,
   isBrandNew,
+  lastApplied,
   needsYouSentence,
   readLastVisit,
   selectFeed,
@@ -179,5 +181,40 @@ describe("isBrandNew", () => {
     // A general ask (no application) writes no event, so the feed stays empty.
     expect(isBrandNew({ applicationsTotal: 0, eventCount: 0, openAsks: 1 })).toBe(false);
     expect(isBrandNew({ applicationsTotal: 0, eventCount: 0, openAsks: null })).toBe(false);
+  });
+});
+
+describe("lastApplied", () => {
+  const apps = [
+    { id: 1, job_title: "Engineer", job_company: "Monzo" },
+    { id: 2, job_title: "Analyst", job_company: "" },
+  ] as never;
+  it("picks the newest applied event by occurred_at and names its company", () => {
+    const events = [
+      ev(1, "agent:Claude", { event_type: "applied", occurred_at: "2026-10-05T10:00:00Z" }),
+      ev(2, "agent:Claude", { event_type: "applied", occurred_at: "2026-10-01T10:00:00Z", application_id: 2 }),
+      ev(3, "agent:Claude", { event_type: "replied", occurred_at: "2026-10-09T10:00:00Z" }),
+    ];
+    expect(lastApplied(events, apps)).toEqual({ company: "Monzo", occurredAt: "2026-10-05T10:00:00Z" });
+  });
+  it("falls back to the job title, skips unparseable dates, null when none", () => {
+    const events = [
+      ev(1, "agent:Claude", { event_type: "applied", occurred_at: "last week" }),
+      ev(2, "agent:Claude", { event_type: "applied", occurred_at: "2026-10-01", application_id: 2 }),
+    ];
+    expect(lastApplied(events, apps)).toEqual({ company: "Analyst", occurredAt: "2026-10-01" });
+    expect(lastApplied([ev(1, "agent:Claude")], apps)).toBeNull();
+  });
+});
+
+describe("dayAt", () => {
+  const now = new Date(2026, 9, 22, 15, 0);
+  it("today / yesterday / weekday / date, with the clock unless only a date was given", () => {
+    expect(dayAt(new Date(2026, 9, 22, 14, 5).toISOString(), now)).toMatch(/^today at /);
+    expect(dayAt(new Date(2026, 9, 21, 9, 30).toISOString(), now)).toMatch(/^yesterday at /);
+    expect(dayAt("2026-10-19", now)).toMatch(/^on \S+$/);
+    expect(dayAt("2026-09-01", now)).toMatch(/^on /);
+    expect(dayAt("2026-09-01", now)).not.toMatch(/ at /);
+    expect(dayAt("not a date", now)).toBe("");
   });
 });
