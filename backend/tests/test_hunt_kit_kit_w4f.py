@@ -131,6 +131,15 @@ def test_telegram_splits_roles_on_headings_and_never_bleeds():
     assert stats["ok"] == 1 and stats["jobs"] == 2
 
 
+def test_telegram_unclosed_tags_do_not_hide_later_roles():
+    page = ('<html><body><div id="dev_page_content"><h3>A</h3><p>first <a href="x">link<h3>B</h3><p>second</p>'
+            "<h3>C</h3><div>third</div></div></body></html>")
+    jobs, _ = _run("telegramcareers", _row("telegramcareers"), _stub({"telegram.org/jobs": (200, page)}))
+    assert [j["title"] for j in jobs] == ["A", "B", "C"]
+    assert "second" not in jobs[0]["description"] and "third" not in jobs[1]["description"]
+    assert "third" in jobs[2]["description"]
+
+
 def test_telegram_missing_content_refusal_and_hostile_markup():
     assert _run("telegramcareers", _row("telegramcareers"), _stub({"/jobs": (200, "<html><h3>Role</h3></html>")}))[0] == []
     for st in (403, 429, 0, 500):

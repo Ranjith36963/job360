@@ -114,11 +114,28 @@ def _telegramcareers(row: dict[str, Any], http: Http) -> list[Job] | None:
     if content is None:
         return None
     roles: list[tuple[str, list[Any]]] = []
-    for k in content.kids:
-        if isinstance(k, _Node) and k.tag == "h3":
-            roles.append((_clean(k.text()), []))
-        elif roles:
-            roles[-1][1].append(k)
+    has_h3: dict[int, bool] = {}
+
+    def holds_h3(n: _Node) -> bool:  # memoised: each node is judged once, so the split stays linear
+        got = has_h3.get(id(n))
+        if got is None:
+            got = n.tag == "h3" or any(isinstance(c, _Node) and holds_h3(c) for c in n.kids)
+            has_h3[id(n)] = got
+        return got
+
+    def split(n: _Node) -> None:
+        # The page is hand-maintained: one unclosed <p>/<a>/<div> nests every later heading inside it (the tree never
+        # auto-closes). Descend through any wrapper that holds a heading so each <h3> still opens a role (NOT in the
+        # reference, which reads direct children only).
+        for k in n.kids:
+            if isinstance(k, _Node) and k.tag == "h3":
+                roles.append((_clean(k.text()), []))
+            elif isinstance(k, _Node) and holds_h3(k):
+                split(k)
+            elif roles:
+                roles[-1][1].append(k)
+
+    split(content)
     jobs: list[Job] = []
     seen: set[str] = set()
     for title, kids in roles:
