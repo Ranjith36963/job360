@@ -303,12 +303,14 @@ ASK: never read on your own. At each scheduled time only ask in chat
 PAUSED: every run stops at once, reads nothing, records nothing, does
 not ask.
 
-SCHEDULE: if your app offers only hourly or daily schedules, then for
-1h, 3h, 6h or 12h create an HOURLY task (1h runs every hour) that does the work only at hours
-00, 03, 06, 09, 12, 15, 18 and 21 (3h), 00, 06, 12 and 18 (6h) or 08
-and 20 (12h) in the user's timezone (ask them if you do not know it),
-and otherwise ends at once without writing anything. For 24h, run once
-each morning.
+SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
+runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
+`batch`), then `mark_done` each; `nothing_due` = end at once without
+writing anything. Job360 counts each duty from when it was last done
+(preferences.check_every for the inbox, assistant_settings.hunt_every_hours
+for the hunt), so a missed hour catches up. It lists the inbox only in
+auto mode and the batch only when the user lets you apply on your own; it
+is never a yes to submit (check_submit still decides).
 
 KILL SWITCH: every scheduled run first calls get_profile. If
 preferences.daily_check is "paused", "declined" or "" (not
