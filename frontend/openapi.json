@@ -21557,6 +21557,26 @@
         ]
       }
     },
+    "/api/deployz": {
+      "get": {
+        "description": "Deploy healthcheck (2026-10-22): readyz's DB check, then the browser hold.\n\nA new container answers 503 ``holding`` while the OLD process still has a recently active\ncloud browser, for at most ``DEPLOY_HOLD_MAX_SECONDS`` after this process booted, so Railway\nkeeps the old container (and its half-filled form) serving. See\n``services/browser_agent/deploy_hold.py``. Public, since Railway's healthcheck sends no\ncredentials; the body carries no user data and no counts.\n\n200 ``{\"status\": \"ready\"}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}`` (wins over the hold)\n503 ``{\"status\": \"holding\", \"reason\": \"browser_busy\", \"held_s\": <seconds since boot>}``",
+        "operationId": "deployz_api_deployz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Deployz",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/api/doctor": {
       "get": {
         "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only except the auto-ghost sweep (a `ghosted` event per silent\napplication, reported in ghosted_now); email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).\n\nAlso the MCP tool list as served now (``tools``, ``tools_version``) so an\nassistant can tell its client cached an old one: pass the version it saw\nlast as ``client_tools_version`` and ``tools_stale`` says whether it moved\n(null when none was passed).",

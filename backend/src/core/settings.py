@@ -1186,6 +1186,11 @@ BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
 # Live sign-in views (Settings -> Job sites) have their own cap, apart from the assistants' browsers.
 BROWSER_AGENT_MAX_LIVE = int(os.getenv("BROWSER_AGENT_MAX_LIVE", "2"))
 BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))
+# Deploy hold (browser_agent/deploy_hold.py): a NEW container answers 503 on /api/deployz while the
+# OLD process had a browser active within the last DEPLOY_HOLD_QUIET_SECONDS, for at most
+# DEPLOY_HOLD_MAX_SECONDS after the new process boots. 0 = off (the kill switch).
+DEPLOY_HOLD_MAX_SECONDS = int(os.getenv("DEPLOY_HOLD_MAX_SECONDS", "600"))
+DEPLOY_HOLD_QUIET_SECONDS = int(os.getenv("DEPLOY_HOLD_QUIET_SECONDS", "300"))
 
 
 # -- Migration safety (gap roadmap slice 20). Migrations auto-apply on boot and
