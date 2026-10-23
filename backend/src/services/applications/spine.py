@@ -2947,10 +2947,14 @@ async def whats_new(
 
     interviews = await interview_agenda(db, user_id)
 
+    # Feature 10 - unmatched mail, likewise carried whatever `since` says.
+    from src.services.applications.inbox_items import for_whats_new  # noqa: PLC0415
+
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
         "open_asks": open_asks, "proof_missing": missing_proof, "interviews": interviews,
+        "inbox_items": await for_whats_new(db, user_id),
     }
 
 
