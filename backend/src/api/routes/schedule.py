@@ -15,7 +15,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -72,7 +72,7 @@ def _log(event: str, user: CurrentUser, **fields: str) -> None:
     )
 
 
-@router.get("/schedule/due", response_model=WhatsDueOut)
+@router.get("/schedule/due", response_model=WhatsDueOut, dependencies=AUTH_FIRST)
 async def whats_due(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
@@ -86,7 +86,7 @@ async def whats_due(
     return WhatsDueOut(**answer)
 
 
-@router.post("/schedule/done", response_model=MarkDoneOut)
+@router.post("/schedule/done", response_model=MarkDoneOut, dependencies=AUTH_FIRST)
 async def mark_done(
     body: MarkDoneIn,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
