@@ -171,6 +171,11 @@ BOARD_SOURCES = (
     "scalis",
     "senior",
     "profession",
+    "jobindex",
+    "jobbankdk",
+    "hhru",
+    "habrcareer",
+    "getmatch",
     "herp",
     "hrmos",
     "mokahr",
@@ -386,7 +391,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4",
+    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2876,6 +2881,12 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("scalis", re.compile(r"^([a-z0-9-]+)\.scalis\.ai$")),
     ("senior", re.compile(r"^([a-z0-9-]+)\.portaldetalentos\.senior\.com\.br$")),
     ("profession", re.compile(r"^(?:www\.)?profession\.hu$")),
+    # national and regional boards (kit_w4a): five one-site boards whose job link carries no board token
+    ("jobindex", re.compile(r"^(?:www\.)?jobindex\.dk$")),
+    ("jobbankdk", re.compile(r"^(?:www\.)?jobbank\.dk$")),
+    ("hhru", re.compile(r"^(?:www\.)?hh\.ru$")),
+    ("habrcareer", re.compile(r"^career\.habr\.com$")),
+    ("getmatch", re.compile(r"^(?:www\.)?getmatch\.ru$")),
     ("yourator", re.compile(r"^(?:www\.)?yourator\.co$")),
     ("careerviet", re.compile(r"^(?:www\.)?careerviet\.vn$")),
     ("occ", re.compile(r"^(?:www\.)?occ\.com\.mx$")),
@@ -3024,6 +3035,8 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         elif ats == "profession":  # https://www.profession.hu/allas/<slug>-<id>: the category is not in the link
             tok = ""
         elif ats in ("onstrider", "micro1", "alignerr"):  # one site each: the job link carries no board token
+            tok = ""
+        elif ats in ("jobindex", "jobbankdk", "hhru", "habrcareer", "getmatch"):  # kit_w4a: no token in the link
             tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""

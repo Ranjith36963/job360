@@ -6499,5 +6499,10 @@
 {"name":"BOLD Business","ats":"scalis","board":"boldbusiness","source":"freehire"},
 {"name":"Intelbras","ats":"senior","board":"intelbras","source":"freehire"},
 {"name":"Profession.hu IT development","ats":"profession","board":"itdev","source":"freehire"},
-{"name":"Profession.hu IT operations","ats":"profession","board":"itops","source":"freehire"}
+{"name":"Profession.hu IT operations","ats":"profession","board":"itops","source":"freehire"},
+{"name":"hh.ru","ats":"hhru","board":"96","source":"freehire"},
+{"name":"Habr Career","ats":"habrcareer","board":"all","source":"freehire"},
+{"name":"Getmatch","ats":"getmatch","board":"all","source":"freehire"},
+{"name":"Jobindex","ats":"jobindex","board":"python aarhus","source":"ajs"},
+{"name":"Akademikernes Jobbank","ats":"jobbankdk","board":"data scientist","source":"ajs"}
 ]
