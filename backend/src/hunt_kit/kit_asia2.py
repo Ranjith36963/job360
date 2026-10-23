@@ -65,7 +65,8 @@ _POST = {"Content-Type": "application/json", "Accept": "application/json"}
 DETAIL_CAP = 25  # detail requests per board (the references fan out over every posting)
 MOKAHR_PAGES = 100  # 50 postings a page: mokahr.go:44 bounds a tenant at 5,000
 MOKAHR_PAGE = 50  # the listing's hard ceiling: 51 and above answer code 102 (mokahr.go:43)
-MOKAHR_MAX_BYTES = 3_000_000  # the pure-Python decryptor reads a page this size in about a second
+MOKAHR_MAX_BYTES = 3_000_000  # one encrypted page; the pure-Python decryptor needs about 5 s for a page this size
+MOKAHR_BOARD_MAX_BYTES = 6_000_000  # all encrypted pages of one board (a real page is tens of KB); the walk stops past it
 HRMOS_PAGES = 50  # hrmos.go:15
 HERP_GROUPS = 20  # requisition-group pages read per board
 QUICKIN_PAGES = 50  # 100 postings a page (quickin.go:10-13 allows 200 pages)
@@ -224,9 +225,14 @@ def _mokahr(row: dict[str, Any], http: Http) -> list[Job] | None:
         return None
     org, site, host = m.group(1), int(m.group(2)), "hire-r1.mokahr.com" if m.group(3) else "app.mokahr.com"
     seen: dict[str, dict[str, Any]] = {}
+    spent = 0  # encrypted bytes read so far: decryption costs seconds a megabyte, so a hostile host cannot keep it going
     for page in range(MOKAHR_PAGES):
         body = json.dumps({"siteId": site, "orgId": org, "locale": "zh-CN", "limit": MOKAHR_PAGE, "offset": page * MOKAHR_PAGE}).encode()
         st, data = _get(http, f"https://{host}/api/outer/ats-apply/website/jobs/v2", method="POST", data=body, headers=_POST)
+        if st == 200 and isinstance(data, dict) and isinstance(data.get("data"), str):
+            spent += len(data["data"])
+            if spent > MOKAHR_BOARD_MAX_BYTES:
+                break  # keep what was read; the first page can never trip this (one page is capped at MOKAHR_MAX_BYTES)
         rows = _mokahr_rows(data) if st == 200 else None
         if rows is None:
             if page:

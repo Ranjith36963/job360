@@ -108,6 +108,13 @@ Vagas.com.br (`vagas:all`, the national board's three tech listings). A posting 
 passes your title filter, at most 25 per board, and the first refusal ends the board's detail requests. Gupy, InHire and HiringRoom
 list a posting without its description when it was not opened; Vagas.com.br lists only the postings it opened.
 
+`kit_markets4.py` adds three national job sites: Yourator, Taiwan (`yourator:all`, the whole board by its public JSON pages),
+CareerViet, Vietnam (`careerviet:all`, or one keyword slug such as `careerviet:ke-toan`) and OCC Mundial, Mexico (`occ:<keyword>`,
+one keyword slug is required; the site has no all-jobs listing; the first 3 result pages). Listings only, no description; every
+link stays on the board's own site (Yourator's employer links are not followed), and a refusal ends the board. OCC answers
+Cloudflare's challenge from outside Mexico, which shows as a failed board. AIJobs (aijobs.net) is not read: its list is a CSRF-protected
+POST that needs a cookie jar, so a link there is reported as unsupported.
+
 `kit_ats_misc3.py` adds five generic platforms: Radancy / TalentBrew career sites (`radancy:<career-site host>`, e.g.
 `radancy:careers.ing.com`, optionally `host/<lang>`; the site's results fragment, else its sitemap), UKG Ready
 (`ukgready:<pod host>/<tenant>`, e.g. `secure4.saashr.com/6162397`; a different product from UKG Pro Recruiting, which is
@@ -124,6 +131,21 @@ HERP (`herp:<slug>` of `herp.careers/v1/<slug>`), Quickin (`quickin:<slug>` of `
 of `jobs.pyjamahr.com/<slug>`). MokaHR and Quickin list whole postings; HRMOS, HERP
 and PyjamaHR list a posting without its description unless it was opened, which happens only for a card that passes your title
 filter, at most 25 per board, and the first refusal ends the board's detail requests. Two MokaHR tenants that app.mokahr.com's robots.txt excludes are not read. A `herkey.com` link is reported as unsupported (one boardless index behind a session token, not read).
+
+`kit_ats_misc4.py` adds two platforms: ADP MyJobs (`adpmyjobs:<career site slug>`, e.g. `adpmyjobs:stellantisexternalcx`; a different product
+from Workforce Now, which is `adp`) and Eploy career sites (`eploy:<careers host>`, e.g. `eploy:careers.pei.group`, read from the site's
+`live-jobs.xml`). A requisition detail or vacancy page is opened only for a card that passes your title filter, at most 25 per board;
+the first refusal ends the board's detail requests (an Eploy vacancy then shows a title read from its link and no description).
+Dayforce is not read: its listing needs a cookie session the kit cannot hold, so a `jobs.dayforcehcm.com` link is reported as unsupported.
+Cornerstone and Jibe are already `cornerstone` and `jibe`.
+
+`kit_ats_misc5.py` adds five generic platforms: SelfRecruit (`selfrecruit:<tenant>` of `<tenant>.selfrecruit.ge`), Enlizt
+(`enlizt:<tenant>` of `<tenant>.enlizt.me`), Hurma (`hurma:<tenant>` of `<tenant>.hurma.work`), Compleo (`compleo:<tenant>`, the
+path segment of `jobs.compleo.app/<tenant>/jobdetail/<code>`) and Spark (`spark:<workspace>` of `<workspace>.spark.work`). SelfRecruit,
+Enlizt and Compleo list no title, so the first 25 postings of a board are opened (your title filter cannot pre-select them) and
+a posting that was not opened is not listed; the first refusal ends the board's pages. Hurma lists titles and opens a posting
+only when it passes your title filter, at most 25 per board; Spark carries the whole posting in its list. Zoho Recruit is
+already read by `zohorecruit`, so it is not built again.
 
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
@@ -324,7 +346,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py`, `kit_ats_misc3.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)

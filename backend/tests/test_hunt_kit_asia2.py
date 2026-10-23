@@ -361,3 +361,18 @@ def test_pyjamahr_one_bad_item_refusal_title_ok_failures_and_bad_tokens():
     for tok in ("", "..", "a/b", "a&b"):
         h = _stub({})
         assert _run("pyjamahr", _row("pyjamahr", tok), h)[0] == [] and not h.calls
+
+
+def test_mokahr_stops_reading_encrypted_pages_once_the_board_has_spent_its_byte_budget(monkeypatch):
+    """A host that keeps answering full encrypted pages cannot hold the decryptor for 100 pages."""
+    monkeypatch.setattr(k, "MOKAHR_BOARD_MAX_BYTES", 2500)
+    served = []
+
+    def decrypted(data):
+        served.append(1)
+        return [_plain_row(len(served) * 100 + i) for i in range(50)]  # a full page: the walk would go on
+
+    monkeypatch.setattr(k, "_mokahr_rows", decrypted)
+    http = _stub({"/api/outer/ats-apply/website/jobs/v2": (200, {"data": "A" * 1000, "necromancer": "0123456789abcdef"})})
+    jobs, _ = _run("mokahr", _row("mokahr", "acme/123"), http)
+    assert len(http.calls) == 3 and len(served) == 2 and len(jobs) == 100  # the third answer tripped the budget unread
