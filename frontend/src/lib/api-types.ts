@@ -1595,7 +1595,8 @@ export interface paths {
          * Browser Live
          * @description One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
          *     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
-         *     logged or returned; the audit line names the action only.
+         *     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
+         *     human check in their assistant's browser instead (shot, click, type, key, scroll, done).
          */
         post: operations["browser_live_api_browser_live_post"];
         delete?: never;
@@ -5837,6 +5838,12 @@ export interface components {
              * @default
              */
             key: string;
+            /**
+             * Mode
+             * @default sign_in
+             * @enum {string}
+             */
+            mode: "sign_in" | "finish";
             /**
              * Text
              * @default
