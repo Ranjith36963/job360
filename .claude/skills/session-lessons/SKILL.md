@@ -261,7 +261,9 @@ Apify web-fetch tool, before you build. Never cite from memory.
   `test_mcp_tools_rev` one after another: each bumped `TOOLS_REV` from the same main and
   pinned its own hash, so every merge made the rest stale. **Rule:** after merging main into
   a PR that changes MCP tool names or parameters, recompute the served hash and set the rev
-  to main's rev + 1 at that moment, not when the slice was written.
+  to main's rev + 1 at that moment, not when the slice was written. **Superseded
+  2026-10-23 (#1093):** the hand-pinned rev kept colliding (17 → 20 in two days, #1093 itself
+  conflicted twice), so `tools_rev()` is now derived from the hash. Nothing is re-pinned.
 - 2026-10-20, same session: the "merge through a script" rule above was followed with a
   script that ran `git merge` and a `--no-verify` regen commit inside `bash update.sh`. The
   commit-gate hook reads only the top-level command, so a dozen merge commits went up with no
