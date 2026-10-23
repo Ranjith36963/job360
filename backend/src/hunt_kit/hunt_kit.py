@@ -163,6 +163,8 @@ BOARD_SOURCES = (
     "earcu",
     "beesite",
     "workablemarketplace",
+    "adpmyjobs",
+    "eploy",
     "selfrecruit",
     "enlizt",
     "hurma",
@@ -359,7 +361,7 @@ def _import_kit(name: str) -> Any:
 # replaces a name an earlier one already provides).
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
-    "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5",
+    "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2828,6 +2830,8 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("vagas", re.compile(r"^(?:www\.)?vagas\.com\.br$")),
     ("beesite", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+){0,3}\.beesite\.de)$")),
     ("workablemarketplace", re.compile(r"^jobs\.workable\.com$")),
+    ("adpmyjobs", re.compile(r"^myjobs\.adp\.com$")),
+    ("eploy", re.compile(r"^([a-z0-9-]+\.eploy\.net)$")),
     # generic ATS, part 5: the tenant is the subdomain (SelfRecruit, Enlizt, Hurma, Spark) or a path segment (Compleo)
     ("selfrecruit", re.compile(r"^([a-z0-9-]+)\.selfrecruit\.ge$")),
     ("enlizt", re.compile(r"^([a-z0-9-]+)\.enlizt\.me$")),
@@ -2929,6 +2933,8 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "%s/%s" % (m.group(1), t) if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", t) else ""
         elif ats == "beesite":  # the search host itself; a portal's job page sits on the employer's domain
             tok = m.group(1)
+        elif ats == "adpmyjobs":  # myjobs.adp.com/<site slug>/cx/job/<id>; /public is the vendor API
+            tok = seg[0] if seg and seg[0] != "public" and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
         elif ats in ("selfrecruit", "enlizt", "hurma", "spark"):  # www/hub/api.<vendor>: the vendor, not a tenant
             tok = "" if m.group(1) in ("www", "hub", "api", "app") else m.group(1)
         elif ats == "compleo":  # https://jobs.compleo.app/<tenant>/jobdetail/<code>
@@ -2969,7 +2975,9 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         else:
             tok = m.group(1)
         # A path token (UltiPro tenant, ADP cid) keeps its case; lookups compare lowercased anyway.
-        keep = ats in ("ultipro", "adp", "cornerstone", "comeet", "pageup", "paycom", "ripplehire", "compleo")
+        keep = ats in (
+            "ultipro", "adp", "cornerstone", "comeet", "pageup", "paycom", "ripplehire", "compleo", "adpmyjobs",
+        )
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
