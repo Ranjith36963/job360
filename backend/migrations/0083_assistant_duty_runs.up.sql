@@ -1,4 +1,9 @@
--- 0082_assistant_duty_runs: "what is due now?" (owner decision 2026-10-23).
+-- 0083_assistant_duty_runs: "what is due now?" (owner decision 2026-10-23).
+--
+-- Renumbered from 0082 (owner, 2026-10-23): main held two 0082s (this one, #1142, merged
+-- 5 minutes after 0082_ask_withdraw_reason, #1135). Production had already run it as
+-- 0082_assistant_duty_runs; it is CREATE ... IF NOT EXISTS, so running it again under
+-- this name changes nothing.
 --
 -- The user's settings drive their OWN assistant on a schedule with their PC off. The clock
 -- lives at the AI vendor (a scheduled cloud task that wakes hourly); Job360 has no worker and

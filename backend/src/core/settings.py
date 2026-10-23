@@ -948,7 +948,7 @@ ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TT
 # How many waiting requests ONE user's assistants may create per hour — a loop
 # cannot bury the Needs-you page. Counted off the table, never per IP.
 ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR", "20"))
-# Owner decision 2026-10-23 - "what is due now?" for the user's OWN scheduled task (migration 0082).
+# Owner decision 2026-10-23 - "what is due now?" for the user's OWN scheduled task (migration 0083).
 # The clock lives at the AI vendor; Job360 only answers. SCHEDULE_TICK_HOURS is how often that task
 # is expected to wake (returned as `expected_every_hours`). Duties are a closed set; `tick` is the
 # stamp of the last scheduled run. Reads and marks are per-user rate limited (a loop cannot hammer).

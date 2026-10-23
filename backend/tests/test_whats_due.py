@@ -1,4 +1,4 @@
-"""Owner 2026-10-23 - "what is due now?" (``whats_due`` / ``mark_done``, migration 0082).
+"""Owner 2026-10-23 - "what is due now?" (``whats_due`` / ``mark_done``, migration 0083).
 
 The user's own scheduled task asks Job360 which duties are due; Job360 runs nothing. Pure tests
 pin the due rules (elapsed time, never fixed slots, so late runs heal; the batch only when the user

@@ -32,7 +32,7 @@ EXPECTED_TOOLS = {
     "get_application",
     "list_applications",
     "mark_inbox_checked",
-    # Owner 2026-10-23 - the scheduled run: what is due, and stamp a duty done (migration 0082).
+    # Owner 2026-10-23 - the scheduled run: what is due, and stamp a duty done (migration 0083).
     "whats_due",
     "mark_done",
     "save_artifact",

@@ -3,7 +3,7 @@
 Owner decision 2026-10-23. The clock lives at the AI vendor: the user's scheduled task (for
 example a Claude cloud task) wakes every ``SCHEDULE_TICK_HOURS`` and asks MCP ``whats_due``.
 Job360 has no AI and no worker; it runs nothing. It only answers which duties are due and
-stamps them when the assistant says one is done (``mark_done``, migration 0082).
+stamps them when the assistant says one is done (``mark_done``, migration 0083).
 
 Three duties, each named by the recipe that runs it (``SCHEDULE_DUTY_RECIPES``):
 
@@ -122,7 +122,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     }
 
 
-# ── Storage (migration 0082) ─────────────────────────────────────────────────
+# ── Storage (migration 0083) ─────────────────────────────────────────────────
 
 
 async def load_stamps(db: JobDatabase, user_id: str) -> dict[str, datetime]:
