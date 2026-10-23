@@ -118,6 +118,14 @@ your title filter, at most 25 per board; the first refusal ends the board's page
 about 5.6 MB, over the kit's page limit, so a `jobs.humanbit.ai` link is reported as unsupported. A Radancy or eArcu link on
 an employer's own domain is recognised by its path.
 
+`kit_market5.py` adds five marketplace and recruiting sites: GeekHunter (`geekhunter:<company slug>` of
+`geekhunter.com/pt/<slug>/jobs`), Likeit (`likeit:<tenant>` of `<tenant>.likeit.fi`, the tenant's RSS feed, every posting inline),
+and three one-site boards, Strider (`onstrider:all`, open vacancies only), micro1 (`micro1:all`) and Alignerr (`alignerr:all`). A
+posting page is opened only for a card that passes your title filter, at most 25 per board; the first refusal ends the board's
+pages. Energy Jobline is not read: its ad pages answer only a client that calls itself Googlebot, which the kit never does, so an
+`energyjobline.com` link is reported as unsupported. The references' referral-code links for Strider, micro1 and Alignerr are not
+used: the kit lists the plain posting page.
+
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
 (`hiringthing:host`, the full careers host, e.g. `acme.hiringthing.com`, because the product is white-labelled),
