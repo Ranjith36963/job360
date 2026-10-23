@@ -80,11 +80,12 @@ def _log_resolved(
     event_id: Optional[int] = None,
 ) -> None:
     extra: dict[str, Any] = {
-        "event": "inbox_item_resolved", "user_id": safe_log_value(user_id), "inbox_item_id": item_id,
-        "resolution": resolution, "application_id": application_id, "via": via,
+        "event": "inbox_item_resolved", "user_id": safe_log_value(user_id), "inbox_item_id": safe_log_value(item_id),
+        "resolution": safe_log_value(resolution), "application_id": safe_log_value(application_id),
+        "via": safe_log_value(via),
     }
     if event_id is not None:
-        extra["event_id"] = event_id
+        extra["event_id"] = safe_log_value(event_id)
     get_audit_logger().info("inbox_item_resolved", extra=extra)
 
 
@@ -155,7 +156,7 @@ async def store_unmatched(
         "inbox_item_stored",
         extra={
             "event": "inbox_item_stored", "user_id": safe_log_value(user_id),
-            "inbox_item_id": item["id"], "dismissed": dismissed,
+            "inbox_item_id": safe_log_value(item["id"]), "dismissed": safe_log_value(dismissed),
         },
     )
     return _result(item, existed=False, recorded=False, app_id=None)
