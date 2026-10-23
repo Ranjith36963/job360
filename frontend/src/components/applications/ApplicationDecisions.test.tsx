@@ -337,6 +337,23 @@ describe("Your assistant got stuck (blocked record)", () => {
     await waitFor(() => expect(screen.getByTestId("blocked-finish-here")).toBeTruthy());
   });
 
+  it("Done waits for a picture refresh in flight instead of being dropped", async () => {
+    let release: (v: unknown) => void = () => undefined;
+    const shot = { status: "ok", url: "u", title: "Apply", width: 1280, height: 800, image: "data:image/jpeg;base64,AAAA" };
+    browserLive.mockReset().mockResolvedValueOnce(shot).mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockResolvedValue({ status: "ok", done: true });
+    render(
+      <ApplicationDecisions applicationId={7} controls={controls({ blocked: { ...BLOCKED, step: "Job360 browser" } })} onChanged={() => undefined} />
+    );
+    fireEvent.click(screen.getByTestId("blocked-finish-here"));
+    await waitFor(() => expect(screen.getByTestId("finish-view")).toBeTruthy());
+    await waitFor(() => expect(browserLive).toHaveBeenCalledTimes(2), { timeout: 3000 }); // the refresh is in flight
+    fireEvent.click(screen.getByTestId("finish-done"));
+    release(shot);
+    await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "done" }, "finish"), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByTestId("blocked-finish-here")).toBeTruthy());
+  });
+
   it("Finish it here says so when the form has already closed", async () => {
     browserLive.mockReset().mockResolvedValue({ status: "refused", reason: "no_form", detail: "The form has closed." });
     render(

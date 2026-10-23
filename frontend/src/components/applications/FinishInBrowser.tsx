@@ -69,8 +69,11 @@ export function FinishInBrowser({ onDone }: { onDone: () => void }) {
   }
 
   async function done() {
-    await step({ action: "done" });
-    onDone();
+    // A background refresh may be in flight (step drops a call while busy): wait it out, so Done is never
+    // silently dropped and the browser's 30-minute hold always ends.
+    for (let i = 0; busyRef.current && i < 50; i++) await new Promise((r) => window.setTimeout(r, 100));
+    const res = await step({ action: "done" });
+    if (res?.status === "ok" || res?.reason === "no_form") onDone();
   }
 
   if (gone) {
