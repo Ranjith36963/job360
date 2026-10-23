@@ -1672,7 +1672,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
 
     @mcp.tool()
     async def add_contact(
-        name: str,
+        name: str = "",
         application_id: Optional[int] = None,
         role: str = "",
         email: str = "",
@@ -1688,21 +1688,19 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         shared: Optional[str] = None,
         phone: Optional[str] = None,
         links: Optional[list[str]] = None,
+        people: Optional[list[dict[str, Any]]] = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
         for cold networking (met them, no job yet — you can link them to one
         later by adding them again with an application_id). Adding the SAME
-        person again (same application, or same user when cold) returns the
-        existing contact (already_existed=true, matched_on = "email",
-        "linkedin_url", "phone" or "name") instead of a duplicate: same email; else same
-        LinkedIn URL; else same phone (7+ digits); else same name (on a job: unless both
-        have different LinkedIn URLs or phones; cold: only when neither has either).
-        A match changes nothing: use update_contact to add what is new. Draft outreach for them
-        with save_artifact(contact_id=...).
+        person again returns the existing contact (already_existed=true, matched_on: email, linkedin_url,
+        phone or name; get_recipe("rules") has the order) instead of a duplicate; a match changes nothing:
+        use update_contact to add what is new.
         `found_via` = where you found them: "company_site", "company_team_page",
-        "linkedin", "apollo" (Apollo, Vibe Prospecting, Sprouts), "email_finder"
-        (Hunter and similar), "github", "speaker_page", "referral", "job_ad",
+        "linkedin", "apollo" (Apollo, Vibe Prospecting, Sprouts), "email_finder",
+        "github", "speaker_page", "referral", "job_ad",
         "email", "event" or "other" (leave it out if you do not know). `source_url` = the page you found them on
         (http/https); Job360 stores it, never opens it. `company` = the employer they work at: REQUIRED without
         application_id; on a job leave it out unless they work elsewhere (an agency) -
@@ -1713,7 +1711,46 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         get_profile path: "cv_data.cv_positions[i]", "cv_data.cv_projects[i]" or "cv_data.education[i]";
         Job360 refuses a record the profile lacks. Never guess either.
         `phone` is kept as + and digits; `links` = up to 5 other http/https profile URLs.
-        `client_key` (optional): a retry with the same key returns the first reply."""
+        `client_key` (optional): a retry with the same key returns the first reply.
+        A list (the user's CSV/vCard, parsed by you): pass `people` = [{name, role, email, linkedin_url,
+        phone, links, notes, found_via, source_url, company}] (max 50) instead of `name`; `dry_run`=true
+        writes nothing and returns would_add, duplicates and invalid by index. Show the user, then call
+        again without it."""
+        if people is not None:
+            single = (
+                name, role, email, linkedin_url, notes, occurred_at, found_via, source_url, company,
+                email_source, relationship, shared, phone, links, client_key,
+            )
+            if any(v not in ("", None) for v in single):
+                raise _refuse("add_contact", 422, "give name (one person) or people (a list), not both")
+        elif dry_run:
+            raise _refuse("add_contact", 422, "dry_run needs people")
+        if people is not None:
+            # Gap-audit #15: notes copied out of a fenced read are stored as plain text.
+            people = [
+                {**p, "notes": _unfence_in(p["notes"])} if isinstance(p, dict) and isinstance(p.get("notes"), str)
+                else p
+                for p in people
+            ]
+            try:
+                batch_body = applications_route.AddContactsBatchRequest(
+                    application_id=application_id, people=people, dry_run=dry_run
+                )
+            except ValidationError as exc:
+                raise _validation_error(exc) from None
+            try:
+                async with _request_db() as db:
+                    # Same gate as the REST door: require_user (no verified-email gate on either).
+                    batch_resp = await applications_route.add_contacts_batch(batch_body, db, _user())
+            except HTTPException as exc:
+                _audit("add_contact", "error", application_id=application_id, batch=True, http_status=exc.status_code)
+                raise _tool_error(exc) from None
+            _audit(
+                "add_contact", "ok", application_id=application_id, batch=True, dry_run=dry_run,
+                would_add=len(batch_resp["would_add"]), added=len(batch_resp["added"]),
+                duplicates=len(batch_resp["duplicates"]), invalid=len(batch_resp["invalid"]),
+            )
+            return batch_resp
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:

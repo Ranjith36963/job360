@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_serializer
 
 from src.api.auth_deps import (
     AUTH_FIRST,
@@ -2351,6 +2351,70 @@ async def add_person(
     scope without an email: same LinkedIn URL, else same phone (7+ digits),
     else same name only when neither side has a LinkedIn URL or a phone. ``source_url`` is stored, never fetched."""
     return await _add_contact_once(db, user, body.application_id, body, response)
+
+
+class AddContactsBatchRequest(BaseModel):
+    """``POST /api/contacts/batch`` — the agent parsed the user's list (CSV/vCard);
+    Job360 previews (dry_run) or stores it. Items are raw dicts so one bad row
+    is reported in ``invalid`` instead of failing the whole call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    application_id: Optional[int] = None
+    people: list[dict[str, Any]]
+    dry_run: bool = False
+
+
+class BatchContactRowOut(BaseModel):
+    index: int
+    name: Optional[str] = None
+    contact_id: Optional[int] = None
+    duplicate_of_index: Optional[int] = None
+    matched_on: Optional[str] = None
+    status: Optional[int] = None
+    detail: Optional[str] = None
+
+
+class AddContactsBatchResponse(BaseModel):
+    dry_run: bool
+    would_add: list[BatchContactRowOut]
+    added: list[BatchContactRowOut]
+    duplicates: list[BatchContactRowOut]
+    invalid: list[BatchContactRowOut]
+
+
+@router.post("/contacts/batch", response_model=AddContactsBatchResponse, dependencies=AUTH_FIRST)
+async def add_contacts_batch(
+    body: AddContactsBatchRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Many people in one call: ``dry_run`` previews ``would_add`` /
+    ``duplicates`` / ``invalid`` by index and writes nothing; without it each
+    person is stored in its own transaction (idempotent, like ``add_contact``).
+    A bad row lands in ``invalid`` and never fails the rest. Status 200 always."""
+    limit = settings.CONTACTS_BATCH_MAX
+    if not 1 <= len(body.people) <= limit:
+        raise HTTPException(422, f"people must hold 1-{limit} entries (CONTACTS_BATCH_MAX)")
+    valid: list[dict[str, Any]] = []
+    bad: list[dict[str, Any]] = []
+    for i, item in enumerate(body.people):
+        try:
+            model = AddContactRequest.model_validate(item)
+        except ValidationError as exc:
+            detail = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+            bad.append({"index": i, "status": 422, "detail": detail})
+            continue
+        valid.append({"index": i, **model.model_dump()})
+    try:
+        result = await contacts_service.add_contacts_batch(
+            db, user.id, body.application_id, actor_for(user), people=valid, dry_run=body.dry_run
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
+    result["invalid"] = sorted([*result["invalid"], *bad], key=lambda r: r["index"])
+    return result
 
 
 @router.post("/contacts/{contact_id}/confirm", response_model=ContactOut, dependencies=AUTH_FIRST)

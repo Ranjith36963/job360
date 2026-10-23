@@ -1,4 +1,4 @@
-"""Outreach pack #14 — a contact's phone and links, and the web-only Confirm mark.
+"""Outreach pack #14 — a contact's phone and links, the web-only Confirm mark, and batch add.
 
 Phone is stored normalised (optional leading ``+``, then digits); 7+ digits is an identity for
 the no-email dedupe (after the LinkedIn URL, before the name). ``links`` is a list of up to
@@ -295,8 +295,129 @@ async def test_no_mcp_door_confirms_a_contact(authenticated_async_context):
         assert resp.status_code == 422
 
 
+# ── batch ────────────────────────────────────────────────────────────────────
+
+_BATCH = [
+    {"name": "Ann", "email": "ANN@northwind.example"},
+    {"name": "Bo", "phone": "07700900123"},
+    {"name": "Bo Two", "phone": "07700 900 123"},
+    {"name": ""},
+    {"name": "Di", "links": ["ftp://x"]},
+    {"name": "Ed", "shoe": "x"},
+]
+
+
+def _count_contacts() -> int:
+    return int(_sql("SELECT COUNT(*) FROM application_contacts")[0][0])
+
+
 @pytest.mark.asyncio
-async def test_mcp_add_contact_phone_links(authenticated_async_context):
+async def test_batch_dry_run_previews_without_writing(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        ann = await _add_contact(client, app_id, name="Ann Existing", email="ann@northwind.example")
+        before = _count_contacts()
+        resp = await client.post(
+            "/api/contacts/batch", json={"application_id": app_id, "people": _BATCH, "dry_run": True}
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["dry_run"] is True and body["added"] == []
+        assert [(r["index"], r["name"]) for r in body["would_add"]] == [(1, "Bo")]
+        dup = {r["index"]: r for r in body["duplicates"]}
+        assert dup[0]["contact_id"] == ann.json()["contact_id"] and dup[0]["matched_on"] == "email"
+        assert dup[2]["duplicate_of_index"] == 1 and dup[2]["matched_on"] == "phone"
+        assert [r["index"] for r in body["invalid"]] == [3, 4, 5]
+        assert all(r["status"] == 422 for r in body["invalid"])
+        assert "shoe" in body["invalid"][2]["detail"]
+        assert _count_contacts() == before
+
+
+@pytest.mark.asyncio
+async def test_batch_real_run_matches_dry_run(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _add_contact(client, app_id, name="Ann Existing", email="ann@northwind.example")
+        before = _count_contacts()
+        events_before = _sql("SELECT COUNT(*) FROM application_events WHERE event_type = 'contact_added'")[0][0]
+        resp = await client.post(
+            "/api/contacts/batch", json={"application_id": app_id, "people": _BATCH, "dry_run": False}
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["would_add"] == []
+        assert [r["index"] for r in body["added"]] == [1]
+        created = body["added"][0]["contact_id"]
+        dup = {r["index"]: r for r in body["duplicates"]}
+        assert dup[2]["contact_id"] == created and dup[2]["duplicate_of_index"] == 1
+        assert dup[0]["duplicate_of_index"] is None
+        assert [r["index"] for r in body["invalid"]] == [3, 4, 5]
+        assert _count_contacts() == before + 1
+        events_after = _sql("SELECT COUNT(*) FROM application_events WHERE event_type = 'contact_added'")[0][0]
+        assert events_after == events_before + 1
+
+
+@pytest.mark.asyncio
+async def test_batch_size_and_cap(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        assert (await client.post("/api/contacts/batch", json={"people": []})).status_code == 422
+        too_many = [{"name": f"P{i}"} for i in range(51)]
+        big = await client.post("/api/contacts/batch", json={"people": too_many})
+        assert big.status_code == 422 and "CONTACTS_BATCH_MAX" in big.json()["detail"]
+        monkeypatch.setattr(settings, "CONTACTS_PER_APPLICATION_MAX", 1)
+        resp = await client.post(
+            "/api/contacts/batch",
+            json={"application_id": app_id, "people": [{"name": "One"}, {"name": "Two"}], "dry_run": True},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [r["index"] for r in body["would_add"]] == [0]
+        assert body["invalid"][0]["index"] == 1 and body["invalid"][0]["status"] == 409
+        assert "CONTACTS_PER_APPLICATION_MAX" in body["invalid"][0]["detail"]
+        missing = await client.post(
+            "/api/contacts/batch", json={"application_id": 987654, "people": [{"name": "X"}]}
+        )
+        assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_batch_cold_rows_need_a_company_and_keep_it(authenticated_async_context):
+    rows = [
+        {"name": "Cold Ann", "company": "Northwind", "email": "cold.ann@northwind.example"},
+        {"name": "Cold Bo"},
+        {"name": "Cold Cy", "company": "Northwind", "email_source": "user_gave"},
+        {"name": "Cold Di", "company": "Northwind", "relationship": "not-a-relationship"},
+    ]
+    async with authenticated_async_context() as client:
+        dry = await client.post("/api/contacts/batch", json={"people": rows, "dry_run": True})
+        assert dry.status_code == 200, dry.text
+        assert [r["index"] for r in dry.json()["would_add"]] == [0]
+        assert [r["index"] for r in dry.json()["invalid"]] == [1, 2, 3]
+        assert "company" in dry.json()["invalid"][0]["detail"]
+        assert "email_source" in dry.json()["invalid"][1]["detail"]
+        real = await client.post("/api/contacts/batch", json={"people": rows, "dry_run": False})
+        body = real.json()
+        # The dry run and the real run agree: one stored, the same three refused.
+        assert [r["index"] for r in body["added"]] == [0]
+        assert [r["index"] for r in body["invalid"]] == [1, 2, 3]
+        assert _sql("SELECT company FROM application_contacts WHERE name = %s", ("Cold Ann",))[0][0] == "Northwind"
+
+
+@pytest.mark.asyncio
+async def test_batch_on_a_job_keeps_a_supplied_company(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        resp = await client.post(
+            "/api/contacts/batch",
+            json={"application_id": app_id, "people": [{"name": "Agency Ann", "company": "Acme Staffing"}]},
+        )
+        assert [r["index"] for r in resp.json()["added"]] == [0], resp.text
+        assert _sql("SELECT company FROM application_contacts WHERE name = %s", ("Agency Ann",))[0][0] == "Acme Staffing"
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_contact_batch_phone_links(authenticated_async_context):
     import httpx2
     from mcp.client import Client
     from mcp.client.streamable_http import streamable_http_client
@@ -316,6 +437,15 @@ async def test_mcp_add_contact_phone_links(authenticated_async_context):
                 assert not res.is_error, res.content[0].text
                 return json.loads(res.content[0].text)
 
+            dry = payload(await mcp.call_tool("add_contact", {
+                "people": [{"name": "Mo", "company": "Northwind", "phone": "07700900555"}], "dry_run": True,
+            }))
+            assert dry["would_add"][0]["index"] == 0
+            assert _count_contacts() == 0
+            both = await mcp.call_tool("add_contact", {"name": "X", "people": [{"name": "Y"}]})
+            assert both.is_error and "422" in both.content[0].text and "not both" in both.content[0].text
+            lone = await mcp.call_tool("add_contact", {"name": "Y", "dry_run": True})
+            assert lone.is_error and "dry_run needs people" in lone.content[0].text
             one = payload(await mcp.call_tool("add_contact", {
                 "name": "Mo", "company": "Northwind", "phone": "07700 900555", "links": ["https://mo.example"],
             }))
@@ -339,10 +469,15 @@ async def test_logs_never_carry_phone_or_links(authenticated_async_context, log_
         made = await _add_person(agent, phone="+447700900999", links=["https://loglinks.example"])
         assert made.status_code == 201, made.text
         cid = made.json()["contact_id"]
+        batch = await agent.post(
+            "/api/contacts/batch",
+            json={"people": [{"name": "Batch One", "phone": "07700900999", "links": ["https://loglinks.example/b"]}]},
+        )
+        assert batch.status_code == 200, batch.text
     async with authenticated_async_context() as client:
         assert (await client.post(f"/api/contacts/{cid}/confirm")).status_code == 200
-    audit = [r for r in log_capture.records if r.get("event") in ("contact_added", "contact_confirmed")]
-    assert {r["event"] for r in audit} == {"contact_added", "contact_confirmed"}
+    audit = [r for r in log_capture.records if r.get("event") in ("contact_added", "contacts_batch", "contact_confirmed")]
+    assert {r["event"] for r in audit} == {"contact_added", "contacts_batch", "contact_confirmed"}
     assert next(r for r in audit if r["event"] == "contact_added")["has_phone"] is True
     for record in log_capture.records:
         text = repr(record)
@@ -368,3 +503,24 @@ async def test_concurrent_confirms_write_one_row_and_do_not_use_the_edit_cap(
         monkeypatch.setattr(settings, "CONTACT_EDITS_PER_CONTACT_MAX", 1)
         assert (await client.patch(f"/api/contacts/{cid}", json={"notes": "n"})).status_code == 200
         assert (await client.patch(f"/api/contacts/{cid}", json={"notes": "m"})).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_batch_dry_run_uses_the_same_match_order_as_the_real_run(authenticated_async_context):
+    li = "https://www.linkedin.com/in/shared-person"
+    people = [{"name": "Bo", "linkedin_url": li}, {"name": "Ann", "linkedin_url": li}]
+
+    async def run(dry: bool) -> dict[str, Any]:
+        async with authenticated_async_context() as client:
+            app_id = await _bring(client)
+            await _add_contact(client, app_id, name="Ann")
+            resp = await client.post(
+                "/api/contacts/batch", json={"application_id": app_id, "people": people, "dry_run": dry}
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+    dry = await run(True)
+    dup = dry["duplicates"][0]
+    assert dup["index"] == 1 and dup["duplicate_of_index"] == 0 and dup["matched_on"] == "linkedin_url"
+    assert "contact_id" not in dup or dup["contact_id"] is None
