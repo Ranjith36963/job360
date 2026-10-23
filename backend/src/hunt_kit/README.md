@@ -139,6 +139,13 @@ central feed of every company on the platform), Generalist World (`generalistwor
 posting page is opened; the first refusal ends a board and keeps what it had read. A job link that is not https on the board's own
 host is dropped. Consider (`getconsider.com`) is not read: its search needs a cookie session and a CSRF token that the kit's `http`
 cannot hold, so a `getconsider.com` link is reported as unsupported.
+`kit_fh4.py` adds three boards: Scalis (`scalis:<tenant>` of `<tenant>.scalis.ai`, the paged listing carries every body), Senior's
+Portal de Talentos (`senior:<tenant>` of `<tenant>.portaldetalentos.senior.com.br`, a keyless POST API; a vacancy you do not open is
+listed without a body) and Profession.hu (`profession:itdev` or `profession:itops`, the two IT category sitemaps of a Hungarian
+catalogue; a posting is listed only after its page was opened). A detail request is made only for a posting that passes your title
+filter, at most 25 per board; the first refusal ends the board's detail requests. Not read: Gusto Hiring and JobLeads (Cloudflare
+serves them only to a Chrome TLS fingerprint, which urllib cannot imitate), so `jobs.gusto.com` and `jobleads.com` links are
+reported as unsupported.
 
 `kit_asia2.py` adds Asian boards: MokaHR (`mokahr:<orgId>/<siteId>` of `app.mokahr.com/social-recruitment/<orgId>/<siteId>`, or
 `mokahr:<orgId>/<siteId>/r1` for the international host `hire-r1.mokahr.com`), HRMOS (`hrmos:<slug>` of `hrmos.co/pages/<slug>/jobs`),
