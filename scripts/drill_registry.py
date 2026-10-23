@@ -419,6 +419,17 @@ REGISTRY: dict[str, Guard] = {
         # Verified exit 1 on the commit that added this line.
         negative=[sys.executable, "scripts/check_job_result_routing.py", "--drill", "--break-checker", "CASE"],
     ),
+    "scripts/npm_audit_baseline.py": Guard(
+        status="drilled",
+        # The PR half of `npm audit (frontend deps)` (owner, 2026-10-22): red
+        # only for advisories on the PR's lockfile and not the base's; a missing
+        # base or head report fails closed. Drill: seven fixture report pairs
+        # (inherited-only passes, new advisory fails, no base fails, ...).
+        drill=[sys.executable, "scripts/npm_audit_baseline.py", "--drill"],
+        # NEGATIVE CONTROL: every advisory treated as inherited, so the drill
+        # must FAIL. Verified exit 1 on the commit that added this line.
+        negative=[sys.executable, "scripts/npm_audit_baseline.py", "--drill", "--break-checker", "NEW"],
+    ),
     "scripts/ci_scope.py": Guard(
         status="drilled",
         # Decides `docs` / `frontend` / `full` for a PR so ci.yml and
