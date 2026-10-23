@@ -33,7 +33,8 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
 >
 > Railway's deploy healthcheck is `backend/railway.json`'s `healthcheckPath`; what
-> answers it is `api.routes.health.readyz`. The probes are mounted under `/api`
+> answers it is `api.routes.health.deployz`: readyz's DB check, then 503 while the old
+> process has a busy cloud browser, for at most `DEPLOY_HOLD_MAX_SECONDS` (0 turns the hold off). The probes are mounted under `/api`
 > (`api.main`'s `include_router`), so every live path carries that prefix, and the
 > codes and bodies are pinned by `backend/tests/test_health_probes.py`.
 

@@ -116,6 +116,32 @@ async def ready_to_send(
     )
 
 
+class CvToApproveRow(BaseModel):
+    application_id: int
+    job_title: str
+    job_company: str
+    cv: ReadyDoc
+
+
+class CvToApproveOut(BaseModel):
+    items: list[CvToApproveRow]
+
+
+@router.get("/cv-to-approve", response_model=CvToApproveOut, dependencies=AUTH_FIRST)
+async def cv_to_approve(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 - FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the user's own page; no MCP twin
+) -> CvToApproveOut:
+    """Approve CV on Needs you (owner decision 2026-10-23): the caller's open applications whose newest CV
+    they have not seen yet, from chat or the web. "CV OK" is ``POST /applications/{id}/cv-seen``."""
+    rows = await ready_service.cv_to_approve(db, user.id)
+    get_audit_logger().info(
+        "cv_to_approve_read",
+        extra={"event": "cv_to_approve_read", "user_id": safe_log_value(user.id), "result": "ok", "count": len(rows)},
+    )
+    return CvToApproveOut(items=[CvToApproveRow(**r) for r in rows])
+
+
 class ConfirmAnswerRequest(BaseModel):
     form_filled_event_id: int = Field(..., ge=1)
     # None = Verify (the typed answer is right); text = Edit (this is the right answer).

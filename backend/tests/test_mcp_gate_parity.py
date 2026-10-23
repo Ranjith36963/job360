@@ -67,6 +67,10 @@ TOOL_ROUTES = {
     "get_application": ("applications", "get_application", {"application_id": 987654321}),
     "list_applications": ("applications", "list_applications", {}),
     "mark_inbox_checked": ("applications", "mark_inbox_checked", {"application_ids": [987654321]}),
+    "match_email": ("applications", "match_email", {"sender": "recruiter@acme.example"}),  # feature 8 - require_user, read-only, no email gate.
+    # Owner 2026-10-23 - the scheduled run asks what is due and stamps a duty (migration 0082).
+    "whats_due": ("schedule", "whats_due", {}),
+    "mark_done": ("schedule", "mark_done", {"duty": "hunt"}),
     "save_artifact": (
         "applications", "save_artifact", {"application_id": 987654321, "kind": "cv", "text": "x"}
     ),
