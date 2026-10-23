@@ -84,6 +84,8 @@ Usage:
     python scripts/chain_check.py --strict        # warnings fail too
     python scripts/chain_check.py --drill
     python scripts/chain_check.py --drill --break-checker W6
+    python scripts/chain_check.py --no-map --baseline BASE_DIR   # PRs: fail only on
+        # findings BASE_DIR (a checkout of the PR base) does not already have
 Exit: 0 clean, 1 broken wire(s), 2 the checker could not run.
 """
 
@@ -91,6 +93,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -974,6 +977,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--strict", action="store_true", help="warnings fail the run too")
     parser.add_argument("--no-map", action="store_true")
+    parser.add_argument("--baseline", default=None, metavar="DIR",
+                        help="a checkout of the PR's base: fail only on findings it does not have")
     parser.add_argument("--drill", action="store_true", help="break wires on purpose; the checker must go RED")
     parser.add_argument("--break-checker", default=None, metavar="Wn",
                         help="blind one check (W1..W13) — used to prove the DRILL itself can fail")
@@ -1039,13 +1044,76 @@ def main(argv: list[str] | None = None) -> int:
             print("\nEvery wire connects: producers and consumers agree on names, "
                   "no gate is unreachable, every dispatch target exists.")
 
-    if parse_errors:
-        return 2
-    if errors:
-        return 1
-    if warns and args.strict:
-        return 1
-    return 0
+    rc = 2 if parse_errors else 1 if errors or (warns and args.strict) else 0
+    if rc and args.baseline:
+        failing = errors + (warns if args.strict else [])
+        head = {_comparable(f"{f.check}|{f.file}|{f.hop}|{f.message}") for f in failing}
+        head |= {_comparable(f"PARSE|{e}") for e in parse_errors}
+        return judge_against_base(head, Path(args.baseline).resolve(), args.strict, rc)
+    return rc
+
+
+# ─── PR baseline: red only for THIS PR's broken wires (owner, 2026-10-22) ─────
+# `--baseline DIR` (DIR = a checkout of the PR's base commit): the base's OWN
+# checker judges the base tree, and only findings the base does not have fail.
+# Shared ones print as inherited. Push to main runs without it, so main's own
+# broken wires are still a red build on main. A base that gives nothing
+# comparable fails closed: every finding counts as this PR's.
+def _comparable(text: str) -> str:
+    """A finding without its line numbers: an edit above it moves them."""
+    return re.sub(r"(?<=:)\d+|(?<=line )\d+", "N", text)
+
+
+def _annotate(level: str, title: str, text: str) -> None:
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::{level} title={title}::{text}")
+
+
+def base_findings(base: Path, strict: bool) -> set[str] | None:
+    try:
+        p = subprocess.run([sys.executable, str(base / "scripts" / "chain_check.py"), "--root",
+                            str(base), "--json", "--no-map"], cwd=base, capture_output=True,
+                           check=False, encoding="utf-8", errors="replace", timeout=300)
+        data = json.loads(p.stdout) if p.returncode in (0, 1, 2) else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
+        return None
+    out = {_comparable(f"PARSE|{e}") for e in data.get("parse_errors") or []}
+    for f in data["findings"]:
+        if f.get("severity") == "error" or strict:
+            out.add(_comparable(f"{f['check']}|{f['file']}|{f['hop']}|{f['message']}"))
+    return out
+
+
+def judge_against_base(head: set[str], base: Path, strict: bool, rc: int) -> int:
+    lines = ["", "## Baseline: the PR's base commit", ""]
+    found = base_findings(base, strict)
+    if found is None:
+        _annotate("warning", "chain baseline unavailable", "the base run gave nothing comparable; "
+                  "every broken wire is judged as this PR's (fail closed)")
+        lines.append("The base run gave nothing comparable, so every broken wire above is this PR's.")
+    else:
+        inherited, new = sorted(head & found), sorted(head - found)
+        if inherited:
+            lines.append(f"**inherited from main (not this PR's): {len(inherited)}.** Fix these on main.")
+            lines += [f"- {f}" for f in inherited]
+            for f in inherited:
+                _annotate("warning", "broken wire inherited from main (not this PR's)", f)
+        if new:
+            lines.append(f"**this PR's own broken wires: {len(new)}.** Fix them in this PR.")
+            lines += [f"- {f}" for f in new]
+            for f in new:
+                _annotate("error", "broken wire added by this PR", f)
+        else:
+            lines.append("No broken wire of this PR's own. OK")
+            rc = 0
+    print("\n".join(lines))
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    return rc
 
 
 # ─────────────────────────────────────────────────────────────────────────────

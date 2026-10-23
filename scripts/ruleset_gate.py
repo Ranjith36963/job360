@@ -809,6 +809,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="which findings set the EXIT CODE. `ruleset` = only what a commit can "
                          "cause (dead/wrong-app/intermittent contexts, stale evidence); `all` "
                          "adds the live PR queue. Everything is printed either way.")
+    ap.add_argument("--baseline", default=None, metavar="DIR",
+                    help="with --check on a PR: a checkout of the PR's base; fail only on "
+                         "blocking findings the base's own --check does not have")
     args = ap.parse_args(argv)
 
     if args.drill:
@@ -834,7 +837,34 @@ def main(argv: list[str] | None = None) -> int:
     findings = analyze(ruleset, world, require_active=args.require_active,
                        max_snapshot_age_days=args.max_age_days)
     _report(ruleset, world, findings, scope=args.scope)
-    return 1 if blocking(findings, scope=args.scope) else 0
+    bad = blocking(findings, scope=args.scope)
+    if bad and args.baseline and not args.live:
+        import pr_baseline  # noqa: PLC0415 - scripts/ is sys.path[0]; needed only on a red PR
+        return pr_baseline.against_base(
+            [f"[{f.code}] {f.detail}" for f in bad], Path(args.baseline).resolve(),
+            "ruleset_gate.py", ["--check", "--scope", args.scope], parse_wedges, "ruleset gate", ROOT)
+    return 1 if bad else 0
+
+
+def parse_wedges(rc: int, out: str) -> set[str] | None:
+    """The `[CODE] detail` rows of a --check report's WEDGE section (the base's verdict).
+
+    Read from the text report, because the base's own checker has no machine output.
+    A red base with no WEDGE row is not something this can compare: None (fail closed).
+    """
+    import pr_baseline  # noqa: PLC0415
+
+    if rc not in (0, 1) or "evidence:" not in out:
+        return None
+    rows, inside = set(), False
+    for line in out.splitlines():
+        if line.startswith("WEDGE ("):
+            inside = True
+        elif inside and line.startswith("  ["):
+            rows.add(pr_baseline.comparable(line))
+        elif inside and not line.strip():
+            inside = False
+    return rows if rows or rc == 0 else None
 
 
 if __name__ == "__main__":
