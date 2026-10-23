@@ -165,6 +165,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/match-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Match Email
+         * @description Feature 8 (G088): the user's applications that a STORED fact links to this email -
+         *     same thread, a saved contact's email, a sender domain in email_senders, the company named
+         *     in the subject - each with its reasons. Facts, not a verdict: the assistant decides
+         *     (VISION rule 5). Read-only. POST so the sender and subject never sit in a URL or access log.
+         */
+        post: operations["match_email_api_applications_match_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/stats": {
         parameters: {
             query?: never;
@@ -1573,7 +1596,7 @@ export interface paths {
         put?: never;
         /**
          * Browser Action
-         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,
+         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, fill, upload, back,
          *     close). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant
          *     reads them like any page; a 404 from the gate (not the caller's application) stays a 404.
          */
@@ -1849,6 +1872,27 @@ export interface paths {
          *     except one audit line. 404 for a contact that is not the caller's (rule #12).
          */
         get: operations["outreach_check_api_contacts__contact_id__outreach_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cv-to-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cv To Approve
+         * @description Approve CV on Needs you (owner decision 2026-10-23): the caller's open applications whose newest CV
+         *     they have not seen yet, from chat or the web. "CV OK" is ``POST /applications/{id}/cv-seen``.
+         */
+        get: operations["cv_to_approve_api_cv_to_approve_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3640,6 +3684,11 @@ export interface components {
             job: components["schemas"]["KitJobOut"];
             kit: components["schemas"]["KitIdOut"];
             known_people?: components["schemas"]["KnownPeopleOut"];
+            /**
+             * Last Fill
+             * @default []
+             */
+            last_fill: components["schemas"]["KitLastFillOut"][];
             /** Missing */
             missing: components["schemas"]["KitMissingOut"][];
             /** Settings */
@@ -4282,6 +4331,8 @@ export interface components {
              * @default
              */
             doc_kind: string;
+            /** Fields */
+            fields?: components["schemas"]["FillField"][];
             /**
              * On
              * @default true
@@ -4719,6 +4770,21 @@ export interface components {
             /** Artifact Id */
             artifact_id?: number | null;
         };
+        /** CvToApproveOut */
+        CvToApproveOut: {
+            /** Items */
+            items: components["schemas"]["CvToApproveRow"][];
+        };
+        /** CvToApproveRow */
+        CvToApproveRow: {
+            /** Application Id */
+            application_id: number;
+            cv: components["schemas"]["ReadyDoc"];
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+        };
         /**
          * DoctorAuth
          * @description How this caller is signed in: ``session`` (browser), ``token`` (personal
@@ -5045,6 +5111,8 @@ export interface components {
              * @default
              */
             subject: string;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /**
          * EventSourceOut
@@ -5062,6 +5130,8 @@ export interface components {
             sender: string;
             /** Subject */
             subject: string;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /** ExportApplicationOut */
         ExportApplicationOut: {
@@ -5232,6 +5302,19 @@ export interface components {
              * @default
              */
             title: string;
+        };
+        /**
+         * FillField
+         * @description One field for action fill: a ref from the latest look and its value.
+         */
+        FillField: {
+            /** Ref */
+            ref: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /**
          * FitAxisIn
@@ -5841,6 +5924,25 @@ export interface components {
             /** Recorded By */
             recorded_by: string;
         };
+        /**
+         * KitLastFillOut
+         * @description One answer of the newest ``form_filled``, as stored (``redacted``: hashed, ``answer`` is "").
+         */
+        KitLastFillOut: {
+            /** Answer */
+            answer: string;
+            /** Key */
+            key?: string | null;
+            /** Question */
+            question: string;
+            /**
+             * Redacted
+             * @default false
+             */
+            redacted: boolean;
+            /** Source */
+            source: string;
+        };
         /** KitMissingOut */
         KitMissingOut: {
             /** Key */
@@ -6135,6 +6237,53 @@ export interface components {
             duty: "hunt" | "inbox" | "batch";
             /** Last Tick At */
             last_tick_at: string;
+        };
+        /** MatchEmailCandidateOut */
+        MatchEmailCandidateOut: {
+            /** Application Id */
+            application_id: number;
+            /** Contact Ids */
+            contact_ids: number[];
+            /** Email Senders */
+            email_senders: string[];
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Reasons */
+            reasons: string[];
+            /** Status */
+            status: string;
+            /** Thread Event Ids */
+            thread_event_ids: number[];
+        };
+        /**
+         * MatchEmailIn
+         * @description feature 8 - the email the assistant already read; any of the three (at least one).
+         */
+        MatchEmailIn: {
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
+            /**
+             * Thread Id
+             * @default
+             */
+            thread_id: string;
+        };
+        /** MatchEmailOut */
+        MatchEmailOut: {
+            /** Candidates */
+            candidates: components["schemas"]["MatchEmailCandidateOut"][];
+            /** Truncated */
+            truncated: boolean;
         };
         /** MeResponse */
         MeResponse: {
@@ -9120,6 +9269,43 @@ export interface operations {
             };
         };
     };
+    match_email_api_applications_match_email_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MatchEmailIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchEmailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stats_api_applications_stats_get: {
         parameters: {
             query?: {
@@ -12041,6 +12227,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutreachCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cv_to_approve_api_cv_to_approve_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CvToApproveOut"];
                 };
             };
             /** @description Validation Error */

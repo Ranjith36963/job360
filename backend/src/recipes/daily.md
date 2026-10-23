@@ -25,8 +25,8 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    ({"Company A" "Company B"} OR {from:<each email_senders domain>} OR label:<the user's job label, if any>)`. Look for
    employer replies, confirmation emails and replies from people you reached out to; skip a message id already recorded as a `source`.
 3. **Read the WHOLE email, then record.** Never decide from the subject or preview ("we'd like to schedule a call" and
-   "thanks for applying" look alike there). Match each email to ONE open application (sender, subject, body, company,
-   `email_senders`). Record at once (both modes record straight away; the record is the user's trail) with `record_event`:
+   "thanks for applying" look alike there). Match each email to ONE open application with `match_email` (stored facts:
+   thread, contact, sender domain, company; you decide from the body). Record at once (both modes record straight away; the record is the user's trail) with `record_event`:
    replied, interview requested or scheduled (`scheduled_at`), rejected, offer. A rejection/offer is recorded at once,
    then `get_recipe("feedback")` (verbatim words, post-mortem). Always pass `source` (message id, sender,
    subject, received time). Set `follow_up_on` when news is promised by a date. A reply from a person we sent outreach to:

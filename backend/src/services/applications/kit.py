@@ -361,6 +361,15 @@ async def _same_role(
 # ── The decision state (what the web buttons show, what the gate reads) ──────
 
 
+def cv_mark_matches(ev: dict[str, Any], cv_id: Optional[int], cv_sha: Optional[str]) -> bool:
+    """A ``cv_seen`` / ``submit_approved`` event marks the CV ``cv_id`` (and its text, ``cv_sha``; None =
+    no CV to compare). Where it was given (chat or web) never matters: either counts."""
+    p = ev["payload"]
+    return ev["event_type"] in ("cv_seen", "submit_approved") and p.get("artifact_id") == cv_id and (
+        cv_sha is None or p.get("sha256") == cv_sha
+    )
+
+
 async def controls_state(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], now: datetime
 ) -> dict[str, Any]:
@@ -379,10 +388,7 @@ async def controls_state(
     cv_id = cv["id"] if cv else None
     cv_sha = sha256_text(cv["text"]) if cv else ""
     for ev in events:
-        p = ev["payload"]
-        if ev["event_type"] in ("cv_seen", "submit_approved") and p.get("artifact_id") == cv_id and (
-            cv is None or p.get("sha256") == cv_sha
-        ):
+        if cv_mark_matches(ev, cv_id, cv_sha if cv else None):
             if seen is None:
                 seen = _who(ev)
             if approved is None and stale is None and ev["event_type"] == "submit_approved":
@@ -730,6 +736,28 @@ async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) 
     fills = await _events(db, user_id, application_id, ("form_filled",))
     host = fills[0]["payload"].get("host") if fills else None
     return host if isinstance(host, str) and host else None
+
+
+async def last_fill(db: JobDatabase, user_id: str, application_id: int) -> list[dict[str, Any]]:
+    """The answers of the NEWEST ``form_filled`` as stored, [] when there is none: what the assistant
+    retypes in one browser ``fill`` when the browser closed before the submit (owner decision 2026-10-23).
+    A G023-hashed answer comes back with ``answer`` "" and ``redacted`` true: its value was never kept."""
+    fills = await _events(db, user_id, application_id, ("form_filled",))
+    raw = fills[0]["payload"].get("answers") if fills else None
+    out: list[dict[str, Any]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or not item.get("question"):
+            continue
+        row: dict[str, Any] = {
+            "question": str(item["question"]), "source": str(item.get("source") or ""),
+            "answer": "" if item.get("redacted") else str(item.get("answer") or ""),
+        }
+        if isinstance(item.get("key"), str) and item["key"]:
+            row["key"] = item["key"]
+        if item.get("redacted"):
+            row["redacted"] = True
+        out.append(row)
+    return out
 
 
 async def latest_form_url(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
@@ -2322,6 +2350,7 @@ async def build_kit(
         "autofill": state["autofill"]["mode"],
         "warnings": pay_warnings(profile, country),
         "known_people": people_here,
+        "last_fill": await last_fill(db, user.id, application_id),
         "instructions": list(KIT_INSTRUCTIONS),
     }
     if answers_omitted:
