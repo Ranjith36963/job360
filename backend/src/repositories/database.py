@@ -708,17 +708,17 @@ class JobDatabase:
         "application_receipts", "application_stage_history", "applications",
         "application_proof_screenshots", "artifact_links", "assistant_setting_requests", "assistant_triggers",
         "browser_sign_ins",
-        "calendar_feeds", "contact_edits", "contact_outreach", "email_verifications", "idempotency_keys",
-        "missing_tool_reports",
+        "calendar_feeds", "contact_edits", "contact_outreach", "email_change_undos", "email_verifications",
+        "idempotency_keys", "missing_tool_reports",
         "oauth_grants",
         "password_resets", "proof_upload_links", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
-        "user_profile_versions", "user_profiles",
+        "user_profile_versions", "user_profiles", "user_templates",
     )
 
     # Tables included in a GDPR Article 20 export (docs/fable/05 C7). This is the
     # user's OWN data — what they authored or what we derived about them.
     # Deliberately EXCLUDED from _PER_USER_TABLES: sessions, password_resets,
-    # email_verifications, browser_sign_ins (encrypted site cookies, i.e. a live
+    # email_change_undos, email_verifications, browser_sign_ins (encrypted site cookies, i.e. a live
     # sign-in), assistant_triggers (an encrypted bearer token). Those hold
     # short-lived security tokens, not portable personal data; exporting them
     # would hand out live credentials.
@@ -734,7 +734,7 @@ class JobDatabase:
         "assistant_setting_requests", "audit_log", "contact_edits", "contact_outreach",
         "idempotency_keys", "missing_tool_reports", "oauth_grants", "profile_edits", "tailored_documents",
         "tailored_usage",
-        "user_profile_versions", "user_profiles",
+        "user_profile_versions", "user_profiles", "user_templates",
     )
 
     # Secret-bearing columns are redacted even inside exported tables — e.g. the
@@ -946,9 +946,10 @@ class JobDatabase:
         await self._db.commit()
 
     async def update_user_email(self, user_id: str, new_email: str) -> None:
-        """Replace the email address for the given user."""
+        """Replace the email address for the given user. The new address is
+        unproven, so ``email_verified_at`` is cleared in the same UPDATE."""
         await self._db.execute(
-            "UPDATE users SET email = ? WHERE id = ?",
+            "UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?",
             (new_email, user_id),
         )
         await self._db.commit()

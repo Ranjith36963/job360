@@ -278,6 +278,9 @@ def _blocked(body: Any) -> bool:
     return bool(_kb_block.search(body))
 
 
+_SITEMAP_MAX = 10_000_000  # a sitemap can list tens of thousands of postings; the 2 MB page default would drop it
+
+
 def _fetch(http: HttpFn, stats: Stats, name: str, budget: Any, url: str, *, ad: bool = False,
            check_block: bool = True, **kw: Any) -> Any:
     """One counted request; the body on HTTP 200, else None.
@@ -354,7 +357,8 @@ def fetch_airswift(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
     """Airswift (oil, gas and engineering recruiter) read through its sitemap; worldwide."""
     budget = _Budget(SITES_MAX_REQUESTS)
     ads: dict[str, int] = {}
-    for loc in _sitemap_locs(_fetch(http, stats, "airswift", budget, AIRSWIFT_SITEMAP, as_json=False)):
+    for loc in _sitemap_locs(_fetch(http, stats, "airswift", budget, AIRSWIFT_SITEMAP, as_json=False,
+                                  max_bytes=_SITEMAP_MAX)):
         m = _AS_JOB.match(loc)
         if m and _slug_hit(m.group(1), queries):
             ads[loc] = int(m.group(2))
@@ -806,7 +810,7 @@ def fetch_joppy(queries: list[str], http: HttpFn, stats: Stats, *, days: int, co
     if not _wanted(countries, "ES"):
         return []
     budget = _Budget(SITES_MAX_REQUESTS)
-    slugs = joppy_slugs(_fetch(http, stats, "joppy", budget, JOPPY_SITEMAP, as_json=False))
+    slugs = joppy_slugs(_fetch(http, stats, "joppy", budget, JOPPY_SITEMAP, as_json=False, max_bytes=_SITEMAP_MAX))
     jobs: list[Job] = []
     for slug in slugs[:JOPPY_COMPANIES]:
         if budget.left <= 0:
@@ -1012,7 +1016,8 @@ def fetch_techtree(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
     budget = _Budget(SITES_MAX_REQUESTS)
     urls: list[str] = []
     seen: set[str] = set()
-    for loc in _sitemap_locs(_fetch(http, stats, "techtree", budget, TT_SITEMAP, as_json=False)):
+    for loc in _sitemap_locs(_fetch(http, stats, "techtree", budget, TT_SITEMAP, as_json=False,
+                                      max_bytes=_SITEMAP_MAX)):
         m = _TT_JOB.search(loc)
         if m and "techtree.dev" in loc:
             url = "https://jobs.techtree.dev/job/" + m.group(1)

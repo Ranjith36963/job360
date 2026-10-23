@@ -12,7 +12,9 @@ const setAutofill = vi.fn();
 const clearDuplicate = vi.fn();
 const resolveBlocked = vi.fn();
 const submittedBlocked = vi.fn();
+const browserLive = vi.fn();
 vi.mock("@/lib/api", () => ({
+  browserLive: (...a: unknown[]) => browserLive(...a),
   resolveBlocked: (...a: unknown[]) => resolveBlocked(...a),
   submittedBlocked: (...a: unknown[]) => submittedBlocked(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
@@ -314,6 +316,51 @@ describe("Your assistant got stuck (blocked record)", () => {
     await waitFor(() => expect(submittedBlocked).toHaveBeenCalledWith(7, ""));
     expect(onChanged).not.toHaveBeenCalled();
     expect(screen.queryByTestId("blocked-submitted-ok")).toBeNull();
+  });
+
+  it("a CAPTCHA in Job360's browser offers Finish it here, which drives that browser in finish mode", async () => {
+    browserLive.mockReset().mockResolvedValue({
+      status: "ok", url: "https://jobs.example.com/apply", title: "Apply", width: 1280, height: 800,
+      image: "data:image/jpeg;base64,AAAA",
+    });
+    const blocked = { ...BLOCKED, step: "Job360 browser" };
+    const { rerender } = render(
+      <ApplicationDecisions applicationId={7} controls={controls({ blocked: { ...blocked, reason: "login_needed" } })} onChanged={() => undefined} />
+    );
+    expect(screen.queryByTestId("blocked-finish-here")).toBeNull(); // a sign-in wall has its own link
+    rerender(<ApplicationDecisions applicationId={7} controls={controls({ blocked })} onChanged={() => undefined} />);
+    fireEvent.click(screen.getByTestId("blocked-finish-here"));
+    await waitFor(() => expect(screen.getByTestId("finish-view")).toBeTruthy());
+    expect(browserLive).toHaveBeenCalledWith({ action: "shot" }, "finish");
+    fireEvent.click(screen.getByTestId("finish-done"));
+    await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "done" }, "finish"));
+    await waitFor(() => expect(screen.getByTestId("blocked-finish-here")).toBeTruthy());
+  });
+
+  it("Done waits for a picture refresh in flight instead of being dropped", async () => {
+    let release: (v: unknown) => void = () => undefined;
+    const shot = { status: "ok", url: "u", title: "Apply", width: 1280, height: 800, image: "data:image/jpeg;base64,AAAA" };
+    browserLive.mockReset().mockResolvedValueOnce(shot).mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockResolvedValue({ status: "ok", done: true });
+    render(
+      <ApplicationDecisions applicationId={7} controls={controls({ blocked: { ...BLOCKED, step: "Job360 browser" } })} onChanged={() => undefined} />
+    );
+    fireEvent.click(screen.getByTestId("blocked-finish-here"));
+    await waitFor(() => expect(screen.getByTestId("finish-view")).toBeTruthy());
+    await waitFor(() => expect(browserLive).toHaveBeenCalledTimes(2), { timeout: 3000 }); // the refresh is in flight
+    fireEvent.click(screen.getByTestId("finish-done"));
+    release(shot);
+    await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "done" }, "finish"), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByTestId("blocked-finish-here")).toBeTruthy());
+  });
+
+  it("Finish it here says so when the form has already closed", async () => {
+    browserLive.mockReset().mockResolvedValue({ status: "refused", reason: "no_form", detail: "The form has closed." });
+    render(
+      <ApplicationDecisions applicationId={7} controls={controls({ blocked: { ...BLOCKED, step: "Job360 browser" } })} onChanged={() => undefined} />
+    );
+    fireEvent.click(screen.getByTestId("blocked-finish-here"));
+    await waitFor(() => expect(screen.getByTestId("finish-gone").textContent).toBe("The form has closed."));
   });
 
   it("shows the detail line only when there is detail", () => {

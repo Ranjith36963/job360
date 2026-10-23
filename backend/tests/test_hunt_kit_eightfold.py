@@ -15,7 +15,7 @@ ROW = {"name": "Bayer", "ats": "eightfold", "tenant": "bayer", "domain": "bayer.
 def _stub(routes):
     calls = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append(url)
         for frag, resp in routes.items():
             if frag in url:

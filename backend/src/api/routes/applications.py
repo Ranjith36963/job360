@@ -24,7 +24,7 @@ from __future__ import annotations
 import contextlib
 import json
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional, Union
+from typing import Any, Awaitable, Callable, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
@@ -60,6 +60,7 @@ from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
 from src.services.applications import ready as ready_service
 from src.services.applications import stats as stats_service
+from src.services.applications import uploads as uploads_service
 from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.fit_record import fit_view
@@ -74,6 +75,22 @@ router = APIRouter(tags=["applications"])
 
 def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+def _key_body(body: BaseModel) -> dict[str, Any]:
+    """The idempotency body (slice 25): the request's own fields, minus the key itself."""
+    return body.model_dump(exclude={"client_key"})
+
+
+async def _client_key_once(
+    db: JobDatabase, user: CurrentUser, tool: str, key: Optional[str], key_body: dict[str, Any],
+    write: Callable[[], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """``idempotency.run_once`` for a route: a bad or reused key becomes its 422/409."""
+    try:
+        return await idempotency.run_once(db._db, user.id, tool, key, key_body, write)
+    except idempotency.IdempotencyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
 # Every event a contact ledger mark writes (outreach pack #5/#6): event_type -> ledger entry.
@@ -105,7 +122,7 @@ class SaveArtifactRequest(BaseModel):
 
     kind: str
     text: str
-    label: str = Field("", max_length=100)
+    label: str = Field("", max_length=200)
     model: Optional[str] = Field(None, max_length=200)
     # Owner decision, 2026-09-25 — a message DRAFTED for a person. When given,
     # `kind` must be "outreach" and the text becomes a numbered version in
@@ -127,6 +144,10 @@ class SaveArtifactRequest(BaseModel):
     # characters removed.
     ats_score: Optional[int] = Field(None, ge=0, le=100, strict=True)
     ats_notes: Optional[str] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the
+    # same key + same body returns the FIRST reply (already_existed=true) and writes
+    # nothing; the same key with a different body is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
 
 class FitAxisIn(BaseModel):
@@ -226,6 +247,10 @@ class RecordEventRequest(BaseModel):
     # use `POST /api/contacts/{contact_id}/outreach` for a cold contact).
     contact_id: Optional[int] = None
     channel: Optional[str] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the
+    # same key + same body returns the FIRST reply (already_existed=true) and writes
+    # nothing; the same key with a different body is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
     def clamp_detail(self) -> str:
         cap = settings.APPLICATION_EVENT_DETAIL_MAX_CHARS
@@ -264,6 +289,10 @@ class ReceiptAnswerOut(BaseModel):
     answer: str
     source: Optional[str] = None
     key: Optional[str] = None
+    # G023 (slice 11): a sensitive answer the user did not agree to remember is stored as its
+    # sha256 only; it reads back with ``answer`` "" and these two set.
+    redacted: Optional[bool] = None
+    value_sha256: Optional[str] = None
 
     @model_serializer(mode="wrap")
     def _omit_unset(self, handler: Any):  # type: ignore[no-untyped-def]  # un-annotated keeps the OpenAPI schema typed
@@ -289,6 +318,10 @@ class RecordApplicationReceiptRequest(BaseModel):
     # Idempotency key (1-128 printable chars): the same one again returns the FIRST
     # receipt with already_existed=true and writes nothing; a different body = 409.
     request_id: Optional[str] = None
+    # Gap roadmap slice 31 (G078): an EMAIL application's recipient (ONE address; '' = take it from the
+    # newest email_drafted when channel is email) and the sent message's Gmail id ('' = not given).
+    recipient: str = Field("", max_length=320)
+    gmail_message_id: str = Field("", max_length=300)
 
     def clamp_fields_filled(self) -> dict[str, Any]:
         cap = settings.APPLICATION_RECEIPT_FIELDS_MAX_BYTES
@@ -322,6 +355,8 @@ class AddContactRequest(BaseModel):
     source_url: Optional[str] = None  # the page the assistant found this person on; http(s); stored, never fetched (M2)
     # the employer; REQUIRED when there is no application_id (contacts.add_contact checks it)
     company: Optional[str] = None
+    # Slice 25 — optional idempotency key, same rule as SaveArtifactRequest.client_key.
+    client_key: Optional[str] = None
     email_source: Optional[str] = None  # closed set CONTACT_EMAIL_SOURCES
     relationship: Optional[str] = None  # closed set CONTACT_RELATIONSHIP
     shared: Optional[str] = None  # a profile record pointer, checked by contacts._validate_shared
@@ -593,6 +628,7 @@ class OutreachEntryOut(BaseModel):
     recorded_by: str
     source_message_id: str
     follow_up_on: Optional[str] = None
+    label: str = ""
 
 
 class ContactOutreachOut(BaseModel):
@@ -858,11 +894,14 @@ class SaveArtifactResponse(BaseModel):
     created_at: str
     event_id: Optional[int]
     contact_id: Optional[int] = None
+    label: str = ""
     ats_score: Optional[int] = None
     ats_notes: Optional[str] = None
     # Deterministic save-time checks (services/applications/cv_checks.py): claims
     # not found in the profile + PDF problems. Advisory - a save is never refused.
     checks: list[dict[str, str]] = []
+    # Slice 25 — true when this client_key was already used: the FIRST reply, nothing written.
+    already_existed: bool = False
 
 
 class SaveFitLineOut(BaseModel):
@@ -909,6 +948,19 @@ class RecordEventResponse(BaseModel):
     follow_up_on: Optional[str]
 
 
+class ReceiptFileOut(BaseModel):
+    """Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+    Slice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is
+    of the artifact's TEXT and ``fmt`` is '' (the email's file format is not known)."""
+
+    kind: str
+    artifact_id: int
+    # sha256 of the exact bytes served (hex); the bytes themselves are never stored.
+    sha256: str
+    fmt: str
+    event_id: int
+
+
 class RecordApplicationReceiptResponse(BaseModel):
     receipt_id: int
     sent_at: str
@@ -928,6 +980,13 @@ class RecordApplicationReceiptResponse(BaseModel):
     event_id: int
     # S3 - '' | same_job | same_role | same_company. A flag, never a block.
     possible_duplicate: str = ""
+    # Slice 11 - '<event_type>#<event_id>' the answers were frozen from when none were given; '' otherwise.
+    answers_from: str = ""
+    # Slice 29 - the uploaded / served files this receipt names ([] = none seen, or other versions named).
+    files: list[ReceiptFileOut] = Field(default_factory=list)
+    # Slice 31 - an email application's recipient and Gmail message id ('' = not an email / not given).
+    recipient: str = ""
+    gmail_message_id: str = ""
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
     referred_by_contact_id: Optional[int] = None
@@ -1389,10 +1448,16 @@ class RecordOutreachRequest(BaseModel):
     # Owner decision, 2026-09-25 — sent (linked only) or any meeting/call/intro/referral entry
     # (cold too); `contacts.record_outreach` enforces it.
     follow_up_on: Optional[str] = None
+    # pack #13 — only on entry="message"; contacts.record_outreach refuses it on sent/reply
+    label: str = Field(default="", max_length=200)
     # A caller going through /applications/{id}/events can only ever touch a
     # contact linked to THAT SAME application — set by the wrapper below,
     # never by the request body itself.
     application_id: Optional[int] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the
+    # same key + same body returns the FIRST reply (already_existed=true) and writes
+    # nothing; the same key with a different body is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
 
 class RecordOutreachResponse(BaseModel):
@@ -1541,6 +1606,20 @@ class StatsContactFoundViaGroupOut(BaseModel):
     outreach_sent: int
     outreach_replied: int
     reply_rate: Optional[float]
+
+
+class StatsOutreachVariantGroupOut(BaseModel):
+    """Pack #13 — per outreach `label` (lower(trim)): contacts with a sent mark, counted
+    once under the label of their newest message version saved BEFORE their first sent
+    mark ('' / none = key null, "Not set"); of those, how many have a reply mark;
+    reply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N."""
+
+    key: Optional[str]
+    label: str
+    outreach_sent: int
+    outreach_replied: int
+    reply_rate: Optional[float]
+    small_sample: bool
 
 
 class StatsScoreLineOut(BaseModel):
@@ -1846,6 +1925,7 @@ class StatsResponse(BaseModel):
     by_channel: list[StatsKeyedGroupOut]
     by_contact_found_via: list[StatsContactFoundViaGroupOut]
     by_contact_relationship: list[StatsContactFoundViaGroupOut]  # same group model, per relationship
+    by_outreach_variant: list[StatsOutreachVariantGroupOut] = []
     score_line: StatsScoreLineOut
     groups_truncated: bool
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
@@ -2209,21 +2289,35 @@ async def add_contact(
     """201 for a new contact, 200 (``already_existed: true``, ``matched_on``)
     for the same person seen again on this application (R2): same email, else
     (no email) same normalised LinkedIn URL, else same name unless both carry
-    different LinkedIn URLs. The status code is set dynamically since the
-    same call can legitimately answer either."""
-    try:
-        result = await contacts_service.add_contact(
-            db, user.id, application_id, actor_for(user),
-            name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url, company=body.company, email_source=body.email_source,
-            relationship=body.relationship, shared=body.shared,
-        )
-    except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+    different LinkedIn URLs; also a repeated ``client_key``. The status code is
+    set dynamically since the same call can legitimately answer either."""
+    return await _add_contact_once(db, user, application_id, body, response)
+
+
+async def _add_contact_once(
+    db: JobDatabase, user: CurrentUser, application_id: Optional[int], body: AddContactRequest, response: Response
+) -> dict[str, Any]:
+    """Both contact doors (per-application and ``POST /contacts``) share one
+    ``add_contact`` key space: the key body always names ``application_id``."""
+
+    async def _write() -> dict[str, Any]:
+        try:
+            result = await contacts_service.add_contact(
+                db, user.id, application_id, actor_for(user),
+                name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
+                notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
+                source_url=body.source_url, company=body.company, email_source=body.email_source,
+                relationship=body.relationship, shared=body.shared,
+            )
+        except SpineError as exc:
+            _raise(exc)
+            raise AssertionError("unreachable")  # _raise always raises
+        return {**result, "contact_id": result["contact"]["id"]}
+
+    key_body = {**_key_body(body), "application_id": application_id}
+    result = await _client_key_once(db, user, "add_contact", body.client_key, key_body, _write)
     response.status_code = 200 if result["already_existed"] else 201
-    return {**result, "contact_id": result["contact"]["id"]}
+    return result
 
 
 @router.post(
@@ -2244,19 +2338,7 @@ async def add_person(
     scoped to the USER instead of an application when there is none. Cold
     scope without an email: same LinkedIn URL, else same name only when
     neither side has a LinkedIn URL. ``source_url`` is stored, never fetched."""
-    try:
-        result = await contacts_service.add_contact(
-            db, user.id, body.application_id, actor_for(user),
-            name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
-            source_url=body.source_url, company=body.company, email_source=body.email_source,
-            relationship=body.relationship, shared=body.shared,
-        )
-    except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
-    response.status_code = 200 if result["already_existed"] else 201
-    return {**result, "contact_id": result["contact"]["id"]}
+    return await _add_contact_once(db, user, body.application_id, body, response)
 
 
 @router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
@@ -2303,18 +2385,27 @@ async def record_outreach(
     (``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to
     the SAME service function this route calls (M5 parity) — this route is
     the one door that works for a COLD contact too, since it carries no
-    ``application_id`` in its URL."""
-    try:
-        source = spine.validate_source(body.source.model_dump() if body.source else None)
-        result = await contacts_service.record_outreach(
-            db, user.id, contact_id, actor_for(user),
-            entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
-            source_message_id=source["message_id"] if source else "",
-            follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
-        )
-    except SpineError as exc:
-        _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+    ``application_id`` in its URL. A ``client_key`` lives in the key space of
+    the tool that calls this door: ``save_artifact`` for a message version,
+    ``record_event`` for a sent/reply mark."""
+
+    async def _write() -> dict[str, Any]:
+        try:
+            source = spine.validate_source(body.source.model_dump() if body.source else None)
+            return await contacts_service.record_outreach(
+                db, user.id, contact_id, actor_for(user),
+                entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
+                source_message_id=source["message_id"] if source else "",
+                follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
+                label=body.label,
+            )
+        except SpineError as exc:
+            _raise(exc)
+            raise AssertionError("unreachable")  # _raise always raises
+
+    tool = "save_artifact" if body.entry == "message" else "record_event"
+    key_body = {**_key_body(body), "contact_id": contact_id}
+    result = await _client_key_once(db, user, tool, body.client_key, key_body, _write)
     response.status_code = 200 if result["already_existed"] else 201
     return result
 
@@ -2436,6 +2527,15 @@ async def save_artifact(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
+    key_body = {**_key_body(body), "application_id": application_id}
+    return await _client_key_once(
+        db, user, "save_artifact", body.client_key, key_body, lambda: _save_artifact(application_id, body, db, user)
+    )
+
+
+async def _save_artifact(
+    application_id: int, body: SaveArtifactRequest, db: JobDatabase, user: CurrentUser
+) -> dict[str, Any]:
     try:
         if body.contact_id is None and body.kind == "outreach":
             raise _outreach_needs_contact("save_artifact", user.id, application_id=application_id)
@@ -2456,14 +2556,14 @@ async def save_artifact(
             result = await contacts_service.record_outreach(
                 db, user.id, body.contact_id, actor_for(user),
                 entry="message", channel=body.channel, text=body.text,
-                application_id_hint=application_id,
+                application_id_hint=application_id, label=body.label,
             )
             outreach = result["outreach"]
             return {
                 "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
                 "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": body.model,
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": result["event_id"],
-                "contact_id": body.contact_id, "checks": outreach.get("checks", []),
+                "contact_id": body.contact_id, "checks": outreach.get("checks", []), "label": outreach["label"],
             }
         return await spine.save_artifact(
             db, user_id=user.id, application_id=application_id, kind=body.kind, text=body.text,
@@ -2765,7 +2865,8 @@ async def approve_send(
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-    (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
+    or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+    event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
     nothing is recorded (the yes must name what the user saw)."""
@@ -2971,7 +3072,9 @@ async def submit_check(
     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
-    clears none of them. An unconfirmed email answers ``ask`` /
+    clears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form
+    rules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.
+    An unconfirmed email answers ``ask`` /
     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
     ``get_application_kit``; 422 when malformed): another session's live kit hold
     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -3005,7 +3108,8 @@ async def submit_check(
             "event": "submit_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
             "decision": verdict.decision, "reason": verdict.reason,
-            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)), "result": "ok",
+            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)),
+            "channel": "email" if settings_rules.is_mailto(form_url) else "form", "result": "ok",
         },
     )
     return {
@@ -3062,6 +3166,15 @@ async def record_event(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
+    key_body = {**_key_body(body), "application_id": application_id}
+    return await _client_key_once(
+        db, user, "record_event", body.client_key, key_body, lambda: _record_event(application_id, body, db, user)
+    )
+
+
+async def _record_event(
+    application_id: int, body: RecordEventRequest, db: JobDatabase, user: CurrentUser
+) -> dict[str, Any]:
     try:
         if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:
             raise _outreach_needs_contact("record_event", user.id, application_id=application_id)
@@ -3109,6 +3222,12 @@ async def record_event(
         spine.validate_event_type(body.event_type)
         if body.event_type in proof_service.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
+        if body.event_type in uploads_service.SERVER_ONLY_EVENTS:
+            # Slice 29: the receipt trusts it as the file that was sent, so no caller may forge one.
+            raise SpineError(
+                422, f"{body.event_type} is written by Job360 itself (its browser upload or the kit's file link), "
+                "not by a caller",
+            )
         detail = body.clamp_detail()
         # proof_text is capped in CHARACTERS (owner limit), so it skips the generic byte cap.
         if body.event_type == "proof_text":
@@ -3366,6 +3485,7 @@ async def record_application_receipt(
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
             applied_at=applied_at, request_id=body.request_id,
             referred_by_contact_id=body.referred_by_contact_id,
+            recipient=body.recipient, gmail_message_id=body.gmail_message_id,
         )
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None

@@ -85,7 +85,7 @@ def test_taleo_portal_from_portalno_config_block() -> None:
 def test_eightfold_sends_browser_like_user_agent() -> None:
     seen: list[dict] = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         seen.append(headers or {})
         return 200, {"positions": [], "count": 0}
 
@@ -97,7 +97,7 @@ def test_eightfold_sends_browser_like_user_agent() -> None:
 def test_solidjobs_sends_campaign_param_and_reads_inline_fields() -> None:
     calls: list[str] = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append(url)
         return 200, {"jobs": [{"title": "Dev", "company": "Acme", "url": "https://solid.jobs/o/k/job360",
                                "locations": ["Warszawa"], "isRemote": True, "validFrom": "2026-10-01T00:00:00Z",

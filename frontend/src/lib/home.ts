@@ -228,3 +228,41 @@ export function formatToday(now: Date = new Date()): string {
     year: "numeric",
   });
 }
+
+// ---- The last confirmed application (from redesign #745) -------------------
+
+/** The newest `applied` event in `events` and its company, or null. `occurred_at`
+ * is the agent's own text, so an unparseable one is skipped, never guessed. */
+export function lastApplied(
+  events: readonly WhatsNewEvent[],
+  applications: readonly WhatsNewApplication[]
+): { company: string; occurredAt: string } | null {
+  let best: WhatsNewEvent | null = null;
+  for (const e of events) {
+    if (e.event_type !== "applied" || Number.isNaN(Date.parse(e.occurred_at))) continue;
+    if (!best || Date.parse(e.occurred_at) > Date.parse(best.occurred_at)) best = e;
+  }
+  if (!best) return null;
+  const app = applications.find((a) => a.id === best.application_id);
+  const company = (app?.job_company || app?.job_title || "").trim();
+  return company ? { company, occurredAt: best.occurred_at } : null;
+}
+
+/** "today at 14:05", "yesterday at 09:30", "on Tuesday at 11:00" or "on 3 Oct".
+ * A bare date has no time to show (JS would read it as UTC midnight), so it
+ * gets the day only. Unparseable → "". */
+export function dayAt(iso: string, now: Date = new Date()): string {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso.trim());
+  const d = dateOnly ? new Date(`${iso.trim()}T12:00:00`) : new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  let day: string;
+  if (d.toDateString() === now.toDateString()) day = "today";
+  else if (d.toDateString() === yesterday.toDateString()) day = "yesterday";
+  else if (d < now && now.getTime() - d.getTime() < 6 * DAY_MS)
+    day = `on ${d.toLocaleDateString(undefined, { weekday: "long" })}`;
+  else day = `on ${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+  if (dateOnly) return day;
+  return `${day} at ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+}

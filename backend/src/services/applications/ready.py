@@ -197,19 +197,26 @@ def _user_check(
     their approved answer to this question, else a memory row they saved on the web
     that still holds this key. ``changed_to`` = the user's word when it differs from
     what the assistant typed."""
-    typed = _norm(a["answer"])
     word = _approved_for(profile, a["question"], company_key, str(a.get("key") or "") or None)
     if word is not None:
-        return (True, None) if _norm(word) == typed else (False, word)
+        return (True, None) if _typed_is(a, word) else (False, word)
     key = str(a.get("key") or "")
     path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
     by = saved.get(path, (None, None))[0] if a["source"] == "memory" and path and key in have else None
     if not by or is_assistant_actor(str(by)):
         return False, None
     text = _memory_text(profile, key)
-    if text is not None and _norm(text) != typed:
+    if text is not None and not _typed_is(a, text):
         return False, text if _field_target(key) else None
     return True, None
+
+
+def _typed_is(a: dict[str, Any], text: str) -> bool:
+    """``text`` is what was typed. A hashed answer (G023, ``redacted``) is compared by its sha256
+    of the exact text; any other by the normalized wording."""
+    if a.get("redacted"):
+        return kit.sha256_text(text.strip()) == a.get("value_sha256")
+    return _norm(text) == _norm(a["answer"])
 
 
 def _answer_rows(
@@ -220,6 +227,8 @@ def _answer_rows(
     answers: list[dict[str, Any]] = []
     flags: list[dict[str, Any]] = []
     for a in typed:
+        if a.get("redacted"):
+            a = {**a, "answer": "", "redacted": True}  # G023: no value kept, only its hash
         key, src = a.get("key"), a["source"]
         by = at = None
         if src in ("memory", "approved", "profile") and key in have:
@@ -240,40 +249,73 @@ def _answer_rows(
             continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
         if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
-        if not a["answer"]:
+        if src in ("written", "approved") and not verified:
+            # Owner rule: "I draft, you approve" - an essay is typed only after the user approved it.
+            flags.append(_flag("unapproved", f"A written answer needs your OK: {a['question']}", key))
+        if not verified and kit._question_is_sensitive(str(a["question"]), str(key) if key else None):
+            # Owner, 2026-10-22: a private, legal or risky question is the user's to answer, in any country.
+            flags.append(_flag("sensitive", f"A private question needs your OK: {a['question']}", key))
+        if not a["answer"] and not a.get("redacted"):
             flags.append(_flag("blank", f"An answer is blank: {a['question']}", key))
         if src in ("memory", "approved") and key and key not in have and not verified:
             flags.append(_flag("not_in_memory", f"No longer in memory: {a['question']}", key))
     return answers, flags
 
 
-async def has_unverified_guess(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
-    """True when the NEWEST ``form_filled`` holds an answer the assistant marked
-    ``guessed`` that the user has not stood behind (owner rule 2026-10-19: "if you
-    guess you are not verified - you need to ask me"). The SAME reading as the
-    card (:func:`_answer_rows`), so the gate and the card never disagree. Only the
-    ``guessed`` flag counts: a guess the user EDITED is the user's word (``changed``),
-    and :func:`type_first_lock` holds the submit until the form holds it. Scoped by
-    ``user_id`` (rule #12)."""
+async def _unverified_flags(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], pick: Any,
+) -> list[dict[str, Any]]:
+    """The card's flags for the answers of the NEWEST ``form_filled`` that ``pick`` selects (the SAME reading as
+    the card, :func:`_answer_rows`, so a gate and the card never disagree). Scoped by ``user_id`` (rule #12)."""
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
     fills = await kit._events(db, user_id, int(app_row["id"]), ("form_filled",))
     typed = fills[0]["payload"].get("answers") if fills else None
-    if not isinstance(typed, list) or not any(isinstance(a, dict) and a.get("source") == "guessed" for a in typed):
-        return False
+    if not isinstance(typed, list):
+        return []
+    rows = [
+        a for a in typed
+        if isinstance(a, dict) and "question" in a and ("answer" in a or a.get("redacted")) and pick(a)
+    ]
+    if not rows:
+        return []
     loaded, overlay = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     blocks, _missing = kit.compute_answers(profile, overlay, country)
     have = {i["key"]: i for block in blocks.values() for i in block}
     saved = {str(r["path"]): (r.get("set_by"), r.get("set_at")) for r in overlay}
-    guesses = [
-        a for a in typed
-        if isinstance(a, dict) and "question" in a and "answer" in a and a.get("source") == "guessed"
-    ]
-    _answers, flags = _answer_rows(guesses, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    _answers, flags = _answer_rows(rows, have, saved, profile, _company_key(str(app_row.get("job_company") or "")))
+    return flags
+
+
+async def has_unverified_guess(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds an answer the assistant marked
+    ``guessed`` that the user has not stood behind (owner rule 2026-10-19: "if you
+    guess you are not verified - you need to ask me"). Only the ``guessed`` flag counts: a
+    guess the user EDITED is the user's word (``changed``), and :func:`type_first_lock` holds the
+    submit until the form holds it."""
+    flags = await _unverified_flags(db, user_id, app_row, lambda a: a.get("source") == "guessed")
     return any(f["code"] == "guessed" for f in flags)
+
+
+async def has_unapproved_written(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds a ``written`` (or ``approved``) answer the user has not
+    approved: no ``user_info.answers`` record for this company (or any) matches its topic or wording
+    (owner rule: "I draft, you approve"). The card shows it as an ``unapproved`` flag; check_submit asks."""
+    flags = await _unverified_flags(db, user_id, app_row, lambda a: a.get("source") in ("written", "approved"))
+    return any(f["code"] == "unapproved" for f in flags)
+
+
+async def has_unconfirmed_sensitive(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
+    """True when the NEWEST ``form_filled`` holds an answer to a sensitive question (``kit`` decides which
+    wording counts) that the user has not stood behind: not their approved answer, not a value they saved
+    themselves (owner, 2026-10-22). The card shows it as a ``sensitive`` flag; check_submit asks."""
+    flags = await _unverified_flags(
+        db, user_id, app_row, lambda a: kit._question_is_sensitive(str(a["question"]), str(a.get("key") or "") or None)
+    )
+    return any(f["code"] == "sensitive" for f in flags)
 
 
 def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
@@ -394,11 +436,15 @@ async def changed_answers(db: JobDatabase, user_id: str, app_row: dict[str, Any]
     for row in await cur.fetchall():
         payload = _json(row["payload"])
         newest_per_page.setdefault(payload.get("page"), payload.get("answers"))
-    in_form = {
-        (_norm(h.get("question", "")), _norm(h.get("answer", "")))
-        for held in newest_per_page.values() for h in held or [] if isinstance(h, dict)
-    }
-    return [p for p in pending if (_norm(p["question"]), _norm(p["answer"])) not in in_form]
+    held_rows = [h for held in newest_per_page.values() for h in held or [] if isinstance(h, dict)]
+    in_form = {(_norm(h.get("question", "")), _norm(h.get("answer", ""))) for h in held_rows}
+    # G023: a sweep's hashed answer proves the user's words by their sha256.
+    hashed = {(_norm(h.get("question", "")), h.get("value_sha256")) for h in held_rows if h.get("redacted")}
+    return [
+        p for p in pending
+        if (_norm(p["question"]), _norm(p["answer"])) not in in_form
+        and (_norm(p["question"]), kit.sha256_text(p["answer"].strip())) not in hashed
+    ]
 
 
 async def ready_cards(
@@ -474,7 +520,7 @@ def _path_value(profile: Any, path: str) -> Any:
 
 
 def _with_approved(
-    profile: Any, question: str, text: str, company_key: Optional[str], topic: str = "",
+    profile: Any, question: str, text: str, company_key: Optional[str], topic: str = "", company: str = "",
 ) -> list[dict[str, Any]]:
     """The approved-answers list with ``question`` -> ``text`` replacing any earlier answer
     to the same question (unscoped, or scoped to this company) on the same topic. A same-worded
@@ -487,11 +533,13 @@ def _with_approved(
                 and (not str(r.get("company") or "").strip()
                      or kit.normalized_company_key(str(r["company"])) == company_key))
     ]
-    return [*keep, {"question": question, "answer": text, "approved": True, **({"topic": topic} if topic else {})}]
+    return [*keep, {"question": question, "answer": text, "approved": True,
+                    **({"topic": topic} if topic else {}), **({"company": company} if company else {})}]
 
 
 def answer_edits(
-    profile: Any, answer: dict[str, Any], text: str, *, edited: bool, company_key: Optional[str]
+    profile: Any, answer: dict[str, Any], text: str, *, edited: bool, company_key: Optional[str],
+    company: str = "",
 ) -> list[tuple[str, Any]]:
     """The memory writes that make ``text`` the user's own answer to ``answer``."""
     key = str(answer.get("key") or "")
@@ -508,7 +556,9 @@ def answer_edits(
         if kit._present(value):
             out.append((path, value))  # the same value, now saved by the user
     if not sensitive or not out:
-        approved = _with_approved(profile, answer["question"], text, company_key, key)
+        # A written answer is for this employer only: a why-this-company essay is never reused elsewhere.
+        scoped = company if answer["source"] == "written" else ""
+        approved = _with_approved(profile, answer["question"], text, company_key, key, scoped)
         out.append((user_info.USER_INFO_ANSWERS_PATH, approved))
     return out
 
@@ -531,6 +581,10 @@ async def confirm_answer(
     if not 0 <= index < len(card["answers"]):
         raise profile_edits.ProfileEditError(422, "No such answer on this form")
     answer = card["answers"][index]
+    if new_text is None and answer.get("redacted"):
+        raise profile_edits.ProfileEditError(
+            422, "This sensitive answer was not kept (you did not ask to remember it) - use Edit to type it"
+        )
     text = (answer["answer"] if new_text is None else new_text).strip()
     if not text:
         raise profile_edits.ProfileEditError(
@@ -539,7 +593,7 @@ async def confirm_answer(
     loaded, _ = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
     writes = answer_edits(profile, answer, text, edited=new_text is not None,
-                          company_key=_company_key(card["job_company"]))
+                          company_key=_company_key(card["job_company"]), company=card["job_company"])
     for path, value in writes:
         profile_edits.validate_edit(path, value)  # all-or-nothing: a bad value writes nothing
     if load_profile(user_id, with_overlay=False) is None:

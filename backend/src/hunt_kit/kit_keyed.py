@@ -217,7 +217,15 @@ WHATJOBS_MARKETS = {  # code -> country name (whatjobs.go:78-130)
     "ke": "Kenya", "py": "Paraguay",
 }
 _WJ_ID = re.compile(r"pub_api__cpl__(\d+)__\d+")
-_WJ_MARK = re.compile(r"\s*#J-\d+-Ljbffr\s*$")
+_WJ_MARK = re.compile(r"#J-\d+-Ljbffr\s*$")
+
+
+def _wj_clean(text: str) -> str:
+    """Drop the trailing ``#J-<n>-Ljbffr`` marker and the blanks before it (a regex led by \\s* is slow on blanks)."""
+    m = _WJ_MARK.search(text)
+    return text[:m.start()].rstrip() if m else text
+
+
 _WJ_GENERIC = {"developer", "engineer", "programmer", "dev", "specialist", "architect"}
 
 
@@ -242,7 +250,7 @@ def parse_whatjobs(payload: Any, country: str = "") -> list[Job]:
         out.append(_job(
             title=r.get("title"), company=r.get("company"), url=r.get("url"),
             location=f"{city}, {country}" if city and country else city or country,
-            description=_WJ_MARK.sub("", str(r.get("snippet") or "")), source="feed:whatjobs",
+            description=_wj_clean(str(r.get("snippet") or "")), source="feed:whatjobs",
             board="whatjobs", extra={"id": m.group(1), "tracked_url": True, "attribution": "WhatJobs"}))
     return out
 
