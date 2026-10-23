@@ -367,6 +367,7 @@ GETRO_NETWORKS: list[tuple[str, int | None, str]] = [  # (name, collection id or
     ("Speedinvest", None, "https://careers.speedinvest.com/jobs"),
     ("HV Capital", None, "https://hv.getro.com/jobs"),
     ("Point Nine", None, "https://jobs.pointnine.com/jobs"),
+    ("Techstars", None, "https://jobs.techstars.com/jobs"),  # ApplyPilot sites.yaml:92
 ]
 GETRO_MAX_REQUESTS = MAX_SEARCHES * (PAGES + 1)  # pages plus one id lookup per search
 

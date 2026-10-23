@@ -195,6 +195,10 @@ BOARD_SOURCES = (
     "collage",
     "flowxtra",
     "generalistworld",
+    "geekjob",
+    "applicantpro",
+    "potok",
+    "huntflow",
     "cleverstaff",
     "friendwork",
     "joinup",
@@ -394,7 +398,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4c",
+    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4c",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2907,6 +2911,11 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("collage", re.compile(r"^secure\.collage\.co$")),
     ("flowxtra", re.compile(r"^flowxtra\.com$")),
     ("generalistworld", re.compile(r"^(?:www\.)?generalist\.world$")),
+    # wave 4 batch B: GeekJob (one board, no token in the link), ApplicantPro, Potok, Huntflow (tenant subdomains)
+    ("geekjob", re.compile(r"^(?:www\.)?geekjob\.ru$")),
+    ("applicantpro", re.compile(r"^([a-z0-9-]+)\.applicantpro\.com$")),
+    ("potok", re.compile(r"^([a-z0-9-]+)\.potok\.io$")),
+    ("huntflow", re.compile(r"^([a-z0-9-]+)\.huntflow\.io$")),
     # boards C: CleverStaff and joinup.ch are one host each; a FriendWork tenant is the first path segment
     ("cleverstaff", re.compile(r"^cleverstaff\.net$")),
     ("friendwork", re.compile(r"^jobs\.friend\.work$")),
@@ -3001,7 +3010,7 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
         elif ats == "friendwork":  # https://jobs.friend.work/<token>/<id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", seg[0]) else ""
-        elif ats in ("vagas", "yourator", "careerviet", "occ", "cleverstaff", "joinup"):  # one board, no token
+        elif ats in ("vagas", "yourator", "careerviet", "occ", "geekjob", "cleverstaff", "joinup"):  # one board
             tok = ""
         elif ats == "mokahr":  # app.mokahr.com/social-recruitment/<org>/<site>; hire-r1.* = r1
             moka = len(seg) >= 3 and seg[0] in ("social-recruitment", "campus-recruitment", "apply")
@@ -3049,7 +3058,8 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
-        elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
+        elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire", "applicantpro", "potok",
+                     "huntflow") and m.group(1).split(".")[0] in (
                 _NON_TENANT_SUB | ({"apply"} if ats == "hrmdirect" else set())):
             continue  # www/help/app.<vendor>.com (apply. for HRM Direct) is the vendor's own site, not a tenant board
         elif ats == "comeet":  # https://www.comeet.com/jobs/<slug>/<companyUID>/...
