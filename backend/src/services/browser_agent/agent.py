@@ -194,6 +194,9 @@ class Session:
     blocked_urls: dict[str, str] = field(default_factory=dict)
     # The assistant session (its `session` label) driving this browser: another one is refused.
     owner: str = ""
+    # Kept open past idle_s until this time (monotonic): a form stopped on a human check waits for the
+    # user to finish it themselves in the hand-off view (hold_for_user). None = no hold.
+    held_until: Optional[float] = None
 
 
 class BrowserPool:
@@ -257,7 +260,8 @@ class BrowserPool:
         now = time.monotonic()
         for user_id, s in list(self._sessions.items()):
             expired = s.closes_at is not None and now > s.closes_at
-            if (now - s.last_used > self.idle_s or expired) and not s.lock.locked():
+            held = s.held_until is not None and now < s.held_until
+            if (now - s.last_used > self.idle_s or expired) and not held and not s.lock.locked():
                 await self.close(user_id, "idle")
 
     async def get(
@@ -1472,6 +1476,23 @@ def live_key(user_id: str) -> str:
 # The site the user started signing in on, per user: Keep saves it (and where the sign-in ended up).
 _live_hosts: dict[str, str] = {}
 
+# The hand-off view: the USER finishes a step only a human may do (a CAPTCHA) in the assistant's own
+# browser, on the page it stopped on. Unlike the sign-in view it acts on the assistant's browser (the
+# form stays filled), but it is reached the same way: from the website with a browser session only,
+# never a token, so no assistant can drive it. No start (it never opens a page) and no keep.
+FINISH_ACTIONS = ("shot", "click", "type", "key", "scroll", "done")
+# How long a form stopped on a human check stays open for the user, however idle.
+HANDOFF_HOLD_SECONDS = 30 * 60
+
+
+def hold_for_user(pool: Optional[BrowserPool], user_id: str, seconds: float = HANDOFF_HOLD_SECONDS) -> bool:
+    """Keep the user's assistant browser open ``seconds`` more for the hand-off view. False: none is open."""
+    s = pool._sessions.get(user_id) if pool is not None else None
+    if s is None:
+        return False
+    s.held_until = time.monotonic() + seconds
+    return True
+
 
 SHOT_TRIES = 3
 
@@ -1519,18 +1540,32 @@ async def live(
     dy: float = 0,
     load_state: Optional[StateFn] = None,
     keep: Optional[Callable[[str, dict[str, Any]], Awaitable[int]]] = None,
+    finish: bool = False,
 ) -> dict[str, Any]:
-    """One step of the user's own sign-in, returning a fresh picture of the page."""
-    if action not in LIVE_ACTIONS:
-        raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(LIVE_ACTIONS) + ".")
-    if action == "cancel":
-        _live_hosts.pop(user_id, None)
-        return {"status": "ok", "closed": await pool.close(live_key(user_id))}
-    s = await pool.get(live_key(user_id), create=action == "start", load_state=load_state)
-    if s is None:
-        raise BrowserError("refused", "no_browser", "Start again: type the job site's address and press Start.")
-    if s.closes_at is None or action == "start":  # each Start is a new sign-in: its full time
-        s.closes_at = time.monotonic() + LIVE_MAX_SECONDS
+    """One step of the user's own sign-in, returning a fresh picture of the page. ``finish``: one step
+    of the hand-off view instead, in the user's assistant browser (FINISH_ACTIONS)."""
+    actions = FINISH_ACTIONS if finish else LIVE_ACTIONS
+    if action not in actions:
+        raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(actions) + ".")
+    if finish:
+        s = await pool.get(user_id, create=False)
+        if s is None:
+            raise BrowserError(
+                "refused", "no_form", "The form has closed. Ask your assistant to fill it again, or apply yourself.",
+            )
+        if action == "done":  # the user is finished: the browser goes back to its idle clock
+            s.held_until = None
+            s.last_used = time.monotonic()
+            return {"status": "ok", "done": True}
+    else:
+        if action == "cancel":
+            _live_hosts.pop(user_id, None)
+            return {"status": "ok", "closed": await pool.close(live_key(user_id))}
+        s = await pool.get(live_key(user_id), create=action == "start", load_state=load_state)
+        if s is None:
+            raise BrowserError("refused", "no_browser", "Start again: type the job site's address and press Start.")
+        if s.closes_at is None or action == "start":  # each Start is a new sign-in: its full time
+            s.closes_at = time.monotonic() + LIVE_MAX_SECONDS
     # The page refreshes its picture every 1.5 s: only the user's own steps keep the view open.
     by_user = action != "shot"
     async with s.lock:

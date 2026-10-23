@@ -169,6 +169,11 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
 - On the application's page, a sign-in stop shows a **"Sign in once to <site> on Job sites"** button, so the next run starts signed in.
 - The note tells the user how to finish: with their own assistant's browser when their computer is on (Claude in
   Chrome, Gemini in Chrome, ChatGPT agent), or by signing in once on Settings → Job sites. The note names only those three, and OpenAI has retired agent mode.
+- **Finish it here (2026-10-23):** on a CAPTCHA stop, the filled form is kept open for 30 minutes past the idle sweep
+  (`agent.hold_for_user`), and the application's page shows **"Finish it here"**. The user solves the check themselves
+  on a live picture of the assistant's own browser (`POST /api/browser/live` with `mode: finish`: shot, click, type,
+  key, scroll, done; no start, no keep). Website session only, like the sign-in view: a token gets 403. Done puts the
+  browser back on its idle clock; then "I submitted it" records the receipt. Job360 still never solves a CAPTCHA.
 
 **`key` action (2026-10-19; Enter rule 2026-10-20):** ArrowDown, ArrowUp, Tab, Escape and Enter,
 for the suggestion lists real forms use: type, ArrowDown, Enter. Enter is refused outside a suggestion

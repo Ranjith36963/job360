@@ -6472,5 +6472,20 @@
 {"name":"Cambridge University Press & Assessment","ats":"earcu","board":"careers.cambridge.org","source":"freehire"},
 {"name":"Mercedes-Benz","ats":"beesite","board":"mercedes-benz-beesite-production-gjb.app.beesite.de","source":"freehire"},
 {"name":"Porsche","ats":"beesite","board":"porsche-beesite-production-gjb.app.beesite.de","source":"freehire"},
-{"name":"Intuition Machines","ats":"workablemarketplace","board":"ix7jhWd4JnugmXDK5RaQSZ","source":"freehire"}
+{"name":"Intuition Machines","ats":"workablemarketplace","board":"ix7jhWd4JnugmXDK5RaQSZ","source":"freehire"},
+{"name":"DeepSeek","ats":"mokahr","board":"high-flyer/140576","source":"career-ops"},
+{"name":"Moonshot AI","ats":"mokahr","board":"moonshot/148506","source":"career-ops"},
+{"name":"Zhipu AI","ats":"mokahr","board":"zphz/148983","source":"career-ops"},
+{"name":"CyberAgent Group","ats":"hrmos","board":"cyberagent-group","source":"freehire"},
+{"name":"BotCity","ats":"quickin","board":"botcity","source":"freehire"},
+{"name":"Dodo Payments","ats":"pyjamahr","board":"dodo-payments","source":"freehire"},
+{"name":"Yourator (Taiwan startup board)","ats":"yourator","board":"all","source":"career-ops"},
+{"name":"CareerViet (Vietnam)","ats":"careerviet","board":"all","source":"career-ops"},
+{"name":"Stellantis","ats":"adpmyjobs","board":"stellantisexternalcx","source":"freehire"},
+{"name":"PEI Group","ats":"eploy","board":"careers.pei.group","source":"freehire"},
+{"name":"Dressup","ats":"selfrecruit","board":"dressup","source":"freehire"},
+{"name":"Tributo Devido","ats":"enlizt","board":"tributodevido","source":"freehire"},
+{"name":"ScrumLaunch","ats":"hurma","board":"scrumlaunch","source":"freehire"},
+{"name":"WA FENIX","ats":"compleo","board":"wafx","source":"freehire"},
+{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"}
 ]
