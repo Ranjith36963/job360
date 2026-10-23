@@ -133,6 +133,12 @@ pages. Energy Jobline is not read: its ad pages answer only a client that calls 
 `energyjobline.com` link is reported as unsupported. The references' referral-code links for Strider, micro1 and Alignerr are not
 used: the kit lists the plain posting page.
 
+`kit_co6.py` adds four job boards: Agentic Engineering Jobs (`agenticjobs:all`, the site's public API), Flowxtra (`flowxtra:all`, the
+central feed of every company on the platform), Generalist World (`generalistworld:all`, the one `/jobs/` page) and Collage HR
+(`collage:<job-site address>`, the last path segment of `secure.collage.co/jobs/<address>`). Every field comes from the listing, so no
+posting page is opened; the first refusal ends a board and keeps what it had read. A job link that is not https on the board's own
+host is dropped. Consider (`getconsider.com`) is not read: its search needs a cookie session and a CSRF token that the kit's `http`
+cannot hold, so a `getconsider.com` link is reported as unsupported.
 `kit_fh4.py` adds three boards: Scalis (`scalis:<tenant>` of `<tenant>.scalis.ai`, the paged listing carries every body), Senior's
 Portal de Talentos (`senior:<tenant>` of `<tenant>.portaldetalentos.senior.com.br`, a keyless POST API; a vacancy you do not open is
 listed without a body) and Profession.hu (`profession:itdev` or `profession:itops`, the two IT category sitemaps of a Hungarian

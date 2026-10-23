@@ -303,12 +303,14 @@ ASK: never read on your own. At each scheduled time only ask in chat
 PAUSED: every run stops at once, reads nothing, records nothing, does
 not ask.
 
-SCHEDULE: if your app offers only hourly or daily schedules, then for
-1h, 3h, 6h or 12h create an HOURLY task (1h runs every hour) that does the work only at hours
-00, 03, 06, 09, 12, 15, 18 and 21 (3h), 00, 06, 12 and 18 (6h) or 08
-and 20 (12h) in the user's timezone (ask them if you do not know it),
-and otherwise ends at once without writing anything. For 24h, run once
-each morning.
+SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
+runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
+`batch`), then `mark_done` each; `nothing_due` = end at once without
+writing anything. Job360 counts each duty from when it was last done
+(preferences.check_every for the inbox, assistant_settings.hunt_every_hours
+for the hunt), so a missed hour catches up. It lists the inbox only in
+auto mode and the batch only when the user lets you apply on your own; it
+is never a yes to submit (check_submit still decides).
 
 KILL SWITCH: every scheduled run first calls get_profile. If
 preferences.daily_check is "paused", "declined" or "" (not
@@ -576,7 +578,7 @@ and `source`/`key` are returned when you read the receipt. Examples:
 `form_filled` {"form_url":"https://jobs.example.com/apply/1","fields_count":1,"answers":[{"question":"Right to work?","answer":"Yes","source":"profile","key":"work_authorization"}]};
 `form_swept` {"fields_checked":12,"fixed":1,"notes":"fixed phone"}; `cv_seen` {"artifact_id":7,"sha256":"<from the kit>","where":"chat"};
 `hold_released` {"reason":"done"}; `site_account` {"host":"jobs.example.com"};
-`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried"};
+`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried","note":"upload worked"} (`note`: optional why, at most 200 chars);
 `proof_text` {"text":"Thank you, application received.","page_host":"jobs.example.com"}.
 A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared`, `submit_resolved` and where="web" need the user's own click
@@ -599,7 +601,8 @@ ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and nev
 login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with
-reason `blocked`. `unblocked` closes the ask; with nothing blocked it is 409.
+reason `blocked`. An `upload_failed` block clears itself once a later
+`document_uploaded` is recorded. `unblocked` closes the ask; with nothing blocked it is 409.
 When the user answers a blocked ask, do what they said, then record
 `unblocked`. If Needs-you is full no ask opens (`check_submit` still asks):
 tell the user in chat.

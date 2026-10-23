@@ -45,7 +45,7 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
     "blocked": {
         "reason": "captcha", "step": "submit form", "page_host": "jobs.example.com", "detail": "CAPTCHA before submit",
     },
-    "unblocked": {"resolution": "retried"},
+    "unblocked": {"resolution": "retried", "note": "the CV upload worked on the second try"},
     "proof_text": {"text": "Thank you, your application has been received.", "page_host": "jobs.example.com"},
     # Feedback loop slice 4 (interview side); checked by interview_payloads.validate.
     "interview_session": {

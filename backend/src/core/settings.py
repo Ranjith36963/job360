@@ -948,6 +948,15 @@ ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TT
 # How many waiting requests ONE user's assistants may create per hour — a loop
 # cannot bury the Needs-you page. Counted off the table, never per IP.
 ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR", "20"))
+# Owner decision 2026-10-23 - "what is due now?" for the user's OWN scheduled task (migration 0082).
+# The clock lives at the AI vendor; Job360 only answers. SCHEDULE_TICK_HOURS is how often that task
+# is expected to wake (returned as `expected_every_hours`). Duties are a closed set; `tick` is the
+# stamp of the last scheduled run. Reads and marks are per-user rate limited (a loop cannot hammer).
+SCHEDULE_TICK_HOURS = int(os.getenv("SCHEDULE_TICK_HOURS", "1"))
+SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch")
+SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batch": "batch"}
+SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
+SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and
 # asks yes. Matched against whole host labels (indeed.co.uk, uk.indeed.com,
 # linkedin.com, lnkd.in all hit; notindeed.com does not). Over-blocking only
@@ -1186,6 +1195,11 @@ BROWSER_AGENT_MAX_SESSIONS = int(os.getenv("BROWSER_AGENT_MAX_SESSIONS", "2"))
 # Live sign-in views (Settings -> Job sites) have their own cap, apart from the assistants' browsers.
 BROWSER_AGENT_MAX_LIVE = int(os.getenv("BROWSER_AGENT_MAX_LIVE", "2"))
 BROWSER_AGENT_IDLE_SECONDS = int(os.getenv("BROWSER_AGENT_IDLE_SECONDS", "600"))
+# Deploy hold (browser_agent/deploy_hold.py): a NEW container answers 503 on /api/deployz while the
+# OLD process had a browser active within the last DEPLOY_HOLD_QUIET_SECONDS, for at most
+# DEPLOY_HOLD_MAX_SECONDS after the new process boots. 0 = off (the kill switch).
+DEPLOY_HOLD_MAX_SECONDS = int(os.getenv("DEPLOY_HOLD_MAX_SECONDS", "600"))
+DEPLOY_HOLD_QUIET_SECONDS = int(os.getenv("DEPLOY_HOLD_QUIET_SECONDS", "300"))
 
 
 # -- Migration safety (gap roadmap slice 20). Migrations auto-apply on boot and
