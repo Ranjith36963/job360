@@ -271,7 +271,6 @@ async def test_an_assistant_withdraws_only_its_own_ask_and_must_say_why(authenti
 
 @pytest.mark.asyncio
 async def test_mcp_answer_ask_withdraw_closes_the_assistants_own_ask(authenticated_async_context, fixture_user_id):
-    pytest.importorskip("mcp")
     import httpx2
     from mcp.client import Client
     from mcp.client.streamable_http import streamable_http_client
