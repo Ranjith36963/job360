@@ -22,7 +22,7 @@ API_FRAG = "/careersection/rest/jobboard/searchjobs"
 def _stub(routes: dict):
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append((url, method, data))
         for frag, resp in routes.items():
             if frag in url:
@@ -136,3 +136,30 @@ def test_hostile_detail_never_drops_listing():
     assert len(jobs) == 1
     jobs = kit_ats.fetch_taleo({**ROW, "fetch_details": True, "detail_limit": float("inf")}, http, {})
     assert len(jobs) == 1
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_taleo_head_and_ld_scans_are_linear_on_unclosed_markup():
+    page = '<table id="jobs"><thead><tr><th>Title</th><th>Location</th></tr></thead></table>'
+    assert kit_ats._taleo_headings(page) == ["Title", "Location"]
+    _grows_linearly(kit_ats._taleo_headings, lambda k: "<table id='jobs'>" * k + "</thead>")
+    _grows_linearly(kit_ats._taleo_headings, lambda k: "<label " * k + "</th>")
+    ld = '<script type="application/ld+json">{"@type": "JobPosting", "description": "<p>Hi</p>"}</script>'
+    assert kit_ats._taleo_description(ld) == "Hi"
+    _grows_linearly(kit_ats._taleo_description, lambda k: '<script type="application/ld+json">' * k)

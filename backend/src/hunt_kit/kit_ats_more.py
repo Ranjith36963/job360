@@ -46,6 +46,8 @@ try:  # shared helpers live in the sibling kit_ats.py
         _remote_from,
         _text,
         _title_ok,
+        drop_blocks,
+        finditer_closed,
     )
 except ImportError:  # loaded by file path: find the sibling file
     import importlib.util as _ilu
@@ -59,6 +61,7 @@ except ImportError:  # loaded by file path: find the sibling file
     MAX_PAGES, Http, Job = _mod.MAX_PAGES, _mod.Http, _mod.Job
     _count, _get, _iso_date, _job, _jobvite_date = _mod._count, _mod._get, _mod._iso_date, _mod._job, _mod._jobvite_date
     _join, _remote_from, _text, _title_ok = _mod._join, _mod._remote_from, _mod._text, _mod._title_ok
+    drop_blocks, finditer_closed = _mod.drop_blocks, _mod.finditer_closed
 
 _JSON = {"Accept": "application/json"}
 _POST = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -898,10 +901,20 @@ def _ripplehire(row: dict[str, Any], http: Http) -> list[Job] | None:
 PAYLOCITY_DETAIL_CAP = 25  # detail-page requests per board (the rest keep the listing fields, no description)
 _PAYLOCITY_JOBS_KEY = re.compile(r'"Jobs"\s*:')
 _PAYLOCITY_HEADER = re.compile(
-    r"""<div\b[^>]*class=["'][^"']*\bjob-listing-header\b[^"']*["'][^>]*>\s*Description\s*</div>\s*(<div\b[^>]*>)""", re.I)
-_PAYLOCITY_LD = re.compile(r"""<script\b[^>]*type=["']application/ld\+json["'][^>]*>([\s\S]*?)</script>""", re.I)
-_PAYLOCITY_DIV = re.compile(r"<(/?)div\b[^>]*>", re.I)
-_PAYLOCITY_DROP = re.compile(r"<(script|style)\b[^>]*>[\s\S]*?</\1\s*>", re.I)
+    r"""<div\b[^<>]*class=["'][^"']*\bjob-listing-header\b[^"']*["'][^<>]*>\s*Description\s*</div>\s*(<div\b[^>]*>)""", re.I)
+_PAYLOCITY_LD = re.compile(r"""<script\b[^<>]*type=["']application/ld\+json["'][^<>]*>([\s\S]*?)</script>""", re.I)
+_PAYLOCITY_LD_END = re.compile(r"</script>", re.I)
+_PAYLOCITY_DIV = re.compile(r"<(/?)div\b[^<>]*>", re.I)
+_PAYLOCITY_DROP = re.compile(r"<(script|style)\b[^<>]*>", re.I)
+
+
+def _paylocity_closer(name: str) -> re.Pattern[str]:
+    return re.compile(rf"</{name}\s*>", re.I)
+
+
+def _paylocity_drop(text: str) -> str:
+    """Remove every <script>/<style> element (one linear pass; the lazy regex was quadratic on unclosed ones)."""
+    return str(drop_blocks(text, _PAYLOCITY_DROP, _paylocity_closer))
 
 
 def _bracket_slice(s: str, key: re.Pattern[str], open_: str, close: str) -> str:
@@ -942,17 +955,18 @@ def _paylocity_description(page: str) -> str:
             if depth == 0:
                 end = t.start()
                 break
-        body = str(_text(_PAYLOCITY_DROP.sub("", page[m.end():end])))
+        body = str(_text(_paylocity_drop(page[m.end():end])))
         if body:
             return body
-    for raw in _PAYLOCITY_LD.findall(page):
+    for lm in finditer_closed(_PAYLOCITY_LD, _PAYLOCITY_LD_END, page):
+        raw = lm.group(1)
         try:
             data = json.loads(raw)
         except ValueError:
             continue
         for node in data if isinstance(data, list) else [data]:
             if isinstance(node, dict) and node.get("description"):
-                return str(_text(_PAYLOCITY_DROP.sub("", html.unescape(str(node["description"])))))
+                return str(_text(_paylocity_drop(html.unescape(str(node["description"])))))
     return ""
 
 

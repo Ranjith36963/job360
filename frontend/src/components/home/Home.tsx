@@ -18,9 +18,11 @@ import {
   FEED_MAX_PAGES,
   HOME_ASKS_LIMIT,
   buildSentence,
+  dayAt,
   daysAgoIso,
   formatToday,
   isBrandNew,
+  lastApplied,
   readLastVisit,
   selectFeed,
   writeLastVisit,
@@ -44,7 +46,7 @@ const LOADING = { status: "loading" } as const;
 
 type SinceVisit = Pick<WhatsNewPages, "events" | "truncated" | "now">;
 type Asks = { asks: Ask[]; openCount: number };
-type Feed = { items: FeedItem[]; eventCount: number };
+type Feed = { items: FeedItem[]; eventCount: number; applied: ReturnType<typeof lastApplied> };
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 const linkBtn =
@@ -98,7 +100,11 @@ export function Home() {
         if (!live()) return;
         setFeed({
           status: "ok",
-          value: { items: selectFeed(r.events, r.applications, FEED_LIMIT), eventCount: r.events.length },
+          value: {
+            items: selectFeed(r.events, r.applications, FEED_LIMIT),
+            eventCount: r.events.length,
+            applied: lastApplied(r.events, r.applications),
+          },
         });
         setSince({
           status: "ok",
@@ -191,6 +197,8 @@ export function Home() {
           .sort((a, b) => (a.follow_up_on ?? "").localeCompare(b.follow_up_on ?? ""))
       : [];
   const feedItems = feed.status === "ok" ? feed.value.items : [];
+  const applied = feed.status === "ok" ? feed.value.applied : null;
+  const appliedWhen = applied ? dayAt(applied.occurredAt) : "";
   const showRail =
     !settled ||
     stats.status === "loading" ||
@@ -238,6 +246,12 @@ export function Home() {
                   "Home"
                 )}
               </h1>
+              {applied && (
+                <p data-testid="home-subline" className="mt-3 text-[15px] text-muted-foreground">
+                  The last application you confirmed was {applied.company}
+                  {appliedWhen ? `, ${appliedWhen}` : ""}.
+                </p>
+              )}
             </div>
             <Link
               href="/bring"

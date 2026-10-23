@@ -148,6 +148,21 @@ BOARD_SOURCES = (
     "peopleforce",
     "talenthr",
     "talentlyft",
+    "neogov",
+    "applitrack",
+    "schoolspring",
+    "edjoin",
+    "radancy",
+    "ukgready",
+    "gupy",
+    "hiringroom",
+    "inhire",
+    "recrutei",
+    "solides",
+    "vagas",
+    "earcu",
+    "beesite",
+    "workablemarketplace",
 )
 FEED_SOURCES = (
     "freehire",
@@ -339,7 +354,7 @@ def _import_kit(name: str) -> Any:
 # replaces a name an earlier one already provides).
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
-    "kit_sites_a",
+    "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -494,7 +509,7 @@ def html_to_text(raw: str | None) -> str:
     """Turn an HTML fragment into plain text, keeping line breaks between blocks."""
     h = html.unescape(raw or "")
     h = re.sub(r"(?i)</(p|li|div|h[1-6]|ul|ol|tr)>|<br\s*/?>", "\n", h)
-    h = re.sub(r"<[^>]+>", " ", h)
+    h = re.sub(r"<[^<>]+>", " ", h)  # [^<>]: a "<" with no ">" stops at the next "<" (linear on "<a " * n)
     h = html.unescape(h)
     h = re.sub(r"[ \t\r\f\v\xa0]+", " ", h)
     h = re.sub(r"\s*\n\s*", "\n", h)
@@ -777,6 +792,10 @@ def _open(req: urllib.request.Request, timeout: int) -> Any:
     return _OPENER.open(req, timeout=timeout)
 
 
+PAGE_MAX_BYTES = 2_000_000  # default cap for one HTML/XML/RSS response (pages the readers parse with regexes)
+API_MAX_BYTES = 20_000_000  # default cap for one JSON API response (SimplifyJobs listings.json is ~13 MB)
+SITEMAP_MAX_BYTES = 10_000_000  # explicit cap for a sitemap (can list tens of thousands of postings)
+FEED_MAX_BYTES = 5_000_000  # explicit cap for an RSS/Atom/XML job feed (full descriptions per item)
 _STATUS_TL = threading.local()  # a board task sets .log; http_request then notes every status it returns
 
 
@@ -785,13 +804,15 @@ def http_request(
     params: Any = None,
     data: bytes | None = None,
     retries: int = RETRIES_429,
-    max_bytes: int = 20_000_000,
+    max_bytes: int = API_MAX_BYTES,
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
+    truncate: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given); see _http_request. Notes the status for dead-board memory."""
-    res = _http_request(url, params, data, retries, max_bytes, method, headers, **({"once": True} if once else {}))
+    extra: dict[str, bool] = {**({"once": True} if once else {}), **({"truncate": True} if truncate else {})}
+    res = _http_request(url, params, data, retries, max_bytes, method, headers, **extra)
     log = getattr(_STATUS_TL, "log", None)
     if log is not None:
         log.append(res[0])
@@ -803,12 +824,16 @@ def _http_request(
     params: Any = None,
     data: bytes | None = None,
     retries: int = RETRIES_429,
-    max_bytes: int = 20_000_000,
+    max_bytes: int = API_MAX_BYTES,
     method: str | None = None,
     headers: dict[str, str] | None = None,
     once: bool = False,
+    truncate: bool = False,
 ) -> tuple[int, str, bytes]:
     """GET (or POST/other when `data`/`method` is given). Returns (status, final_url, body).
+
+    A body over ``max_bytes`` is a failed request (status 0, empty body), never a half-parsed page, unless
+    ``truncate=True``: then the first ``max_bytes`` bytes are returned (check_live classifies a page from its head).
 
     429 backs off, retries twice; 502/503/504 on a GET retry once; other 4xx never retry.
     ``once=True`` sends the request exactly once, whatever the answer (kit_bigboards: a refusal ends the site).
@@ -834,7 +859,10 @@ def _http_request(
             try:
                 req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
                 with _open(req, TIMEOUT_S) as r:
-                    return r.status, r.geturl(), r.read(max_bytes)
+                    body = r.read(max_bytes if truncate else max_bytes + 1)
+                    if len(body) > max_bytes:  # oversize is a failed request, never a half-parsed body
+                        return 0, url, b""
+                    return r.status, r.geturl(), body
             except urllib.error.HTTPError as e:
                 if once:
                     return e.code, url, b""
@@ -870,14 +898,18 @@ def http(
     headers: dict[str, str] | None = None,
     as_json: bool = True,
     once: bool = False,
+    max_bytes: int | None = None,
 ) -> tuple[int, Any]:
     """The shared http helper handed to every kit module (contract signature).
 
     Returns (status, parsed_json_or_text_or_None); status 0 on network error.
     Rate limiting (3 per host), 429 backoff and the User-Agent are built in. ``once=True`` sends the request
     exactly once (no 429 backoff, no 5xx retry): kit_bigboards uses it so a refusal ends the site.
+    ``max_bytes`` caps one response (PAGE_MAX_BYTES for text, API_MAX_BYTES for JSON); a larger body is status 0.
     """
-    st, _u, body = http_request(url, data=data, method=method, headers=headers, once=once)
+    if max_bytes is None:
+        max_bytes = API_MAX_BYTES if as_json else PAGE_MAX_BYTES
+    st, _u, body = http_request(url, data=data, method=method, headers=headers, once=once, max_bytes=max_bytes)
     if not (200 <= st < 300):
         return st, None
     text = decode_body(body)
@@ -1546,7 +1578,7 @@ class Collector:
             # a company board's token names the company; a feed's board is the feed itself ("eures"), never one
             "company": raw.get("company") or (raw.get("board") if raw.get("board") != source else "") or "",
             "url": url,
-            "location": re.sub(r"\s*\|\s*", " | ", (raw.get("loc") or "").strip(" |")),
+            "location": _respace((raw.get("loc") or "").strip(" |"), "|", " | "),
             "posted": raw.get("posted", ""),
             "source": rec_source or source,
             "board": raw.get("board", ""),
@@ -1759,7 +1791,7 @@ _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber
 # ats -> token part used as the name (comeet slug/uid, pageup id[/locale], werecruit lang/slug)
 _PATH_TOKEN = {
     "successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0,
-    "werecruit": 1, "ripplehire": 0,
+    "werecruit": 1, "ripplehire": 0, "neogov": 1, "ukgready": 1,
 }
 
 
@@ -2448,10 +2480,26 @@ def _stated_closed(lines: str) -> re.Pattern[str] | None:
     return None
 
 
+def _respace(text: str, sep: str, joiner: str) -> str:
+    """``re.sub(\\s*SEP\\s*, joiner, text)`` without the regex (it is quadratic on a long run of blanks)."""
+    parts = text.split(sep)
+    if len(parts) == 1:
+        return text
+    parts[0], parts[-1] = parts[0].rstrip(), parts[-1].lstrip()
+    return joiner.join(parts[:1] + [p.strip() for p in parts[1:-1]] + parts[-1:])
+
+
+_VIS_OPEN = re.compile(r"<(script(?=\b)|style(?=\b)|noscript(?=\b)|template(?=\b)|svg(?=\b)|!--)", re.I)
+
+
+def _vis_closer(name: str) -> re.Pattern[str]:
+    return re.compile(r"</%s\s*>" % name if name != "!--" else "--!?>", re.I)  # browsers end a comment at --> or --!>
+
+
 def _visible_text(raw: str) -> str:
     """Text a visitor would see: scripts, styles, comments and tags removed (freehire measures visible text)."""
-    t = re.sub(r"(?is)<(script|style|noscript|template|svg)\b.*?</\1\s*>|<!--.*?-->", " ", raw)
-    t = html.unescape(re.sub(r"<[^>]+>", " ", t))
+    t = _import_kit("kit_xml").drop_blocks(raw, _VIS_OPEN, _vis_closer, " ")  # one linear pass, not a lazy regex
+    t = html.unescape(re.sub(r"<[^<>]+>", " ", t))
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -2505,7 +2553,8 @@ def check_live(col: Collector, results: list[dict[str, Any]]) -> list[dict[str, 
 
     def one(rec: dict[str, Any]) -> bool:
         try:
-            st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000)
+            # the head of a long page is enough to classify it: keep it, do not treat "over 300 KB" as a failed fetch
+            st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000, truncate=True)
             verdict = classify_liveness(st, rec["url"], final, body.decode("utf-8", "replace"))
         except Exception:  # a failed check keeps the job (never abort the run)
             return True
@@ -2756,12 +2805,33 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("peopleforce", re.compile(r"^([a-z0-9-]+)\.peopleforce\.io$")),
     ("talenthr", re.compile(r"^jobs\.talenthr\.io$")),
     ("talentlyft", re.compile(r"^([a-z0-9-]+)\.talentlyft\.com$")),
+    # public sector / education: NEOGOV group 1 is the domain; AppliTrack keeps its board in the path, EDJOIN has none
+    ("neogov", re.compile(r"^(?:www\.)?(governmentjobs\.com|schooljobs\.com)$")),
+    ("applitrack", re.compile(r"^(?:www\.)?applitrack\.com$")),
+    ("schoolspring", re.compile(r"^([a-z0-9-]+)\.schoolspring\.com$")),
+    ("edjoin", re.compile(r"^(?:www\.)?edjoin\.org$")),
+    # generic ATS: UKG Ready pod hosts (the board is host/tenant), BeeSite search hosts, the Workable marketplace;
+    # eArcu and Radancy sit on each employer's own host, so they are matched by path in board_from_job_url
+    ("ukgready", re.compile(r"^((?:[a-z0-9-]+\.)*(?:saashr\.com|entertimeonline\.com|yourpayrollhr\.com|mykronos\.com|"
+                            r"workforceready\.[a-z]{2,3}(?:\.[a-z]{2})?))$")),
+    # Latin America: the tenant is the subdomain (Gupy, HiringRoom, InHire, Solides) or a path segment (Recrutei)
+    ("gupy", re.compile(r"^([a-z0-9-]+)\.gupy\.io$")),
+    ("hiringroom", re.compile(r"^([a-z0-9-]+)\.hiringroom\.com$")),
+    ("recrutei", re.compile(r"^jobs\.recrutei\.com\.br$")),
+    ("inhire", re.compile(r"^([a-z0-9-]+)\.inhire\.app$")),
+    ("solides", re.compile(r"^([a-z0-9-]+)\.vagas\.solides\.com\.br$")),
+    ("vagas", re.compile(r"^(?:www\.)?vagas\.com\.br$")),
+    ("beesite", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+){0,3}\.beesite\.de)$")),
+    ("workablemarketplace", re.compile(r"^jobs\.workable\.com$")),
 ]
+# Career sites on an employer's own host that the URL path gives away: eArcu vacancies and Radancy (TalentBrew) jobs
+_EARCU_PATH = re.compile(r"^/jobs/vacancy/[^/]+/\d+/description/?$")
+_RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+/\d+/?$")
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co)$", re.I)
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2827,6 +2897,29 @@ def board_from_job_url(url: str) -> dict[str, Any]:
                 tok = sub if sub.lower() not in _SLUG_BLOCK else ""
             else:
                 tok = seg[0] if seg and re.fullmatch(_SLUG, seg[0]) and seg[0].lower() not in _SLUG_BLOCK else ""
+        elif ats == "neogov":  # https://www.schooljobs.com/careers/<agency>[/<folder>]/jobs/<id>/...
+            agency = seg[1].lower() if len(seg) > 1 and seg[0] == "careers" else ""
+            ok_agency = re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", agency) and agency != "home"
+            tok = "%s/%s" % (m.group(1), agency) if ok_agency else ""
+        elif ats == "applitrack":  # https://www.applitrack.com/<district>/onlineapp/...
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", seg[0]) else ""
+        elif ats == "schoolspring":  # <district>.schoolspring.com is a district board; www/api carry no board token
+            tok = "" if m.group(1) in ("www", "api") else host
+        elif ats in ("gupy", "hiringroom", "inhire"):  # portal., private-api., api., www.: vendor hosts
+            tok = "" if m.group(1) in ("www", "api", "portal", "private-api", "employability-portal") else m.group(1)
+        elif ats == "recrutei":  # https://jobs.recrutei.com.br/<tenant>/vacancy/<id>-<slug>
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
+        elif ats == "vagas":  # one national board: the job link carries no board token
+            tok = ""
+        elif ats == "edjoin":  # one central index: the job link does not show the job-type id the board is
+            tok = ""
+        elif ats == "ukgready":  # https://<pod host>/ta/<tenant>.careers?ShowJob=<id>
+            t = seg[1][:-len(".careers")] if len(seg) > 1 and seg[0] == "ta" and seg[1].endswith(".careers") else ""
+            tok = "%s/%s" % (m.group(1), t) if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", t) else ""
+        elif ats == "beesite":  # the search host itself; a portal's job page sits on the employer's domain
+            tok = m.group(1)
+        elif ats == "workablemarketplace":  # jobs.workable.com/view/<job>/...: the company hashid is not in the link
+            tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
         elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
@@ -2864,7 +2957,16 @@ def board_from_job_url(url: str) -> dict[str, Any]:
         return {"kind": "ats", "ats": ats, "token": tok if keep else tok.lower(), "host": host}
     if "gh_jid" in q:  # a company domain that embeds Greenhouse: the board token is not in the link
         return {"kind": "ats", "ats": "greenhouse", "token": "", "host": host}
-    return {"kind": "unsupported" if _UNSUPPORTED_HOSTS.search(host) else "other", "ats": "", "token": "", "host": host}
+    if _EARCU_PATH.search(u.path):
+        return {"kind": "ats", "ats": "earcu", "token": host, "host": host}
+    rm = _RADANCY_PATH.search(u.path)
+    if rm:
+        lang = "/" + rm.group(1) if rm.group(1) not in (None, "en") else ""
+        return {"kind": "ats", "ats": "radancy", "token": host + lang, "host": host}
+    # PeopleSoft HCM sites sit on each employer's own host: the path is the signature (not read, needs a cookie)
+    ps = bool(re.search(r"^/psc/[^/]+/[^/]+/[^/]+/c/HRS_HRAM_FL\.", u.path, re.I))
+    kind = "unsupported" if ps or _UNSUPPORTED_HOSTS.search(host) else "other"
+    return {"kind": kind, "ats": "", "token": "", "host": host}
 
 
 def cached_universe(ats_list: Iterable[str], cache_dir: Path | None = None) -> tuple[list[dict[str, str]], list[str]]:

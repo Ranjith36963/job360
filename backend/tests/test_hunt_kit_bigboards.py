@@ -662,3 +662,27 @@ def test_a_429_says_try_again_tomorrow(capsys):
     http = _http(lambda url, obj=None: (429, ""))
     kb.fetch_linkedin(["a"], http, {}, days=BIG, countries=["GB"])
     assert "try again tomorrow" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_div_and_google_scans_are_linear_on_hostile_markup():
+    assert kb._div_inner('<div class="a x b"><div>in</div>tail</div>', "x") == "<div>in</div>tail"
+    _grows_linearly(lambda p: kb._div_inner(p, "x"), lambda k: '<div class="x">' + "<div " * k)
+    _grows_linearly(kb.parse_google_first_page, lambda k: '520084652":[' * k + "]] }]]]]]")
+    _grows_linearly(kb.parse_google_first_page, lambda k: '520084652":[1] ' * k)

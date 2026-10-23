@@ -49,12 +49,14 @@ from src.services.browser_agent.page_js import (
     SUBMIT_GUARD_READ_JS,
     SUBMIT_GUARD_START_JS,
     TICK_VIA_LABEL_JS,
+    TYPEABLE_TARGET_JS,
     WATCH_READ_JS,
     WATCH_START_JS,
 )
 from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
 from src.services.browser_agent.sites import (
     account_step,
+    greenhouse_embed_url,
     is_honeypot,
     looks_like_application,
     outcome_for,
@@ -540,8 +542,34 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
     page = _live_page(s)
     if not await loc.evaluate("(el) => el.getAttribute('aria-expanded') === 'true'"):
         await loc.click()
-    own_lists = [i for i in await loc.evaluate(OWN_LIST_IDS_JS) if _LIST_ID.match(i)]
     seen: list[str] = []
+    if await _pick_in_frames(s, page, loc, text, seen):
+        return
+    # A long or virtualized list draws only part of its options until something is typed (a phone-country
+    # list of ~250). Once, never a loop: type the asked-for text with the real keyboard, let the list
+    # redraw, read the options again and pick again.
+    # Only option-shaped text is keyed: short, and no control character (as keys "\n" is Enter).
+    typeable = (
+        await loc.evaluate(TYPEABLE_TARGET_JS)
+        if len(text) <= KEYED_MAX_CHARS and not _CONTROL_CHARS.search(text) else ""
+    )
+    if typeable:
+        field = loc if typeable == "self" else loc.locator("input").nth(int(typeable.split(":", 1)[1]))
+        await field.fill("")  # clear old text first (never ctrl+a: in an empty field it types an "a")
+        await field.press_sequentially(text, delay=25)
+        await _settle(page)
+        seen = []
+        if await _pick_in_frames(s, page, loc, text, seen):
+            return
+    await page.keyboard.press("Escape")
+    raise _option_not_found(text, seen)
+
+
+async def _pick_in_frames(s: Session, page: Any, loc: Any, text: str, seen: list[str]) -> bool:
+    """Read the options drawn now (the field's own frame first), click the one ``text`` names and check
+    the field shows it. True when picked and confirmed; False when no drawn option matches (``seen`` gets
+    every label read)."""
+    own_lists = [i for i in await loc.evaluate(OWN_LIST_IDS_JS) if _LIST_ID.match(i)]
     for frame in await _option_frames(page, loc):
         options, scoped = frame.locator(VISIBLE_OPTIONS), False
         for list_id in own_lists:  # the list the field names as its own, when it is in this frame
@@ -577,14 +605,13 @@ async def _choose(s: Session, loc: Any, text: str) -> None:
             if shown.strip() else bool(await loc.evaluate(CHOSEN_NEARBY_JS, texts[i].casefold()))
         )
         if confirmed:
-            return
+            return True
         raise BrowserError(
             "error", "choose_unconfirmed",
             f"Clicked option {i + 1} but the field does not show it. The field shows: "
             + (_wrap_untrusted(shown[:60]) if shown.strip() else "nothing"),
         )
-    await page.keyboard.press("Escape")
-    raise _option_not_found(text, seen)
+    return False
 
 
 async def _option_frames(page: Any, loc: Any) -> list[Any]:
@@ -1135,6 +1162,8 @@ async def _act(
     gate: Optional[Gate], files: Optional[FileFn],
 ) -> dict[str, Any]:
     if action == "open":
+        requested = url
+        url = greenhouse_embed_url(url)  # before the screen: the guard sees the URL that is opened
         verdict = await pool.screen.screen(url)
         if not verdict.ok:
             raise BrowserError(
@@ -1153,7 +1182,12 @@ async def _act(
         await _settle(page)
         if (refusal := _refusal(s, page)) is not None:
             raise refusal
-        return await look(s)
+        result = await look(s)
+        if url != requested:
+            result["opened_as"] = (
+                "Greenhouse embed form (lighter page for the same job): " + redact_url_for_display(url)
+            )
+        return result
     if action == "look":
         return await look(s)
     if action == "back":
@@ -1331,6 +1365,11 @@ async def _act(
         )
 
     if action == "choose":
+        if kind == "password":
+            raise BrowserError(
+                "refused", "password_field",
+                "That is a password box. Job360 never types a password: the user signs in themselves.",
+            )
         await _choose(s, loc, text)
         return await look(s, after_action=True)
 
