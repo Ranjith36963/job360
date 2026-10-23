@@ -44,8 +44,10 @@ export function FinishInBrowser({ onDone }: { onDone: () => void }) {
     }
   }, []);
 
+  // The first picture, fetched from a timer callback (not in the effect body: react-hooks/set-state-in-effect).
   useEffect(() => {
-    void step({ action: "shot" });
+    const id = window.setTimeout(() => void step({ action: "shot" }), 0);
+    return () => window.clearTimeout(id);
   }, [step]);
 
   // Keep the picture fresh (the check changes on its own), not while this tab is hidden.
