@@ -133,6 +133,8 @@ pages. Energy Jobline is not read: its ad pages answer only a client that calls 
 `energyjobline.com` link is reported as unsupported. The references' referral-code links for Strider, micro1 and Alignerr are not
 used: the kit lists the plain posting page.
 
+`kit_co7.py` adds three boards from career-ops: PrevueAPS (`prevueaps:<tenant>` of `<tenant>.prevueaps.ca`; the tenant's numeric site id is read from its `/jobs/` page, then one JSON call), Red Rover K12 (`redrover:<orgId>` of `jobs.redroverk12.com/org/<orgId>`, public postings only; a district with more postings than one call holds fails the board rather than returning a cut list) and Senjob, Senegal (`senjob:all`, the listing pages, at most 10; the listing names no employer, so the company is `?`). No posting page is opened for any of the three.
+
 `kit_asia2.py` adds Asian boards: MokaHR (`mokahr:<orgId>/<siteId>` of `app.mokahr.com/social-recruitment/<orgId>/<siteId>`, or
 `mokahr:<orgId>/<siteId>/r1` for the international host `hire-r1.mokahr.com`), HRMOS (`hrmos:<slug>` of `hrmos.co/pages/<slug>/jobs`),
 HERP (`herp:<slug>` of `herp.careers/v1/<slug>`), Quickin (`quickin:<slug>` of `jobs.quickin.io/<slug>`), and PyjamaHR (`pyjamahr:<slug>`
@@ -356,7 +358,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_co7.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)
 - `build_companies.py` rebuilds the register rows of `companies.json` (never needed to run the kit)
