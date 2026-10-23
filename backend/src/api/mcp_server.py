@@ -1555,32 +1555,33 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     ) -> dict[str, Any]:
         """Append an event.
 
-        `source` {kind, message_id, thread_id?, sender, subject, received_at} = the email; repeat id = no-op.
+        `source` {kind, message_id, thread_id?, sender, subject, received_at, quote?} = the email; repeat id = no-op;
+        quote = deciding line, verbatim. Unsure: outcome_suggested (rules).
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move status;
-        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + email
-        `source` is proof, not a 2nd.
+        furthest stage wins (only corrects_event_id moves back). A repeat `applied` + `source`
+        is proof, not a 2nd.
         `scheduled_at` (ISO-8601 + tz) only on interview_requested/_scheduled.
         `follow_up_on` YYYY-MM-DD = next chase; "" clears.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`, or user says),
-        outreach_replied, contact_meeting|contact_call|contact_intro|referral_asked|
-        referral_given|outreach_bounced (bounce id as `source`); no application_id if cold.
+        Outreach: `contact_id` + `channel` with outreach_sent (Sent-mail id as `source`),
+        outreach_replied, contact_meeting|_call|_intro, referral_asked|_given, outreach_bounced
+        (bounce id as `source`); no application_id if cold.
 
         Kit events: form_filled {form_url, fields_count, fields_skipped?: [blanks],
         answers?: [{question, answer, source, key?}]}, source = memory|profile|approved|written|guessed;
         form_checked {questions_count, answered, missing, missing_required?, answers?, page, pages_total};
         cv_seen and submit_approved {artifact_id, sha256, where} after the user's yes (where=chat);
-        submit_declined {where}; submit_attempted {} pre-click;
+        submit_declined {where}; submit_attempted {};
         form_swept {fields_checked, fixed, notes, unreadable, page, pages_total, answers, form_url};
-        email_drafted {to, subject, attachments, gmail_draft_id} (no body);
+        email_drafted {to, subject, attachments, gmail_draft_id};
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|posting_closed|account_creation|otp_needed|id_or_payment_asked|assessment_required|
         manual_only|site_limit_reached|other, step, page_host, detail}, then stop; unblocked {resolution:
         retried|user_did_it|skipped, note?}.
-        proof_text {text, page_host}; simulation {} = test app, not counted; unqueued {reason?};
+        proof_text {text, page_host}; simulation {} = test app; unqueued {reason?};
         answer_corrected {key|question, was_source}. Payloads, 403/409: get_recipe("rules"), Events."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         detail, payload, source = _unfence_in(detail), _unfence_in(payload), _unfence_in(source)
@@ -2202,7 +2203,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
-    async def doctor(client_tools_version: str = "", client_tools_rev: Optional[int] = None) -> dict[str, Any]:
+    async def doctor(
+        client_tools_version: str = "", client_tools_rev: Optional[int] = None,
+        client_tools: Optional[dict[str, list[str]]] = None,
+    ) -> dict[str, Any]:
         """Call first when something seems wrong or at the start of a run; read
         `next_step` (verify_email | upload_cv | setup:<round> | answer_asks |
         confirm_settings | ok). Also: how you are signed in (`auth`), what the
@@ -2222,11 +2226,15 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         `tools_version` = their short hash. Pass the `tools_version` you saw last
         time as `client_tools_version`: `tools_stale` true = your client's tool
         list is old (follow `stale_hint`: tell the user to reconnect Job360). `tools_rev`
-        is the same as a plain integer; pass the one you saw as `client_tools_rev`. Call
+        is the same as a plain integer; pass the one you saw as `client_tools_rev`.
+        Surest check: pass `client_tools` = {tool: [parameter names]} from your own
+        tool list; `tools_missing` names what your client lacks. Call
         doctor too when a tool ignores or refuses an argument you expected."""
         try:
             async with _request_db() as db:
                 resp = await doctor_route.doctor(db, _user(), client_tools_version, client_tools_rev)
+            if client_tools is not None:
+                resp = {**resp, **tools_report(client_tools_version, client_tools_rev, client_tools)}
         except HTTPException as exc:
             _audit("doctor", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -2552,11 +2560,35 @@ def tools_stamp() -> dict[str, Any]:
     return {"tools_version": tools_version(served_tool_parameters()), "tools_rev": tools_rev()}
 
 
-def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int] = None) -> dict[str, Any]:
-    """The doctor's tool-list block: ``tools_version``, ``tools``, ``tools_stale`` and ``stale_hint``.
+def missing_from_client(client_tools: Mapping[str, Any]) -> dict[str, list[str]]:
+    """``{tool: [parameters the client lacks]}`` against what this server serves now.
 
-    ``tools_stale`` is null when the caller passed no version, else whether the
-    version it saw differs from what this server serves now.
+    A tool the client lacks entirely maps to all its parameters (or ``["*"]`` when it
+    has none). Extra tools or parameters on the client side are ignored: only what
+    it is missing makes it stale.
+    """
+    missing: dict[str, list[str]] = {}
+    for name, params in served_tool_parameters().items():
+        have = client_tools.get(name)
+        if have is None:
+            missing[name] = sorted(params) or ["*"]
+            continue
+        lacked = sorted(set(params) - {str(p) for p in have})
+        if lacked:
+            missing[name] = lacked
+    return missing
+
+
+def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int] = None,
+                 client_tools: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
+    """The doctor's tool-list block: ``tools_version``, ``tools``, ``tools_stale``, ``stale_hint``, ``tools_missing``.
+
+    ``tools_stale`` is null when the caller passed nothing to compare, else whether
+    its version or rev differs from what this server serves now, or - the check
+    that cannot be fooled - whether ``client_tools`` (the tool and parameter names
+    the client really holds) lacks anything served now. 2026-10-23: a client with
+    a cached tool list (no ``phone``/``links`` on add_contact) passed the version
+    from the freshly read instructions and was told ``tools_stale: false``.
     """
     tools = served_tool_parameters()
     version = tools_version(tools)
@@ -2564,13 +2596,20 @@ def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int]
     stale: Optional[bool] = (given.lower() != version) if given else None
     if client_tools_rev is not None:
         stale = bool(stale) or client_tools_rev != tools_rev()
-    return {
+    missing: Optional[dict[str, list[str]]] = None
+    if client_tools is not None:
+        missing = missing_from_client(client_tools)
+        stale = bool(stale) or bool(missing)
+    report: dict[str, Any] = {
         "tools_version": version,
         "tools_rev": tools_rev(),
         "tools": tools,
         "tools_stale": stale,
         "stale_hint": stale_hint_for(_current_client_name.get()),
     }
+    if missing is not None:  # only when asked: keeps the plain doctor identical to GET /api/doctor
+        report["tools_missing"] = missing
+    return report
 
 
 def _declare_tools_list_changed(result: HandlerResult) -> HandlerResult:

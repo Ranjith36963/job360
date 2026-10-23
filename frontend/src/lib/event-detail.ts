@@ -9,7 +9,7 @@
 //   `contact_name` is joined in by the backend (caller's own contacts only).
 // ---------------------------------------------------------------------------
 
-import { eventLabel } from "@/lib/event-labels";
+import { eventLabel, STATUS_LABEL } from "@/lib/event-labels";
 
 const KIND_LABEL: Record<string, string> = {
   cv: "CV",
@@ -86,6 +86,10 @@ export function eventTitle(e: { event_type: string; payload?: unknown; recorded_
   if (CONTACT_EVENTS.has(e.event_type)) {
     const name = contactNameOf(e);
     return name ? `${eventLabel(e)} · ${name}` : eventLabel(e);
+  }
+  if (e.event_type === "outcome_suggested") {
+    const t = payloadOf(e).event_type;
+    if (typeof t === "string") return `${eventLabel(e)}: ${STATUS_LABEL[t] ?? t}`;
   }
   return eventLabel(e);
 }

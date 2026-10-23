@@ -54,6 +54,10 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
         "gaps": [{"topic": "query planning", "status": "gap"}],
         "signals": [{"signal": "scope_ambiguity", "quote": "We will see what the role becomes."}],
     },
+    "outcome_suggested": {
+        "event_type": "rejected", "quote": "We have decided to move forward with other candidates.",
+        "why": "It does not name the role, and two applications are open there.",
+    },
     "process_friction": {"reason": "rescheduled twice"},
     "assessment": {
         "platform": "HackerRank", "subject": "SQL", "threshold_pct": 70, "score_pct": 82,

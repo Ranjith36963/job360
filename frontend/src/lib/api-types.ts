@@ -188,6 +188,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/outcome-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Outcome Suggestions
+         * @description Feature 9: open outcome_suggested events (not ignored, and their email not yet recorded
+         *     on the application), newest first. Read-only; web only (an assistant reads them on
+         *     get_application / whats_new).
+         */
+        get: operations["list_outcome_suggestions_api_applications_outcome_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/stats": {
         parameters: {
             query?: never;
@@ -5099,6 +5121,8 @@ export interface components {
             kind: string;
             /** Message Id */
             message_id: string;
+            /** Quote */
+            quote?: string | null;
             /** Received At */
             received_at?: string | null;
             /**
@@ -5124,6 +5148,8 @@ export interface components {
             kind: string;
             /** Message Id */
             message_id: string;
+            /** Quote */
+            quote?: string | null;
             /** Received At */
             received_at: string | null;
             /** Sender */
@@ -6405,6 +6431,39 @@ export interface components {
             redirect_uri: string;
             /** Scope */
             scope: string;
+        };
+        /** OutcomeSuggestionOut */
+        OutcomeSuggestionOut: {
+            /** Application Id */
+            application_id: number;
+            email: components["schemas"]["EventSourceOut"];
+            /** Event Id */
+            event_id: number;
+            /** Event Type */
+            event_type: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Occurred At */
+            occurred_at: string;
+            /** Quote */
+            quote: string;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Status */
+            status: string;
+            /** Why */
+            why: string;
+        };
+        /** OutcomeSuggestionsOut */
+        OutcomeSuggestionsOut: {
+            /** Suggestions */
+            suggestions: components["schemas"]["OutcomeSuggestionOut"][];
+            /** Truncated */
+            truncated: boolean;
         };
         /**
          * OutreachCheckResponse
@@ -9293,6 +9352,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MatchEmailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_outcome_suggestions_api_applications_outcome_suggestions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeSuggestionsOut"];
                 };
             };
             /** @description Validation Error */

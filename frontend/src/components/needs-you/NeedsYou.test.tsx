@@ -22,6 +22,7 @@ vi.mock("@/lib/api", () => ({
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
+vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
 // Approve CV has its own tests (CvToApprove.test.tsx).
 vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
 // Ready to send has its own tests (ReadyToSend.test.tsx).

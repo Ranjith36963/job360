@@ -958,6 +958,13 @@ export async function setApplicationVisa(
   });
 }
 
+/** Feature 9: an assistant was unsure what an email means; these wait for Accept / Ignore. */
+export type OutcomeSuggestion = _Schemas["OutcomeSuggestionOut"];
+
+export async function listOutcomeSuggestions(): Promise<_Schemas["OutcomeSuggestionsOut"]> {
+  return request("/api/applications/outcome-suggestions");
+}
+
 export async function recordApplicationEvent(
   applicationId: number,
   body: {
@@ -971,6 +978,16 @@ export async function recordApplicationEvent(
     // Owner decision, 2026-09-25 — omit to leave the date alone, "" to
     // clear it, "YYYY-MM-DD" to set it. Works on any event_type.
     follow_up_on?: string;
+    // The email an event came from; `quote` = its one deciding sentence, verbatim (<= 500).
+    source?: {
+      kind?: string;
+      message_id: string;
+      thread_id?: string;
+      sender?: string;
+      subject?: string;
+      received_at?: string;
+      quote?: string;
+    };
   }
 ): Promise<_Schemas["RecordEventResponse"]> {
   return request(`/api/applications/${applicationId}/events`, {
