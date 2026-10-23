@@ -419,6 +419,10 @@ APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS = int(
 )
 APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS", "320"))
 APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS", "500"))
+APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS", "256"))
+# match_email (feature 8): at most this many candidate applications per call, newest
+# first; `truncated` says more existed.
+MATCH_EMAIL_MAX_CANDIDATES = int(os.getenv("MATCH_EMAIL_MAX_CANDIDATES", "20"))
 
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)
@@ -948,6 +952,15 @@ ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TT
 # How many waiting requests ONE user's assistants may create per hour — a loop
 # cannot bury the Needs-you page. Counted off the table, never per IP.
 ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR", "20"))
+# Owner decision 2026-10-23 - "what is due now?" for the user's OWN scheduled task (migration 0082).
+# The clock lives at the AI vendor; Job360 only answers. SCHEDULE_TICK_HOURS is how often that task
+# is expected to wake (returned as `expected_every_hours`). Duties are a closed set; `tick` is the
+# stamp of the last scheduled run. Reads and marks are per-user rate limited (a loop cannot hammer).
+SCHEDULE_TICK_HOURS = int(os.getenv("SCHEDULE_TICK_HOURS", "1"))
+SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch")
+SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batch": "batch"}
+SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
+SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and
 # asks yes. Matched against whole host labels (indeed.co.uk, uk.indeed.com,
 # linkedin.com, lnkd.in all hit; notindeed.com does not). Over-blocking only

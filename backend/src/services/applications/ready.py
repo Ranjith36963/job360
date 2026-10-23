@@ -63,6 +63,44 @@ async def ready_rows(
     return out
 
 
+# Approve CV on Needs you (owner decision 2026-10-23): every open application whose newest CV the user has
+# not seen yet - neither a cv_seen nor a submit_approved names it, from chat or from the web.
+CV_TO_APPROVE_MAX = 50
+_CV_TO_APPROVE_SQL = (
+    "SELECT a.id AS application_id, a.job_title, a.job_company, c.id AS artifact_id, c.version_no, c.text, "
+    "c.created_at, c.made_by FROM applications a JOIN application_artifacts c "
+    "ON c.application_id = a.id AND c.user_id = a.user_id AND c.kind = 'cv' "
+    "AND c.version_no = (SELECT MAX(v.version_no) FROM application_artifacts v WHERE v.application_id = a.id "
+    "AND v.user_id = a.user_id AND v.kind = 'cv') "
+    "WHERE a.user_id = ? AND a.status = 'considering' "
+    "AND NOT EXISTS (SELECT 1 FROM application_receipts r WHERE r.application_id = a.id AND r.user_id = a.user_id) "
+    "ORDER BY c.id DESC LIMIT ?"
+)
+
+
+async def cv_to_approve(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+    """The caller's open applications whose newest CV has no seen mark (``kit.cv_mark_matches``, the
+    test the gate's ``cv_not_seen`` uses), newest CV first, at most ``CV_TO_APPROVE_MAX``."""
+    cur = await db._db.execute(_CV_TO_APPROVE_SQL, (user_id, CV_TO_APPROVE_MAX * 4))
+    out: list[dict[str, Any]] = []
+    for r in await cur.fetchall():
+        row = dict(r)
+        app_id, sha = int(row["application_id"]), kit.sha256_text(row["text"])
+        marks = await kit._events(db, user_id, app_id, ("cv_seen", "submit_approved"))
+        if any(kit.cv_mark_matches(ev, row["artifact_id"], sha) for ev in marks):
+            continue
+        out.append({
+            "application_id": app_id, "job_title": row["job_title"] or "", "job_company": row["job_company"] or "",
+            "cv": {
+                "artifact_id": row["artifact_id"], "version": row["version_no"], "saved_at": row["created_at"],
+                "made_by": row["made_by"],
+            },
+        })
+        if len(out) >= CV_TO_APPROVE_MAX:
+            break
+    return out
+
+
 async def newest_fill_id(db: JobDatabase, user_id: str, application_id: int) -> Optional[int]:
     """The id of the caller's newest ``form_filled`` event on one application
     (None when there is none). "Send" checks it so a yes names the fill the user saw."""

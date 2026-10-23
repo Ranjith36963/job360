@@ -12,8 +12,8 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
 0. **Check the mode.** `get_profile`, read `preferences.daily_check`. `paused`,
    `declined` or empty: STOP, read no email, record nothing, do not ask. `ask`:
    ask in chat "Can I check your Gmail now?" and STOP unless they say yes.
-   `auto` (or `scheduled`): go on. Hourly task and `preferences.check_every` is `3h`, `6h` or `12h` (`1h` runs every hour),
-   not a run hour (00, 03, 06, 09, 12, 15, 18, 21 for 3h; 00, 06, 12, 18 for 6h; 08, 20 for 12h, user's timezone): STOP.
+   `auto` (or `scheduled`): go on. **A scheduled run** (the user's task woke you): call `whats_due` first and run only what
+   it lists (`inbox` = this recipe, `hunt`, `batch`); `nothing_due`: STOP. After each one, `mark_done` it.
 0b. **Check the pause.** Read `settings`. If `settings.paused` is true, do ALL
    apply work as stopped: fill no forms, submit nothing, start no application
    (the inbox check goes on only if its mode allows it). `pause_reason` is the
@@ -25,8 +25,8 @@ missing: `ask_user` (a Needs-you note), then continue. Full rules (Gmail modes, 
    ({"Company A" "Company B"} OR {from:<each email_senders domain>} OR label:<the user's job label, if any>)`. Look for
    employer replies, confirmation emails and replies from people you reached out to; skip a message id already recorded as a `source`.
 3. **Read the WHOLE email, then record.** Never decide from the subject or preview ("we'd like to schedule a call" and
-   "thanks for applying" look alike there). Match each email to ONE open application (sender, subject, body, company,
-   `email_senders`). Record at once (both modes record straight away; the record is the user's trail) with `record_event`:
+   "thanks for applying" look alike there). Match each email to ONE open application with `match_email` (stored facts:
+   thread, contact, sender domain, company; you decide from the body). Record at once (both modes record straight away; the record is the user's trail) with `record_event`:
    replied, interview requested or scheduled (`scheduled_at`), rejected, offer. A rejection/offer is recorded at once,
    then `get_recipe("feedback")` (verbatim words, post-mortem). Always pass `source` (message id, sender,
    subject, received time). Set `follow_up_on` when news is promised by a date. A reply from a person we sent outreach to:

@@ -133,6 +133,19 @@ pages. Energy Jobline is not read: its ad pages answer only a client that calls 
 `energyjobline.com` link is reported as unsupported. The references' referral-code links for Strider, micro1 and Alignerr are not
 used: the kit lists the plain posting page.
 
+`kit_co6.py` adds four job boards: Agentic Engineering Jobs (`agenticjobs:all`, the site's public API), Flowxtra (`flowxtra:all`, the
+central feed of every company on the platform), Generalist World (`generalistworld:all`, the one `/jobs/` page) and Collage HR
+(`collage:<job-site address>`, the last path segment of `secure.collage.co/jobs/<address>`). Every field comes from the listing, so no
+posting page is opened; the first refusal ends a board and keeps what it had read. A job link that is not https on the board's own
+host is dropped. Consider (`getconsider.com`) is not read: its search needs a cookie session and a CSRF token that the kit's `http`
+cannot hold, so a `getconsider.com` link is reported as unsupported.
+`kit_fh4.py` adds three boards: Scalis (`scalis:<tenant>` of `<tenant>.scalis.ai`, the paged listing carries every body), Senior's
+Portal de Talentos (`senior:<tenant>` of `<tenant>.portaldetalentos.senior.com.br`, a keyless POST API; a vacancy you do not open is
+listed without a body) and Profession.hu (`profession:itdev` or `profession:itops`, the two IT category sitemaps of a Hungarian
+catalogue; a posting is listed only after its page was opened). A detail request is made only for a posting that passes your title
+filter, at most 25 per board; the first refusal ends the board's detail requests. Not read: Gusto Hiring and JobLeads (Cloudflare
+serves them only to a Chrome TLS fingerprint, which urllib cannot imitate), so `jobs.gusto.com` and `jobleads.com` links are
+reported as unsupported.
 `kit_w4a.py` adds five national and regional boards: Jobindex (`jobindex:<search words>`, jobindex.dk, 20 postings a page), Akademikernes Jobbank
 (`jobbankdk:<search words>`, the RSS feed of jobbank.dk, up to 100 postings, no body), hh.ru (`hhru:<professional_role id>`, for example `hhru:96`; the
 listing's embedded state, no vacancy page is opened, so a posting carries the salary line and no body), Habr Career (`habrcareer:all`) and Getmatch

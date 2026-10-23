@@ -303,12 +303,14 @@ ASK: never read on your own. At each scheduled time only ask in chat
 PAUSED: every run stops at once, reads nothing, records nothing, does
 not ask.
 
-SCHEDULE: if your app offers only hourly or daily schedules, then for
-1h, 3h, 6h or 12h create an HOURLY task (1h runs every hour) that does the work only at hours
-00, 03, 06, 09, 12, 15, 18 and 21 (3h), 00, 06, 12 and 18 (6h) or 08
-and 20 (12h) in the user's timezone (ask them if you do not know it),
-and otherwise ends at once without writing anything. For 24h, run once
-each morning.
+SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
+runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
+`batch`), then `mark_done` each; `nothing_due` = end at once without
+writing anything. Job360 counts each duty from when it was last done
+(preferences.check_every for the inbox, assistant_settings.hunt_every_hours
+for the hunt), so a missed hour catches up. It lists the inbox only in
+auto mode and the batch only when the user lets you apply on your own; it
+is never a yes to submit (check_submit still decides).
 
 KILL SWITCH: every scheduled run first calls get_profile. If
 preferences.daily_check is "paused", "declined" or "" (not
@@ -513,10 +515,10 @@ then record_event `applied` with the right `occurred_at` and `corrects_event_id`
 = that id. The old event is kept and marked superseded; never record a second
 plain `applied` (it becomes a confirmation, not a new date).
 
-`source` names the email an event came from (kind/message_id/sender/subject/
-received_at) — the same message_id on the same application is the same event,
+`source` names the email an event came from (kind/message_id/thread_id/sender/subject/
+received_at; thread_id optional, <= 256) — the same message_id on the same application is the same event,
 so you get the first one back with already_existed=true and nothing is written;
-re-reading an inbox is safe. If the same message_id arrives with a different event_type the reply carries `warnings` naming the old type; reclassify with `corrects_event_id` and leave `source` out (the original event keeps it; repeating the message_id is a no-op). `scheduled_at` is the real interview datetime
+re-reading an inbox is safe. Before recording mail, `match_email(sender, thread_id, subject)` lists the user's applications with stored reasons (same_thread, contact_email, sender_domain_in_email_senders, company_in_subject) - facts, not a verdict; you choose, and several or none = ONE ask_user. If the same message_id arrives with a different event_type the reply carries `warnings` naming the old type; reclassify with `corrects_event_id` and leave `source` out (the original event keeps it; repeating the message_id is a no-op). `scheduled_at` is the real interview datetime
 (ISO-8601 with a timezone) and is only accepted on interview_requested/
 interview_scheduled. `follow_up_on` (YYYY-MM-DD) sets when to chase this
 application next — works on ANY event_type, so a plain `note` can carry it; omit
