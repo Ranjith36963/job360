@@ -176,6 +176,9 @@ SHAPES: dict[str, dict[str, Any]] = {
         "example": "draft_only", "allowed_values": _sorted(VALID_OUTREACH_SEND_VALUES),
         "note": "auto = you may send outreach after check_outreach says send; the user's OK needed",
     },
+    _settings.HUNT_EVERY_PATH: {
+        "example": 6, "note": "hunt every N hours, 1-168; null or 0 = off. Turning it on needs the user's OK",
+    },
 }
 
 

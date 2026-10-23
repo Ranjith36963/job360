@@ -564,6 +564,7 @@ _SETTING_LOG_VALUE_PATHS = frozenset(
         settings_rules.COMPANY_CAP_PATH, settings_rules.COMPANY_CAP_DAYS_PATH,
         settings_rules.WEEKLY_CAP_PATH, settings_rules.MIN_GAP_PATH, settings_rules.APPLY_HOURS_PATH,
         settings_rules.AUTO_GRANT_COUNT_PATH, settings_rules.AUTO_GRANT_UNTIL_PATH,
+        settings_rules.HUNT_EVERY_PATH,
     }
 )
 

@@ -26,6 +26,8 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
 * ``outreach_send`` — ``draft_only`` (default) | ``auto``: may the assistant press Send on an outreach
   email (feature 10 gate). Its own consent, never implied by the Gmail mode
   ``preferences.daily_check`` (owner 2026-10-20, G087).
+* ``hunt_every_hours`` — hunt for jobs every N hours, 1-168; ``None`` / ``0`` = off (owner 2026-10-23).
+  The user's own scheduled task reads it through MCP ``whats_due``; Job360 never runs a hunt itself.
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -102,11 +104,13 @@ AUTO_EMPLOYER_EMAILS_PATH = f"{HEAD}.auto_employer_emails"
 OUTREACH_SEND_PATH = f"{HEAD}.outreach_send"
 DEFAULT_OUTREACH_SEND = "draft_only"
 OUTREACH_SEND_AUTO = "auto"
+HUNT_EVERY_PATH = f"{HEAD}.hunt_every_hours"
+HUNT_EVERY_MAX = 168  # one week
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
-    AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH,
+    AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -352,6 +356,8 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return value
     if path == OUTREACH_SEND_PATH:
         return _closed_set(path, value, VALID_OUTREACH_SEND_VALUES)
+    if path == HUNT_EVERY_PATH:
+        return _int_in_range(path, value, 0, HUNT_EVERY_MAX)  # 0 = off, like null
     raise _bad(path, "is not an assistant setting")  # pragma: no cover — callers pass SETTING_PATHS
 
 
@@ -380,6 +386,14 @@ class EffectiveSettings:
     auto_grant_count: Optional[int] = None
     auto_grant_until: str = ""
     outreach_send: str = DEFAULT_OUTREACH_SEND
+    hunt_every_hours: Optional[int] = None  # None = no scheduled hunt
+
+
+def _hunt_every(raw: Any) -> Optional[int]:
+    """A stored hunt interval as a whole number of hours; ``None`` / ``0`` / anything unreadable = off."""
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= HUNT_EVERY_MAX:
+        return None
+    return raw
 
 
 def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
@@ -417,6 +431,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         auto_grant_count=None if s.auto_grant_count is None else int(s.auto_grant_count),
         auto_grant_until=s.auto_grant_until or "",
         outreach_send=_outreach_send(s.outreach_send),
+        hunt_every_hours=_hunt_every(s.hunt_every_hours),
     )
 
 
@@ -467,6 +482,8 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return bool(raw)
     if path == OUTREACH_SEND_PATH:
         return _outreach_send(raw)
+    if path == HUNT_EVERY_PATH:
+        return _hunt_every(raw)
     raise KeyError(path)
 
 
@@ -559,6 +576,8 @@ def classify_change(
     emails               in the owner's name)                          switch; applies at once)
     outreach_send        draft_only -> auto (the assistant sends       auto -> draft_only
                          outreach in the user's name)                  (applies at once)
+    hunt_every_hours     off -> a number, or a SMALLER number (the      turned off, or a larger
+                         assistant hunts on its own more often)         number
     preferences.         anything -> auto (the assistant reads Gmail    every other value
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
@@ -612,6 +631,11 @@ def classify_change(
         return "riskier" if (bool(after) and not bool(before)) else "safer"
     if path == OUTREACH_SEND_PATH:
         return "riskier" if (after == OUTREACH_SEND_AUTO and before != OUTREACH_SEND_AUTO) else "safer"
+    if path == HUNT_EVERY_PATH:
+        # Off is the longest interval there is: more often, or newly on, frees the assistant.
+        before_rank = float("inf") if not before else before
+        after_rank = float("inf") if not after else after
+        return "riskier" if after_rank < before_rank else "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
 
 
@@ -2103,6 +2127,7 @@ def build_settings_view(
         "pause_reason": {"value": raw.pause_reason, "effective": eff.pause_reason},
         "auto_employer_emails": {"value": raw.auto_employer_emails, "effective": eff.auto_employer_emails},
         "outreach_send": {"value": raw.outreach_send, "effective": eff.outreach_send},
+        "hunt_every_hours": {"value": raw.hunt_every_hours, "effective": eff.hunt_every_hours},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,

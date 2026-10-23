@@ -740,6 +740,9 @@ class AssistantSettings:
     # chosen) | "auto". Separate from preferences.daily_check (reading Gmail never grants sending). Turning it to
     # auto is a riskier change.
     outreach_send: str = ""
+    # Owner 2026-10-23: hunt for jobs every N hours (1-168). None / 0 = off (rule #29: never set for the user).
+    # The user's own scheduled task asks MCP ``whats_due``; Job360 runs nothing. Turning it on is riskier.
+    hunt_every_hours: Optional[int] = None
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)
