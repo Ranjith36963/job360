@@ -92,6 +92,8 @@ def test_host_rule_reads_each_link_and_reports_gusto_and_jobleads_as_unsupported
     r = b("https://www.profession.hu/allas/senior-java-fejleszto-budapest-2990578")
     assert (r["kind"], r["ats"], r["token"]) == ("ats", "profession", "")
     assert b("https://profession.hu/allas/x-1")["ats"] == "profession"
+    r = b("https://www.scalis.ai/job/5f78d010-b21f-4d22-b037-e86865530f62")
+    assert (r["ats"], r["token"]) == ("scalis", "")
     assert b("https://jobs.gusto.com/postings/acme-0f0f0f0f-0f0f-0f0f-0f0f-0f0f0f0f0f0f")["kind"] == "unsupported"
     assert b("https://www.jobleads.com/job/123")["kind"] == "unsupported"
     assert b("https://evil.example/boldbusiness.scalis.ai/job/1")["kind"] == "other"

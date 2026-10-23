@@ -3004,6 +3004,8 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = gh if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", gh) else ""
         elif ats == "likeit":  # https://<tenant>.likeit.fi/jsp/duuni/AdvertShow.jsp?id=<id>
             tok = "" if m.group(1) == "www" else m.group(1)
+        elif ats == "scalis":  # https://<tenant>.scalis.ai/...: www/app/api are vendor hosts, not tenants
+            tok = "" if m.group(1) in ("www", "app", "api") else m.group(1)
         elif ats == "profession":  # https://www.profession.hu/allas/<slug>-<id>: the category is not in the link
             tok = ""
         elif ats in ("onstrider", "micro1", "alignerr"):  # one site each: the job link carries no board token
