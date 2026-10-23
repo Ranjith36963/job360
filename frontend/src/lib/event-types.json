@@ -61,6 +61,8 @@
     "referral_asked",
     "referral_given",
     "document_uploaded",
-    "email_drafted"
+    "email_drafted",
+    "outcome_suggested",
+    "outcome_dismissed"
   ]
 }

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
+import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
 import { CvToApprove } from "./CvToApprove";
 import { BatchApplyPanel } from "./BatchApplyPanel";
@@ -355,6 +356,7 @@ export function NeedsYou() {
       <MorningCheck />
       <CvToApprove />
       <ReadyToSend onTotal={setReadyTotal} />
+      <OutcomeSuggestions />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>

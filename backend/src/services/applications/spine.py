@@ -325,6 +325,13 @@ def _has_control_chars(value: str) -> bool:
     )
 
 
+def normalize_quote(value: Any) -> str:
+    """Feature 9 - a verbatim email sentence: every run of whitespace (newline, tab, CR,
+    U+2028/2029, NBSP: anything str.split() splits on) becomes ONE space, ends trimmed.
+    Other control characters are left for the caller to REFUSE (never silently stripped)."""
+    return " ".join(str(value or "").split())
+
+
 def _strip_control_chars(value: str, *, keep: str = "\n\t") -> str:
     """Remove (never 422) the same control characters ``_has_control_chars``
     refuses, except the line breaks/tabs in ``keep`` — free-text notes are
@@ -425,8 +432,10 @@ def validate_ats(kind: str, ats_score: Optional[int], ats_notes: Optional[str]) 
     return ats_score, notes
 
 
-def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def validate_source(raw: Optional[dict[str, Any]], *, allow_quote: bool = True) -> Optional[dict[str, Any]]:
     """R1/S2/S3 — normalise-and-validate an event's optional email source.
+
+    ``quote`` is optional, whitespace-collapsed, capped, and refused when ``allow_quote`` is False (outreach).
 
     ``None`` in, ``None`` out (an event with no source). Otherwise: trim the
     four text fields (``thread_id`` optional, '' = none), reject an empty ``message_id`` (that is the identity
@@ -470,6 +479,15 @@ def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         if len(value) > cap:
             raise SpineError(422, f"{name} exceeds {setting_name} ({cap} chars)")
 
+    quote = normalize_quote(raw.get("quote"))
+    if _has_control_chars(quote):
+        raise SpineError(422, "quote must not contain control characters")
+    quote_cap = settings.APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS
+    if len(quote) > quote_cap:
+        raise SpineError(422, f"quote exceeds APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS ({quote_cap} chars)")
+    if quote and not allow_quote:
+        raise SpineError(422, "source.quote is kept on application events only; record outreach without it")
+
     if kind not in settings.APPLICATION_EVENT_SOURCE_KINDS:
         raise SpineError(
             422,
@@ -492,6 +510,7 @@ def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         "sender": sender,
         "subject": subject,
         "received_at": received_at,
+        "quote": quote,
     }
 
 
@@ -600,6 +619,7 @@ def _event_source(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         "kind": row["source_kind"],
         "message_id": row["source_message_id"],
         "thread_id": row.get("source_thread_id") or None,
+        "quote": row.get("source_quote") or None,
         "sender": row["source_sender"],
         "subject": row["source_subject"],
         "received_at": row["source_received_at"] or None,
@@ -691,7 +711,7 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
     ``recorded_at`` order the status recompute uses."""
     cur = await db._db.execute(
         "SELECT id, event_type, detail, payload, occurred_at, recorded_at, recorded_by, corrects_event_id, "
-        "source_kind, source_message_id, source_thread_id, source_sender, source_subject, "
+        "source_kind, source_message_id, source_thread_id, source_quote, source_sender, source_subject, "
         "source_received_at, scheduled_at "
         "FROM application_events WHERE application_id = ? ORDER BY occurred_at ASC, id ASC",
         (application_id,),
@@ -1040,6 +1060,7 @@ async def append_event(
     source_kind = source["kind"] if source else ""
     source_message_id = source["message_id"] if source else ""
     source_thread_id = source["thread_id"] if source else ""
+    source_quote = source["quote"] if source else ""
     source_sender = source["sender"] if source else ""
     source_subject = source["subject"] if source else ""
     source_received_at = source["received_at"] if source else ""
@@ -1054,12 +1075,12 @@ async def append_event(
                 "INSERT INTO application_events "
                 "(user_id, application_id, event_type, detail, payload, occurred_at, recorded_at, "
                 " recorded_by, corrects_event_id, source_kind, source_message_id, source_thread_id, "
-                " source_sender, source_subject, source_received_at, scheduled_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " source_quote, source_sender, source_subject, source_received_at, scheduled_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, application_id, event_type, detail, payload_json, occurred_at, now,
                     recorded_by, corrects_event_id, source_kind, source_message_id, source_thread_id,
-                    source_sender, source_subject, source_received_at, scheduled_at,
+                    source_quote, source_sender, source_subject, source_received_at, scheduled_at,
                 ),
             )
     except pg.IntegrityError:
@@ -2871,7 +2892,8 @@ async def whats_new(
     cur = await db._db.execute(
         f"SELECT id, application_id, event_type, detail, payload, occurred_at, recorded_at, "  # noqa: S608
         f"recorded_by, corrects_event_id, source_kind, source_message_id, source_thread_id, "
-        f"source_sender, source_subject, source_received_at, scheduled_at FROM application_events WHERE {where_sql} "
+        f"source_quote, source_sender, source_subject, source_received_at, scheduled_at "
+        f"FROM application_events WHERE {where_sql} "
         f"ORDER BY recorded_at ASC, id ASC LIMIT ?",
         [*params, limit + 1],
     )
