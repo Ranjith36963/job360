@@ -118,6 +118,13 @@ your title filter, at most 25 per board; the first refusal ends the board's page
 about 5.6 MB, over the kit's page limit, so a `jobs.humanbit.ai` link is reported as unsupported. A Radancy or eArcu link on
 an employer's own domain is recognised by its path.
 
+`kit_ats_misc4.py` adds two platforms: ADP MyJobs (`adpmyjobs:<career site slug>`, e.g. `adpmyjobs:stellantisexternalcx`; a different product
+from Workforce Now, which is `adp`) and Eploy career sites (`eploy:<careers host>`, e.g. `eploy:careers.pei.group`, read from the site's
+`live-jobs.xml`). A requisition detail or vacancy page is opened only for a card that passes your title filter, at most 25 per board;
+the first refusal ends the board's detail requests (an Eploy vacancy then shows a title read from its link and no description).
+Dayforce is not read: its listing needs a cookie session the kit cannot hold, so a `jobs.dayforcehcm.com` link is reported as unsupported.
+Cornerstone and Jibe are already `cornerstone` and `jibe`.
+
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
 (`hiringthing:host`, the full careers host, e.g. `acme.hiringthing.com`, because the product is white-labelled),
