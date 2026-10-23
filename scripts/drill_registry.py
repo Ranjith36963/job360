@@ -200,6 +200,15 @@ REGISTRY: dict[str, Guard] = {
         no_negative="40+ cases hardcoded in a 3,600-line self_drill(); a --break-checker there is its own "
                       "PR",
     ),
+    "scripts/migration_sweep.py": Guard(
+        status="drilled",
+        # After main gains a migration, fails merge-cage and withdraws auto-merge on
+        # every open PR whose new migration number now clashes (blocker B30). The
+        # drill replays #1088 then #1006 through a fake GitHub.
+        drill=[sys.executable, "scripts/migration_sweep.py", "--drill"],
+        # NEGATIVE CONTROL: the judge blinded to report no clash; must exit 1.
+        negative=[sys.executable, "scripts/migration_sweep.py", "--drill", "--blind"],
+    ),
     "scripts/gate_wiring_check.py": Guard(
         status="drilled",
         # Checks the cage is wired somewhere it could actually stop something.
