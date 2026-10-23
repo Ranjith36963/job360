@@ -4697,6 +4697,44 @@
         "title": "DoctorSilentItem",
         "type": "object"
       },
+      "DueItemOut": {
+        "properties": {
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch"
+            ],
+            "title": "Duty",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "never_done",
+              "interval_elapsed",
+              "queue_waiting"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "recipe": {
+            "enum": [
+              "hunt",
+              "daily",
+              "batch"
+            ],
+            "title": "Recipe",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty",
+          "recipe",
+          "reason"
+        ],
+        "title": "DueItemOut",
+        "type": "object"
+      },
       "EmailChangeRequest": {
         "properties": {
           "current_password": {
@@ -7435,6 +7473,53 @@
           "email"
         ],
         "title": "MagicLinkRequest",
+        "type": "object"
+      },
+      "MarkDoneIn": {
+        "additionalProperties": false,
+        "properties": {
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch"
+            ],
+            "title": "Duty",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty"
+        ],
+        "title": "MarkDoneIn",
+        "type": "object"
+      },
+      "MarkDoneOut": {
+        "properties": {
+          "done_at": {
+            "title": "Done At",
+            "type": "string"
+          },
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch"
+            ],
+            "title": "Duty",
+            "type": "string"
+          },
+          "last_tick_at": {
+            "title": "Last Tick At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty",
+          "done_at",
+          "last_tick_at"
+        ],
+        "title": "MarkDoneOut",
         "type": "object"
       },
       "MeResponse": {
@@ -14705,6 +14790,89 @@
           "sha"
         ],
         "title": "VersionResponse",
+        "type": "object"
+      },
+      "WhatsDueOut": {
+        "properties": {
+          "batch_hold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Hold"
+          },
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "due": {
+            "items": {
+              "$ref": "#/components/schemas/DueItemOut"
+            },
+            "title": "Due",
+            "type": "array"
+          },
+          "expected_every_hours": {
+            "title": "Expected Every Hours",
+            "type": "integer"
+          },
+          "last_done_at": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Last Done At",
+            "type": "object"
+          },
+          "last_tick_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tick At"
+          },
+          "next_due_at": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Next Due At",
+            "type": "object"
+          },
+          "nothing_due": {
+            "title": "Nothing Due",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "due",
+          "nothing_due",
+          "next_due_at",
+          "last_done_at",
+          "expected_every_hours",
+          "checked_at"
+        ],
+        "title": "WhatsDueOut",
         "type": "object"
       },
       "WhatsNewApplicationOut": {
@@ -24318,6 +24486,148 @@
         "summary": "Get Recipe",
         "tags": [
           "recipes"
+        ]
+      }
+    },
+    "/api/schedule/done": {
+      "post": {
+        "description": "Stamp one duty (hunt | inbox | batch) as done now, and the tick. A slot, never history.",
+        "operationId": "mark_done_api_schedule_done_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkDoneIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkDoneOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Done",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/schedule/due": {
+      "get": {
+        "description": "The duties due NOW for the signed-in user, each with its recipe. Read-only: changes no setting\nand stamps nothing.",
+        "operationId": "whats_due_api_schedule_due_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsDueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Whats Due",
+        "tags": [
+          "schedule"
         ]
       }
     },

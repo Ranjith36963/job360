@@ -4,9 +4,9 @@
 Print this checklist and tick each step:
 [ ] 1 Targets  [ ] 2 Plan  [ ] 3 Search  [ ] 4 Judge  [ ] 5 Bring  [ ] 6 Report
 
-Job360 never searches, ranks or recommends jobs. YOU search, then bring only the good ones into Job360.
-Use EVERY tool you have, at full strength: code (the hunt kit), web search and fetch, a browser,
-connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: thousands of ads, not twenty.
+Job360 never searches, ranks or recommends jobs. YOU search, then bring only the good ones into Job360. Use EVERY tool
+you have, at full strength: code (the hunt kit), web search and fetch, a browser, connectors, parallel helpers (one per source). Go WIDE: thousands of ads, not twenty.
+**A scheduled run** (the user's task woke you): call `whats_due` first and run only what it lists. After the hunt, `mark_done` hunt and call `whats_due` again: a `batch` there = `get_recipe("batch")`.
 
 1. **Read the targets.** Call `get_profile`: target titles, level, `search_brief`, `assistant_notes`. Call
    `list_applications` so you never bring a job twice. `search_brief.gaps` not empty: ask each `ask` once, then
