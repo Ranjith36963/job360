@@ -109,6 +109,16 @@ export const EVENT_LABEL: Record<string, string> = {
   submit_resolved: "Submit marked as not sent",
   // Bulk-apply F4 (2026-10-18).
   answer_corrected: "Answer corrected by you",
+  // Outreach pack #5/#6 (2026-10-20): contact interactions and referrals.
+  contact_meeting: "Meeting with a contact",
+  contact_call: "Call with a contact",
+  contact_intro: "Introduced to a contact",
+  referral_asked: "Asked for a referral",
+  referral_given: "Referral given",
+  // Gap roadmap slice 29: the exact file sent (server-written).
+  document_uploaded: "Document file sent",
+  // Gap roadmap slice 31: an email application's exact draft (no body).
+  email_drafted: "Email application drafted",
 };
 
 function relayedWords(payload: unknown): boolean {

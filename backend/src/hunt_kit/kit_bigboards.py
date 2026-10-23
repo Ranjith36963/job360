@@ -256,11 +256,11 @@ def parse_linkedin_cards(page: Any) -> list[tuple[str, Job]]:
 
 def _div_inner(page: str, cls: str) -> str:
     """The inner HTML of the first <div> whose class list holds ``cls`` (nested divs balanced)."""
-    m = re.search(r"""<div\b[^>]*\bclass=["'][^"']*\b""" + re.escape(cls) + r"""\b[^"']*["'][^>]*>""", page)
+    m = re.search(r"""<div\b[^<>]*\bclass=["'][^"']*\b""" + re.escape(cls) + r"""\b[^"']*["'][^<>]*>""", page)
     if not m:
         return ""
     depth, rest = 1, page[m.end():]
-    for t in re.finditer(r"<(/?)div\b[^>]*>", rest):
+    for t in re.finditer(r"<(/?)div\b[^<>]*>", rest):
         depth += -1 if t.group(1) else 1
         if depth == 0:
             return rest[:t.start()]
@@ -701,6 +701,7 @@ G_ASYNC = (
 _G_FC_FIRST = re.compile(r'<div jsname="Yust4d"[^>]+data-async-fc="([^"]+)"')
 _G_FC_ANY = re.compile(r'data-async-fc="([^"]+)"')
 _G_INITIAL = re.compile('520084652":(' + r"\[.*?\]\s*])\s*}\s*]\s*]\s*]\s*]\s*]")
+_G_INITIAL_END = re.compile(r"\]\s*]\s*}\s*]\s*]\s*]\s*]\s*]")  # where every _G_INITIAL match ends
 _G_KEY = "520084652"
 
 
@@ -759,7 +760,7 @@ def parse_google_first_page(page: Any) -> tuple[list[Job], str | None]:
     html = page if isinstance(page, str) else ""
     m = _G_FC_FIRST.search(html)
     out: list[Job] = []
-    for hit in _G_INITIAL.finditer(html):
+    for hit in _kf.finditer_closed(_G_INITIAL, _G_INITIAL_END, html):
         try:
             job = parse_google_ad(json.loads(hit.group(1)))
         except ValueError:

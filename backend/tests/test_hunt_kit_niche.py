@@ -28,7 +28,7 @@ class FakeHttp:
     def __init__(self, routes: dict[str, object], status: int = 200) -> None:
         self.routes, self.status, self.calls = routes, status, []
 
-    def __call__(self, url, *, method="GET", data=None, headers=None, as_json=True):
+    def __call__(self, url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         self.calls.append({"url": url, "method": method, "data": data, "headers": headers or {}})
         for needle, body in self.routes.items():
             if needle in url:

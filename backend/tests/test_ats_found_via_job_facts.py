@@ -168,7 +168,7 @@ async def test_found_via_closed_set_add_update_and_read_back(authenticated_async
         unset = await client.post(f"/api/applications/{app_id}/contacts", json={"name": "Bob"})
         assert unset.json()["contact"]["found_via"] is None, "unset stays null (rule #29)"
 
-        cold = await client.post("/api/contacts", json={"name": "Cleo", "found_via": "event"})
+        cold = await client.post("/api/contacts", json={"name": "Cleo", "company": "Contoso", "found_via": "event"})
         assert cold.status_code == 201 and cold.json()["contact"]["found_via"] == "event"
 
         upd = await client.patch(f"/api/contacts/{cid}", json={"found_via": "company site"})
@@ -452,7 +452,7 @@ async def test_stats_by_contact_found_via(authenticated_async_context):
         app_id = (await _bring(client, _AD_FR))["application_id"]
 
         async def add(name: str, found_via: Any = None, cold: bool = False) -> int:
-            body: dict[str, Any] = {"name": name}
+            body: dict[str, Any] = {"name": name, **({"company": "Contoso"} if cold else {})}
             if found_via:
                 body["found_via"] = found_via
             url = "/api/contacts" if cold else f"/api/applications/{app_id}/contacts"
@@ -602,3 +602,13 @@ async def test_unknown_channel_reply_warns_stored_as_other(authenticated_async_c
         ok = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "ats_form"})).json()
         assert ok["channel"] == "company_site" and ok["channel_given"] == "ats_form"
         assert not [w for w in ok["warnings"] if "channel" in w]
+
+
+def test_contact_found_via_has_the_people_source_ladder():
+    """Owner 2026-10-20: People is a source like Jobs. The reach recipe's ladder
+    (team page, GitHub, speaker page, email finder) must each have a value, so a
+    contact found there is not filed under 'other'."""
+    from src.core import settings
+
+    for slug in ("company_team_page", "github", "speaker_page", "email_finder"):
+        assert slug in settings.CONTACT_FOUND_VIA

@@ -12,7 +12,9 @@ with the caller's assistant; the safety stays here and in
 * the final submit runs the caller's ``submit_check`` and records
   ``submit_attempted`` first, both scoped to the caller;
 * uploads are only the caller's own saved CV / cover letter for that
-  application, rendered by Job360;
+  application, rendered by Job360, and each one records ``document_uploaded``
+  (the sha256 of the exact bytes and the form's host - slice 29), which the
+  receipt names as its ``files``;
 * step 6: when a gated submit lands on the site's confirmation, a screenshot
   of it is stored as that application's proof (``proof_screenshot``);
 * slice 3: when the browser stops on a CAPTCHA or a sign-in wall for a named
@@ -28,7 +30,7 @@ with the caller's assistant; the safety stays here and in
 from __future__ import annotations
 
 import contextlib
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -98,7 +100,9 @@ def _gate_and_files(
 
     async def _files(kind: str) -> tuple[str, bytes]:
         from src.services.applications import kit as applications_kit  # noqa: PLC0415
-        from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415 - fpdf2 is heavy
+        from src.services.applications import uploads  # noqa: PLC0415
+        from src.services.applications.authorship import actor_for  # noqa: PLC0415
+        from src.services.tailoring.cv_render import RENDERER_VERSION, render_document_pdf  # noqa: PLC0415 - heavy
 
         async with _db() as db:
             row = await applications_spine.latest_artifact(db, user.id, application_id, kind)
@@ -107,6 +111,23 @@ def _gate_and_files(
                 "refused", "no_document", f"No {kind} is saved for this application: save_artifact first."
             )
         pdf = await render_document_pdf(user.id, kind, row.get("text") or "")
+        # Slice 29: the receipt names exactly these bytes (sha256 only). Never blocks the upload.
+        host = await _page_host(user)
+        try:
+            async with _db() as db:
+                await uploads.record(
+                    db, user_id=user.id, application_id=application_id, kind=kind, artifact=row, data=pdf,
+                    fmt="pdf", renderer_version=RENDERER_VERSION, host=host, recorded_by=actor_for(user),
+                )
+        except Exception:  # noqa: BLE001 - opening the connection failed: the upload still goes ahead
+            get_audit_logger().warning(
+                "document_uploaded_failed",
+                extra={
+                    "event": "document_uploaded_failed", "user_id": safe_log_value(user.id),
+                    "application_id": int(application_id), "kind": safe_log_value(kind, max_len=20),
+                    "artifact_id": int(row["id"]), "result": "error",
+                },
+            )
         # The file name an employer sees: the kit's own name for this PDF, else the plain default.
         stem = await applications_kit.named_stem(user.id, kind)
         return (f"{stem}.pdf" if stem else "CV.pdf" if kind == "cv" else "Cover_letter.pdf"), pdf
@@ -126,6 +147,20 @@ def _gate_and_files(
     return browser_agent.Gate(
         check=_check, mark_attempt=_mark, save_proof=_proof, application_id=application_id
     ), _files
+
+
+async def _page_host(user: CurrentUser) -> Optional[str]:
+    """The host of the page the caller's browser is on (the form an upload goes into); ``None``
+    when there is no browser or the address has no host. Never raises."""
+    from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+    try:
+        s = await browser_agent.get_pool().get(user.id, create=False)
+        if s is None:
+            return None
+        return site_host(str(s.page.url)) or None
+    except Exception:  # noqa: BLE001 - a missing host never stops an upload
+        return None
 
 
 def _loader(user: CurrentUser) -> browser_agent.StateFn:
@@ -195,6 +230,11 @@ HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. Finish it with your own assistant's browser when your computer is on "
     "(Claude in Chrome, Gemini in Chrome, ChatGPT's own browser), or sign in once on Settings, Job sites."
 )
+# A human check: the filled form is kept open for the user to finish here (agent.hold_for_user).
+CAPTCHA_DETAIL = (
+    "The site asked for a human check. Your filled form is kept open for 30 minutes: press Finish it here, "
+    "solve the check yourself, then press Done. After that, finish it in your own browser."
+)
 
 
 async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:
@@ -206,12 +246,15 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
     from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
 
     reason = _BLOCKED_REASON.get(str(result.get("reason")), "other")
+    held = reason == "captcha" and browser_agent.hold_for_user(browser_agent.get_pool(), user.id)
     async with _db() as db:
         current = await blocked_service.open_block(db, user.id, application_id)
         if current is not None and current["reason"] == reason:
             return False
         # "Job360 browser" is read by the web (ApplicationDecisions.tsx) to offer "Sign in once on Job sites".
-        payload: dict[str, Any] = {"reason": reason, "step": "Job360 browser", "detail": HAND_OFF_DETAIL}
+        payload: dict[str, Any] = {
+            "reason": reason, "step": "Job360 browser", "detail": CAPTCHA_DETAIL if held else HAND_OFF_DETAIL,
+        }
         host = site_host(str(result.get("url", "")))
         if host and "." in host:
             payload["page_host"] = host
@@ -234,6 +277,11 @@ class LiveActionRequest(BaseModel):
     text: str = Field("", max_length=browser_agent.MAX_TYPE_CHARS)
     key: str = Field("", max_length=16)
     dy: float = 0
+    # "finish": the hand-off view, in the user's own assistant browser (a CAPTCHA the user solves).
+    mode: Literal["sign_in", "finish"] = "sign_in"
+
+
+_LIVE_AUDIT = {"sign_in": "live", "finish": "finish"}
 
 
 @router.post("/browser/live")
@@ -243,9 +291,10 @@ async def browser_live(
 ) -> dict[str, Any]:
     """One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
-    logged or returned; the audit line names the action only."""
+    logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
+    human check in their assistant's browser instead (shot, click, type, key, scroll, done)."""
     if not settings.BROWSER_AGENT_ENABLED:
-        _audit(user, f"live_{body.action}", "off")
+        _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", "off")
         return dict(OFF)
     from src.services.browser_agent import sign_ins  # noqa: PLC0415
 
@@ -261,12 +310,12 @@ async def browser_live(
     try:
         result = await browser_agent.live(
             browser_agent.get_pool(), user.id, body.action, url=body.url, x=body.x, y=body.y, text=body.text,
-            key=body.key, dy=body.dy, load_state=_loader(user), keep=_keep,
+            key=body.key, dy=body.dy, load_state=_loader(user), keep=_keep, finish=body.mode == "finish",
         )
     except browser_agent.BrowserError as exc:
-        _audit(user, f"live_{body.action}", exc.status, exc.reason)
+        _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", exc.status, exc.reason)
         return exc.as_dict()
-    _audit(user, f"live_{body.action}", str(result.get("status", "")))
+    _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", str(result.get("status", "")))
     return result
 
 
@@ -297,7 +346,7 @@ async def forget_sign_in(
         forgotten = await sign_ins.forget(db, user.id, clean)
     if not forgotten:
         raise HTTPException(status_code=404, detail="no saved sign-in for that site")
-    await browser_agent.get_pool().close(user.id)
-    await browser_agent.get_pool().close(browser_agent.live_key(user.id))
+    await browser_agent.get_pool().close(user.id, "sign_in_forgotten")
+    await browser_agent.get_pool().close(browser_agent.live_key(user.id), "sign_in_forgotten")
     _audit(user, "forget_sign_in", "ok")
     return {"forgotten": clean}

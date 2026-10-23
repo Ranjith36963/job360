@@ -34,7 +34,7 @@ An index of the 14 hard rules, one line each. Where a test guards a rule, the te
 ### Auth + multi-tenant routes
 12. **Every per-user FastAPI route MUST `Depends(require_user)`** and scope queries by `user.id`. Never accept `user_id` from URL/body — trivial IDOR.
 25. **Per-user mutating routes MUST scope by `user.id`** (extends #12) — derive from the session cookie / bearer / OAuth subject, never a parameter. Step 3 review caught 3 real IDOR violations.
-26. **Account-mgmt routes (password/email/delete) MUST verify the current password BEFORE the mutation, then `response.delete_cookie("job360_session")`** (forces re-login).
+26. **Account-mgmt routes (password/email/delete) MUST verify the current password BEFORE the mutation, then `response.delete_cookie("job360_session")`** (forces re-login). They, the data export and `/profile/clear` are web-session only (`require_session_user`; list: `tests/test_route_auth_coverage.py::SESSION_ONLY_ROUTES`). The one passwordless exception: an account with `users.has_password` FALSE (magic link only) may delete itself without a password, but only from a session created within `ACCOUNT_DELETE_FRESH_SESSION_SECONDS` (a fresh email-link sign-in); otherwise 403 (`tests/test_account_session_only.py`).
 
 ### Heavy imports
 16. **Never import `sentence_transformers`, `chromadb`, `rapidfuzz` or `sklearn` at module top level** — top-level costs 150 ms – 2 s per pytest collection. Not even "just for typing". Guarded by `backend/tests/test_heavy_imports_stay_lazy.py`.

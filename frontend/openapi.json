@@ -4,13 +4,17 @@
       "AccountDeleteRequest": {
         "properties": {
           "current_password": {
-            "title": "Current Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
           }
         },
-        "required": [
-          "current_password"
-        ],
         "title": "AccountDeleteRequest",
         "type": "object"
       },
@@ -18,10 +22,43 @@
         "additionalProperties": false,
         "description": "Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md \u00a7Tool contracts).\n\nNo length/shape constraints declared here (unlike ``SaveArtifactRequest``'s\n``label``): every cap is a live ``settings`` value a test can monkeypatch,\nso ``contacts.add_contact`` checks them at call time \u2014 the same pattern\n``SaveFitRequest.clamp_reasoning``/``RecordEventRequest.clamp_detail`` use.\n``added_by`` is deliberately ABSENT \u2014 ``extra=\"forbid\"`` rejects it (S2).",
         "properties": {
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "email": {
             "default": "",
             "title": "Email",
             "type": "string"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -59,10 +96,32 @@
             ],
             "title": "Occurred At"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -142,10 +201,43 @@
             ],
             "title": "Application Id"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "email": {
             "default": "",
             "title": "Email",
             "type": "string"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -183,10 +275,32 @@
             ],
             "title": "Occurred At"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "default": "",
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -718,6 +832,9 @@
             "title": "Job Id",
             "type": "integer"
           },
+          "known_people": {
+            "$ref": "#/components/schemas/KnownPeopleOut"
+          },
           "last_event_at": {
             "anyOf": [
               {
@@ -1231,6 +1348,9 @@
           },
           "kit": {
             "$ref": "#/components/schemas/KitIdOut"
+          },
+          "known_people": {
+            "$ref": "#/components/schemas/KnownPeopleOut"
           },
           "missing": {
             "items": {
@@ -2520,6 +2640,17 @@
             "title": "Apply Url",
             "type": "string"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "company": {
             "maxLength": 300,
             "minLength": 1,
@@ -2696,6 +2827,11 @@
             ],
             "title": "Ad Posted At"
           },
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
           "application_id": {
             "title": "Application Id",
             "type": "integer"
@@ -2747,6 +2883,9 @@
           },
           "job": {
             "$ref": "#/components/schemas/JobResponse"
+          },
+          "known_people": {
+            "$ref": "#/components/schemas/KnownPeopleOut"
           },
           "listed_people": {
             "anyOf": [
@@ -3250,6 +3389,17 @@
             ],
             "title": "Application Id"
           },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -3267,6 +3417,17 @@
           "email": {
             "title": "Email",
             "type": "string"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -3303,9 +3464,31 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -3336,6 +3519,20 @@
       },
       "ContactOutreachOut": {
         "properties": {
+          "bounced": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Bounced",
+            "type": "array"
+          },
+          "interactions": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Interactions",
+            "type": "array"
+          },
           "last_reply": {
             "anyOf": [
               {
@@ -3547,6 +3744,168 @@
         "title": "ControlsCvOut",
         "type": "object"
       },
+      "CreateAskOut": {
+        "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered At"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
+          },
+          "answered_by_user": {
+            "title": "Answered By User",
+            "type": "boolean"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "asked_at": {
+            "title": "Asked At",
+            "type": "string"
+          },
+          "asked_by": {
+            "title": "Asked By",
+            "type": "string"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "relayed_from_chat": {
+            "default": false,
+            "title": "Relayed From Chat",
+            "type": "boolean"
+          },
+          "said_by": {
+            "default": "assistant",
+            "enum": [
+              "you",
+              "assistant"
+            ],
+            "title": "Said By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_words": {
+            "default": "",
+            "title": "User Words",
+            "type": "string"
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
+          }
+        },
+        "required": [
+          "id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "question",
+          "context",
+          "asked_by",
+          "asked_at",
+          "answer",
+          "answered_by",
+          "answered_at",
+          "answered_by_user",
+          "withdrawn_at",
+          "status"
+        ],
+        "title": "CreateAskOut",
+        "type": "object"
+      },
       "CreateAskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3560,6 +3919,17 @@
               }
             ],
             "title": "Application Id"
+          },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
           },
           "context": {
             "default": "",
@@ -4088,6 +4458,21 @@
           "new_email"
         ],
         "title": "EmailChangeRequest",
+        "type": "object"
+      },
+      "EmailChangeUndoRequest": {
+        "properties": {
+          "token": {
+            "maxLength": 200,
+            "minLength": 20,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "EmailChangeUndoRequest",
         "type": "object"
       },
       "EmailVerificationConfirmRequest": {
@@ -5768,6 +6153,16 @@
             "title": "Id",
             "type": "integer"
           },
+          "referred_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitReferredByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -6188,6 +6583,24 @@
         "title": "KitMissingOut",
         "type": "object"
       },
+      "KitReferredByOut": {
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact_id",
+          "name"
+        ],
+        "title": "KitReferredByOut",
+        "type": "object"
+      },
       "KitSameJobOut": {
         "properties": {
           "application_id": {
@@ -6239,6 +6652,134 @@
           "at"
         ],
         "title": "KitSeenOut",
+        "type": "object"
+      },
+      "KnownPeopleOut": {
+        "description": "known_people: `count` = every person found; `people` = at most KNOWN_PEOPLE_MAX; `truncated` = more exist.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/KnownPersonOut"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "title": "KnownPeopleOut",
+        "type": "object"
+      },
+      "KnownPersonOut": {
+        "description": "One person the user already stored at this job's company (known_people). `company` is\nthe contact's own company, else its linked job's; `application_ids` = the jobs they are linked to.",
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "contact_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Contact Ids",
+            "type": "array"
+          },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
+          },
+          "last_reply_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reply At"
+          },
+          "last_sent_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sent At"
+          },
+          "last_sent_channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sent Channel"
+          },
+          "message_count": {
+            "default": 0,
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reachable": {
+            "default": false,
+            "title": "Reachable",
+            "type": "boolean"
+          },
+          "replied": {
+            "default": false,
+            "title": "Replied",
+            "type": "boolean"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact_ids",
+          "name"
+        ],
+        "title": "KnownPersonOut",
         "type": "object"
       },
       "LessonOut": {
@@ -6413,6 +6954,22 @@
         "title": "ListPeopleResponse",
         "type": "object"
       },
+      "ListTemplatesResponse": {
+        "properties": {
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateOut"
+            },
+            "title": "Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "title": "ListTemplatesResponse",
+        "type": "object"
+      },
       "ListedPerson": {
         "additionalProperties": false,
         "description": "Outreach pack #15 \u2014 a person the ad itself names (\"Meet the hiring team\").\nStored as a contact on this application, found_via='job_ad'. Lengths and the\nhttp(s) rule are add_contact's (contacts.validate_listed_people).",
@@ -6511,6 +7068,15 @@
             "default": "",
             "maxLength": 16,
             "title": "Key",
+            "type": "string"
+          },
+          "mode": {
+            "default": "sign_in",
+            "enum": [
+              "sign_in",
+              "finish"
+            ],
+            "title": "Mode",
             "type": "string"
           },
           "text": {
@@ -6613,6 +7179,39 @@
           "email"
         ],
         "title": "MagicLinkRequest",
+        "type": "object"
+      },
+      "MeResponse": {
+        "properties": {
+          "analytics_consent": {
+            "default": false,
+            "title": "Analytics Consent",
+            "type": "boolean"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "has_password": {
+            "default": true,
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "UTC",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "MeResponse",
         "type": "object"
       },
       "MissingToolRequest": {
@@ -6920,7 +7519,7 @@
         "type": "object"
       },
       "OutreachEntryOut": {
-        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times).",
+        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times). Also a meeting/call/intro/referral entry (``follow_up_on``\nis set only on those). A ``bounced`` mark's ``text`` is the address that bounced.",
         "properties": {
           "channel": {
             "title": "Channel",
@@ -6934,9 +7533,25 @@
             "title": "Entry",
             "type": "string"
           },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
           },
           "occurred_at": {
             "title": "Occurred At",
@@ -7121,6 +7736,17 @@
             ],
             "title": "Application Id"
           },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -7138,6 +7764,17 @@
           "email": {
             "title": "Email",
             "type": "string"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -7181,9 +7818,31 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -7239,6 +7898,17 @@
       "PersonOut": {
         "description": "``list_people``'s no-``contact_id`` shape \u2014 one row per PERSON\n(grouped by lower(email) else linkedin_url), aggregated across every\nunderlying ``application_contacts`` row that shares that identity.",
         "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "contact_ids": {
             "items": {
               "type": "integer"
@@ -7249,6 +7919,17 @@
           "email": {
             "title": "Email",
             "type": "string"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -7309,6 +7990,17 @@
             "title": "Reachable",
             "type": "boolean"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "replied": {
             "title": "Replied",
             "type": "boolean"
@@ -7316,6 +8008,17 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -8150,6 +8853,11 @@
             "title": "Question",
             "type": "string"
           },
+          "redacted": {
+            "default": false,
+            "title": "Redacted",
+            "type": "boolean"
+          },
           "saved_at": {
             "anyOf": [
               {
@@ -8442,6 +9150,11 @@
             "title": "Answers",
             "type": "array"
           },
+          "answers_from": {
+            "default": "",
+            "title": "Answers From",
+            "type": "string"
+          },
           "application_id": {
             "anyOf": [
               {
@@ -8565,9 +9278,21 @@
             ],
             "title": "Fields Total"
           },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
+          },
           "form_host": {
             "default": "",
             "title": "Form Host",
+            "type": "string"
+          },
+          "gmail_message_id": {
+            "default": "",
+            "title": "Gmail Message Id",
             "type": "string"
           },
           "guessed_count": {
@@ -8646,6 +9371,11 @@
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
           },
+          "recipient": {
+            "default": "",
+            "title": "Recipient",
+            "type": "string"
+          },
           "recorded_by": {
             "anyOf": [
               {
@@ -8656,6 +9386,17 @@
               }
             ],
             "title": "Recorded By"
+          },
+          "referred_by_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referred By Contact Id"
           },
           "sent_at": {
             "title": "Sent At",
@@ -8751,6 +9492,17 @@
             "title": "Question",
             "type": "string"
           },
+          "redacted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redacted"
+          },
           "source": {
             "anyOf": [
               {
@@ -8761,6 +9513,17 @@
               }
             ],
             "title": "Source"
+          },
+          "value_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Sha256"
           }
         },
         "required": [
@@ -8768,6 +9531,40 @@
           "answer"
         ],
         "title": "ReceiptAnswerOut",
+        "type": "object"
+      },
+      "ReceiptFileOut": {
+        "description": "Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).\nSlice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is\nof the artifact's TEXT and ``fmt`` is '' (the email's file format is not known).",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "fmt": {
+            "title": "Fmt",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "artifact_id",
+          "sha256",
+          "fmt",
+          "event_id"
+        ],
+        "title": "ReceiptFileOut",
         "type": "object"
       },
       "ReceiptListResponse": {
@@ -8985,11 +9782,45 @@
             "title": "Fields Filled",
             "type": "object"
           },
+          "gmail_message_id": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Gmail Message Id",
+            "type": "string"
+          },
           "note": {
             "default": "",
             "maxLength": 2000,
             "title": "Note",
             "type": "string"
+          },
+          "recipient": {
+            "default": "",
+            "maxLength": 320,
+            "title": "Recipient",
+            "type": "string"
+          },
+          "referred_by_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referred By Contact Id"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
           }
         },
         "title": "RecordApplicationReceiptRequest",
@@ -8997,6 +9828,16 @@
       },
       "RecordApplicationReceiptResponse": {
         "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
+          "answers_from": {
+            "default": "",
+            "title": "Answers From",
+            "type": "string"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -9063,6 +9904,18 @@
             "title": "Event Id",
             "type": "integer"
           },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "gmail_message_id": {
+            "default": "",
+            "title": "Gmail Message Id",
+            "type": "string"
+          },
           "possible_duplicate": {
             "default": "",
             "title": "Possible Duplicate",
@@ -9071,6 +9924,22 @@
           "receipt_id": {
             "title": "Receipt Id",
             "type": "integer"
+          },
+          "recipient": {
+            "default": "",
+            "title": "Recipient",
+            "type": "string"
+          },
+          "referred_by_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referred By Contact Id"
           },
           "sent_at": {
             "title": "Sent At",
@@ -9116,6 +9985,17 @@
               }
             ],
             "title": "Channel"
+          },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
           },
           "contact_id": {
             "anyOf": [
@@ -9303,6 +10183,17 @@
             "title": "Channel",
             "type": "string"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "entry": {
             "title": "Entry",
             "type": "string"
@@ -9317,6 +10208,12 @@
               }
             ],
             "title": "Follow Up On"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
           },
           "occurred_at": {
             "anyOf": [
@@ -9481,6 +10378,17 @@
             ],
             "title": "Channel"
           },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
           "contact_id": {
             "anyOf": [
               {
@@ -9498,7 +10406,7 @@
           },
           "label": {
             "default": "",
-            "maxLength": 100,
+            "maxLength": 200,
             "title": "Label",
             "type": "string"
           },
@@ -9528,6 +10436,11 @@
       },
       "SaveArtifactResponse": {
         "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
           "artifact_id": {
             "title": "Artifact Id",
             "type": "integer"
@@ -9597,6 +10510,11 @@
           },
           "kind": {
             "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
             "type": "string"
           },
           "made_by": {
@@ -9926,6 +10844,43 @@
           "event_id"
         ],
         "title": "SaveFitResponse",
+        "type": "object"
+      },
+      "SaveTemplateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "text"
+        ],
+        "title": "SaveTemplateRequest",
         "type": "object"
       },
       "SetVisaRequest": {
@@ -11253,6 +12208,59 @@
         "title": "StatsLessonSideOut",
         "type": "object"
       },
+      "StatsOutreachVariantGroupOut": {
+        "description": "Pack #13 \u2014 per outreach `label` (lower(trim)): contacts with a sent mark, counted\nonce under the label of their newest message version saved BEFORE their first sent\nmark ('' / none = key null, \"Not set\"); of those, how many have a reply mark;\nreply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outreach_replied": {
+            "title": "Outreach Replied",
+            "type": "integer"
+          },
+          "outreach_sent": {
+            "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "outreach_sent",
+          "outreach_replied",
+          "reply_rate",
+          "small_sample"
+        ],
+        "title": "StatsOutreachVariantGroupOut",
+        "type": "object"
+      },
       "StatsOverallOut": {
         "properties": {
           "applied": {
@@ -11709,6 +12717,117 @@
         "title": "StatsReasonOut",
         "type": "object"
       },
+      "StatsReferralGroupOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "brought": {
+            "title": "Brought",
+            "type": "integer"
+          },
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "integer"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "brought",
+          "applied",
+          "replied",
+          "interview",
+          "offer",
+          "rejected",
+          "reply_rate",
+          "interview_rate",
+          "offer_rate",
+          "small_sample"
+        ],
+        "title": "StatsReferralGroupOut",
+        "type": "object"
+      },
+      "StatsReferralsOut": {
+        "description": "``stats(view=\"referrals\")``: referred vs not. Facts only, never a ranking.",
+        "properties": {
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "not_referred": {
+            "$ref": "#/components/schemas/StatsReferralGroupOut"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "referral_asked": {
+            "title": "Referral Asked",
+            "type": "integer"
+          },
+          "referred": {
+            "$ref": "#/components/schemas/StatsReferralGroupOut"
+          }
+        },
+        "required": [
+          "n",
+          "referred",
+          "not_referred",
+          "referral_asked",
+          "note"
+        ],
+        "title": "StatsReferralsOut",
+        "type": "object"
+      },
       "StatsResponse": {
         "properties": {
           "applications_truncated": {
@@ -11741,6 +12860,13 @@
             "title": "By Contact Found Via",
             "type": "array"
           },
+          "by_contact_relationship": {
+            "items": {
+              "$ref": "#/components/schemas/StatsContactFoundViaGroupOut"
+            },
+            "title": "By Contact Relationship",
+            "type": "array"
+          },
           "by_country": {
             "items": {
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
@@ -11760,6 +12886,14 @@
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
             },
             "title": "By Job Source",
+            "type": "array"
+          },
+          "by_outreach_variant": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StatsOutreachVariantGroupOut"
+            },
+            "title": "By Outreach Variant",
             "type": "array"
           },
           "by_role": {
@@ -11864,6 +12998,16 @@
               }
             ]
           },
+          "referrals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatsReferralsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "score_line": {
             "$ref": "#/components/schemas/StatsScoreLineOut"
           },
@@ -11918,6 +13062,7 @@
           "by_job_source",
           "by_channel",
           "by_contact_found_via",
+          "by_contact_relationship",
           "score_line",
           "groups_truncated",
           "applications_truncated",
@@ -12645,6 +13790,65 @@
         "title": "TallyItem",
         "type": "object"
       },
+      "TemplateOut": {
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "template_id": {
+            "title": "Template Id",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "template_id",
+          "kind",
+          "label",
+          "version_no",
+          "text",
+          "chars",
+          "made_by",
+          "created_at"
+        ],
+        "title": "TemplateOut",
+        "type": "object"
+      },
       "TimezoneRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12817,6 +14021,17 @@
         "additionalProperties": false,
         "description": "``PATCH /api/contacts/{contact_id}`` \u2014 every field optional; only the\nones given are appended to ``contact_edits`` (owner decision, 2026-09-25:\ncontacts ARE editable, old values kept). No length caps declared here \u2014\nsame reasoning as ``AddContactRequest``: ``contacts.update_contact``\nchecks live ``settings`` values at call time.",
         "properties": {
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
           "email": {
             "anyOf": [
               {
@@ -12827,6 +14042,17 @@
               }
             ],
             "title": "Email"
+          },
+          "email_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Source"
           },
           "found_via": {
             "anyOf": [
@@ -12872,6 +14098,17 @@
             ],
             "title": "Notes"
           },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship"
+          },
           "role": {
             "anyOf": [
               {
@@ -12882,6 +14119,17 @@
               }
             ],
             "title": "Role"
+          },
+          "shared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shared"
           },
           "source_url": {
             "anyOf": [
@@ -15088,7 +16336,7 @@
     },
     "/api/applications/{application_id}/contacts": {
       "post": {
-        "description": "201 for a new contact, 200 (``already_existed: true``, ``matched_on``)\nfor the same person seen again on this application (R2): same email, else\n(no email) same normalised LinkedIn URL, else same name unless both carry\ndifferent LinkedIn URLs. The status code is set dynamically since the\nsame call can legitimately answer either.",
+        "description": "201 for a new contact, 200 (``already_existed: true``, ``matched_on``)\nfor the same person seen again on this application (R2): same email, else\n(no email) same normalised LinkedIn URL, else same name unless both carry\ndifferent LinkedIn URLs; also a repeated ``client_key``. The status code is\nset dynamically since the same call can legitimately answer either.",
         "operationId": "add_contact_api_applications__application_id__contacts_post",
         "parameters": [
           {
@@ -16410,7 +17658,7 @@
     },
     "/api/applications/{application_id}/send/approve": {
       "post": {
-        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing\n(``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
+        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing\nor a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the\nevent; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
         "operationId": "approve_send_api_applications__application_id__send_approve_post",
         "parameters": [
           {
@@ -16594,7 +17842,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form\nrules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.\nAn unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {
@@ -16995,7 +18243,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AskOut"
+                  "$ref": "#/components/schemas/CreateAskOut"
                 }
               }
             },
@@ -17897,6 +19145,41 @@
         ]
       }
     },
+    "/api/auth/email-change/undo": {
+      "post": {
+        "description": "Undo an email change from the link mailed to the OLD address.\n\nPublic, authenticated by its one-time token (like password-reset/confirm).\nOn success: 204, the previous email and its previous verified state are\nback, and every session, agent token and OAuth grant is revoked.\nUnknown, used, expired or deleted-user token: generic 400. The previous\naddress now belonging to another account: 409, nothing changed.\n\nRate-limited per IP (429) like the password-reset request.",
+        "operationId": "email_change_undo_api_auth_email_change_undo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeUndoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Email Change Undo",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/auth/login": {
       "post": {
         "operationId": "login_api_auth_login_post",
@@ -18099,7 +19382,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/MeResponse"
                 }
               }
             },
@@ -18457,7 +19740,7 @@
     },
     "/api/auth/users/me": {
       "delete": {
-        "description": "ERASE the caller's account (GDPR Article 17). Requires current-password\nverification (hard rule #26), then clears the session cookie.\n\nUses hard_delete_user (docs/fable/05) \u2014 actually erases all per-user data\n(CV, profile, channels, feed, actions, \u2026), not a soft `deleted_at` flag that\nleft the data in place and could be resurrected on a later magic-link consume.",
+        "description": "ERASE the caller's account (GDPR Article 17), then clear the session cookie.\n\nWeb session only: an agent token can never erase the account. An account\nwith a password must send it (hard rule #26). An account with NO password\n(``has_password`` FALSE: only a magic link ever signed it in) cannot, so it\nmay delete only from a session created by a fresh email link, inside\n``ACCOUNT_DELETE_FRESH_SESSION_SECONDS``; otherwise 403 says how.\n\nUses hard_delete_user (docs/fable/05) \u2014 actually erases all per-user data\n(CV, profile, channels, feed, actions, \u2026), not a soft `deleted_at` flag that\nleft the data in place and could be resurrected on a later magic-link consume.",
         "operationId": "delete_account_api_auth_users_me_delete",
         "parameters": [
           {
@@ -18526,7 +19809,7 @@
     },
     "/api/auth/users/me/email": {
       "patch": {
-        "description": "Change email. Requires current password. Invalidates session \u2192 re-login required.",
+        "description": "Change email. Requires current password. Invalidates session \u2192 re-login required.\n\nThe new address is unproven, so ``email_verified_at`` is cleared and the\nverification mail goes to it. The OLD address gets a notice with a 24 h\none-time link that undoes the change (``/email-change/undo``). Both mails\nare background work: a failed send never breaks the request.",
         "operationId": "change_email_api_auth_users_me_email_patch",
         "parameters": [
           {
@@ -18595,7 +19878,7 @@
     },
     "/api/auth/users/me/export": {
       "get": {
-        "description": "Download everything we hold on the caller as one JSON file (Article 20).\n\nGET is correct here: it is a pure read, no state changes. Scoped to the\nsession's own ``user.id`` (rule #12) \u2014 the caller can never name another user.\nSecrets (password hash, encrypted channel creds) are redacted and the\nsecurity-token tables are omitted entirely; see ``export_user_data``.",
+        "description": "Download everything we hold on the caller as one JSON file (Article 20).\n\nWeb session only (gap roadmap slice 3): a leaked, never-expiring agent token\nmust not be able to download the whole account. An assistant reads history\nthrough ``export_history``, which leaves out the account tables.\n\nGET is correct here: it is a pure read, no state changes. Scoped to the\nsession's own ``user.id`` (rule #12) \u2014 the caller can never name another user.\nSecrets (password hash, encrypted channel creds) are redacted and the\nsecurity-token tables are omitted entirely; see ``export_user_data``.",
         "operationId": "export_my_data_api_auth_users_me_export_get",
         "parameters": [
           {
@@ -18900,7 +20183,7 @@
     },
     "/api/browser/live": {
       "post": {
-        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only.",
+        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only. ``mode: finish``: the user finishes a\nhuman check in their assistant's browser instead (shot, click, type, key, scroll, done).",
         "operationId": "browser_live_api_browser_live_post",
         "parameters": [
           {
@@ -19589,7 +20872,7 @@
     },
     "/api/contacts/{contact_id}/outreach": {
       "post": {
-        "description": "The one shared door for a contact's outreach ledger \u2014 a drafted\nmessage VERSION, or a ``sent``/``reply`` mark. ``save_artifact``\n(``kind=\"outreach\"`` + ``contact_id``) and ``record_event``\n(``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to\nthe SAME service function this route calls (M5 parity) \u2014 this route is\nthe one door that works for a COLD contact too, since it carries no\n``application_id`` in its URL.",
+        "description": "The one shared door for a contact's outreach ledger \u2014 a drafted\nmessage VERSION, or a ``sent``/``reply`` mark. ``save_artifact``\n(``kind=\"outreach\"`` + ``contact_id``) and ``record_event``\n(``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to\nthe SAME service function this route calls (M5 parity) \u2014 this route is\nthe one door that works for a COLD contact too, since it carries no\n``application_id`` in its URL. A ``client_key`` lives in the key space of\nthe tool that calls this door: ``save_artifact`` for a message version,\n``record_event`` for a sent/reply mark.",
         "operationId": "record_outreach_api_contacts__contact_id__outreach_post",
         "parameters": [
           {
@@ -19988,7 +21271,7 @@
     },
     "/api/jobs/bring": {
       "post": {
-        "description": "Store the pasted ad and birth the Application for it.\n\nNothing is scored: the caller (the user's agent) already decided this ad\nis worth keeping, and product rule 4 forbids us judging fit. Returns the\nstored job plus the `application_id` the caller should work against from\nhere on.",
+        "description": "Store the pasted ad and birth the Application for it.\n\nNothing is scored: the caller (the user's agent) already decided this ad\nis worth keeping, and product rule 4 forbids us judging fit. Returns the\nstored job plus the `application_id` the caller should work against from\nhere on. A repeated ``client_key`` returns the first reply (slice 25).",
         "operationId": "bring_job_api_jobs_bring_post",
         "parameters": [
           {
@@ -20687,7 +21970,7 @@
     },
     "/api/people": {
       "get": {
-        "description": "No ``contact_id`` \u2014 every person the user has added, grouped by\nlower(email) else linkedin_url (the same recruiter on two jobs is one\nperson here). With ``contact_id`` \u2014 that ONE row's own full record\n(message versions, sent/reply marks, detail-edit history), never merged.",
+        "description": "No ``contact_id`` \u2014 every person the user has added, grouped by\nlower(email) else linkedin_url (the same recruiter on two jobs is one\nperson here). With ``contact_id`` \u2014 that ONE row's own full record\n(message versions, sent/reply marks, detail-edit history), never merged.\n``company`` keeps only people whose company (or linked job's company) has the same company key as jobs (rule #1).",
         "operationId": "list_people_api_people_get",
         "parameters": [
           {
@@ -20720,6 +22003,22 @@
                 }
               ],
               "title": "Email"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company"
             }
           },
           {
@@ -20998,7 +22297,7 @@
     },
     "/api/profile/clear": {
       "post": {
-        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot and leaves the CV, the preferences and\n``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\nWEB SESSION ONLY (gap roadmap slice 3): \"all\" wipes the CV, preferences,\nmemory and assistant settings at once, so a leaked agent token must not\nreach it. An assistant clears one field with ``update_profile(null)``.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot (it copies the memory into ``profile_edits``\nfirst instead, ``_snapshot_memory_then_clear``) and leaves the CV, the\npreferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
         "operationId": "clear_profile_section_api_profile_clear_post",
         "parameters": [
           {
@@ -22946,6 +24245,172 @@
         "summary": "Provenance",
         "tags": [
           "tailor"
+        ]
+      }
+    },
+    "/api/templates": {
+      "get": {
+        "operationId": "list_templates_api_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "outreach_template",
+              "maxLength": 40,
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTemplatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "templates"
+        ]
+      },
+      "post": {
+        "operationId": "save_template_api_templates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Template",
+        "tags": [
+          "templates"
         ]
       }
     },

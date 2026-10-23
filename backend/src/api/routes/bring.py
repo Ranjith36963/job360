@@ -49,7 +49,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.models import JobResponse
+from src.api.models import JobResponse, KnownPeopleOut
 from src.core import settings
 from src.core.settings import USER_BROUGHT_SOURCE
 from src.repositories.database import JobDatabase
@@ -241,6 +241,10 @@ class BringJobRequest(BaseModel):
     queue: bool = Field(False, strict=True)
     # Outreach pack #15 — people the ad names; stored as job_ad contacts on THIS application. Omitted = none.
     listed_people: Optional[list[ListedPerson]] = None
+    # Gap roadmap slice 25 — optional idempotency key (1-128 printable chars): the same
+    # key + same body returns the FIRST reply (already_existed=true), writing nothing;
+    # another body under it is a 409 (services/idempotency).
+    client_key: Optional[str] = None
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -299,6 +303,11 @@ class BringJobResponse(BaseModel):
     queue_note: Optional[str] = None
     # Outreach pack #15 — one result per `listed_people` item; null when the call sent none.
     listed_people: Optional[list[ListedPersonOut]] = None
+    # people THIS user already stored at this company (known_people.py) - a join, never a lookup
+    known_people: KnownPeopleOut = Field(default_factory=KnownPeopleOut)
+    # Slice 25 — true when this client_key was already used: the FIRST reply, nothing
+    # written. Not ``existing`` (that is "you had this job before this bring").
+    already_existed: bool = False
 
 
 def _repost_sentence(repost: dict[str, Any]) -> str:
@@ -349,8 +358,32 @@ async def bring_job(
     Nothing is scored: the caller (the user's agent) already decided this ad
     is worth keeping, and product rule 4 forbids us judging fit. Returns the
     stored job plus the `application_id` the caller should work against from
-    here on.
+    here on. A repeated ``client_key`` returns the first reply (slice 25).
     """
+    from src.services import idempotency  # noqa: PLC0415
+
+    async def _write() -> dict[str, Any]:
+        return (await _bring_job(body, db, user)).model_dump()
+
+    # The MCP tool sends "" where a web body leaves the visa text out (None); both mean
+    # "not said", so they hash the same and the two doors share one key space.
+    key_body = {
+        **body.model_dump(exclude={"client_key"}),
+        "visa_detail": body.visa_detail or "", "visa_country": body.visa_country or "",
+    }
+    try:
+        # Not one transaction (atomic=False): the bring's read-only checks swallow their own
+        # errors, which would abort an enclosing transaction. The key is stored right after;
+        # a retry that slips between the two is caught by the title+company dedupe below.
+        reply = await idempotency.run_once(
+            db._db, user.id, "bring_job", body.client_key, key_body, _write, atomic=False,
+        )
+    except idempotency.IdempotencyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    return BringJobResponse(**reply)
+
+
+async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) -> BringJobResponse:
     # Lazy import (rule #16) — keeps the spine off the module import path.
     from src.models import Job  # noqa: PLC0415
     from src.services.applications import job_facts  # noqa: PLC0415
@@ -576,12 +609,21 @@ async def bring_job(
             description=str(app_now.get("job_description_snapshot") or body.description),
         )
 
+    from src.services.applications import known_people as known_people_service  # noqa: PLC0415
+
+    known = (
+        await known_people_service.for_application(db, user.id, app_now)
+        if app_now
+        else dict(known_people_service.EMPTY, people=[])
+    )
+
     get_audit_logger().info(
         "job_brought",
         extra={
             "event": "job_brought", "job_id": job_id, "user_id": user.id,
             "application_id": birth["application_id"],
             "existing": bool(birth["existing"]), "catalog_existing": not inserted, "status": "ok",
+            "known_people_count": known["count"],
         },
     )
 
@@ -621,6 +663,7 @@ async def bring_job(
         checks=checks,
         repost=flagged_repost,
         listed_people=listed,
+        known_people=KnownPeopleOut(**known),
         **facts,
     )
 

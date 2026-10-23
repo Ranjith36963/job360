@@ -17,18 +17,21 @@ the token IS the credential. So the rules are strict:
   rewrite the path to ``/api/files/[redacted]``).
 
 A link download is NOT a ``cv_seen``: the assistant fetched the file, not the user.
+Each served download writes one ``document_uploaded`` (slice 29: the sha256 of the
+exact bytes, host ``None``) so a receipt can name the file; a failed write is logged
+and the file is still served.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import hmac
-import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
+from src.api.client_ip import client_ip, throttle_client_ip
 from src.api.dependencies import get_request_db
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -47,14 +50,12 @@ GONE_DETAIL = "link expired - ask your assistant to get the kit again"
 CHANGED_DETAIL = "this CV was changed - get the kit again"
 
 
-def _ip_hash(request: Request) -> str:
-    """A hashed client address: the rate-limit key and the log token. The raw IP
-    is personal data and never stored. ``X-Forwarded-For`` only when the operator
-    set ``JOB360_TRUST_PROXY=1`` (otherwise it is attacker-controlled)."""
-    ip = request.client.host if request.client else "unknown"
-    if os.getenv("JOB360_TRUST_PROXY") == "1":
-        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        ip = forwarded or ip
+def _ip_hash(request: Request, *, throttle: bool = False) -> str:
+    """A hashed client address: the log token, or with ``throttle=True`` the
+    rate-limit key (an IPv6 caller counted per /64). The raw IP is personal data
+    and never stored. The address is ``src.api.client_ip``'s (X-Forwarded-For
+    only from configured trusted proxy hops)."""
+    ip = throttle_client_ip(request) if throttle else client_ip(request)
     return hashlib.sha256(ip.encode("utf-8")).hexdigest()[:16]
 
 
@@ -78,7 +79,7 @@ async def download_file(
     token: str, request: Request, db: JobDatabase = Depends(get_request_db),  # noqa: B008
 ) -> Response:
     """Serve one kit file. See the module docstring for the rules."""
-    ip = _ip_hash(request)
+    ip = _ip_hash(request, throttle=True)
     bad_key = f"files_bad:{ip}"
 
     def _bad_token(reason: str) -> HTTPException:
@@ -96,7 +97,7 @@ async def download_file(
 
     computed = kit.hash_token(token)
     cur = await db._db.execute(
-        "SELECT id, token_hash, user_id, application_id, artifact_id, version_no, fmt "
+        "SELECT id, token_hash, user_id, application_id, artifact_id, version_no, fmt, created_by "
         "FROM artifact_links WHERE token_hash = ?",
         (computed,),
     )
@@ -130,21 +131,31 @@ async def download_file(
     if artifact is None or latest is None or latest["id"] != artifact["id"]:
         raise _refuse(request, 410, "cv_changed", user_id, CHANGED_DETAIL)
 
-    from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415
-    from src.services.tailoring.docx import render_docx  # noqa: PLC0415 - heavy, lazy (rule #16)
+    from src.services.applications import uploads  # noqa: PLC0415
+    from src.services.tailoring import cv_render  # noqa: PLC0415
+    from src.services.tailoring import docx as docx_render  # noqa: PLC0415 - heavy, lazy (rule #16)
 
     kind = str(artifact["kind"])
     title = "Curriculum Vitae" if kind == "cv" else "Cover Letter"
     fmt = "docx" if row["fmt"] == "docx" else "pdf"
     if fmt == "docx":
-        content = await asyncio.to_thread(render_docx, artifact["text"], title=title)
+        content = await asyncio.to_thread(docx_render.render_docx, artifact["text"], title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        renderer_version = docx_render.RENDERER_VERSION
     else:
-        content = await render_document_pdf(user_id, kind, artifact["text"])
+        content = await cv_render.render_document_pdf(user_id, kind, artifact["text"])
         media_type = "application/pdf"
+        renderer_version = cv_render.RENDERER_VERSION
     app_row = await spine.get_owned_application(db, user_id, int(row["application_id"])) or {}
     stem = await kit.download_stem(
         user_id, str(app_row.get("job_company") or ""), kind, int(artifact["version_no"])
+    )
+    # Slice 29: one document_uploaded per serve, the sha256 of exactly these bytes (no host: a link).
+    # Last DB write of the request, and it never raises, so the download is served whatever happens.
+    await uploads.record(
+        db, user_id=user_id, application_id=int(row["application_id"]), kind=kind, artifact=artifact,
+        data=content, fmt=fmt, renderer_version=renderer_version, host=None,
+        recorded_by=str(row.get("created_by") or "web"),
     )
     get_audit_logger().info(
         "file_download",

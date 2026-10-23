@@ -9,7 +9,7 @@ Which slices are built, and the switch that turns them on, is section 9 — the 
 Built and merged: #882, #891, #895, #916 (the one "Batch auto apply" switch).
 - **The batch** = a waiting line your AI works through, one job at a time.
 - **In it:** AI hunts and your links both go straight in. Tags: AI hunt, Your link, Pasted ad.
-- **Modes (pick one):** Straight away, Hours to apply, Auto for a while (each lets your assistant send on its own, but only within your score line and the safety checks); Ask me each time = off.
+- **Modes (pick one):** Straight away, Auto for a while (each lets your assistant send on its own, but only within your score line and the safety checks); Ask me each time = off.
 - **Limits:** per day (blank = no limit); per company and per week, each with a blue "No limit" tick; the wait between applications in minutes and seconds (0 = no wait).
 - **Needs you:** a login, CAPTCHA, missing answer or a form waiting for Submit lands there while the batch moves on.
 - **Not yet confirmed:** a real batch on production (not checked here). Next: reconnect Job360 in the AI app, set the rules, "run 360 batch 3".
@@ -123,10 +123,10 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
     - `page_js.py`: reads a page and tags each control with a `ref`
     - `agent.py`: the browser pool (one Chromium; an isolated context per user, plus one for their live sign-in view), plus the actions
   - `backend/src/api/routes/browser.py`: `POST /api/browser`, the route the MCP tool calls (rule M5)
-  - The MCP tool `browser` in `mcp_server.py`, always listed (it answers `off` until the switch is on). This raised `TOOLS_REV` to 9: reconnect to see it.
+  - The MCP tool `browser` in `mcp_server.py`, always listed (it answers `off` until the switch is on).
 - **Final submit:**
   - The tool runs `check_submit` itself and records `submit_attempted` first.
-  - It clicks only on `submit`. Most asks (settings, the practice run, Indeed / LinkedIn) become a `submit` once the user clicks Send on Needs you for that CV; another session's hold, a form address that cannot be read or does not match, an open `blocked`, a guessed answer or an unverified email still asks.
+  - It clicks only on `submit`. Which asks the user's Send on Needs you turns into a `submit`, and which ones no yes ever clears, is the ordered rule list in `services/profile/assistant_settings.may_submit`'s docstring.
   - What counts as the final submit (`safety.control_kind`): any button that can submit its form itself (type submit or image, or a `<button>` with no type, that has a form owner) unless its name is a step ("Next", "Save and continue") or it is a pressed-or-not toggle (`aria-pressed`, Ashby's Yes / No), so a name we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named with the whole word "Submit" ("Submitted applications" is a tab), or "Send application" once the page holds an answer; and "Apply", "Send", "Finish", "Complete" or "Confirm" (or the common EU verbs: absenden, envoyer, postuler, enviar, verzenden...) on a button in a form, or on any button once the page holds an answer, inside the `<form>` around a shadow root's host too. An answer is a typed value (not in a search or password box), a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too, in the button's own frame; a box, option or switch the page already held when the first look read it (a cookie switch) is not one.
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the browser answers. It is on in production (seen live 2026-10-20); the code default stays off.
@@ -169,6 +169,11 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
 - On the application's page, a sign-in stop shows a **"Sign in once to <site> on Job sites"** button, so the next run starts signed in.
 - The note tells the user how to finish: with their own assistant's browser when their computer is on (Claude in
   Chrome, Gemini in Chrome, ChatGPT agent), or by signing in once on Settings → Job sites. The note names only those three, and OpenAI has retired agent mode.
+- **Finish it here (2026-10-23):** on a CAPTCHA stop, the filled form is kept open for 30 minutes past the idle sweep
+  (`agent.hold_for_user`), and the application's page shows **"Finish it here"**. The user solves the check themselves
+  on a live picture of the assistant's own browser (`POST /api/browser/live` with `mode: finish`: shot, click, type,
+  key, scroll, done; no start, no keep). Website session only, like the sign-in view: a token gets 403. Done puts the
+  browser back on its idle clock; then "I submitted it" records the receipt. Job360 still never solves a CAPTCHA.
 
 **`key` action (2026-10-19; Enter rule 2026-10-20):** ArrowDown, ArrowUp, Tab, Escape and Enter,
 for the suggestion lists real forms use: type, ArrowDown, Enter. Enter is refused outside a suggestion
@@ -226,6 +231,7 @@ the page's own requests to finish, because single-page sites (React forms) draw 
   site newly drew the file name on the page (not just the file box holding it, and not a name already on the page),
   because Greenhouse can take the file and still show an error (ApplYourself). A new "failed / error / try again /
   too large / not supported" line next to the field makes it false and comes back as `upload_error` (page text).
+  The CV goes to the page as an in-memory file, not a temp path, and `upload_confirmed` is read after waiting up to about 10 s for the site to show the file name.
 - **Never a control key through `type`:** typed as keys, a line break is Enter (it can submit the form and skip
   `check_submit`) and a tab moves to another field. `type` refuses them (`control_characters`); a line break (`\n` only; `\r` is refused) goes
   only into a multi-line `<textarea>`, inserted as text. Option labels quoted in an error sit inside the untrusted marker.

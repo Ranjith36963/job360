@@ -51,7 +51,7 @@ LD_DETAIL = ('<html><head><script type="application/ld+json">'
 def _http(routes: dict):
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append(url)
         for frag, resp in routes.items():
             if url.startswith(frag):
@@ -168,3 +168,31 @@ def test_gate_keeps_the_cap_for_matching_titles():
     assert len(http.calls) == 1 + more.PAYLOCITY_DETAIL_CAP
     assert not any(j["description"] for j in jobs if j["title"].startswith("Skip"))
     assert sum(1 for j in jobs if j["description"]) == more.PAYLOCITY_DETAIL_CAP
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_paylocity_description_scans_are_linear_on_unclosed_tags():
+    page = ('<div class="job-listing-header">Description</div><div><p>Hi</p><script>x()</script>'
+            '<style>p{}</style></div>')
+    assert more._paylocity_description(page) == "Hi"
+    head = '<div class="job-listing-header">Description</div><div>'
+    _grows_linearly(more._paylocity_description, lambda k: head + "<script>" * k)
+    _grows_linearly(more._paylocity_description, lambda k: head + "<style>" * k)
+    _grows_linearly(more._paylocity_description, lambda k: '<script type="application/ld+json">' * k)
+    _grows_linearly(more._paylocity_description, lambda k: "<div " * k)

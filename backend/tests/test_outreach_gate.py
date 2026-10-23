@@ -75,11 +75,13 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "not_latest_draft", {"facts": {"latest_draft": False}}),
     ("stop", "not_email_channel", {"facts": {"channel": "linkedin"}}),
     ("stop", "no_email", {"facts": {"has_email": False}}),
+    ("stop", "email_bounced", {"facts": {"email_bounced": True}}),
     ("stop", "already_sent", {"facts": {"already_sent": True}}),
     ("stop", "replied", {"facts": {"replied": True}}),
     ("stop", "application_closed", {"facts": {"application_closed": True}}),
     ("stop", "daily_outreach_cap_reached", {"counts": {"today": 10}}),
     ("stop", "company_cap_reached", {"counts": {"company": 2}}),
+    ("ask", "email_guessed", {"facts": {"email_source": "pattern_guess"}}),
     ("ask", "mode_not_auto", {"cfg": {"outreach_send": "draft_only"}}),
     ("ask", "no_found_via", {"facts": {"found_via": None}}),
     ("ask", "unlinked_contact", {"facts": {"linked": False}}),
@@ -196,6 +198,8 @@ async def _contact(
     body: dict[str, Any] = {"name": name, "role": "Recruiter", "email": email}
     if app_id is not None:
         body["application_id"] = app_id
+    if app_id is None:
+        body["company"] = "Contoso"
     if found_via:
         body["found_via"] = found_via
     resp = await client.post("/api/contacts", json=body)

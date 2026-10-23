@@ -24,7 +24,7 @@ _AD = {
 }
 _ANSWERS = [
     {"question": "Why Fabrikam?", "answer": "The platform team owns its own SLOs."},
-    {"question": "Right to work?", "answer": "Needs sponsorship."},
+    {"question": "Earliest start?", "answer": "In four weeks."},  # not sensitive: G023 would hash it
 ]
 _FIELDS: dict[str, Any] = {"phone": "+44 7700 900456", "salary_expectation": 70000, "relocate": False}
 _NEW_FIELDS = (

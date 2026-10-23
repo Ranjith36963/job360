@@ -40,7 +40,7 @@ class FakeHttp:
     def __init__(self, routes: dict[str, object], status: int = 200) -> None:
         self.routes, self.status, self.calls = routes, status, []
 
-    def __call__(self, url, *, method="GET", data=None, headers=None, as_json=True):
+    def __call__(self, url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         self.calls.append({"url": url, "method": method, "data": data})
         for needle, body in self.routes.items():
             if needle in url:
@@ -338,7 +338,7 @@ def test_githublists_reads_both_lists_and_matches_titles():
 def _rec_http(routes):
     calls: list = []
 
-    def http(url, *, method="GET", data=None, headers=None, as_json=True):
+    def http(url, *, method="GET", data=None, headers=None, as_json=True, max_bytes=None):
         calls.append((url, method, data, headers or {}))
         for frag, resp in routes.items():
             if frag in url:
@@ -459,3 +459,29 @@ def test_hn_keeps_a_job_link_and_files_a_homepage_under_company_site():
     home = kf.parse_hn_comment('Metcor | Data Engineer | London <a href="https:&#x2F;&#x2F;metcor.co.uk">site</a>', 8)
     assert home is not None and home["url"] == "https://news.ycombinator.com/item?id=8"
     assert home["extra"]["company_site"] == "https://metcor.co.uk"
+
+
+# --------------------------------------------------------------------------- regex scaling (hostile markup)
+def _grows_linearly(fn, make, n=6000):
+    """Time fn(make(n)) and fn(make(4n)): linear stays within 8x (+50 ms of noise room), quadratic takes ~16x."""
+    import time
+
+    def run(k):
+        s, best = make(k), 9e9
+        for _ in range(2):
+            t0 = time.perf_counter()
+            fn(s)
+            best = min(best, time.perf_counter() - t0)
+        return best
+
+    t1, t4 = run(n), run(4 * n)
+    assert t4 < 8 * t1 + 0.05, (t1, t4)
+
+
+def test_feed_html_scans_are_linear_on_unclosed_markup():
+    assert kf.strip_html("<p>Hello</p><script>x</script><ul><li>a</li><li>b</li></ul><b>c</b>") == "Hello\n\n- a\n- b\nc"
+    for evil in ("<script>", "<style>", "<p ", "<li", "<a ", "<"):
+        _grows_linearly(kf.strip_html, lambda k, e=evil: e * k)
+    assert kf._respace("a ,  b ,c", ",", ", ") == "a, b, c" and kf._respace(" x ", ",", ", ") == " x "
+    _grows_linearly(lambda s: kf._respace(s, ",", ", "), lambda k: " " * (4 * k) + "x")
+    _grows_linearly(lambda s: kf.parse_hn_comment(s, 1), lambda k: "Acme (" + "(" * (4 * k))

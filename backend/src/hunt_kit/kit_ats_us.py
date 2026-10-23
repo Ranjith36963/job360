@@ -650,13 +650,17 @@ _ISO_ID = re.compile(r"/jobs/(\d+)")
 _ISO_GONE = ("typed the url for this website incorrectly", "career site has been disabled")
 
 
+_SITEMAP_MAX = 10_000_000  # a sitemap can list tens of thousands of postings; the 2 MB page default would drop it
+
+
 def _isolvedhire(row: dict[str, Any], http: Http) -> list[Job] | None:
     """iSolved Hire career site (<board>.isolvedhire.com): ids from sitemap.xml, schema.org JobPosting per posting."""
     board = str(row.get("token") or "").lower()
     if not _LABEL.fullmatch(board):
         return None
     host = f"{board}.isolvedhire.com"
-    st, sm = _get(http, f"https://{host}/sitemap.xml", as_json=False, headers={"Accept": "application/xml"})
+    st, sm = _get(http, f"https://{host}/sitemap.xml", as_json=False, headers={"Accept": "application/xml"},
+                max_bytes=_SITEMAP_MAX)
     if st != 200 or not isinstance(sm, str) or any(n in sm[:512].lower() for n in _ISO_GONE):
         return None
     ids: list[str] = []

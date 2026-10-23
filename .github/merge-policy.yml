@@ -391,6 +391,13 @@ lanes:
   #   * `rollback: railway` — `deploymentRollback` restores the previous image
   #     AND its variables in seconds, and the watcher CONFIRMS `canRollback`
   #     before anything in this lane is allowed to merge at all.
+  #     It restores the IMAGE, never the schema or rows: a migration that
+  #     committed stays applied under the rolled-back code. migrations/runner.py
+  #     bounds each migration (lock_timeout / statement_timeout; a timeout rolls
+  #     it back whole and fails the boot, so the old container keeps serving) and
+  #     first copies every table it touches to `migration_snapshots."<table>__<id>"`,
+  #     kept MIGRATION_SNAPSHOT_RETENTION_DAYS (14). A new DROP COLUMN / DROP TABLE
+  #     needs `-- allow-drop: <reason>` (tests/test_migration_safety.py).
   # Speed still comes from being able to UNDO. Nothing here merges on the
   # strength of looking safe.
   #
@@ -410,7 +417,9 @@ lanes:
       - "**/*docker-compose*"
       - "**/*Dockerfile*"
       # dependency manifests run postinstall scripts on the build host;
-      # dependabot-auto.yml already owns the safe subset of this decision
+      # dependabot-auto.yml already owns the safe subset of this decision.
+      # A change that ADDS a package name leaves this lane for product_human
+      # (`content_pins.new_dependency` below); a version bump stays here.
       - "**/package.json"
       - "**/package-lock.json"
       - "**/pyproject.toml"
@@ -696,6 +705,23 @@ data_exemptions:
       REGISTRY is the list of guards and their drills — appending to it is how a
       guard gets registered, which is the workflow this repo wants to be fast.
       Everything else in that file is the enforcement law and stays owner-lane.
+
+# ── Content pins: the new-package tripwire (owner, 2026-10-20) ─────────────
+# The mirror of `data_exemptions`: an exemption can only LOOSEN a lane, a pin
+# can only TIGHTEN one. `scripts/lane.py content_pins()` reads each matching
+# manifest at base and head; a change that ADDS a package NAME (slopsquatting:
+# an agent can invent a name, and a typo-squat runs install scripts on the build
+# host) moves that file to `lane`. A version bump of a name already there keeps
+# the file's own lane (`product_owner` above). With no revisions, or a file it
+# cannot parse, the pin FIRES: unmeasurable reads as "the owner's".
+content_pins:
+  new_dependency:
+    lane: product_human
+    manifests:
+      "**/pyproject.toml": pyproject           # [project] deps + optional, [dependency-groups], [build-system]
+      "**/package.json": package_json          # dependencies, dev/optional/peerDependencies
+      "**/package-lock.json": package_lock     # every installed name, transitive ones included
+      "**/requirements*.txt": requirements     # *.lock.txt too; a new index/-r/-e line counts
 
 # ── Size ceiling ───────────────────────────────────────────────────────────
 # Not a quality judgement — a REVIEWABILITY one. Past this, no reviewer (human
