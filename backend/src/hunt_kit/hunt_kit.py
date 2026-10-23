@@ -163,6 +163,11 @@ BOARD_SOURCES = (
     "earcu",
     "beesite",
     "workablemarketplace",
+    "geekhunter",
+    "likeit",
+    "onstrider",
+    "micro1",
+    "alignerr",
     "herp",
     "hrmos",
     "mokahr",
@@ -374,7 +379,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2",
+    "kit_asia2", "kit_market5",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2853,6 +2858,13 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("pyjamahr", re.compile(r"^jobs\.pyjamahr\.com$")),
     ("beesite", re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+){0,3}\.beesite\.de)$")),
     ("workablemarketplace", re.compile(r"^jobs\.workable\.com$")),
+    # marketplaces and recruiting sites (kit_market5): GeekHunter (slug in the path), Likeit (tenant subdomain), and
+    # three one-site boards (Strider, micro1, Alignerr) whose job link carries no board token
+    ("geekhunter", re.compile(r"^www\.geekhunter\.com$")),
+    ("likeit", re.compile(r"^([a-z0-9-]+)\.likeit\.fi$")),
+    ("onstrider", re.compile(r"^(?:www\.)?onstrider\.com$")),
+    ("micro1", re.compile(r"^jobs\.micro1\.ai$")),
+    ("alignerr", re.compile(r"^www\.alignerr\.com$")),
     ("yourator", re.compile(r"^(?:www\.)?yourator\.co$")),
     ("careerviet", re.compile(r"^(?:www\.)?careerviet\.vn$")),
     ("occ", re.compile(r"^(?:www\.)?occ\.com\.mx$")),
@@ -2873,7 +2885,7 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com)$", re.I)
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2978,6 +2990,13 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             ok_t = len(seg) > 2 and seg[1] == "jobdetail" and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", seg[0])
             tok = seg[0] if ok_t else ""
         elif ats == "workablemarketplace":  # jobs.workable.com/view/<job>/...: the company hashid is not in the link
+            tok = ""
+        elif ats == "geekhunter":  # https://www.geekhunter.com/pt/<company slug>/jobs/<posting slug>
+            gh = seg[1] if len(seg) > 2 and seg[0] == "pt" and seg[2] == "jobs" else ""
+            tok = gh if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", gh) else ""
+        elif ats == "likeit":  # https://<tenant>.likeit.fi/jsp/duuni/AdvertShow.jsp?id=<id>
+            tok = "" if m.group(1) == "www" else m.group(1)
+        elif ats in ("onstrider", "micro1", "alignerr"):  # one site each: the job link carries no board token
             tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
