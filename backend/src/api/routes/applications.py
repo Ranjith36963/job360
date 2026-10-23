@@ -1238,6 +1238,16 @@ class KitAccountSiteOut(BaseModel):
     known_account: Optional[KitKnownAccountOut] = None
 
 
+class KitLastFillOut(BaseModel):
+    """One answer of the newest ``form_filled``, as stored (``redacted``: hashed, ``answer`` is "")."""
+
+    question: str
+    answer: str
+    source: str
+    key: Optional[str] = None
+    redacted: bool = False
+
+
 class ApplicationKitOut(BaseModel):
     """Everything an assistant needs to fill ONE application form (S3). Binds to
     THIS application only: its latest CV and cover letter, never another job's."""
@@ -1261,6 +1271,8 @@ class ApplicationKitOut(BaseModel):
     # Plain facts to check with the user (e.g. expected_below_current) - never a block.
     warnings: list[dict[str, str]] = []
     known_people: KnownPeopleOut = Field(default_factory=KnownPeopleOut)
+    # The newest form_filled's answers: retyped in one browser fill when the browser closed (2026-10-23).
+    last_fill: list[KitLastFillOut] = []
     instructions: list[str]
 
 

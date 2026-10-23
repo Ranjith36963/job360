@@ -70,7 +70,9 @@ from src.services.untrusted import wrap_untrusted as _wrap_untrusted
 
 logger = logging.getLogger("job360.services.browser_agent")
 
-ACTIONS = ("open", "look", "click", "type", "choose", "tick", "upload", "key", "scroll", "back", "close")
+ACTIONS = (
+    "open", "look", "click", "type", "choose", "tick", "fill", "upload", "key", "scroll", "back", "close",
+)
 # Keys the assistant may press (action "key", the key in `text`). Enter only inside a suggestion list:
 # in an ordinary field Enter can submit the form, which would skip check_submit.
 AGENT_KEYS = frozenset({"ArrowDown", "ArrowUp", "Tab", "Escape", "Enter"})
@@ -1095,11 +1097,13 @@ async def run(
     files: Optional[FileFn] = None,
     load_state: Optional[StateFn] = None,
     owner: str = "",
+    fields: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     """Carry out one action for one user and return what the page looks like after it.
 
-    ``owner`` is the caller's session label: while one session drives the user's browser, a call
-    with another label is refused (``busy``), so two assistant runs never fill one form."""
+    ``fields`` is fill's list of ``{ref, text}``. ``owner`` is the caller's session label: while one
+    session drives the user's browser, a call with another label is refused (``busy``), so two
+    assistant runs never fill one form."""
     if action not in ACTIONS:
         raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(ACTIONS) + ".")
     if action == "close":
@@ -1118,12 +1122,16 @@ async def run(
                 "it (action close).",
             )
         s.owner = owner
+    limit_s = FILL_TIMEOUT_S if action == "fill" else ACT_TIMEOUT_S
     async with s.lock:
         s.last_used = time.monotonic()
         try:
             result = await asyncio.wait_for(
-                _act(pool, s, action, url=url, ref=ref, text=text, on=on, doc_kind=doc_kind, gate=gate, files=files),
-                ACT_TIMEOUT_S,
+                _act(
+                    pool, s, action, url=url, ref=ref, text=text, on=on, doc_kind=doc_kind, gate=gate, files=files,
+                    fields=fields or [],
+                ),
+                limit_s,
             )
         except BrowserError as exc:
             if exc.status == "needs_you" and not exc.url:
@@ -1135,7 +1143,7 @@ async def run(
         except asyncio.TimeoutError:
             raise BrowserError(
                 "error", "timeout",
-                f"That action took longer than {int(ACT_TIMEOUT_S)} seconds and was stopped. Call look to see "
+                f"That action took longer than {int(limit_s)} seconds and was stopped. Call look to see "
                 "the page.",
             ) from None
         except Exception as exc:  # noqa: BLE001 - a browser failure is shown to the assistant, never a 500
@@ -1148,7 +1156,8 @@ async def run(
             # The form changed (an answer typed, a box ticked, a new page): a control that did nothing
             # before may work now, so it gets its tries back.
             s.dead_clicks.clear()
-        s.recent = ([*s.recent, (action, ref, text, url)])[-REPEAT_LIMIT:]
+        said = json.dumps(fields, sort_keys=True) if action == "fill" else text
+        s.recent = ([*s.recent, (action, ref, said, url)])[-REPEAT_LIMIT:]
         if len(s.recent) == REPEAT_LIMIT and len(set(s.recent)) == 1 and action not in ("look", "scroll"):
             result["repeat_warning"] = (
                 f"The same {action} {REPEAT_LIMIT} times in a row. Stop repeating it: look again, try another "
@@ -1163,7 +1172,7 @@ _TICK_ROLES = ("checkbox", "radio", "switch")
 
 async def _act(
     pool: BrowserPool, s: Session, action: str, *, url: str, ref: str, text: str, on: bool, doc_kind: str,
-    gate: Optional[Gate], files: Optional[FileFn],
+    gate: Optional[Gate], files: Optional[FileFn], fields: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     if action == "open":
         requested = url
@@ -1212,6 +1221,8 @@ async def _act(
         raise BrowserError("needs_you", "captcha", CAPTCHA_DETAIL)
     if action == "key":
         return await _press(s, ref, text)
+    if action == "fill":
+        return await _fill(s, fields or [])
     if action == "scroll":
         if text not in ("down", "up"):
             raise BrowserError("refused", "bad_scroll", 'scroll needs text "down" or "up".')
@@ -1340,23 +1351,8 @@ async def _act(
         return out
 
     if action == "type":
-        if kind == "password":
-            raise BrowserError(
-                "refused", "password_field",
-                "That is a password box. Job360 never types a password: the user signs in themselves.",
-            )
-        if len(text) > MAX_TYPE_CHARS:
-            raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
-        # Windows line breaks are line breaks: "\r\n" and a lone "\r" become "\n" before the check.
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        if _CONTROL_CHARS.search(text.replace("\n", "")) or (
-            "\n" in text and not await loc.evaluate("(el) => el.tagName === 'TEXTAREA'")
-        ):
-            raise BrowserError(
-                "refused", "control_characters",
-                "Type plain text only: line breaks only into a multi-line box, never tabs or other control keys.",
-            )
-        typed = await _type_into(loc, text)
+        text = _plain_text(text)
+        typed = await _type_checked(loc, kind, text)
         out = await look(s, after_action=True)
         out["typed_matches"] = typed == text
         return out
@@ -1369,23 +1365,12 @@ async def _act(
         )
 
     if action == "choose":
-        if kind == "password":
-            raise BrowserError(
-                "refused", "password_field",
-                "That is a password box. Job360 never types a password: the user signs in themselves.",
-            )
+        _refuse_password(kind)
         await _choose(s, loc, text)
         return await look(s, after_action=True)
 
     if action == "tick":
-        try:
-            await loc.set_checked(on)
-        except Exception:  # noqa: BLE001 - a hidden input behind a styled label: click the label instead
-            state = await loc.evaluate(TICK_VIA_LABEL_JS, on)
-            if state != on:
-                raise BrowserError(
-                    "error", "tick_failed", "That box did not change. Call look and click its label instead."
-                ) from None
+        await _tick(loc, on)
         return await look(s, after_action=True)
 
     # action == "upload"
@@ -1435,6 +1420,166 @@ async def _act(
     out["upload_confirmed"] = not error and not shown_before and (name in page_after or name in near_after)
     if error:
         out["upload_error"] = _wrap_untrusted(error[:200])
+    return out
+
+
+LOGIN_BOX_DETAIL = "That is a password box. Job360 never types a password: the user signs in themselves."
+
+
+def _refuse_password(kind: str) -> None:
+    if kind == "password":
+        raise BrowserError("refused", "password_field", LOGIN_BOX_DETAIL)
+
+
+def _plain_text(text: str) -> str:
+    """Windows line breaks are line breaks: CRLF and a lone CR become LF before the checks."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+async def _type_checked(loc: Any, kind: str, text: str) -> str:
+    """Type ``text`` (already :func:`_plain_text`) into one field after every typing rule; the read-back."""
+    _refuse_password(kind)
+    if len(text) > MAX_TYPE_CHARS:
+        raise BrowserError("refused", "text_too_long", f"Type at most {MAX_TYPE_CHARS} characters at once.")
+    if _CONTROL_CHARS.search(text.replace("\n", "")) or (
+        "\n" in text and not await loc.evaluate("(el) => el.tagName === 'TEXTAREA'")
+    ):
+        raise BrowserError(
+            "refused", "control_characters",
+            "Type plain text only: line breaks only into a multi-line box, never tabs or other control keys.",
+        )
+    return await _type_into(loc, text)
+
+
+async def _tick(loc: Any, on: bool) -> None:
+    try:
+        await loc.set_checked(on)
+    except Exception:  # noqa: BLE001 - a hidden input behind a styled label: click the label instead
+        state = await loc.evaluate(TICK_VIA_LABEL_JS, on)
+        if state != on:
+            raise BrowserError(
+                "error", "tick_failed", "That box did not change. Call look and click its label instead."
+            ) from None
+
+
+# ── fill: many fields in one call (owner decision 2026-10-23) ─────────────────
+# Each field goes through the same rules as its own type / choose / tick; a refused field never stops
+# the others. One look at the end, plus a read-back per field.
+MAX_FILL_FIELDS = 40
+FILL_FIELD_TIMEOUT_S = 30.0
+# The whole fill: more than one action's time, still bounded (a page that hangs lets the browser go).
+FILL_TIMEOUT_S = 240.0
+FILL_VALUE_MAX = 200
+_TICK_WORDS = {
+    "yes": True, "true": True, "on": True, "1": True, "checked": True, "tick": True,
+    "no": False, "false": False, "off": False, "0": False, "unchecked": False, "untick": False,
+}
+# What a field holds now: a select's chosen option text, a box's yes / no, else its value or text.
+READ_BACK_JS = r"""
+(el) => {
+  if (el.tagName === 'SELECT') return Array.from(el.selectedOptions, (o) => o.text).join(', ');
+  const t = (el.type || '').toLowerCase();
+  if (el.tagName === 'INPUT' && (t === 'checkbox' || t === 'radio')) return el.checked ? 'yes' : 'no';
+  const a = el.getAttribute('aria-checked');
+  if (a === 'true' || a === 'false') return a === 'true' ? 'yes' : 'no';
+  return ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '');
+}
+"""
+
+
+def _fill_how(facts: dict[str, Any], editable: bool) -> str:
+    """type | choose | tick for one control, or "" when fill does not set it (a button, a file box)."""
+    tag, kind, role = facts.get("tag", ""), facts.get("type", ""), str(facts.get("role") or "").lower()
+    if tag == "select" or role in ("combobox", "listbox"):
+        return "choose"
+    if (tag == "input" and kind in ("checkbox", "radio")) or role in _TICK_ROLES:
+        return "tick"
+    if tag == "input" and kind in ("file", "submit", "button", "image", "reset", "hidden"):
+        return ""
+    if tag in ("input", "textarea") or role in ("textbox", "searchbox") or editable:
+        return "type"
+    return ""
+
+
+async def _fill_one(s: Session, ref: str, text: str) -> tuple[bool, str]:
+    """Set one field: (it holds what was asked, what it shows now). A refusal raises BrowserError."""
+    frame, loc = await _find(s, ref)
+    _refuse_captcha_frame(frame)
+    kind = await _kind(loc)
+    if kind == "submit":
+        raise BrowserError("refused", "submit_control", "fill never clicks the final submit.")
+    _refuse_password(kind)
+    facts = await loc.evaluate(ELEMENT_FACTS_JS)
+    how = _fill_how(facts, bool(await loc.evaluate("(el) => el.isContentEditable")))
+    if not how:
+        raise BrowserError(
+            "refused", "not_a_field", "fill sets text boxes, dropdowns and boxes only: click or upload this one.",
+        )
+    on = _TICK_WORDS.get(text.strip().casefold()) if how == "tick" else None
+    if how == "tick" and on is None:
+        raise BrowserError("refused", "bad_tick_text", 'For a box use text "yes" or "no".')
+    if is_honeypot(str(facts.get("name") or "")) and (on if how == "tick" else bool(text)):
+        raise BrowserError("refused", "leave_blank", "That field says to leave it blank (a trap for bots).")
+    if how == "type":
+        text = _plain_text(text)
+        shown = await _type_checked(loc, kind, text)
+        return shown == text, shown
+    if how == "tick":
+        await _tick(loc, bool(on))
+        shown = str(await loc.evaluate(READ_BACK_JS))
+        return shown == ("yes" if on else "no"), shown
+    await _choose(s, loc, text)  # raises unless the field shows the option
+    return True, str(await loc.evaluate(READ_BACK_JS))
+
+
+async def _fill(s: Session, fields: list[dict[str, str]]) -> dict[str, Any]:
+    if not fields:
+        raise BrowserError("refused", "no_fields", "fill needs fields: a list of {ref, text} from the latest look.")
+    if len(fields) > MAX_FILL_FIELDS:
+        raise BrowserError("refused", "too_many_fields", f"fill takes at most {MAX_FILL_FIELDS} fields a call.")
+    page = _live_page(s)
+    # The Enter guard, for the whole fill: a submit any field sets off is stopped and reported.
+    guarded = []
+    for f in page.frames[:MAX_FRAMES]:
+        try:
+            await asyncio.wait_for(f.evaluate(SUBMIT_GUARD_START_JS), FRAME_READ_TIMEOUT_S)
+            guarded.append(f)
+        except Exception:  # noqa: BLE001, S112 - a frame mid-navigation
+            continue
+    filled: list[dict[str, Any]] = []
+    stopped = submitted = False
+    try:
+        for item in fields:
+            ref, text = str(item.get("ref") or ""), str(item.get("text") or "")
+            row: dict[str, Any] = {"ref": ref, "ok": False, "value": "", "reason": ""}
+            filled.append(row)
+            if stopped:
+                row["reason"] = "not_tried"
+                continue
+            try:
+                ok, shown = await asyncio.wait_for(_fill_one(s, ref, text), FILL_FIELD_TIMEOUT_S)
+                row.update(ok=ok, value=_clip(shown, FILL_VALUE_MAX), reason="" if ok else "value_differs")
+            except BrowserError as exc:
+                row["reason"] = exc.reason
+                stopped = exc.status == "needs_you"  # a CAPTCHA: nothing more is typed on this page
+            except asyncio.TimeoutError:
+                row["reason"] = "timeout"
+            except Exception:  # noqa: BLE001 - one field's browser failure never stops the others
+                row["reason"] = "browser_error"
+    finally:
+        for f in guarded:  # the guard always comes off: left on, it would cancel the real, gated submit
+            try:
+                submitted = bool(await f.evaluate(SUBMIT_GUARD_READ_JS)) or submitted
+            except Exception:  # noqa: BLE001, S112 - the frame navigated away: nothing to put back
+                continue
+    await _settle(page)
+    out = await look(s, after_action=True)
+    out["filled"] = filled
+    if submitted:
+        out["submit_stopped"] = True
+        out["next"] = "A field tried to submit the form; Job360 stopped it. Read the page; submit only by click."
+    elif stopped:
+        out["next"] = "The page asks for a human check: stop this form (record blocked)."
     return out
 
 

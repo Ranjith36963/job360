@@ -1573,7 +1573,7 @@ export interface paths {
         put?: never;
         /**
          * Browser Action
-         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,
+         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, fill, upload, back,
          *     close). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant
          *     reads them like any page; a 404 from the gate (not the caller's application) stays a 404.
          */
@@ -1849,6 +1849,27 @@ export interface paths {
          *     except one audit line. 404 for a contact that is not the caller's (rule #12).
          */
         get: operations["outreach_check_api_contacts__contact_id__outreach_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cv-to-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cv To Approve
+         * @description Approve CV on Needs you (owner decision 2026-10-23): the caller's open applications whose newest CV
+         *     they have not seen yet, from chat or the web. "CV OK" is ``POST /applications/{id}/cv-seen``.
+         */
+        get: operations["cv_to_approve_api_cv_to_approve_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3569,6 +3590,11 @@ export interface components {
             job: components["schemas"]["KitJobOut"];
             kit: components["schemas"]["KitIdOut"];
             known_people?: components["schemas"]["KnownPeopleOut"];
+            /**
+             * Last Fill
+             * @default []
+             */
+            last_fill: components["schemas"]["KitLastFillOut"][];
             /** Missing */
             missing: components["schemas"]["KitMissingOut"][];
             /** Settings */
@@ -4211,6 +4237,8 @@ export interface components {
              * @default
              */
             doc_kind: string;
+            /** Fields */
+            fields?: components["schemas"]["FillField"][];
             /**
              * On
              * @default true
@@ -4647,6 +4675,21 @@ export interface components {
         CvSeenRequest: {
             /** Artifact Id */
             artifact_id?: number | null;
+        };
+        /** CvToApproveOut */
+        CvToApproveOut: {
+            /** Items */
+            items: components["schemas"]["CvToApproveRow"][];
+        };
+        /** CvToApproveRow */
+        CvToApproveRow: {
+            /** Application Id */
+            application_id: number;
+            cv: components["schemas"]["ReadyDoc"];
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
         };
         /**
          * DoctorAuth
@@ -5143,6 +5186,19 @@ export interface components {
              * @default
              */
             title: string;
+        };
+        /**
+         * FillField
+         * @description One field for action fill: a ref from the latest look and its value.
+         */
+        FillField: {
+            /** Ref */
+            ref: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /**
          * FitAxisIn
@@ -5751,6 +5807,25 @@ export interface components {
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+        };
+        /**
+         * KitLastFillOut
+         * @description One answer of the newest ``form_filled``, as stored (``redacted``: hashed, ``answer`` is "").
+         */
+        KitLastFillOut: {
+            /** Answer */
+            answer: string;
+            /** Key */
+            key?: string | null;
+            /** Question */
+            question: string;
+            /**
+             * Redacted
+             * @default false
+             */
+            redacted: boolean;
+            /** Source */
+            source: string;
         };
         /** KitMissingOut */
         KitMissingOut: {
@@ -11909,6 +11984,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutreachCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cv_to_approve_api_cv_to_approve_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CvToApproveOut"];
                 };
             };
             /** @description Validation Error */

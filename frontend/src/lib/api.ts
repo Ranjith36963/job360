@@ -1226,6 +1226,14 @@ export async function getMorningCheck(since: string): Promise<MorningCheck> {
   return request<MorningCheck>(`/api/morning-check${qs({ since })}`);
 }
 
+// ---- Approve CV on Needs you (2026-10-23) ----
+export type CvToApproveRow = _Schemas["CvToApproveRow"];
+
+/** Open applications whose newest CV the user has not seen yet (from chat or the web). */
+export async function getCvToApprove(): Promise<{ items: CvToApproveRow[] }> {
+  return request<{ items: CvToApproveRow[] }>("/api/cv-to-approve");
+}
+
 // ---- Ready to send (S5d) ----
 export type ReadyToSend = _Schemas["ReadyToSendOut"];
 export type ReadyCardData = _Schemas["ReadyCard"];
