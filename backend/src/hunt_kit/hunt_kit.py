@@ -183,6 +183,10 @@ BOARD_SOURCES = (
     "hurma",
     "compleo",
     "spark",
+    "agenticjobs",
+    "collage",
+    "flowxtra",
+    "generalistworld",
 )
 FEED_SOURCES = (
     "freehire",
@@ -379,7 +383,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5",
+    "kit_asia2", "kit_market5", "kit_co6",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2876,6 +2880,12 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("hurma", re.compile(r"^([a-z0-9-]+)\.hurma\.work$")),
     ("compleo", re.compile(r"^jobs\.compleo\.app$")),
     ("spark", re.compile(r"^([a-z0-9-]+)\.spark\.work$")),
+    # career-ops batch A (kit_co6): Agentic Engineering Jobs, Flowxtra, Generalist World: one-site boards, no token
+    # in the link; Collage HR tenant: path segment of secure.collage.co/jobs/<address>
+    ("agenticjobs", re.compile(r"^agentic-engineering-jobs\.com$")),
+    ("collage", re.compile(r"^secure\.collage\.co$")),
+    ("flowxtra", re.compile(r"^flowxtra\.com$")),
+    ("generalistworld", re.compile(r"^(?:www\.)?generalist\.world$")),
 ]
 _BOARD_SLUG = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}"  # a path slug that cannot be . or ..
 # Career sites on an employer's own host that the URL path gives away: eArcu vacancies and Radancy (TalentBrew) jobs
@@ -2885,7 +2895,8 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com)$", re.I)
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com|"
+    r"getconsider\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2984,6 +2995,11 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = m.group(1)
         elif ats == "adpmyjobs":  # myjobs.adp.com/<site slug>/cx/job/<id>; /public is the vendor API
             tok = seg[0] if seg and seg[0] != "public" and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
+        elif ats in ("agenticjobs", "flowxtra", "generalistworld"):  # one site each: no token in the link
+            tok = ""
+        elif ats == "collage":  # https://secure.collage.co/jobs/<job-site address>[/...]
+            ca = seg[1] if len(seg) > 1 and seg[0] == "jobs" else ""
+            tok = ca if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", ca) else ""
         elif ats in ("selfrecruit", "enlizt", "hurma", "spark"):  # www/hub/api.<vendor>: the vendor, not a tenant
             tok = "" if m.group(1) in ("www", "hub", "api", "app") else m.group(1)
         elif ats == "compleo":  # https://jobs.compleo.app/<tenant>/jobdetail/<code>
