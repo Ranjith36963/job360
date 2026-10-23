@@ -6504,5 +6504,9 @@
 {"name":"Habr Career","ats":"habrcareer","board":"all","source":"freehire"},
 {"name":"Getmatch","ats":"getmatch","board":"all","source":"freehire"},
 {"name":"Jobindex","ats":"jobindex","board":"python aarhus","source":"ajs"},
-{"name":"Akademikernes Jobbank","ats":"jobbankdk","board":"data scientist","source":"ajs"}
+{"name":"Akademikernes Jobbank","ats":"jobbankdk","board":"data scientist","source":"ajs"},
+{"name":"GeekJob","ats":"geekjob","board":"all","source":"freehire"},
+{"name":"Skyeng","ats":"potok","board":"skyengteam","source":"freehire"},
+{"name":"Banki.ru","ats":"huntflow","board":"banki","source":"freehire"},
+{"name":"Tripster","ats":"huntflow","board":"tripster","source":"freehire"}
 ]

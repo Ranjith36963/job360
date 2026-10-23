@@ -108,6 +108,13 @@ Vagas.com.br (`vagas:all`, the national board's three tech listings). A posting 
 passes your title filter, at most 25 per board, and the first refusal ends the board's detail requests. Gupy, InHire and HiringRoom
 list a posting without its description when it was not opened; Vagas.com.br lists only the postings it opened.
 
+`kit_w4b.py` adds four boards: GeekJob, Russia (`geekjob:all`, the whole site's listing pages), ApplicantPro (`applicantpro:<tenant>` of
+`<tenant>.applicantpro.com`, the sibling host of iSolved Hire), Potok (`potok:<tenant>` of `<tenant>.potok.io`, a Russian ATS) and Huntflow
+(`huntflow:<tenant>` of `<tenant>.huntflow.io`, a Russian ATS). A posting page is opened only for a title that passes your title filter, at most
+25 per board (40 for ApplicantPro, whose sitemap has no titles), and the first refusal ends the board's detail requests. GeekJob lists only the
+postings it opened; Potok and Huntflow list a posting without its description when it was not opened. Not read: Huntflow community hubs (a hub
+board is listed under its own name, not under each partner company). The Techstars Jobs network was added to the Getro list in `kit_startups.py`.
+
 `kit_markets4.py` adds three national job sites: Yourator, Taiwan (`yourator:all`, the whole board by its public JSON pages),
 CareerViet, Vietnam (`careerviet:all`, or one keyword slug such as `careerviet:ke-toan`) and OCC Mundial, Mexico (`occ:<keyword>`,
 one keyword slug is required; the site has no all-jobs listing; the first 3 result pages). Listings only, no description; every

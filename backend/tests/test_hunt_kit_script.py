@@ -386,6 +386,7 @@ def test_companies_json_valid() -> None:
     ok |= {"jobindex", "jobbankdk", "hhru", "habrcareer", "getmatch"}  # the kit_w4a types
     ok |= {"adpmyjobs", "eploy"}  # the kit_ats_misc4 types
     ok |= {"selfrecruit", "enlizt", "hurma", "compleo", "spark"}  # the kit_ats_misc5 types
+    ok |= {"geekjob", "applicantpro", "potok", "huntflow"}  # the kit_w4b types
     ok |= {"avature", "comeet", "hibob", "pageup", "freshteam"}  # the kit_ats_extra types
     ok |= {"betterteam", "catsone", "clinch", "crelate", "erecruiter", "gr8people", "hrmanager", "ismartrecruit", "loxo", "mindsight"}  # the kit_ats_misc1 types
     ok |= {"opencats", "odoo", "recruitingsolutions", "teamex", "wantapply", "werecruit", "workstream", "wpyoast",
