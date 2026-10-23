@@ -133,6 +133,12 @@ pages. Energy Jobline is not read: its ad pages answer only a client that calls 
 `energyjobline.com` link is reported as unsupported. The references' referral-code links for Strider, micro1 and Alignerr are not
 used: the kit lists the plain posting page.
 
+`kit_w4a.py` adds five national and regional boards: Jobindex (`jobindex:<search words>`, jobindex.dk, 20 postings a page), Akademikernes Jobbank
+(`jobbankdk:<search words>`, the RSS feed of jobbank.dk, up to 100 postings, no body), hh.ru (`hhru:<professional_role id>`, for example `hhru:96`; the
+listing's embedded state, no vacancy page is opened, so a posting carries the salary line and no body), Habr Career (`habrcareer:all`) and Getmatch
+(`getmatch:all`). Habr Career and Getmatch open a posting only for a card that passes your title filter, at most 25 per board. A refusal ends a board's
+pages; jobbank.dk may answer with a Cloudflare challenge, which fails that board without a retry. A posting with no employer name is not listed.
+
 `kit_asia2.py` adds Asian boards: MokaHR (`mokahr:<orgId>/<siteId>` of `app.mokahr.com/social-recruitment/<orgId>/<siteId>`, or
 `mokahr:<orgId>/<siteId>/r1` for the international host `hire-r1.mokahr.com`), HRMOS (`hrmos:<slug>` of `hrmos.co/pages/<slug>/jobs`),
 HERP (`herp:<slug>` of `herp.careers/v1/<slug>`), Quickin (`quickin:<slug>` of `jobs.quickin.io/<slug>`), and PyjamaHR (`pyjamahr:<slug>`

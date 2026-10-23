@@ -6492,5 +6492,10 @@
 {"name":"Tributo Devido","ats":"enlizt","board":"tributodevido","source":"freehire"},
 {"name":"ScrumLaunch","ats":"hurma","board":"scrumlaunch","source":"freehire"},
 {"name":"WA FENIX","ats":"compleo","board":"wafx","source":"freehire"},
-{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"}
+{"name":"VOLO","ats":"spark","board":"volo","source":"freehire"},
+{"name":"hh.ru","ats":"hhru","board":"96","source":"freehire"},
+{"name":"Habr Career","ats":"habrcareer","board":"all","source":"freehire"},
+{"name":"Getmatch","ats":"getmatch","board":"all","source":"freehire"},
+{"name":"Jobindex","ats":"jobindex","board":"python aarhus","source":"ajs"},
+{"name":"Akademikernes Jobbank","ats":"jobbankdk","board":"data scientist","source":"ajs"}
 ]
