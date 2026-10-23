@@ -37,10 +37,10 @@ def test_tools_rev_is_derived_from_tools_version():
 
     rev = m.tools_rev()
     assert isinstance(rev, int) and not isinstance(rev, bool) and 1 <= rev <= 999_999
-    # 19 was the last hand-pinned rev; the offset keeps hash 853b69b3466b on it. Pinned for that hash only:
+    # 20 was the last hand-pinned rev; the offset keeps hash 27f231eaf9ab on it. Pinned for that hash only:
     # when the tool surface (tool or parameter names) moves the hash moves and this check is skipped.
-    if m.tools_version(m.served_tool_parameters()) == "853b69b3466b":
-        assert rev == 19
+    if m.tools_version(m.served_tool_parameters()) == "27f231eaf9ab":
+        assert rev == 20
 
 
 def test_different_parameter_map_gives_different_rev():

@@ -235,6 +235,9 @@ the same `request_id` again returns the FIRST receipt with `already_existed: tru
 and writes nothing; the same `request_id` with different fields is refused (409
 `idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
 After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
+Leave `answers` out and the receipt freezes the newest form_filled / form_swept answers (`answers_from`);
+an empty `channel` reads the form's host. A sensitive answer the user did not agree to remember is kept as its hash only.
+Leave cv_artifact_id / cover_letter_artifact_id out when the browser uploaded the files: the receipt names exactly what was uploaded (`files`).
 
 Write tools take an optional `client_key` the same way: `save_artifact`,
 `record_event`, `bring_job`, `add_contact` and `ask_user` (your own id for this
@@ -373,6 +376,8 @@ earlier application counts toward today's `daily_cap`, `weekly_cap` and
 `min_gap_minutes` like any `applied` (Job360 counts when it was recorded):
 tell the user.
 
+EMAIL APPLICATIONS (the ad says "apply by email"): record_event email_drafted {to, subject, attachments: [{artifact_id, sha256}] from get_application_kit, gmail_draft_id?} (never the body) before check_submit, then call check_submit with `form_url` = `mailto:<to>`; send only on `submit` (or the user's yes for that exact draft: a new recipient or attachment needs a new yes); then record_application with channel "email", `recipient` and the sent email's `gmail_message_id`.
+
 ## Outreach
 
 Outreach to a person — recruiter, hiring manager, referral, cold
@@ -428,6 +433,8 @@ have one too: it is kept on that entry). Record only what the user told you or t
 nothing and never count as outreach sends. `referral_given` needs the contact linked to the job (add_contact
 with application_id first); the kit's `referred_by` and stats(view="referrals") read it. A wrong one:
 record_event `note` with `corrects_event_id` = its event id (the person's own history keeps the entry).
+
+Variants and templates: pass `label` on save_artifact(contact_id=..., kind="outreach") to name the approach (for example a template's label). stats `by_outreach_variant` counts each contact once, under the label of its newest message saved before its first `sent` mark (no message or no label = "Not set"), with sent, replied and reply rate. Keep reusable wording with save_artifact(kind="outreach_template", label=..., text=...) and no application_id or contact_id: each save is a new version; get_profile `outreach_templates` returns the newest of each label. You fill a template in yourself for each person, with true facts only; Job360 never fills, renders or sends one.
 
 ## Automatic employer emails
 
@@ -750,6 +757,7 @@ sexual_orientation, transgender}; "prefer not to say" is valid.
 recorded_at, company (optional), topic (optional)}] — set `approved: true` only after the user agrees to that exact
 wording, and send `recorded_at` back as stored. An answer given for ONE employer (consent,
 why-this-company, a referral there) gets `company`: that job's company; it is reused only for that company.
+A company-specific written answer always carries `company`; never a claim the profile lacks (a written answer is typed only after the user approves it: `check_submit` asks `answer_unapproved`).
 `topic` = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. `work_from.IN`,
 `notice_period_days`): save it with every answer; a gap's own `topic` goes in unchanged. An approved answer
 closes a gap when its topic matches, or its question equals the gap's text ignoring case and punctuation.

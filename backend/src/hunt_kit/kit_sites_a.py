@@ -111,6 +111,9 @@ def _hit(text: str, queries: list[str]) -> bool:
     return any(all(w in low for w in q.split()) for q in qs)
 
 
+_SITEMAP_MAX = 10_000_000  # a sitemap can list tens of thousands of postings; the 2 MB page default would drop it
+
+
 def _fetch(http: HttpFn, stats: Stats, name: str, budget: Any, url: str, **kw: Any) -> Any:
     """``kit_regional._fetch`` with ``once=True``: the http helper sends the request exactly once. Without it a 429 is retried
     (4 s, 8 s) and a 502/503/504 once, which breaks "the first answer that is not HTTP 200 ends the run" and the WORK180 pacing."""
@@ -546,7 +549,8 @@ def fetch_work180(queries: list[str], http: HttpFn, stats: Stats, *, days: int, 
     for locale in locales:
         if budget.left <= 0:
             break
-        xml = _list_get(paced, stats, "work180", budget, f"{W180_BASE}/{locale}/jobs-sitemap.xml", as_json=False)
+        xml = _list_get(paced, stats, "work180", budget, f"{W180_BASE}/{locale}/jobs-sitemap.xml", as_json=False,
+                        max_bytes=_SITEMAP_MAX)
         spent = 0
         for entry in parse_work180_sitemap(xml, locale):
             if spent >= W180_DETAIL_CAP or budget.left <= 0:
@@ -791,14 +795,15 @@ def fetch_instaffo(queries: list[str], http: HttpFn, stats: Stats, *, days: int,
     if not _wanted(countries, "DE"):
         return []
     budget = _Budget(SITE_MAX_REQUESTS)
-    index = _list_get(http, stats, "instaffo", budget, INSTAFFO_INDEX, as_json=False)
+    index = _list_get(http, stats, "instaffo", budget, INSTAFFO_INDEX, as_json=False, max_bytes=_SITEMAP_MAX)
     # the sub-sitemap and every job loc are pinned to https://jobs.instaffo.com (rebuilt from host + path): a value read from
     # the sitemap never picks the host that is fetched or emitted
     sub = next((u for u in (_pinned(loc, INSTAFFO_HOST) for loc, _ in parse_sitemap(index)) if u and "sitemap-jobs" in urlsplit(u).path), "")
     if not sub:
         return []
     entries = [(pu, lm) for pu, lm in ((_pinned(loc, INSTAFFO_HOST), lm) for loc, lm in
-                                       parse_sitemap(_list_get(http, stats, "instaffo", budget, sub, as_json=False)))
+                                       parse_sitemap(_list_get(http, stats, "instaffo", budget, sub, as_json=False,
+                                                  max_bytes=_SITEMAP_MAX)))
                if pu and _INSTAFFO_ID.search(pu)]
     entries.sort(key=lambda e: e[1], reverse=True)
     qs = _queries(queries)

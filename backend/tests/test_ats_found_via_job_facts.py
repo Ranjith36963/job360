@@ -602,3 +602,13 @@ async def test_unknown_channel_reply_warns_stored_as_other(authenticated_async_c
         ok = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "ats_form"})).json()
         assert ok["channel"] == "company_site" and ok["channel_given"] == "ats_form"
         assert not [w for w in ok["warnings"] if "channel" in w]
+
+
+def test_contact_found_via_has_the_people_source_ladder():
+    """Owner 2026-10-20: People is a source like Jobs. The reach recipe's ladder
+    (team page, GitHub, speaker page, email finder) must each have a value, so a
+    contact found there is not filed under 'other'."""
+    from src.core import settings
+
+    for slug in ("company_team_page", "github", "speaker_page", "email_finder"):
+        assert slug in settings.CONTACT_FOUND_VIA

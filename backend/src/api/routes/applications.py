@@ -60,6 +60,7 @@ from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
 from src.services.applications import ready as ready_service
 from src.services.applications import stats as stats_service
+from src.services.applications import uploads as uploads_service
 from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.fit_record import fit_view
@@ -121,7 +122,7 @@ class SaveArtifactRequest(BaseModel):
 
     kind: str
     text: str
-    label: str = Field("", max_length=100)
+    label: str = Field("", max_length=200)
     model: Optional[str] = Field(None, max_length=200)
     # Owner decision, 2026-09-25 — a message DRAFTED for a person. When given,
     # `kind` must be "outreach" and the text becomes a numbered version in
@@ -288,6 +289,10 @@ class ReceiptAnswerOut(BaseModel):
     answer: str
     source: Optional[str] = None
     key: Optional[str] = None
+    # G023 (slice 11): a sensitive answer the user did not agree to remember is stored as its
+    # sha256 only; it reads back with ``answer`` "" and these two set.
+    redacted: Optional[bool] = None
+    value_sha256: Optional[str] = None
 
     @model_serializer(mode="wrap")
     def _omit_unset(self, handler: Any):  # type: ignore[no-untyped-def]  # un-annotated keeps the OpenAPI schema typed
@@ -313,6 +318,10 @@ class RecordApplicationReceiptRequest(BaseModel):
     # Idempotency key (1-128 printable chars): the same one again returns the FIRST
     # receipt with already_existed=true and writes nothing; a different body = 409.
     request_id: Optional[str] = None
+    # Gap roadmap slice 31 (G078): an EMAIL application's recipient (ONE address; '' = take it from the
+    # newest email_drafted when channel is email) and the sent message's Gmail id ('' = not given).
+    recipient: str = Field("", max_length=320)
+    gmail_message_id: str = Field("", max_length=300)
 
     def clamp_fields_filled(self) -> dict[str, Any]:
         cap = settings.APPLICATION_RECEIPT_FIELDS_MAX_BYTES
@@ -619,6 +628,7 @@ class OutreachEntryOut(BaseModel):
     recorded_by: str
     source_message_id: str
     follow_up_on: Optional[str] = None
+    label: str = ""
 
 
 class ContactOutreachOut(BaseModel):
@@ -884,6 +894,7 @@ class SaveArtifactResponse(BaseModel):
     created_at: str
     event_id: Optional[int]
     contact_id: Optional[int] = None
+    label: str = ""
     ats_score: Optional[int] = None
     ats_notes: Optional[str] = None
     # Deterministic save-time checks (services/applications/cv_checks.py): claims
@@ -937,6 +948,19 @@ class RecordEventResponse(BaseModel):
     follow_up_on: Optional[str]
 
 
+class ReceiptFileOut(BaseModel):
+    """Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+    Slice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is
+    of the artifact's TEXT and ``fmt`` is '' (the email's file format is not known)."""
+
+    kind: str
+    artifact_id: int
+    # sha256 of the exact bytes served (hex); the bytes themselves are never stored.
+    sha256: str
+    fmt: str
+    event_id: int
+
+
 class RecordApplicationReceiptResponse(BaseModel):
     receipt_id: int
     sent_at: str
@@ -956,6 +980,13 @@ class RecordApplicationReceiptResponse(BaseModel):
     event_id: int
     # S3 - '' | same_job | same_role | same_company. A flag, never a block.
     possible_duplicate: str = ""
+    # Slice 11 - '<event_type>#<event_id>' the answers were frozen from when none were given; '' otherwise.
+    answers_from: str = ""
+    # Slice 29 - the uploaded / served files this receipt names ([] = none seen, or other versions named).
+    files: list[ReceiptFileOut] = Field(default_factory=list)
+    # Slice 31 - an email application's recipient and Gmail message id ('' = not an email / not given).
+    recipient: str = ""
+    gmail_message_id: str = ""
     # True when this request_id was already recorded: the FIRST receipt, nothing written.
     already_existed: bool = False
     referred_by_contact_id: Optional[int] = None
@@ -1417,6 +1448,8 @@ class RecordOutreachRequest(BaseModel):
     # Owner decision, 2026-09-25 — sent (linked only) or any meeting/call/intro/referral entry
     # (cold too); `contacts.record_outreach` enforces it.
     follow_up_on: Optional[str] = None
+    # pack #13 — only on entry="message"; contacts.record_outreach refuses it on sent/reply
+    label: str = Field(default="", max_length=200)
     # A caller going through /applications/{id}/events can only ever touch a
     # contact linked to THAT SAME application — set by the wrapper below,
     # never by the request body itself.
@@ -1573,6 +1606,20 @@ class StatsContactFoundViaGroupOut(BaseModel):
     outreach_sent: int
     outreach_replied: int
     reply_rate: Optional[float]
+
+
+class StatsOutreachVariantGroupOut(BaseModel):
+    """Pack #13 — per outreach `label` (lower(trim)): contacts with a sent mark, counted
+    once under the label of their newest message version saved BEFORE their first sent
+    mark ('' / none = key null, "Not set"); of those, how many have a reply mark;
+    reply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N."""
+
+    key: Optional[str]
+    label: str
+    outreach_sent: int
+    outreach_replied: int
+    reply_rate: Optional[float]
+    small_sample: bool
 
 
 class StatsScoreLineOut(BaseModel):
@@ -1878,6 +1925,7 @@ class StatsResponse(BaseModel):
     by_channel: list[StatsKeyedGroupOut]
     by_contact_found_via: list[StatsContactFoundViaGroupOut]
     by_contact_relationship: list[StatsContactFoundViaGroupOut]  # same group model, per relationship
+    by_outreach_variant: list[StatsOutreachVariantGroupOut] = []
     score_line: StatsScoreLineOut
     groups_truncated: bool
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
@@ -2349,6 +2397,7 @@ async def record_outreach(
                 entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
                 source_message_id=source["message_id"] if source else "",
                 follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
+                label=body.label,
             )
         except SpineError as exc:
             _raise(exc)
@@ -2507,14 +2556,14 @@ async def _save_artifact(
             result = await contacts_service.record_outreach(
                 db, user.id, body.contact_id, actor_for(user),
                 entry="message", channel=body.channel, text=body.text,
-                application_id_hint=application_id,
+                application_id_hint=application_id, label=body.label,
             )
             outreach = result["outreach"]
             return {
                 "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
                 "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": body.model,
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": result["event_id"],
-                "contact_id": body.contact_id, "checks": outreach.get("checks", []),
+                "contact_id": body.contact_id, "checks": outreach.get("checks", []), "label": outreach["label"],
             }
         return await spine.save_artifact(
             db, user_id=user.id, application_id=application_id, kind=body.kind, text=body.text,
@@ -2816,7 +2865,8 @@ async def approve_send(
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-    (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
+    or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+    event; check_submit asks ``approval_stale``). Clears an earlier
     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
     the fill the user was looking at; when either is no longer the newest, 409 and
     nothing is recorded (the yes must name what the user saw)."""
@@ -3022,7 +3072,9 @@ async def submit_check(
     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
-    clears none of them. An unconfirmed email answers ``ask`` /
+    clears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form
+    rules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.
+    An unconfirmed email answers ``ask`` /
     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
     ``get_application_kit``; 422 when malformed): another session's live kit hold
     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -3056,7 +3108,8 @@ async def submit_check(
             "event": "submit_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
             "decision": verdict.decision, "reason": verdict.reason,
-            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)), "result": "ok",
+            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)),
+            "channel": "email" if settings_rules.is_mailto(form_url) else "form", "result": "ok",
         },
     )
     return {
@@ -3169,6 +3222,12 @@ async def _record_event(
         spine.validate_event_type(body.event_type)
         if body.event_type in proof_service.SERVER_ONLY_EVENTS:
             raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
+        if body.event_type in uploads_service.SERVER_ONLY_EVENTS:
+            # Slice 29: the receipt trusts it as the file that was sent, so no caller may forge one.
+            raise SpineError(
+                422, f"{body.event_type} is written by Job360 itself (its browser upload or the kit's file link), "
+                "not by a caller",
+            )
         detail = body.clamp_detail()
         # proof_text is capped in CHARACTERS (owner limit), so it skips the generic byte cap.
         if body.event_type == "proof_text":
@@ -3426,6 +3485,7 @@ async def record_application_receipt(
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
             applied_at=applied_at, request_id=body.request_id,
             referred_by_contact_id=body.referred_by_contact_id,
+            recipient=body.recipient, gmail_message_id=body.gmail_message_id,
         )
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None

@@ -386,6 +386,15 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # refuses them without contact_id. Note-family: never move the status. A wrong one is
     # retracted by a `note` with corrects_event_id (stats and the kit skip it).
     "contact_meeting", "contact_call", "contact_intro", "referral_asked", "referral_given",
+    # Gap roadmap slice 29: the exact file a form was sent. SERVER-WRITTEN only (the browser's
+    # upload and the kit's /api/files/{token} link): {kind, artifact_id, version, sha256 of the
+    # bytes served, fmt, renderer_version, host}. A hash, never bytes or text. Refused from
+    # record_event (services/applications/uploads.py); record_application freezes it as `files`.
+    "document_uploaded",
+    # Gap roadmap slice 31 (G078): an EMAIL application's exact draft, recorded by the assistant before
+    # check_submit {to, subject, attachments: [{artifact_id, sha256 of the text}], gmail_draft_id?}; never
+    # the body. Checked in services/applications/email_channel.py; read by the gate and the receipt.
+    "email_drafted",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -638,6 +647,15 @@ OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000")
 LINKEDIN_NOTE_MAX_CHARS = 200
 LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
+# Outreach pack #13 — the caller's own variant label on a message version / a template
+# (stats `by_outreach_variant` groups on lower(trim(label))). Free text, one line.
+VARIANT_LABEL_MAX_CHARS = 100
+# User-level templates (not tied to a job or a person): reusable wording the assistant
+# fills in itself. Versioned per label, append-only. Job360 never fills, renders or sends one.
+USER_TEMPLATE_KINDS = ("outreach_template",)
+USER_TEMPLATE_MAX_CHARS = int(os.getenv("USER_TEMPLATE_MAX_CHARS", "3000"))
+USER_TEMPLATE_LABELS_MAX = int(os.getenv("USER_TEMPLATE_LABELS_MAX", "10"))
+USER_TEMPLATE_VERSIONS_PER_LABEL_MAX = int(os.getenv("USER_TEMPLATE_VERSIONS_PER_LABEL_MAX", "50"))
 OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_MAX", "200"))
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
 CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))
@@ -677,7 +695,10 @@ LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
 KNOWN_PEOPLE_MAX = int(os.getenv("KNOWN_PEOPLE_MAX", "20"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
-CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
+CONTACT_FOUND_VIA = (
+    "company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event",
+    "company_team_page", "github", "speaker_page", "email_finder", "other",
+)
 # Outreach pack #7 — where the contact's EMAIL came from (the person's origin is
 # found_via). Closed set; unset = NULL (rule #29). `pattern_guess` makes
 # check_outreach answer ask (email_guessed). Editable like found_via (a contact_edits row).

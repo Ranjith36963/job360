@@ -771,7 +771,8 @@ export interface paths {
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
          *     where=web. A CV edited later makes the yes stop matching; slice 8: so does a new
          *     letter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing
-         *     (``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier
+         *     or a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the
+         *     event; check_submit asks ``approval_stale``). Clears an earlier
          *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
          *     the fill the user was looking at; when either is no longer the newest, 409 and
          *     nothing is recorded (the yes must name what the user saw).
@@ -826,7 +827,9 @@ export interface paths {
          *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a
          *     host + path other than the page stored on the newest ``form_filled`` / ``form_swept``
          *     (``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes
-         *     clears none of them. An unconfirmed email answers ``ask`` /
+         *     clears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form
+         *     rules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.
+         *     An unconfirmed email answers ``ask`` /
          *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
          *     ``get_application_kit``; 422 when malformed): another session's live kit hold
          *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
@@ -1592,7 +1595,8 @@ export interface paths {
          * Browser Live
          * @description One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
          *     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
-         *     logged or returned; the audit line names the action only.
+         *     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
+         *     human check in their assistant's browser instead (shot, click, type, key, scroll, done).
          */
         post: operations["browser_live_api_browser_live_post"];
         delete?: never;
@@ -2923,6 +2927,24 @@ export interface paths {
         get: operations["provenance_api_tailor__job_id___doc_kind__provenance_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Templates */
+        get: operations["list_templates_api_templates_get"];
+        put?: never;
+        /** Save Template */
+        post: operations["save_template_api_templates_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5757,6 +5779,11 @@ export interface components {
              */
             truncated: boolean;
         };
+        /** ListTemplatesResponse */
+        ListTemplatesResponse: {
+            /** Templates */
+            templates: components["schemas"]["TemplateOut"][];
+        };
         /**
          * ListedPerson
          * @description Outreach pack #15 — a person the ad itself names ("Meet the hiring team").
@@ -5811,6 +5838,12 @@ export interface components {
              * @default
              */
             key: string;
+            /**
+             * Mode
+             * @default sign_in
+             * @enum {string}
+             */
+            mode: "sign_in" | "finish";
             /**
              * Text
              * @default
@@ -6024,6 +6057,11 @@ export interface components {
             follow_up_on?: string | null;
             /** Id */
             id: number;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Occurred At */
             occurred_at: string;
             /** Recorded At */
@@ -6602,6 +6640,11 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /**
+             * Redacted
+             * @default false
+             */
+            redacted: boolean;
             /** Saved At */
             saved_at?: string | null;
             /** Saved By */
@@ -6690,6 +6733,11 @@ export interface components {
         Receipt: {
             /** Answers */
             answers?: components["schemas"]["ReceiptAnswerOut"][];
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Application Id */
             application_id?: number | null;
             /** Channel */
@@ -6729,11 +6777,18 @@ export interface components {
             fields_skipped: number;
             /** Fields Total */
             fields_total?: number | null;
+            /** Files */
+            files?: components["schemas"]["ReceiptFileOut"][];
             /**
              * Form Host
              * @default
              */
             form_host: string;
+            /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
             /**
              * Guessed Count
              * @default 0
@@ -6772,6 +6827,11 @@ export interface components {
             /** Profile Version */
             profile_version: number | null;
             proof?: components["schemas"]["ProofOut"];
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Recorded By */
             recorded_by?: string | null;
             /** Referred By Contact Id */
@@ -6809,8 +6869,30 @@ export interface components {
             key?: string | null;
             /** Question */
             question: string;
+            /** Redacted */
+            redacted?: boolean | null;
             /** Source */
             source?: string | null;
+            /** Value Sha256 */
+            value_sha256?: string | null;
+        };
+        /**
+         * ReceiptFileOut
+         * @description Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).
+         *     Slice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is
+         *     of the artifact's TEXT and ``fmt`` is '' (the email's file format is not known).
+         */
+        ReceiptFileOut: {
+            /** Artifact Id */
+            artifact_id: number;
+            /** Event Id */
+            event_id: number;
+            /** Fmt */
+            fmt: string;
+            /** Kind */
+            kind: string;
+            /** Sha256 */
+            sha256: string;
         };
         /** ReceiptListResponse */
         ReceiptListResponse: {
@@ -6914,10 +6996,20 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
+            /**
              * Note
              * @default
              */
             note: string;
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Referred By Contact Id */
             referred_by_contact_id?: number | null;
             /** Request Id */
@@ -6930,6 +7022,11 @@ export interface components {
              * @default false
              */
             already_existed: boolean;
+            /**
+             * Answers From
+             * @default
+             */
+            answers_from: string;
             /** Channel */
             channel: string;
             /**
@@ -6954,6 +7051,13 @@ export interface components {
             cv_version_no: number | null;
             /** Event Id */
             event_id: number;
+            /** Files */
+            files?: components["schemas"]["ReceiptFileOut"][];
+            /**
+             * Gmail Message Id
+             * @default
+             */
+            gmail_message_id: string;
             /**
              * Possible Duplicate
              * @default
@@ -6961,6 +7065,11 @@ export interface components {
             possible_duplicate: string;
             /** Receipt Id */
             receipt_id: number;
+            /**
+             * Recipient
+             * @default
+             */
+            recipient: string;
             /** Referred By Contact Id */
             referred_by_contact_id?: number | null;
             /** Sent At */
@@ -7042,6 +7151,11 @@ export interface components {
             entry: string;
             /** Follow Up On */
             follow_up_on?: string | null;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Occurred At */
             occurred_at?: string | null;
             source?: components["schemas"]["EventSource"] | null;
@@ -7143,6 +7257,11 @@ export interface components {
             event_id: number | null;
             /** Kind */
             kind: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
             /** Made By */
             made_by: string;
             /** Model */
@@ -7211,6 +7330,17 @@ export interface components {
             fit: components["schemas"]["ApplicationFitOut"];
             line: components["schemas"]["SaveFitLineOut"];
             visa?: components["schemas"]["ApplicationVisaOut"] | null;
+        };
+        /** SaveTemplateRequest */
+        SaveTemplateRequest: {
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Model */
+            model?: string | null;
+            /** Text */
+            text: string;
         };
         /**
          * SetVisaRequest
@@ -7658,6 +7788,27 @@ export interface components {
             /** Still Waiting */
             still_waiting: number;
         };
+        /**
+         * StatsOutreachVariantGroupOut
+         * @description Pack #13 — per outreach `label` (lower(trim)): contacts with a sent mark, counted
+         *     once under the label of their newest message version saved BEFORE their first sent
+         *     mark ('' / none = key null, "Not set"); of those, how many have a reply mark;
+         *     reply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N.
+         */
+        StatsOutreachVariantGroupOut: {
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string;
+            /** Outreach Replied */
+            outreach_replied: number;
+            /** Outreach Sent */
+            outreach_sent: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+            /** Small Sample */
+            small_sample: boolean;
+        };
         /** StatsOverallOut */
         StatsOverallOut: {
             /** Applied */
@@ -7851,6 +8002,11 @@ export interface components {
             by_cv_version: components["schemas"]["StatsCvVersionGroupOut"][];
             /** By Job Source */
             by_job_source: components["schemas"]["StatsKeyedGroupOut"][];
+            /**
+             * By Outreach Variant
+             * @default []
+             */
+            by_outreach_variant: components["schemas"]["StatsOutreachVariantGroupOut"][];
             /** By Role */
             by_role: components["schemas"]["StatsRoleGroupOut"][];
             calibration?: components["schemas"]["StatsCalibrationOut"] | null;
@@ -8132,6 +8288,27 @@ export interface components {
             receipt_id?: number | null;
             /** Title */
             title: string;
+        };
+        /** TemplateOut */
+        TemplateOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model?: string | null;
+            /** Template Id */
+            template_id: number;
+            /** Text */
+            text: string;
+            /** Version No */
+            version_no: number;
         };
         /** TimezoneRequest */
         TimezoneRequest: {
@@ -13075,6 +13252,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvenanceSegment"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_templates_api_templates_get: {
+        parameters: {
+            query?: {
+                kind?: string;
+                label?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListTemplatesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_template_api_templates_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateOut"];
                 };
             };
             /** @description Validation Error */

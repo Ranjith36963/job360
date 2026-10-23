@@ -267,7 +267,9 @@ function AnswerRow({
           <span className="text-xs text-info">Your answer. Your assistant types it in before it sends.</span>
         </span>
       ) : (
-        <span className="whitespace-pre-wrap break-words">{a.answer || "(blank)"}</span>
+        <span className="whitespace-pre-wrap break-words">
+          {a.redacted ? "(not kept: sensitive - Edit to type it)" : a.answer || "(blank)"}
+        </span>
       )}
       <span className="flex flex-wrap items-start gap-1.5 sm:justify-end">
         <span className={cn("whitespace-nowrap rounded-full border px-2 py-px font-mono text-[11px] font-medium", CHIP[chip.tone])}>

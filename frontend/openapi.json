@@ -6954,6 +6954,22 @@
         "title": "ListPeopleResponse",
         "type": "object"
       },
+      "ListTemplatesResponse": {
+        "properties": {
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateOut"
+            },
+            "title": "Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "title": "ListTemplatesResponse",
+        "type": "object"
+      },
       "ListedPerson": {
         "additionalProperties": false,
         "description": "Outreach pack #15 \u2014 a person the ad itself names (\"Meet the hiring team\").\nStored as a contact on this application, found_via='job_ad'. Lengths and the\nhttp(s) rule are add_contact's (contacts.validate_listed_people).",
@@ -7052,6 +7068,15 @@
             "default": "",
             "maxLength": 16,
             "title": "Key",
+            "type": "string"
+          },
+          "mode": {
+            "default": "sign_in",
+            "enum": [
+              "sign_in",
+              "finish"
+            ],
+            "title": "Mode",
             "type": "string"
           },
           "text": {
@@ -7522,6 +7547,11 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
           },
           "occurred_at": {
             "title": "Occurred At",
@@ -8823,6 +8853,11 @@
             "title": "Question",
             "type": "string"
           },
+          "redacted": {
+            "default": false,
+            "title": "Redacted",
+            "type": "boolean"
+          },
           "saved_at": {
             "anyOf": [
               {
@@ -9115,6 +9150,11 @@
             "title": "Answers",
             "type": "array"
           },
+          "answers_from": {
+            "default": "",
+            "title": "Answers From",
+            "type": "string"
+          },
           "application_id": {
             "anyOf": [
               {
@@ -9238,9 +9278,21 @@
             ],
             "title": "Fields Total"
           },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
+          },
           "form_host": {
             "default": "",
             "title": "Form Host",
+            "type": "string"
+          },
+          "gmail_message_id": {
+            "default": "",
+            "title": "Gmail Message Id",
             "type": "string"
           },
           "guessed_count": {
@@ -9318,6 +9370,11 @@
           },
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
+          },
+          "recipient": {
+            "default": "",
+            "title": "Recipient",
+            "type": "string"
           },
           "recorded_by": {
             "anyOf": [
@@ -9435,6 +9492,17 @@
             "title": "Question",
             "type": "string"
           },
+          "redacted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redacted"
+          },
           "source": {
             "anyOf": [
               {
@@ -9445,6 +9513,17 @@
               }
             ],
             "title": "Source"
+          },
+          "value_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Sha256"
           }
         },
         "required": [
@@ -9452,6 +9531,40 @@
           "answer"
         ],
         "title": "ReceiptAnswerOut",
+        "type": "object"
+      },
+      "ReceiptFileOut": {
+        "description": "Slice 29 - one file the receipt names: what Job360 uploaded or served (``document_uploaded``).\nSlice 31 - or a file attached to the email (``event_id`` = the ``email_drafted``): then ``sha256`` is\nof the artifact's TEXT and ``fmt`` is '' (the email's file format is not known).",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "fmt": {
+            "title": "Fmt",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "artifact_id",
+          "sha256",
+          "fmt",
+          "event_id"
+        ],
+        "title": "ReceiptFileOut",
         "type": "object"
       },
       "ReceiptListResponse": {
@@ -9669,10 +9782,22 @@
             "title": "Fields Filled",
             "type": "object"
           },
+          "gmail_message_id": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Gmail Message Id",
+            "type": "string"
+          },
           "note": {
             "default": "",
             "maxLength": 2000,
             "title": "Note",
+            "type": "string"
+          },
+          "recipient": {
+            "default": "",
+            "maxLength": 320,
+            "title": "Recipient",
             "type": "string"
           },
           "referred_by_contact_id": {
@@ -9707,6 +9832,11 @@
             "default": false,
             "title": "Already Existed",
             "type": "boolean"
+          },
+          "answers_from": {
+            "default": "",
+            "title": "Answers From",
+            "type": "string"
           },
           "channel": {
             "title": "Channel",
@@ -9774,6 +9904,18 @@
             "title": "Event Id",
             "type": "integer"
           },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptFileOut"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "gmail_message_id": {
+            "default": "",
+            "title": "Gmail Message Id",
+            "type": "string"
+          },
           "possible_duplicate": {
             "default": "",
             "title": "Possible Duplicate",
@@ -9782,6 +9924,11 @@
           "receipt_id": {
             "title": "Receipt Id",
             "type": "integer"
+          },
+          "recipient": {
+            "default": "",
+            "title": "Recipient",
+            "type": "string"
           },
           "referred_by_contact_id": {
             "anyOf": [
@@ -10062,6 +10209,12 @@
             ],
             "title": "Follow Up On"
           },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
           "occurred_at": {
             "anyOf": [
               {
@@ -10253,7 +10406,7 @@
           },
           "label": {
             "default": "",
-            "maxLength": 100,
+            "maxLength": 200,
             "title": "Label",
             "type": "string"
           },
@@ -10357,6 +10510,11 @@
           },
           "kind": {
             "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
             "type": "string"
           },
           "made_by": {
@@ -10686,6 +10844,43 @@
           "event_id"
         ],
         "title": "SaveFitResponse",
+        "type": "object"
+      },
+      "SaveTemplateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "text"
+        ],
+        "title": "SaveTemplateRequest",
         "type": "object"
       },
       "SetVisaRequest": {
@@ -12013,6 +12208,59 @@
         "title": "StatsLessonSideOut",
         "type": "object"
       },
+      "StatsOutreachVariantGroupOut": {
+        "description": "Pack #13 \u2014 per outreach `label` (lower(trim)): contacts with a sent mark, counted\nonce under the label of their newest message version saved BEFORE their first sent\nmark ('' / none = key null, \"Not set\"); of those, how many have a reply mark;\nreply_rate = replied / sent; small_sample under STATS_SMALL_SAMPLE_N.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outreach_replied": {
+            "title": "Outreach Replied",
+            "type": "integer"
+          },
+          "outreach_sent": {
+            "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "outreach_sent",
+          "outreach_replied",
+          "reply_rate",
+          "small_sample"
+        ],
+        "title": "StatsOutreachVariantGroupOut",
+        "type": "object"
+      },
       "StatsOverallOut": {
         "properties": {
           "applied": {
@@ -12638,6 +12886,14 @@
               "$ref": "#/components/schemas/StatsKeyedGroupOut"
             },
             "title": "By Job Source",
+            "type": "array"
+          },
+          "by_outreach_variant": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StatsOutreachVariantGroupOut"
+            },
+            "title": "By Outreach Variant",
             "type": "array"
           },
           "by_role": {
@@ -13532,6 +13788,65 @@
           "at"
         ],
         "title": "TallyItem",
+        "type": "object"
+      },
+      "TemplateOut": {
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "template_id": {
+            "title": "Template Id",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "template_id",
+          "kind",
+          "label",
+          "version_no",
+          "text",
+          "chars",
+          "made_by",
+          "created_at"
+        ],
+        "title": "TemplateOut",
         "type": "object"
       },
       "TimezoneRequest": {
@@ -17343,7 +17658,7 @@
     },
     "/api/applications/{application_id}/send/approve": {
       "post": {
-        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing\n(``fingerprint`` on the event; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
+        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching; slice 8: so does a new\nletter, fill, form page or assistant profile edit, or SUBMIT_APPROVAL_TTL_MINUTES passing\nor a newer ``email_drafted`` with another recipient or attachment (slice 31; ``fingerprint`` on the\nevent; check_submit asks ``approval_stale``). Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
         "operationId": "approve_send_api_applications__application_id__send_approve_post",
         "parameters": [
           {
@@ -17527,7 +17842,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch``, and a\nhost + path other than the page stored on the newest ``form_filled`` / ``form_swept``\n(``kit.latest_form_url``) answers ``ask`` / ``form_page_mismatch`` - a stored yes\nclears none of them. An EMAIL application passes ``form_url=mailto:<to>`` (slice 31, G078): no form\nrules, but ``stop`` / ``email_not_drafted`` until an ``email_drafted`` to that address is recorded.\nAn unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {
@@ -19868,7 +20183,7 @@
     },
     "/api/browser/live": {
       "post": {
-        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only.",
+        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only. ``mode: finish``: the user finishes a\nhuman check in their assistant's browser instead (shot, click, type, key, scroll, done).",
         "operationId": "browser_live_api_browser_live_post",
         "parameters": [
           {
@@ -23930,6 +24245,172 @@
         "summary": "Provenance",
         "tags": [
           "tailor"
+        ]
+      }
+    },
+    "/api/templates": {
+      "get": {
+        "operationId": "list_templates_api_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "outreach_template",
+              "maxLength": 40,
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTemplatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "templates"
+        ]
+      },
+      "post": {
+        "operationId": "save_template_api_templates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Template",
+        "tags": [
+          "templates"
         ]
       }
     },

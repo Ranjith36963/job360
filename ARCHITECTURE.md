@@ -119,7 +119,12 @@ compares, counts down and rate-limits it (`api/routes/files.py`), and
 `utils.logger.redact_path` keeps the token out of every log and Sentry event.
 Caps: the `KIT_*` and `FILE_*` constants in `core/settings.py`.
 `application_receipts` gained `possible_duplicate`, `kit_event_id`,
-`kit_sha256`, all set at INSERT. The human in the loop is the note events in
+`kit_sha256`, all set at INSERT; migration 0078 added `answers_from` / `answers_count`
+(a receipt recorded without answers freezes the newest form event's, `spine.record_receipt`);
+migration 0080 added `recipient` / `gmail_message_id` for an EMAIL application, whose
+`email_drafted` event (`services/applications/email_channel.py`) the gate reads
+(`check_submit` with `form_url=mailto:<to>`, reason `email_not_drafted`).
+The human in the loop is the note events in
 `services/applications/kit.KIT_EVENT_TYPES`, validated in the `record_event`
 route (`kit.check_kit_event`), plus the website-only buttons — the
 `require_session_user` routes in `api/routes/applications.py`; `may_submit`

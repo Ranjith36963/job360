@@ -254,8 +254,12 @@ async def test_sensitive_memory_goes_to_its_field_never_the_approved_list(authen
         app_id = await _bring(client)
         await _fill(client, app_id, [GENDER])
         card = await _card(client, app_id)
-        assert _codes(card) == ["sensitive", "not_in_memory"]  # gender is a private question (any job)
-        resp = await _confirm(client, app_id, 0, card["form_filled_event_id"])
+        assert _codes(card) == ["sensitive", "not_in_memory"]
+        # G023 (slice 11): not in memory, so the fill kept only its hash - Verify cannot see it, Edit types it.
+        assert (card["answers"][0]["redacted"], card["answers"][0]["answer"]) == (True, "")
+        refused = await _confirm(client, app_id, 0, card["form_filled_event_id"])
+        assert refused.status_code == 422 and "use Edit" in refused.json()["detail"]
+        resp = await _confirm(client, app_id, 0, card["form_filled_event_id"], "Female")
         assert resp.status_code == 200, resp.text
         assert resp.json()["answers"][0]["verified"] is True and _codes(resp.json()) == []
         profile = load_profile(fixture_user_id)
@@ -303,7 +307,7 @@ async def test_verify_memory_an_assistant_saved_makes_it_the_users_own(authentic
 async def test_refusals_write_nothing(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        await _fill(client, app_id, [GUESS, {"question": "Middle name", "answer": "", "source": "written"}])
+        await _fill(client, app_id, [GUESS, {"question": "Middle name", "answer": "", "source": "profile"}])
         fill = (await _card(client, app_id))["form_filled_event_id"]
         assert (await _confirm(client, app_id, 0, fill + 999)).status_code == 409
         assert (await _confirm(client, app_id, 7, fill)).status_code == 422

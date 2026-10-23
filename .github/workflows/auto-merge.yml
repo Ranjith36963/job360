@@ -588,6 +588,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          # A PR that merged or closed while the cage was judging it has no
+          # verdict worth posting (an `error` on a merged head is noise). If this
+          # read fails we do not know, so fall through and post as before.
+          pr_state=$(gh pr view "$PR" --repo "$GH_REPO" --json state --jq .state 2>/dev/null || true)
+          if [ -n "$pr_state" ] && [ "$pr_state" != "OPEN" ]; then
+            echo "PR #$PR is $pr_state; verdict not posted" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           state=""; desc=""; sha=""
           if [ -s status.json ]; then
             state=$(jq -r '.state // empty' status.json 2>/dev/null || true)
