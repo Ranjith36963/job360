@@ -2910,11 +2910,9 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
-    r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
+    r"ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
     r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com|"
     r"getconsider\.com|jobs\.gusto\.com|jobleads\.com)$", re.I)
-    r"ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
