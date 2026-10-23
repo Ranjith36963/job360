@@ -119,6 +119,8 @@ export const EVENT_LABEL: Record<string, string> = {
   document_uploaded: "Document file sent",
   // Gap roadmap slice 31: an email application's exact draft (no body).
   email_drafted: "Email application drafted",
+  outcome_suggested: "Outcome suggested (waiting for your OK)",
+  outcome_dismissed: "Suggested outcome ignored",
 };
 
 function relayedWords(payload: unknown): boolean {

@@ -23,7 +23,9 @@ on:
         default: false
 
 permissions:
-  contents: read
+  # write: GitHub refuses disablePullRequestAutoMerge with contents: read
+  # ("Resource not accessible by integration", run 39965024973).
+  contents: write
   pull-requests: write # withdraw auto-merge on a clashing PR
   statuses: write # `merge-cage` = failure on a clashing PR's head
 

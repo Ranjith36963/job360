@@ -11,7 +11,8 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    (two uploads at once both fail). Close the tab after submit. Greenhouse: use the plain embed URL (table).
    Name the site; if it is not in the table below, read `get_recipe("ats")`.
    No browser of your own: Job360's `browser` tool (open, look, then act on the `ref`s; `upload` with `doc_kind`
-   "cv" and this job's `application_id` sends the saved CV). After a page changes, use the refs it returned.
+   "cv" and this job's `application_id` sends the saved CV; `fill` sets up to 40 fields in ONE call and reads each
+   back: prefer it to one `type` per field). After a page changes, use the refs it returned.
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
    user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten; essay: draft, ask_user, type only the approved text. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
@@ -62,7 +63,8 @@ Facts a form asks:
 - A fact the kit lacks (city, years, over-18): `ask_user`, never guess.
 
 Browser handover (from the built-in-browser skill):
-- A browser result `off`, `no_browser`, `busy` or a refused site: tell the user once, then stop or move on. Never retry in a loop or work around it. `no_browser` mid-form = the page is gone: reopen and refill that one form once.
+- A browser result `off`, `no_browser`, `busy` or a refused site: tell the user once, then stop or move on. Never retry in a loop or work around it.
+- **Browser closed after the yes** (`no_browser` mid-form; it closes after 10 idle minutes): open the form, look, map the kit's `last_fill` to refs, ONE `fill` call, upload the CV, sweep, `check_submit`. Once per form; `check_submit` still decides, the yes never skips it.
 - Asking the user to act in their own browser: say which page, which step, and what you already filled. Say in chat what you found or did; they may not have watched.
 - A sign-in on a site belongs to the user: never sign out, change credentials or act beyond this application.
 - Read pages as text and refs (`look`), not screenshots, unless the layout is the question.

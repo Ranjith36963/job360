@@ -193,11 +193,15 @@ async def test_doctor_reports_the_served_tools_and_staleness(authenticated_async
             version = first["tools_version"]
             match = _payload(await mcp.call_tool("doctor", {"client_tools_version": version}))
             mismatch = _payload(await mcp.call_tool("doctor", {"client_tools_version": "000000000000"}))
+            # The client's own list over the wire: current version, but add_contact lacks `email`.
+            cached = {**served, "add_contact": [p for p in served["add_contact"] if p != "email"]}
+            caught = _payload(await mcp.call_tool("doctor", {"client_tools_version": version, "client_tools": cached}))
+            fresh = _payload(await mcp.call_tool("doctor", {"client_tools": served}))
 
     assert re.fullmatch(r"[0-9a-f]{12}", version)
     assert second["tools_version"] == version
     assert "apply_url" in first["tools"]["update_job"]
-    assert first["tools"]["doctor"] == ["client_tools_version", "client_tools_rev"]
+    assert first["tools"]["doctor"] == ["client_tools_version", "client_tools_rev", "client_tools"]
     # The map is exactly what tools/list advertises, and the version is its hash.
     assert first["tools"] == served
     assert version == tools_version(served)
@@ -206,6 +210,8 @@ async def test_doctor_reports_the_served_tools_and_staleness(authenticated_async
     assert mismatch["tools_stale"] is True
     assert first["stale_hint"] == TOOLS_STALE_HINT
     assert "reconnect the Job360 connector" in mismatch["stale_hint"]
+    assert caught["tools_stale"] is True and caught["tools_missing"] == {"add_contact": ["email"]}
+    assert fresh["tools_stale"] is False and fresh["tools_missing"] == {}
 
 
 @pytest.mark.asyncio
