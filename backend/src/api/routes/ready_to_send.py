@@ -78,6 +78,8 @@ class ReadyCard(BaseModel):
     cover_letter: Optional[ReadyDoc] = None
     answers: list[ReadyAnswer]
     flags: list[ReadyFlag]
+    # Seconds left on the hold keeping this filled form's Job360 browser open (None = none held).
+    held_seconds: Optional[int] = None
 
 
 class ReadyToSendOut(BaseModel):
@@ -112,8 +114,17 @@ async def ready_to_send(
     )
     return ReadyToSendOut(
         paused=paused, total=len(cards), unflagged=len(cards) - flagged,
-        items=[ReadyCard(**c) for c in cards[:limit]],
+        items=[ReadyCard(**c, held_seconds=_held(user.id, c["application_id"])) for c in cards[:limit]],
     )
+
+
+def _held(user_id: str, application_id: int) -> Optional[int]:
+    """Seconds left on that job's browser hold (in memory, this process; None = none), for Finish it here."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        return None
+    from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
+
+    return browser_agent.held_seconds(browser_agent.get_pool(), user_id, int(application_id))
 
 
 class CvToApproveRow(BaseModel):

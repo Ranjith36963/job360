@@ -117,11 +117,20 @@ async def list_asks(
     try:
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
         finish = await blocked_service.finish_here_ask_ids(db, user.id, rows)
-        rows = [{**r, "finish_here": r["id"] in finish} for r in rows]
+        rows = [{**r, "finish_here": r["id"] in finish, "held_seconds": _held(user.id, r, finish)} for r in rows]
         return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id)}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _held(user_id: str, ask: dict[str, Any], finish: set[int]) -> Optional[int]:
+    """A finish-here ask's seconds left on its browser hold (in memory, this process); None otherwise."""
+    if ask["id"] not in finish:
+        return None
+    from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
+
+    return browser_agent.held_seconds(browser_agent.get_pool(), user_id, int(ask["application_id"]))
 
 
 @router.post("/asks/{ask_id}/answer", response_model=AskOut, dependencies=AUTH_FIRST)

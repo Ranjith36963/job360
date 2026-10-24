@@ -756,6 +756,8 @@ class AskOut(BaseModel):
     status: str
     # True = this ask is a human check (CAPTCHA) in Job360's own browser: Needs you offers "Finish it here".
     finish_here: bool = False
+    # Seconds left on the hold keeping that form's Job360 browser open (None = not held): "kept open N minutes".
+    held_seconds: Optional[int] = None
     # 0087 - "" (an older ask), "question", or a blocker only the user can clear on the form.
     kind: str = ""
     # The form questions this ask carries, each with the answer filled in and where it came from.
@@ -3700,6 +3702,12 @@ async def _record_event(
             )
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
+        if body.event_type == "form_swept" and settings.BROWSER_AGENT_ENABLED:
+            # The form is filled and checked; it now waits on the user's yes (or a human check): keep this
+            # job's Job360 browser open 30 minutes, not 10. A no-op when no browser is open for it.
+            from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
+
+            browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id)
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
         if body.event_type in interview_payloads.INTERVIEW_EVENT_TYPES:

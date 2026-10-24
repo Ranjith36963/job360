@@ -16,6 +16,7 @@ import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
 import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
+import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { JobCards, loadJobCards } from "./JobCards";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
@@ -105,10 +106,12 @@ export function AskCard({
           onClick={() => setFinish("on")}
           className={`${confirmBtn} self-start`}
         >
-          Finish it here
+          Finish it here{heldText(ask.held_seconds)}
         </button>
       )}
-      {mode === "open" && finish === "on" && <FinishInBrowser onDone={() => setFinish("done")} />}
+      {mode === "open" && finish === "on" && ask.application_id != null && (
+        <FinishInBrowser applicationId={ask.application_id} onDone={() => setFinish("done")} />
+      )}
       {finish === "done" && ask.application_id != null && (
         <p data-testid="ask-finish-done" className="text-xs text-muted-foreground">
           Did it go through?{" "}

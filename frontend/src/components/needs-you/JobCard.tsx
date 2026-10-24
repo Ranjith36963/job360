@@ -9,6 +9,7 @@ import type { JobCardData, PersonToReach } from "@/lib/job-cards";
 import type { Ask } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
+import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 import { AskQuestions, initialRows } from "./AskQuestions";
@@ -102,11 +103,11 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`blocker-${ask.id}`}>
               <p className="text-sm font-medium">{isBlocker(kind) ? BLOCKER_TITLE[kind] : ""}</p>
               <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.question}</p>
-              {finishing === ask.id && <FinishInBrowser onDone={() => setFinishing(null)} />}
+              {finishing === ask.id && <FinishInBrowser applicationId={card.applicationId} onDone={() => setFinishing(null)} />}
               <div className="flex flex-wrap gap-2">
                 {ask.finish_here && finishing !== ask.id && (
                   <button type="button" className={btn} data-testid={`finish-here-${ask.id}`} onClick={() => setFinishing(ask.id)}>
-                    Finish it here
+                    Finish it here{heldText(ask.held_seconds)}
                   </button>
                 )}
                 {card.formUrl && (

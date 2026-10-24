@@ -101,7 +101,9 @@ async def test_a_captcha_stop_holds_the_form_and_says_finish_it_here(authenticat
     pool = agent.BrowserPool(max_sessions=1, idle_s=600, resolve=_no_dns)
 
     async def fake_run(p, user_id, action, **kw):
-        pool._sessions[user_id] = agent.Session(context=_Ctx(), page=None)  # noqa: SLF001 - the open form
+        pool._sessions[agent.browser_key(user_id, kw.get("application_id"))] = agent.Session(  # noqa: SLF001
+            context=_Ctx(), page=None,  # the open form, in that job's own browser
+        )
         return {"status": "needs_you", "reason": "captcha", "detail": "x", "url": "https://jobs.acme.com/apply/7"}
 
     monkeypatch.setattr(agent, "run", fake_run)
@@ -116,7 +118,7 @@ async def test_a_captcha_stop_holds_the_form_and_says_finish_it_here(authenticat
         out = (await client.post("/api/browser", json={"action": "click", "ref": "e1_ab", "application_id": app_id})).json()
         assert out["blocked_recorded"] is True
         user_id = authenticated_async_context.fixture_user_id
-        assert pool._sessions[user_id].held_until is not None  # noqa: SLF001
+        assert pool._sessions[agent.browser_key(user_id, app_id)].held_until is not None  # noqa: SLF001
         async with contextlib.asynccontextmanager(get_request_db)() as db:
             cur = await db._db.execute(
                 "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
@@ -125,7 +127,9 @@ async def test_a_captcha_stop_holds_the_form_and_says_finish_it_here(authenticat
             (row,) = [json.loads(r["payload"]) for r in await cur.fetchall()]
         assert row["reason"] == "captcha" and "Finish it here" in row["detail"]
 
-        done = (await client.post("/api/browser/live", json={"action": "done", "mode": "finish"})).json()
+        done = (await client.post(
+            "/api/browser/live", json={"action": "done", "mode": "finish", "application_id": app_id},
+        )).json()
         assert done == {"status": "ok", "done": True}
         bad = await client.post("/api/browser/live", json={"action": "shot", "mode": "drive"})
         assert bad.status_code == 422
@@ -158,7 +162,9 @@ async def test_needs_you_offers_finish_here_and_a_refill_is_held_for_the_user(au
     replies = [{"status": "needs_you", "reason": "captcha", "detail": "x", "url": "https://jobs.acme.com/apply/7"}]
 
     async def fake_run(p, user_id, action, **kw):
-        pool._sessions[user_id] = agent.Session(context=_Ctx(), page=None)  # noqa: SLF001 - the open form
+        pool._sessions[agent.browser_key(user_id, kw.get("application_id"))] = agent.Session(  # noqa: SLF001
+            context=_Ctx(), page=None,  # the open form, in that job's own browser
+        )
         return replies.pop(0) if replies else {"status": "ok", "filled": []}
 
     monkeypatch.setattr(agent, "run", fake_run)
@@ -183,14 +189,14 @@ async def test_needs_you_offers_finish_here_and_a_refill_is_held_for_the_user(au
         flags = {a["application_id"]: a["finish_here"] for a in asks}
         assert flags == {captcha_app: True, other_app: False}  # only the CAPTCHA in Job360's browser
 
-        pool._sessions[user_id].held_until = None  # noqa: SLF001 - the first hold ran out
+        captcha_key, other_key = (agent.browser_key(user_id, a) for a in (captcha_app, other_app))
+        pool._sessions[captcha_key].held_until = None  # noqa: SLF001 - the first hold ran out
         refill = (await client.post("/api/browser", json={
             "action": "fill", "fields": [{"ref": "e1_ab", "text": "Grace"}], "application_id": captcha_app,
         })).json()
-        assert refill["held_for_you"] is True and pool._sessions[user_id].held_until is not None  # noqa: SLF001
+        assert refill["held_for_you"] is True and pool._sessions[captcha_key].held_until is not None  # noqa: SLF001
 
-        pool._sessions[user_id].held_until = None  # noqa: SLF001
         other = (await client.post("/api/browser", json={
             "action": "fill", "fields": [{"ref": "e1_ab", "text": "Grace"}], "application_id": other_app,
         })).json()
-        assert other["held_for_you"] is False and pool._sessions[user_id].held_until is None  # noqa: SLF001
+        assert other["held_for_you"] is False and pool._sessions[other_key].held_until is None  # noqa: SLF001

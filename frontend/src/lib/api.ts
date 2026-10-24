@@ -1346,12 +1346,14 @@ export async function forgetBrowserSignIn(host: string): Promise<{ forgotten: st
 }
 
 /** One step of the user's own sign-in. What is typed goes to the page and is never kept. */
-/** `mode: "finish"`: the hand-off view, in the assistant's own browser on the form it stopped on. */
+/** `mode: "finish"`: the hand-off view, in that application's own browser on the form it stopped on. */
 export async function browserLive(
   step: BrowserLiveAction,
   mode: "sign_in" | "finish" = "sign_in",
+  applicationId?: number,
 ): Promise<BrowserLiveShot> {
-  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify({ ...step, mode }) });
+  const body = applicationId === undefined ? { ...step, mode } : { ...step, mode, application_id: applicationId };
+  return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify(body) });
 }
 
 // ---- Send starts my assistant (browser agent, "Send trigger"; website only, never a token) ----

@@ -31,6 +31,13 @@ export function clock(iso: string | null | undefined): string {
   return d ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
 }
 
+/** " · kept open N more minutes" while Job360's browser holds the filled form for the user; "" otherwise. */
+export function heldText(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return "";
+  const n = Math.max(1, Math.round(seconds / 60));
+  return ` · kept open ${n} more minute${n === 1 ? "" : "s"}`;
+}
+
 /** The chip under every answer: where it came from, who saved it, when. */
 export function sourceChip(a: ReadyAnswer, filledBy: string): { text: string; tone: ChipTone } {
   const saved = a.saved_by ? `saved by ${nameOf(a.saved_by)}` : "";
