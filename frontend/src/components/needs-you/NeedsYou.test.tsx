@@ -17,6 +17,11 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: vi.fn(),
   declineSettingRequest: vi.fn(),
+  // The job cards have their own tests (JobCard.test.tsx). A job record that fails to load drops
+  // its card and its asks show as plain cards under "Other questions", which these tests cover.
+  getApplication: () => Promise.reject(new Error("no job record in this test")),
+  getCvToApprove: async () => ({ items: [] }),
+  listPeople: async () => ({ people: [] }),
 }));
 // The morning check has its own tests (MorningCheck.test.tsx).
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
@@ -66,6 +71,11 @@ function setup(open: unknown[], answered: unknown[] = []) {
       ? { asks: open, open_count: open.length }
       : { asks: answered, open_count: open.length }
   );
+}
+
+// An answered ask shows as one line; "Change" opens the full card these tests check.
+async function openAnswered() {
+  for (const b of await screen.findAllByTestId(/^answered-change-/)) fireEvent.click(b);
 }
 
 beforeEach(() => {
@@ -121,6 +131,7 @@ describe("NeedsYou", () => {
         : { asks: [confirmAsk.mock.calls.length ? done : relayed, { ...base, id: 5, question: "Q5", status: "answered", answer: "A5", answered_by: "agent:Claude" }], open_count: 0 }
     );
     render(<NeedsYou />);
+    await openAnswered();
     const btn = await screen.findByTestId("confirm-relayed");
     expect(screen.getAllByTestId("confirm-relayed")).toHaveLength(1); // not on the assistant-only answer
     fireEvent.click(btn);
@@ -142,6 +153,7 @@ describe("NeedsYou", () => {
       ]
     );
     render(<NeedsYou />);
+    await openAnswered();
     const relayed = await screen.findByTestId("ask-relayed-from-chat");
     expect(relayed).toHaveTextContent("You said (via Claude): its two months, give or take");
     // only the relayed card shows it; the assistant-only answer is unchanged
@@ -157,6 +169,7 @@ describe("NeedsYou", () => {
       ]
     );
     render(<NeedsYou />);
+    await openAnswered();
     expect(await screen.findByText("You answered on Job360")).toBeInTheDocument();
     expect(
       screen.getByText("Your assistant recorded your answer from chat")
@@ -205,6 +218,7 @@ describe("NeedsYou", () => {
     const done = { ...base, id: 2, question: "Q2", status: "answered", answer: "A2", answered_by_user: true };
     setup([], [done]);
     render(<NeedsYou />);
+    await openAnswered();
     fireEvent.click(await screen.findByTestId("ask-change"));
     fireEvent.change(screen.getByTestId("ask-input-2"), { target: { value: "B2" } });
     setup([], [{ ...done, answer: "B2" }]);
