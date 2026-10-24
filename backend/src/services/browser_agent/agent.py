@@ -32,6 +32,7 @@ from src.services.applications.job_checks import redact_url_for_display
 from src.services.browser_agent.deploy_hold import Beacon
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
+    BODY_TEXT_JS,
     CHOSEN_NEARBY_JS,
     CONTROL_STATE_JS,
     ELEMENT_FACTS_JS,
@@ -919,9 +920,6 @@ def _refuse_captcha_frame(frame: Any) -> None:
         frame = frame.parent_frame
 
 
-# The frame's text as look reads it (whitespace folded, so a phrase split over lines still matches).
-_BODY_TEXT_JS = "(n) => (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, n)"
-
 
 async def _page_captcha(page: Any) -> bool:
     """Whether the page shows a CAPTCHA now: the same frames and text ``look`` reads."""
@@ -935,7 +933,9 @@ async def _page_captcha(page: Any) -> bool:
         if i >= MAX_FRAMES_CHECKED or read >= MAX_FRAMES:
             continue
         try:
-            texts.append(await asyncio.wait_for(f.evaluate(_BODY_TEXT_JS, MAX_TEXT), FRAME_READ_TIMEOUT_S))
+            # The frame's text as look reads it (whitespace folded, so a phrase split over lines still
+            # matches; a long <select>'s options never push the check's words past the cut).
+            texts.append(await asyncio.wait_for(f.evaluate(BODY_TEXT_JS, MAX_TEXT), FRAME_READ_TIMEOUT_S))
         except Exception:  # noqa: BLE001, S112 - a frame mid-navigation: its address still counts
             continue
         read += 1

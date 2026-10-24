@@ -21,8 +21,8 @@ _SUBMIT_REGEX_JS = (
 
 # Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int,
 # places: [[dist, above], ...]} (one place per element).
-# Each element: {ref, tag, type, role, name, value, checked, required, disabled, autocomplete,
-# in_form, options, via_label}.
+# Each element: {ref, tag, type, role, name, value, checked, group, required, disabled, autocomplete,
+# in_form, options, via_label} (group: the question a radio or checkbox answers).
 #
 # Learned from the open-source browser agents (docs/product/BROWSER_AGENT.md, research 2026-10-19):
 # * nearest-first budget: when a page has more controls than fit, keep the ones closest to what is
@@ -31,10 +31,37 @@ _SUBMIT_REGEX_JS = (
 # * open shadow roots are read (Playwright injected.js:4410-4421; SmartRecruiters' spl-* widgets);
 # * a 0x0 / transparent checkbox or radio behind a styled label is read through its label
 #   (Skyvern domUtils.js:514-526, nanobrowser enrich.ts:3-5).
+# The text a person sees, read without touching the page: innerText's visible text, minus every
+# <select>'s options (Chromium's innerText lists them all: a 1,500-option university list ate the whole
+# 6,000-character budget on Palantir's Lever form, 2026-10-24, and hid every question below it) and
+# minus the nodes in `skip`. Whitespace folded; reading stops a little past `limit`.
+_VISIBLE_TEXT_JS = r"""
+  const noText = new Set(['SELECT', 'OPTION', 'OPTGROUP', 'DATALIST', 'TEXTAREA', 'SCRIPT', 'STYLE', 'NOSCRIPT',
+    'TEMPLATE']);
+  const visibleText = (root, limit, skip) => {
+    const parts = [];
+    let size = 0;
+    const visit = (el) => {
+      if (size > limit || noText.has(el.tagName) || (skip && skip.has(el))) return;
+      const s = getComputedStyle(el);
+      if (s.display === 'none') return;
+      const block = !s.display.startsWith('inline') && s.display !== 'contents';
+      if (block || el.tagName === 'BR') parts.push(' ');
+      for (const c of el.childNodes) {
+        if (c.nodeType === 1) visit(c);
+        else if (c.nodeType === 3 && s.visibility === 'visible') { parts.push(c.data); size += c.data.length; }
+      }
+      if (block) parts.push(' ');
+    };
+    if (root) visit(root);
+    return parts.join('').replace(/\s+/g, ' ').trim();
+  };
+"""
+
 # How a control is named. ONE copy, used by both the look (SNAPSHOT_JS) and the gate
 # (ELEMENT_FACTS_JS): when the two named a button differently, the gate could read a "Submit
 # application" button the look showed as an ordinary field and let it through (#908 review).
-_LABEL_OF_JS = r"""
+_LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
   const labelEl = (el) => {
     if (el.labels && el.labels.length) return el.labels[0];
     return el.closest('label');
@@ -62,7 +89,46 @@ _LABEL_OF_JS = r"""
     const role = (el.getAttribute('role') || '').toLowerCase();
     if ((el.tagName === 'BUTTON' || el.tagName === 'A' || role === 'button' || role === 'link')
         && (el.innerText || '').trim()) return el.innerText;
-    return el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
+    // A field with no label is named by the question just above it (Lever's custom questions are a
+    // <div class="text"> beside a bare <textarea name="cards[..][field0]">), never by its name attribute.
+    const typed = el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
+      || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset'].includes(el.type));
+    const q = typed ? questionOf(el) : '';
+    const ph = el.getAttribute('placeholder') || '';
+    if (q) return ph && !q.includes(ph) ? q + ' (' + ph + ')' : q;
+    return ph || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
+  };
+  // The controls a question block can hold: a block with a second one is not this control's question.
+  const fieldSel = 'input:not([type=hidden]), textarea, select, button, [contenteditable=""], '
+    + '[contenteditable=true], [contenteditable=plaintext-only], [role=combobox], [role=textbox], '
+    + '[role=checkbox], [role=radio], [role=switch]';
+  // A radio or checkbox answers with its whole group (same name): the block holding the group is its question.
+  const groupOf = (el) => {
+    if (el.tagName !== 'INPUT' || !['radio', 'checkbox'].includes(el.type) || !el.name) return [el];
+    return Array.from(el.getRootNode().querySelectorAll('input'))
+      .filter((i) => i.name === el.name && i.type === el.type);
+  };
+  // The text of the nearest block (up to 6 levels up) that holds this control or its group and no other
+  // control, without the control's (or each choice's) own text: the question asked about it.
+  const questionOf = (el) => {
+    const members = groupOf(el), skip = new Set();
+    for (const m of members) { skip.add(m); if (labelEl(m)) skip.add(labelEl(m)); }
+    let n = el.parentElement;
+    for (let i = 0; i < 6 && n && n !== el.ownerDocument.body; i++, n = n.parentElement) {
+      if (Array.from(n.querySelectorAll(fieldSel)).some((f) => !members.includes(f))) return '';
+      if (!members.every((m) => n.contains(m))) continue;
+      const t = visibleText(n, 300, skip);
+      if (t) return t;
+    }
+    return '';
+  };
+  // Which question a Yes / No choice answers: its fieldset's legend, its radiogroup's name, or the block above.
+  const choiceGroup = (el) => {
+    const fs = el.closest('fieldset'), legend = fs && fs.querySelector(':scope > legend');
+    if (legend && legend.innerText.trim()) return legend.innerText;
+    const g = el.closest('[role=radiogroup], [role=group]');
+    if (g && (g.getAttribute('aria-label') || '').trim()) return g.getAttribute('aria-label');
+    return questionOf(el);
   };
   // A button can belong to a form it sits outside of (form="id"): el.form knows, closest() does not.
   // Inside an open shadow root the <form> is around the host, so climb out host by host.
@@ -192,7 +258,11 @@ SNAPSHOT_JS = r"""
       item.value = el.selectedOptions.length ? clip(el.selectedOptions[0].text, maxName) : '';
       item.options = Array.from(el.options).slice(0, 40).map(o => clip(o.text, 80));
     } else if (tag === 'input' || tag === 'textarea') {
-      if (type === 'checkbox' || type === 'radio') item.checked = el.checked;
+      if (type === 'checkbox' || type === 'radio') {
+        item.checked = el.checked;
+        const group = clip(choiceGroup(el), maxName);
+        if (group && group !== item.name) item.group = group;
+      }
       else if (type === 'file') item.value = Array.from(el.files || []).map(f => f.name).join(', ');
       else item.value = clip(el.value, 300);
     } else if (el.getAttribute('aria-checked') !== null) item.checked = el.getAttribute('aria-checked') === 'true';
@@ -202,7 +272,7 @@ SNAPSHOT_JS = r"""
     else if (tag === 'button' && /(^|\s)_active_/.test(el.className || '')) item.pressed = true;
     return item;
   });
-  const text = clip(document.body ? document.body.innerText : '', maxText);
+  const text = clip(visibleText(document.body, maxText), maxText);
   return {
     elements: out, text, has_password_box: hasPassword, omitted_above: omittedAbove, omitted_below: omittedBelow,
     // Per kept element: [distance from the screen, above it], for the size cut.
@@ -210,6 +280,9 @@ SNAPSHOT_JS = r"""
   };
 }
 """
+
+# A frame's page text as look reads it, cut at n: the CAPTCHA check reads the same text.
+BODY_TEXT_JS = "(n) => {" + _VISIBLE_TEXT_JS + "  return visibleText(document.body, n).slice(0, n);\n}"
 
 # Reads one tagged element's facts again right before acting on it, so the
 # safety check runs on what is on the page NOW, not on an old snapshot.
