@@ -862,6 +862,11 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     # Chromium switches to its error page a moment after a failed load: check again after the reads.
     if page.url.startswith("chrome-error://"):
         return _load_failed(page, after_action)
+    # A trap field for bots: its name, title or name attribute says to leave it blank. The hints are
+    # dropped here, before the size cut: the assistant reads the name.
+    for e in elements:
+        if is_honeypot(_safety_name(e.get("name"), e.pop("hints", ""))):
+            e["leave_blank"] = True
     elements, cut_above, cut_below = _within_size(elements, places)
     above += cut_above
     below += cut_below
@@ -880,9 +885,6 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
         step = None
     if step:
         out["form_step"] = step
-    for e in elements:
-        if is_honeypot(str(e.get("name") or "")):
-            e["leave_blank"] = True
     out["application_form"] = looks_like_application(elements)
     site = site_for(page.url, frame_urls[1:])
     if site is not None:
@@ -968,10 +970,18 @@ async def _find(s: Session, ref: str) -> tuple[Any, Any]:
     raise BrowserError("refused", "ref_not_found", "That ref is not on the page any more. Call look and use a new one.")
 
 
+def _safety_name(name: Any, hints: Any) -> str:
+    """A control's name for the safety checks: its shown name plus a typed control's title and name
+    attribute (``hints``), so a field named by the question above it is still known as a password box
+    (name="password") or a trap ("Leave this field blank" in its title) (#1174 review)."""
+    return " ".join(t for t in (str(name or ""), str(hints or "")) if t.strip())
+
+
 async def _kind(loc: Any) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
     return control_kind(
-        facts.get("tag", ""), facts.get("type", ""), facts.get("name", ""), facts.get("autocomplete", ""),
+        facts.get("tag", ""), facts.get("type", ""), _safety_name(facts.get("name"), facts.get("hints")),
+        facts.get("autocomplete", ""),
         bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
         bool(facts.get("owns_form")), bool(facts.get("toggle")),
     )
@@ -1253,7 +1263,7 @@ async def _act(
         facts.get("tag") in ("input", "textarea", "select") or str(facts.get("role")).lower() in _TICK_ROLES
     ):
         fills = False
-    if fills and is_honeypot(str(facts.get("name") or "")):
+    if fills and is_honeypot(_safety_name(facts.get("name"), facts.get("hints"))):
         raise BrowserError(
             "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
         )
@@ -1527,7 +1537,7 @@ async def _fill_one(s: Session, ref: str, text: str) -> tuple[bool, str]:
     on = _TICK_WORDS.get(text.strip().casefold()) if how == "tick" else None
     if how == "tick" and on is None:
         raise BrowserError("refused", "bad_tick_text", 'For a box use text "yes" or "no".')
-    if is_honeypot(str(facts.get("name") or "")) and (on if how == "tick" else bool(text)):
+    if is_honeypot(_safety_name(facts.get("name"), facts.get("hints"))) and (on if how == "tick" else bool(text)):
         raise BrowserError("refused", "leave_blank", "That field says to leave it blank (a trap for bots).")
     if how == "type":
         text = _plain_text(text)

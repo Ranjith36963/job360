@@ -22,7 +22,8 @@ _SUBMIT_REGEX_JS = (
 # Returns {elements: [...], text: str, has_password_box: bool, omitted_above: int, omitted_below: int,
 # places: [[dist, above], ...]} (one place per element).
 # Each element: {ref, tag, type, role, name, value, checked, group, required, disabled, autocomplete,
-# in_form, options, via_label} (group: the question a radio or checkbox answers).
+# in_form, options, via_label, hints} (group: the question a radio or checkbox answers; hints: a typed
+# control's title and name attribute, for look's trap-field check only).
 #
 # Learned from the open-source browser agents (docs/product/BROWSER_AGENT.md, research 2026-10-19):
 # * nearest-first budget: when a page has more controls than fit, keep the ones closest to what is
@@ -39,22 +40,32 @@ _VISIBLE_TEXT_JS = r"""
   const noText = new Set(['SELECT', 'OPTION', 'OPTGROUP', 'DATALIST', 'TEXTAREA', 'SCRIPT', 'STYLE', 'NOSCRIPT',
     'TEMPLATE']);
   const visibleText = (root, limit, skip) => {
+    // `size` counts the FOLDED text, as the reader will see it: a page indented with thousands of spaces
+    // must not use up the budget before its words (a CAPTCHA's "I'm not a robot" below them, #1174 review).
     const parts = [];
-    let size = 0;
+    let size = 0, space = true;
+    const add = (t) => {
+      t = t.replace(/\s+/g, ' ');
+      if (t === ' ') { if (space) return; space = true; parts.push(t); size += 1; return; }
+      if (space && t[0] === ' ') t = t.slice(1);
+      if (!t) return;
+      parts.push(t); size += t.length; space = t[t.length - 1] === ' ';
+    };
     const visit = (el) => {
       if (size > limit || noText.has(el.tagName) || (skip && skip.has(el))) return;
       const s = getComputedStyle(el);
       if (s.display === 'none') return;
       const block = !s.display.startsWith('inline') && s.display !== 'contents';
-      if (block || el.tagName === 'BR') parts.push(' ');
+      if (block || el.tagName === 'BR') add(' ');
       for (const c of el.childNodes) {
+        if (size > limit) return;
         if (c.nodeType === 1) visit(c);
-        else if (c.nodeType === 3 && s.visibility === 'visible') { parts.push(c.data); size += c.data.length; }
+        else if (c.nodeType === 3 && s.visibility === 'visible') add(c.data);
       }
-      if (block) parts.push(' ');
+      if (block) add(' ');
     };
     if (root) visit(root);
-    return parts.join('').replace(/\s+/g, ' ').trim();
+    return parts.join('').trim();
   };
 """
 
@@ -91,36 +102,76 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
         && (el.innerText || '').trim()) return el.innerText;
     // A field with no label is named by the question just above it (Lever's custom questions are a
     // <div class="text"> beside a bare <textarea name="cards[..][field0]">), never by its name attribute.
-    const typed = el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
-      || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset'].includes(el.type));
-    const q = typed ? questionOf(el) : '';
+    const q = typed(el) ? questionOf(el) : '';
     const ph = el.getAttribute('placeholder') || '';
     if (q) return ph && !q.includes(ph) ? q + ' (' + ph + ')' : q;
     return ph || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
   };
+  // A control a person types into or picks in (not a button).
+  const typed = (el) => el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
+    || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset'].includes(el.type));
+  // What the safety checks read besides the name: a typed control's title and name attribute. The name
+  // shown is the question above it, but "never type a password" and "leave a trap field blank" must still
+  // see name="password" or title="Leave this field blank" (#1174 review).
+  const hintsOf = (el) => typed(el)
+    ? [el.getAttribute('title'), el.getAttribute('name')].filter((t) => t && t.trim()).join(' ') : '';
   // The controls a question block can hold: a block with a second one is not this control's question.
   const fieldSel = 'input:not([type=hidden]), textarea, select, button, [contenteditable=""], '
     + '[contenteditable=true], [contenteditable=plaintext-only], [role=combobox], [role=textbox], '
     + '[role=checkbox], [role=radio], [role=switch]';
-  // A radio or checkbox answers with its whole group (same name): the block holding the group is its question.
+  // A radio or checkbox answers with its whole group (same name): the block holding the group is its
+  // question. One map per root per run: a 2,000-box group read once, not once per box (#1174 review).
+  const groupsByRoot = new Map();
+  const alone = (el) => ({ members: new Set([el]), verdicts: new Map() });
   const groupOf = (el) => {
-    if (el.tagName !== 'INPUT' || !['radio', 'checkbox'].includes(el.type) || !el.name) return [el];
-    return Array.from(el.getRootNode().querySelectorAll('input'))
-      .filter((i) => i.name === el.name && i.type === el.type);
+    if (el.tagName !== 'INPUT' || !['radio', 'checkbox'].includes(el.type) || !el.name) return alone(el);
+    const root = el.getRootNode();
+    let groups = groupsByRoot.get(root);
+    if (!groups) {
+      groups = new Map();
+      for (const i of root.querySelectorAll('input[type=radio], input[type=checkbox]')) {
+        if (!i.name) continue;
+        const key = i.type + '\u0000' + i.name;
+        if (!groups.has(key)) groups.set(key, { members: new Set(), verdicts: new Map() });
+        groups.get(key).members.add(i);
+      }
+      groupsByRoot.set(root, groups);
+    }
+    return groups.get(el.type + '\u0000' + el.name) || alone(el);
   };
   // The text of the nearest block (up to 6 levels up) that holds this control or its group and no other
-  // control, without the control's (or each choice's) own text: the question asked about it.
+  // control, without the control's (or each choice's) own text: the question asked about it. Each block's
+  // verdict is kept per group, and each control's answer per run (labelOf and choiceGroup both ask).
+  const questions = new Map(), OTHER = {}, PART = {};
   const questionOf = (el) => {
-    const members = groupOf(el), skip = new Set();
-    for (const m of members) { skip.add(m); if (labelEl(m)) skip.add(labelEl(m)); }
+    if (questions.has(el)) return questions.get(el);
+    const g = groupOf(el);
+    let answer = '';
     let n = el.parentElement;
     for (let i = 0; i < 6 && n && n !== el.ownerDocument.body; i++, n = n.parentElement) {
-      if (Array.from(n.querySelectorAll(fieldSel)).some((f) => !members.includes(f))) return '';
-      if (!members.every((m) => n.contains(m))) continue;
-      const t = visibleText(n, 300, skip);
-      if (t) return t;
+      let v = g.verdicts.get(n);
+      if (v === undefined) {
+        let held = 0;
+        v = null;
+        for (const f of n.querySelectorAll(fieldSel)) {
+          if (!g.members.has(f)) { v = OTHER; break; }
+          held++;
+        }
+        if (v !== OTHER && held < g.members.size) v = PART;
+        if (v === null) {
+          if (!g.skip) {
+            g.skip = new Set();
+            for (const m of g.members) { g.skip.add(m); const l = labelEl(m); if (l) g.skip.add(l); }
+          }
+          v = visibleText(n, 300, g.skip);
+        }
+        g.verdicts.set(n, v);
+      }
+      if (v === OTHER) break;           // a block with another control: no question
+      if (v !== PART && v) { answer = v; break; }
     }
-    return '';
+    questions.set(el, answer);
+    return answer;
   };
   // Which question a Yes / No choice answers: its fieldset's legend, its radiogroup's name, or the block above.
   const choiceGroup = (el) => {
@@ -250,6 +301,8 @@ SNAPSHOT_JS = r"""
       autocomplete: clip(el.getAttribute('autocomplete'), maxAttr), in_form: inForm(el),
     };
     if (viaLabel) item.via_label = true;
+    const hints = clip(hintsOf(el), maxName);
+    if (hints) item.hints = hints;  // read by look's trap-field check, then dropped (agent.look)
     // The site's own "this answer is wrong / missing" mark: Workday sets it only after Save
     // (ats-autofill skills/fill-app/dom-toolkit.js:431-437).
     if (el.getAttribute('aria-invalid') === 'true') item.invalid = true;
@@ -321,6 +374,7 @@ ELEMENT_FACTS_JS = r"""
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
+    hints: hintsOf(el).replace(/\s+/g, ' ').trim().slice(0, 200),
     in_form: inForm(el), role: el.getAttribute('role') || '',
     // Whether it can submit a form itself: a button in a shadow root has no form owner.
     owns_form: !!el.form, toggle: el.hasAttribute('aria-pressed'),

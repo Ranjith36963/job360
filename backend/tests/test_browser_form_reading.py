@@ -150,3 +150,126 @@ async def test_a_button_beside_question_text_is_still_named_by_what_it_shows(gat
         assert gated.value.reason == "submit_needs_application"
     finally:
         await pool.shutdown()
+
+
+# Review of #1174: the text budget counts folded text (indentation is not words); a field named by the
+# question above it still shows the safety checks its title and name attribute; a big group reads fast.
+_IND = "\n" + " " * 24
+REVIEW = {
+    "/indented": "<!doctype html><html><body>" + "".join(
+        f"{_IND}<div>{_IND}  <span>Q{i}</span>{_IND}</div>" for i in range(300)
+    ) + "<p>I'm not a robot</p></body></html>",
+    "/fields": """<!doctype html><html><body><form>
+<div><div>Enter it below</div><input type="text" name="password" title="Password"></div>
+<div><div>Your secret</div><input type="text" name="cards[s][field0]" title="Password"></div>
+<div><div>Your code</div><input type="text" name="password"></div>
+<div><div>Website</div><input type="text" title="Leave this field blank"></div>
+<div><div>Full name</div><input type="text" name="cards[n][field0]"></div>
+</form></body></html>""",
+    "/boxes": "<!doctype html><html><body><form><div><div>Skills</div><div>" + "".join(
+        f"<div><label><input type=checkbox name='skills[]'>Skill {i}</label></div>" for i in range(2000)
+    ) + "</div></div></form></body></html>",
+}
+
+
+@pytest.fixture
+async def review_site():
+    from aiohttp import web
+
+    async def page(request):
+        return web.Response(text=REVIEW[request.path], content_type="text/html")
+
+    app = web.Application()
+    for path in REVIEW:
+        app.router.add_get(path, page)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    tcp = web.TCPSite(runner, "127.0.0.1", 0)
+    await tcp.start()
+    yield tcp._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    await runner.cleanup()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_indentation_never_pushes_the_captcha_words_past_the_text_budget(review_site):
+    from src.services.browser_agent.agent import BrowserPool, _page_captcha, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/indented")
+        assert "Q299" in page["text"]   # >6,000 characters of raw whitespace come before it
+        assert page["status"] == "needs_you" and page["reason"] == "captcha"
+        assert await _page_captcha(pool._sessions["u1"].page)  # noqa: SLF001
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_field_named_by_its_question_is_still_known_as_a_password_box(review_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/fields")
+        by_name = {e["name"]: e for e in page["elements"]}
+        assert set(by_name) == {"Enter it below", "Your secret", "Your code", "Website", "Full name"}
+        assert all("hints" not in e for e in page["elements"])   # the look shows the question only
+        names = ("Enter it below", "Your secret", "Your code")
+        for name in names:
+            with pytest.raises(BrowserError) as exc:
+                await run(pool, "u1", "type", ref=by_name[name]["ref"], text="hunter2")
+            assert exc.value.reason == "password_field", name
+        rows = (await run(pool, "u1", "fill", fields=[{"ref": by_name[n]["ref"], "text": "x"} for n in names]))[
+            "filled"]
+        assert [r["reason"] for r in rows] == ["password_field"] * 3
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_trap_field_named_by_its_question_is_still_left_blank(review_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/fields")
+        by_name = {e["name"]: e for e in page["elements"]}
+        assert by_name["Website"].get("leave_blank") is True
+        assert "leave_blank" not in by_name["Full name"]
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "type", ref=by_name["Website"]["ref"], text="https://example.com")
+        assert exc.value.reason == "leave_blank"
+        rows = (await run(pool, "u1", "fill", fields=[{"ref": by_name["Website"]["ref"], "text": "x"}]))["filled"]
+        assert [r["reason"] for r in rows] == ["leave_blank"]
+        typed = await run(pool, "u1", "type", ref=by_name["Full name"]["ref"], text="Ada Lovelace")
+        assert typed["typed_matches"] is True
+        values = await pool._sessions["u1"].page.evaluate(  # noqa: SLF001
+            "() => Array.from(document.querySelectorAll('input')).map((i) => i.value)")
+        assert values == ["", "", "", "", "Ada Lovelace"]
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_2000_box_group_is_read_in_one_pass(review_site):
+    import time
+
+    from src.services.browser_agent.agent import BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        page = await run(pool, "u1", "open", url="http://jobs.example/boxes")
+        assert page["elements"][0]["group"] == "Skills"
+        start = time.monotonic()
+        await run(pool, "u1", "look")
+        assert time.monotonic() - start < 1.0   # was ~1.5 s for the snapshot alone (one group map per box)
+    finally:
+        await pool.shutdown()
