@@ -111,12 +111,15 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
   const typed = (el) => el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
     || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset'].includes(el.type));
   // What the safety checks read besides the name: a typed control's title and name attribute, each on
-  // its own (never joined: "Do not fill this in" + "website" no longer ends the trap phrase) and each
-  // clipped on its own (a long title never pushes name="password" out). The name shown is the question
-  // above it, but "never type a password" and "leave a trap field blank" must still see them (#1174 review).
+  // its own (never joined: "Do not fill this in" + "website" no longer ends the trap phrase). Never shown
+  // to the assistant, so length costs nothing: each is kept whole up to 200 characters and, past that,
+  // by BOTH ends ("... please leave this field blank", "ctl00$...$txtPassword"). The name shown is the
+  // question above it, but "never type a password" and "leave a trap field blank" must still see them
+  // (#1174 review).
+  const keepEnds = (t) => (t.length > 200 ? t.slice(0, 100) + ' ' + t.slice(-100) : t);
   const hintsOf = (el) => typed(el)
     ? [el.getAttribute('title'), el.getAttribute('name')]
-      .map((t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 100)).filter(Boolean)
+      .map((t) => keepEnds((t || '').replace(/\s+/g, ' ').trim())).filter(Boolean)
     : [];
   // The controls a question block can hold: a block with a second one is not this control's question.
   const fieldSel = 'input:not([type=hidden]), textarea, select, button, [contenteditable=""], '

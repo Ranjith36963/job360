@@ -172,6 +172,13 @@ REVIEW = {
 <div><div>Enter it below</div><input type="text" name="password" title="Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. "></div>
 <div><div>Which exams did you pass</div><input type="text" title="Word limit 200" name="cards[e][field0]"></div>
 </form></body></html>""",
+    "/long": """<!doctype html><html><body><form>
+<div><div>Your site</div><input type="text" title="This field is used to stop automated spam submissions from bots.
+If you are a human, please leave this field blank."></div>
+<div><div>Enter it below</div><input type="text" name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_password"></div>
+<div><div>Referral</div><input type="text" title="We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. We read every answer with care. Please leave this field blank."></div>
+<div><div>Full name</div><input type="text" name="cards[n][field0]"></div>
+</form></body></html>""",
     "/boxes": "<!doctype html><html><body><form><div><div>Skills</div><div>" + "".join(
         f"<div><label><input type=checkbox name='skills[]'>Skill {i}</label></div>" for i in range(2000)
     ) + "</div></div></form></body></html>",
@@ -344,5 +351,54 @@ async def test_pass_and_a_word_limit_title_never_spell_a_password(review_site):
         values = await pool._sessions["u1"].page.evaluate(  # noqa: SLF001
             "() => Array.from(document.querySelectorAll('input')).map((i) => i.value)")
         assert values == ["", "", "", "A-levels"]
+    finally:
+        await pool.shutdown()
+
+
+# A long hint keeps its end (#1174 re-review): a trap title's "leave this field blank" sits past its
+# 100th character, an ASP.NET-style name attribute ends in "_password", a 400-character title is kept by
+# both ends.
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_long_trap_title_keeps_its_trap_phrase(review_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        els = (await run(pool, "u1", "open", url="http://jobs.example/long"))["elements"]
+        assert [e["name"] for e in els] == ["Your site", "Enter it below", "Referral", "Full name"]
+        assert all("hints" not in e for e in els)
+        assert [bool(e.get("leave_blank")) for e in els] == [True, False, True, False]
+        for e in (els[0], els[2]):
+            with pytest.raises(BrowserError) as exc:
+                await run(pool, "u1", "type", ref=e["ref"], text="https://example.com")
+            assert exc.value.reason == "leave_blank", e["name"]
+        rows = (await run(pool, "u1", "fill", fields=[{"ref": e["ref"], "text": "x"} for e in (els[0], els[2])]))[
+            "filled"]
+        assert [r["reason"] for r in rows] == ["leave_blank", "leave_blank"]
+        typed = await run(pool, "u1", "type", ref=els[3]["ref"], text="Ada Lovelace")
+        assert typed["typed_matches"] is True
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_long_name_attribute_keeps_its_password_end(review_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        els = (await run(pool, "u1", "open", url="http://jobs.example/long"))["elements"]
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "type", ref=els[1]["ref"], text="hunter2")
+        assert exc.value.reason == "password_field"
+        rows = (await run(pool, "u1", "fill", fields=[{"ref": els[1]["ref"], "text": "x"}]))["filled"]
+        assert [r["reason"] for r in rows] == ["password_field"]
+        values = await pool._sessions["u1"].page.evaluate(  # noqa: SLF001
+            "() => Array.from(document.querySelectorAll('input')).map((i) => i.value)")
+        assert values == ["", "", "", ""]
     finally:
         await pool.shutdown()
