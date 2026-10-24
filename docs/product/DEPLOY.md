@@ -19,7 +19,7 @@ Verified 2026-07-27: `meta.commitHash` equalled `origin/main` HEAD exactly, and 
 
 > **`/api/health` cannot answer this.** It returns a hardcoded `{"status":"ok","version":"1.0.0"}` with no commit SHA. Timestamp correlation is the only alternative signal and it fails silently on a rollback or a failed build — so use the deploy API, not the clock.
 
-> **`GET https://job360.uk/api/version` can** (since 2026-10-20): it returns `{"sha": "<RAILWAY_GIT_COMMIT_SHA>"}` from the process actually serving, or `"unknown"` if Railway did not set it. `post-merge-watch.yml` waits on it after every merge and goes red "deploy never went live" if the merge SHA never appears. (Railway's backend healthcheck has been `/api/readyz` since #960, so a deploy whose DB check fails never takes traffic and `/api/version` keeps reporting the old SHA.)
+> **`GET https://job360.uk/api/version` can** (since 2026-10-20): it returns `{"sha": "<RAILWAY_GIT_COMMIT_SHA>"}` from the process actually serving, or `"unknown"` if Railway did not set it. `post-merge-watch.yml` waits on it after every merge and goes red "deploy never went live" if the merge SHA never appears.
 
 ### If you ever need to deploy WITHOUT the GitHub link
 
@@ -36,7 +36,7 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 > answers it is `api.routes.health.deployz`: readyz's DB check, then 503 while the old
 > process has a busy cloud browser, for at most `DEPLOY_HOLD_MAX_SECONDS` (0 turns the hold off). The probes are mounted under `/api`
 > (`api.main`'s `include_router`), so every live path carries that prefix, and the
-> codes and bodies are pinned by `backend/tests/test_health_probes.py`.
+> codes and bodies are pinned by `backend/tests/test_health_probes.py` and `test_deploy_hold.py`, the configured path by `test_railway_healthcheck_path.py`.
 
 ## 🟢 What's already done (no action needed)
 - Backend + frontend **Dockerfiles** and **`docker-compose.prod.yml`** — read the
