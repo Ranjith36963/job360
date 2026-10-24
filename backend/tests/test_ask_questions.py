@@ -153,7 +153,6 @@ def _mcp_client(token: str):
 
 @pytest.mark.asyncio
 async def test_mcp_ask_user_and_answer_ask_carry_questions_and_answers(authenticated_async_context):
-    pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
     token = await _mint_token(authenticated_async_context)
