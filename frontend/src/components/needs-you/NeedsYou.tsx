@@ -17,6 +17,7 @@ import { settingScore } from "@/lib/assistant-tab";
 import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
 // Every string on an ask (question, context, answer, job fields) is written by
 // the user's assistant or by the user — untrusted. It is only ever rendered as
@@ -49,6 +50,8 @@ export function AskCard({
   const [draft, setDraft] = useState(mode === "open" ? "" : (ask.answer ?? ""));
   const [pending, setPending] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
+  // "Finish it here": the CAPTCHA in Job360's browser, solved on this card (owner, 2026-10-24).
+  const [finish, setFinish] = useState<"off" | "on" | "done">("off");
 
   async function run(fn: () => Promise<unknown>, failMsg: string, onDone?: () => void) {
     setBusy(true);
@@ -93,6 +96,27 @@ export function AskCard({
             ))}
         </p>
       </div>
+
+      {mode === "open" && ask.finish_here && finish === "off" && (
+        <button
+          type="button"
+          data-testid="ask-finish-here"
+          onClick={() => setFinish("on")}
+          className={`${confirmBtn} self-start`}
+        >
+          Finish it here
+        </button>
+      )}
+      {mode === "open" && finish === "on" && <FinishInBrowser onDone={() => setFinish("done")} />}
+      {finish === "done" && ask.application_id != null && (
+        <p data-testid="ask-finish-done" className="text-xs text-muted-foreground">
+          Did it go through?{" "}
+          <Link href={`/applications/${ask.application_id}`} className="underline underline-offset-2">
+            Press I submitted it on the application
+          </Link>
+          , or tell your assistant.
+        </p>
+      )}
 
       {mode === "answered" && !editing && (
         <div className="flex flex-col gap-1 rounded-lg bg-muted/30 p-3">

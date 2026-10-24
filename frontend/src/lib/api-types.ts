@@ -4114,6 +4114,11 @@ export interface components {
             confirmed_at?: string | null;
             /** Context */
             context: string;
+            /**
+             * Finish Here
+             * @default false
+             */
+            finish_here: boolean;
             /** Id */
             id: number;
             /** Job Company */
@@ -4779,6 +4784,11 @@ export interface components {
             confirmed_at?: string | null;
             /** Context */
             context: string;
+            /**
+             * Finish Here
+             * @default false
+             */
+            finish_here: boolean;
             /** Id */
             id: number;
             /** Job Company */

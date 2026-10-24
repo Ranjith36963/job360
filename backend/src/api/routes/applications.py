@@ -745,6 +745,8 @@ class AskOut(BaseModel):
     withdrawn_by: str = ""
     withdrawn_reason: str = ""
     status: str
+    # True = this ask is a human check (CAPTCHA) in Job360's own browser: Needs you offers "Finish it here".
+    finish_here: bool = False
 
 
 class ProofOut(BaseModel):
