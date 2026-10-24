@@ -27,7 +27,16 @@ const picked = "rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-pri
 const DID_IT = "I did it myself on the form.";
 const SKIP_JOB = "Skip this job: do not apply.";
 
-export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () => Promise<void> }) {
+/** `showHeader` false: the application page, whose own title already names the job. */
+export function JobCard({
+  card,
+  onChanged,
+  showHeader = true,
+}: {
+  card: JobCardData;
+  onChanged: () => Promise<void>;
+  showHeader?: boolean;
+}) {
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -85,6 +94,7 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
 
   return (
     <li data-testid={`job-card-${card.applicationId}`} className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card">
+      {showHeader && (
       <div className="flex flex-col gap-0.5">
         <Link href={`/applications/${card.applicationId}`} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
           {card.company || "Unknown company"}
@@ -94,6 +104,7 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
           {card.formFilled ? "Form filled, waiting for you" : "Waiting for you"} · since {relativeTime(card.oldestAskAt)}
         </p>
       </div>
+      )}
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
