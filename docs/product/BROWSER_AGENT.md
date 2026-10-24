@@ -131,7 +131,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the browser answers. It is on in production (seen live 2026-10-20); the code default stays off.
   - `BROWSER_AGENT_MAX_SESSIONS` (default 2, all users together), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
-  - `BROWSER_AGENT_MAX_PER_USER` (default 3, 2026-10-24): a new browser past a cap closes that user's least recently used one that is not held for them; when all are held it answers `busy` (`browsers_held`). Another user's browser is never closed.
+  - `BROWSER_AGENT_MAX_PER_USER` (default 3, 2026-10-24): a new browser past a cap closes that user's least recently used one that is not held for them; when all are held it answers `busy` (`browsers_held`). The per-user cap is never above `BROWSER_AGENT_MAX_SESSIONS`, and a user with no browser takes another user's least recently used spare one (every user gets a slot); another user's only, held or busy browser is never closed.
   - `BROWSER_AGENT_MAX_LIVE` (default 2): the live sign-in views' own cap, so they never take an assistant's browser.
   - A started Chromium takes about 250 MB, and each browser adds about 100-250 MB (measured locally on test pages, 2026-10-20; real career sites not yet measured).
   - An idle browser is closed by a sweep the app runs every 60 s while the switch is on, not only on the next request.
@@ -175,7 +175,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   on a live picture of the assistant's own browser (`POST /api/browser/live` with `mode: finish`: shot, click, type,
   key, scroll, done; no start, no keep). Website session only, like the sign-in view: a token gets 403. Done puts the
   browser back on its idle clock; then "I submitted it" records the receipt. Job360 still never solves a CAPTCHA.
-  Since 2026-10-24 `form_swept` holds that job's browser the same 30 minutes (it waits on the user's yes); the finish
+  Since 2026-10-24 `form_swept` holds that job's browser the same 30 minutes (it waits on the user's yes; a form filled in the scratch browser moves to the job when the browser is on the swept `form_url`). A hold is not renewed while it runs, and one user holds at most `BROWSER_AGENT_MAX_SESSIONS - 1` browsers at once; the finish
   view names the `application_id` whose browser it drives, Ready to send offers it too, and Needs you shows `held_seconds`.
 
 **`key` action (2026-10-19; Enter rule 2026-10-20):** ArrowDown, ArrowUp, Tab, Escape and Enter,

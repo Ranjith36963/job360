@@ -3707,7 +3707,15 @@ async def _record_event(
             # job's Job360 browser open 30 minutes, not 10. A no-op when no browser is open for it.
             from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
 
-            browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id)
+            pool = browser_agent.get_pool()
+            form_url = str((payload or {}).get("form_url") or "")
+            if form_url and browser_agent.browser_key(user.id, application_id) not in pool.user_keys(user.id):
+                # Filled in the scratch browser (no application named): on the same page it becomes this job's.
+                kit_hold = await kit_service.live_hold(db, user, application_id, datetime.now(timezone.utc))
+                browser_agent.adopt_for_form(
+                    pool, user.id, application_id, form_url, str((kit_hold or {}).get("session") or "")
+                )
+            browser_agent.hold_for_user(pool, user.id, application_id)
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
         if body.event_type in interview_payloads.INTERVIEW_EVENT_TYPES:

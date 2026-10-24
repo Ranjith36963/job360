@@ -3,15 +3,19 @@
 * Each application gets its own browser: a second job (even under a new session label) never takes or
   drops the first job's filled form. The same job's browser still refuses another session label.
 * Caps: at most ``max_per_user`` per user; a new one closes the user's least recently used browser that is
-  not held for them, and is refused (``browsers_held``) when every one waits on the user. Another user's
-  browser is never closed.
-* ``form_swept`` holds that job's browser (it waits on the user's yes); Needs you can say for how long.
+  not held for them, and is refused (``browsers_held``) when every one waits on the user. The per-user cap
+  never exceeds the pool, and a user with no browser takes another user's spare one (every user gets a
+  slot); never another user's only, held or busy browser (review of #1176).
+* ``form_swept`` holds that job's browser (it waits on the user's yes); Needs you can say for how long. A
+  hold is not renewed while active, and one user holds at most ``max_sessions - 1`` at once. A form filled
+  in the scratch browser is adopted by the job when the browser is on the swept form's page.
 * The finish view acts on the named application's browser, and needs that application.
 """
 from __future__ import annotations
 
 import socket
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -214,3 +218,116 @@ async def test_form_swept_holds_that_jobs_browser_and_ready_says_how_long(authen
     ) as bot:
         resp = await bot.post("/api/browser/live", json={"action": "done", "mode": "finish", "application_id": apps[0]})
         assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_user_with_no_browser_takes_another_users_spare_one_never_their_only(monkeypatch):
+    from src.services.browser_agent import agent
+
+    pool = _pool(monkeypatch, max_sessions=2)  # max_per_user 3 > the pool: capped at 2
+    old = await pool.get(agent.browser_key("uA", 1), create=True)
+    kept = await pool.get(agent.browser_key("uA", 2), create=True)
+    old.last_used = time.monotonic() - 100
+    theirs = await pool.get(agent.browser_key("uB", 1), create=True)  # A had two: its oldest makes room
+    assert old.context.closed and not kept.context.closed and not theirs.context.closed
+    assert set(pool._sessions) == {agent.browser_key("uA", 2), agent.browser_key("uB", 1)}  # noqa: SLF001
+    with pytest.raises(agent.BrowserError) as busy:
+        await pool.get(agent.browser_key("uC", 1), create=True)  # A and B each have one: neither is taken
+    assert busy.value.reason == "all_browsers_busy"
+    assert not kept.context.closed and not theirs.context.closed
+
+
+@pytest.mark.asyncio
+async def test_another_users_held_or_busy_browser_is_never_taken(monkeypatch):
+    from src.services.browser_agent import agent
+
+    pool = _pool(monkeypatch, max_sessions=3)
+    held, busy, free = [await pool.get(agent.browser_key("uA", n), create=True) for n in (1, 2, 3)]
+    held.last_used, busy.last_used, free.last_used = (time.monotonic() - t for t in (300, 200, 10))
+    assert agent.hold_for_user(pool, "uA", 1)
+    await busy.lock.acquire()
+    try:
+        await pool.get(agent.browser_key("uB", 1), create=True)  # only A's free one may go, though newest
+        assert free.context.closed and not held.context.closed and not busy.context.closed
+        with pytest.raises(agent.BrowserError) as full:
+            await pool.get(agent.browser_key("uC", 1), create=True)
+        assert full.value.reason == "all_browsers_busy"
+        assert not held.context.closed and not busy.context.closed
+    finally:
+        busy.lock.release()
+
+
+@pytest.mark.asyncio
+async def test_a_user_at_the_pool_size_is_told_its_browsers_wait_on_it(monkeypatch):
+    from src.services.browser_agent import agent
+
+    pool = _pool(monkeypatch, max_sessions=2)
+    await pool.get(agent.browser_key("uA", 1), create=True)
+    busy = await pool.get(agent.browser_key("uA", 2), create=True)
+    assert agent.hold_for_user(pool, "uA", 1)
+    await busy.lock.acquire()
+    try:
+        with pytest.raises(agent.BrowserError) as held:
+            await pool.get(agent.browser_key("uA", 3), create=True)
+        assert (held.value.status, held.value.reason) == ("busy", "browsers_held")
+    finally:
+        busy.lock.release()
+
+
+@pytest.mark.asyncio
+async def test_a_hold_is_not_renewed_while_active_and_one_user_holds_at_most_pool_minus_one(monkeypatch):
+    from src.services.browser_agent import agent
+
+    pool = _pool(monkeypatch, max_sessions=3)
+    one, two, three = [await pool.get(agent.browser_key("uA", n), create=True) for n in (1, 2, 3)]
+    one.held_until = time.monotonic() + 60
+    assert agent.hold_for_user(pool, "uA", 1)
+    assert one.held_until < time.monotonic() + 61  # still the first hold's end, not 30 more minutes
+    assert agent.hold_for_user(pool, "uA", 2)
+    assert not agent.hold_for_user(pool, "uA", 3) and three.held_until is None  # 2 of 3 held: no more
+    one.held_until = time.monotonic() - 1  # the first hold ran out: a new one may start
+    assert agent.hold_for_user(pool, "uA", 3) and three.held_until is not None
+    assert two.held_until is not None
+
+
+@pytest.mark.asyncio
+async def test_form_swept_adopts_the_scratch_browser_on_that_forms_page(authenticated_async_context, monkeypatch):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = _pool(monkeypatch, max_sessions=3)
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+    answer = {"question": "Name", "answer": "Ada Lovelace", "source": "memory", "key": "contact.legal_last_name"}
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        apps = []
+        for n in (1, 2):
+            brought = await client.post("/api/jobs/bring", json={
+                "title": f"Engineer {n}", "company": "Acme", "location": "London",
+                "description": "Build services. " * 10, "apply_url": f"https://jobs.acme.com/apply/{n}",
+            })
+            apps.append(brought.json()["application_id"])
+
+        async def sweep(app_id: int, form_url: str) -> None:
+            filled = {"form_url": form_url, "fields_count": 1, "answers": [answer]}
+            swept = {"fields_checked": 1, "fixed": 0, "form_url": form_url}
+            for kind, payload in (("form_filled", filled), ("form_swept", swept)):
+                resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": kind, "payload": payload})
+                assert resp.status_code == 201, resp.text
+
+        scratch = await pool.get(user_id, create=True)
+        scratch.page = SimpleNamespace(url="https://jobs.acme.com/apply/1?src=board#form")
+        await sweep(apps[0], "https://jobs.acme.com/apply/1")
+        assert pool._sessions.get(agent.browser_key(user_id, apps[0])) is scratch  # noqa: SLF001
+        assert user_id not in pool._sessions and scratch.held_until is not None  # noqa: SLF001
+
+        scratch.held_until = time.monotonic() + 60
+        await sweep(apps[0], "https://jobs.acme.com/apply/1")  # a second sweep does not extend the hold
+        assert scratch.held_until < time.monotonic() + 61
+
+        other = await pool.get(user_id, create=True)
+        other.page = SimpleNamespace(url="https://jobs.acme.com/apply/elsewhere")
+        await sweep(apps[1], "https://jobs.acme.com/apply/2")
+        assert pool._sessions.get(user_id) is other and other.held_until is None  # noqa: SLF001
+        assert agent.browser_key(user_id, apps[1]) not in pool._sessions  # noqa: SLF001

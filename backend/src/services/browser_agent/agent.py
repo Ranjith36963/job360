@@ -299,20 +299,42 @@ class BrowserPool:
             return
         self._sessions[key] = self._sessions.pop(user_id)
 
+    def per_user_cap(self) -> int:
+        """Browsers one user may have open: never more than the whole pool."""
+        return max(1, min(self.max_per_user, self.max_sessions))
+
+    def _spare_of_others(self, user_id: str) -> Optional[str]:
+        """Another user's least recently used browser that may close so this user gets a slot: not held,
+        not mid-action, and its owner keeps at least one other browser. None: nothing qualifies."""
+        now = time.monotonic()
+        spare = [
+            k for k, s in self._sessions.items()
+            if not k.startswith(LIVE_PREFIX) and _user_of(k) != user_id and not _held(s, now)
+            and not s.lock.locked() and len(self.user_keys(_user_of(k))) > 1
+        ]
+        return min(spare, key=lambda k: self._sessions[k].last_used) if spare else None
+
     async def _make_room(self, user_id: str) -> None:
         """Room for one more browser of this user under both caps: close the user's own least recently
-        used browser that is not held for them (never another user's). Called with ``_create_lock`` held."""
+        used browser that is not held for them. A user with none takes another user's spare one (every
+        user gets a slot); never another user's only, held or busy browser. Called with ``_create_lock``."""
         while True:
             mine = self.user_keys(user_id)
             agents = sum(1 for k in self._sessions if not k.startswith(LIVE_PREFIX))
-            if not mine or (len(mine) < self.max_per_user and agents < self.max_sessions):
+            if len(mine) < self.per_user_cap() and agents < self.max_sessions:
                 return
+            if not mine:
+                spare = self._spare_of_others(user_id)
+                if spare is None:
+                    return  # _create refuses: all_browsers_busy
+                await self.close(spare, "replaced")
+                continue
             now = time.monotonic()
             free = [k for k in mine if not _held(self._sessions[k], now) and not self._sessions[k].lock.locked()]
             if not free:
                 break
             await self.close(min(free, key=lambda k: self._sessions[k].last_used), "replaced")
-        if len(mine) >= self.max_per_user:
+        if len(mine) >= self.per_user_cap():
             raise BrowserError(
                 "busy", "browsers_held",
                 f"This user has {len(mine)} Job360 browsers open and each holds a form waiting on them (their yes "
@@ -1710,12 +1732,48 @@ def hold_for_user(
     seconds: float = HANDOFF_HOLD_SECONDS,
 ) -> bool:
     """Keep one job's browser open ``seconds`` more for the user (a human check, or a swept form waiting on
-    their yes). False: none is open."""
+    their yes). An active hold is not extended (holds never renew forever), and one user holds at most
+    ``max_sessions - 1`` browsers at once. False: none is open, or the user already holds that many."""
     s = pool._sessions.get(browser_key(user_id, application_id)) if pool is not None else None
-    if s is None:
+    if pool is None or s is None:
         return False
-    s.held_until = time.monotonic() + seconds
+    now = time.monotonic()
+    if _held(s, now):
+        return True
+    if sum(1 for k in pool.user_keys(user_id) if _held(pool._sessions[k], now)) >= max(1, pool.max_sessions - 1):
+        return False
+    s.held_until = now + seconds
     return True
+
+
+def _same_page(a: str, b: str) -> bool:
+    """Same scheme, host and path (query and fragment ignored)."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    try:
+        x, y = urlsplit(a), urlsplit(b)
+    except ValueError:
+        return False
+    try:
+        return bool(x.hostname) and (x.scheme.lower(), x.hostname, x.port, x.path or "/") == (
+            y.scheme.lower(), y.hostname, y.port, y.path or "/"
+        )
+    except ValueError:  # a malformed port
+        return False
+
+
+def adopt_for_form(pool: Optional[BrowserPool], user_id: str, application_id: int, form_url: str, owner: str) -> bool:
+    """A form swept for a job but filled in the user's scratch browser: when that job has no browser and the
+    scratch one is on the form's page and not held, it becomes the job's (``adopt``, ``owner`` = the
+    session holding the job). True when it moved."""
+    key = browser_key(user_id, application_id)
+    scratch = pool._sessions.get(user_id) if pool is not None else None
+    if pool is None or scratch is None or key in pool._sessions or _held(scratch, time.monotonic()):
+        return False
+    if not form_url or not _same_page(str(getattr(scratch.page, "url", "") or ""), form_url):
+        return False
+    pool.adopt(user_id, key, owner)
+    return key in pool._sessions
 
 
 def held_seconds(pool: Optional[BrowserPool], user_id: str, application_id: int) -> Optional[int]:
