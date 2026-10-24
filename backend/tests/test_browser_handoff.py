@@ -144,3 +144,53 @@ async def test_a_token_can_never_drive_the_finish_view(authenticated_async_conte
     ) as agent:
         resp = await agent.post("/api/browser/live", json={"action": "click", "x": 10, "y": 10, "mode": "finish"})
         assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_needs_you_offers_finish_here_and_a_refill_is_held_for_the_user(authenticated_async_context, monkeypatch):
+    """Owner, 2026-10-24: the CAPTCHA ask on Needs you carries ``finish_here``; when the assistant fills that
+    form again, the browser is held for the user (30 minutes), not left to the 10-minute idle close."""
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = agent.BrowserPool(max_sessions=1, idle_s=600, resolve=_no_dns)
+    replies = [{"status": "needs_you", "reason": "captcha", "detail": "x", "url": "https://jobs.acme.com/apply/7"}]
+
+    async def fake_run(p, user_id, action, **kw):
+        pool._sessions[user_id] = agent.Session(context=_Ctx(), page=None)  # noqa: SLF001 - the open form
+        return replies.pop(0) if replies else {"status": "ok", "filled": []}
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        app_ids = []
+        for n in (7, 8):
+            brought = await client.post("/api/jobs/bring", json={
+                "title": f"Engineer {n}", "company": "Acme", "location": "London",
+                "description": "Build services. " * 10, "apply_url": f"https://jobs.acme.com/apply/{n}",
+            })
+            app_ids.append(brought.json()["application_id"])
+        captcha_app, other_app = app_ids
+        await client.post("/api/browser", json={"action": "click", "ref": "e1_ab", "application_id": captcha_app})
+        await client.post(f"/api/applications/{other_app}/events", json={
+            "event_type": "blocked", "payload": {"reason": "login_needed", "step": "Job360 browser"},
+        })
+
+        asks = (await client.get("/api/asks")).json()["asks"]
+        flags = {a["application_id"]: a["finish_here"] for a in asks}
+        assert flags == {captcha_app: True, other_app: False}  # only the CAPTCHA in Job360's browser
+
+        pool._sessions[user_id].held_until = None  # noqa: SLF001 - the first hold ran out
+        refill = (await client.post("/api/browser", json={
+            "action": "fill", "fields": [{"ref": "e1_ab", "text": "Grace"}], "application_id": captcha_app,
+        })).json()
+        assert refill["held_for_you"] is True and pool._sessions[user_id].held_until is not None  # noqa: SLF001
+
+        pool._sessions[user_id].held_until = None  # noqa: SLF001
+        other = (await client.post("/api/browser", json={
+            "action": "fill", "fields": [{"ref": "e1_ab", "text": "Grace"}], "application_id": other_app,
+        })).json()
+        assert other["held_for_you"] is False and pool._sessions[user_id].held_until is None  # noqa: SLF001
