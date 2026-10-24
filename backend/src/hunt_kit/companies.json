@@ -6515,5 +6515,9 @@
 {"name":"Revun","ats":"northstone","board":"www.revun.com/careers","source":"freehire"},
 {"name":"Langford Staffing","ats":"northstone","board":"www.langfordstaffing.com/careers","source":"freehire"},
 {"name":"EnzRossi","ats":"northstone","board":"vetted.enzrossi.com/positions","source":"freehire"},
-{"name":"Deutsche Bahn","ats":"avature","board":"jobs.deutschebahngroup.careers","source":"career-ops"}
+{"name":"Deutsche Bahn","ats":"avature","board":"jobs.deutschebahngroup.careers","source":"career-ops"},
+{"name":"DOIT Software","ats":"cleverstaff","board":"doit-software1","source":"freehire"},
+{"name":"IT Geo","ats":"friendwork","board":"c656f1c111eb44075d21d77f57216c72","source":"freehire"},
+{"name":"WowVendor","ats":"friendwork","board":"wowvendor","source":"freehire"},
+{"name":"joinup.ch (newest page)","ats":"joinup","board":"all","source":"career-ops"}
 ]
