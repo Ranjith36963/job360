@@ -1251,6 +1251,14 @@ export async function addPerson(body: {
 }
 
 /** The user's own Confirm on a person their assistant added (session only). */
+/** Mark that the user sent a contact's drafted message themselves (the one outreach door). */
+export async function markOutreachSent(contactId: number, channel: "linkedin" | "email" | "other"): Promise<unknown> {
+  return request(`/api/contacts/${contactId}/outreach`, {
+    method: "POST",
+    body: JSON.stringify({ entry: "sent", channel }),
+  });
+}
+
 export async function confirmContact(contactId: number): Promise<Contact> {
   return request(`/api/contacts/${contactId}/confirm`, { method: "POST" });
 }

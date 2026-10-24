@@ -206,6 +206,7 @@ BOARD_SOURCES = (
     "cleverstaff",
     "friendwork",
     "joinup",
+    "vouch",
 )
 FEED_SOURCES = (
     "freehire",
@@ -295,6 +296,7 @@ FEED_SOURCES = (
     "torre",
     "tecla",
     "japandev",
+    "bdjobs",
 )
 SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn", "simplify": "githublists"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
@@ -402,11 +404,11 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c",
+    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c", "kit_fh5",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
-    "kit_asia", "kit_sites_a", "kit_sites_b", "kit_markets3",
+    "kit_asia", "kit_sites_a", "kit_sites_b", "kit_markets3", "kit_fh5",
 )
 
 
@@ -2770,6 +2772,7 @@ _FEED_HOSTS = (
     ("torre", re.compile(r"^torre\.ai$", re.I)),
     ("tecla", re.compile(r"^(?:app|api)\.tecla\.io$", re.I)),
     ("japandev", re.compile(r"^japan-dev\.com$", re.I)),
+    ("bdjobs", re.compile(r"^(?:www\.)?bdjobs\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
@@ -2929,6 +2932,7 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("cleverstaff", re.compile(r"^cleverstaff\.net$")),
     ("friendwork", re.compile(r"^jobs\.friend\.work$")),
     ("joinup", re.compile(r"^(?:www\.)?joinup\.ch$")),
+    ("vouch", re.compile(r"^(?:www\.)?vouch\.careers$")),  # vouch.careers/companies/<company cuid>[/<job id>]
 ]
 _BOARD_SLUG = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}"  # a path slug that cannot be . or ..
 # Career sites on an employer's own host that the URL path gives away: eArcu vacancies and Radancy (TalentBrew) jobs
@@ -2939,7 +2943,7 @@ _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
     r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com|"
-    r"getconsider\.com|jobs\.gusto\.com|jobleads\.com|eluta\.ca|talent\.com)$", re.I)
+    r"getconsider\.com|jobs\.gusto\.com|jobleads\.com|eluta\.ca|talent\.com|hellowork\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -3047,6 +3051,9 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = ca if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", ca) else ""
         elif ats in ("selfrecruit", "enlizt", "hurma", "spark"):  # www/hub/api.<vendor>: the vendor, not a tenant
             tok = "" if m.group(1) in ("www", "hub", "api", "app") else m.group(1)
+        elif ats == "vouch":  # https://vouch.careers/companies/<company cuid>[/<job id>]
+            cuid = seg[1] if len(seg) > 1 and seg[0] == "companies" else ""
+            tok = cuid if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cuid) else ""
         elif ats == "compleo":  # https://jobs.compleo.app/<tenant>/jobdetail/<code>
             ok_t = len(seg) > 2 and seg[1] == "jobdetail" and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", seg[0])
             tok = seg[0] if ok_t else ""

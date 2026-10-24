@@ -194,6 +194,10 @@ Northstone recruiting-brand sites (`northstone:<host>/<section>`, e.g. `northsto
 only for a title that passes your filter, at most 25). Deutsche Bahn is an `avature` row on its Avature tenant
 (`jobs.deutschebahngroup.careers`); the reference's db.jobs search endpoint is not read. A `recruiting.paylocity.com`
 `/Recruiting/Jobs/All/<guid>` link is now recognised as a `paylocity` board (it was wrongly reported as unsupported).
+`kit_fh5.py` adds Vouch (`vouch:<company cuid>` of `vouch.careers/companies/<cuid>`: one page carries every posting) and the BDJobs
+feed (Bangladesh, `bdjobs`; runs when BD is one of your countries; the site's keyword search, up to 4 pages a title, then a description
+request for up to 15 kept postings). HelloWork is not read (it needs a Chrome TLS fingerprint), so `hellowork.com` links are reported
+as unsupported; SEEK and Python.org jobs are already read by `jobstreet` and `pythonjobs`.
 
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
