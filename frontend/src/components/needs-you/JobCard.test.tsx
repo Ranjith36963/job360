@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Ask } from "@/lib/api";
 import type { JobCardData } from "@/lib/job-cards";
 import { rowKind } from "@/lib/job-cards";
@@ -158,6 +158,35 @@ describe("JobCard", () => {
     expect(screen.getByText(/Invite pending/)).toBeInTheDocument();
     expect(screen.queryByTestId("sent-4")).toBeNull(); // no send buttons while pending
     expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
+  });
+
+  it("hides an old send-it-yourself reminder for someone already under People, and answers it from that row", async () => {
+    const muzir = {
+      contact: { id: 4, name: "Muzir Kassim", role: "CEO", found_via: "other" },
+      message: "Hi Muzir, ...",
+      linkedinUrl: "https://www.linkedin.com/in/muzir",
+    } as unknown as JobCardData["people"][number];
+    const reminder = ask("Send this LinkedIn message to Muzir Kassim (CEO, BJAK) yourself: search their name on LinkedIn");
+    render(<JobCard card={card([reminder], { people: [muzir] })} onChanged={onChanged} />);
+    expect(screen.queryByTestId(`reminder-${reminder.id}`)).toBeNull();
+    expect(screen.getAllByText("I sent it")).toHaveLength(1); // one row, not two
+    fireEvent.click(screen.getByTestId("sent-4"));
+    await waitFor(() => expect(answerAsk).toHaveBeenCalledWith(reminder.id, "I sent it myself."));
+    expect(markOutreachSent).toHaveBeenCalledWith(4, "linkedin");
+  });
+
+  it("answers a reminder naming two people only when both are handled", async () => {
+    const person = (id: number, name: string) =>
+      ({ contact: { id, name, role: "", found_via: null }, message: `Hi ${name}`, linkedinUrl: "https://www.linkedin.com/in/x" }) as unknown as JobCardData["people"][number];
+    const reminder = ask("Send these LinkedIn messages yourself to German Mikulski (CTO) and Pavel Gertsberg (CEO)");
+    render(<JobCard card={card([reminder], { people: [person(1, "German Mikulski"), person(2, "Pavel Gertsberg")] })} onChanged={onChanged} />);
+    expect(screen.queryByTestId(`reminder-${reminder.id}`)).toBeNull();
+    fireEvent.click(screen.getByTestId("sent-1"));
+    await waitFor(() => expect(markOutreachSent).toHaveBeenCalledWith(1, "linkedin"));
+    expect(answerAsk).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByTestId("person-1")).toBeNull()); // sent: off the card
+    fireEvent.click(within(screen.getByTestId("person-2")).getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(answerAsk).toHaveBeenCalledWith(reminder.id, "Skip: do not send it."));
   });
 
   it("renders assistant text as text, never HTML", () => {

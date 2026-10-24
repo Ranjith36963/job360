@@ -149,3 +149,16 @@ export const LINKEDIN_STATE_LABEL: Record<LinkedinState, string> = {
   pending: "Invite pending: nothing to send until they accept",
   unknown: "Are you connected on LinkedIn?",
 };
+/** Owner 2026-10-24: an old "send this LinkedIn message to <name> yourself" ask about someone already
+ *  listed under People to reach is the same action twice. For each reminder ask, the ids of the people
+ *  on this card it names (by full name, any case). A reminder naming someone here is not shown as its
+ *  own row; it is answered when the last person it names is marked sent or skipped. */
+export function remindersCovered(people: PersonToReach[], reminders: Ask[]): Map<number, number[]> {
+  const out = new Map<number, number[]>();
+  for (const r of reminders) {
+    const text = `${r.question}\n${r.context}`.toLowerCase();
+    const named = people.filter((p) => p.contact.name.trim().length > 2 && text.includes(p.contact.name.trim().toLowerCase()));
+    if (named.length > 0) out.set(r.id, named.map((p) => p.contact.id));
+  }
+  return out;
+}

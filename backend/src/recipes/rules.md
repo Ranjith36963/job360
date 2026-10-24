@@ -625,7 +625,7 @@ login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with
 reason `blocked`. An `upload_failed` block clears itself once a later
-`document_uploaded` is recorded. `unblocked` closes the ask; with nothing blocked it is 409.
+`document_uploaded` is recorded, and its Needs-you ask closes too. `unblocked` closes the ask; with nothing blocked it is 409.
 When the user answers a blocked ask, do what they said, then record
 `unblocked`. If Needs-you is full no ask opens (`check_submit` still asks):
 tell the user in chat.

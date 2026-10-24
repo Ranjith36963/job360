@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { answerAsk, updateContact, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
 import { closedSetLabel } from "@/lib/closed-sets";
-import { BLOCKER_TITLE, LINKEDIN_STATE_LABEL, NOTE_MAX_CHARS, isBlocker, linkedinState } from "@/lib/job-cards";
+import { BLOCKER_TITLE, LINKEDIN_STATE_LABEL, NOTE_MAX_CHARS, isBlocker, linkedinState, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach } from "@/lib/job-cards";
 import type { Ask } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -27,7 +27,16 @@ const picked = "rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-pri
 const DID_IT = "I did it myself on the form.";
 const SKIP_JOB = "Skip this job: do not apply.";
 
-export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () => Promise<void> }) {
+/** `showHeader` false: the application page, whose own title already names the job. */
+export function JobCard({
+  card,
+  onChanged,
+  showHeader = true,
+}: {
+  card: JobCardData;
+  onChanged: () => Promise<void>;
+  showHeader?: boolean;
+}) {
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -42,8 +51,19 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");
-  const reminders = card.asks.filter((a) => a.kind === "outreach");
+  const allReminders = card.asks.filter((a) => a.kind === "outreach");
+  // A reminder about someone already under People to reach is not a second row (owner 2026-10-24).
+  const covered = remindersCovered(card.people, allReminders.map((r) => r.ask));
+  const reminders = allReminders.filter((r) => !covered.has(r.ask.id));
   const people = card.people.filter((p) => !hidden.has(p.contact.id));
+
+  /** After `contactId` is sent or skipped: answer each covered reminder whose people are all done. */
+  async function resolveReminders(contactId: number, answer: string) {
+    const done = new Set([...hidden, contactId]);
+    for (const [askId, ids] of covered) {
+      if (ids.includes(contactId) && ids.every((id) => done.has(id))) await answerAsk(askId, answer);
+    }
+  }
   const rowCount = structured.reduce((n, { ask }) => n + (ask.questions?.length ?? 0), 0);
   const allChecked = structured.every(({ ask }) =>
     (ask.questions ?? []).every((q) => rowsFor(ask)[q.key]?.ok && rowsFor(ask)[q.key].value.trim()),
@@ -85,6 +105,7 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
 
   return (
     <li data-testid={`job-card-${card.applicationId}`} className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card">
+      {showHeader && (
       <div className="flex flex-col gap-0.5">
         <Link href={`/applications/${card.applicationId}`} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
           {card.company || "Unknown company"}
@@ -94,6 +115,7 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
           {card.formFilled ? "Form filled, waiting for you" : "Waiting for you"} · since {relativeTime(card.oldestAskAt)}
         </p>
       </div>
+      )}
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
@@ -189,8 +211,15 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
           {people.map((p) => (
             <PersonRow key={p.contact.id} person={p} busy={busy}
               onState={(state) => void run(() => updateContact(p.contact.id, { linkedin_state: state }), "Couldn't save that")}
-              onSent={() => void run(() => markOutreachSent(p.contact.id, "linkedin"), "Couldn't save that you sent it")}
-              onSkip={() => setHidden((prev) => new Set(prev).add(p.contact.id))} />
+              onSent={() => void run(async () => {
+                await markOutreachSent(p.contact.id, "linkedin");
+                setHidden((prev) => new Set(prev).add(p.contact.id)); // sent: handled, before the reload
+                await resolveReminders(p.contact.id, "I sent it myself.");
+              }, "Couldn't save that you sent it")}
+              onSkip={() => {
+                setHidden((prev) => new Set(prev).add(p.contact.id));
+                void run(() => resolveReminders(p.contact.id, "Skip: do not send it."), "Couldn't save that");
+              }} />
           ))}
           {reminders.map(({ ask }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`reminder-${ask.id}`}>

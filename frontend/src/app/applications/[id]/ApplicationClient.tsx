@@ -11,7 +11,7 @@ import {
   recordApplicationReceipt,
   releaseHold,
 } from "@/lib/api";
-import type { ApplicationControls, ApplicationDetail, Ask, ReadyCardData, VisaShape } from "@/lib/api";
+import type { ApplicationControls, ApplicationDetail, ReadyCardData, VisaShape } from "@/lib/api";
 import { ReadyCard } from "@/components/needs-you/ReadyCard";
 import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
@@ -32,7 +32,9 @@ import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
 import { FollowUpField } from "@/components/applications/FollowUpField";
-import { AskCard } from "@/components/needs-you/NeedsYou";
+import { JobCard } from "@/components/needs-you/JobCard";
+import { loadJobCard } from "@/components/needs-you/JobCards";
+import type { JobCardData } from "@/lib/job-cards";
 import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { STATUS_LABEL, whoLabel } from "@/lib/event-labels";
 import { formatDate, formatDateTime } from "@/lib/format-date";
@@ -101,6 +103,23 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   // S5d: this application's "ready to send" card, when the assistant filled the
   // form and no yes / no has come after it. A failed read shows no card.
   const [ready, setReady] = useState<{ card: ReadyCardData; paused: boolean } | null>(null);
+  // "Needs you" for this job: the SAME card the Needs-you page shows, built by the same loader.
+  const [jobCard, setJobCard] = useState<JobCardData | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!detail) return;
+    loadJobCard(detail).then(
+      (c) => {
+        if (!cancelled) setJobCard(c);
+      },
+      () => {
+        if (!cancelled) setJobCard(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [detail]);
 
   const load = useCallback(async () => {
     try {
@@ -197,7 +216,6 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
     .filter((e) => e.event_type === "lesson" && !e.superseded)
     .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
 
-  const openAsks: Ask[] = (detail.asks ?? []).filter((a) => a.status === "open" && !a.withdrawn_at);
   const tone = STAGE_TONE[detail.status] ?? "quiet";
   const cvChanges = changesSinceApprovedCv(detail.events, detail.artifacts);
   // The one table (lib/application-actions) decides which buttons show.
@@ -273,15 +291,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         </section>
       )}
 
-      {openAsks.length > 0 && (
+      {jobCard && (
         <section aria-labelledby="app-asks" data-testid="app-asks" className="flex flex-col gap-3">
           <h2 id="app-asks" className={LABEL}>
             Needs you
           </h2>
           <ul className="flex flex-col gap-3">
-            {openAsks.map((a) => (
-              <AskCard key={a.id} ask={a} mode="open" onChanged={reloadAfterAsk} />
-            ))}
+            <JobCard card={jobCard} onChanged={reloadAfterAsk} showHeader={false} />
           </ul>
         </section>
       )}
