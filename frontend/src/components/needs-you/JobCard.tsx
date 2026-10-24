@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
+import { answerAsk, updateContact, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
 import { closedSetLabel } from "@/lib/closed-sets";
-import { BLOCKER_TITLE, isBlocker } from "@/lib/job-cards";
+import { BLOCKER_TITLE, LINKEDIN_STATE_LABEL, NOTE_MAX_CHARS, isBlocker, linkedinState } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach } from "@/lib/job-cards";
 import type { Ask } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -188,6 +188,7 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
           <h3 className={label}>People to reach</h3>
           {people.map((p) => (
             <PersonRow key={p.contact.id} person={p} busy={busy}
+              onState={(state) => void run(() => updateContact(p.contact.id, { linkedin_state: state }), "Couldn't save that")}
               onSent={() => void run(() => markOutreachSent(p.contact.id, "linkedin"), "Couldn't save that you sent it")}
               onSkip={() => setHidden((prev) => new Set(prev).add(p.contact.id))} />
           ))}
@@ -246,10 +247,24 @@ async function downloadCv(card: JobCardData) {
   }
 }
 
-function PersonRow({ person, busy, onSent, onSkip }: { person: PersonToReach; busy: boolean; onSent: () => void; onSkip: () => void }) {
+function PersonRow({
+  person,
+  busy,
+  onSent,
+  onSkip,
+  onState,
+}: {
+  person: PersonToReach;
+  busy: boolean;
+  onSent: () => void;
+  onSkip: () => void;
+  onState: (state: "connected" | "not_connected") => void;
+}) {
   const [copied, setCopied] = useState(false);
   const c = person.contact;
   const where = c.found_via ? `Found via ${closedSetLabel(c.found_via)}` : "";
+  const state = linkedinState(c.linkedin_state);
+  const chars = person.message.length;
   return (
     <div className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`person-${c.id}`}>
       <p className="text-sm font-medium">
@@ -258,6 +273,21 @@ function PersonRow({ person, busy, onSent, onSkip }: { person: PersonToReach; bu
       </p>
       {where && <p className="text-xs text-muted-foreground">{where}</p>}
       <p className="whitespace-pre-wrap rounded-md border border-border bg-card p-2 text-sm">{person.message}</p>
+      <div className="flex flex-wrap items-center gap-2 text-xs" data-testid={`li-state-${c.id}`}>
+        <span className="text-muted-foreground">{LINKEDIN_STATE_LABEL[state]}</span>
+        {state === "not_connected" && (
+          <span data-testid={`note-count-${c.id}`} className={chars > NOTE_MAX_CHARS ? "font-medium text-destructive" : "text-muted-foreground"}>
+            {chars}/{NOTE_MAX_CHARS} characters
+          </span>
+        )}
+        {(["connected", "not_connected"] as const).map((s) => (
+          <button key={s} type="button" disabled={busy} aria-pressed={state === s} data-testid={`li-${s}-${c.id}`}
+            className={state === s ? picked : btn} onClick={() => onState(s)}>
+            {s === "connected" ? "We're connected" : "Not connected yet"}
+          </button>
+        ))}
+      </div>
+      {state !== "pending" && (
       <div className="flex flex-wrap gap-2">
         <button type="button" className={btn}
           onClick={() => navigator.clipboard.writeText(person.message).then(() => setCopied(true), () => toast.error("Couldn't copy"))}>
@@ -273,6 +303,7 @@ function PersonRow({ person, busy, onSent, onSkip }: { person: PersonToReach; bu
           Skip
         </button>
       </div>
+      )}
     </div>
   );
 }

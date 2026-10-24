@@ -133,3 +133,19 @@ export function sortCards(cards: JobCardData[]): JobCardData[] {
   };
   return [...cards].sort((a, b) => rank(a) - rank(b) || a.oldestAskAt.localeCompare(b.oldestAskAt));
 }
+
+/** Owner 2026-10-24: the People row says whether the user is connected to this person on LinkedIn,
+ *  which decides the draft (connected: a message; not connected: a short connection note). */
+export type LinkedinState = "connected" | "not_connected" | "pending" | "unknown";
+export const NOTE_MAX_CHARS = 200; // LinkedIn's connection-note limit on a free account (300 with Premium)
+
+export function linkedinState(raw: string | null | undefined): LinkedinState {
+  return raw === "connected" || raw === "not_connected" || raw === "pending" ? raw : "unknown";
+}
+
+export const LINKEDIN_STATE_LABEL: Record<LinkedinState, string> = {
+  connected: "Connected on LinkedIn",
+  not_connected: "Not connected: send a connection note, at most 200 characters (300 with Premium)",
+  pending: "Invite pending: nothing to send until they accept",
+  unknown: "Are you connected on LinkedIn?",
+};

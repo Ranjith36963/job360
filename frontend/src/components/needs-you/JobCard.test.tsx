@@ -8,12 +8,14 @@ import { JobCard } from "./JobCard";
 const answerAsk = vi.fn();
 const markCvSeen = vi.fn();
 const markOutreachSent = vi.fn();
+const updateContact = vi.fn();
 const answerAskQuestions = vi.fn();
 const rememberAnswers = vi.fn();
 vi.mock("@/lib/api", () => ({
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
   markOutreachSent: (...a: unknown[]) => markOutreachSent(...a),
+  updateContact: (...a: unknown[]) => updateContact(...a),
   answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
   rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
   downloadApplicationArtifact: vi.fn(),
@@ -43,6 +45,7 @@ beforeEach(() => {
   answerAsk.mockReset().mockResolvedValue({});
   markCvSeen.mockReset().mockResolvedValue({});
   markOutreachSent.mockReset().mockResolvedValue({});
+  updateContact.mockReset().mockResolvedValue({});
   answerAskQuestions.mockReset().mockResolvedValue({});
   rememberAnswers.mockReset().mockResolvedValue(undefined);
   onChanged.mockClear();
@@ -136,6 +139,25 @@ describe("JobCard", () => {
       { topic: "visa", question: "Do you need visa sponsorship?", answer: "No" },
       { topic: "salary", question: "Expected salary", answer: "€55,000" },
     ]);
+  });
+
+  it("shows the LinkedIn state, a note counter when not connected, and sets the state in one click", async () => {
+    const person = (state: string | null, message: string) =>
+      ({ contact: { id: 4, name: "Ada", role: "CTO", found_via: null, linkedin_state: state }, message,
+        linkedinUrl: "https://www.linkedin.com/in/ada" }) as unknown as JobCardData["people"][number];
+    const { rerender } = render(<JobCard card={card([], { people: [person(null, "Hi Ada")] })} onChanged={onChanged} />);
+    expect(screen.getByText("Are you connected on LinkedIn?")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("li-connected-4"));
+    await waitFor(() => expect(updateContact).toHaveBeenCalledWith(4, { linkedin_state: "connected" }));
+
+    rerender(<JobCard card={card([], { people: [person("not_connected", "x".repeat(201))] })} onChanged={onChanged} />);
+    expect(screen.getByTestId("note-count-4")).toHaveTextContent("201/200 characters");
+    expect(screen.getByTestId("li-not_connected-4")).toHaveAttribute("aria-pressed", "true");
+
+    rerender(<JobCard card={card([], { people: [person("pending", "Hi Ada")] })} onChanged={onChanged} />);
+    expect(screen.getByText(/Invite pending/)).toBeInTheDocument();
+    expect(screen.queryByTestId("sent-4")).toBeNull(); // no send buttons while pending
+    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
   });
 
   it("renders assistant text as text, never HTML", () => {

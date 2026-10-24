@@ -1236,6 +1236,7 @@ export async function updateContact(
     relationship?: string; // "" clears it
     phone?: string; // "" clears it
     links?: string[]; // [] clears it
+    linkedin_state?: string; // connected | not_connected | pending | unknown; "" clears it
   }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
