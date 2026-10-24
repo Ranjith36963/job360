@@ -23,7 +23,7 @@ _SUBMIT_REGEX_JS = (
 # places: [[dist, above], ...]} (one place per element).
 # Each element: {ref, tag, type, role, name, value, checked, group, required, disabled, autocomplete,
 # in_form, options, via_label, hints} (group: the question a radio or checkbox answers; hints: a typed
-# control's title and name attribute, for look's trap-field check only).
+# control's title and name attribute, each its own string, for look's trap-field check only).
 #
 # Learned from the open-source browser agents (docs/product/BROWSER_AGENT.md, research 2026-10-19):
 # * nearest-first budget: when a page has more controls than fit, keep the ones closest to what is
@@ -110,11 +110,14 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
   // A control a person types into or picks in (not a button).
   const typed = (el) => el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
     || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset'].includes(el.type));
-  // What the safety checks read besides the name: a typed control's title and name attribute. The name
-  // shown is the question above it, but "never type a password" and "leave a trap field blank" must still
-  // see name="password" or title="Leave this field blank" (#1174 review).
+  // What the safety checks read besides the name: a typed control's title and name attribute, each on
+  // its own (never joined: "Do not fill this in" + "website" no longer ends the trap phrase) and each
+  // clipped on its own (a long title never pushes name="password" out). The name shown is the question
+  // above it, but "never type a password" and "leave a trap field blank" must still see them (#1174 review).
   const hintsOf = (el) => typed(el)
-    ? [el.getAttribute('title'), el.getAttribute('name')].filter((t) => t && t.trim()).join(' ') : '';
+    ? [el.getAttribute('title'), el.getAttribute('name')]
+      .map((t) => (t || '').replace(/\s+/g, ' ').trim().slice(0, 100)).filter(Boolean)
+    : [];
   // The controls a question block can hold: a block with a second one is not this control's question.
   const fieldSel = 'input:not([type=hidden]), textarea, select, button, [contenteditable=""], '
     + '[contenteditable=true], [contenteditable=plaintext-only], [role=combobox], [role=textbox], '
@@ -301,8 +304,8 @@ SNAPSHOT_JS = r"""
       autocomplete: clip(el.getAttribute('autocomplete'), maxAttr), in_form: inForm(el),
     };
     if (viaLabel) item.via_label = true;
-    const hints = clip(hintsOf(el), maxName);
-    if (hints) item.hints = hints;  // read by look's trap-field check, then dropped (agent.look)
+    const hints = hintsOf(el);
+    if (hints.length) item.hints = hints;  // read by look's trap-field check, then dropped (agent.look)
     // The site's own "this answer is wrong / missing" mark: Workday sets it only after Save
     // (ats-autofill skills/fill-app/dom-toolkit.js:431-437).
     if (el.getAttribute('aria-invalid') === 'true') item.invalid = true;
@@ -374,7 +377,7 @@ ELEMENT_FACTS_JS = r"""
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
-    hints: hintsOf(el).replace(/\s+/g, ' ').trim().slice(0, 200),
+    hints: hintsOf(el),
     in_form: inForm(el), role: el.getAttribute('role') || '',
     // Whether it can submit a form itself: a button in a shadow root has no form owner.
     owns_form: !!el.form, toggle: el.hasAttribute('aria-pressed'),

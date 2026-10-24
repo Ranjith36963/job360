@@ -166,6 +166,12 @@ REVIEW = {
 <div><div>Website</div><input type="text" title="Leave this field blank"></div>
 <div><div>Full name</div><input type="text" name="cards[n][field0]"></div>
 </form></body></html>""",
+    "/parts": """<!doctype html><html><body><form>
+<div><label>Do not fill this in<input type="text" name="website"></label></div>
+<div><div>Your site</div><input type="text" title="Do not fill this in" name="website"></div>
+<div><div>Enter it below</div><input type="text" name="password" title="Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. Please read this note. "></div>
+<div><div>Which exams did you pass</div><input type="text" title="Word limit 200" name="cards[e][field0]"></div>
+</form></body></html>""",
     "/boxes": "<!doctype html><html><body><form><div><div>Skills</div><div>" + "".join(
         f"<div><label><input type=checkbox name='skills[]'>Skill {i}</label></div>" for i in range(2000)
     ) + "</div></div></form></body></html>",
@@ -268,5 +274,75 @@ async def test_a_2000_box_group_is_named_by_its_question(review_site):
             assert page["status"] == "ok", page.get("reason")
             boxes = [e for e in page["elements"] if e["type"] == "checkbox"]
             assert boxes and all(e["group"] == "Skills" for e in boxes)
+    finally:
+        await pool.shutdown()
+
+
+async def _open_parts(pool):
+    from src.services.browser_agent.agent import run
+
+    els = (await run(pool, "u1", "open", url="http://jobs.example/parts"))["elements"]
+    assert [e["name"] for e in els] == [
+        "Do not fill this in", "Your site", "Enter it below", "Which exams did you pass",
+    ]
+    assert all("hints" not in e for e in els)
+    return els
+
+
+# Name, title and name attribute are each checked on their own (#1174 re-review): joined, "Do not fill
+# this in" + "website" no longer ended the trap phrase, a 250-character title clipped name="password"
+# away, and "pass" + "Word limit" spelled a password.
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_do_not_fill_trap_is_caught_beside_its_name_attribute(review_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        els = await _open_parts(pool)
+        assert [bool(e.get("leave_blank")) for e in els] == [True, True, False, False]
+        for e in els[:2]:
+            with pytest.raises(BrowserError) as exc:
+                await run(pool, "u1", "type", ref=e["ref"], text="https://example.com")
+            assert exc.value.reason == "leave_blank", e["name"]
+        rows = (await run(pool, "u1", "fill", fields=[{"ref": e["ref"], "text": "x"} for e in els[:2]]))["filled"]
+        assert [r["reason"] for r in rows] == ["leave_blank", "leave_blank"]
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_long_title_never_hides_a_password_name_attribute(review_site):
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        els = await _open_parts(pool)
+        with pytest.raises(BrowserError) as exc:
+            await run(pool, "u1", "type", ref=els[2]["ref"], text="hunter2")
+        assert exc.value.reason == "password_field"
+        rows = (await run(pool, "u1", "fill", fields=[{"ref": els[2]["ref"], "text": "x"}]))["filled"]
+        assert [r["reason"] for r in rows] == ["password_field"]
+    finally:
+        await pool.shutdown()
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_pass_and_a_word_limit_title_never_spell_a_password(review_site):
+    from src.services.browser_agent.agent import BrowserPool, run
+
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(review_site))
+    try:
+        els = await _open_parts(pool)
+        typed = await run(pool, "u1", "type", ref=els[3]["ref"], text="A-levels")
+        assert typed["typed_matches"] is True
+        values = await pool._sessions["u1"].page.evaluate(  # noqa: SLF001
+            "() => Array.from(document.querySelectorAll('input')).map((i) => i.value)")
+        assert values == ["", "", "", "A-levels"]
     finally:
         await pool.shutdown()

@@ -865,7 +865,7 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     # A trap field for bots: its name, title or name attribute says to leave it blank. The hints are
     # dropped here, before the size cut: the assistant reads the name.
     for e in elements:
-        if is_honeypot(_safety_name(e.get("name"), e.pop("hints", ""))):
+        if _is_trap(e.get("name"), e.pop("hints", None)):
             e["leave_blank"] = True
     elements, cut_above, cut_below = _within_size(elements, places)
     above += cut_above
@@ -970,21 +970,40 @@ async def _find(s: Session, ref: str) -> tuple[Any, Any]:
     raise BrowserError("refused", "ref_not_found", "That ref is not on the page any more. Call look and use a new one.")
 
 
-def _safety_name(name: Any, hints: Any) -> str:
-    """A control's name for the safety checks: its shown name plus a typed control's title and name
-    attribute (``hints``), so a field named by the question above it is still known as a password box
-    (name="password") or a trap ("Leave this field blank" in its title) (#1174 review)."""
-    return " ".join(t for t in (str(name or ""), str(hints or "")) if t.strip())
+def _safety_parts(name: Any, hints: Any) -> list[str]:
+    """A control's name, title and name attribute, each its own string: the safety checks test each part
+    alone (any part a trap, a trap; any part a password, a password), never a joined string, where one
+    part's words could end, start or spell another's phrase (#1174 re-review). ``hints`` comes from
+    page_js ``hintsOf``: a field named by the question above it keeps name="password" or a title
+    "Leave this field blank" in view."""
+    parts = [str(name or "")]
+    if isinstance(hints, (list, tuple)):
+        parts.extend(str(h or "") for h in hints)
+    elif hints:
+        parts.append(str(hints))
+    return [p for p in parts if p.strip()]
+
+
+def _is_trap(name: Any, hints: Any) -> bool:
+    return any(is_honeypot(p) for p in _safety_parts(name, hints))
 
 
 async def _kind(loc: Any) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
-    return control_kind(
-        facts.get("tag", ""), facts.get("type", ""), _safety_name(facts.get("name"), facts.get("hints")),
-        facts.get("autocomplete", ""),
-        bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
-        bool(facts.get("owns_form")), bool(facts.get("toggle")),
-    )
+
+    def kind_of(name: str) -> str:
+        return control_kind(
+            facts.get("tag", ""), facts.get("type", ""), name, facts.get("autocomplete", ""),
+            bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
+            bool(facts.get("owns_form")), bool(facts.get("toggle")),
+        )
+
+    kind = kind_of(str(facts.get("name") or ""))
+    # A title or name attribute that names a password box makes it one; each part read on its own.
+    hints = facts.get("hints") if isinstance(facts.get("hints"), list) else []
+    if kind != "password" and any(kind_of(str(h or "")) == "password" for h in hints):
+        return "password"
+    return kind
 
 
 SETTLE_IDLE_MS = 3000
@@ -1263,7 +1282,7 @@ async def _act(
         facts.get("tag") in ("input", "textarea", "select") or str(facts.get("role")).lower() in _TICK_ROLES
     ):
         fills = False
-    if fills and is_honeypot(_safety_name(facts.get("name"), facts.get("hints"))):
+    if fills and _is_trap(facts.get("name"), facts.get("hints")):
         raise BrowserError(
             "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
         )
@@ -1537,7 +1556,7 @@ async def _fill_one(s: Session, ref: str, text: str) -> tuple[bool, str]:
     on = _TICK_WORDS.get(text.strip().casefold()) if how == "tick" else None
     if how == "tick" and on is None:
         raise BrowserError("refused", "bad_tick_text", 'For a box use text "yes" or "no".')
-    if is_honeypot(_safety_name(facts.get("name"), facts.get("hints"))) and (on if how == "tick" else bool(text)):
+    if _is_trap(facts.get("name"), facts.get("hints")) and (on if how == "tick" else bool(text)):
         raise BrowserError("refused", "leave_blank", "That field says to leave it blank (a trap for bots).")
     if how == "type":
         text = _plain_text(text)
