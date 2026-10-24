@@ -29,6 +29,9 @@ describe("rowKind", () => {
     ["Send this LinkedIn message yourself", "outreach"],
     ["Do you need visa sponsorship for Germany?", "yes_no"],
     ["Expected yearly salary (EUR)", "question"],
+    ["Your assistant got stuck: a bot check at Indeed Apply button on uk.indeed.com.", "captcha"],
+    ["Certa asks: \"Do you meet this requirement?\" You live in London now. Yes or No?", "yes_no"],
+    ["Is it BJAK's confirmation? Reply yes or no.", "yes_no"],
   ])("%s -> %s", (question, kind) => {
     expect(rowKind(ask({ question }))).toBe(kind);
   });
