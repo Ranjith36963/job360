@@ -18,7 +18,7 @@ from src.services.profile import schedule
 from src.services.profile.models import UserPreferences
 
 NOW = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
-HUNT = "assistant_settings.hunt_every_hours"
+PEOPLE = "assistant_settings.people_hunt"
 
 
 def _facts(**kw: Any) -> schedule.DueFacts:
@@ -90,16 +90,17 @@ async def _add_person(client: AsyncClient, app_id: int, name: str):
 def test_reach_runs_after_hunt_and_before_batch():
     answer = schedule.due_now(
         _facts(hunt_every_hours=1, inbox_mode="auto", check_every="1h", apply_on_own=True, queued=1,
-               reach_ids=[7, 3]), NOW
+               people_hunt=True, reach_ids=[7, 3]), NOW
     )
     assert [d["duty"] for d in answer["due"]] == ["inbox", "hunt", "reach", "batch"]
     assert answer["due"][2] == {"duty": "reach", "recipe": "reach", "reason": "new_applications",
                                 "application_ids": [7, 3]}
 
 
-def test_reach_rides_the_hunt_schedule_and_stays_silent_without_it():
-    """Rule #29: a user who never scheduled a hunt is never woken to find people."""
-    assert schedule.due_now(_facts(reach_ids=[7]), NOW)["nothing_due"] is True
+def test_reach_needs_its_own_switch_not_the_job_hunt():
+    """Rule #29: a user who never turned the people hunt on is never woken to find people."""
+    assert [d["duty"] for d in schedule.due_now(_facts(hunt_every_hours=6, reach_ids=[7]), NOW)["due"]] == ["hunt"]
+    assert [d["duty"] for d in schedule.due_now(_facts(people_hunt=True, reach_ids=[7]), NOW)["due"]] == ["reach"]
 
 
 # ── Through the real doors ───────────────────────────────────────────────────
@@ -111,11 +112,42 @@ async def test_a_new_application_is_due_until_marked_then_never_again(authentica
         _seed_profile(fixture_user_id)
         app_id = await _bring(client, _ad(1))
         assert await _reach(client) == []
-        await _patch(client, HUNT, 6)
+        await _patch(client, PEOPLE, True)
         assert await _reach(client) == [app_id]
         resp = await client.post("/api/schedule/done", json={"duty": "reach", "application_ids": [app_id]})
         assert resp.status_code == 200, resp.text
         assert await _reach(client) == []
+
+
+@pytest.mark.asyncio
+async def test_the_switch_is_the_users_own_an_assistant_turning_it_on_waits(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        await _bring(client, _ad(1))
+        bad = await client.patch("/api/profile", json={"edits": [{"path": PEOPLE, "value": "yes"}]})
+        assert bad.status_code == 422, bad.text
+        async with await _agent(client) as agent:
+            asked = await agent.patch("/api/profile", json={"edits": [{"path": PEOPLE, "value": True}]})
+            assert asked.status_code == 200, asked.text
+        assert await _reach(client) == []  # waiting for the user's OK, not applied
+        view = (await client.get("/api/assistant-settings")).json()
+        assert view["people_hunt"]["effective"] is False and view["people_hunt_last_at"] is None
+        assert any(w["path"] == PEOPLE for w in view["waiting"])
+
+
+@pytest.mark.asyncio
+async def test_the_settings_page_shows_when_it_last_ran(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        await _patch(client, PEOPLE, True)
+        app_id = await _bring(client, _ad(1))
+        assert (await client.post("/api/schedule/done", json={"duty": "reach", "application_ids": [app_id]})).status_code == 200
+        view = (await client.get("/api/assistant-settings")).json()
+        assert view["people_hunt"]["effective"] is True and view["people_hunt_last_at"]
+        await _patch(client, PEOPLE, False)  # off applies at once
+        assert (await client.get("/api/assistant-settings")).json()["people_hunt"]["effective"] is False
 
 
 @pytest.mark.asyncio
@@ -134,7 +166,7 @@ async def test_mark_done_reach_takes_only_the_callers_own_ids(authenticated_asyn
 async def test_a_run_gets_at_most_the_cap_newest_first(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        await _patch(client, HUNT, 6)
+        await _patch(client, PEOPLE, True)
         ids = [await _bring(client, _ad(n, company=f"Co{n}")) for n in range(settings.REACH_MAX_PER_RUN + 1)]
         assert await _reach(client) == list(reversed(ids))[: settings.REACH_MAX_PER_RUN]
 
@@ -143,7 +175,7 @@ async def test_a_run_gets_at_most_the_cap_newest_first(authenticated_async_conte
 async def test_a_person_the_assistant_added_takes_the_application_off(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        await _patch(client, HUNT, 6)
+        await _patch(client, PEOPLE, True)
         app_id = await _bring(client, _ad(1))
         async with await _agent(client) as agent:
             assert (await _add_person(agent, app_id, "Priya Shah")).status_code in (200, 201)
@@ -162,7 +194,7 @@ async def test_the_mcp_mark_done_stamps_reach(authenticated_async_context, fixtu
     try:
         async with authenticated_async_context() as client:
             _seed_profile(fixture_user_id)
-            await _patch(client, HUNT, 6)
+            await _patch(client, PEOPLE, True)
             app_id = await _bring(client, _ad(1))
             due = await tools.get_tool("whats_due").fn()
             assert [d for d in due["due"] if d["duty"] == "reach"][0]["application_ids"] == [app_id]

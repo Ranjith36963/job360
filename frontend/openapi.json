@@ -2715,6 +2715,20 @@
           "paused_until": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "people_hunt": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "people_hunt_last_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "People Hunt Last At"
+          },
           "practice_run": {
             "$ref": "#/components/schemas/PracticeRunOut"
           },
@@ -2760,6 +2774,7 @@
           "auto_employer_emails",
           "outreach_send",
           "hunt_every_hours",
+          "people_hunt",
           "paused",
           "practice_run"
         ],

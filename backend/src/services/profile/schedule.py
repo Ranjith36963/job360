@@ -13,7 +13,8 @@ Three duties, each named by the recipe that runs it (``SCHEDULE_DUTY_RECIPES``):
   ``scheduled``) and ``preferences.check_every`` hours have passed (empty = 24, the daily
   recipe's own "once a day"). ``ask`` / ``paused`` / empty never run on a schedule: nobody is
   there to say yes.
-* ``reach`` (recipe ``reach``, owner 2026-10-24: the PEOPLE hunt) - open applications (considering or
+* ``reach`` (recipe ``reach``, owner 2026-10-24: the PEOPLE hunt) - only while the user's own switch
+  ``assistant_settings.people_hunt`` is on: open applications (considering or
   applied) brought or applied in the last ``REACH_WINDOW_DAYS`` that have no assistant-added person and
   no ``reach:<id>`` stamp, newest first, at most ``REACH_MAX_PER_RUN``; listed as ``application_ids``.
   An application whose only people are still an invite pending on LinkedIn is not listed.
@@ -64,7 +65,8 @@ class DueFacts:
     weekly_left: Optional[int]
     inside_hours: bool
     stamps: dict[str, datetime] = field(default_factory=dict)
-    # Applications the people hunt should work on this run (newest first, capped).
+    # The user's people-hunt switch, and the applications it should work on this run (newest first, capped).
+    people_hunt: bool = False
     reach_ids: list[int] = field(default_factory=list)
 
 
@@ -113,7 +115,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         if nxt <= now:
             due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty],
                         "reason": "never_done" if last is None else "interval_elapsed"})
-    if f.reach_ids and f.hunt_every_hours is not None:  # people hunting rides the user's hunt schedule
+    if f.people_hunt and f.reach_ids:
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
                     "reason": "new_applications", "application_ids": list(f.reach_ids)})
     hold = batch_hold(f)
@@ -259,5 +261,6 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         weekly_left=weekly_left,
         inside_hours=inside,
         stamps=await load_stamps(db, user_id),
-        reach_ids=await _reach_ids(db, user_id, now),
+        people_hunt=cfg.people_hunt,
+        reach_ids=await _reach_ids(db, user_id, now) if cfg.people_hunt else [],
     )
