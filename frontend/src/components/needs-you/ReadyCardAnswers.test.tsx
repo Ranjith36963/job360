@@ -21,6 +21,16 @@ beforeEach(() => {
 
 // card(64): 0 memory, 1 profile, 2 written, 3 guessed.
 describe("Verify / Edit on each answer", () => {
+  it("a web-address answer is a new-tab link, with Verify right beside it", () => {
+    const linkedin = answer({ question: "LinkedIn profile", answer: "https://linkedin.com/in/ranjith-ai-engineer" });
+    render(<ReadyCard card={card(64, { answers: [linkedin] })} paused={false} onChanged={() => {}} />);
+    const link = screen.getByTestId("answer-link");
+    expect(link.textContent).toBe("https://linkedin.com/in/ranjith-ai-engineer");
+    expect(link).toHaveAttribute("href", "https://linkedin.com/in/ranjith-ai-engineer");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(screen.getByTestId("ready-answer-verify-64-0")).toHaveTextContent("Verify");
+  });
+
   it("memory, written and guessed rows get Verify and Edit; profile rows do not", () => {
     render(<ReadyCard card={card(64)} paused={false} onChanged={() => {}} />);
     for (const i of [0, 2, 3]) {
