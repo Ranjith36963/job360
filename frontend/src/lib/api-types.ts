@@ -210,6 +210,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/record-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Events
+         * @description Feature 10 (G289): record several emails in one call. `events` run through the SAME route
+         *     function as record_event (every validator, one result per item); `unmatched` mail is stored once
+         *     per message id as a Needs-you inbox item. One refused item never stops the others.
+         */
+        post: operations["record_events_api_applications_record_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/stats": {
         parameters: {
             query?: never;
@@ -2053,6 +2075,47 @@ export interface paths {
         get: operations["hunt_kit_file_api_hunt_kit__name__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inbox-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Inbox Items
+         * @description Feature 10: unmatched mail the assistant stored (open, or all).
+         */
+        get: operations["list_inbox_items_api_inbox_items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inbox-items/{item_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Inbox Item
+         * @description The user's pick: match the email to one of their applications, or dismiss it. Stores the pick
+         *     and writes no event (only the assistant read the mail). No MCP tool: the assistant records the event.
+         */
+        post: operations["resolve_inbox_item_api_inbox_items__item_id__resolve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5602,6 +5665,78 @@ export interface components {
             inbox_checked_at: string;
         };
         /**
+         * InboxItemIn
+         * @description An email the assistant could not tie to one application (EventSource's fields + dismissed).
+         */
+        InboxItemIn: {
+            /**
+             * Dismissed
+             * @default false
+             */
+            dismissed: boolean;
+            /**
+             * Kind
+             * @default email
+             */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Quote */
+            quote?: string | null;
+            /** Received At */
+            received_at?: string | null;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
+            /** Thread Id */
+            thread_id?: string | null;
+        };
+        /**
+         * InboxItemOut
+         * @description Feature 10 - one unmatched email the assistant stored (services/applications/inbox_items.py).
+         */
+        InboxItemOut: {
+            /** Application Id */
+            application_id: number | null;
+            /** Created At */
+            created_at: string;
+            /** Event Id */
+            event_id: number | null;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string | null;
+            /** Job Title */
+            job_title: string | null;
+            /** Kind */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Received At */
+            received_at: string | null;
+            /** Recorded By */
+            recorded_by: string;
+            /** Resolution */
+            resolution: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Resolved By */
+            resolved_by: string | null;
+            /** Sender */
+            sender: string;
+            /** Subject */
+            subject: string;
+            /** Thread Id */
+            thread_id: string | null;
+        };
+        /**
          * InterviewAgenda
          * @description ``upcoming`` = live interviews in the next 7 days; ``just_passed`` = those of the last 3 days whose
          *     application has no outcome event yet (ask the user how it went).
@@ -6114,6 +6249,13 @@ export interface components {
         ListAsksResponse: {
             /** Asks */
             asks: components["schemas"]["AskOut"][];
+            /** Open Count */
+            open_count: number;
+        };
+        /** ListInboxItemsResponse */
+        ListInboxItemsResponse: {
+            /** Items */
+            items: components["schemas"]["InboxItemOut"][];
             /** Open Count */
             open_count: number;
         };
@@ -7601,6 +7743,59 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /** RecordEventsItem */
+        RecordEventsItem: {
+            /** Application Id */
+            application_id?: number | null;
+            /** Channel */
+            channel?: string | null;
+            /** Contact Id */
+            contact_id?: number | null;
+            /** Corrects Event Id */
+            corrects_event_id?: number | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Follow Up On */
+            follow_up_on?: string | null;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Scheduled At */
+            scheduled_at?: string | null;
+            source?: components["schemas"]["EventSource"] | null;
+        };
+        /** RecordEventsItemOut */
+        RecordEventsItemOut: {
+            /** Error */
+            error?: string | null;
+            event?: components["schemas"]["RecordEventResponse"] | null;
+            /** Index */
+            index: number;
+            /** Ok */
+            ok: boolean;
+        };
+        /** RecordEventsRequest */
+        RecordEventsRequest: {
+            /** Events */
+            events?: components["schemas"]["RecordEventsItem"][];
+            /** Unmatched */
+            unmatched?: components["schemas"]["InboxItemIn"][];
+        };
+        /** RecordEventsResponse */
+        RecordEventsResponse: {
+            /** Events */
+            events: components["schemas"]["RecordEventsItemOut"][];
+            /** Unmatched */
+            unmatched: components["schemas"]["UnmatchedItemOut"][];
+        };
         /**
          * RecordOutreachRequest
          * @description ``POST /api/contacts/{contact_id}/outreach`` — the one shared door
@@ -7669,6 +7864,16 @@ export interface components {
         ReleaseHoldOut: {
             /** Released */
             released: boolean;
+        };
+        /** ResolveInboxItemRequest */
+        ResolveInboxItemRequest: {
+            /** Application Id */
+            application_id?: number | null;
+            /**
+             * Dismiss
+             * @default false
+             */
+            dismiss: boolean;
         };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
@@ -8837,6 +9042,34 @@ export interface components {
             /** Question */
             question: string;
         };
+        /** UnmatchedItemOut */
+        UnmatchedItemOut: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
+            /**
+             * Already Recorded
+             * @default false
+             */
+            already_recorded: boolean;
+            /** Application Id */
+            application_id?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Inbox Item Id */
+            inbox_item_id?: number | null;
+            /** Index */
+            index: number;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Resolution
+             * @default
+             */
+            resolution: string;
+        };
         /**
          * UpdateContactRequest
          * @description ``PATCH /api/contacts/{contact_id}`` — every field optional; only the
@@ -9039,6 +9272,8 @@ export interface components {
             applications: components["schemas"]["WhatsNewApplicationOut"][];
             /** Events */
             events: components["schemas"]["WhatsNewEventOut"][];
+            /** Inbox Items */
+            inbox_items?: components["schemas"]["InboxItemOut"][];
             /**
              * @default {
              *       "just_passed": [],
@@ -9385,6 +9620,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutcomeSuggestionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_events_api_applications_record_events_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordEventsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordEventsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12510,6 +12782,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_inbox_items_api_inbox_items_get: {
+        parameters: {
+            query?: {
+                status?: string;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListInboxItemsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_inbox_item_api_inbox_items__item_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                item_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveInboxItemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxItemOut"];
                 };
             };
             /** @description Validation Error */

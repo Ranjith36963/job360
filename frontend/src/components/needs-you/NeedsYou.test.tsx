@@ -25,6 +25,7 @@ vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
 // Approve CV has its own tests (CvToApprove.test.tsx).
 vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
+vi.mock("./UnmatchedMail", () => ({ UnmatchedMail: () => null }));
 // Ready to send has its own tests (ReadyToSend.test.tsx).
 // Ready to send has its own tests; this stand-in only reports its total for the badge.
 const readyMock = vi.hoisted(() => ({ total: 0 }));

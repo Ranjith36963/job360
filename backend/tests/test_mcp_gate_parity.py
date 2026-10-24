@@ -71,6 +71,9 @@ TOOL_ROUTES = {
     # Owner 2026-10-23 - the scheduled run asks what is due and stamps a duty (migration 0082).
     "whats_due": ("schedule", "whats_due", {}),
     "mark_done": ("schedule", "mark_done", {"duty": "hunt"}),
+    "record_events": (
+        "applications", "record_events", {"events": [{"application_id": 987654321, "event_type": "note"}]}
+    ),  # feature 10 - require_user, no email gate.
     "save_artifact": (
         "applications", "save_artifact", {"application_id": 987654321, "kind": "cv", "text": "x"}
     ),
