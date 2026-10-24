@@ -7,10 +7,12 @@ import type { ApplicationDetail, Ask, Contact } from "@/lib/api";
  */
 
 export type BlockerKind = "captcha" | "upload" | "login" | "safety";
-export type RowKind = BlockerKind | "outreach" | "yes_no" | "question";
+// "structured": an ask that lists its form questions (one row each, with where each answer came from).
+export type RowKind = BlockerKind | "outreach" | "yes_no" | "question" | "structured";
+const BLOCKER_KINDS: readonly string[] = ["captcha", "upload", "login", "safety"];
 
 const BLOCKER_RULES: [BlockerKind, RegExp][] = [
-  ["captcha", /captcha|i'?m not a robot|human check/i],
+  ["captcha", /captcha|i'?m not a robot|human check|bot check|solve the check/i],
   ["upload", /\bupload|\battach (?:the |your |my )?(?:cv|resume|file)|file (?:input|picker)/i],
   ["login", /\blog ?in\b|\bsign ?in\b|password|one-time code|verification code|\botp\b/i],
   ["safety", /safety (?:block|check|stop)|\bblocked\b/i],
@@ -18,13 +20,19 @@ const BLOCKER_RULES: [BlockerKind, RegExp][] = [
 const OUTREACH = /linkedin (?:message|note|dm)|connection (?:request|note)|send (?:this|the) (?:message|note|dm)/i;
 const SIMULATION = /\bsimulation\b|lifecycle test|do not apply/i;
 const YES_NO = /^(?:do|does|did|are|is|was|were|can|could|will|would|have|has|had|should)\b[^?\n]*\?$/i;
+// "...? Yes or No?" / "Reply yes or no." at the end of a longer question.
+const ENDS_YES_NO = /\byes or no[?.]?\s*$/i;
 
 export function rowKind(ask: Ask): RowKind {
+  // The kind the assistant stored wins; only an older ask (kind "") is read from its words.
+  if (BLOCKER_KINDS.includes(ask.kind ?? "")) return ask.kind as BlockerKind;
+  if (ask.questions?.length) return "structured";
+  if (ask.kind === "question") return "question";
   const text = `${ask.question}\n${ask.context}`;
   for (const [kind, re] of BLOCKER_RULES) if (re.test(text)) return kind;
   if (OUTREACH.test(text)) return "outreach";
   const q = ask.question.trim();
-  return q.length <= 200 && YES_NO.test(q) ? "yes_no" : "question";
+  return (q.length <= 200 && YES_NO.test(q)) || ENDS_YES_NO.test(q) ? "yes_no" : "question";
 }
 
 export function isBlocker(kind: RowKind): kind is BlockerKind {

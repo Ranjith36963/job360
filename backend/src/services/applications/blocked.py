@@ -146,6 +146,15 @@ _USER_TODO: dict[str, str] = {
 }
 
 
+# The ask kind a blocked step's ask carries (0087), so the web shows buttons, not a text box.
+# A reason missing here is not something only the user can clear on the form: a plain ask.
+ASK_KIND_FOR_REASON: dict[str, str] = {
+    "captcha": "captcha", "bot_check": "captcha", "login_needed": "login", "account_creation": "login",
+    "otp_needed": "login",
+    "upload_failed": "upload", "safety_block": "safety",
+}
+
+
 def ask_question(stored: dict[str, Any]) -> str:
     step = stored.get("step") or "a step"
     host = stored.get("page_host") or "the job site"
@@ -260,7 +269,8 @@ async def before_append(
         return {**stored, "ask_id": max(open_ids)}
     try:
         ask = await asks_service.create_ask(
-            db, user.id, application_id, ask_question(stored), "", stored["assistant"]
+            db, user.id, application_id, ask_question(stored), "", stored["assistant"],
+            kind=ASK_KIND_FOR_REASON.get(stored["reason"], ""),
         )
     except SpineError as exc:
         if exc.status_code != 429:

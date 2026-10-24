@@ -832,6 +832,30 @@ export async function answerAsk(id: number, answer: string): Promise<Ask> {
   });
 }
 
+/** Answer an ask that lists form questions: one answer per question key. */
+export async function answerAskQuestions(id: number, answers: Record<string, string>): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ answers }),
+  });
+}
+
+/** "Remember these answers for every form": each one becomes an approved saved answer on the
+ *  profile (user_info.answers), replacing an older one with the same topic. */
+export async function rememberAnswers(items: { topic: string; question: string; answer: string }[]): Promise<void> {
+  if (items.length === 0) return;
+  await request("/api/profile", {
+    method: "PATCH",
+    body: JSON.stringify({
+      edits: items.map((i) => ({
+        path: "user_info.answers",
+        op: "upsert",
+        value: { question: i.question, answer: i.answer, approved: true, topic: i.topic },
+      })),
+    }),
+  });
+}
+
 export async function confirmAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/confirm`, { method: "POST" });
 }

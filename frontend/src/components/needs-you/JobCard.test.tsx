@@ -8,10 +8,14 @@ import { JobCard } from "./JobCard";
 const answerAsk = vi.fn();
 const markCvSeen = vi.fn();
 const markOutreachSent = vi.fn();
+const answerAskQuestions = vi.fn();
+const rememberAnswers = vi.fn();
 vi.mock("@/lib/api", () => ({
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
   markOutreachSent: (...a: unknown[]) => markOutreachSent(...a),
+  answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
+  rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
   downloadApplicationArtifact: vi.fn(),
 }));
 vi.mock("@/components/applications/FinishInBrowser", () => ({ FinishInBrowser: () => <div data-testid="finish-browser" /> }));
@@ -39,6 +43,8 @@ beforeEach(() => {
   answerAsk.mockReset().mockResolvedValue({});
   markCvSeen.mockReset().mockResolvedValue({});
   markOutreachSent.mockReset().mockResolvedValue({});
+  answerAskQuestions.mockReset().mockResolvedValue({});
+  rememberAnswers.mockReset().mockResolvedValue(undefined);
   onChanged.mockClear();
 });
 
@@ -99,6 +105,37 @@ describe("JobCard", () => {
     render(<JobCard card={card([captcha])} onChanged={onChanged} />);
     fireEvent.click(screen.getByTestId(`finish-here-${captcha.id}`));
     expect(screen.getByTestId("finish-browser")).toBeInTheDocument();
+  });
+
+  it("shows one row per listed question with where its answer came from, and approves them together", async () => {
+    const listed = {
+      ...ask("Form answers for n8n"),
+      kind: "question",
+      questions: [
+        { key: "country", question: "Where should your contract be based?", answer: "Germany", source: "memory", remembered_on: "2026-10-12" },
+        { key: "visa", question: "Do you need visa sponsorship?", answer: "", source: "none", choices: ["Yes, I need it", "No"] },
+        { key: "salary", question: "Expected salary", answer: "€50,000", source: "guess" },
+      ],
+    } as unknown as Ask;
+    render(<JobCard card={card([listed])} onChanged={onChanged} />);
+    expect(screen.getByText("From memory (2026-10-12)")).toBeInTheDocument();
+    expect(screen.getByText("Guessed, please check")).toBeInTheDocument();
+    expect(screen.getByText("Not known yet")).toBeInTheDocument();
+    const approve = screen.getByTestId("approve-all-7");
+    fireEvent.click(screen.getByTestId(`q-ok-${listed.id}-country`));
+    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    expect(approve).toBeDisabled(); // the guess is not checked yet
+    fireEvent.click(screen.getByTestId(`q-edit-${listed.id}-salary`));
+    fireEvent.change(screen.getByTestId(`q-input-${listed.id}-salary`), { target: { value: "€55,000" } });
+    fireEvent.click(screen.getByTestId("remember-7"));
+    fireEvent.click(approve);
+    const answers = { country: "Germany", visa: "No", salary: "€55,000" };
+    await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(listed.id, answers));
+    expect(rememberAnswers).toHaveBeenCalledWith([
+      { topic: "country", question: "Where should your contract be based?", answer: "Germany" },
+      { topic: "visa", question: "Do you need visa sponsorship?", answer: "No" },
+      { topic: "salary", question: "Expected salary", answer: "€55,000" },
+    ]);
   });
 
   it("renders assistant text as text, never HTML", () => {

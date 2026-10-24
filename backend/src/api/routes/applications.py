@@ -715,6 +715,15 @@ class InboxItemOut(BaseModel):
     event_id: Optional[int]  # the event recorded with this message id on application_id (None = not yet)
 
 
+class AskQuestionOut(BaseModel):
+    key: str
+    question: str
+    answer: str
+    source: str
+    choices: Optional[list[str]] = None
+    remembered_on: Optional[str] = None
+
+
 class AskOut(BaseModel):
     """One "Needs you" ask (see ``services/applications/asks.py``)."""
 
@@ -747,6 +756,12 @@ class AskOut(BaseModel):
     status: str
     # True = this ask is a human check (CAPTCHA) in Job360's own browser: Needs you offers "Finish it here".
     finish_here: bool = False
+    # 0087 - "" (an older ask), "question", or a blocker only the user can clear on the form.
+    kind: str = ""
+    # The form questions this ask carries, each with the answer filled in and where it came from.
+    questions: list[AskQuestionOut] = Field(default_factory=list)
+    # The answers the user approved, one per question key ({} until answered).
+    answers: dict[str, str] = Field(default_factory=dict)
 
 
 class ProofOut(BaseModel):

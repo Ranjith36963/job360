@@ -567,8 +567,23 @@
         "additionalProperties": false,
         "properties": {
           "answer": {
+            "default": "",
             "title": "Answer",
             "type": "string"
+          },
+          "answers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answers"
           },
           "user_words": {
             "default": "",
@@ -577,9 +592,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "answer"
-        ],
         "title": "AnswerAskRequest",
         "type": "object"
       },
@@ -2354,6 +2366,13 @@
             "title": "Answered By User",
             "type": "boolean"
           },
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Answers",
+            "type": "object"
+          },
           "application_id": {
             "anyOf": [
               {
@@ -2419,9 +2438,21 @@
             ],
             "title": "Job Title"
           },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/AskQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
           },
           "relayed_from_chat": {
             "default": false,
@@ -2485,6 +2516,122 @@
           "status"
         ],
         "title": "AskOut",
+        "type": "object"
+      },
+      "AskQuestionIn": {
+        "additionalProperties": false,
+        "description": "One form question of an ask (0087): the answer the assistant filled in and where it came from.\nLengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``.",
+        "properties": {
+          "answer": {
+            "default": "",
+            "title": "Answer",
+            "type": "string"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "remembered_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remembered On"
+          },
+          "source": {
+            "enum": [
+              "profile",
+              "memory",
+              "cv",
+              "guess",
+              "draft",
+              "none"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "question",
+          "source"
+        ],
+        "title": "AskQuestionIn",
+        "type": "object"
+      },
+      "AskQuestionOut": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "remembered_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remembered On"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "question",
+          "answer",
+          "source"
+        ],
+        "title": "AskQuestionOut",
         "type": "object"
       },
       "AssistantSettingsView": {
@@ -4055,6 +4202,13 @@
             "title": "Answered By User",
             "type": "boolean"
           },
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Answers",
+            "type": "object"
+          },
           "application_id": {
             "anyOf": [
               {
@@ -4120,9 +4274,21 @@
             ],
             "title": "Job Title"
           },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/AskQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
           },
           "relayed_from_chat": {
             "default": false,
@@ -4218,9 +4384,41 @@
             "title": "Context",
             "type": "string"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "question",
+                  "captcha",
+                  "login",
+                  "upload",
+                  "safety"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "questions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AskQuestionIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questions"
           }
         },
         "required": [

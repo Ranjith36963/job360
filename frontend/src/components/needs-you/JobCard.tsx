@@ -2,14 +2,17 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { answerAsk, downloadApplicationArtifact, markCvSeen, markOutreachSent } from "@/lib/api";
+import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { BLOCKER_TITLE, isBlocker } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach } from "@/lib/job-cards";
+import type { Ask } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
+import { AskQuestions, initialRows } from "./AskQuestions";
+import type { RowState } from "./AskQuestions";
 
 // Every string on a card (questions, job fields, names, drafted messages) is written by an
 // assistant or a job site: untrusted, rendered only as React text, never as HTML.
@@ -31,13 +34,23 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
   const [confirmSkip, setConfirmSkip] = useState(false);
   // A CAPTCHA on a form filled in Job360's own browser: the user can finish it right here.
   const [finishing, setFinishing] = useState<number | null>(null);
+  const structured = card.asks.filter((a) => a.kind === "structured");
+  // Each listed question's answer as it stands and whether the user checked it, per ask.
+  const [rows, setRows] = useState<Record<number, Record<string, RowState>>>({});
+  const rowsFor = (ask: Ask) => rows[ask.id] ?? initialRows(ask.questions ?? []);
+  const [remember, setRemember] = useState(false);
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");
   const reminders = card.asks.filter((a) => a.kind === "outreach");
   const people = card.people.filter((p) => !hidden.has(p.contact.id));
-  const allAnswered = questions.every((q) => (answers[q.ask.id] ?? "").trim().length > 0);
-  const canApprove = !busy && allAnswered && (questions.length > 0 || card.cv !== null);
+  const rowCount = structured.reduce((n, { ask }) => n + (ask.questions?.length ?? 0), 0);
+  const allChecked = structured.every(({ ask }) =>
+    (ask.questions ?? []).every((q) => rowsFor(ask)[q.key]?.ok && rowsFor(ask)[q.key].value.trim()),
+  );
+  const allAnswered = allChecked && questions.every((q) => (answers[q.ask.id] ?? "").trim().length > 0);
+  const hasAnswers = questions.length > 0 || rowCount > 0;
+  const canApprove = !busy && allAnswered && (hasAnswers || card.cv !== null);
 
   async function run(fn: () => Promise<unknown>, failMsg: string) {
     setBusy(true);
@@ -54,6 +67,12 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
   const approveAll = () =>
     run(async () => {
       for (const q of questions) await answerAsk(q.ask.id, answers[q.ask.id].trim());
+      for (const { ask } of structured) {
+        const qs = ask.questions ?? [];
+        const given = Object.fromEntries(qs.map((q) => [q.key, rowsFor(ask)[q.key].value.trim()]));
+        await answerAskQuestions(ask.id, given);
+        if (remember) await rememberAnswers(qs.map((q) => ({ topic: q.key, question: q.question, answer: given[q.key] })));
+      }
       if (card.cv) await markCvSeen(card.applicationId, card.cv.artifactId);
     }, "Couldn't save everything");
 
@@ -110,9 +129,20 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
         </section>
       )}
 
-      {questions.length > 0 && (
+      {hasAnswers && (
         <section className="flex flex-col gap-2" data-testid="form-answers">
-          <h3 className={label}>Form answers · {questions.length}</h3>
+          <h3 className={label}>Form answers · {questions.length + rowCount}</h3>
+          {structured.map(({ ask }) => (
+            <AskQuestions key={ask.id} askId={ask.id} questions={ask.questions ?? []} rows={rowsFor(ask)} busy={busy}
+              onChange={(key, row) => setRows((prev) => ({ ...prev, [ask.id]: { ...rowsFor(ask), ...prev[ask.id], [key]: row } }))} />
+          ))}
+          {rowCount > 0 && (
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={remember} disabled={busy} data-testid={`remember-${card.applicationId}`}
+                onChange={(e) => setRemember(e.target.checked)} />
+              Remember these answers for every form (saved to your profile)
+            </label>
+          )}
           {questions.map(({ ask, kind }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`question-${ask.id}`}>
               <p className="whitespace-pre-wrap text-sm font-medium">{ask.question}</p>
@@ -180,7 +210,7 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
       )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
-        {(questions.length > 0 || card.cv) && (
+        {(hasAnswers || card.cv) && (
           <button type="button" className={mainBtn} disabled={!canApprove} data-testid={`approve-all-${card.applicationId}`}
             onClick={() => void approveAll()}>
             {busy ? "Saving…" : "Approve everything and continue"}

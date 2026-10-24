@@ -29,8 +29,20 @@ describe("rowKind", () => {
     ["Send this LinkedIn message yourself", "outreach"],
     ["Do you need visa sponsorship for Germany?", "yes_no"],
     ["Expected yearly salary (EUR)", "question"],
+    ["Your assistant got stuck: a bot check at Indeed Apply button on uk.indeed.com.", "captcha"],
+    ["Certa asks: \"Do you meet this requirement?\" You live in London now. Yes or No?", "yes_no"],
+    ["Is it BJAK's confirmation? Reply yes or no.", "yes_no"],
   ])("%s -> %s", (question, kind) => {
     expect(rowKind(ask({ question }))).toBe(kind);
+  });
+});
+
+describe("rowKind with a stored kind", () => {
+  it("trusts the stored kind over the words, and lists questions as structured", () => {
+    expect(rowKind(ask({ question: "Please check the form", kind: "upload" } as Partial<Ask>))).toBe("upload");
+    expect(rowKind(ask({ question: "Solve the CAPTCHA", kind: "question" } as Partial<Ask>))).toBe("question");
+    const listed = { question: "Form answers", kind: "question", questions: [{ key: "a", question: "A?", answer: "x", source: "cv" }] };
+    expect(rowKind(ask(listed as unknown as Partial<Ask>))).toBe("structured");
   });
 });
 
