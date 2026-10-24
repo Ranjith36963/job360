@@ -127,3 +127,49 @@ async def test_rest_recipe_and_doctor_agree_with_mcp(authenticated_async_context
     assert rest["tools_version"] == via_mcp["tools_version"] == m.tools_version(m.served_tool_parameters())
     assert rest["tools_rev"] == via_mcp["tools_rev"] == rev
     assert rest_doc["tools_rev"] == rev and rest_doc["tools_stale"] is True
+
+
+def test_missing_from_client_names_what_a_cached_list_lacks():
+    from src.api import mcp_server as m
+
+    served = m.served_tool_parameters()
+    assert m.missing_from_client(served) == {}
+    # 2026-10-23: a client cached add_contact before phone/links landed, and lacked doctor's new param.
+    cached = {**served, "add_contact": [p for p in served["add_contact"] if p not in ("phone", "links")]}
+    cached.pop("whats_new")
+    missing = m.missing_from_client(cached)
+    assert missing["add_contact"] == sorted({"phone", "links"} & set(served["add_contact"]))
+    assert missing["whats_new"] == sorted(served["whats_new"]) or missing["whats_new"] == ["*"]
+    assert set(missing) == {"add_contact", "whats_new"}
+    # extras on the client side never make it stale
+    assert m.missing_from_client({**served, "old_tool": ["x"], "doctor": [*served["doctor"], "extra"]}) == {}
+
+
+@pytest.mark.asyncio
+async def test_doctor_client_tools_catches_a_cached_list_the_version_misses(
+    authenticated_async_context, fixture_user_id,
+):
+    from src.api import mcp_server as m
+
+    tools = m.build_server()._tool_manager
+    served = m.served_tool_parameters()
+    version, rev = m.tools_version(served), m.tools_rev()
+    cached = {**served, "add_contact": [p for p in served["add_contact"] if p != "phone"]}
+    token = m._current_user.set(_user(fixture_user_id))
+    try:
+        async with authenticated_async_context():
+            doctor = tools.get_tool("doctor").fn
+            # the instructions' version and rev are current, so they alone say "not stale"...
+            fooled = await doctor(client_tools_version=version, client_tools_rev=rev)
+            assert fooled["tools_stale"] is False and "tools_missing" not in fooled
+            # ...but the real list the client holds is not
+            caught = await doctor(client_tools_version=version, client_tools_rev=rev, client_tools=cached)
+            assert caught["tools_stale"] is True
+            assert caught["tools_missing"] == {"add_contact": ["phone"]}
+            assert caught["stale_hint"]
+            fresh = await doctor(client_tools=served)
+            assert fresh["tools_stale"] is False and fresh["tools_missing"] == {}
+            # the account part of doctor is untouched by the tool check
+            assert fresh["next_step"] == fooled["next_step"]
+    finally:
+        m._current_user.reset(token)

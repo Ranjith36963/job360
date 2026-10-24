@@ -72,8 +72,10 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("profile_edits", "user_id"),
     # S2 assistant settings (migration 0051): riskier changes waiting on the user.
     ("assistant_setting_requests", "user_id"),
+    ("assistant_duty_runs", "user_id"),  # 0082: when each scheduled duty was last done
     ("artifact_links", "user_id"),
     ("user_templates", "user_id"),  # 0076: the user's own outreach templates
+    ("inbox_items", "user_id"),  # 0086: unmatched mail waiting for the user to pick an application
     # S7 proof of application (migration 0053).
     ("application_proof_screenshots", "user_id"),
     ("proof_upload_links", "user_id"),

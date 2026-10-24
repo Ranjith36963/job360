@@ -165,6 +165,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/match-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Match Email
+         * @description Feature 8 (G088): the user's applications that a STORED fact links to this email -
+         *     same thread, a saved contact's email, a sender domain in email_senders, the company named
+         *     in the subject - each with its reasons. Facts, not a verdict: the assistant decides
+         *     (VISION rule 5). Read-only. POST so the sender and subject never sit in a URL or access log.
+         */
+        post: operations["match_email_api_applications_match_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/outcome-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Outcome Suggestions
+         * @description Feature 9: open outcome_suggested events (not ignored, and their email not yet recorded
+         *     on the application), newest first. Read-only; web only (an assistant reads them on
+         *     get_application / whats_new).
+         */
+        get: operations["list_outcome_suggestions_api_applications_outcome_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/record-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Events
+         * @description Feature 10 (G289): record several emails in one call. `events` run through the SAME route
+         *     function as record_event (every validator, one result per item); `unmatched` mail is stored once
+         *     per message id as a Needs-you inbox item. One refused item never stops the others.
+         */
+        post: operations["record_events_api_applications_record_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/stats": {
         parameters: {
             query?: never;
@@ -951,7 +1018,9 @@ export interface paths {
         put?: never;
         /**
          * Withdraw Ask
-         * @description Take an open ask back. Web only - there is deliberately no MCP tool.
+         * @description Take an open ask back. The user (web) may withdraw any ask, reason optional. An assistant
+         *     (the MCP ``answer_ask`` ``withdraw``) may withdraw only an ask it asked itself, and must say why
+         *     (owner, 2026-10-23); an ask the user or another assistant raised stays the user's to close.
          */
         post: operations["withdraw_ask_api_asks__ask_id__withdraw_post"];
         delete?: never;
@@ -1571,7 +1640,7 @@ export interface paths {
         put?: never;
         /**
          * Browser Action
-         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,
+         * @description One action in the caller's cloud browser (open, look, click, type, choose, tick, fill, upload, back,
          *     close). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant
          *     reads them like any page; a 404 from the gate (not the caller's application) stays a 404.
          */
@@ -1855,6 +1924,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cv-to-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cv To Approve
+         * @description Approve CV on Needs you (owner decision 2026-10-23): the caller's open applications whose newest CV
+         *     they have not seen yet, from chat or the web. "CV OK" is ``POST /applications/{id}/cv-seen``.
+         */
+        get: operations["cv_to_approve_api_cv_to_approve_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deployz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deployz
+         * @description Deploy healthcheck (2026-10-22): readyz's DB check, then the browser hold.
+         *
+         *     A new container answers 503 ``holding`` while the OLD process still has a recently active
+         *     cloud browser, for at most ``DEPLOY_HOLD_MAX_SECONDS`` after this process booted, so Railway
+         *     keeps the old container (and its half-filled form) serving. See
+         *     ``services/browser_agent/deploy_hold.py``. Public, since Railway's healthcheck sends no
+         *     credentials; the body carries no user data and no counts.
+         *
+         *     200 ``{"status": "ready"}``
+         *     503 ``{"status": "not_ready", "reason": "pool_timeout" | "db_error"}`` (wins over the hold)
+         *     503 ``{"status": "holding", "reason": "browser_busy", "held_s": <seconds since boot>}``
+         */
+        get: operations["deployz_api_deployz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/doctor": {
         parameters: {
             query?: never;
@@ -1955,6 +2075,47 @@ export interface paths {
         get: operations["hunt_kit_file_api_hunt_kit__name__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inbox-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Inbox Items
+         * @description Feature 10: unmatched mail the assistant stored (open, or all).
+         */
+        get: operations["list_inbox_items_api_inbox_items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inbox-items/{item_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Inbox Item
+         * @description The user's pick: match the email to one of their applications, or dismiss it. Stores the pick
+         *     and writes no event (only the assistant read the mail). No MCP tool: the assistant records the event.
+         */
+        post: operations["resolve_inbox_item_api_inbox_items__item_id__resolve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2831,6 +2992,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedule/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Done
+         * @description Stamp one duty (hunt | inbox | batch) as done now, and the tick. A slot, never history.
+         */
+        post: operations["mark_done_api_schedule_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedule/due": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whats Due
+         * @description The duties due NOW for the signed-in user, each with its recipe. Read-only: changes no setting
+         *     and stamps nothing.
+         */
+        get: operations["whats_due_api_schedule_due_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -3298,8 +3500,15 @@ export interface components {
         };
         /** AnswerAskRequest */
         AnswerAskRequest: {
-            /** Answer */
+            /**
+             * Answer
+             * @default
+             */
             answer: string;
+            /** Answers */
+            answers?: {
+                [key: string]: string;
+            } | null;
             /**
              * User Words
              * @default
@@ -3567,6 +3776,11 @@ export interface components {
             job: components["schemas"]["KitJobOut"];
             kit: components["schemas"]["KitIdOut"];
             known_people?: components["schemas"]["KnownPeopleOut"];
+            /**
+             * Last Fill
+             * @default []
+             */
+            last_fill: components["schemas"]["KitLastFillOut"][];
             /** Missing */
             missing: components["schemas"]["KitMissingOut"][];
             /** Settings */
@@ -3897,6 +4111,10 @@ export interface components {
             answered_by: string | null;
             /** Answered By User */
             answered_by_user: boolean;
+            /** Answers */
+            answers?: {
+                [key: string]: string;
+            };
             /** Application Id */
             application_id: number | null;
             /** Asked At */
@@ -3907,14 +4125,26 @@ export interface components {
             confirmed_at?: string | null;
             /** Context */
             context: string;
+            /**
+             * Finish Here
+             * @default false
+             */
+            finish_here: boolean;
             /** Id */
             id: number;
             /** Job Company */
             job_company: string | null;
             /** Job Title */
             job_title: string | null;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
             /** Question */
             question: string;
+            /** Questions */
+            questions?: components["schemas"]["AskQuestionOut"][];
             /**
              * Relayed From Chat
              * @default false
@@ -3935,6 +4165,56 @@ export interface components {
             user_words: string;
             /** Withdrawn At */
             withdrawn_at: string | null;
+            /**
+             * Withdrawn By
+             * @default
+             */
+            withdrawn_by: string;
+            /**
+             * Withdrawn Reason
+             * @default
+             */
+            withdrawn_reason: string;
+        };
+        /**
+         * AskQuestionIn
+         * @description One form question of an ask (0087): the answer the assistant filled in and where it came from.
+         *     Lengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``.
+         */
+        AskQuestionIn: {
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+            /** Choices */
+            choices?: string[] | null;
+            /** Key */
+            key: string;
+            /** Question */
+            question: string;
+            /** Remembered On */
+            remembered_on?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "profile" | "memory" | "cv" | "guess" | "draft" | "none";
+        };
+        /** AskQuestionOut */
+        AskQuestionOut: {
+            /** Answer */
+            answer: string;
+            /** Choices */
+            choices?: string[] | null;
+            /** Key */
+            key: string;
+            /** Question */
+            question: string;
+            /** Remembered On */
+            remembered_on?: string | null;
+            /** Source */
+            source: string;
         };
         /**
          * AssistantSettingsView
@@ -4199,6 +4479,8 @@ export interface components {
              * @default
              */
             doc_kind: string;
+            /** Fields */
+            fields?: components["schemas"]["FillField"][];
             /**
              * On
              * @default true
@@ -4550,6 +4832,10 @@ export interface components {
             answered_by: string | null;
             /** Answered By User */
             answered_by_user: boolean;
+            /** Answers */
+            answers?: {
+                [key: string]: string;
+            };
             /** Application Id */
             application_id: number | null;
             /** Asked At */
@@ -4560,14 +4846,26 @@ export interface components {
             confirmed_at?: string | null;
             /** Context */
             context: string;
+            /**
+             * Finish Here
+             * @default false
+             */
+            finish_here: boolean;
             /** Id */
             id: number;
             /** Job Company */
             job_company: string | null;
             /** Job Title */
             job_title: string | null;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
             /** Question */
             question: string;
+            /** Questions */
+            questions?: components["schemas"]["AskQuestionOut"][];
             /**
              * Relayed From Chat
              * @default false
@@ -4588,6 +4886,16 @@ export interface components {
             user_words: string;
             /** Withdrawn At */
             withdrawn_at: string | null;
+            /**
+             * Withdrawn By
+             * @default
+             */
+            withdrawn_by: string;
+            /**
+             * Withdrawn Reason
+             * @default
+             */
+            withdrawn_reason: string;
         };
         /** CreateAskRequest */
         CreateAskRequest: {
@@ -4600,8 +4908,12 @@ export interface components {
              * @default
              */
             context: string;
+            /** Kind */
+            kind?: ("question" | "captcha" | "login" | "upload" | "safety") | null;
             /** Question */
             question: string;
+            /** Questions */
+            questions?: components["schemas"]["AskQuestionIn"][] | null;
         };
         /** CreateReceiptRequest */
         CreateReceiptRequest: {
@@ -4625,6 +4937,21 @@ export interface components {
         CvSeenRequest: {
             /** Artifact Id */
             artifact_id?: number | null;
+        };
+        /** CvToApproveOut */
+        CvToApproveOut: {
+            /** Items */
+            items: components["schemas"]["CvToApproveRow"][];
+        };
+        /** CvToApproveRow */
+        CvToApproveRow: {
+            /** Application Id */
+            application_id: number;
+            cv: components["schemas"]["ReadyDoc"];
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
         };
         /**
          * DoctorAuth
@@ -4887,6 +5214,24 @@ export interface components {
             /** Last Interview Event Id */
             last_interview_event_id: number;
         };
+        /** DueItemOut */
+        DueItemOut: {
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch";
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "never_done" | "interval_elapsed" | "queue_waiting";
+            /**
+             * Recipe
+             * @enum {string}
+             */
+            recipe: "hunt" | "daily" | "batch";
+        };
         /** EmailChangeRequest */
         EmailChangeRequest: {
             /** Current Password */
@@ -4922,6 +5267,8 @@ export interface components {
             kind: string;
             /** Message Id */
             message_id: string;
+            /** Quote */
+            quote?: string | null;
             /** Received At */
             received_at?: string | null;
             /**
@@ -4934,6 +5281,8 @@ export interface components {
              * @default
              */
             subject: string;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /**
          * EventSourceOut
@@ -4945,12 +5294,16 @@ export interface components {
             kind: string;
             /** Message Id */
             message_id: string;
+            /** Quote */
+            quote?: string | null;
             /** Received At */
             received_at: string | null;
             /** Sender */
             sender: string;
             /** Subject */
             subject: string;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /** ExportApplicationOut */
         ExportApplicationOut: {
@@ -5121,6 +5474,19 @@ export interface components {
              * @default
              */
             title: string;
+        };
+        /**
+         * FillField
+         * @description One field for action fill: a ref from the latest look and its value.
+         */
+        FillField: {
+            /** Ref */
+            ref: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /**
          * FitAxisIn
@@ -5380,6 +5746,78 @@ export interface components {
             application_ids: number[];
             /** Inbox Checked At */
             inbox_checked_at: string;
+        };
+        /**
+         * InboxItemIn
+         * @description An email the assistant could not tie to one application (EventSource's fields + dismissed).
+         */
+        InboxItemIn: {
+            /**
+             * Dismissed
+             * @default false
+             */
+            dismissed: boolean;
+            /**
+             * Kind
+             * @default email
+             */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Quote */
+            quote?: string | null;
+            /** Received At */
+            received_at?: string | null;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
+            /** Thread Id */
+            thread_id?: string | null;
+        };
+        /**
+         * InboxItemOut
+         * @description Feature 10 - one unmatched email the assistant stored (services/applications/inbox_items.py).
+         */
+        InboxItemOut: {
+            /** Application Id */
+            application_id: number | null;
+            /** Created At */
+            created_at: string;
+            /** Event Id */
+            event_id: number | null;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string | null;
+            /** Job Title */
+            job_title: string | null;
+            /** Kind */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Received At */
+            received_at: string | null;
+            /** Recorded By */
+            recorded_by: string;
+            /** Resolution */
+            resolution: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Resolved By */
+            resolved_by: string | null;
+            /** Sender */
+            sender: string;
+            /** Subject */
+            subject: string;
+            /** Thread Id */
+            thread_id: string | null;
         };
         /**
          * InterviewAgenda
@@ -5730,6 +6168,25 @@ export interface components {
             /** Recorded By */
             recorded_by: string;
         };
+        /**
+         * KitLastFillOut
+         * @description One answer of the newest ``form_filled``, as stored (``redacted``: hashed, ``answer`` is "").
+         */
+        KitLastFillOut: {
+            /** Answer */
+            answer: string;
+            /** Key */
+            key?: string | null;
+            /** Question */
+            question: string;
+            /**
+             * Redacted
+             * @default false
+             */
+            redacted: boolean;
+            /** Source */
+            source: string;
+        };
         /** KitMissingOut */
         KitMissingOut: {
             /** Key */
@@ -5878,6 +6335,13 @@ export interface components {
             /** Open Count */
             open_count: number;
         };
+        /** ListInboxItemsResponse */
+        ListInboxItemsResponse: {
+            /** Items */
+            items: components["schemas"]["InboxItemOut"][];
+            /** Open Count */
+            open_count: number;
+        };
         /** ListPeopleResponse */
         ListPeopleResponse: {
             /** People */
@@ -6005,6 +6469,73 @@ export interface components {
             /** Next */
             next?: string | null;
         };
+        /** MarkDoneIn */
+        MarkDoneIn: {
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch";
+        };
+        /** MarkDoneOut */
+        MarkDoneOut: {
+            /** Done At */
+            done_at: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch";
+            /** Last Tick At */
+            last_tick_at: string;
+        };
+        /** MatchEmailCandidateOut */
+        MatchEmailCandidateOut: {
+            /** Application Id */
+            application_id: number;
+            /** Contact Ids */
+            contact_ids: number[];
+            /** Email Senders */
+            email_senders: string[];
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Reasons */
+            reasons: string[];
+            /** Status */
+            status: string;
+            /** Thread Event Ids */
+            thread_event_ids: number[];
+        };
+        /**
+         * MatchEmailIn
+         * @description feature 8 - the email the assistant already read; any of the three (at least one).
+         */
+        MatchEmailIn: {
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
+            /**
+             * Thread Id
+             * @default
+             */
+            thread_id: string;
+        };
+        /** MatchEmailOut */
+        MatchEmailOut: {
+            /** Candidates */
+            candidates: components["schemas"]["MatchEmailCandidateOut"][];
+            /** Truncated */
+            truncated: boolean;
+        };
         /** MeResponse */
         MeResponse: {
             /**
@@ -6125,6 +6656,39 @@ export interface components {
             redirect_uri: string;
             /** Scope */
             scope: string;
+        };
+        /** OutcomeSuggestionOut */
+        OutcomeSuggestionOut: {
+            /** Application Id */
+            application_id: number;
+            email: components["schemas"]["EventSourceOut"];
+            /** Event Id */
+            event_id: number;
+            /** Event Type */
+            event_type: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Occurred At */
+            occurred_at: string;
+            /** Quote */
+            quote: string;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Status */
+            status: string;
+            /** Why */
+            why: string;
+        };
+        /** OutcomeSuggestionsOut */
+        OutcomeSuggestionsOut: {
+            /** Suggestions */
+            suggestions: components["schemas"]["OutcomeSuggestionOut"][];
+            /** Truncated */
+            truncated: boolean;
         };
         /**
          * OutreachCheckResponse
@@ -7262,6 +7826,59 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /** RecordEventsItem */
+        RecordEventsItem: {
+            /** Application Id */
+            application_id?: number | null;
+            /** Channel */
+            channel?: string | null;
+            /** Contact Id */
+            contact_id?: number | null;
+            /** Corrects Event Id */
+            corrects_event_id?: number | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Follow Up On */
+            follow_up_on?: string | null;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Scheduled At */
+            scheduled_at?: string | null;
+            source?: components["schemas"]["EventSource"] | null;
+        };
+        /** RecordEventsItemOut */
+        RecordEventsItemOut: {
+            /** Error */
+            error?: string | null;
+            event?: components["schemas"]["RecordEventResponse"] | null;
+            /** Index */
+            index: number;
+            /** Ok */
+            ok: boolean;
+        };
+        /** RecordEventsRequest */
+        RecordEventsRequest: {
+            /** Events */
+            events?: components["schemas"]["RecordEventsItem"][];
+            /** Unmatched */
+            unmatched?: components["schemas"]["InboxItemIn"][];
+        };
+        /** RecordEventsResponse */
+        RecordEventsResponse: {
+            /** Events */
+            events: components["schemas"]["RecordEventsItemOut"][];
+            /** Unmatched */
+            unmatched: components["schemas"]["UnmatchedItemOut"][];
+        };
         /**
          * RecordOutreachRequest
          * @description ``POST /api/contacts/{contact_id}/outreach`` — the one shared door
@@ -7330,6 +7947,16 @@ export interface components {
         ReleaseHoldOut: {
             /** Released */
             released: boolean;
+        };
+        /** ResolveInboxItemRequest */
+        ResolveInboxItemRequest: {
+            /** Application Id */
+            application_id?: number | null;
+            /**
+             * Dismiss
+             * @default false
+             */
+            dismiss: boolean;
         };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
@@ -8498,6 +9125,34 @@ export interface components {
             /** Question */
             question: string;
         };
+        /** UnmatchedItemOut */
+        UnmatchedItemOut: {
+            /**
+             * Already Existed
+             * @default false
+             */
+            already_existed: boolean;
+            /**
+             * Already Recorded
+             * @default false
+             */
+            already_recorded: boolean;
+            /** Application Id */
+            application_id?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Inbox Item Id */
+            inbox_item_id?: number | null;
+            /** Index */
+            index: number;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Resolution
+             * @default
+             */
+            resolution: string;
+        };
         /**
          * UpdateContactRequest
          * @description ``PATCH /api/contacts/{contact_id}`` — every field optional; only the
@@ -8628,6 +9283,29 @@ export interface components {
             /** Sha */
             sha: string;
         };
+        /** WhatsDueOut */
+        WhatsDueOut: {
+            /** Batch Hold */
+            batch_hold?: string | null;
+            /** Checked At */
+            checked_at: string;
+            /** Due */
+            due: components["schemas"]["DueItemOut"][];
+            /** Expected Every Hours */
+            expected_every_hours: number;
+            /** Last Done At */
+            last_done_at: {
+                [key: string]: string | null;
+            };
+            /** Last Tick At */
+            last_tick_at?: string | null;
+            /** Next Due At */
+            next_due_at: {
+                [key: string]: string | null;
+            };
+            /** Nothing Due */
+            nothing_due: boolean;
+        };
         /** WhatsNewApplicationOut */
         WhatsNewApplicationOut: {
             /** Id */
@@ -8677,6 +9355,8 @@ export interface components {
             applications: components["schemas"]["WhatsNewApplicationOut"][];
             /** Events */
             events: components["schemas"]["WhatsNewEventOut"][];
+            /** Inbox Items */
+            inbox_items?: components["schemas"]["InboxItemOut"][];
             /**
              * @default {
              *       "just_passed": [],
@@ -8698,6 +9378,14 @@ export interface components {
             since: string;
             /** Truncated */
             truncated: boolean;
+        };
+        /** WithdrawAskRequest */
+        WithdrawAskRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
         };
     };
     responses: never;
@@ -8945,6 +9633,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LessonsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    match_email_api_applications_match_email_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MatchEmailIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchEmailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_outcome_suggestions_api_applications_outcome_suggestions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeSuggestionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_events_api_applications_record_events_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordEventsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordEventsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10398,7 +11193,11 @@ export interface operations {
                 job360_session?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WithdrawAskRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -11888,6 +12687,59 @@ export interface operations {
             };
         };
     };
+    cv_to_approve_api_cv_to_approve_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CvToApproveOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deployz_api_deployz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     doctor_api_doctor_get: {
         parameters: {
             query?: {
@@ -12013,6 +12865,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_inbox_items_api_inbox_items_get: {
+        parameters: {
+            query?: {
+                status?: string;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListInboxItemsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_inbox_item_api_inbox_items__item_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                item_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveInboxItemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxItemOut"];
                 };
             };
             /** @description Validation Error */
@@ -13251,6 +14178,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_done_api_schedule_done_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkDoneIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkDoneOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    whats_due_api_schedule_due_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsDueOut"];
                 };
             };
             /** @description Validation Error */

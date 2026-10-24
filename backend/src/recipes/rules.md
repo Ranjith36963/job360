@@ -249,6 +249,17 @@ the SAME key.
 
 An ask can also be answered by the user on the Job360 Needs-you page.
 
+ONE ASK PER JOB: Needs you shows one card per job. Put every open question for a job in ONE
+`ask_user` (`application_id`, `kind` question) as `questions`: [{key, question, answer, source,
+choices?, remembered_on?}]. `source` says where YOUR answer came from, honestly: profile, memory
+(a saved answer; `remembered_on` its date), cv, draft (you wrote it), guess, or none (not known:
+empty answer). A guess is never memory. Yes/no or a closed list: give `choices`. A step only the
+user can do (CAPTCHA, sign-in, a failed upload, a safety block) is its own ask on the same job:
+record `blocked` (Job360 opens it with its kind) or `ask_user` `kind` captcha|login|upload|safety.
+The user approves the answers at once; `answer_ask` returns them as `answers` {key: answer}.
+Never ask the user to send an outreach message through `ask_user`: a saved message nobody marked
+sent shows under People to reach on that job's card.
+
 When the user answered in chat, pass `user_words` (their exact words) to `answer_ask`: the answer then shows as theirs, via you.
 
 `answer_ask` keeps the answer on the ask and appends an `answered` event; the
@@ -303,12 +314,14 @@ ASK: never read on your own. At each scheduled time only ask in chat
 PAUSED: every run stops at once, reads nothing, records nothing, does
 not ask.
 
-SCHEDULE: if your app offers only hourly or daily schedules, then for
-1h, 3h, 6h or 12h create an HOURLY task (1h runs every hour) that does the work only at hours
-00, 03, 06, 09, 12, 15, 18 and 21 (3h), 00, 06, 12 and 18 (6h) or 08
-and 20 (12h) in the user's timezone (ask them if you do not know it),
-and otherwise ends at once without writing anything. For 24h, run once
-each morning.
+SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
+runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
+`batch`), then `mark_done` each; `nothing_due` = end at once without
+writing anything. Job360 counts each duty from when it was last done
+(preferences.check_every for the inbox, assistant_settings.hunt_every_hours
+for the hunt), so a missed hour catches up. It lists the inbox only in
+auto mode and the batch only when the user lets you apply on your own; it
+is never a yes to submit (check_submit still decides).
 
 KILL SWITCH: every scheduled run first calls get_profile. If
 preferences.daily_check is "paused", "declined" or "" (not
@@ -378,6 +391,16 @@ tell the user.
 
 EMAIL APPLICATIONS (the ad says "apply by email"): record_event email_drafted {to, subject, attachments: [{artifact_id, sha256}] from get_application_kit, gmail_draft_id?} (never the body) before check_submit, then call check_submit with `form_url` = `mailto:<to>`; send only on `submit` (or the user's yes for that exact draft: a new recipient or attachment needs a new yes); then record_application with channel "email", `recipient` and the sent email's `gmail_message_id`.
 
+UNMATCHED MAIL (record_events): mail you read but cannot tie to ONE application goes in
+`unmatched` of one `record_events` call (message_id, thread_id, sender, subject, received_at).
+Job360 stores it once as a Needs-you item; the user picks its application or dismisses it
+on Job360. Set `dismissed: true` only when the user told you, in chat, that it is about no
+job. Skip every message id listed in `whats_new` `inbox_items`. A row with resolution
+`matched` and no `event_id` means the user picked its application: read the email again and
+record its event on that application with its `source`. `events` takes record_event's
+arguments plus `application_id`, and each item is judged on its own. A cold contact's
+outreach still goes through record_event. At most RECORD_EVENTS_MAX_ITEMS (50) items per call.
+
 ## Outreach
 
 Outreach to a person — recruiter, hiring manager, referral, cold
@@ -402,9 +425,9 @@ the user's browser, when you control the browser. Never send through a Gmail
 connector — connectors only draft.** Right before pressing Send, call
 check_outreach(contact_id, message_id) — message_id is the artifact_id
 save_artifact returned: `send` = press Send, then record outreach_sent; `ask` =
-save a Gmail draft and ask_user; `stop` = do not send. It counts only RECORDED
+save a Gmail draft (it shows on Needs you); `stop` = do not send. It counts only RECORDED
 sends against the daily and per-company caps. A guessed address (email_source pattern_guess) makes check_outreach answer `ask` (email_guessed): save a Gmail draft, the user sends. When a delivery-failure email (a bounce) arrives for outreach you sent, record_event outreach_bounced with contact_id, channel "email" and the bounce's Gmail message id as `source` (no detail text); check_outreach then answers `stop` (email_bounced) for that address on every contact until update_contact gives a new email (with its email_source). Never resend to a bounced address. Without browser control: save it as a
-Gmail draft and `ask_user` "Press Send on the draft to <name>" (Needs you);
+Gmail draft; the saved message shows under People to reach on Needs you;
 the user sends. A LinkedIn or other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's
 Gmail Sent folder for a message to that address since this version was saved,
@@ -513,10 +536,10 @@ then record_event `applied` with the right `occurred_at` and `corrects_event_id`
 = that id. The old event is kept and marked superseded; never record a second
 plain `applied` (it becomes a confirmation, not a new date).
 
-`source` names the email an event came from (kind/message_id/sender/subject/
-received_at) — the same message_id on the same application is the same event,
+`source` names the email an event came from (kind/message_id/thread_id/sender/subject/
+received_at; thread_id optional, <= 256) — the same message_id on the same application is the same event,
 so you get the first one back with already_existed=true and nothing is written;
-re-reading an inbox is safe. If the same message_id arrives with a different event_type the reply carries `warnings` naming the old type; reclassify with `corrects_event_id` and leave `source` out (the original event keeps it; repeating the message_id is a no-op). `scheduled_at` is the real interview datetime
+re-reading an inbox is safe. Before recording mail, `match_email(sender, thread_id, subject)` lists the user's applications with stored reasons (same_thread, contact_email, sender_domain_in_email_senders, company_in_subject) - facts, not a verdict; you choose, and several or none = ONE ask_user. If the same message_id arrives with a different event_type the reply carries `warnings` naming the old type; reclassify with `corrects_event_id` and leave `source` out (the original event keeps it; repeating the message_id is a no-op). `scheduled_at` is the real interview datetime
 (ISO-8601 with a timezone) and is only accepted on interview_requested/
 interview_scheduled. `follow_up_on` (YYYY-MM-DD) sets when to chase this
 application next — works on ANY event_type, so a plain `note` can carry it; omit
@@ -526,6 +549,8 @@ replied/interview_*/offer/rejected/withdrawn/ghosted — clears a follow_up_on
 that has already arrived; a future one is left alone, and passing `follow_up_on`
 yourself always wins). list_applications(due=true) is how the user (or your next
 daily-check run) finds what's arrived.
+
+Optional `source.quote` = the one deciding sentence, verbatim (whitespace collapsed, <= 500, shown on the Timeline; refused on outreach). Not sure what an email means: record `outcome_suggested` {event_type: replied|interview_requested|interview_scheduled|offer|rejected, quote, why} with `source`; it is stored in its payload, never moves status, and a repeat for the same message_id returns the first one. The user's Accept on Needs you records the real event with that `source` and `quote`; Ignore is `outcome_dismissed` {suggestion_event_id}, which you may record when the user says "ignore it" in chat. Never record the real event yourself unless the user says so in chat.
 
 A test or simulated application: `record_event` `simulation` FIRST, before any other event; it is never counted
 in stats. Undo it with a `note` whose `corrects_event_id` is that event (never another `simulation`).
@@ -576,7 +601,7 @@ and `source`/`key` are returned when you read the receipt. Examples:
 `form_filled` {"form_url":"https://jobs.example.com/apply/1","fields_count":1,"answers":[{"question":"Right to work?","answer":"Yes","source":"profile","key":"work_authorization"}]};
 `form_swept` {"fields_checked":12,"fixed":1,"notes":"fixed phone"}; `cv_seen` {"artifact_id":7,"sha256":"<from the kit>","where":"chat"};
 `hold_released` {"reason":"done"}; `site_account` {"host":"jobs.example.com"};
-`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried"};
+`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried","note":"upload worked"} (`note`: optional why, at most 200 chars);
 `proof_text` {"text":"Thank you, application received.","page_host":"jobs.example.com"}.
 A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared`, `submit_resolved` and where="web" need the user's own click
@@ -599,7 +624,8 @@ ask for the user. Never retry a CAPTCHA, bot check or ID/payment request and nev
 login page means the user signs in themselves. Until `unblocked`
 {resolution: retried | user_did_it | skipped} is recorded (by you, or the
 user's "Mark resolved" on the website), check_submit answers `ask` with
-reason `blocked`. `unblocked` closes the ask; with nothing blocked it is 409.
+reason `blocked`. An `upload_failed` block clears itself once a later
+`document_uploaded` is recorded, and its Needs-you ask closes too. `unblocked` closes the ask; with nothing blocked it is 409.
 When the user answers a blocked ask, do what they said, then record
 `unblocked`. If Needs-you is full no ask opens (`check_submit` still asks):
 tell the user in chat.

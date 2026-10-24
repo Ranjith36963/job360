@@ -54,7 +54,8 @@ from src.services.applications import auto_emails as auto_emails_service
 from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
-from src.services.applications import interview_payloads, queue_preflight, spine
+from src.services.applications import inbox_items as inbox_items_service
+from src.services.applications import interview_payloads, outcome_suggestions, queue_preflight, spine
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import proof as proof_service
@@ -218,9 +219,11 @@ class EventSource(BaseModel):
 
     kind: str = "email"
     message_id: str
+    thread_id: Optional[str] = None
     sender: str = ""
     subject: str = ""
     received_at: Optional[str] = None
+    quote: Optional[str] = None
 
 
 class RecordEventRequest(BaseModel):
@@ -471,9 +474,11 @@ class EventSourceOut(BaseModel):
 
     kind: str
     message_id: str
+    thread_id: Optional[str] = None
     sender: str
     subject: str
     received_at: Optional[str]
+    quote: Optional[str] = None
 
 
 class ApplicationEventOut(BaseModel):
@@ -689,6 +694,36 @@ class NextStepOut(BaseModel):
     label: str
 
 
+class InboxItemOut(BaseModel):
+    """Feature 10 - one unmatched email the assistant stored (services/applications/inbox_items.py)."""
+
+    id: int
+    kind: str
+    message_id: str
+    thread_id: Optional[str]
+    sender: str
+    subject: str
+    received_at: Optional[str]
+    recorded_by: str
+    created_at: str
+    resolution: str  # "" open | "matched" | "dismissed"
+    application_id: Optional[int]
+    job_title: Optional[str]
+    job_company: Optional[str]
+    resolved_by: Optional[str]
+    resolved_at: Optional[str]
+    event_id: Optional[int]  # the event recorded with this message id on application_id (None = not yet)
+
+
+class AskQuestionOut(BaseModel):
+    key: str
+    question: str
+    answer: str
+    source: str
+    choices: Optional[list[str]] = None
+    remembered_on: Optional[str] = None
+
+
 class AskOut(BaseModel):
     """One "Needs you" ask (see ``services/applications/asks.py``)."""
 
@@ -715,7 +750,18 @@ class AskOut(BaseModel):
     # When the user confirmed the relayed answer on the web (None = not yet).
     confirmed_at: Optional[str] = None
     withdrawn_at: Optional[str]
+    # Who took the ask back and why ("" = not withdrawn, or no reason given).
+    withdrawn_by: str = ""
+    withdrawn_reason: str = ""
     status: str
+    # True = this ask is a human check (CAPTCHA) in Job360's own browser: Needs you offers "Finish it here".
+    finish_here: bool = False
+    # 0087 - "" (an older ask), "question", or a blocker only the user can clear on the form.
+    kind: str = ""
+    # The form questions this ask carries, each with the answer filled in and where it came from.
+    questions: list[AskQuestionOut] = Field(default_factory=list)
+    # The answers the user approved, one per question key ({} until answered).
+    answers: dict[str, str] = Field(default_factory=dict)
 
 
 class ProofOut(BaseModel):
@@ -884,6 +930,31 @@ class InboxCheckedOut(BaseModel):
     inbox_checked_at: str
 
 
+class MatchEmailIn(BaseModel):
+    """feature 8 - the email the assistant already read; any of the three (at least one)."""
+
+    model_config = ConfigDict(extra="forbid")
+    sender: str = ""
+    thread_id: str = ""
+    subject: str = ""
+
+
+class MatchEmailCandidateOut(BaseModel):
+    application_id: int
+    job_title: str
+    job_company: str
+    status: str
+    reasons: list[str]
+    thread_event_ids: list[int]
+    contact_ids: list[int]
+    email_senders: list[str]
+
+
+class MatchEmailOut(BaseModel):
+    candidates: list[MatchEmailCandidateOut]
+    truncated: bool
+
+
 class SaveArtifactResponse(BaseModel):
     # Owner decision, 2026-09-25 — a `contact_id` save writes no
     # `application_artifacts` row at all (its identity lives in
@@ -967,6 +1038,58 @@ class ReceiptFileOut(BaseModel):
     event_id: int
 
 
+class RecordEventsItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    application_id: Optional[int] = None
+    event_type: str
+    detail: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    occurred_at: Optional[str] = None
+    corrects_event_id: Optional[int] = None
+    source: Optional[EventSource] = None
+    scheduled_at: Optional[str] = None
+    follow_up_on: Optional[str] = None
+    contact_id: Optional[int] = None
+    channel: Optional[str] = None
+
+
+class InboxItemIn(EventSource):
+    """An email the assistant could not tie to one application (EventSource's fields + dismissed)."""
+
+    dismissed: bool = False  # true ONLY when the user said it is about no job
+
+
+class RecordEventsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    events: list[RecordEventsItem] = Field(default_factory=list)
+    unmatched: list[InboxItemIn] = Field(default_factory=list)
+
+
+class RecordEventsItemOut(BaseModel):
+    index: int
+    ok: bool
+    event: Optional[RecordEventResponse] = None
+    error: Optional[str] = None  # "<status>: <detail>", the same text record_event's tool error carries
+
+
+class UnmatchedItemOut(BaseModel):
+    index: int
+    ok: bool
+    inbox_item_id: Optional[int] = None
+    already_existed: bool = False
+    already_recorded: bool = False  # already an event's source: nothing stored
+    resolution: str = ""
+    application_id: Optional[int] = None
+    error: Optional[str] = None
+
+
+class RecordEventsResponse(BaseModel):
+    events: list[RecordEventsItemOut]
+    unmatched: list[UnmatchedItemOut]
+
+
 class RecordApplicationReceiptResponse(BaseModel):
     receipt_id: int
     sent_at: str
@@ -1037,6 +1160,8 @@ class WhatsNewResponse(BaseModel):
     proof_missing: list[ProofMissingOut]
     # Gap 10 - interviews in the next 7 days, and the last 3 days' with no outcome recorded yet.
     interviews: InterviewAgenda = InterviewAgenda()
+    # Feature 10 - unmatched mail: every open item + items resolved in the last INBOX_ITEMS_RECENT_DAYS.
+    inbox_items: list[InboxItemOut] = Field(default_factory=list)
 
 
 class ExportArtifactOut(BaseModel):
@@ -1235,6 +1360,16 @@ class KitAccountSiteOut(BaseModel):
     known_account: Optional[KitKnownAccountOut] = None
 
 
+class KitLastFillOut(BaseModel):
+    """One answer of the newest ``form_filled``, as stored (``redacted``: hashed, ``answer`` is "")."""
+
+    question: str
+    answer: str
+    source: str
+    key: Optional[str] = None
+    redacted: bool = False
+
+
 class ApplicationKitOut(BaseModel):
     """Everything an assistant needs to fill ONE application form (S3). Binds to
     THIS application only: its latest CV and cover letter, never another job's."""
@@ -1258,6 +1393,8 @@ class ApplicationKitOut(BaseModel):
     # Plain facts to check with the user (e.g. expected_below_current) - never a block.
     warnings: list[dict[str, str]] = []
     known_people: KnownPeopleOut = Field(default_factory=KnownPeopleOut)
+    # The newest form_filled's answers: retyped in one browser fill when the browser closed (2026-10-23).
+    last_fill: list[KitLastFillOut] = []
     instructions: list[str]
 
 
@@ -2017,6 +2154,47 @@ async def stats(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+class OutcomeSuggestionOut(BaseModel):
+    event_id: int
+    application_id: int
+    job_title: str
+    job_company: str
+    status: str
+    event_type: str
+    quote: str
+    why: str
+    occurred_at: str
+    recorded_at: str
+    recorded_by: str
+    email: EventSourceOut
+
+
+class OutcomeSuggestionsOut(BaseModel):
+    suggestions: list[OutcomeSuggestionOut]
+    truncated: bool
+
+
+@router.get("/applications/outcome-suggestions", response_model=OutcomeSuggestionsOut, dependencies=AUTH_FIRST)
+async def list_outcome_suggestions(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Feature 9: open outcome_suggested events (not ignored, and their email not yet recorded
+    on the application), newest first. Read-only; web only (an assistant reads them on
+    get_application / whats_new)."""
+    items, truncated = await outcome_suggestions.open_suggestions(
+        db, user.id, settings.OUTCOME_SUGGESTIONS_LIST_MAX
+    )
+    get_audit_logger().info(
+        "outcome_suggestions_listed",
+        extra={
+            "event": "outcome_suggestions_listed", "user_id": safe_log_value(user.id), "count": len(items),
+            "event_ids": [i["event_id"] for i in items], "truncated": truncated, "result": "ok",
+        },
+    )
+    return {"suggestions": items, "truncated": truncated}
+
+
 @router.get("/applications", response_model=ListApplicationsResponse, dependencies=AUTH_FIRST)
 async def list_applications(
     status: Optional[str] = Query(None),
@@ -2059,12 +2237,114 @@ async def mark_inbox_checked(
     cursor forward. The assistant read the mail; Job360 only remembers how far
     (VISION rule 5). All or nothing; never rewinds a newer cursor."""
     from src.services.applications.inbox import mark_checked  # noqa: PLC0415
+    from src.services.profile import schedule  # noqa: PLC0415
 
     try:
-        return await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
+        resp = await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+    # The inbox duty is done (owner 2026-10-23): whats_due counts the next check from now.
+    await schedule.mark(db, user.id, "inbox", datetime.now(timezone.utc))
+    return resp
+
+
+@router.post("/applications/match-email", response_model=MatchEmailOut, dependencies=AUTH_FIRST)
+async def match_email(
+    body: MatchEmailIn,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Feature 8 (G088): the user's applications that a STORED fact links to this email -
+    same thread, a saved contact's email, a sender domain in email_senders, the company named
+    in the subject - each with its reasons. Facts, not a verdict: the assistant decides
+    (VISION rule 5). Read-only. POST so the sender and subject never sit in a URL or access log."""
+    from src.services.applications.email_match import match_email as match  # noqa: PLC0415
+
+    try:
+        result = await match(db, user.id, sender=body.sender, thread_id=body.thread_id, subject=body.subject)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
+    get_audit_logger().info(
+        "match_email",
+        extra={
+            "event": "match_email",
+            "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)),
+            "has_sender": bool(body.sender.strip()),
+            "has_thread_id": bool(body.thread_id.strip()),
+            "has_subject": bool(body.subject.strip()),
+            "candidate_count": len(result["candidates"]),
+            "application_ids": [c["application_id"] for c in result["candidates"]],
+            "truncated": result["truncated"],
+            "result": "ok",
+        },
+    )
+    return result
+
+
+@router.post("/applications/record-events", response_model=RecordEventsResponse, dependencies=AUTH_FIRST)
+async def record_events(
+    body: RecordEventsRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Feature 10 (G289): record several emails in one call. `events` run through the SAME route
+    function as record_event (every validator, one result per item); `unmatched` mail is stored once
+    per message id as a Needs-you inbox item. One refused item never stops the others."""
+    n = len(body.events) + len(body.unmatched)
+    cap = settings.RECORD_EVENTS_MAX_ITEMS
+    if n == 0:
+        raise HTTPException(status_code=422, detail="give at least one item in events or unmatched")
+    if n > cap:
+        raise HTTPException(
+            status_code=422,
+            detail=f"at most RECORD_EVENTS_MAX_ITEMS ({cap}) items per call (events + unmatched): split the batch",
+        )
+    actor = actor_for(user)
+    event_results: list[dict[str, Any]] = []
+    for i, item in enumerate(body.events):
+        res: dict[str, Any] = {"index": i, "ok": False, "event": None, "error": None}
+        try:
+            if item.contact_id is not None and item.application_id is None:
+                res["error"] = (
+                    "422: a cold contact's outreach (contact_id, no application_id) goes through record_event, "
+                    "one call each"
+                )
+            elif item.application_id is None:
+                res["error"] = (
+                    "422: application_id is required (an email you cannot tie to one application goes in unmatched)"
+                )
+            else:
+                req = RecordEventRequest(**item.model_dump(exclude={"application_id"}, exclude_none=False))
+                res["event"] = await record_event(item.application_id, req, db, user)
+                res["ok"] = True
+        except HTTPException as exc:
+            res["error"] = f"{exc.status_code}: {exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)}"
+        except ValidationError as exc:
+            problems = "; ".join(f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('msg')}" for e in exc.errors())
+            res["error"] = f"422: {problems}"
+        event_results.append(res)
+    unmatched_results: list[dict[str, Any]] = []
+    for i, entry in enumerate(body.unmatched):
+        try:
+            r = await inbox_items_service.store_unmatched(
+                db, user.id, entry.model_dump(exclude={"dismissed"}), actor, dismissed=entry.dismissed
+            )
+            unmatched_results.append({"index": i, "ok": True, "error": None, **r})
+        except SpineError as exc:
+            unmatched_results.append({"index": i, "ok": False, "error": f"{exc.status_code}: {exc.detail}"})
+    get_audit_logger().info(
+        "record_events",
+        extra={
+            "event": "record_events", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor),
+            "events_count": len(event_results), "ok_count": sum(1 for r in event_results if r["ok"]),
+            "unmatched_count": len(unmatched_results),
+            "inbox_item_ids": [r["inbox_item_id"] for r in unmatched_results if r.get("inbox_item_id")],
+        },
+    )
+    return {"events": event_results, "unmatched": unmatched_results}
 
 
 @router.get("/applications/job/{job_id}", response_model=JobResponse, dependencies=AUTH_FIRST)
@@ -2482,7 +2762,7 @@ async def record_outreach(
 
     async def _write() -> dict[str, Any]:
         try:
-            source = spine.validate_source(body.source.model_dump() if body.source else None)
+            source = spine.validate_source(body.source.model_dump() if body.source else None, allow_quote=False)
             return await contacts_service.record_outreach(
                 db, user.id, contact_id, actor_for(user),
                 entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
@@ -3269,7 +3549,9 @@ async def _record_event(
     try:
         if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:
             raise _outreach_needs_contact("record_event", user.id, application_id=application_id)
-        source = spine.validate_source(body.source.model_dump() if body.source else None)
+        source = spine.validate_source(
+            body.source.model_dump() if body.source else None, allow_quote=body.contact_id is None
+        )
         if body.contact_id is not None:
             # Owner decision, 2026-09-25 — record this as OUTREACH for a
             # person too, in the same transaction as the job-timeline event.
@@ -3302,6 +3584,11 @@ async def _record_event(
             app_row = await spine.get_owned_application(db, user.id, application_id)
             if app_row is None:  # pragma: no cover — record_outreach already 422s a mismatch
                 raise SpineError(404, "application not found")
+            if source and result.get("event_id"):
+                # Feature 10: a linked contact's reply/sent mark is an event on this application too.
+                await inbox_items_service.resolve_by_event(
+                    db, user.id, source["message_id"], application_id, int(result["event_id"]), actor_for(user)
+                )
             return {
                 "event_id": result["event_id"], "event_type": body.event_type,
                 "occurred_at": result["outreach"]["occurred_at"], "recorded_at": result["outreach"]["recorded_at"],
@@ -3361,6 +3648,14 @@ async def _record_event(
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             # S3: closed payloads + who may write which (the MCP tool inherits this).
             payload = await kit_service.check_kit_event(db, user, application_id, body.event_type, payload)
+        if body.event_type in outcome_suggestions.EVENT_TYPES:
+            # Feature 9: a suggestion never moves status; checks + dedupe live in the service,
+            # in the ROUTE function, so the MCP record_event tool inherits them (M5).
+            return await outcome_suggestions.record(
+                db, user, application_id, body.event_type, payload, source, detail=detail,
+                occurred_at=occurred_at, follow_up_on_set=body.follow_up_on is not None,
+                corrects_event_id=body.corrects_event_id,
+            )
         if body.event_type in blocked_service.BLOCKED_EVENT_TYPES:
             # S6: closed payloads; `blocked` opens one Needs-you ask, `unblocked`
             # closes it - ask + event in ONE transaction (the MCP tool inherits this).
@@ -3390,6 +3685,11 @@ async def _record_event(
                 # Weak spot #4: a repeat `applied` (e.g. the confirmation email) is
                 # stored as the submission-confirmation note, never a second applied.
                 repeat_applied_as_confirmation=True,
+            )
+        if source:
+            # Feature 10: this message was waiting as an unmatched inbox item - it now has its application.
+            await inbox_items_service.resolve_by_event(
+                db, user.id, source["message_id"], application_id, int(result["event_id"]), actor_for(user)
             )
         if body.event_type == "replied" and source and source.get("sender"):
             # The sender is a person we sent outreach to on this job: mark them

@@ -302,7 +302,7 @@ def parse_occurred_at(raw: Optional[str], field: str = "occurred_at") -> str:
 # optional email source and interview datetime ──────────────────────────────
 
 
-_SOURCE_CONTROL_CHAR_FIELDS = ("message_id", "sender", "subject")
+_SOURCE_CONTROL_CHAR_FIELDS = ("message_id", "sender", "subject", "thread_id")
 
 # S3 — what "control character" means for a source field. Unicode category
 # Cc is C0 + DEL + C1; Zl/Zp are U+2028/U+2029, real line terminators in
@@ -323,6 +323,13 @@ def _has_control_chars(value: str) -> bool:
         ch in _SOURCE_BANNED_CHARS or unicodedata.category(ch) in _SOURCE_BANNED_CATEGORIES
         for ch in value
     )
+
+
+def normalize_quote(value: Any) -> str:
+    """Feature 9 - a verbatim email sentence: every run of whitespace (newline, tab, CR,
+    U+2028/2029, NBSP: anything str.split() splits on) becomes ONE space, ends trimmed.
+    Other control characters are left for the caller to REFUSE (never silently stripped)."""
+    return " ".join(str(value or "").split())
 
 
 def _strip_control_chars(value: str, *, keep: str = "\n\t") -> str:
@@ -425,11 +432,13 @@ def validate_ats(kind: str, ats_score: Optional[int], ats_notes: Optional[str]) 
     return ats_score, notes
 
 
-def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def validate_source(raw: Optional[dict[str, Any]], *, allow_quote: bool = True) -> Optional[dict[str, Any]]:
     """R1/S2/S3 — normalise-and-validate an event's optional email source.
 
+    ``quote`` is optional, whitespace-collapsed, capped, and refused when ``allow_quote`` is False (outreach).
+
     ``None`` in, ``None`` out (an event with no source). Otherwise: trim the
-    three text fields, reject an empty ``message_id`` (that is the identity
+    four text fields (``thread_id`` optional, '' = none), reject an empty ``message_id`` (that is the identity
     R2 dedupes on — it cannot be blank), reject any control character (S3 —
     a subject cannot legally carry a newline), cap each field's length
     (S2, naming the setting), and check ``kind`` against the closed set.
@@ -444,12 +453,13 @@ def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     message_id = str(raw.get("message_id") or "").strip()
     sender = str(raw.get("sender") or "").strip()
     subject = str(raw.get("subject") or "").strip()
+    thread_id = str(raw.get("thread_id") or "").strip()
     received_at_raw = raw.get("received_at")
 
     if not message_id:
         raise SpineError(422, "message_id must not be empty")
 
-    fields = {"message_id": message_id, "sender": sender, "subject": subject}
+    fields = {"message_id": message_id, "sender": sender, "subject": subject, "thread_id": thread_id}
     for name in _SOURCE_CONTROL_CHAR_FIELDS:
         value = fields[name]
         if _has_control_chars(value):
@@ -462,10 +472,21 @@ def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
          "APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS"),
         ("subject", subject, settings.APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS,
          "APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS"),
+        ("thread_id", thread_id, settings.APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS,
+         "APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS"),
     )
     for name, value, cap, setting_name in caps:
         if len(value) > cap:
             raise SpineError(422, f"{name} exceeds {setting_name} ({cap} chars)")
+
+    quote = normalize_quote(raw.get("quote"))
+    if _has_control_chars(quote):
+        raise SpineError(422, "quote must not contain control characters")
+    quote_cap = settings.APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS
+    if len(quote) > quote_cap:
+        raise SpineError(422, f"quote exceeds APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS ({quote_cap} chars)")
+    if quote and not allow_quote:
+        raise SpineError(422, "source.quote is kept on application events only; record outreach without it")
 
     if kind not in settings.APPLICATION_EVENT_SOURCE_KINDS:
         raise SpineError(
@@ -485,9 +506,11 @@ def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     return {
         "kind": kind,
         "message_id": message_id,
+        "thread_id": thread_id,
         "sender": sender,
         "subject": subject,
         "received_at": received_at,
+        "quote": quote,
     }
 
 
@@ -587,7 +610,7 @@ def _follow_up_due(follow_up_on: Optional[str], status: str, today_iso: str) -> 
 
 
 def _event_source(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
-    """R4 — build the ``source`` object a reader emits from the six raw
+    """R4 — build the ``source`` object a reader emits from the seven raw
     columns; ``None`` when the event carries no source (the 0038/0041
     convention: ``source_message_id == ''`` means none, never NULL)."""
     if not row.get("source_message_id"):
@@ -595,6 +618,8 @@ def _event_source(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     return {
         "kind": row["source_kind"],
         "message_id": row["source_message_id"],
+        "thread_id": row.get("source_thread_id") or None,
+        "quote": row.get("source_quote") or None,
         "sender": row["source_sender"],
         "subject": row["source_subject"],
         "received_at": row["source_received_at"] or None,
@@ -686,7 +711,8 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
     ``recorded_at`` order the status recompute uses."""
     cur = await db._db.execute(
         "SELECT id, event_type, detail, payload, occurred_at, recorded_at, recorded_by, corrects_event_id, "
-        "source_kind, source_message_id, source_sender, source_subject, source_received_at, scheduled_at "
+        "source_kind, source_message_id, source_thread_id, source_quote, source_sender, source_subject, "
+        "source_received_at, scheduled_at "
         "FROM application_events WHERE application_id = ? ORDER BY occurred_at ASC, id ASC",
         (application_id,),
     )
@@ -1033,6 +1059,8 @@ async def append_event(
     payload_json = json.dumps(event_payload)
     source_kind = source["kind"] if source else ""
     source_message_id = source["message_id"] if source else ""
+    source_thread_id = source["thread_id"] if source else ""
+    source_quote = source["quote"] if source else ""
     source_sender = source["sender"] if source else ""
     source_subject = source["subject"] if source else ""
     source_received_at = source["received_at"] if source else ""
@@ -1046,13 +1074,13 @@ async def append_event(
             cur = await db._db.execute(
                 "INSERT INTO application_events "
                 "(user_id, application_id, event_type, detail, payload, occurred_at, recorded_at, "
-                " recorded_by, corrects_event_id, source_kind, source_message_id, source_sender, "
-                " source_subject, source_received_at, scheduled_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " recorded_by, corrects_event_id, source_kind, source_message_id, source_thread_id, "
+                " source_quote, source_sender, source_subject, source_received_at, scheduled_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, application_id, event_type, detail, payload_json, occurred_at, now,
-                    recorded_by, corrects_event_id, source_kind, source_message_id, source_sender,
-                    source_subject, source_received_at, scheduled_at,
+                    recorded_by, corrects_event_id, source_kind, source_message_id, source_thread_id,
+                    source_quote, source_sender, source_subject, source_received_at, scheduled_at,
                 ),
             )
     except pg.IntegrityError:
@@ -2863,8 +2891,9 @@ async def whats_new(
 
     cur = await db._db.execute(
         f"SELECT id, application_id, event_type, detail, payload, occurred_at, recorded_at, "  # noqa: S608
-        f"recorded_by, corrects_event_id, source_kind, source_message_id, source_sender, "
-        f"source_subject, source_received_at, scheduled_at FROM application_events WHERE {where_sql} "
+        f"recorded_by, corrects_event_id, source_kind, source_message_id, source_thread_id, "
+        f"source_quote, source_sender, source_subject, source_received_at, scheduled_at "
+        f"FROM application_events WHERE {where_sql} "
         f"ORDER BY recorded_at ASC, id ASC LIMIT ?",
         [*params, limit + 1],
     )
@@ -2918,10 +2947,14 @@ async def whats_new(
 
     interviews = await interview_agenda(db, user_id)
 
+    # Feature 10 - unmatched mail, likewise carried whatever `since` says.
+    from src.services.applications.inbox_items import for_whats_new  # noqa: PLC0415
+
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
         "open_asks": open_asks, "proof_missing": missing_proof, "interviews": interviews,
+        "inbox_items": await for_whats_new(db, user_id),
     }
 
 

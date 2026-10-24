@@ -168,6 +168,14 @@ BOARD_SOURCES = (
     "onstrider",
     "micro1",
     "alignerr",
+    "scalis",
+    "senior",
+    "profession",
+    "jobindex",
+    "jobbankdk",
+    "hhru",
+    "habrcareer",
+    "getmatch",
     "herp",
     "hrmos",
     "mokahr",
@@ -183,6 +191,22 @@ BOARD_SOURCES = (
     "hurma",
     "compleo",
     "spark",
+    "agenticjobs",
+    "collage",
+    "flowxtra",
+    "generalistworld",
+    "geekjob",
+    "applicantpro",
+    "potok",
+    "huntflow",
+    "telegramcareers",
+    "bairesdev",
+    "vention",
+    "northstone",
+    "cleverstaff",
+    "friendwork",
+    "joinup",
+    "vouch",
     "prevueaps",
     "redrover",
     "senjob",
@@ -275,6 +299,7 @@ FEED_SOURCES = (
     "torre",
     "tecla",
     "japandev",
+    "bdjobs",
 )
 SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernews": "hn", "simplify": "githublists"}
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
@@ -382,11 +407,11 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5", "kit_co7",
+    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c", "kit_fh5", "kit_co7",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
-    "kit_asia", "kit_sites_a", "kit_sites_b", "kit_markets3",
+    "kit_asia", "kit_sites_a", "kit_sites_b", "kit_markets3", "kit_fh5",
 )
 
 
@@ -1819,7 +1844,7 @@ _TWO_PART = {"taleo": ("tenant", "section"), "oraclecloud": ("host", "siteNumber
 # ats -> token part used as the name (comeet slug/uid, pageup id[/locale], werecruit lang/slug)
 _PATH_TOKEN = {
     "successfactors": 0, "ultipro": 1, "adp": 0, "cornerstone": 0, "opencats": 0, "comeet": 0, "pageup": 0,
-    "werecruit": 1, "ripplehire": 0, "neogov": 1, "ukgready": 1, "mokahr": 0,
+    "werecruit": 1, "ripplehire": 0, "neogov": 1, "ukgready": 1, "mokahr": 0, "northstone": 0,
 }
 
 
@@ -2750,6 +2775,7 @@ _FEED_HOSTS = (
     ("torre", re.compile(r"^torre\.ai$", re.I)),
     ("tecla", re.compile(r"^(?:app|api)\.tecla\.io$", re.I)),
     ("japandev", re.compile(r"^japan-dev\.com$", re.I)),
+    ("bdjobs", re.compile(r"^(?:www\.)?bdjobs\.com$", re.I)),
     # owner decision 2026-10-19: the kit reads these two itself (kit_bigboards); Google Jobs links point to employers
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$", re.I)),
     ("glassdoor", re.compile(r"(?:^|\.)glassdoor\.[a-z.]+$", re.I)),
@@ -2868,6 +2894,16 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("onstrider", re.compile(r"^(?:www\.)?onstrider\.com$")),
     ("micro1", re.compile(r"^jobs\.micro1\.ai$")),
     ("alignerr", re.compile(r"^www\.alignerr\.com$")),
+    # freehire batch A (kit_fh4): Scalis and Senior Portal de Talentos (tenant subdomain), Profession.hu (one site)
+    ("scalis", re.compile(r"^([a-z0-9-]+)\.scalis\.ai$")),
+    ("senior", re.compile(r"^([a-z0-9-]+)\.portaldetalentos\.senior\.com\.br$")),
+    ("profession", re.compile(r"^(?:www\.)?profession\.hu$")),
+    # national and regional boards (kit_w4a): five one-site boards whose job link carries no board token
+    ("jobindex", re.compile(r"^(?:www\.)?jobindex\.dk$")),
+    ("jobbankdk", re.compile(r"^(?:www\.)?jobbank\.dk$")),
+    ("hhru", re.compile(r"^(?:www\.)?hh\.ru$")),
+    ("habrcareer", re.compile(r"^career\.habr\.com$")),
+    ("getmatch", re.compile(r"^(?:www\.)?getmatch\.ru$")),
     ("yourator", re.compile(r"^(?:www\.)?yourator\.co$")),
     ("careerviet", re.compile(r"^(?:www\.)?careerviet\.vn$")),
     ("occ", re.compile(r"^(?:www\.)?occ\.com\.mx$")),
@@ -2883,6 +2919,27 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("hurma", re.compile(r"^([a-z0-9-]+)\.hurma\.work$")),
     ("compleo", re.compile(r"^jobs\.compleo\.app$")),
     ("spark", re.compile(r"^([a-z0-9-]+)\.spark\.work$")),
+    # career-ops batch A (kit_co6): Agentic Engineering Jobs, Flowxtra, Generalist World: one-site boards, no token
+    # in the link; Collage HR tenant: path segment of secure.collage.co/jobs/<address>
+    ("agenticjobs", re.compile(r"^agentic-engineering-jobs\.com$")),
+    ("collage", re.compile(r"^secure\.collage\.co$")),
+    ("flowxtra", re.compile(r"^flowxtra\.com$")),
+    ("generalistworld", re.compile(r"^(?:www\.)?generalist\.world$")),
+    # wave 4 batch B: GeekJob (one board, no token in the link), ApplicantPro, Potok, Huntflow (tenant subdomains)
+    ("geekjob", re.compile(r"^(?:www\.)?geekjob\.ru$")),
+    ("applicantpro", re.compile(r"^([a-z0-9-]+)\.applicantpro\.com$")),
+    ("potok", re.compile(r"^([a-z0-9-]+)\.potok\.io$")),
+    ("huntflow", re.compile(r"^([a-z0-9-]+)\.huntflow\.io$")),
+    # Paylocity's reader had no rule (a recruiting.paylocity.com link was reported as unsupported); wave 4 part F boards
+    ("paylocity", re.compile(r"^recruiting\.paylocity\.com$")),
+    ("telegramcareers", re.compile(r"^telegram\.org$")),
+    ("bairesdev", re.compile(r"^(?:talent|applicants)\.bairesdev\.com$")),
+    ("vention", re.compile(r"^(join\.ventionteams\.com)$")),
+    # boards C: CleverStaff and joinup.ch are one host each; a FriendWork tenant is the first path segment
+    ("cleverstaff", re.compile(r"^cleverstaff\.net$")),
+    ("friendwork", re.compile(r"^jobs\.friend\.work$")),
+    ("joinup", re.compile(r"^(?:www\.)?joinup\.ch$")),
+    ("vouch", re.compile(r"^(?:www\.)?vouch\.careers$")),  # vouch.careers/companies/<company cuid>[/<job id>]
 ]
 _BOARD_SLUG = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}"  # a path slug that cannot be . or ..
 # Career sites on an employer's own host that the URL path gives away: eArcu vacancies and Radancy (TalentBrew) jobs
@@ -2891,8 +2948,9 @@ _RADANCY_PATH = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/job/[^/]+/[^/]+/\d+
 # Job sites the kit has no reader for (so the answer is "not supported", not "unknown site").
 _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
-    r"paylocity\.com|ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
-    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com)$", re.I)
+    r"ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
+    r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com|"
+    r"getconsider\.com|jobs\.gusto\.com|jobleads\.com|eluta\.ca|talent\.com|hellowork\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -2970,7 +3028,9 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "" if m.group(1) in ("www", "api", "portal", "private-api", "employability-portal") else m.group(1)
         elif ats == "recrutei":  # https://jobs.recrutei.com.br/<tenant>/vacancy/<id>-<slug>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
-        elif ats in ("vagas", "yourator", "careerviet", "occ", "senjob"):  # one national board: no token in the link
+        elif ats == "friendwork":  # https://jobs.friend.work/<token>/<id>
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", seg[0]) else ""
+        elif ats in ("vagas", "yourator", "careerviet", "occ", "geekjob", "cleverstaff", "joinup", "senjob"):
             tok = ""
         elif ats == "prevueaps":  # https://<tenant>.prevueaps.ca/jobs/<id>; www/api/app are the vendor's own hosts
             tok = "" if m.group(1) in ("www", "api", "app") else m.group(1)
@@ -2995,11 +3055,28 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = m.group(1)
         elif ats == "adpmyjobs":  # myjobs.adp.com/<site slug>/cx/job/<id>; /public is the vendor API
             tok = seg[0] if seg and seg[0] != "public" and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
+        elif ats in ("agenticjobs", "flowxtra", "generalistworld"):  # one site each: no token in the link
+            tok = ""
+        elif ats == "collage":  # https://secure.collage.co/jobs/<job-site address>[/...]
+            ca = seg[1] if len(seg) > 1 and seg[0] == "jobs" else ""
+            tok = ca if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", ca) else ""
         elif ats in ("selfrecruit", "enlizt", "hurma", "spark"):  # www/hub/api.<vendor>: the vendor, not a tenant
             tok = "" if m.group(1) in ("www", "hub", "api", "app") else m.group(1)
+        elif ats == "vouch":  # https://vouch.careers/companies/<company cuid>[/<job id>]
+            cuid = seg[1] if len(seg) > 1 and seg[0] == "companies" else ""
+            tok = cuid if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cuid) else ""
         elif ats == "compleo":  # https://jobs.compleo.app/<tenant>/jobdetail/<code>
             ok_t = len(seg) > 2 and seg[1] == "jobdetail" and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", seg[0])
             tok = seg[0] if ok_t else ""
+        elif ats == "paylocity":  # .../Recruiting/Jobs/All/<company guid>; /Details/<n> has no guid
+            g = seg[seg.index("All") + 1] if "All" in seg[:-1] else ""
+            tok = g if re.fullmatch(r"[A-Za-z0-9-]{1,80}", g) else ""
+        elif ats == "telegramcareers":  # only telegram.org/jobs is the board; the rest of telegram.org is not
+            if seg[:1] != ["jobs"]:
+                continue
+            tok = "telegram.org"
+        elif ats == "bairesdev":  # the one talent site; applicants.bairesdev.com/job/<career>/<id>/apply is its posting
+            tok = "talent.bairesdev.com"
         elif ats == "workablemarketplace":  # jobs.workable.com/view/<job>/...: the company hashid is not in the link
             tok = ""
         elif ats == "geekhunter":  # https://www.geekhunter.com/pt/<company slug>/jobs/<posting slug>
@@ -3007,11 +3084,18 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = gh if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", gh) else ""
         elif ats == "likeit":  # https://<tenant>.likeit.fi/jsp/duuni/AdvertShow.jsp?id=<id>
             tok = "" if m.group(1) == "www" else m.group(1)
+        elif ats == "scalis":  # https://<tenant>.scalis.ai/...: www/app/api are vendor hosts, not tenants
+            tok = "" if m.group(1) in ("www", "app", "api") else m.group(1)
+        elif ats == "profession":  # https://www.profession.hu/allas/<slug>-<id>: the category is not in the link
+            tok = ""
         elif ats in ("onstrider", "micro1", "alignerr"):  # one site each: the job link carries no board token
+            tok = ""
+        elif ats in ("jobindex", "jobbankdk", "hhru", "habrcareer", "getmatch"):  # kit_w4a: no token in the link
             tok = ""
         elif ats == "hireology":  # https://careers.hireology.com/<slug>/<job id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9-]+", seg[0]) else ""
-        elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire") and m.group(1).split(".")[0] in (
+        elif ats in ("careerplug", "hiringthing", "hrmdirect", "isolvedhire", "applicantpro", "potok",
+                     "huntflow") and m.group(1).split(".")[0] in (
                 _NON_TENANT_SUB | ({"apply"} if ats == "hrmdirect" else set())):
             continue  # www/help/app.<vendor>.com (apply. for HRM Direct) is the vendor's own site, not a tenant board
         elif ats == "comeet":  # https://www.comeet.com/jobs/<slug>/<companyUID>/...

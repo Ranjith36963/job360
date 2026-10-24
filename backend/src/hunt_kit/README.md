@@ -107,6 +107,17 @@ Recrutei (`recrutei:<tenant>` of `jobs.recrutei.com.br/<tenant>`), InHire (`inhi
 Vagas.com.br (`vagas:all`, the national board's three tech listings). A posting page or detail call is made only for a card that
 passes your title filter, at most 25 per board, and the first refusal ends the board's detail requests. Gupy, InHire and HiringRoom
 list a posting without its description when it was not opened; Vagas.com.br lists only the postings it opened.
+`kit_w4c.py` adds CleverStaff (`cleverstaff:<alias>`), FriendWork (`friendwork:<token>` of `jobs.friend.work/<token>`) and joinup.ch
+(`joinup:all`, only the newest results page the site renders). Each returns its description inline or none, so no posting page is
+opened. Eluta (eluta.ca) and Talent.com are not read: the only reference is a search-URL template, with no result markup, fields or
+paging, so a link on either host is reported as unsupported.
+
+`kit_w4b.py` adds four boards: GeekJob, Russia (`geekjob:all`, the whole site's listing pages), ApplicantPro (`applicantpro:<tenant>` of
+`<tenant>.applicantpro.com`, the sibling host of iSolved Hire), Potok (`potok:<tenant>` of `<tenant>.potok.io`, a Russian ATS) and Huntflow
+(`huntflow:<tenant>` of `<tenant>.huntflow.io`, a Russian ATS). A posting page is opened only for a title that passes your title filter, at most
+25 per board (40 for ApplicantPro, whose sitemap has no titles), and the first refusal ends the board's detail requests. GeekJob lists only the
+postings it opened; Potok and Huntflow list a posting without its description when it was not opened. Not read: Huntflow community hubs (a hub
+board is listed under its own name, not under each partner company). The Techstars Jobs network was added to the Getro list in `kit_startups.py`.
 
 `kit_markets4.py` adds three national job sites: Yourator, Taiwan (`yourator:all`, the whole board by its public JSON pages),
 CareerViet, Vietnam (`careerviet:all`, or one keyword slug such as `careerviet:ke-toan`) and OCC Mundial, Mexico (`occ:<keyword>`,
@@ -133,6 +144,24 @@ pages. Energy Jobline is not read: its ad pages answer only a client that calls 
 `energyjobline.com` link is reported as unsupported. The references' referral-code links for Strider, micro1 and Alignerr are not
 used: the kit lists the plain posting page.
 
+`kit_co6.py` adds four job boards: Agentic Engineering Jobs (`agenticjobs:all`, the site's public API), Flowxtra (`flowxtra:all`, the
+central feed of every company on the platform), Generalist World (`generalistworld:all`, the one `/jobs/` page) and Collage HR
+(`collage:<job-site address>`, the last path segment of `secure.collage.co/jobs/<address>`). Every field comes from the listing, so no
+posting page is opened; the first refusal ends a board and keeps what it had read. A job link that is not https on the board's own
+host is dropped. Consider (`getconsider.com`) is not read: its search needs a cookie session and a CSRF token that the kit's `http`
+cannot hold, so a `getconsider.com` link is reported as unsupported.
+`kit_fh4.py` adds three boards: Scalis (`scalis:<tenant>` of `<tenant>.scalis.ai`, the paged listing carries every body), Senior's
+Portal de Talentos (`senior:<tenant>` of `<tenant>.portaldetalentos.senior.com.br`, a keyless POST API; a vacancy you do not open is
+listed without a body) and Profession.hu (`profession:itdev` or `profession:itops`, the two IT category sitemaps of a Hungarian
+catalogue; a posting is listed only after its page was opened). A detail request is made only for a posting that passes your title
+filter, at most 25 per board; the first refusal ends the board's detail requests. Not read: Gusto Hiring and JobLeads (Cloudflare
+serves them only to a Chrome TLS fingerprint, which urllib cannot imitate), so `jobs.gusto.com` and `jobleads.com` links are
+reported as unsupported.
+`kit_w4a.py` adds five national and regional boards: Jobindex (`jobindex:<search words>`, jobindex.dk, 20 postings a page), Akademikernes Jobbank
+(`jobbankdk:<search words>`, the RSS feed of jobbank.dk, up to 100 postings, no body), hh.ru (`hhru:<professional_role id>`, for example `hhru:96`; the
+listing's embedded state, no vacancy page is opened, so a posting carries the salary line and no body), Habr Career (`habrcareer:all`) and Getmatch
+(`getmatch:all`). Habr Career and Getmatch open a posting only for a card that passes your title filter, at most 25 per board. A refusal ends a board's
+pages; jobbank.dk may answer with a Cloudflare challenge, which fails that board without a retry. A posting with no employer name is not listed.
 `kit_co7.py` adds three boards from career-ops: PrevueAPS (`prevueaps:<tenant>` of `<tenant>.prevueaps.ca`; the tenant's numeric site id is read from its `/jobs/` page, then one JSON call), Red Rover K12 (`redrover:<orgId>` of `jobs.redroverk12.com/org/<orgId>`, public postings only; a district with more postings than one call holds fails the board rather than returning a cut list) and Senjob, Senegal (`senjob:all`, the listing pages, at most 10; the listing names no employer, so the company is `?`). No posting page is opened for any of the three.
 
 `kit_asia2.py` adds Asian boards: MokaHR (`mokahr:<orgId>/<siteId>` of `app.mokahr.com/social-recruitment/<orgId>/<siteId>`, or
@@ -156,6 +185,20 @@ Enlizt and Compleo list no title, so the first 25 postings of a board are opened
 a posting that was not opened is not listed; the first refusal ends the board's pages. Hurma lists titles and opens a posting
 only when it passes your title filter, at most 25 per board; Spark carries the whole posting in its list. Zoho Recruit is
 already read by `zohorecruit`, so it is not built again.
+
+`kit_w4f.py` adds four single-employer or small-platform boards: Telegram jobs (`telegramcareers:telegram.org`, the one
+`telegram.org/jobs` page; each role's link is the page with the title as a fragment, because the page publishes no per-role
+link), BairesDev (`bairesdev:talent.bairesdev.com`; the talent site lists the postings and the applicants API is read for
+each, only for a title that passes your filter, at most 25, the first refusal ends the board; the apply link carries no
+referrer code), Vention (`vention:join.ventionteams.com`, a keyless Wagtail pages API with the whole posting inline) and
+Northstone recruiting-brand sites (`northstone:<host>/<section>`, e.g. `northstone:www.revun.com/careers`; a page is opened
+only for a title that passes your filter, at most 25). Deutsche Bahn is an `avature` row on its Avature tenant
+(`jobs.deutschebahngroup.careers`); the reference's db.jobs search endpoint is not read. A `recruiting.paylocity.com`
+`/Recruiting/Jobs/All/<guid>` link is now recognised as a `paylocity` board (it was wrongly reported as unsupported).
+`kit_fh5.py` adds Vouch (`vouch:<company cuid>` of `vouch.careers/companies/<cuid>`: one page carries every posting) and the BDJobs
+feed (Bangladesh, `bdjobs`; runs when BD is one of your countries; the site's keyword search, up to 4 pages a title, then a description
+request for up to 15 kept postings). HelloWork is not read (it needs a Chrome TLS fingerprint), so `hellowork.com` links are reported
+as unsupported; SEEK and Python.org jobs are already read by `jobstreet` and `pythonjobs`.
 
 `kit_ats_us.py` adds US mid-market boards: Bullhorn (`bullhorn:cluster:corpToken`, a staffing agency's own board, so the
 company is the agency), CareerPlug (`careerplug:subdomain`), Hireology (`hireology:slug`), HiringThing
@@ -358,6 +401,8 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_w4f.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
+- `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_w4c.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
 - `kit_ats.py`, `kit_ats_more.py`, `kit_ats_eu.py`, `kit_ats_extra.py`, `kit_ats_misc1.py`, `kit_ats_misc2.py`, `kit_ats_us.py`, `kit_pubsec.py` and `kit_latam.py` and `kit_co7.py` and `kit_ats_misc3.py` and `kit_ats_misc5.py` and `kit_asia2.py` the other company-board types, `kit_feeds.py` open feeds, `kit_keyed.py` keyed feeds, `kit_gov.py` more national job services, `kit_regional.py` India and Gulf boards, `kit_bigboards.py` LinkedIn, Glassdoor and Google Jobs, `kit_bigco.py` Amazon, Google, Apple, Meta, IBM and Uber career sites, `kit_startups.py` startup boards, `kit_asia.py` South-East Asian boards, `kit_sites_a.py` more country job sites, `kit_sites_b.py` more niche sites, `kit_markets3.py` global marketplaces, `kit_niche.py` niche boards
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `board`, `source`; Workday rows also `tenant`, `wd`, `site`; Taleo `tenant`, `section`; Oracle `host`, `siteNumber`; register rows `country`, `sponsor_register`, `match`, with `source` `nl-ind` or `gb-ho` when the register added the board)

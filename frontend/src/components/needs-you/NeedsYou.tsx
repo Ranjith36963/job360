@@ -6,14 +6,19 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
+import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
+import { CvToApprove } from "./CvToApprove";
 import { BatchApplyPanel } from "./BatchApplyPanel";
+import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
 import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { JobCards, loadJobCards } from "./JobCards";
+import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
 // Every string on an ask (question, context, answer, job fields) is written by
 // the user's assistant or by the user — untrusted. It is only ever rendered as
@@ -46,6 +51,8 @@ export function AskCard({
   const [draft, setDraft] = useState(mode === "open" ? "" : (ask.answer ?? ""));
   const [pending, setPending] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
+  // "Finish it here": the CAPTCHA in Job360's browser, solved on this card (owner, 2026-10-24).
+  const [finish, setFinish] = useState<"off" | "on" | "done">("off");
 
   async function run(fn: () => Promise<unknown>, failMsg: string, onDone?: () => void) {
     setBusy(true);
@@ -90,6 +97,27 @@ export function AskCard({
             ))}
         </p>
       </div>
+
+      {mode === "open" && ask.finish_here && finish === "off" && (
+        <button
+          type="button"
+          data-testid="ask-finish-here"
+          onClick={() => setFinish("on")}
+          className={`${confirmBtn} self-start`}
+        >
+          Finish it here
+        </button>
+      )}
+      {mode === "open" && finish === "on" && <FinishInBrowser onDone={() => setFinish("done")} />}
+      {finish === "done" && ask.application_id != null && (
+        <p data-testid="ask-finish-done" className="text-xs text-muted-foreground">
+          Did it go through?{" "}
+          <Link href={`/applications/${ask.application_id}`} className="underline underline-offset-2">
+            Press I submitted it on the application
+          </Link>
+          , or tell your assistant.
+        </p>
+      )}
 
       {mode === "answered" && !editing && (
         <div className="flex flex-col gap-1 rounded-lg bg-muted/30 p-3">
@@ -245,6 +273,24 @@ export function AskCard({
   );
 }
 
+/** An answered ask as one line; "Change" opens the full card to edit or confirm it. */
+function AnsweredRow({ ask, onChanged }: { ask: Ask; onChanged: () => Promise<void> }) {
+  const [openRow, setOpenRow] = useState(false);
+  if (openRow) return <AskCard ask={ask} mode="answered" onChanged={onChanged} />;
+  const job = [ask.job_company, ask.job_title].filter(Boolean).join(" · ");
+  return (
+    <li data-testid={`answered-${ask.id}`} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+      <span className="min-w-0 truncate">
+        {job && <span className="text-muted-foreground">{job}: </span>}
+        {ask.question} <span className="text-muted-foreground">→ {ask.answer}</span>
+      </span>
+      <button type="button" data-testid={`answered-change-${ask.id}`} onClick={() => setOpenRow(true)} className={linkBtn}>
+        Change
+      </button>
+    </li>
+  );
+}
+
 /** The requests waiting for the user's OK. Best-effort: a failed read just
  *  shows none, it never blocks the questions. */
 async function waitingRequests(): Promise<WaitingRequest[]> {
@@ -257,12 +303,19 @@ async function waitingRequests(): Promise<WaitingRequest[]> {
   }
 }
 
+/** Open + answered asks, the waiting setting changes, and the open asks as one card per job. */
+async function fetchAll() {
+  const [o, a, w] = await Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()]);
+  return [o, a, w, await loadJobCards(o.asks)] as const;
+}
+
 function announce(openCount: number) {
   window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
 }
 
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
+  const [jobs, setJobs] = useState<Awaited<ReturnType<typeof loadJobCards>>>({ cards: [], general: [] });
   // Setting changes an assistant asked for, waiting for the user's OK (S2).
   const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
@@ -280,8 +333,10 @@ export function NeedsYou() {
       o: Awaited<ReturnType<typeof listAsks>>,
       a: Awaited<ReturnType<typeof listAsks>>,
       w: WaitingRequest[],
+      j: Awaited<ReturnType<typeof loadJobCards>>,
     ) => {
       setOpen(o.asks);
+      setJobs(j);
       setAnswered(a.asks);
       setWaiting(w);
       setMoreAnswered(a.asks.length >= PAGE);
@@ -295,8 +350,7 @@ export function NeedsYou() {
   // screen and the error shows above them with a retry.
   const load = useCallback(async () => {
     try {
-      const [o, a, w] = await Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()]);
-      apply(o, a, w);
+      apply(...(await fetchAll()));
     } catch {
       setError("Could not load your questions.");
     }
@@ -304,9 +358,9 @@ export function NeedsYou() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()])
-      .then(([o, a, w]) => {
-        if (!cancelled) apply(o, a, w);
+    fetchAll()
+      .then((all) => {
+        if (!cancelled) apply(...all);
       })
       .catch(() => {
         if (!cancelled) setError("Could not load your questions.");
@@ -352,7 +406,9 @@ export function NeedsYou() {
     <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
       <MorningCheck />
+      <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
       <ReadyToSend onTotal={setReadyTotal} />
+      <OutcomeSuggestions />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -377,27 +433,36 @@ export function NeedsYou() {
         <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Waiting for you
         </h2>
-        {open.length === 0 ? (
+        {jobs.cards.length === 0 && jobs.general.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
             {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
         ) : (
-          <ul className="flex flex-col gap-3">
-            {open.map((a) => (
-              <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
-            ))}
-          </ul>
+          <>
+            <JobCards cards={jobs.cards} onChanged={load} />
+            {jobs.general.length > 0 && (
+              <>
+                <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
+                <ul className="flex flex-col gap-3">
+                  {jobs.general.map((a) => (
+                    <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
+                  ))}
+                </ul>
+              </>
+            )}
+          </>
         )}
       </section>
+      <UnmatchedMail />
 
       {answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">
           <h2 id="answered-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             Answered
           </h2>
-          <ul className="flex flex-col gap-3">
+          <ul className="flex flex-col gap-2">
             {answered.map((a) => (
-              <AskCard key={a.id} ask={a} mode="answered" onChanged={load} />
+              <AnsweredRow key={a.id} ask={a} onChanged={load} />
             ))}
           </ul>
           {moreAnswered && (

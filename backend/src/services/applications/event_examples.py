@@ -45,7 +45,7 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
     "blocked": {
         "reason": "captcha", "step": "submit form", "page_host": "jobs.example.com", "detail": "CAPTCHA before submit",
     },
-    "unblocked": {"resolution": "retried"},
+    "unblocked": {"resolution": "retried", "note": "the CV upload worked on the second try"},
     "proof_text": {"text": "Thank you, your application has been received.", "page_host": "jobs.example.com"},
     # Feedback loop slice 4 (interview side); checked by interview_payloads.validate.
     "interview_session": {
@@ -53,6 +53,10 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
         "interviewer_role": "engineering manager", "competency_tags": ["system-design", "sql"],
         "gaps": [{"topic": "query planning", "status": "gap"}],
         "signals": [{"signal": "scope_ambiguity", "quote": "We will see what the role becomes."}],
+    },
+    "outcome_suggested": {
+        "event_type": "rejected", "quote": "We have decided to move forward with other candidates.",
+        "why": "It does not name the role, and two applications are open there.",
     },
     "process_friction": {"reason": "rescheduled twice"},
     "assessment": {

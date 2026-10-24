@@ -111,7 +111,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
 
 | Slice | What |
 |---|---|
-| 1 ✅ | **The `browser` MCP tool** (open, look, click, type, choose, tick, upload CV/letter, key, scroll, back, close), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off in the code** until one switch is set. |
+| 1 ✅ | **The `browser` MCP tool** (its actions are `services/browser_agent/agent.ACTIONS`), with the submit gate, password refusal, CAPTCHA and sign-in detection, private-address block, idle close and a cap on live browsers. **Off in the code** until one switch is set. |
 | 2 ✅ | **Sign in once:** a live view on the Job360 site; cookies and site storage are kept, encrypted, per site. |
 | 3 ✅ | **Hand-off:** a job the cloud browser couldn't finish shows on Needs you with "finish it with your assistant's browser". |
 | 4 🟡 | **Measure:** test real career sites (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and record which work from the cloud. |
@@ -135,7 +135,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   - A started Chromium takes about 250 MB, and each browser adds about 100-250 MB (measured locally on test pages, 2026-10-20; real career sites not yet measured).
   - An idle browser is closed by a sweep the app runs every 60 s while the switch is on, not only on the next request.
   - One assistant session at a time per browser: a call with another `session` label gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
-  - A frame that never answers is skipped after 3 s, and one action is stopped after 60 s (`error`, `timeout`), so a hung page never holds the browser.
+  - A hung page never holds the browser: the frame-read, per-action and `fill` limits are `services/browser_agent/agent.FRAME_READ_TIMEOUT_S` / `ACT_TIMEOUT_S` / `FILL_TIMEOUT_S` (a breach answers `error`, `timeout`).
 - **Playbooks:** the `batch` recipe gets a "which browser" line (your own browser first, Job360's when you have none or the user is away); the `forms` recipe points to the tool.
 - **Tests:** `backend/tests/test_browser_agent.py` and the `test_browser_*` files beside it. The safety rules and the off switch always run; the real-Chromium runs run where Playwright + Chromium are installed and skip otherwise. CI's offline-suite installs both (since 2026-10-20), so they run on every PR, and the skip ratchet (`scripts/test_integrity.py`) is red if they ever skip there.
 - **Egress proxy** (`services/browser_agent/egress.py`, added after review): Chromium's only way out. Each host is resolved once, every address screened by the URL-fetch SSRF guard, and the connection pinned to the address that passed, so a redirect to a private address, a WebSocket or a DNS change after the check gets a 403. Tested with a real redirect to loopback. WebRTC's UDP does not use the proxy, so Chromium launches with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`: an egress guard that keeps a page's WebRTC traffic behind the same screen, not a disguise.

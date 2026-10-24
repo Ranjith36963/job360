@@ -832,12 +832,55 @@ export async function answerAsk(id: number, answer: string): Promise<Ask> {
   });
 }
 
+/** Answer an ask that lists form questions: one answer per question key. */
+export async function answerAskQuestions(id: number, answers: Record<string, string>): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ answers }),
+  });
+}
+
+/** "Remember these answers for every form": each one becomes an approved saved answer on the
+ *  profile (user_info.answers), replacing an older one with the same topic. */
+export async function rememberAnswers(items: { topic: string; question: string; answer: string }[]): Promise<void> {
+  if (items.length === 0) return;
+  await request("/api/profile", {
+    method: "PATCH",
+    body: JSON.stringify({
+      edits: items.map((i) => ({
+        path: "user_info.answers",
+        op: "upsert",
+        value: { question: i.question, answer: i.answer, approved: true, topic: i.topic },
+      })),
+    }),
+  });
+}
+
 export async function confirmAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/confirm`, { method: "POST" });
 }
 
 export async function withdrawAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/withdraw`, { method: "POST" });
+}
+
+// ---- Unmatched mail (feature 10): emails the assistant could not tie to one application ----
+export type InboxItem = _Schemas["InboxItemOut"];
+
+export async function listInboxItems(
+  status: "open" | "all" = "open"
+): Promise<_Schemas["ListInboxItemsResponse"]> {
+  return request(`/api/inbox-items${qs({ status })}`);
+}
+
+export async function resolveInboxItem(
+  id: number,
+  body: { application_id: number } | { dismiss: true }
+): Promise<InboxItem> {
+  return request<InboxItem>(`/api/inbox-items/${id}/resolve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 // ---- Assistant settings (S2, owner decision 2026-10-08) ----
@@ -958,6 +1001,13 @@ export async function setApplicationVisa(
   });
 }
 
+/** Feature 9: an assistant was unsure what an email means; these wait for Accept / Ignore. */
+export type OutcomeSuggestion = _Schemas["OutcomeSuggestionOut"];
+
+export async function listOutcomeSuggestions(): Promise<_Schemas["OutcomeSuggestionsOut"]> {
+  return request("/api/applications/outcome-suggestions");
+}
+
 export async function recordApplicationEvent(
   applicationId: number,
   body: {
@@ -971,6 +1021,16 @@ export async function recordApplicationEvent(
     // Owner decision, 2026-09-25 — omit to leave the date alone, "" to
     // clear it, "YYYY-MM-DD" to set it. Works on any event_type.
     follow_up_on?: string;
+    // The email an event came from; `quote` = its one deciding sentence, verbatim (<= 500).
+    source?: {
+      kind?: string;
+      message_id: string;
+      thread_id?: string;
+      sender?: string;
+      subject?: string;
+      received_at?: string;
+      quote?: string;
+    };
   }
 ): Promise<_Schemas["RecordEventResponse"]> {
   return request(`/api/applications/${applicationId}/events`, {
@@ -1215,6 +1275,14 @@ export async function addPerson(body: {
 }
 
 /** The user's own Confirm on a person their assistant added (session only). */
+/** Mark that the user sent a contact's drafted message themselves (the one outreach door). */
+export async function markOutreachSent(contactId: number, channel: "linkedin" | "email" | "other"): Promise<unknown> {
+  return request(`/api/contacts/${contactId}/outreach`, {
+    method: "POST",
+    body: JSON.stringify({ entry: "sent", channel }),
+  });
+}
+
 export async function confirmContact(contactId: number): Promise<Contact> {
   return request(`/api/contacts/${contactId}/confirm`, { method: "POST" });
 }
@@ -1224,6 +1292,14 @@ export type MorningCheck = _Schemas["MorningCheckOut"];
 
 export async function getMorningCheck(since: string): Promise<MorningCheck> {
   return request<MorningCheck>(`/api/morning-check${qs({ since })}`);
+}
+
+// ---- Approve CV on Needs you (2026-10-23) ----
+export type CvToApproveRow = _Schemas["CvToApproveRow"];
+
+/** Open applications whose newest CV the user has not seen yet (from chat or the web). */
+export async function getCvToApprove(): Promise<{ items: CvToApproveRow[] }> {
+  return request<{ items: CvToApproveRow[] }>("/api/cv-to-approve");
 }
 
 // ---- Ready to send (S5d) ----

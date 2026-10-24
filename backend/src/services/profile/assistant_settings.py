@@ -749,6 +749,10 @@ class SubmitFacts:
     # listed questions (``form_count_mismatch``), or named fields it could not read back
     # (``unreadable_fields``). Both default False: an application with no ``form_checked`` never stops here.
     form_count_short: bool = False
+    # The numbers behind ``form_count_short`` for its message (owner, 2026-10-23): the questions the sweep
+    # counted (``fields_checked`` + the fill's ``fields_skipped``) and how many check_form listed. None = unknown.
+    form_count_counted: Optional[int] = None
+    form_count_listed: Optional[int] = None
     unreadable_fields: bool = False
     # Weak spot #1b (c): an application created after the cut-off (``kit.FORM_CHECK_REQUIRED_FROM``)
     # has no ``form_checked`` event yet (``form_check_missing``). Older applications are never flagged.
@@ -1320,10 +1324,16 @@ def _form_stop(application: SubmitFacts) -> Optional[SubmitDecision]:
             "ask the user about any you cannot, record a new form_swept and call check_submit again.",
         )
     if application.form_count_short:
+        counted, listed = application.form_count_counted, application.form_count_listed
+        said = (
+            f"You checked {counted} of {listed} questions; count blank optional ones too "
+            "(fields_checked, plus the blanks named in form_filled fields_skipped). "
+            if counted is not None and listed is not None
+            else "You swept fewer fields than check_form listed questions. "
+        )
         return SubmitDecision(
             "stop", "form_count_mismatch",
-            "You swept fewer fields than check_form listed questions. Re-read every field, "
-            "record a new form_swept and call check_submit again.",
+            said + "Re-read every field, record a new form_swept and call check_submit again.",
         )
     if application.form_check_missing:
         return SubmitDecision(
