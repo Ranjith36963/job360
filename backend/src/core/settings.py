@@ -681,6 +681,10 @@ OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000")
 # operator knobs (no env). Warn-only save check: cv_checks.linkedin_note_too_long.
 LINKEDIN_NOTE_MAX_CHARS = 200
 LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
+# What an outreach draft is (save_artifact `draft_kind`, optional, not stored): a connection_note must
+# fit the note limit above and an inmail body LinkedIn's hard limit, else the save is refused.
+OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email")
+LINKEDIN_INMAIL_BODY_MAX_CHARS = 1900
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 # Outreach pack #13 — the caller's own variant label on a message version / a template
 # (stats `by_outreach_variant` groups on lower(trim(label))). Free text, one line.
@@ -747,8 +751,12 @@ CONTACT_RELATIONSHIP = (
 CONTACT_SHARED_SOURCES = ("cv_data.cv_positions", "cv_data.cv_projects", "cv_data.education")
 CONTACT_EDIT_FIELDS = (
     "name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company", "email_source",
-    "relationship", "shared", "phone", "links",
+    "relationship", "shared", "phone", "links", "linkedin_state",
 )
+# Owner 2026-10-24 - is the user connected to this person on LinkedIn? It decides which draft fits:
+# connected = a message; not_connected = a connection note; pending = draft nothing new. Unset reads as
+# unknown (rule #29); the user or an assistant sets it (update_contact), each change kept with who/when.
+LINKEDIN_STATES = ("connected", "not_connected", "pending", "unknown")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))

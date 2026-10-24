@@ -386,6 +386,7 @@ def test_companies_json_valid() -> None:
     ok |= {"scalis", "senior", "profession"}  # the kit_fh4 types
     ok |= {"jobindex", "jobbankdk", "hhru", "habrcareer", "getmatch"}  # the kit_w4a types
     ok |= {"vouch"}  # the kit_fh5 type
+    ok |= {"prevueaps", "redrover", "senjob"}  # the kit_co7 types
     ok |= {"adpmyjobs", "eploy"}  # the kit_ats_misc4 types
     ok |= {"selfrecruit", "enlizt", "hurma", "compleo", "spark"}  # the kit_ats_misc5 types
     ok |= {"geekjob", "applicantpro", "potok", "huntflow"}  # the kit_w4b types
