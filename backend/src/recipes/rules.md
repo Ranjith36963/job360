@@ -249,6 +249,17 @@ the SAME key.
 
 An ask can also be answered by the user on the Job360 Needs-you page.
 
+ONE ASK PER JOB: Needs you shows one card per job. Put every open question for a job in ONE
+`ask_user` (`application_id`, `kind` question) as `questions`: [{key, question, answer, source,
+choices?, remembered_on?}]. `source` says where YOUR answer came from, honestly: profile, memory
+(a saved answer; `remembered_on` its date), cv, draft (you wrote it), guess, or none (not known:
+empty answer). A guess is never memory. Yes/no or a closed list: give `choices`. A step only the
+user can do (CAPTCHA, sign-in, a failed upload, a safety block) is its own ask on the same job:
+record `blocked` (Job360 opens it with its kind) or `ask_user` `kind` captcha|login|upload|safety.
+The user approves the answers at once; `answer_ask` returns them as `answers` {key: answer}.
+Never ask the user to send an outreach message through `ask_user`: a saved message nobody marked
+sent shows under People to reach on that job's card.
+
 When the user answered in chat, pass `user_words` (their exact words) to `answer_ask`: the answer then shows as theirs, via you.
 
 `answer_ask` keeps the answer on the ask and appends an `answered` event; the
@@ -414,9 +425,9 @@ the user's browser, when you control the browser. Never send through a Gmail
 connector — connectors only draft.** Right before pressing Send, call
 check_outreach(contact_id, message_id) — message_id is the artifact_id
 save_artifact returned: `send` = press Send, then record outreach_sent; `ask` =
-save a Gmail draft and ask_user; `stop` = do not send. It counts only RECORDED
+save a Gmail draft (it shows on Needs you); `stop` = do not send. It counts only RECORDED
 sends against the daily and per-company caps. A guessed address (email_source pattern_guess) makes check_outreach answer `ask` (email_guessed): save a Gmail draft, the user sends. When a delivery-failure email (a bounce) arrives for outreach you sent, record_event outreach_bounced with contact_id, channel "email" and the bounce's Gmail message id as `source` (no detail text); check_outreach then answers `stop` (email_bounced) for that address on every contact until update_contact gives a new email (with its email_source). Never resend to a bounced address. Without browser control: save it as a
-Gmail draft and `ask_user` "Press Send on the draft to <name>" (Needs you);
+Gmail draft; the saved message shows under People to reach on Needs you;
 the user sends. A LinkedIn or other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's
 Gmail Sent folder for a message to that address since this version was saved,

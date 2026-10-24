@@ -14,7 +14,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    "cv" and this job's `application_id` sends the saved CV; `fill` sets up to 40 fields in ONE call and reads each
    back: prefer it to one `type` per field). After a page changes, use the refs it returned.
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
-   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten; essay: draft, ask_user, type only the approved text. **Done when** the form is loaded and in front.
+   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing: ONE `ask_user` for this job, every question in `questions` with an honest `source`; `over_limit` = shorten; essay: a `draft` row, type only the approved text. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
    freeze the tab. Wait for the parse to finish, then re-read the page. **Done when** the file name shows and the
    page is idle.
@@ -60,7 +60,7 @@ Facts a form asks:
   attestation for the user.
 - Salary: use the hiring country's record, in its currency. Pick the band that holds the number (lower bound
   inclusive) and show it in step 6.
-- A fact the kit lacks (city, years, over-18): `ask_user`, never guess.
+- A fact the kit lacks (city, years, over-18): a row in the job's one ask (`source` none), never guess.
 
 Browser handover (from the built-in-browser skill):
 - A browser result `off`, `no_browser`, `busy` or a refused site: tell the user once, then stop or move on. Never retry in a loop or work around it.
