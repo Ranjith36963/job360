@@ -573,7 +573,10 @@ def test_instructions_and_recipes_carry_the_outreach_gate():
     reach = " ".join(load_recipe("reach").text.lower().split())
     assert "check_outreach(contact_id, message_id)" in reach
     assert "settings.outreach_send" in reach
-    assert "`send`: press send in gmail" in reach and "`ask`: save a gmail draft and `ask_user`" in reach
+    assert "`send`: press send in gmail" in reach
+    # Owner 2026-10-24: an outreach `ask` is no longer an ask_user - the saved message shows under
+    # People to reach on that job's Needs-you card.
+    assert "`ask`: save a gmail draft; the saved message shows under people to reach on needs you (no `ask_user`)" in reach
     assert "`stop`: do not send" in reach and "record `outreach_sent`" in reach
     rules_text = " ".join(load_recipe("rules").text.lower().split())
     assert "check_outreach(contact_id, message_id)" in rules_text
