@@ -27,6 +27,8 @@ vi.mock("@/lib/api", () => ({
   getArtifactDiff: vi.fn(),
   // S3: the decision buttons read this on mount; a failed read hides them.
   getApplicationControls: vi.fn().mockRejectedValue(new Error("not mocked")),
+  // Needs you on this page is the Needs-you job card: it reads the CV still to check.
+  getCvToApprove: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
 const ask = (over: Record<string, unknown> = {}) => ({
@@ -163,9 +165,8 @@ describe("ApplicationClient frame", () => {
     window.addEventListener("job360:asks-changed", onEvent);
 
     render(<ApplicationClient applicationId={42} />);
-    fireEvent.change(await screen.findByTestId("ask-input-7"), { target: { value: "Yes" } });
-    fireEvent.click(screen.getByTestId("ask-save"));
-    fireEvent.click(await screen.findByTestId("ask-answer-confirm"));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes" }));
+    fireEvent.click(screen.getByTestId("approve-all-42"));
 
     await waitFor(() => expect(seen).toEqual([3]));
     expect(answerAsk).toHaveBeenCalledWith(7, "Yes");
@@ -173,5 +174,19 @@ describe("ApplicationClient frame", () => {
     expect(listAsks).toHaveBeenCalledWith("open");
     await waitFor(() => expect(screen.queryByTestId("app-asks")).toBeNull());
     window.removeEventListener("job360:asks-changed", onEvent);
+  });
+
+  it("shows this job's Needs-you card: a blocker gets buttons, never a Save answer text box", async () => {
+    const captcha = ask({ id: 11, question: "Your assistant got stuck: a CAPTCHA at final submit on jobs.ashbyhq.com." });
+    getApplication.mockResolvedValue(detail({ asks: [captcha] }));
+    render(<ApplicationClient applicationId={42} />);
+    expect(await screen.findByTestId("job-card-42")).toBeInTheDocument();
+    expect(screen.getByText("Only you can do this")).toBeInTheDocument();
+    expect(screen.getByTestId("did-it-11")).toHaveTextContent("I did it");
+    expect(screen.getByTestId("skip-job-42")).toBeInTheDocument();
+    expect(screen.queryByText("Save answer")).toBeNull();
+    expect(screen.queryByTestId("ask-input-11")).toBeNull();
+    // The page title already names the job: the card drops its own title line.
+    expect(screen.queryByRole("link", { name: "Acme" })).toBeNull();
   });
 });
