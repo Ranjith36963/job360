@@ -18,7 +18,8 @@ const linkBtn =
  * page; an OK in chat counts too, and either clears the gate's cv_not_seen. Job titles and company
  * names are untrusted text, rendered as React text only. Nothing waiting, or a failed read: no section.
  */
-export function CvToApprove() {
+/** `skip`: jobs that already show as a card on Needs you (their CV check lives on that card). */
+export function CvToApprove({ skip }: { skip?: Set<number> } = {}) {
   const [rows, setRows] = useState<CvToApproveRow[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
 
@@ -60,14 +61,15 @@ export function CvToApprove() {
     }
   }
 
-  if (rows.length === 0) return null;
+  const shown = rows.filter((r) => !skip?.has(r.application_id));
+  if (shown.length === 0) return null;
   return (
     <section aria-labelledby="approve-cv" data-testid="approve-cv" className="flex flex-col gap-3">
       <h2 id="approve-cv" className={sectionLabel}>
         Approve CV
       </h2>
       <ul className="flex flex-col gap-3">
-        {rows.map((r) => (
+        {shown.map((r) => (
           <li
             key={r.application_id}
             data-testid={`approve-cv-${r.application_id}`}
