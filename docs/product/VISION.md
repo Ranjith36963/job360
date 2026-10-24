@@ -38,6 +38,30 @@ The better the context in the heart, the more the soul can do alone. We never
 source, rank or recommend (rule 4): a new source is a list of places the
 assistant tries and a field that records where it came from, never a Job360 finder.
 
+## The harness (the owner, 2026-10-24)
+
+**Job360 is the job seeker's harness for their own AI assistant.** The assistant
+is the engine (it thinks, finds, writes, fills); Job360 controls when it runs,
+what it does, within which limits, and keeps the record. Connect Job360 to any
+assistant (Claude today; ChatGPT and Gemini next) and the seeker gets the same
+full job-seeking help, because every part that matters lives in Job360:
+
+| Harness part | What it is |
+|---|---|
+| Control panel | The seeker's settings: limits, apply mode, hunt and Gmail timing, score line |
+| Instructions | The recipes every assistant follows (`get_recipe`) |
+| Safety gates | `check_submit`, `check_outreach`, the practice run: the assistant cannot act past the seeker's rules |
+| Memory | Profile, answers, every document version, events, receipts |
+| Duty board | `whats_due` / `mark_done`: what is due now, what is done |
+| Ignition | Job360 starts the assistant the moment the seeker acts or a step finishes (a vendor start link where one exists; the vendor's own timer everywhere) |
+| Engines on a clock | Hunt, people hunt, apply, Gmail check: scheduled runs with the seeker's computer off |
+| Dashboard | Needs you: one card per job, one click per action |
+
+The harness never becomes the brain: no LLM of its own (decision 28), never
+sources, ranks or recommends (rule 4). It steers, limits and records. What
+differs per assistant is only the setup (how its timer is made, whether a start
+link exists); the parts above stay the same.
+
 ## How a job gets in (decided 2026-10-16, the owner)
 
 Jobs enter the apply process in two ways:
