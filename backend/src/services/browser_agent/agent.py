@@ -215,6 +215,8 @@ class Session:
     # Kept open past idle_s until this time (monotonic): a form stopped on a human check waits for the
     # user to finish it themselves in the hand-off view (hold_for_user). None = no hold.
     held_until: Optional[float] = None
+    # The page whose form_swept hold this browser already used (one per form; a new page or Done frees it).
+    swept_on: Optional[tuple[str, ...]] = None
 
 
 def _held(s: Session, now: float) -> bool:
@@ -1729,37 +1731,52 @@ HANDOFF_HOLD_SECONDS = 30 * 60
 
 def hold_for_user(
     pool: Optional[BrowserPool], user_id: str, application_id: Optional[int] = None,
-    seconds: float = HANDOFF_HOLD_SECONDS,
+    seconds: float = HANDOFF_HOLD_SECONDS, *, renew: bool = False, swept: bool = False,
 ) -> bool:
     """Keep one job's browser open ``seconds`` more for the user (a human check, or a swept form waiting on
-    their yes). An active hold is not extended (holds never renew forever), and one user holds at most
-    ``max_sessions - 1`` browsers at once. False: none is open, or the user already holds that many."""
+    their yes). An active hold is not extended unless ``renew`` (a fresh CAPTCHA hand-off: the user gets the
+    full time). ``swept``: a form_swept hold, at most one per form page (a new page or Done frees it). A new
+    hold needs the user to hold fewer than ``max_sessions - 1`` browsers. False: none open, or not held."""
     s = pool._sessions.get(browser_key(user_id, application_id)) if pool is not None else None
     if pool is None or s is None:
         return False
     now = time.monotonic()
     if _held(s, now):
+        if renew:
+            s.held_until = max(s.held_until or now, now + seconds)
         return True
-    if sum(1 for k in pool.user_keys(user_id) if _held(pool._sessions[k], now)) >= max(1, pool.max_sessions - 1):
+    page = _page_key(str(getattr(s.page, "url", "") or ""))
+    if swept and s.swept_on == page:
+        return False
+    if held_count(pool, user_id) >= max(1, pool.max_sessions - 1):
         return False
     s.held_until = now + seconds
+    if swept:
+        s.swept_on = page
     return True
+
+
+def held_count(pool: BrowserPool, user_id: str) -> int:
+    """How many of the user's browsers are held for them now."""
+    now = time.monotonic()
+    return sum(1 for k in pool.user_keys(user_id) if _held(pool._sessions[k], now))
+
+
+def _page_key(url: str) -> tuple[str, ...]:
+    """A page's scheme, host, port and path (query and fragment ignored); the raw text when unparsable."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    try:
+        x = urlsplit(url)
+        return (x.scheme.lower(), x.hostname or "", str(x.port or ""), x.path or "/")
+    except ValueError:
+        return (url,)
 
 
 def _same_page(a: str, b: str) -> bool:
     """Same scheme, host and path (query and fragment ignored)."""
-    from urllib.parse import urlsplit  # noqa: PLC0415
-
-    try:
-        x, y = urlsplit(a), urlsplit(b)
-    except ValueError:
-        return False
-    try:
-        return bool(x.hostname) and (x.scheme.lower(), x.hostname, x.port, x.path or "/") == (
-            y.scheme.lower(), y.hostname, y.port, y.path or "/"
-        )
-    except ValueError:  # a malformed port
-        return False
+    x = _page_key(a)
+    return len(x) == 4 and bool(x[1]) and x == _page_key(b)
 
 
 def adopt_for_form(pool: Optional[BrowserPool], user_id: str, application_id: int, form_url: str, owner: str) -> bool:
@@ -1845,6 +1862,7 @@ async def live(
             )
         if action == "done":  # the user is finished: the browser goes back to its idle clock
             s.held_until = None
+            s.swept_on = None
             s.last_used = time.monotonic()
             return {"status": "ok", "done": True}
     else:

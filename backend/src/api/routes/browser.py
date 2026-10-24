@@ -262,7 +262,7 @@ async def _hold_if_waiting(user: CurrentUser, application_id: int) -> bool:
         block = await blocked_service.open_block(db, user.id, application_id)
     if not block or block["reason"] != "captcha" or block["step"] != "Job360 browser":
         return False
-    return browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id)
+    return browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id, renew=True)
 
 
 async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:
@@ -274,7 +274,10 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
     from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
 
     reason = _BLOCKED_REASON.get(str(result.get("reason")), "other")
-    held = reason == "captcha" and browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id)
+    # A fresh CAPTCHA gets its full 30 minutes, even inside a form_swept hold that is almost over.
+    held = reason == "captcha" and browser_agent.hold_for_user(
+        browser_agent.get_pool(), user.id, application_id, renew=True
+    )
     async with _db() as db:
         current = await blocked_service.open_block(db, user.id, application_id)
         if current is not None and current["reason"] == reason:

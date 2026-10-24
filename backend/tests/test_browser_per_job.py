@@ -331,3 +331,87 @@ async def test_form_swept_adopts_the_scratch_browser_on_that_forms_page(authenti
         await sweep(apps[1], "https://jobs.acme.com/apply/2")
         assert pool._sessions.get(user_id) is other and other.held_until is None  # noqa: SLF001
         assert agent.browser_key(user_id, apps[1]) not in pool._sessions  # noqa: SLF001
+
+
+async def _bring(client, n: int) -> int:
+    brought = await client.post("/api/jobs/bring", json={
+        "title": f"Engineer {n}", "company": "Acme", "location": "London",
+        "description": "Build services. " * 10, "apply_url": f"https://jobs.acme.com/apply/{n}",
+    })
+    return int(brought.json()["application_id"])
+
+
+async def _swept(client, app_id: int, form_url: str) -> dict:
+    answer = {"question": "Name", "answer": "Ada Lovelace", "source": "memory", "key": "contact.legal_last_name"}
+    filled = {"form_url": form_url, "fields_count": 1, "answers": [answer]}
+    for kind, payload in (("form_filled", filled), ("form_swept", {"fields_checked": 1, "fixed": 0})):
+        resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": kind, "payload": payload})
+        assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+@pytest.mark.asyncio
+async def test_a_captcha_inside_an_almost_over_swept_hold_gets_its_full_time(authenticated_async_context, monkeypatch):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = _pool(monkeypatch, max_sessions=3)
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+
+    async def fake_run(p, user_id, action, **kw):
+        return {"status": "needs_you", "reason": "captcha", "detail": "x", "url": "https://jobs.acme.com/apply/1"}
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        app_id = await _bring(client, 1)
+        s = await pool.get(agent.browser_key(user_id, app_id), create=True)
+        s.held_until = time.monotonic() + 60  # a form_swept hold with a minute left
+        out = (await client.post("/api/browser", json={"action": "click", "ref": "e1_ab", "application_id": app_id})).json()
+        assert out["blocked_recorded"] is True
+        assert agent.held_seconds(pool, user_id, app_id) >= agent.HANDOFF_HOLD_SECONDS - 10
+
+
+@pytest.mark.asyncio
+async def test_one_swept_hold_per_form_page_and_a_refused_one_is_said(authenticated_async_context, monkeypatch):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = _pool(monkeypatch, max_sessions=3)  # one user holds at most 2
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        apps = [await _bring(client, 1)]
+        browsers = [await pool.get(agent.browser_key(user_id, apps[0]), create=True)]
+        browsers[0].page = SimpleNamespace(url="https://jobs.acme.com/apply/1")
+
+        first = await _swept(client, apps[0], "https://jobs.acme.com/apply/1")
+        assert browsers[0].held_until is not None and not any("not held" in w for w in first["warnings"])
+        browsers[0].held_until = time.monotonic() - 1  # the hold ran out
+        again = await _swept(client, apps[0], "https://jobs.acme.com/apply/1")  # same form: no second hold
+        assert browsers[0].held_until < time.monotonic()
+        assert any("already had its 30-minute hold" in w for w in again["warnings"])
+        browsers[0].page = SimpleNamespace(url="https://jobs.acme.com/apply/1/page-2")  # a new form page
+        assert (await _swept(client, apps[0], "https://jobs.acme.com/apply/1/page-2"))["warnings"] == []
+        assert browsers[0].held_until > time.monotonic()
+
+
+@pytest.mark.asyncio
+async def test_a_form_swept_past_the_held_cap_tells_the_assistant(authenticated_async_context, monkeypatch):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = _pool(monkeypatch, max_sessions=3)  # one user holds at most 2
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        apps = [await _bring(client, n) for n in (1, 2, 3)]
+        browsers = [await pool.get(agent.browser_key(user_id, a), create=True) for a in apps]
+        for n in (1, 2):
+            await _swept(client, apps[n - 1], f"https://jobs.acme.com/apply/{n}")
+        over = await _swept(client, apps[2], "https://jobs.acme.com/apply/3")  # a third hold is past the cap
+        assert browsers[2].held_until is None
+        assert any("2 forms already wait on the user" in w and "10 idle minutes" in w for w in over["warnings"])

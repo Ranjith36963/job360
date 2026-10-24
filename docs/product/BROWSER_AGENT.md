@@ -175,7 +175,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   on a live picture of the assistant's own browser (`POST /api/browser/live` with `mode: finish`: shot, click, type,
   key, scroll, done; no start, no keep). Website session only, like the sign-in view: a token gets 403. Done puts the
   browser back on its idle clock; then "I submitted it" records the receipt. Job360 still never solves a CAPTCHA.
-  Since 2026-10-24 `form_swept` holds that job's browser the same 30 minutes (it waits on the user's yes; a form filled in the scratch browser moves to the job when the browser is on the swept `form_url`). A hold is not renewed while it runs, and one user holds at most `BROWSER_AGENT_MAX_SESSIONS - 1` browsers at once; the finish
+  Since 2026-10-24 `form_swept` holds that job's browser the same 30 minutes (it waits on the user's yes; a form filled in the scratch browser moves to the job when the browser is on the swept `form_url`). A hold is not renewed while it runs (only a fresh CAPTCHA stop restarts its 30 minutes), a form page gets one `form_swept` hold (a new page or Done frees it), and one user holds at most `BROWSER_AGENT_MAX_SESSIONS - 1` browsers at once; a `form_swept` that could not hold its browser says so in `warnings`; the finish
   view names the `application_id` whose browser it drives, Ready to send offers it too, and Needs you shows `held_seconds`.
 
 **`key` action (2026-10-19; Enter rule 2026-10-20):** ArrowDown, ArrowUp, Tab, Escape and Enter,
