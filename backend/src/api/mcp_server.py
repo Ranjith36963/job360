@@ -1341,13 +1341,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         ats_score: Optional[int] = None,
         ats_notes: Optional[str] = None,
         client_key: Optional[str] = None,
+        draft_kind: Optional[str] = None,
     ) -> dict[str, Any]:
         """Save a CV, cover letter, answers or outreach note for this application.
         Write the text YOURSELF from get_profile + get_job (Job360 has no
         LLM), then save it here (kind = "cv" | "cover_letter" | "answers" |
         "outreach" | "story_bank" | "interview_transcript" | "redflag_analysis" | "skill_gap_report").
-        Every save is a NEW version, never overwritten; Job360
-        renders DOCX / PDF from it.
+        Every save is a NEW version; Job360 renders DOCX / PDF from it.
 
         ATS check: run your OWN ATS check on EVERY CV you save and pass
         `ats_score` (a whole number 0-100) and `ats_notes` (what would trip an
@@ -1358,8 +1358,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         For a cv or cover_letter, the reply's `checks` lists claims not found in the profile and PDF problems
         (each `{code, severity, detail}`); fix them and save a new version, or tell
         the user. They warn only - the save always succeeds.
-        Outreach with channel `linkedin` also gets linkedin_note_too_long over 200
-        characters (300 if preferences.linkedin_premium is true).
+        Outreach `draft_kind`: connection_note|message|inmail|email. A note over 200 chars (300 with
+        preferences.linkedin_premium) or an InMail over 1,900 is refused.
 
         Give `contact_id` (a person from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and
@@ -1418,7 +1418,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             try:
                 body = applications_route.RecordOutreachRequest(
                     entry="message", channel=channel or "", text=text, label=label,
-                    client_key=client_key,
+                    client_key=client_key, draft_kind=draft_kind,
                 )
             except ValidationError as exc:
                 raise _validation_error(exc) from None
@@ -1447,6 +1447,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         try:
             artifact_body = applications_route.SaveArtifactRequest(
                 kind=kind, text=text, label=label, model=model, contact_id=contact_id, channel=channel,
+                draft_kind=draft_kind,
                 ats_score=ats_score, ats_notes=ats_notes, client_key=client_key,
             )
         except ValidationError as exc:
@@ -1905,6 +1906,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         shared: Optional[str] = None,
         phone: Optional[str] = None,
         links: Optional[list[str]] = None,
+        linkedin_state: Optional[str] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
@@ -1912,7 +1914,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         sets as add_contact (a new `email` without `email_source` clears it); `source_url` is
         http/https; "" clears either. `company` = their employer ("" clears it; a contact with no job
         must keep one). `relationship`/`shared` as add_contact. `phone`; `links` (the whole
-        list, max 5); "" or [] clears. A foreign/unknown contact_id reads 404."""
+        list, max 5); "" or [] clears. `linkedin_state`: connected|not_connected|pending|unknown, from
+        what the user or the profile page says. A foreign/unknown contact_id reads 404."""
         # Gap-audit #15: a value copied out of a fenced read is stored as the plain text it came from.
         notes = _unfence_in(notes)
         try:
@@ -1920,6 +1923,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
                 source_url=source_url, company=company, email_source=email_source,
                 relationship=relationship, shared=shared, phone=phone, links=links,
+                linkedin_state=linkedin_state,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None

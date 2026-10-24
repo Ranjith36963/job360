@@ -1,6 +1,7 @@
 import type { ApplicationReceiptEntry } from "@/lib/api";
 import { formatDate } from "@/lib/format-date";
 import { closedSetLabel } from "@/lib/closed-sets";
+import { AnswerText } from "@/components/AnswerText";
 
 function formatFieldValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -69,7 +70,7 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
                     <div key={i} data-testid="receipt-answer">
                       <dt className="text-xs text-muted-foreground">{qa.question}</dt>
                       <dd className="whitespace-pre-wrap font-heading text-[15px] leading-snug">
-                        {qa.redacted ? "Not kept (sensitive, not remembered)" : qa.answer}
+                        {qa.redacted ? "Not kept (sensitive, not remembered)" : <AnswerText value={qa.answer} />}
                       </dd>
                     </div>
                   ))}
