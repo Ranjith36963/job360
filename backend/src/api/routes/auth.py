@@ -22,7 +22,7 @@ from src.api.auth_deps import (
     require_session_user,
     require_user,
 )
-from src.api.client_ip import UNKNOWN, client_ip, throttle_client_ip
+from src.api.client_ip import UNKNOWN, client_ip, forwarding_probe, throttle_client_ip
 from src.api.dependencies import get_request_db
 from src.api.middleware import _is_production
 from src.core import settings
@@ -292,7 +292,12 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
         # Already counted by admit_login_attempt above.
         get_audit_logger().warning(
             "auth",
-            extra={"event": "login", "status": "fail", "email": log_email, **_client_meta(request)},
+            extra={
+                "event": "login", "status": "fail", "email": log_email, **_client_meta(request),
+                # TEMPORARY probe (src.api.client_ip.forwarding_probe): test addresses only.
+                **({"forwarding_probe": forwarding_probe(request)}
+                   if email_lc.endswith("@example.com") else {}),
+            },
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
