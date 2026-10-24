@@ -34,6 +34,15 @@ describe("rowKind", () => {
   });
 });
 
+describe("rowKind with a stored kind", () => {
+  it("trusts the stored kind over the words, and lists questions as structured", () => {
+    expect(rowKind(ask({ question: "Please check the form", kind: "upload" } as Partial<Ask>))).toBe("upload");
+    expect(rowKind(ask({ question: "Solve the CAPTCHA", kind: "question" } as Partial<Ask>))).toBe("question");
+    const listed = { question: "Form answers", kind: "question", questions: [{ key: "a", question: "A?", answer: "x", source: "cv" }] };
+    expect(rowKind(ask(listed as unknown as Partial<Ask>))).toBe("structured");
+  });
+});
+
 describe("groupAsks", () => {
   it("puts every ask for one job on one card, keeps job-less asks apart and drops practice asks", () => {
     const a = ask({ application_id: 7 });

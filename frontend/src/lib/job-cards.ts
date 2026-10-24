@@ -7,7 +7,9 @@ import type { ApplicationDetail, Ask, Contact } from "@/lib/api";
  */
 
 export type BlockerKind = "captcha" | "upload" | "login" | "safety";
-export type RowKind = BlockerKind | "outreach" | "yes_no" | "question";
+// "structured": an ask that lists its form questions (one row each, with where each answer came from).
+export type RowKind = BlockerKind | "outreach" | "yes_no" | "question" | "structured";
+const BLOCKER_KINDS: readonly string[] = ["captcha", "upload", "login", "safety"];
 
 const BLOCKER_RULES: [BlockerKind, RegExp][] = [
   ["captcha", /captcha|i'?m not a robot|human check/i],
@@ -20,6 +22,10 @@ const SIMULATION = /\bsimulation\b|lifecycle test|do not apply/i;
 const YES_NO = /^(?:do|does|did|are|is|was|were|can|could|will|would|have|has|had|should)\b[^?\n]*\?$/i;
 
 export function rowKind(ask: Ask): RowKind {
+  // The kind the assistant stored wins; only an older ask (kind "") is read from its words.
+  if (BLOCKER_KINDS.includes(ask.kind ?? "")) return ask.kind as BlockerKind;
+  if (ask.questions?.length) return "structured";
+  if (ask.kind === "question") return "question";
   const text = `${ask.question}\n${ask.context}`;
   for (const [kind, re] of BLOCKER_RULES) if (re.test(text)) return kind;
   if (OUTREACH.test(text)) return "outreach";
