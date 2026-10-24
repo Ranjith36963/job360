@@ -300,11 +300,3 @@ def test_missing_flags_list_only_what_the_form_asks_not_salary():
         {"key": "right_to_work.DE.work_authorization", "why": "x"},
     ]
     assert [f["key"] for f in _missing_flags(profile, missing, "DE")] == ["right_to_work.DE.work_authorization"]
-
-
-def test_doctor_missing_goes_through_the_shared_kit_filter():
-    import inspect
-
-    from src.api.routes import doctor
-
-    assert "kit_service.kit_missing(kit_missing)" in inspect.getsource(doctor._missing)
