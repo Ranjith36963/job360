@@ -3840,6 +3840,17 @@
             "title": "Id",
             "type": "integer"
           },
+          "linkedin_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin State"
+          },
           "linkedin_url": {
             "title": "Linkedin Url",
             "type": "string"
@@ -8943,6 +8954,17 @@
             "title": "Jobs",
             "type": "array"
           },
+          "linkedin_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin State"
+          },
           "linkedin_url": {
             "title": "Linkedin Url",
             "type": "string"
@@ -11575,6 +11597,17 @@
             ],
             "title": "Client Key"
           },
+          "draft_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Kind"
+          },
           "entry": {
             "title": "Entry",
             "type": "string"
@@ -11803,6 +11836,17 @@
               }
             ],
             "title": "Contact Id"
+          },
+          "draft_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Kind"
           },
           "kind": {
             "title": "Kind",
@@ -15534,6 +15578,17 @@
               }
             ],
             "title": "Found Via"
+          },
+          "linkedin_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin State"
           },
           "linkedin_url": {
             "anyOf": [
