@@ -203,6 +203,9 @@ BOARD_SOURCES = (
     "bairesdev",
     "vention",
     "northstone",
+    "cleverstaff",
+    "friendwork",
+    "joinup",
 )
 FEED_SOURCES = (
     "freehire",
@@ -399,7 +402,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f",
+    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2922,6 +2925,10 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("telegramcareers", re.compile(r"^telegram\.org$")),
     ("bairesdev", re.compile(r"^(?:talent|applicants)\.bairesdev\.com$")),
     ("vention", re.compile(r"^(join\.ventionteams\.com)$")),
+    # boards C: CleverStaff and joinup.ch are one host each; a FriendWork tenant is the first path segment
+    ("cleverstaff", re.compile(r"^cleverstaff\.net$")),
+    ("friendwork", re.compile(r"^jobs\.friend\.work$")),
+    ("joinup", re.compile(r"^(?:www\.)?joinup\.ch$")),
 ]
 _BOARD_SLUG = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}"  # a path slug that cannot be . or ..
 # Career sites on an employer's own host that the URL path gives away: eArcu vacancies and Radancy (TalentBrew) jobs
@@ -2932,7 +2939,7 @@ _UNSUPPORTED_HOSTS = re.compile(
     r"(?:^|\.)(?:breezy\.hr|applytojob\.com|pinpointhq\.com|join\.com|rippling\.com|"
     r"ultipro\.com|adp\.com|hirebridge\.com|myworkdaysite\.com|csod\.com|"
     r"dayforcehcm\.com|homerun\.co|humanbit\.ai|aijobs\.net|herkey\.com|gradcracker\.com|energyjobline\.com|"
-    r"getconsider\.com|jobs\.gusto\.com|jobleads\.com)$", re.I)
+    r"getconsider\.com|jobs\.gusto\.com|jobleads\.com|eluta\.ca|talent\.com)$", re.I)
 
 
 def board_from_job_url(url: str) -> dict[str, Any]:
@@ -3010,7 +3017,9 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = "" if m.group(1) in ("www", "api", "portal", "private-api", "employability-portal") else m.group(1)
         elif ats == "recrutei":  # https://jobs.recrutei.com.br/<tenant>/vacancy/<id>-<slug>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
-        elif ats in ("vagas", "yourator", "careerviet", "occ", "geekjob"):  # one national board: no token in the link
+        elif ats == "friendwork":  # https://jobs.friend.work/<token>/<id>
+            tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", seg[0]) else ""
+        elif ats in ("vagas", "yourator", "careerviet", "occ", "geekjob", "cleverstaff", "joinup"):  # one board
             tok = ""
         elif ats == "mokahr":  # app.mokahr.com/social-recruitment/<org>/<site>; hire-r1.* = r1
             moka = len(seg) >= 3 and seg[0] in ("social-recruitment", "campus-recruitment", "apply")
