@@ -109,3 +109,6 @@ docs/maintenance/inbox/
 
 # hunt kit runtime cache (downloaded company universe; never committed)
 backend/src/hunt_kit/universe_cache/
+# hunt kit run state when the kit is run from the source folder (history, rotation cursor, stream)
+backend/src/hunt_kit/seen_jobs*.json
+backend/src/hunt_kit/hunt_stream.jsonl*
