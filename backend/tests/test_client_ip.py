@@ -199,3 +199,12 @@ def test_no_other_module_reads_forwarded_for():
 def test_throttle_ip_drops_an_ipv6_scope_id():
     """A link-local address with a zone (``fe80::1%eth0``) still collapses to its /64."""
     assert throttle_ip("fe80::1%eth0") == "fe80::/64"
+
+
+def test_forwarding_probe_reports_the_headers_as_they_arrive(hops):
+    from src.api.client_ip import forwarding_probe
+
+    hops(1)
+    probe = forwarding_probe(_request("6.6.6.6", "82.4.59.9"))
+    assert probe == {"peer": PEER, "hops": 1, "headers": {"x-forwarded-for": ["6.6.6.6", "82.4.59.9"]}}
+    assert forwarding_probe(_request())["headers"] == {}
