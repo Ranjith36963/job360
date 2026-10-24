@@ -4729,6 +4729,8 @@ export interface components {
             found_via?: string | null;
             /** Id */
             id: number;
+            /** Linkedin State */
+            linkedin_state?: string | null;
             /** Linkedin Url */
             linkedin_url: string;
             /** Links */
@@ -6836,6 +6838,8 @@ export interface components {
             id: number;
             /** Jobs */
             jobs: components["schemas"]["PersonJobOut"][];
+            /** Linkedin State */
+            linkedin_state?: string | null;
             /** Linkedin Url */
             linkedin_url: string;
             /** Links */
@@ -7899,6 +7903,8 @@ export interface components {
             channel: string;
             /** Client Key */
             client_key?: string | null;
+            /** Draft Kind */
+            draft_kind?: string | null;
             /** Entry */
             entry: string;
             /** Follow Up On */
@@ -7977,6 +7983,8 @@ export interface components {
             client_key?: string | null;
             /** Contact Id */
             contact_id?: number | null;
+            /** Draft Kind */
+            draft_kind?: string | null;
             /** Kind */
             kind: string;
             /**
@@ -9177,6 +9185,8 @@ export interface components {
             email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
+            /** Linkedin State */
+            linkedin_state?: string | null;
             /** Linkedin Url */
             linkedin_url?: string | null;
             /** Links */

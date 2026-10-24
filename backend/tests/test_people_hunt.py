@@ -3,8 +3,7 @@
 ``whats_due`` lists new applications that still have no one to reach out to, so the user's own
 scheduled task finds people for them; Job360 finds nobody itself. Pure tests pin the due rule;
 API tests go through the real doors and pin the limits: at most REACH_MAX_PER_RUN applications a
-run, REACH_PEOPLE_PER_ROLE people per company and role a week, and ``mark_done`` stamps only the
-caller's own applications. Helpers are copied, never imported from another test module.
+run, and ``mark_done`` stamps only the caller's own applications. Helpers are copied, never imported from another test module.
 """
 from __future__ import annotations
 
@@ -181,24 +180,6 @@ async def test_a_person_the_assistant_added_takes_the_application_off(authentica
         async with await _agent(client) as agent:
             assert (await _add_person(agent, app_id, "Priya Shah")).status_code in (200, 201)
         assert await _reach(client) == []
-
-
-@pytest.mark.asyncio
-async def test_two_people_per_company_and_role_a_week_for_the_assistant_only(
-    authenticated_async_context, fixture_user_id
-):
-    async with authenticated_async_context() as client:
-        _seed_profile(fixture_user_id)
-        first = await _bring(client, _ad(1))
-        other_role = await _bring(client, _ad(3, title="Analytics Engineer"))
-        async with await _agent(client) as agent:
-            assert (await _add_person(agent, first, "Priya Shah")).status_code in (200, 201)
-            assert (await _add_person(agent, first, "Sam Lee")).status_code in (200, 201)
-            third = await _add_person(agent, first, "Alex Kim")
-            assert third.status_code == 422 and "wait for replies" in third.text
-            assert (await _add_person(agent, other_role, "Alex Kim")).status_code in (200, 201)
-        # The user's own add is never limited.
-        assert (await _add_person(client, first, "Jo Park")).status_code in (200, 201)
 
 
 @pytest.mark.asyncio

@@ -78,9 +78,14 @@ def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
+# Optional fields added after keys were first stored: left out while unset, so an old key still matches.
+_KEY_BODY_SKIP_WHEN_UNSET = ("draft_kind",)
+
+
 def _key_body(body: BaseModel) -> dict[str, Any]:
     """The idempotency body (slice 25): the request's own fields, minus the key itself."""
-    return body.model_dump(exclude={"client_key"})
+    skip = {k for k in _KEY_BODY_SKIP_WHEN_UNSET if getattr(body, k, None) is None}
+    return body.model_dump(exclude={"client_key"} | skip)
 
 
 async def _client_key_once(
@@ -136,6 +141,8 @@ class SaveArtifactRequest(BaseModel):
     # `contact_id` but no `application_id`.
     contact_id: Optional[int] = None
     channel: Optional[str] = None
+    # Owner 2026-10-24 - with contact_id: what the draft is (OUTREACH_DRAFT_KINDS), checked on save.
+    draft_kind: Optional[str] = None
     # Owner decision 2026-10-04 — the ASSISTANT's own ATS check of this
     # document (Job360 never computes one). Only kinds in
     # APPLICATION_ARTIFACT_ATS_KINDS (cv, cover_letter) may carry it — any
@@ -678,6 +685,8 @@ class ContactOut(BaseModel):
     confirmed: bool = False  # the user confirmed this person on the web (web-added = confirmed)
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
+    # Owner 2026-10-24 - LINKEDIN_STATES; null = unknown (rule #29).
+    linkedin_state: Optional[str] = None
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
@@ -1577,6 +1586,8 @@ class UpdateContactRequest(BaseModel):
     shared: Optional[str] = None  # "" clears it
     phone: Optional[str] = None  # "" clears it
     links: Optional[list[str]] = None  # [] clears it
+    # Owner 2026-10-24 - closed set LINKEDIN_STATES; "" clears it (reads as unknown).
+    linkedin_state: Optional[str] = None
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1596,6 +1607,8 @@ class RecordOutreachRequest(BaseModel):
     follow_up_on: Optional[str] = None
     # pack #13 — only on entry="message"; contacts.record_outreach refuses it on sent/reply
     label: str = Field(default="", max_length=200)
+    # Owner 2026-10-24 - what the draft is (OUTREACH_DRAFT_KINDS); checked against LinkedIn's limits.
+    draft_kind: Optional[str] = None
     # A caller going through /applications/{id}/events can only ever touch a
     # contact linked to THAT SAME application — set by the wrapper below,
     # never by the request body itself.
@@ -2730,7 +2743,7 @@ async def update_contact(
             company=body.company,
             email_source=body.email_source,
             relationship=body.relationship, shared=body.shared,
-            phone=body.phone, links=body.links,
+            phone=body.phone, links=body.links, linkedin_state=body.linkedin_state,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2768,7 +2781,7 @@ async def record_outreach(
                 entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
                 source_message_id=source["message_id"] if source else "",
                 follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
-                label=body.label,
+                label=body.label, draft_kind=body.draft_kind,
             )
         except SpineError as exc:
             _raise(exc)
@@ -2927,7 +2940,7 @@ async def _save_artifact(
             result = await contacts_service.record_outreach(
                 db, user.id, body.contact_id, actor_for(user),
                 entry="message", channel=body.channel, text=body.text,
-                application_id_hint=application_id, label=body.label,
+                application_id_hint=application_id, label=body.label, draft_kind=body.draft_kind,
             )
             outreach = result["outreach"]
             return {

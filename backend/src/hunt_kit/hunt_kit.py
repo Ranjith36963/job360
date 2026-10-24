@@ -207,6 +207,9 @@ BOARD_SOURCES = (
     "friendwork",
     "joinup",
     "vouch",
+    "prevueaps",
+    "redrover",
+    "senjob",
 )
 FEED_SOURCES = (
     "freehire",
@@ -404,7 +407,7 @@ def _import_kit(name: str) -> Any:
 ATS_MODULES = (
     "kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us",
     "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4",
-    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c", "kit_fh5",
+    "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c", "kit_fh5", "kit_co7",
 )
 FEED_MODULES = (
     "kit_feeds", "kit_gov", "kit_keyed", "kit_niche", "kit_regional", "kit_bigboards", "kit_bigco", "kit_startups",
@@ -2904,6 +2907,10 @@ _HOST_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("yourator", re.compile(r"^(?:www\.)?yourator\.co$")),
     ("careerviet", re.compile(r"^(?:www\.)?careerviet\.vn$")),
     ("occ", re.compile(r"^(?:www\.)?occ\.com\.mx$")),
+    # career-ops readers (kit_co7): PrevueAPS tenant subdomain, Red Rover K12 (org id in the path), Senjob (one board)
+    ("prevueaps", re.compile(r"^([a-z0-9][a-z0-9-]*)\.prevueaps\.ca$")),
+    ("redrover", re.compile(r"^jobs\.redroverk12\.com$")),
+    ("senjob", re.compile(r"^(?:www\.)?senjob\.com$")),
     ("adpmyjobs", re.compile(r"^myjobs\.adp\.com$")),
     ("eploy", re.compile(r"^([a-z0-9-]+\.eploy\.net)$")),
     # generic ATS, part 5: the tenant is the subdomain (SelfRecruit, Enlizt, Hurma, Spark) or a path segment (Compleo)
@@ -3023,8 +3030,12 @@ def board_from_job_url(url: str) -> dict[str, Any]:
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[0]) else ""
         elif ats == "friendwork":  # https://jobs.friend.work/<token>/<id>
             tok = seg[0] if seg and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", seg[0]) else ""
-        elif ats in ("vagas", "yourator", "careerviet", "occ", "geekjob", "cleverstaff", "joinup"):  # one board
+        elif ats in ("vagas", "yourator", "careerviet", "occ", "geekjob", "cleverstaff", "joinup", "senjob"):
             tok = ""
+        elif ats == "prevueaps":  # https://<tenant>.prevueaps.ca/jobs/<id>; www/api/app are the vendor's own hosts
+            tok = "" if m.group(1) in ("www", "api", "app") else m.group(1)
+        elif ats == "redrover":  # https://jobs.redroverk12.com/org/<orgId>/opening/<id>
+            tok = seg[1] if len(seg) > 1 and seg[0] == "org" and re.fullmatch(r"\d{1,12}", seg[1]) else ""
         elif ats == "mokahr":  # app.mokahr.com/social-recruitment/<org>/<site>; hire-r1.* = r1
             moka = len(seg) >= 3 and seg[0] in ("social-recruitment", "campus-recruitment", "apply")
             moka = moka and bool(re.fullmatch(r"[A-Za-z0-9_-]{1,80}", seg[1]))

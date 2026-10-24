@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { Textarea } from "@/components/ui/textarea";
+import { AnswerText } from "@/components/AnswerText";
 
 // Question text, answers and choices are written by the user's assistant: untrusted, rendered as
 // React text only.
@@ -78,7 +79,7 @@ export function AskQuestions({
                 onChange={(e) => onChange(q.key, { value: e.target.value, ok: e.target.value.trim().length > 0 })} />
             ) : (
               <>
-                <p className="whitespace-pre-wrap text-sm">{row.value}</p>
+                <p className="whitespace-pre-wrap text-sm"><AnswerText value={row.value} /></p>
                 <div className="flex gap-2">
                   <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(q.key)}>
                     Edit

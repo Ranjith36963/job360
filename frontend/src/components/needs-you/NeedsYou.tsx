@@ -17,6 +17,7 @@ import { settingScore } from "@/lib/assistant-tab";
 import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { AnswerText } from "@/components/AnswerText";
 import { JobCards, loadJobCards } from "./JobCards";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
@@ -126,7 +127,7 @@ export function AskCard({
               You said (via {whoLabel(ask.answered_by ?? "").name}): {ask.user_words}
             </p>
           ) : null}
-          <p className="whitespace-pre-wrap text-sm">{ask.answer}</p>
+          <p className="whitespace-pre-wrap text-sm"><AnswerText value={ask.answer} /></p>
           <p className="text-xs text-muted-foreground" data-testid="ask-provenance">
             {ask.answered_by_user
               ? "You answered on Job360"
@@ -282,7 +283,7 @@ function AnsweredRow({ ask, onChanged }: { ask: Ask; onChanged: () => Promise<vo
     <li data-testid={`answered-${ask.id}`} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm">
       <span className="min-w-0 truncate">
         {job && <span className="text-muted-foreground">{job}: </span>}
-        {ask.question} <span className="text-muted-foreground">→ {ask.answer}</span>
+        {ask.question} <span className="text-muted-foreground">→ <AnswerText value={ask.answer} /></span>
       </span>
       <button type="button" data-testid={`answered-change-${ask.id}`} onClick={() => setOpenRow(true)} className={linkBtn}>
         Change
