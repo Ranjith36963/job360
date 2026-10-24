@@ -20,7 +20,7 @@ assistant_settings.outreach_send = "auto") are stored as waiting;
 tell the user to confirm once on the Job360 Needs-you page — you can never
 confirm them, and until they do the old value stands. Before the final
 submit call check_submit: submit → submit; ask → stop and ask yes for this
-one; stop → do not submit. The first application after auto is turned on
+one; fill → do `next_action` now, then check again; stop → do not submit. The first application after auto is turned on
 is a practice run: fill it, stop before submit, let the user check it.
 
 `settings` is how much you may do on your own. Each of `apply_min_score`
@@ -78,14 +78,17 @@ setting, so nothing waits).
 
 `check_submit` answers with ONE decision from the user's settings: `submit` -
 go ahead; `ask` - fill the form, stop before submit and ask the user yes for
-this one application; `stop` - do not submit (paused, already applied, or the
-daily limit is reached). `reason` is a short code and `detail` one plain
+this one application; `fill` - do the next step now; never a reason to end the run: do `next_action`
+(write_cv | open_and_fill_form | sweep_form | check_form | sweep_pages | draft_email | type_answers), then call
+check_submit again (reasons form_not_recorded, form_not_swept, unreadable_fields, form_count_mismatch,
+form_check_missing, form_pages_incomplete, email_not_drafted, type_first_pending); `stop` - do not submit this one (`stop_run` true - paused, a daily or weekly limit, outside
+hours - ends the whole run; every other stop: go to the next application). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, weekly_cap_reached (`stop`: the user's weekly limit),
 company_cap_reached
 (`stop`: the user's per-company limit is reached - tell them, they can raise it), outside_hours (`stop`: outside the
 user's apply hours) and pace_wait (`stop`: too soon after the last application; the `detail` has the exact next allowed
-time - never shorten or dodge it), form_pages_incomplete (`stop`: a page 1..N of a multi-page form has no sweep newer
+time - never shorten or dodge it), form_pages_incomplete (`fill`: a page 1..N of a multi-page form has no sweep newer
 than its check: `check_form` and `form_swept` with `page` and `pages_total` for every page), duplicate_job
 (same job already applied to: `stop` in auto mode, else `ask`), duplicate_role (`ask`: same company and title
 already applied to inside the window - a repost; the user's "not a duplicate" click or a yes clears it),
@@ -101,7 +104,7 @@ recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
 the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
 latest `form_filled`), form_page_mismatch (the host + path of `form_url` is not the page of your latest
-`form_filled` / `form_swept`: submit on the page you filled, or fill and sweep this one), form_check_missing (`stop`: a newer application has no `form_checked`: call check_form, record it), required_unanswered (`stop`: the newest `form_checked` lists a REQUIRED question with no answer: ask_user for it, save it, check_form again, record a new `form_checked`; a yes never clears it), email_not_verified (the user has not confirmed their
+`form_filled` / `form_swept`: submit on the page you filled, or fill and sweep this one), form_check_missing (`fill`: a newer application has no `form_checked`: call check_form, record it), required_unanswered (`stop`: the newest `form_checked` lists a REQUIRED question with no answer: ask_user for it, save it, check_form again, record a new `form_checked`; a yes never clears it), email_not_verified (the user has not confirmed their
 email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), approval_stale (`ask`: that yes no longer counts - the `detail` names

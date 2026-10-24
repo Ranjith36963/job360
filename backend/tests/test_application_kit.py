@@ -1556,7 +1556,7 @@ async def test_submit_check_stops_form_not_swept_then_submits_after_the_sweep(
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
         body = await _check(client, app_id, sweep=False)
-        assert (body["decision"], body["reason"]) == ("stop", "form_not_swept")
+        assert (body["decision"], body["reason"]) == ("fill", "form_not_swept")
         assert "form_swept" in body["detail"]
         # bad payloads are 422 (closed keys, whole numbers, fixed <= fields_checked)
         for bad in (
@@ -1586,7 +1586,7 @@ async def test_a_sweep_older_than_the_latest_fill_does_not_count(authenticated_a
         # the form is filled again: the old sweep no longer describes it
         assert (await _event(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 2})).status_code == 201
         resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
-        assert (resp.json()["decision"], resp.json()["reason"]) == ("stop", "form_not_swept")
+        assert (resp.json()["decision"], resp.json()["reason"]) == ("fill", "form_not_swept")
 
 
 @pytest.mark.asyncio
@@ -1706,7 +1706,7 @@ async def test_an_empty_or_short_sweep_of_a_filled_form_is_refused(authenticated
             assert resp.status_code == 422, checked
             assert "at least 23" in resp.text
         body = await _check(client, app_id, fill=False)
-        assert (body["decision"], body["reason"]) == ("stop", "form_not_swept")
+        assert (body["decision"], body["reason"]) == ("fill", "form_not_swept")
         ok = await _event(client, app_id, "form_swept", {"fields_checked": 23, "fixed": 2})
         assert ok.status_code == 201, ok.text
         body = await _check(client, app_id, fill=False)
@@ -1799,7 +1799,7 @@ async def test_form_filled_rejects_userinfo_url(authenticated_async_context, fix
             assert resp.status_code == 422, url
             assert "form_url" in resp.text and "evil" not in resp.text
         # nothing was stored, so the gate still says the form is not recorded
-        assert await _submit_check(client, app_id, GREENHOUSE) == ("stop", "form_not_recorded")
+        assert await _submit_check(client, app_id, GREENHOUSE) == ("fill", "form_not_recorded")
 
 
 @pytest.mark.asyncio

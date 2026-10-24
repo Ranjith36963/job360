@@ -1316,14 +1316,14 @@ async def test_mcp_has_check_submit_and_no_confirm_decline_or_take_back_tool(
             # the gate over MCP
             app_id = _payload(await mcp.call_tool("bring_job", {**_AD}))["application_id"]
             verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
-            assert (verdict["decision"], verdict["reason"]) == ("stop", "form_not_recorded")
+            assert (verdict["decision"], verdict["reason"]) == ("fill", "form_not_recorded")
             await mcp.call_tool(
                 "record_event",
                 {"application_id": app_id, "event_type": "form_filled",
                  "payload": {"form_url": FORM, "fields_count": 1}},
             )
             verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
-            assert (verdict["decision"], verdict["reason"]) == ("stop", "form_not_swept")
+            assert (verdict["decision"], verdict["reason"]) == ("fill", "form_not_swept")
             await mcp.call_tool(
                 "record_event",
                 {"application_id": app_id, "event_type": "form_swept",
@@ -1883,14 +1883,14 @@ async def test_submit_check_stops_form_not_recorded_until_form_filled_and_a_yes_
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
         body = (await _check(client, app_id, fill=False)).json()
-        assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
+        assert (body["decision"], body["reason"]) == ("fill", "form_not_recorded")
         yes = await client.post(
             f"/api/applications/{app_id}/events",
             json={"event_type": "submit_approved", "payload": {"artifact_id": None, "sha256": "", "where": "web"}},
         )
         assert yes.status_code == 201, yes.text
         body = (await _check(client, app_id, fill=False)).json()
-        assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
+        assert (body["decision"], body["reason"]) == ("fill", "form_not_recorded")
         body = (await _check(client, app_id)).json()
         assert body["reason"] != "form_not_recorded"
 
@@ -1908,6 +1908,6 @@ async def test_a_fill_from_before_a_new_cv_does_not_count(authenticated_async_co
         new_cv = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada v2."})
         assert new_cv.status_code == 201, new_cv.text
         body = (await _check(client, app_id, fill=False)).json()
-        assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
+        assert (body["decision"], body["reason"]) == ("fill", "form_not_recorded")
         body = (await _check(client, app_id)).json()
         assert body["reason"] != "form_not_recorded"

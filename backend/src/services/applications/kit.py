@@ -828,6 +828,7 @@ async def gate_facts(
         email_verified=email_verified,
         other_session_hold=other_session_hold,
         cv_unsupported=await _cv_unsupported(db, user_id, cv["artifact_id"]) if cv else False,
+        has_cv=cv is not None,
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         written_unapproved=await _written_unapproved(db, user_id, app_row),

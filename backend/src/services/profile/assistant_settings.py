@@ -785,6 +785,8 @@ class SubmitFacts:
     # ``cv_unsupported_claims``; a yes for THIS CV clears it (2026-10-17, career-ops
     # verify-cv-facts.mjs blocks invented metrics; here it is an ask, not a stop).
     cv_unsupported: bool = False
+    # A CV is saved for this application (check_submit's ``fill`` names ``write_cv`` first when not).
+    has_cv: bool = True
     # Bulk-apply D1: a ``submit_attempted`` is the newest of submit_attempted / applied /
     # submit_resolved (a later `blocked` does not clear it). STOP ``submit_unconfirmed``; a yes never clears it.
     submit_unconfirmed: bool = False
@@ -850,6 +852,42 @@ REASONS: tuple[str, ...] = (
     "approval_stale",
     "required_unanswered", "grant_scope", "email_not_drafted",
 )
+
+# Owner 2026-10-24: check_submit tells the assistant plainly what to do next. A stop whose fix is the
+# assistant's OWN next step is answered ``fill`` with ``next_action`` (never a reason to end the run);
+# only these reasons end the whole run (``stop_run``). Every other stop skips just this application.
+FILL_NEXT_ACTIONS: dict[str, str] = {
+    "form_not_recorded": "open_and_fill_form",
+    "form_not_swept": "sweep_form",
+    "unreadable_fields": "sweep_form",
+    "form_count_mismatch": "sweep_form",
+    "form_check_missing": "check_form",
+    "form_pages_incomplete": "sweep_pages",
+    "email_not_drafted": "draft_email",
+    "type_first_pending": "type_answers",
+}
+NEXT_ACTIONS: tuple[str, ...] = (
+    "write_cv", "open_and_fill_form", "sweep_form", "check_form", "sweep_pages", "draft_email", "type_answers",
+)
+RUN_STOP_REASONS: frozenset[str] = frozenset({"paused", "daily_cap_reached", "weekly_cap_reached", "outside_hours"})
+
+
+def present_verdict(verdict: SubmitDecision, *, has_cv: bool) -> dict[str, Any]:
+    """What check_submit returns for ``verdict``: ``fill`` + ``next_action`` for a stop the assistant
+    fixes itself (``write_cv`` when the form is not filled and no CV is saved yet), and ``stop_run``
+    true only for a stop that ends the whole run. A client that knows only submit/ask/stop/pace_wait
+    never reads ``fill`` as ``submit``."""
+    action = FILL_NEXT_ACTIONS.get(verdict.reason) if verdict.decision == "stop" else None
+    if action == "open_and_fill_form" and not has_cv:
+        action = "write_cv"
+    return {
+        "decision": "fill" if action else verdict.decision,
+        "reason": verdict.reason,
+        "detail": verdict.detail,
+        "next_action": action,
+        "stop_run": verdict.decision == "stop" and verdict.reason in RUN_STOP_REASONS,
+    }
+
 
 # What each ``approval_stale`` part means, in the words the ask shows the user.
 APPROVAL_STALE_WORDS: dict[str, str] = {
