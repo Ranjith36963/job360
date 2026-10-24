@@ -933,6 +933,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.outreach_send",
     # Owner 2026-10-23 - hunt for jobs every N hours (1-168; null / 0 = off). Turning it on is riskier.
     "assistant_settings.hunt_every_hours",
+    # Owner 2026-10-24 - find people to reach for new applications on the schedule (true / false). On is riskier.
+    "assistant_settings.people_hunt",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )

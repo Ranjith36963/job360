@@ -398,10 +398,12 @@ def settings_view(profile: UserProfile, user_id: str) -> dict[str, Any]:
     """The assistant-settings read model for ``profile`` (already overlaid): the
     waiting requests and the derived practice-run state are the two reads."""
     now = datetime.now(timezone.utc)
-    return settings_rules.build_settings_view(
+    view = settings_rules.build_settings_view(
         profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id), now,
         grant_scope=grant_scope.scope_view(user_id, settings_rules.effective(profile.assistant_settings), now),
     )
+    view["people_hunt_last_at"] = settings_rules.people_hunt_last_at(user_id)
+    return view
 
 
 def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
@@ -564,7 +566,7 @@ _SETTING_LOG_VALUE_PATHS = frozenset(
         settings_rules.COMPANY_CAP_PATH, settings_rules.COMPANY_CAP_DAYS_PATH,
         settings_rules.WEEKLY_CAP_PATH, settings_rules.MIN_GAP_PATH, settings_rules.APPLY_HOURS_PATH,
         settings_rules.AUTO_GRANT_COUNT_PATH, settings_rules.AUTO_GRANT_UNTIL_PATH,
-        settings_rules.HUNT_EVERY_PATH,
+        settings_rules.HUNT_EVERY_PATH, settings_rules.PEOPLE_HUNT_PATH,
     }
 )
 
