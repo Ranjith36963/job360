@@ -254,22 +254,23 @@ _FILL_ACTIONS = frozenset({"fill", "type", "choose", "tick", "upload"})
 
 
 async def _hold_if_waiting(user: CurrentUser, application_id: int) -> bool:
-    """The application's open block is a CAPTCHA in Job360's browser: hold the browser 30 minutes so the
-    user finishes it on Needs you instead of the 10-minute idle close. True when held."""
+    """The application's open block is a CAPTCHA that Job360's browser itself recorded (``by: browser``,
+    never a caller's look-alike): keep the browser held for the user instead of the 10-minute idle close.
+    True when held. A running hold is never extended here (only ``_hand_off``, a fresh CAPTCHA, renews),
+    and a new one follows the form_swept rule: at most one per form page (Done or a new page frees it),
+    under the held cap. Otherwise an assistant's fills could keep a browser held forever (review of #1176)."""
     from src.services.applications import blocked as blocked_service  # noqa: PLC0415
 
     async with _db() as db:
-        block = await blocked_service.open_block(db, user.id, application_id)
-    if not block or block["reason"] != "captcha" or block["step"] != "Job360 browser":
-        return False
-    return browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id, renew=True)
+        if not await blocked_service.browser_captcha_open(db, user.id, application_id):
+            return False
+    return browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id, swept=True)
 
 
 async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:
     """Record ``blocked`` for the application the browser stopped on, so the job waits on Needs you
     whatever the assistant does next. Once per open block of the same reason (no event per look).
     True when a new ``blocked`` was recorded."""
-    from src.api.routes import applications as applications_route  # noqa: PLC0415 - avoid an import cycle
     from src.services.applications import blocked as blocked_service  # noqa: PLC0415
     from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
 
@@ -280,7 +281,10 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
     )
     async with _db() as db:
         current = await blocked_service.open_block(db, user.id, application_id)
-        if current is not None and current["reason"] == reason:
+        # A caller's look-alike CAPTCHA block (no ``by: browser``) is replaced by the browser's own.
+        if current is not None and current["reason"] == reason and (
+            reason != "captcha" or await blocked_service.browser_captcha_open(db, user.id, application_id)
+        ):
             return False
         # "Job360 browser" is read by the web (ApplicationDecisions.tsx) to offer "Sign in once on Job sites".
         payload: dict[str, Any] = {
@@ -289,9 +293,11 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
         host = site_host(str(result.get("url", "")))
         if host and "." in host:
             payload["page_host"] = host
-        await applications_route.record_event(
-            application_id, applications_route.RecordEventRequest(event_type="blocked", payload=payload), db, user
-        )
+        # Not record_event: this path stores the server-only ``by: browser`` a caller can never write.
+        try:
+            await blocked_service.record_browser_block(db, user, application_id, payload)
+        except applications_spine.SpineError as exc:  # the same HTTP error record_event gave
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     return True
 
 

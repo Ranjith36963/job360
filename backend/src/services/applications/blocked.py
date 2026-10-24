@@ -56,6 +56,9 @@ BLOCKED_REASONS: dict[str, str] = {
 UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped"})
 NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block", "id_or_payment_asked"})
 BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
+# Written only by Job360's own browser (``record_browser_block``), never accepted from a caller: the
+# CAPTCHA hold and "Finish it here" trust a block only when it carries this (review of #1176).
+BY_KEY, BY_BROWSER = "by", "browser"
 STEP_MAX_CHARS = 120
 DETAIL_MAX_CHARS = 300
 # Owner, 2026-10-23: clearing a block may say why (shown on the timeline).
@@ -107,7 +110,9 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
         if problems:
             raise event_examples.refusal(event_type, problems)
         return {"resolution": payload["resolution"], **({"note": note} if note else {}), "assistant": actor}
-    unknown = set(payload) - BLOCKED_KEYS
+    if BY_KEY in payload:
+        problems.append(f'"{BY_KEY}" is written by Job360 itself (its own browser), never by a caller')
+    unknown = set(payload) - BLOCKED_KEYS - {BY_KEY}
     if unknown:
         problems.append(f"blocked payload keys are {sorted(BLOCKED_KEYS)}; unknown: {sorted(unknown)}")
     reason = payload.get("reason")
@@ -194,33 +199,57 @@ async def _uploaded_after(db: JobDatabase, user_id: str, application_id: int, ev
     return await cur.fetchone() is not None
 
 
-async def open_block(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
-    """The newest ``blocked`` with no later ``unblocked`` (what the page shows), else None.
+async def _open_block_event(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
+    """The newest ``blocked`` event (payload parsed) with no later ``unblocked``, else None.
     An ``upload_failed`` block counts as cleared once a ``document_uploaded`` for this application is
-    newer than it (owner, 2026-10-23: the later upload worked). Read-only: nothing is written here (M3)."""
+    newer than it (owner, 2026-10-23: the later upload worked). Read-only."""
     events = await _block_events(db, user_id, application_id)
     if not events or events[0]["event_type"] != "blocked":
         return None
     p = events[0]["payload"]
     if p.get("reason") == "upload_failed" and await _uploaded_after(db, user_id, application_id, int(events[0]["id"])):
         return None
+    return events[0]
+
+
+async def browser_captcha_open(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """The open block is a CAPTCHA that Job360's own browser recorded (``by: browser``). A caller's
+    look-alike (``step: "Job360 browser"`` typed by an assistant) never counts, nor does a block from
+    before the marker: either would let an assistant keep a browser held. Read-only."""
+    ev = await _open_block_event(db, user_id, application_id)
+    return ev is not None and ev["payload"].get("reason") == "captcha" and ev["payload"].get(BY_KEY) == BY_BROWSER
+
+
+async def open_block(db: JobDatabase, user_id: str, application_id: int) -> Optional[dict[str, Any]]:
+    """The newest ``blocked`` with no later ``unblocked`` (what the page shows), else None.
+    Read-only: nothing is written here (M3)."""
+    ev = await _open_block_event(db, user_id, application_id)
+    if ev is None:
+        return None
+    p = ev["payload"]
     reason = p.get("reason") if p.get("reason") in BLOCKED_REASONS else "other"
     return {
         "reason": reason, "reason_label": BLOCKED_REASONS[reason], "step": p.get("step") or "",
         "page_host": p.get("page_host") or "", "detail": p.get("detail") or "",
-        "by": p.get("assistant") or events[0].get("recorded_by") or "", "at": events[0]["recorded_at"],
+        "by": p.get("assistant") or ev.get("recorded_by") or "", "at": ev["recorded_at"],
         "ask_id": p.get("ask_id"),
     }
 
 
 async def finish_here_ask_ids(db: JobDatabase, user_id: str, asks: list[dict[str, Any]]) -> set[int]:
     """The open asks that are a CAPTCHA in Job360's own browser, still open: the user can finish those on
-    Needs you itself (FinishInBrowser). One open-block read per application with an open ask. Read-only."""
+    Needs you itself (FinishInBrowser). One open-block read per application with an open ask. Read-only.
+    A block Job360's browser wrote carries ``by: browser``; one written before that marker (no ``by``, step
+    "Job360 browser") still shows the button. Display only, so harmless: the finish view is the user's own
+    session, acts only on a browser that is already open, and never holds one."""
     out: set[int] = set()
     for app_id in {a["application_id"] for a in asks if a.get("status") == "open" and a.get("application_id")}:
-        block = await open_block(db, user_id, int(app_id))
-        if block and block["reason"] == "captcha" and block["step"] == "Job360 browser" and block["ask_id"]:
-            out.add(int(block["ask_id"]))
+        ev = await _open_block_event(db, user_id, int(app_id))
+        p = ev["payload"] if ev is not None else {}
+        by = p.get(BY_KEY)
+        ours = by == BY_BROWSER or (by is None and p.get("step") == "Job360 browser")
+        if p.get("reason") == "captcha" and ours and isinstance(p.get("ask_id"), int):
+            out.add(int(p["ask_id"]))
     return out
 
 
@@ -319,6 +348,17 @@ async def record(
         )
         await after_append(db, user, application_id, event_type, stored)
     return result
+
+
+async def record_browser_block(
+    db: JobDatabase, user: CurrentUser, application_id: int, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Job360's own browser stopped on this application: check ``payload`` like a caller's, then store it
+    with ``by: browser``, the one key a caller can never write (``check_payload`` refuses it)."""
+    if await spine.get_owned_application(db, user.id, application_id) is None:
+        raise SpineError(404, "application not found")
+    stored = {**check_payload(user, "blocked", payload, ""), BY_KEY: BY_BROWSER}
+    return await record(db, user, application_id, "blocked", stored, occurred_at=spine.parse_occurred_at(None))
 
 
 def _log(user: CurrentUser, application_id: int, event_type: str, stored: dict[str, Any], result: str) -> None:

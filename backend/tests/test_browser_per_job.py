@@ -415,3 +415,87 @@ async def test_a_form_swept_past_the_held_cap_tells_the_assistant(authenticated_
         over = await _swept(client, apps[2], "https://jobs.acme.com/apply/3")  # a third hold is past the cap
         assert browsers[2].held_until is None
         assert any("2 forms already wait on the user" in w and "10 idle minutes" in w for w in over["warnings"])
+
+
+# ── Holds trust only Job360's own CAPTCHA block, and a refill never renews (review of #1176) ──
+
+_FORM = "https://jobs.acme.com/apply/1"
+_FILL = {"action": "fill", "fields": [{"ref": "e1_ab", "text": "Grace"}]}
+
+
+def _scripted(monkeypatch, pool, replies: list[dict]):
+    from src.services.browser_agent import agent
+
+    async def fake_run(p, user_id, action, **kw):
+        return replies.pop(0) if replies else {"status": "ok", "filled": []}
+
+    monkeypatch.setattr(agent, "run", fake_run)
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+
+
+@pytest.mark.asyncio
+async def test_a_callers_captcha_look_alike_never_holds_the_browser(authenticated_async_context, monkeypatch):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = _pool(monkeypatch, max_sessions=3)
+    _scripted(monkeypatch, pool, [])
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        app_id = await _bring(client, 1)
+        s = await pool.get(agent.browser_key(user_id, app_id), create=True)
+        s.page = SimpleNamespace(url=_FORM)
+        forged = await client.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "blocked", "payload": {"reason": "captcha", "step": "Job360 browser"},
+        })
+        assert forged.status_code == 201, forged.text
+        for _ in range(3):
+            out = (await client.post("/api/browser", json={**_FILL, "application_id": app_id})).json()
+            assert out["held_for_you"] is False
+        assert s.held_until is None
+
+
+@pytest.mark.asyncio
+async def test_a_caller_cannot_write_the_browsers_own_mark(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        resp = await client.post(f"/api/applications/{app_id}/events", json={
+            "event_type": "blocked", "payload": {"reason": "captcha", "step": "Job360 browser", "by": "browser"},
+        })
+        assert resp.status_code == 422, resp.text
+        assert "written by Job360 itself" in resp.text
+        assert (await client.get(f"/api/applications/{app_id}/controls")).json().get("blocked") is None
+
+
+@pytest.mark.asyncio
+async def test_a_refill_never_renews_the_captcha_hold_and_reholds_once_per_page(authenticated_async_context, monkeypatch):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = _pool(monkeypatch, max_sessions=3)
+    _scripted(monkeypatch, pool, [{"status": "needs_you", "reason": "captcha", "detail": "x", "url": _FORM}])
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        app_id = await _bring(client, 1)
+        s = await pool.get(agent.browser_key(user_id, app_id), create=True)
+        s.page = SimpleNamespace(url=_FORM)
+        out = (await client.post("/api/browser", json={"action": "click", "ref": "e1_ab", "application_id": app_id})).json()
+        assert out["blocked_recorded"] is True and s.held_until is not None  # the browser's own CAPTCHA holds
+        asks = (await client.get("/api/asks")).json()["asks"]
+        assert [a["finish_here"] for a in asks if a["application_id"] == app_id] == [True]
+
+        end = time.monotonic() + 60
+        s.held_until = end  # a minute left on that hold
+        for _ in range(3):
+            out = (await client.post("/api/browser", json={**_FILL, "application_id": app_id})).json()
+            assert out["held_for_you"] is True
+        assert s.held_until == end  # never renewed by a refill
+
+        s.held_until, s.swept_on = None, None  # the user pressed Done; the block is still open
+        out = (await client.post("/api/browser", json={**_FILL, "application_id": app_id})).json()
+        assert out["held_for_you"] is True and s.held_until is not None  # one new hold for this page
+        s.held_until = time.monotonic() - 1  # it ran out
+        out = (await client.post("/api/browser", json={**_FILL, "application_id": app_id})).json()
+        assert out["held_for_you"] is False and s.held_until < time.monotonic()  # no second one on this page
