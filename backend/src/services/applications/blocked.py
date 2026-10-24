@@ -204,6 +204,17 @@ async def open_block(db: JobDatabase, user_id: str, application_id: int) -> Opti
     }
 
 
+async def finish_here_ask_ids(db: JobDatabase, user_id: str, asks: list[dict[str, Any]]) -> set[int]:
+    """The open asks that are a CAPTCHA in Job360's own browser, still open: the user can finish those on
+    Needs you itself (FinishInBrowser). One open-block read per application with an open ask. Read-only."""
+    out: set[int] = set()
+    for app_id in {a["application_id"] for a in asks if a.get("status") == "open" and a.get("application_id")}:
+        block = await open_block(db, user_id, int(app_id))
+        if block and block["reason"] == "captcha" and block["step"] == "Job360 browser" and block["ask_id"]:
+            out.add(int(block["ask_id"]))
+    return out
+
+
 async def _open_ask_ids(db: JobDatabase, user_id: str, ask_ids: list[int]) -> set[int]:
     if not ask_ids:
         return set()

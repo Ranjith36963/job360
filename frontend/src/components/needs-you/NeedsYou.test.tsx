@@ -43,6 +43,14 @@ vi.mock("./ReadyToSend", async () => {
     },
   };
 });
+// The live view is tested in ApplicationDecisions.test.tsx; this stand-in only offers Done.
+vi.mock("@/components/applications/FinishInBrowser", () => ({
+  FinishInBrowser: ({ onDone }: { onDone: () => void }) => (
+    <button type="button" data-testid="finish-view" onClick={onDone}>
+      Done
+    </button>
+  ),
+}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const base = {
@@ -86,6 +94,21 @@ beforeEach(() => {
 });
 
 describe("NeedsYou", () => {
+  it("a CAPTCHA in Job360's browser offers Finish it here on the card; other asks do not", async () => {
+    setup([
+      { ...base, id: 3, question: "Your assistant got stuck: a CAPTCHA", status: "open", finish_here: true },
+      { ...base, id: 4, application_id: 8, question: "Salary?", status: "open", finish_here: false },
+    ]);
+    render(<NeedsYou />);
+    const button = await screen.findByTestId("ask-finish-here");
+    expect(screen.getAllByTestId("ask-finish-here")).toHaveLength(1);
+    expect(screen.getByTestId("ask-3").contains(button)).toBe(true);
+    fireEvent.click(button);
+    fireEvent.click(await screen.findByTestId("finish-view"));
+    expect(await screen.findByTestId("ask-finish-done")).toHaveTextContent("Did it go through?");
+    expect(screen.getByRole("link", { name: /I submitted it/ })).toHaveAttribute("href", "/applications/7");
+  });
+
   it("renders the question as literal text, never HTML", async () => {
     setup([openAsk]);
     const { container } = render(<NeedsYou />);

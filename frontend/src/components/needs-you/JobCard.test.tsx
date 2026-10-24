@@ -14,6 +14,7 @@ vi.mock("@/lib/api", () => ({
   markOutreachSent: (...a: unknown[]) => markOutreachSent(...a),
   downloadApplicationArtifact: vi.fn(),
 }));
+vi.mock("@/components/applications/FinishInBrowser", () => ({ FinishInBrowser: () => <div data-testid="finish-browser" /> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 let nextId = 1;
@@ -91,6 +92,13 @@ describe("JobCard", () => {
     fireEvent.click(screen.getByTestId("skip-confirm-7"));
     await waitFor(() => expect(answerAsk).toHaveBeenCalledTimes(2));
     expect(answerAsk).toHaveBeenCalledWith(a.id, "Skip this job: do not apply.");
+  });
+
+  it("offers Finish it here on a CAPTCHA in Job360's own browser", () => {
+    const captcha = { ...ask("Solve the CAPTCHA"), finish_here: true } as Ask;
+    render(<JobCard card={card([captcha])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId(`finish-here-${captcha.id}`));
+    expect(screen.getByTestId("finish-browser")).toBeInTheDocument();
   });
 
   it("renders assistant text as text, never HTML", () => {

@@ -9,6 +9,7 @@ import type { JobCardData, PersonToReach } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
 // Every string on a card (questions, job fields, names, drafted messages) is written by an
 // assistant or a job site: untrusted, rendered only as React text, never as HTML.
@@ -28,6 +29,8 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
+  // A CAPTCHA on a form filled in Job360's own browser: the user can finish it right here.
+  const [finishing, setFinishing] = useState<number | null>(null);
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");
@@ -80,7 +83,13 @@ export function JobCard({ card, onChanged }: { card: JobCardData; onChanged: () 
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`blocker-${ask.id}`}>
               <p className="text-sm font-medium">{isBlocker(kind) ? BLOCKER_TITLE[kind] : ""}</p>
               <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.question}</p>
+              {finishing === ask.id && <FinishInBrowser onDone={() => setFinishing(null)} />}
               <div className="flex flex-wrap gap-2">
+                {ask.finish_here && finishing !== ask.id && (
+                  <button type="button" className={btn} data-testid={`finish-here-${ask.id}`} onClick={() => setFinishing(ask.id)}>
+                    Finish it here
+                  </button>
+                )}
                 {card.formUrl && (
                   <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn}>
                     Open the form ↗

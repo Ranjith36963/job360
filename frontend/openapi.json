@@ -2388,6 +2388,11 @@
             "title": "Context",
             "type": "string"
           },
+          "finish_here": {
+            "default": false,
+            "title": "Finish Here",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -4083,6 +4088,11 @@
           "context": {
             "title": "Context",
             "type": "string"
+          },
+          "finish_here": {
+            "default": false,
+            "title": "Finish Here",
+            "type": "boolean"
           },
           "id": {
             "title": "Id",

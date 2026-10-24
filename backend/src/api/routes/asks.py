@@ -19,6 +19,7 @@ from src.api.routes.applications import AskOut, InboxItemOut
 from src.repositories.database import JobDatabase
 from src.services import idempotency
 from src.services.applications import asks as asks_service
+from src.services.applications import blocked as blocked_service
 from src.services.applications import inbox_items as inbox_items_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
@@ -91,6 +92,8 @@ async def list_asks(
 ) -> dict[str, Any]:
     try:
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
+        finish = await blocked_service.finish_here_ask_ids(db, user.id, rows)
+        rows = [{**r, "finish_here": r["id"] in finish} for r in rows]
         return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id)}
     except SpineError as exc:
         _raise(exc)
