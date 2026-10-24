@@ -8,7 +8,7 @@ and never read from a body (``extra="forbid"``).
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,12 +31,29 @@ def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
+class AskQuestionIn(BaseModel):
+    """One form question of an ask (0087): the answer the assistant filled in and where it came from.
+    Lengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    question: str
+    answer: str = ""
+    source: Literal["profile", "memory", "cv", "guess", "draft", "none"]
+    choices: Optional[list[str]] = None
+    remembered_on: Optional[str] = None
+
+
 class CreateAskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     application_id: Optional[int] = None
     question: str
     context: str = ""
+    # 0087 - what the ask is (a question, or a blocker only the user can clear) and its questions.
+    kind: Optional[Literal["question", "captcha", "login", "upload", "safety"]] = None
+    questions: Optional[list[AskQuestionIn]] = None
     # Gap roadmap slice 25 — optional idempotency key: the same key + same body returns the
     # FIRST ask (already_existed=true), writing nothing; another body under it is a 409.
     client_key: Optional[str] = None
@@ -50,7 +67,9 @@ class CreateAskOut(AskOut):
 class AnswerAskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    answer: str
+    # Required unless `answers` is given (an ask with questions: one answer per key).
+    answer: str = ""
+    answers: Optional[dict[str, str]] = None
     user_words: str = Field(default="", max_length=2000)
 
 
@@ -68,7 +87,9 @@ async def create_ask(
     async def _write() -> dict[str, Any]:
         try:
             return await asks_service.create_ask(
-                db, user.id, body.application_id, body.question, body.context, actor_for(user)
+                db, user.id, body.application_id, body.question, body.context, actor_for(user),
+                kind=body.kind or "",
+                questions=[q.model_dump(exclude_none=True) for q in body.questions] if body.questions else None,
             )
         except SpineError as exc:
             _raise(exc)
@@ -76,7 +97,10 @@ async def create_ask(
 
     try:
         return await idempotency.run_once(
-            db._db, user.id, "ask_user", body.client_key, body.model_dump(exclude={"client_key"}), _write
+            # Unset 0087 fields stay out, so a key stored before them still matches its own retry.
+            db._db, user.id, "ask_user", body.client_key,
+            body.model_dump(exclude={"client_key"} | {k for k in ("kind", "questions") if getattr(body, k) is None}),
+            _write,
         )
     except idempotency.IdempotencyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
@@ -108,7 +132,9 @@ async def answer_ask(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        return await asks_service.answer_ask(db, user.id, ask_id, body.answer, actor_for(user), body.user_words)
+        return await asks_service.answer_ask(
+            db, user.id, ask_id, body.answer, actor_for(user), body.user_words, answers=body.answers
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

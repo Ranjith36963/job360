@@ -3500,8 +3500,15 @@ export interface components {
         };
         /** AnswerAskRequest */
         AnswerAskRequest: {
-            /** Answer */
+            /**
+             * Answer
+             * @default
+             */
             answer: string;
+            /** Answers */
+            answers?: {
+                [key: string]: string;
+            } | null;
             /**
              * User Words
              * @default
@@ -4104,6 +4111,10 @@ export interface components {
             answered_by: string | null;
             /** Answered By User */
             answered_by_user: boolean;
+            /** Answers */
+            answers?: {
+                [key: string]: string;
+            };
             /** Application Id */
             application_id: number | null;
             /** Asked At */
@@ -4125,8 +4136,15 @@ export interface components {
             job_company: string | null;
             /** Job Title */
             job_title: string | null;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
             /** Question */
             question: string;
+            /** Questions */
+            questions?: components["schemas"]["AskQuestionOut"][];
             /**
              * Relayed From Chat
              * @default false
@@ -4157,6 +4175,46 @@ export interface components {
              * @default
              */
             withdrawn_reason: string;
+        };
+        /**
+         * AskQuestionIn
+         * @description One form question of an ask (0087): the answer the assistant filled in and where it came from.
+         *     Lengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``.
+         */
+        AskQuestionIn: {
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+            /** Choices */
+            choices?: string[] | null;
+            /** Key */
+            key: string;
+            /** Question */
+            question: string;
+            /** Remembered On */
+            remembered_on?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "profile" | "memory" | "cv" | "guess" | "draft" | "none";
+        };
+        /** AskQuestionOut */
+        AskQuestionOut: {
+            /** Answer */
+            answer: string;
+            /** Choices */
+            choices?: string[] | null;
+            /** Key */
+            key: string;
+            /** Question */
+            question: string;
+            /** Remembered On */
+            remembered_on?: string | null;
+            /** Source */
+            source: string;
         };
         /**
          * AssistantSettingsView
@@ -4774,6 +4832,10 @@ export interface components {
             answered_by: string | null;
             /** Answered By User */
             answered_by_user: boolean;
+            /** Answers */
+            answers?: {
+                [key: string]: string;
+            };
             /** Application Id */
             application_id: number | null;
             /** Asked At */
@@ -4795,8 +4857,15 @@ export interface components {
             job_company: string | null;
             /** Job Title */
             job_title: string | null;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
             /** Question */
             question: string;
+            /** Questions */
+            questions?: components["schemas"]["AskQuestionOut"][];
             /**
              * Relayed From Chat
              * @default false
@@ -4839,8 +4908,12 @@ export interface components {
              * @default
              */
             context: string;
+            /** Kind */
+            kind?: ("question" | "captcha" | "login" | "upload" | "safety") | null;
             /** Question */
             question: string;
+            /** Questions */
+            questions?: components["schemas"]["AskQuestionIn"][] | null;
         };
         /** CreateReceiptRequest */
         CreateReceiptRequest: {

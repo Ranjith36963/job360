@@ -20,6 +20,8 @@ was taken back); a withdrawn ask is not open and does not count to the cap.
 """
 from __future__ import annotations
 
+import json
+import re
 import unicodedata
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -38,6 +40,20 @@ ASKS_USER_WORDS_MAX_CHARS = 2000
 # Why an ask was taken back (owner, 2026-10-23); required when an assistant withdraws its own ask.
 ASKS_WITHDRAW_REASON_MAX_CHARS = 200
 
+# Owner 2026-10-24 - one ask per job carries every open form question. `kind` says what the ask is:
+# a question, or a blocker only the user can clear on the form ("" = an ask from before 0087).
+ASK_KINDS = ("question", "captcha", "login", "upload", "safety")
+# Where an answer the assistant filled in came from (the web labels each row with it). `none` = not
+# known yet: its answer must be empty. A guess is never `memory` - the recipes say so.
+ASK_QUESTION_SOURCES = ("profile", "memory", "cv", "guess", "draft", "none")
+ASKS_QUESTIONS_MAX = 20
+ASK_ITEM_QUESTION_MAX_CHARS = 500
+ASK_ITEM_ANSWER_MAX_CHARS = 2000
+ASK_CHOICES_MAX = 6
+ASK_CHOICE_MAX_CHARS = 100
+_KEY_RE = re.compile(r"^[a-z0-9_.]{1,60}$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 # Same banned set spine.validate_source uses (Cc/Zl/Zp + bidi overrides),
 # except a plain newline and tab are kept: a question or answer is prose and
 # may span lines.
@@ -53,6 +69,80 @@ def clean_text(raw: Optional[str]) -> str:
         if ch in _KEEP or (ch not in _BIDI and unicodedata.category(ch) not in {"Cc", "Zl", "Zp"})
     ]
     return "".join(kept).strip()
+
+
+def _item_text(where: str, raw: Any, limit: int, *, allow_empty: bool = False) -> str:
+    text = clean_text(raw if isinstance(raw, str) else "")
+    if not text and not allow_empty:
+        raise SpineError(422, f"{where} must not be empty")
+    if len(text) > limit:
+        raise SpineError(422, f"{where} exceeds {limit} chars")
+    return text
+
+
+def validate_questions(raw: Optional[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """The ask's question list, cleaned: unique keys, closed sources, capped text. [] = none."""
+    if not raw:
+        return []
+    if len(raw) > ASKS_QUESTIONS_MAX:
+        raise SpineError(422, f"at most {ASKS_QUESTIONS_MAX} questions per ask")
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        where = f"questions[{i}]"
+        key = item.get("key")
+        if not isinstance(key, str) or not _KEY_RE.match(key):
+            raise SpineError(422, f"{where}.key must be 1-60 of a-z 0-9 _ .")
+        if any(q["key"] == key for q in out):
+            raise SpineError(422, f"{where}.key repeats an earlier key")
+        source = item.get("source")
+        if source not in ASK_QUESTION_SOURCES:
+            raise SpineError(422, f"{where}.source must be one of {', '.join(ASK_QUESTION_SOURCES)}")
+        answer = _item_text(f"{where}.answer", item.get("answer"), ASK_ITEM_ANSWER_MAX_CHARS, allow_empty=True)
+        if (source == "none") != (answer == ""):
+            raise SpineError(422, f"{where}: source none goes with an empty answer, any other source with an answer")
+        q: dict[str, Any] = {
+            "key": key, "source": source, "answer": answer,
+            "question": _item_text(f"{where}.question", item.get("question"), ASK_ITEM_QUESTION_MAX_CHARS),
+        }
+        choices = item.get("choices") or []
+        if len(choices) > ASK_CHOICES_MAX:
+            raise SpineError(422, f"{where}.choices: at most {ASK_CHOICES_MAX}")
+        if choices:
+            q["choices"] = [_item_text(f"{where}.choices", c, ASK_CHOICE_MAX_CHARS) for c in choices]
+        remembered = item.get("remembered_on")
+        if remembered is not None:
+            if source != "memory" or not isinstance(remembered, str) or not _DATE_RE.match(remembered):
+                raise SpineError(422, f"{where}.remembered_on is a YYYY-MM-DD date, only with source memory")
+            q["remembered_on"] = remembered
+        out.append(q)
+    return out
+
+
+def _validate_answers(questions: list[dict[str, Any]], raw: Optional[dict[str, Any]]) -> dict[str, str]:
+    """One non-empty answer per question key, nothing else; a question with choices takes one of them."""
+    if not questions:
+        if raw:
+            raise SpineError(422, "this ask has no questions; pass `answer`")
+        return {}
+    if not raw:
+        raise SpineError(422, "this ask lists questions; pass `answers` with one answer per key")
+    keys = [q["key"] for q in questions]
+    if set(raw) != set(keys):
+        raise SpineError(422, f"answers must have exactly these keys: {', '.join(keys)}")
+    out: dict[str, str] = {}
+    for q in questions:
+        text = _item_text(f"answers.{q['key']}", raw[q["key"]], ASK_ITEM_ANSWER_MAX_CHARS)
+        if q.get("choices") and text not in q["choices"]:
+            raise SpineError(422, f"answers.{q['key']} must be one of its choices")
+        out[q["key"]] = text
+    return out
+
+
+def _json_or(raw: Any, empty: Any) -> Any:
+    try:
+        return json.loads(raw) if raw else empty
+    except ValueError:
+        return empty
 
 
 def _serialize(row: dict[str, Any]) -> dict[str, Any]:
@@ -96,13 +186,18 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         "withdrawn_by": row.get("withdrawn_by") or "",
         "withdrawn_reason": row.get("withdrawn_reason") or "",
         "status": status,
+        # 0087 - what the ask is, its questions (each with where the answer came from) and the
+        # answers the user approved ("" / [] / {} on an older ask).
+        "kind": row.get("kind") or "",
+        "questions": _json_or(row.get("questions"), []),
+        "answers": _json_or(row.get("answers"), {}),
     }
 
 
 _SELECT = (
     "SELECT k.id, k.application_id, a.job_title, a.job_company, k.question, k.context, k.asked_by, "
     "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at, k.user_words, k.confirmed_at, "
-    "k.withdrawn_by, k.withdrawn_reason "
+    "k.withdrawn_by, k.withdrawn_reason, k.kind, k.questions, k.answers "
     "FROM application_asks k LEFT JOIN applications a ON a.id = k.application_id AND a.user_id = k.user_id "
 )
 
@@ -153,9 +248,17 @@ async def create_ask(
     question: str,
     context: str,
     asked_by: str,
+    kind: str = "",
+    questions: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Record one ask. 422 on empty/oversized text, 404 if the application is
-    not the caller's, 429 when too many asks are already open."""
+    not the caller's, 429 when too many asks are already open. ``kind`` (ASK_KINDS, "" = unsaid)
+    and ``questions`` (validate_questions) are optional; a blocker carries no questions."""
+    if kind and kind not in ASK_KINDS:
+        raise SpineError(422, f"kind must be one of {', '.join(ASK_KINDS)}")
+    clean_qs = validate_questions(questions)
+    if clean_qs and kind not in ("", "question"):
+        raise SpineError(422, "a blocker ask carries no questions: send them in their own question ask")
     clean_q = clean_text(question)
     if not clean_q:
         raise SpineError(422, "question must not be empty")
@@ -183,9 +286,10 @@ async def create_ask(
             if first := await _first_proof_ask(db, user_id, application_id, proof_ctx):
                 return first
         cur = await db._db.execute(
-            "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, application_id, clean_q, clean_ctx, asked_by, now),
+            "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at, "
+            "kind, questions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, application_id, clean_q, clean_ctx, asked_by, now, kind,
+             json.dumps(clean_qs) if clean_qs else ""),
         )
         ask_id = int(cur.lastrowid or 0)
         if application_id is not None:
@@ -209,17 +313,23 @@ async def create_ask(
 
 
 async def answer_ask(
-    db: JobDatabase, user_id: str, ask_id: int, answer: str, answered_by: str, user_words: str = ""
+    db: JobDatabase, user_id: str, ask_id: int, answer: str, answered_by: str, user_words: str = "",
+    answers: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Record the user's answer. May be called again to CHANGE it: the row
     holds the latest answer and each answer appends an ``answered`` event
     (payload ``{ask_id, answer}``), so earlier answers stay in the history.
-    404 if not the caller's, 422 on empty/oversized text, 409 if withdrawn."""
+    An ask with ``questions`` takes ``answers`` (one per key); ``answer`` then defaults to
+    their "question: answer" lines. 404 if not the caller's, 422 on empty/oversized text, 409 if withdrawn."""
     existing = await _get_ask(db, user_id, ask_id)
     if existing is None:
         raise SpineError(404, "ask not found")
     if existing["withdrawn_at"]:
         raise SpineError(409, "ask was withdrawn")
+    clean_answers = _validate_answers(existing["questions"], answers)
+    if clean_answers and not clean_text(answer):
+        lines = "\n".join(f"{q['question']}: {clean_answers[q['key']]}" for q in existing["questions"])
+        answer = lines[: settings.ASKS_ANSWER_MAX_CHARS]  # the full answers stay in `answers`
     clean_a = clean_text(answer)
     if not clean_a:
         raise SpineError(422, "answer must not be empty")
@@ -231,9 +341,9 @@ async def answer_ask(
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
         cur = await db._db.execute(
-            "UPDATE application_asks SET answer = ?, answered_by = ?, answered_at = ?, user_words = ? "
+            "UPDATE application_asks SET answer = ?, answered_by = ?, answered_at = ?, user_words = ?, answers = ? "
             "WHERE id = ? AND user_id = ? AND withdrawn_at IS NULL",
-            (clean_a, answered_by, now, clean_w, ask_id, user_id),
+            (clean_a, answered_by, now, clean_w, json.dumps(clean_answers) if clean_answers else "", ask_id, user_id),
         )
         if not cur.rowcount:
             raise SpineError(404, "ask not found")
@@ -241,7 +351,8 @@ async def answer_ask(
             await append_event(
                 db, user_id=user_id, application_id=int(existing["application_id"]), event_type="answered",
                 detail=clean_a[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
-                payload={"ask_id": ask_id, "answer": clean_a, **({"user_words": clean_w} if clean_w else {})},
+                payload={"ask_id": ask_id, "answer": clean_a, **({"user_words": clean_w} if clean_w else {}),
+                         **({"answers": clean_answers} if clean_answers else {})},
                 occurred_at=now, recorded_by=answered_by,
             )
     # ``ask_id`` is the ``/asks/{ask_id}/…`` path parameter, so CodeQL's
