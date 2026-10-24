@@ -464,6 +464,37 @@ record_event `note` with `corrects_event_id` = its event id (the person's own hi
 
 Variants and templates: pass `label` on save_artifact(contact_id=..., kind="outreach") to name the approach (for example a template's label). stats `by_outreach_variant` counts each contact once, under the label of its newest message saved before its first `sent` mark (no message or no label = "Not set"), with sent, replied and reply rate. Keep reusable wording with save_artifact(kind="outreach_template", label=..., text=...) and no application_id or contact_id: each save is a new version; get_profile `outreach_templates` returns the newest of each label. You fill a template in yourself for each person, with true facts only; Job360 never fills, renders or sends one.
 
+OUTREACH WRITING (owner 2026-10-24; checked on LinkedIn Help that day). Draft the kind that fits the
+contact's `linkedin_state` and pass it as `draft_kind`: connected = `message`; not_connected =
+`connection_note` (no ask, no link); pending = draft nothing new for LinkedIn (withdrawing an invite blocks
+a re-invite for about 3 weeks); Open Profile or InMail = `inmail`; an email address = `email`. Free accounts
+get about 3 personalised connection notes a month: spend them on hiring managers and founders; a recruiter
+can get a blank invite. Job360 refuses a connection note over 200 characters (300 with
+preferences.linkedin_premium) and an InMail body over 1,900.
+1. Open with THEM: their post, the ad's own words, a shared employer or school. Never open with "I applied",
+   "Hope you're well" or your name.
+2. One proof: the single nearest project, one sentence, one concrete detail.
+3. One small ask, answerable in under a minute (yes/no or one line). Never "15 minutes" or "pick your brain"
+   on first contact.
+4. Length: connection note 200 characters (300 with Premium); LinkedIn message and InMail under 400
+   characters (InMail subject at most 200); cold email 50-90 words with a subject of at most 6 words;
+   referral ask at most 120 words.
+5. Plain, warm, peer to peer: no flattery, no exclamation marks, no emoji.
+6. "I applied" is never the opener: one short clause near the end, only to the recruiter or hiring manager
+   of that role, only if the user really applied. Never to a peer.
+7. Personalise only from a real source and put its URL in the contact's `notes`; nothing found: use the
+   ad's own words.
+8. Truth: every claim comes from get_profile or the user's own words.
+9. One follow-up after 5-7 days in the same thread: 3 lines, one new thing. A second only to the recruiter
+   or hiring manager after 10+ days; then stop.
+10. At most 2 people per company per role per week.
+By recipient: recruiter - ask whether it is still open and whether the user is in range; hiring manager -
+open with their problem, one technical question; peer - ask about their work, never mention applying, no
+referral ask in the first message; founder or CEO - ask who the right person is, shortest of all.
+Sending stays the user's: Job360 never clicks Send or Connect on LinkedIn and never stores LinkedIn
+credentials (LinkedIn's User Agreement bans automated activity). The card gives the user Copy message,
+Open LinkedIn profile and I sent it.
+
 ## Automatic employer emails
 
 Job360 never sends mail. Your own Gmail connector sends; Job360 stores, gates and counts.

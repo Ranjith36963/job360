@@ -398,3 +398,25 @@ def test_one_ask_per_job_with_honest_sources():
     assert "one ask per job" in rules and "a guess is never memory" in rules
     assert "kind` captcha|login|upload|safety" in rules
     assert "never ask the user to send an outreach message through `ask_user`" in rules
+
+
+def test_outreach_writing_rules_and_linkedin_state():
+    """Owner 2026-10-24: drafts fit the contact's LinkedIn state, follow ten writing rules, and the user
+    still sends every LinkedIn message (no automated sending)."""
+    from src.api.routes.recipes import load_recipe
+
+    def flat(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    reach = flat(load_recipe("reach").text)
+    assert "fits the linkedin state" in reach and "`draft_kind`" in reach
+    assert "at most 200 characters (300 if" in reach and "`pending`: draft nothing new" in reach
+    rules = flat(load_recipe("rules").text)
+    assert "outreach writing" in rules
+    for phrase in (
+        "open with them", "one proof", "one small ask", "never \"15 minutes\"", "no exclamation marks, no emoji",
+        "\"i applied\" is never the opener", "never to a peer", "put its url in the contact's `notes`",
+        "one follow-up after 5-7 days", "at most 2 people per company per role per week",
+        "an inmail body over 1,900", "never clicks send or connect on linkedin",
+    ):
+        assert phrase in rules, phrase

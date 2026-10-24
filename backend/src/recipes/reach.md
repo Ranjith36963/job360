@@ -30,9 +30,14 @@ Print this checklist and tick each step:
    `provider_verified`, `pattern_guess` or `user_gave` (never guess it).
    If the user knows them, pass `relationship` and `shared` (the get_profile
    path of the job or school you share) - never guess.
-4. **Write the message yourself** - short, specific to this job, true facts
-   only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
-   `email`, `linkedin` or `other`; `label` = the approach or template you used). This is a draft.
+4. **Write the draft that fits the LinkedIn state** (rules: OUTREACH WRITING). Read the contact's
+   `linkedin_state`; unknown: ask the user once, save it with `update_contact`. `connected`: a message
+   under 400 characters. `not_connected`: a connection note, at most 200 characters (300 if
+   `preferences.linkedin_premium`), no ask, no link; free accounts get about 3 personalised notes a
+   month, so spend them on hiring managers and founders (a recruiter can get a blank invite).
+   `pending`: draft nothing new for LinkedIn. Open with THEM, one proof, one small ask; true facts only.
+   Save it with `save_artifact` (`contact_id`, kind `outreach`, `draft_kind`, channel `email`,
+   `linkedin` or `other`; `label` = the approach or template you used). This is a draft.
 5. **Sending follows the Outreach rules** in `get_recipe("rules")`; read
    `settings.outreach_send` from `get_profile` (its `effective`; the Gmail
    mode `preferences.daily_check` never allows sending).
