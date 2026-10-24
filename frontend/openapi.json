@@ -4966,11 +4966,26 @@
       },
       "DueItemOut": {
         "properties": {
+          "application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ids"
+          },
           "duty": {
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
@@ -4979,7 +4994,8 @@
             "enum": [
               "never_done",
               "interval_elapsed",
-              "queue_waiting"
+              "queue_waiting",
+              "new_applications"
             ],
             "title": "Reason",
             "type": "string"
@@ -4988,7 +5004,8 @@
             "enum": [
               "hunt",
               "daily",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Recipe",
             "type": "string"
@@ -8085,11 +8102,27 @@
       "MarkDoneIn": {
         "additionalProperties": false,
         "properties": {
+          "application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ids"
+          },
           "duty": {
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
@@ -8111,7 +8144,8 @@
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"

@@ -4,6 +4,10 @@
 Print this checklist and tick each step:
 [ ] 1 Find  [ ] 2 Check  [ ] 3 Record  [ ] 4 Write  [ ] 5 Send by mode
 
+**A scheduled run** (the user's task woke you, `whats_due` lists `reach`): work ONLY its `application_ids`, steps
+1-4 for each (at most 2 people per company and role a week; Job360 refuses a third), then
+`mark_done("reach", application_ids)`. A scheduled run never sends: the user sends from Needs you.
+
 1. **Find the right person** for this application (recruiter, hiring manager,
    someone on the team). Warm first: people the user already knows there
    (the kit's `known_people`, `list_people`, past employers and schools in

@@ -5216,21 +5216,23 @@ export interface components {
         };
         /** DueItemOut */
         DueItemOut: {
+            /** Application Ids */
+            application_ids?: number[] | null;
             /**
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch";
+            duty: "hunt" | "inbox" | "batch" | "reach";
             /**
              * Reason
              * @enum {string}
              */
-            reason: "never_done" | "interval_elapsed" | "queue_waiting";
+            reason: "never_done" | "interval_elapsed" | "queue_waiting" | "new_applications";
             /**
              * Recipe
              * @enum {string}
              */
-            recipe: "hunt" | "daily" | "batch";
+            recipe: "hunt" | "daily" | "batch" | "reach";
         };
         /** EmailChangeRequest */
         EmailChangeRequest: {
@@ -6471,11 +6473,13 @@ export interface components {
         };
         /** MarkDoneIn */
         MarkDoneIn: {
+            /** Application Ids */
+            application_ids?: number[] | null;
             /**
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch";
+            duty: "hunt" | "inbox" | "batch" | "reach";
         };
         /** MarkDoneOut */
         MarkDoneOut: {
@@ -6485,7 +6489,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch";
+            duty: "hunt" | "inbox" | "batch" | "reach";
             /** Last Tick At */
             last_tick_at: string;
         };

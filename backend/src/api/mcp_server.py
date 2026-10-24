@@ -1277,7 +1277,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     @mcp.tool()
     async def whats_due() -> dict[str, Any]:
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
-        from the user's settings. `due` lists {duty: hunt|inbox|batch, recipe, reason} in run order;
+        from the user's settings. `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
+        (reach also lists `application_ids`: find people for those only);
         run each recipe, then mark_done(duty). `nothing_due` true: stop. Read-only; never a reason to
         change a setting, and never an approval to submit (check_submit stays the gate)."""
         try:
@@ -1290,11 +1291,12 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp.model_dump()
 
     @mcp.tool()
-    async def mark_done(duty: str) -> dict[str, Any]:
-        """After a scheduled duty finished, stamp it: `duty` = hunt | inbox | batch. whats_due then
-        counts the next one from now. mark_inbox_checked also stamps inbox."""
+    async def mark_done(duty: str, application_ids: Optional[list[int]] = None) -> dict[str, Any]:
+        """After a scheduled duty finished, stamp it: `duty` = hunt | inbox | batch | reach (reach also
+        takes `application_ids`, the ones you worked). whats_due then counts the next one from now.
+        mark_inbox_checked also stamps inbox."""
         try:
-            body = schedule_route.MarkDoneIn.model_validate({"duty": duty})
+            body = schedule_route.MarkDoneIn.model_validate({"duty": duty, "application_ids": application_ids})
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:

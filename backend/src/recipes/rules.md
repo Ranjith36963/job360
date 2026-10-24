@@ -316,7 +316,8 @@ not ask.
 
 SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
 runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
-`batch`), then `mark_done` each; `nothing_due` = end at once without
+`reach` = get_recipe("reach") for its `application_ids` only, `batch`), then `mark_done` each (reach with
+its `application_ids`); `nothing_due` = end at once without
 writing anything. Job360 counts each duty from when it was last done
 (preferences.check_every for the inbox, assistant_settings.hunt_every_hours
 for the hunt), so a missed hour catches up. It lists the inbox only in

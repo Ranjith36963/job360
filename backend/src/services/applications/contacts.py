@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -584,6 +584,31 @@ async def _keyed_identity_candidates(
     return keyed
 
 
+async def _check_people_per_role(db: JobDatabase, user_id: str, application_id: int, actor: str) -> None:
+    """Owner 2026-10-24: an assistant adds at most REACH_PEOPLE_PER_ROLE people for the same company and
+    role within REACH_ROLE_WINDOW_DAYS (across the user's applications for that role). The user's own
+    web adds are never limited."""
+    if actor == _WEB_ACTOR:
+        return
+    since = (datetime.now(timezone.utc) - timedelta(days=settings.REACH_ROLE_WINDOW_DAYS)).isoformat()
+    cur = await db._db.execute(
+        "SELECT COUNT(*) FROM application_contacts c JOIN applications a "
+        "  ON a.id = c.application_id AND a.user_id = c.user_id "
+        "JOIN applications this ON this.id = ? AND this.user_id = ? "
+        "WHERE c.user_id = ? AND c.added_by <> ? AND c.created_at >= ? "
+        "  AND lower(trim(a.job_company)) = lower(trim(this.job_company)) "
+        "  AND lower(trim(a.job_title)) = lower(trim(this.job_title))",
+        (application_id, user_id, user_id, _WEB_ACTOR, since),
+    )
+    row = await cur.fetchone()
+    if row and int(row[0]) >= settings.REACH_PEOPLE_PER_ROLE:
+        raise SpineError(
+            422,
+            f"already {settings.REACH_PEOPLE_PER_ROLE} people added for this company and role in the last "
+            f"{settings.REACH_ROLE_WINDOW_DAYS} days; wait for replies before adding more",
+        )
+
+
 async def _count_contacts(db: JobDatabase, application_id: int) -> int:
     cur = await db._db.execute(
         "SELECT COUNT(*) FROM application_contacts WHERE application_id = ?", (application_id,)
@@ -784,6 +809,7 @@ async def add_contact(
                 return {"contact": view, "already_existed": True, "event_id": None, "matched_on": matched_on}
 
             if application_id is not None:
+                await _check_people_per_role(db, user_id, application_id, actor)
                 count = await _count_contacts(db, application_id)
                 if count >= settings.CONTACTS_PER_APPLICATION_MAX:
                     raise SpineError(
@@ -869,6 +895,7 @@ async def add_contact(
             return {"contact": view, "already_existed": True, "event_id": None, "matched_on": "email"}
 
         if application_id is not None:
+            await _check_people_per_role(db, user_id, application_id, actor)
             count = await _count_contacts(db, application_id)
             if count >= settings.CONTACTS_PER_APPLICATION_MAX:
                 raise SpineError(
