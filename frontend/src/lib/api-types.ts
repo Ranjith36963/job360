@@ -8961,8 +8961,10 @@ export interface components {
          * SubmitCheckResponse
          * @description The answer to "may I press submit on this application?" - one gate
          *     (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
-         *     stop before submit and ask the user yes for this one; ``stop``: do not submit.
-         *     ``reason`` is a closed code; ``detail`` is one plain sentence.
+         *     stop before submit and ask the user yes for this one; ``fill``: do ``next_action``
+         *     now, then check again (never a reason to end the run); ``stop``: do not submit
+         *     this one (``stop_run`` true = end the whole run). ``reason`` is a closed code;
+         *     ``detail`` is one plain sentence.
          */
         SubmitCheckResponse: {
             /** Application Id */
@@ -8975,11 +8977,18 @@ export interface components {
              * Decision
              * @enum {string}
              */
-            decision: "submit" | "ask" | "stop";
+            decision: "submit" | "ask" | "fill" | "stop";
             /** Detail */
             detail: string;
+            /** Next Action */
+            next_action?: string | null;
             /** Reason */
             reason: string;
+            /**
+             * Stop Run
+             * @default false
+             */
+            stop_run: boolean;
             /** Type First */
             type_first?: components["schemas"]["TypeFirstAnswer"][];
         };

@@ -15008,7 +15008,7 @@
         "type": "object"
       },
       "SubmitCheckResponse": {
-        "description": "The answer to \"may I press submit on this application?\" - one gate\n(``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,\nstop before submit and ask the user yes for this one; ``stop``: do not submit.\n``reason`` is a closed code; ``detail`` is one plain sentence.",
+        "description": "The answer to \"may I press submit on this application?\" - one gate\n(``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,\nstop before submit and ask the user yes for this one; ``fill``: do ``next_action``\nnow, then check again (never a reason to end the run); ``stop``: do not submit\nthis one (``stop_run`` true = end the whole run). ``reason`` is a closed code;\n``detail`` is one plain sentence.",
         "properties": {
           "application_id": {
             "title": "Application Id",
@@ -15040,6 +15040,7 @@
             "enum": [
               "submit",
               "ask",
+              "fill",
               "stop"
             ],
             "title": "Decision",
@@ -15049,9 +15050,25 @@
             "title": "Detail",
             "type": "string"
           },
+          "next_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action"
+          },
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "stop_run": {
+            "default": false,
+            "title": "Stop Run",
+            "type": "boolean"
           },
           "type_first": {
             "items": {

@@ -1482,13 +1482,18 @@ class TypeFirstAnswer(BaseModel):
 class SubmitCheckResponse(BaseModel):
     """The answer to "may I press submit on this application?" - one gate
     (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
-    stop before submit and ask the user yes for this one; ``stop``: do not submit.
-    ``reason`` is a closed code; ``detail`` is one plain sentence."""
+    stop before submit and ask the user yes for this one; ``fill``: do ``next_action``
+    now, then check again (never a reason to end the run); ``stop``: do not submit
+    this one (``stop_run`` true = end the whole run). ``reason`` is a closed code;
+    ``detail`` is one plain sentence."""
 
     application_id: int
-    decision: Literal["submit", "ask", "stop"]
+    decision: Literal["submit", "ask", "fill", "stop"]
     reason: str
     detail: str
+    # Owner 2026-10-24: set only with ``fill`` (settings_rules.NEXT_ACTIONS).
+    next_action: Optional[str] = None
+    stop_run: bool = False
     # Owner decision 2026-10-19: answers the user changed on the web after the form was
     # filled. Type each one into its field (replacing what is there) BEFORE any submit.
     type_first: list[TypeFirstAnswer] = Field(default_factory=list)
@@ -3485,20 +3490,19 @@ async def submit_check(
     verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
     type_first = await ready_service.changed_answers(db, user.id, app_row)
     verdict = ready_service.type_first_lock(verdict, type_first)
-    detail = verdict.detail
+    shown = settings_rules.present_verdict(verdict, has_cv=facts.has_cv)
     get_audit_logger().info(
         "submit_check",
         extra={
             "event": "submit_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
-            "decision": verdict.decision, "reason": verdict.reason,
+            "decision": shown["decision"], "reason": verdict.reason,
             "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)),
             "channel": "email" if settings_rules.is_mailto(form_url) else "form", "result": "ok",
         },
     )
     return {
-        "application_id": application_id, "decision": verdict.decision,
-        "reason": verdict.reason, "detail": detail, "type_first": type_first,
+        "application_id": application_id, **shown, "type_first": type_first,
         # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
         "daily_left": settings_rules.daily_left(cfg, counts),
         "company_left": settings_rules.company_left(cfg, counts.company_applied_in_window),

@@ -231,7 +231,7 @@ async def test_an_email_application_without_a_draft_stops_on_the_route_and_the_t
         cv = await _save(client, app_id, "cv", CV)
         token = await _mint_token(client)
         route = await _gate_route(client, app_id)
-    assert (route["decision"], route["reason"]) == ("stop", "email_not_drafted")
+    assert (route["decision"], route["reason"]) == ("fill", "email_not_drafted")
     assert "email_drafted" in route["detail"]
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
@@ -245,7 +245,7 @@ async def test_an_email_application_without_a_draft_stops_on_the_route_and_the_t
             other = _payload(await mcp.call_tool("check_submit", {
                 "application_id": app_id, "form_url": "mailto:hr@southwind.example"}))
     assert (after["decision"], after["reason"]) == ("ask", "submit_mode_confirm")
-    assert (other["decision"], other["reason"]) == ("stop", "email_not_drafted")
+    assert (other["decision"], other["reason"]) == ("fill", "email_not_drafted")
     async with authenticated_async_context() as client:
         again = await _gate_route(client, app_id)
     assert (again["decision"], again["reason"]) == (after["decision"], after["reason"])
