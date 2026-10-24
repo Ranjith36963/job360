@@ -50,6 +50,7 @@ def sweep(dry_run: bool = False) -> int:
                                       f"?recursive=1"]))
     main_tree, truncated = tree.get("tree") or [], bool(tree.get("truncated"))
     clashes = 0
+    failed: list[int] = []
     for pr in open_prs():
         n = pr["number"]
         if ((pr.get("base") or {}).get("ref")) != cage.MAIN_BRANCH:
@@ -71,10 +72,16 @@ def sweep(dry_run: bool = False) -> int:
         cage.gh(["api", f"repos/{cage.REPO}/statuses/{sha}", "-f", "state=failure",
                  "-f", f"context={STATUS_CONTEXT}", "-f", f"description={desc[:140]}"])
         if pr.get("auto_merge"):
-            cage.gh(["api", "graphql", "-f", f"query={_DISABLE}", "-f", f"id={pr['node_id']}"])
-            print(f"  auto-merge withdrawn on #{n}")
+            # One PR's refusal must not stop the sweep: the next PR may be the one
+            # about to land. Every failure is reported and turns the run red.
+            try:
+                cage.gh(["api", "graphql", "-f", f"query={_DISABLE}", "-f", f"id={pr['node_id']}"])
+                print(f"  auto-merge withdrawn on #{n}")
+            except Exception as exc:
+                failed.append(n)
+                print(f"::error::could not withdraw auto-merge on #{n} ({exc}); merge-cage is failure")
     print(f"swept: {clashes} open PR(s) clash with main's migrations")
-    return 0
+    return 1 if failed else 0
 
 
 def drill(blind: bool = False) -> int:
@@ -108,14 +115,26 @@ def drill(blind: bool = False) -> int:
                 return json.dumps(f)
         return "{}"
 
+    def refusing_gh(a: list[str]) -> str:
+        if "graphql" in a:
+            calls.append("REFUSED " + " ".join(a))
+            raise RuntimeError("gh: Resource not accessible by integration")
+        return fake_gh(a)
+
     saved_gh, saved_judge = cage.gh, cage.judge_migration_numbers
     try:
         cage.gh = fake_gh
         if blind:
             cage.judge_migration_numbers = lambda *_a, **_k: []
-        sweep()
+        rc_ok = sweep()
+        # Run 39965024973: GitHub refused the withdraw and the sweep died on it.
+        cage.gh = refusing_gh
+        before = len(calls)
+        rc_refused = sweep()
+        refused_run = calls[before:]
     finally:
         cage.gh, cage.judge_migration_numbers = saved_gh, saved_judge
+    calls = calls[:before]
     failed = [c for c in calls if "state=failure" in c]
     withdrawn = [c for c in calls if "disablePullRequestAutoMerge" in c]
     checks = [
@@ -123,6 +142,9 @@ def drill(blind: bool = False) -> int:
         ("#1006's auto-merge is withdrawn", any("id=N1006" in c for c in withdrawn)),
         ("the no-migration PR and the free-number PR are left alone", len(failed) == 1),
         ("nothing is merged or queued", not any(" merge" in c and "graphql" not in c for c in calls)),
+        ("a clean sweep exits 0", rc_ok == 0),
+        ("a refused withdraw still fails merge-cage and turns the run red",
+         rc_refused == 1 and any("state=failure" in c and "a" * 40 in c for c in refused_run)),
     ]
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

@@ -378,3 +378,23 @@ def test_recipes_check_gmail_for_an_earlier_application_before_applying():
     assert order == sorted(order)
     new = rules[rules.index("earlier application (before applying):"):rules.index("## outreach")]
     assert "gmail connector" not in new
+
+
+def test_one_ask_per_job_with_honest_sources():
+    """Owner 2026-10-24: Needs you is one card per job, so apply / forms / batch send ONE ask per job
+    with every open question in `questions`, each with an honest source; outreach is never an ask."""
+    from src.api.routes.recipes import load_recipe
+
+    def flat(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    apply = flat(load_recipe("apply").text)
+    assert "one `ask_user` per job" in apply and "a guess is never memory" in apply
+    forms = flat(load_recipe("forms").text)
+    assert "one `ask_user` for this job" in forms and "honest `source`" in forms
+    batch = flat(load_recipe("batch").text)
+    assert "one per job" in batch
+    rules = flat(load_recipe("rules").text)
+    assert "one ask per job" in rules and "a guess is never memory" in rules
+    assert "kind` captcha|login|upload|safety" in rules
+    assert "never ask the user to send an outreach message through `ask_user`" in rules

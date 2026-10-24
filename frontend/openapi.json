@@ -567,8 +567,23 @@
         "additionalProperties": false,
         "properties": {
           "answer": {
+            "default": "",
             "title": "Answer",
             "type": "string"
+          },
+          "answers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answers"
           },
           "user_words": {
             "default": "",
@@ -577,9 +592,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "answer"
-        ],
         "title": "AnswerAskRequest",
         "type": "object"
       },
@@ -1482,6 +1494,14 @@
           "known_people": {
             "$ref": "#/components/schemas/KnownPeopleOut"
           },
+          "last_fill": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/KitLastFillOut"
+            },
+            "title": "Last Fill",
+            "type": "array"
+          },
           "missing": {
             "items": {
               "$ref": "#/components/schemas/KitMissingOut"
@@ -2346,6 +2366,13 @@
             "title": "Answered By User",
             "type": "boolean"
           },
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Answers",
+            "type": "object"
+          },
           "application_id": {
             "anyOf": [
               {
@@ -2380,6 +2407,11 @@
             "title": "Context",
             "type": "string"
           },
+          "finish_here": {
+            "default": false,
+            "title": "Finish Here",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -2406,9 +2438,21 @@
             ],
             "title": "Job Title"
           },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/AskQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
           },
           "relayed_from_chat": {
             "default": false,
@@ -2472,6 +2516,122 @@
           "status"
         ],
         "title": "AskOut",
+        "type": "object"
+      },
+      "AskQuestionIn": {
+        "additionalProperties": false,
+        "description": "One form question of an ask (0087): the answer the assistant filled in and where it came from.\nLengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``.",
+        "properties": {
+          "answer": {
+            "default": "",
+            "title": "Answer",
+            "type": "string"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "remembered_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remembered On"
+          },
+          "source": {
+            "enum": [
+              "profile",
+              "memory",
+              "cv",
+              "guess",
+              "draft",
+              "none"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "question",
+          "source"
+        ],
+        "title": "AskQuestionIn",
+        "type": "object"
+      },
+      "AskQuestionOut": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "remembered_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remembered On"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "question",
+          "answer",
+          "source"
+        ],
+        "title": "AskQuestionOut",
         "type": "object"
       },
       "AssistantSettingsView": {
@@ -3207,6 +3367,14 @@
             "maxLength": 16,
             "title": "Doc Kind",
             "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FillField"
+            },
+            "maxItems": 40,
+            "title": "Fields",
+            "type": "array"
           },
           "on": {
             "default": true,
@@ -4034,6 +4202,13 @@
             "title": "Answered By User",
             "type": "boolean"
           },
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Answers",
+            "type": "object"
+          },
           "application_id": {
             "anyOf": [
               {
@@ -4068,6 +4243,11 @@
             "title": "Context",
             "type": "string"
           },
+          "finish_here": {
+            "default": false,
+            "title": "Finish Here",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -4094,9 +4274,21 @@
             ],
             "title": "Job Title"
           },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/AskQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
           },
           "relayed_from_chat": {
             "default": false,
@@ -4192,9 +4384,41 @@
             "title": "Context",
             "type": "string"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "question",
+                  "captcha",
+                  "login",
+                  "upload",
+                  "safety"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "questions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AskQuestionIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questions"
           }
         },
         "required": [
@@ -4252,6 +4476,49 @@
           }
         },
         "title": "CvSeenRequest",
+        "type": "object"
+      },
+      "CvToApproveOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CvToApproveRow"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CvToApproveOut",
+        "type": "object"
+      },
+      "CvToApproveRow": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "cv": {
+            "$ref": "#/components/schemas/ReadyDoc"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "job_title",
+          "job_company",
+          "cv"
+        ],
+        "title": "CvToApproveRow",
         "type": "object"
       },
       "DoctorAuth": {
@@ -4797,6 +5064,17 @@
             "title": "Message Id",
             "type": "string"
           },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote"
+          },
           "received_at": {
             "anyOf": [
               {
@@ -4817,6 +5095,17 @@
             "default": "",
             "title": "Subject",
             "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
           }
         },
         "required": [
@@ -4836,6 +5125,17 @@
             "title": "Message Id",
             "type": "string"
           },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote"
+          },
           "received_at": {
             "anyOf": [
               {
@@ -4854,6 +5154,17 @@
           "subject": {
             "title": "Subject",
             "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
           }
         },
         "required": [
@@ -5292,6 +5603,28 @@
           "message"
         ],
         "title": "FetchUrlResponse",
+        "type": "object"
+      },
+      "FillField": {
+        "additionalProperties": false,
+        "description": "One field for action fill: a ref from the latest look and its value.",
+        "properties": {
+          "ref": {
+            "maxLength": 32,
+            "title": "Ref",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "maxLength": 5000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "title": "FillField",
         "type": "object"
       },
       "FitAxisIn": {
@@ -5913,6 +6246,219 @@
           "inbox_checked_at"
         ],
         "title": "InboxCheckedOut",
+        "type": "object"
+      },
+      "InboxItemIn": {
+        "additionalProperties": false,
+        "description": "An email the assistant could not tie to one application (EventSource's fields + dismissed).",
+        "properties": {
+          "dismissed": {
+            "default": false,
+            "title": "Dismissed",
+            "type": "boolean"
+          },
+          "kind": {
+            "default": "email",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "sender": {
+            "default": "",
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
+            "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "title": "InboxItemIn",
+        "type": "object"
+      },
+      "InboxItemOut": {
+        "description": "Feature 10 - one unmatched email the assistant stored (services/applications/inbox_items.py).",
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "sender": {
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "message_id",
+          "thread_id",
+          "sender",
+          "subject",
+          "received_at",
+          "recorded_by",
+          "created_at",
+          "resolution",
+          "application_id",
+          "job_title",
+          "job_company",
+          "resolved_by",
+          "resolved_at",
+          "event_id"
+        ],
+        "title": "InboxItemOut",
         "type": "object"
       },
       "InterviewAgenda": {
@@ -6859,6 +7405,46 @@
         "title": "KitKnownAccountOut",
         "type": "object"
       },
+      "KitLastFillOut": {
+        "description": "One answer of the newest ``form_filled``, as stored (``redacted``: hashed, ``answer`` is \"\").",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "redacted": {
+            "default": false,
+            "title": "Redacted",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer",
+          "source"
+        ],
+        "title": "KitLastFillOut",
+        "type": "object"
+      },
       "KitMissingOut": {
         "properties": {
           "key": {
@@ -7213,6 +7799,27 @@
         "title": "ListAsksResponse",
         "type": "object"
       },
+      "ListInboxItemsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InboxItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "open_count": {
+            "title": "Open Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "open_count"
+        ],
+        "title": "ListInboxItemsResponse",
+        "type": "object"
+      },
       "ListPeopleResponse": {
         "properties": {
           "people": {
@@ -7522,6 +8129,110 @@
         "title": "MarkDoneOut",
         "type": "object"
       },
+      "MatchEmailCandidateOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "contact_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Contact Ids",
+            "type": "array"
+          },
+          "email_senders": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "thread_event_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Thread Event Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "application_id",
+          "job_title",
+          "job_company",
+          "status",
+          "reasons",
+          "thread_event_ids",
+          "contact_ids",
+          "email_senders"
+        ],
+        "title": "MatchEmailCandidateOut",
+        "type": "object"
+      },
+      "MatchEmailIn": {
+        "additionalProperties": false,
+        "description": "feature 8 - the email the assistant already read; any of the three (at least one).",
+        "properties": {
+          "sender": {
+            "default": "",
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
+            "type": "string"
+          },
+          "thread_id": {
+            "default": "",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "title": "MatchEmailIn",
+        "type": "object"
+      },
+      "MatchEmailOut": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/MatchEmailCandidateOut"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "candidates",
+          "truncated"
+        ],
+        "title": "MatchEmailOut",
+        "type": "object"
+      },
       "MeResponse": {
         "properties": {
           "analytics_consent": {
@@ -7818,6 +8529,94 @@
           "last_used_at"
         ],
         "title": "OAuthGrantOut",
+        "type": "object"
+      },
+      "OutcomeSuggestionOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "email": {
+            "$ref": "#/components/schemas/EventSourceOut"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "status",
+          "event_type",
+          "quote",
+          "why",
+          "occurred_at",
+          "recorded_at",
+          "recorded_by",
+          "email"
+        ],
+        "title": "OutcomeSuggestionOut",
+        "type": "object"
+      },
+      "OutcomeSuggestionsOut": {
+        "properties": {
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeSuggestionOut"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "suggestions",
+          "truncated"
+        ],
+        "title": "OutcomeSuggestionsOut",
         "type": "object"
       },
       "OutreachCheckResponse": {
@@ -10551,6 +11350,201 @@
         "title": "RecordEventResponse",
         "type": "object"
       },
+      "RecordEventsItem": {
+        "additionalProperties": false,
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "corrects_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Event Id"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "event_type"
+        ],
+        "title": "RecordEventsItem",
+        "type": "object"
+      },
+      "RecordEventsItemOut": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordEventResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "index",
+          "ok"
+        ],
+        "title": "RecordEventsItemOut",
+        "type": "object"
+      },
+      "RecordEventsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RecordEventsItem"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "unmatched": {
+            "items": {
+              "$ref": "#/components/schemas/InboxItemIn"
+            },
+            "title": "Unmatched",
+            "type": "array"
+          }
+        },
+        "title": "RecordEventsRequest",
+        "type": "object"
+      },
+      "RecordEventsResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RecordEventsItemOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "unmatched": {
+            "items": {
+              "$ref": "#/components/schemas/UnmatchedItemOut"
+            },
+            "title": "Unmatched",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events",
+          "unmatched"
+        ],
+        "title": "RecordEventsResponse",
+        "type": "object"
+      },
       "RecordOutreachRequest": {
         "additionalProperties": false,
         "description": "``POST /api/contacts/{contact_id}/outreach`` \u2014 the one shared door\n``save_artifact``/``record_event`` (with a ``contact_id``) also call\n(M5 parity).",
@@ -10725,6 +11719,29 @@
           "released"
         ],
         "title": "ReleaseHoldOut",
+        "type": "object"
+      },
+      "ResolveInboxItemRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "dismiss": {
+            "default": false,
+            "title": "Dismiss",
+            "type": "boolean"
+          }
+        },
+        "title": "ResolveInboxItemRequest",
         "type": "object"
       },
       "SaveArtifactRequest": {
@@ -14404,6 +15421,72 @@
         "title": "TypeFirstAnswer",
         "type": "object"
       },
+      "UnmatchedItemOut": {
+        "properties": {
+          "already_existed": {
+            "default": false,
+            "title": "Already Existed",
+            "type": "boolean"
+          },
+          "already_recorded": {
+            "default": false,
+            "title": "Already Recorded",
+            "type": "boolean"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "inbox_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Item Id"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "resolution": {
+            "default": "",
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "ok"
+        ],
+        "title": "UnmatchedItemOut",
+        "type": "object"
+      },
       "UpdateContactRequest": {
         "additionalProperties": false,
         "description": "``PATCH /api/contacts/{contact_id}`` \u2014 every field optional; only the\nones given are appended to ``contact_edits`` (owner decision, 2026-09-25:\ncontacts ARE editable, old values kept). No length caps declared here \u2014\nsame reasoning as ``AddContactRequest``: ``contacts.update_contact``\nchecks live ``settings`` values at call time.",
@@ -15014,6 +16097,13 @@
               "$ref": "#/components/schemas/WhatsNewEventOut"
             },
             "title": "Events",
+            "type": "array"
+          },
+          "inbox_items": {
+            "items": {
+              "$ref": "#/components/schemas/InboxItemOut"
+            },
+            "title": "Inbox Items",
             "type": "array"
           },
           "interviews": {
@@ -15710,6 +16800,224 @@
           }
         },
         "summary": "List Lessons",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/match-email": {
+      "post": {
+        "description": "Feature 8 (G088): the user's applications that a STORED fact links to this email -\nsame thread, a saved contact's email, a sender domain in email_senders, the company named\nin the subject - each with its reasons. Facts, not a verdict: the assistant decides\n(VISION rule 5). Read-only. POST so the sender and subject never sit in a URL or access log.",
+        "operationId": "match_email_api_applications_match_email_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MatchEmailIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchEmailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Match Email",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/outcome-suggestions": {
+      "get": {
+        "description": "Feature 9: open outcome_suggested events (not ignored, and their email not yet recorded\non the application), newest first. Read-only; web only (an assistant reads them on\nget_application / whats_new).",
+        "operationId": "list_outcome_suggestions_api_applications_outcome_suggestions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeSuggestionsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Outcome Suggestions",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/record-events": {
+      "post": {
+        "description": "Feature 10 (G289): record several emails in one call. `events` run through the SAME route\nfunction as record_event (every validator, one result per item); `unmatched` mail is stored once\nper message id as a Needs-you inbox item. One refused item never stops the others.",
+        "operationId": "record_events_api_applications_record_events_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordEventsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordEventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Events",
         "tags": [
           "applications"
         ]
@@ -20630,7 +21938,7 @@
     },
     "/api/browser": {
       "post": {
-        "description": "One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,\nclose). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant\nreads them like any page; a 404 from the gate (not the caller's application) stays a 404.",
+        "description": "One action in the caller's cloud browser (open, look, click, type, choose, tick, fill, upload, back,\nclose). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant\nreads them like any page; a 404 from the gate (not the caller's application) stays a 404.",
         "operationId": "browser_action_api_browser_post",
         "parameters": [
           {
@@ -21725,6 +23033,72 @@
         ]
       }
     },
+    "/api/cv-to-approve": {
+      "get": {
+        "description": "Approve CV on Needs you (owner decision 2026-10-23): the caller's open applications whose newest CV\nthey have not seen yet, from chat or the web. \"CV OK\" is ``POST /applications/{id}/cv-seen``.",
+        "operationId": "cv_to_approve_api_cv_to_approve_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CvToApproveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cv To Approve",
+        "tags": [
+          "ready-to-send"
+        ]
+      }
+    },
     "/api/deployz": {
       "get": {
         "description": "Deploy healthcheck (2026-10-22): readyz's DB check, then the browser hold.\n\nA new container answers 503 ``holding`` while the OLD process still has a recently active\ncloud browser, for at most ``DEPLOY_HOLD_MAX_SECONDS`` after this process booted, so Railway\nkeeps the old container (and its half-filled form) serving. See\n``services/browser_agent/deploy_hold.py``. Public, since Railway's healthcheck sends no\ncredentials; the body carries no user data and no counts.\n\n200 ``{\"status\": \"ready\"}``\n503 ``{\"status\": \"not_ready\", \"reason\": \"pool_timeout\" | \"db_error\"}`` (wins over the hold)\n503 ``{\"status\": \"holding\", \"reason\": \"browser_busy\", \"held_s\": <seconds since boot>}``",
@@ -21962,6 +23336,179 @@
         "summary": "Hunt Kit File",
         "tags": [
           "hunt-kit"
+        ]
+      }
+    },
+    "/api/inbox-items": {
+      "get": {
+        "description": "Feature 10: unmatched mail the assistant stored (open, or all).",
+        "operationId": "list_inbox_items_api_inbox_items_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListInboxItemsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Inbox Items",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/inbox-items/{item_id}/resolve": {
+      "post": {
+        "description": "The user's pick: match the email to one of their applications, or dismiss it. Stores the pick\nand writes no event (only the assistant read the mail). No MCP tool: the assistant records the event.",
+        "operationId": "resolve_inbox_item_api_inbox_items__item_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveInboxItemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Inbox Item",
+        "tags": [
+          "asks"
         ]
       }
     },

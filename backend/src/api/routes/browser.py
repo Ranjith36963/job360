@@ -45,6 +45,15 @@ from src.utils.logger import get_audit_logger, safe_log_value
 router = APIRouter(tags=["browser"])
 
 
+class FillField(BaseModel):
+    """One field for action fill: a ref from the latest look and its value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str = Field(max_length=32)
+    text: str = Field("", max_length=browser_agent.MAX_TYPE_CHARS)
+
+
 class BrowserActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +65,7 @@ class BrowserActionRequest(BaseModel):
     doc_kind: str = Field("", max_length=16)
     application_id: Optional[int] = None
     session: str = Field("", max_length=64)
+    fields: list[FillField] = Field(default_factory=list, max_length=browser_agent.MAX_FILL_FIELDS)
 
 
 OFF = {
@@ -193,7 +203,7 @@ async def browser_action(
     body: BrowserActionRequest,
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """One action in the caller's cloud browser (open, look, click, type, choose, tick, upload, back,
+    """One action in the caller's cloud browser (open, look, click, type, choose, tick, fill, upload, back,
     close). Refusals come back as ``status`` + ``reason`` + ``detail`` with HTTP 200, so an assistant
     reads them like any page; a 404 from the gate (not the caller's application) stays a 404."""
     if not settings.BROWSER_AGENT_ENABLED:
@@ -207,7 +217,7 @@ async def browser_action(
         result = await browser_agent.run(
             browser_agent.get_pool(), user.id, body.action, url=body.url, ref=body.ref, text=body.text,
             on=body.on, doc_kind=body.doc_kind, gate=gate, files=files, load_state=_loader(user),
-            owner=body.session,
+            owner=body.session, fields=[f.model_dump() for f in body.fields],
         )
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
@@ -220,6 +230,8 @@ async def browser_action(
         return refused
     if result.get("status") == "needs_you" and body.application_id is not None:
         result["blocked_recorded"] = await _hand_off(user, body.application_id, result)
+    elif body.action in _FILL_ACTIONS and body.application_id is not None and result.get("status") == "ok":
+        result["held_for_you"] = await _hold_if_waiting(user, body.application_id)
     _audit(user, body.action, str(result.get("status", "")), str(result.get("reason", "")))
     return result
 
@@ -235,6 +247,22 @@ CAPTCHA_DETAIL = (
     "The site asked for a human check. Your filled form is kept open for 30 minutes: press Finish it here, "
     "solve the check yourself, then press Done. After that, finish it in your own browser."
 )
+
+
+# A refill of a form whose CAPTCHA waits on the user: keep it open for them, like the first time (owner, 2026-10-24).
+_FILL_ACTIONS = frozenset({"fill", "type", "choose", "tick", "upload"})
+
+
+async def _hold_if_waiting(user: CurrentUser, application_id: int) -> bool:
+    """The application's open block is a CAPTCHA in Job360's browser: hold the browser 30 minutes so the
+    user finishes it on Needs you instead of the 10-minute idle close. True when held."""
+    from src.services.applications import blocked as blocked_service  # noqa: PLC0415
+
+    async with _db() as db:
+        block = await blocked_service.open_block(db, user.id, application_id)
+    if not block or block["reason"] != "captcha" or block["step"] != "Job360 browser":
+        return False
+    return browser_agent.hold_for_user(browser_agent.get_pool(), user.id)
 
 
 async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:

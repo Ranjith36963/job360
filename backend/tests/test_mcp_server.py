@@ -32,12 +32,14 @@ EXPECTED_TOOLS = {
     "get_application",
     "list_applications",
     "mark_inbox_checked",
+    "match_email",  # Route an email back to its application from stored facts (feature 8) - 33 -> 34.
     # Owner 2026-10-23 - the scheduled run: what is due, and stamp a duty done (migration 0082).
     "whats_due",
     "mark_done",
     "save_artifact",
     "save_fit",
     "record_event",
+    "record_events",  # Batch email record + unmatched-mail store (feature 10) - 34 -> 35.
     "whats_new",
     "export_history",
     # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md §Tool contracts)

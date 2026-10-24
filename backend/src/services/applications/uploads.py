@@ -64,11 +64,16 @@ async def record(
         }
         if artifact.get("version_no") is not None:
             payload["version"] = int(artifact["version_no"])
-        result = await spine.append_event(
-            db, user_id=user_id, application_id=application_id, event_type=EVENT_TYPE, payload=payload,
-            occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=recorded_by,
-        )
-        event_id = int(result["event_id"])
+        async with db._db.transaction():
+            # Read the open block BEFORE the upload lands: afterwards `open_block` already reads it as cleared.
+            stale_ask_id = await _failed_upload_ask_id(db, user_id, application_id)
+            result = await spine.append_event(
+                db, user_id=user_id, application_id=application_id, event_type=EVENT_TYPE, payload=payload,
+                occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=recorded_by,
+            )
+            event_id = int(result["event_id"])
+            if stale_ask_id is not None:
+                await _close_failed_upload_ask(db, user_id, application_id, stale_ask_id, recorded_by)
     except Exception:  # noqa: BLE001 - the upload / download goes ahead whatever happens here
         get_audit_logger().warning(
             "document_uploaded_failed",
@@ -89,6 +94,37 @@ async def record(
         },
     )
     return event_id
+
+
+async def _failed_upload_ask_id(db: JobDatabase, user_id: str, application_id: int) -> Optional[int]:
+    """The Needs-you ask id of this application's open ``upload_failed`` block, else None (any other
+    reason, no block, or a block that opened no ask)."""
+    from src.services.applications import blocked  # noqa: PLC0415 - blocked imports spine
+
+    block = await blocked.open_block(db, user_id, application_id)
+    if block and block["reason"] == "upload_failed" and isinstance(block["ask_id"], int):
+        return int(block["ask_id"])
+    return None
+
+
+async def _close_failed_upload_ask(
+    db: JobDatabase, user_id: str, application_id: int, ask_id: int, recorded_by: str
+) -> None:
+    """The later upload worked: withdraw the block's ask the way ``unblocked`` does (blocked.after_append)."""
+    from src.services.applications import asks as asks_service  # noqa: PLC0415 - asks imports spine
+    from src.services.applications.spine import SpineError  # noqa: PLC0415
+
+    try:
+        await asks_service.withdraw_ask(db, user_id, ask_id, recorded_by, "the later upload worked")
+    except SpineError:  # already answered or withdrawn in between: nothing left to close
+        return
+    get_audit_logger().info(
+        "upload_failed_ask_closed",
+        extra={
+            "event": "upload_failed_ask_closed", "user_id": safe_log_value(user_id),
+            "application_id": int(application_id), "ask_id": int(ask_id), "result": "ok",
+        },
+    )
 
 
 def _int_or_none(value: Any) -> Optional[int]:

@@ -395,6 +395,11 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # check_submit {to, subject, attachments: [{artifact_id, sha256 of the text}], gmail_draft_id?}; never
     # the body. Checked in services/applications/email_channel.py; read by the gate and the receipt.
     "email_drafted",
+    # Feature 9 (G073, 2026-10-20): the assistant is not sure what an email means.
+    # `outcome_suggested` {event_type, quote, why} (+ the email, stored as payload.email) waits
+    # on Needs you; `outcome_dismissed` {suggestion_event_id} is the user's Ignore. Note-family:
+    # neither moves the status. Checked in services/applications/outcome_suggestions.py.
+    "outcome_suggested", "outcome_dismissed",
 )
 SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
@@ -419,6 +424,31 @@ APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS = int(
 )
 APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS", "320"))
 APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS", "500"))
+APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_THREAD_ID_MAX_CHARS", "256"))
+# match_email (feature 8): at most this many candidate applications per call, newest
+# first; `truncated` says more existed.
+MATCH_EMAIL_MAX_CANDIDATES = int(os.getenv("MATCH_EMAIL_MAX_CANDIDATES", "20"))
+# Feature 9 (G073): the verbatim sentence an email-sourced event may carry (source.quote),
+# also the cap on outcome_suggested's payload.quote. A breach is 422 naming this setting.
+APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_QUOTE_MAX_CHARS", "500"))
+# Which status outcomes an assistant may SUGGEST instead of recording. Derived from the
+# status tuple (like APPLICATION_SCHEDULABLE_EVENT_TYPES) so a rename cannot leave a stale name.
+# Not applied (a repeat is already a confirmation note), withdrawn / offer_declined (the user's
+# own decisions), ghosted (Job360 sets it) or hired.
+_SUGGESTABLE_NAMES = {"replied", "interview_requested", "interview_scheduled", "offer", "rejected"}
+APPLICATION_OUTCOME_SUGGESTION_EVENT_TYPES = tuple(
+    t for t in APPLICATION_STATUS_EVENT_TYPES if t in _SUGGESTABLE_NAMES
+)
+APPLICATION_OUTCOME_SUGGESTION_WHY_MAX_CHARS = int(os.getenv("APPLICATION_OUTCOME_SUGGESTION_WHY_MAX_CHARS", "300"))
+# GET /api/applications/outcome-suggestions: at most this many open ones, newest first.
+OUTCOME_SUGGESTIONS_LIST_MAX = int(os.getenv("OUTCOME_SUGGESTIONS_LIST_MAX", "50"))
+
+# record_events + inbox_items (feature 10): every cap a parameter, a breach names it.
+RECORD_EVENTS_MAX_ITEMS = int(os.getenv("RECORD_EVENTS_MAX_ITEMS", "50"))  # events + unmatched per call
+INBOX_ITEMS_MAX_OPEN_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_OPEN_PER_USER", "200"))
+INBOX_ITEMS_MAX_PER_USER = int(os.getenv("INBOX_ITEMS_MAX_PER_USER", "2000"))  # open + resolved + dismissed
+INBOX_ITEMS_RECENT_DAYS = int(os.getenv("INBOX_ITEMS_RECENT_DAYS", "30"))  # resolved items whats_new still lists
+INBOX_ITEMS_WHATS_NEW_MAX = int(os.getenv("INBOX_ITEMS_WHATS_NEW_MAX", "100"))
 
 # R3 — which status event types accept a `scheduled_at`. Derived from
 # APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)

@@ -17,11 +17,20 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: vi.fn(),
   declineSettingRequest: vi.fn(),
+  // The job cards have their own tests (JobCard.test.tsx). A job record that fails to load drops
+  // its card and its asks show as plain cards under "Other questions", which these tests cover.
+  getApplication: () => Promise.reject(new Error("no job record in this test")),
+  getCvToApprove: async () => ({ items: [] }),
+  listPeople: async () => ({ people: [] }),
 }));
 // The morning check has its own tests (MorningCheck.test.tsx).
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
+vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
+// Approve CV has its own tests (CvToApprove.test.tsx).
+vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
+vi.mock("./UnmatchedMail", () => ({ UnmatchedMail: () => null }));
 // Ready to send has its own tests (ReadyToSend.test.tsx).
 // Ready to send has its own tests; this stand-in only reports its total for the badge.
 const readyMock = vi.hoisted(() => ({ total: 0 }));
@@ -34,6 +43,14 @@ vi.mock("./ReadyToSend", async () => {
     },
   };
 });
+// The live view is tested in ApplicationDecisions.test.tsx; this stand-in only offers Done.
+vi.mock("@/components/applications/FinishInBrowser", () => ({
+  FinishInBrowser: ({ onDone }: { onDone: () => void }) => (
+    <button type="button" data-testid="finish-view" onClick={onDone}>
+      Done
+    </button>
+  ),
+}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const base = {
@@ -64,6 +81,11 @@ function setup(open: unknown[], answered: unknown[] = []) {
   );
 }
 
+// An answered ask shows as one line; "Change" opens the full card these tests check.
+async function openAnswered() {
+  for (const b of await screen.findAllByTestId(/^answered-change-/)) fireEvent.click(b);
+}
+
 beforeEach(() => {
   listAsks.mockReset();
   answerAsk.mockReset().mockResolvedValue({});
@@ -72,6 +94,21 @@ beforeEach(() => {
 });
 
 describe("NeedsYou", () => {
+  it("a CAPTCHA in Job360's browser offers Finish it here on the card; other asks do not", async () => {
+    setup([
+      { ...base, id: 3, question: "Your assistant got stuck: a CAPTCHA", status: "open", finish_here: true },
+      { ...base, id: 4, application_id: 8, question: "Salary?", status: "open", finish_here: false },
+    ]);
+    render(<NeedsYou />);
+    const button = await screen.findByTestId("ask-finish-here");
+    expect(screen.getAllByTestId("ask-finish-here")).toHaveLength(1);
+    expect(screen.getByTestId("ask-3").contains(button)).toBe(true);
+    fireEvent.click(button);
+    fireEvent.click(await screen.findByTestId("finish-view"));
+    expect(await screen.findByTestId("ask-finish-done")).toHaveTextContent("Did it go through?");
+    expect(screen.getByRole("link", { name: /I submitted it/ })).toHaveAttribute("href", "/applications/7");
+  });
+
   it("renders the question as literal text, never HTML", async () => {
     setup([openAsk]);
     const { container } = render(<NeedsYou />);
@@ -117,6 +154,7 @@ describe("NeedsYou", () => {
         : { asks: [confirmAsk.mock.calls.length ? done : relayed, { ...base, id: 5, question: "Q5", status: "answered", answer: "A5", answered_by: "agent:Claude" }], open_count: 0 }
     );
     render(<NeedsYou />);
+    await openAnswered();
     const btn = await screen.findByTestId("confirm-relayed");
     expect(screen.getAllByTestId("confirm-relayed")).toHaveLength(1); // not on the assistant-only answer
     fireEvent.click(btn);
@@ -138,6 +176,7 @@ describe("NeedsYou", () => {
       ]
     );
     render(<NeedsYou />);
+    await openAnswered();
     const relayed = await screen.findByTestId("ask-relayed-from-chat");
     expect(relayed).toHaveTextContent("You said (via Claude): its two months, give or take");
     // only the relayed card shows it; the assistant-only answer is unchanged
@@ -153,6 +192,7 @@ describe("NeedsYou", () => {
       ]
     );
     render(<NeedsYou />);
+    await openAnswered();
     expect(await screen.findByText("You answered on Job360")).toBeInTheDocument();
     expect(
       screen.getByText("Your assistant recorded your answer from chat")
@@ -201,6 +241,7 @@ describe("NeedsYou", () => {
     const done = { ...base, id: 2, question: "Q2", status: "answered", answer: "A2", answered_by_user: true };
     setup([], [done]);
     render(<NeedsYou />);
+    await openAnswered();
     fireEvent.click(await screen.findByTestId("ask-change"));
     fireEvent.change(screen.getByTestId("ask-input-2"), { target: { value: "B2" } });
     setup([], [{ ...done, answer: "B2" }]);

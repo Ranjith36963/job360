@@ -45,8 +45,8 @@ Print this checklist and tick each step:
        the browser. Never send through a Gmail connector - connectors only
        draft. No browser control: treat it as `ask`. Then record
        `outreach_sent` at once.
-     - `ask`: save a Gmail draft and `ask_user` "Press Send on the draft to
-       <name>" (Needs you); the user sends.
+     - `ask`: save a Gmail draft; the saved message shows under People to
+       reach on Needs you (no `ask_user`); the user sends.
      - `stop`: do not send; tell the user its `detail` in one line.
    - `draft_only` (the default): draft only. The user sends it.
      Never send it yourself.

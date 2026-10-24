@@ -57,8 +57,9 @@ name: Post-merge watch (the eyes after the merge)
 #   SENTRY_NOISE_ESCALATE_EVENTS 20   ... ONLY below this many events: a flood trips.
 #   SETTLE_MINUTES                5   quiet time after THIS commit's deploy reports
 #                                     SUCCESS before the watch window starts.
-#   DEPLOY_WAIT_MINUTES          10   longest wait for that SUCCESS (job budget: 6 min
-#                                     readyz + 10 + 5 version + 5 settle + 15 watch < 50 min).
+#   DEPLOY_WAIT_MINUTES          16   longest wait for that SUCCESS: a deploy held by a busy cloud
+#                                     browser (/api/deployz) waits up to 10 min more (job budget:
+#                                     6 min readyz + 16 + 5 version + 5 settle + 15 watch < 50 min).
 #   DEPLOY_VERSION_WAIT_MINUTES   5   longest wait for /api/version to serve THIS sha.
 #   DEPLOY_BUILD_MINUTES          4   estimate used when a queued run finds the deploy
 #                                     already SUCCESS (Railway gives no SUCCESS time).
@@ -264,7 +265,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           DEPLOY_SERVICE: backend
-          DEPLOY_WAIT_MINUTES: "10"
+          DEPLOY_WAIT_MINUTES: "16"
           DEPLOY_VERSION_WAIT_MINUTES: "5"
           DEPLOY_BUILD_MINUTES: "4"
           SETTLE_MINUTES: ${{ inputs.settle_minutes || '5' }}
