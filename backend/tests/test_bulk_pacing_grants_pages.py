@@ -514,7 +514,7 @@ async def test_a_two_page_form_stops_until_every_page_is_swept(authenticated_asy
         await rec("form_filled", form_url=FORM, fields_count=3)
         await rec("form_swept", fields_checked=2, fixed=0, page=1, pages_total=2)
         body = await _check(client, app_id)
-        assert (body["decision"], body["reason"]) == ("stop", "form_pages_incomplete")
+        assert (body["decision"], body["reason"]) == ("fill", "form_pages_incomplete")
         await rec("form_checked", questions_count=1, answered=1, missing=0, page=2, pages_total=2)
         body = await _check(client, app_id)
         assert body["reason"] == "form_pages_incomplete", "page 2 is checked but not swept"

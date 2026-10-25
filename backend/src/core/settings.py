@@ -681,6 +681,10 @@ OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000")
 # operator knobs (no env). Warn-only save check: cv_checks.linkedin_note_too_long.
 LINKEDIN_NOTE_MAX_CHARS = 200
 LINKEDIN_NOTE_MAX_CHARS_PREMIUM = 300
+# What an outreach draft is (save_artifact `draft_kind`, optional, not stored): a connection_note must
+# fit the note limit above and an inmail body LinkedIn's hard limit, else the save is refused.
+OUTREACH_DRAFT_KINDS = ("connection_note", "message", "inmail", "email")
+LINKEDIN_INMAIL_BODY_MAX_CHARS = 1900
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
 # Outreach pack #13 — the caller's own variant label on a message version / a template
 # (stats `by_outreach_variant` groups on lower(trim(label))). Free text, one line.
@@ -747,8 +751,12 @@ CONTACT_RELATIONSHIP = (
 CONTACT_SHARED_SOURCES = ("cv_data.cv_positions", "cv_data.cv_projects", "cv_data.education")
 CONTACT_EDIT_FIELDS = (
     "name", "role", "email", "linkedin_url", "notes", "found_via", "source_url", "company", "email_source",
-    "relationship", "shared", "phone", "links",
+    "relationship", "shared", "phone", "links", "linkedin_state",
 )
+# Owner 2026-10-24 - is the user connected to this person on LinkedIn? It decides which draft fits:
+# connected = a message; not_connected = a connection note; pending = draft nothing new. Unset reads as
+# unknown (rule #29); the user or an assistant sets it (update_contact), each change kept with who/when.
+LINKEDIN_STATES = ("connected", "not_connected", "pending", "unknown")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
@@ -933,6 +941,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.outreach_send",
     # Owner 2026-10-23 - hunt for jobs every N hours (1-168; null / 0 = off). Turning it on is riskier.
     "assistant_settings.hunt_every_hours",
+    # Owner 2026-10-24 - find people to reach for new applications on the schedule (true / false). On is riskier.
+    "assistant_settings.people_hunt",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )
@@ -983,8 +993,13 @@ ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUE
 # is expected to wake (returned as `expected_every_hours`). Duties are a closed set; `tick` is the
 # stamp of the last scheduled run. Reads and marks are per-user rate limited (a loop cannot hammer).
 SCHEDULE_TICK_HOURS = int(os.getenv("SCHEDULE_TICK_HOURS", "1"))
-SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch")
-SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batch": "batch"}
+SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch", "reach")
+SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batch": "batch", "reach": "reach"}
+# Owner 2026-10-24 - the PEOPLE hunt (duty `reach`): open applications (considering/applied) brought or
+# applied in the last REACH_WINDOW_DAYS with no assistant-added person and no reach stamp yet, newest
+# first, at most REACH_MAX_PER_RUN per run. Sends stay capped by check_outreach (OUTREACH_COMPANY_MAX).
+REACH_WINDOW_DAYS = 14
+REACH_MAX_PER_RUN = 5
 SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
 SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and

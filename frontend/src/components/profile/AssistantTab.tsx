@@ -24,6 +24,8 @@ import {
   P_EVERY,
   P_HUNT_EVERY,
   P_INBOX,
+  P_PEOPLE_HUNT,
+  PEOPLE_HUNT_HELP,
   P_SCORE,
   PREF_HISTORY_PATHS,
   everyText,
@@ -31,6 +33,7 @@ import {
   huntText,
   inboxKey,
   mergeHistory,
+  peopleHuntLastText,
   settingAutoEmails,
   settingOutreachSend,
   settingScore,
@@ -221,6 +224,7 @@ export function AssistantTab() {
   const every = view.check_every ?? "";
   const savedScore: number | null = settingScore(view.apply_min_score);
   const savedHunt: number | null = settingScore(view.hunt_every_hours);
+  const peopleHunt = settingAutoEmails(view.people_hunt);
   const liveState = { apply_min_score: savedScore, above_line: aboveLine, below_line: belowLine, submit_mode };
   function commitScore() {
     const t = score.trim();
@@ -399,6 +403,28 @@ export function AssistantTab() {
               {savedHunt === 1 ? "hour" : "hours"}
             </label>
           </Row>
+          <Row title="People hunt" sub={PEOPLE_HUNT_HELP}>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={peopleHunt}
+              aria-label="People hunt"
+              data-testid="people-hunt-toggle"
+              disabled={busy}
+              onClick={() => void save(P_PEOPLE_HUNT, !peopleHunt)}
+              className={cn(
+                "min-h-11 rounded-lg border border-border px-3.5 text-sm font-medium md:min-h-9",
+                peopleHunt ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {peopleHunt ? "On" : "Off"}
+            </button>
+            {peopleHunt && (
+              <span className="text-[13px] text-muted-foreground" data-testid="people-hunt-last">
+                {peopleHuntLastText(view.people_hunt_last_at)}
+              </span>
+            )}
+          </Row>
         </Section>
 
         <Section title="Employer emails" hint="Sent in your name by your assistant">
@@ -553,6 +579,7 @@ export function AssistantTab() {
                 ...(today ? [["Today", quotaText(today.state.applied_today, today.state.daily_cap).replace(/ today$/, "")]] : []),
                 ...(inbox ? [["Gmail check", [INBOX_MODES.find((m) => m.value === inbox)?.label, everyText(every)].filter(Boolean).join(", ")]] : []),
                 ...(savedHunt !== null ? [["Job hunt", huntText(savedHunt)]] : []),
+                ...(peopleHunt ? [["People hunt", "On"]] : []),
               ] as [string, string][]
             ).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3">

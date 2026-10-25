@@ -88,10 +88,15 @@ export const P_EVERY = "preferences.check_every";
 /** Owner 2026-10-23: hunt for jobs every N hours (1-168); empty or 0 = off. */
 export const P_HUNT_EVERY = "assistant_settings.hunt_every_hours";
 export const HUNT_EVERY_MAX = 168;
+/** Owner 2026-10-24: may the user's scheduled task find people to reach for new applications. */
+export const P_PEOPLE_HUNT = "assistant_settings.people_hunt";
+export const PEOPLE_HUNT_HELP =
+  "From its own scheduled task, your assistant finds up to 2 people for each new application and writes the messages. You send them yourself.";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
   P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND,
   P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
+  P_PEOPLE_HUNT,
 ] as const;
 export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
 export const HISTORY_PATHS: string[] = [...SETTING_HISTORY_PATHS, ...PREF_HISTORY_PATHS];
@@ -114,6 +119,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_INBOX]: "Gmail check",
   [P_EVERY]: "Inbox check",
   [P_HUNT_EVERY]: "Job hunt",
+  [P_PEOPLE_HUNT]: "People hunt",
 };
 
 /** "auto"/"scheduled" -> auto, "declined" -> paused (Off); anything else as stored. */
@@ -127,6 +133,11 @@ export function everyText(v: unknown): string {
   return n === "1" ? "every hour" : n ? `every ${n} hours` : "";
 }
 
+/** When the people hunt last ran, in words; "not run yet" when it never has. */
+export function peopleHuntLastText(iso: string | null | undefined, now: Date = new Date()): string {
+  return iso ? `Last ran ${historyWhen(iso, now)}` : "Not run yet";
+}
+
 /** A saved hunt interval in words: 6 -> "every 6 hours"; empty or 0 -> "off". */
 export function huntText(v: unknown): string {
   const n = typeof v === "number" ? v : Number.NaN;
@@ -137,7 +148,7 @@ export function huntText(v: unknown): string {
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
-  if (path === P_AUTO_EMAILS) return v === true ? "on" : "off";
+  if (path === P_AUTO_EMAILS || path === P_PEOPLE_HUNT) return v === true ? "on" : "off";
   if (path === P_OUTREACH_SEND) return v === "auto" ? "on" : "off";
   if (path === P_CAP || path === P_COMPANY_CAP || path === P_WEEKLY_CAP) return empty ? "no limit" : String(v);
   if (path === P_MIN_GAP) return empty || v === 0 ? "no wait" : `${String(v)} minutes`;

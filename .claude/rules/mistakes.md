@@ -63,6 +63,10 @@ before every session (Anthropic: rules without `paths` load unconditionally).
 - To list a session's PRs, page `pulls?state=all` and filter bodies; `in:body` search misses most.
 - To test a doc's "the single/only X" claim, enumerate what DOES X (grep `psycopg.connect`,
   `@mcp.tool()`, the decorator) — never X's importers; they cannot show a second doer.
+- Worker briefs forbid `pytest.importorskip` and any skip or quarantine: the test-integrity check goes red (#1107, #1135).
+- Run `npm ci` before `npm run lint` in a long-lived checkout; a stale node_modules lacks new rules (#1134, 2026-10-23).
+- Name `model:` on every Agent call (model-delegation); an unnamed worker inherits the lead's model (2026-10-24).
+- A watcher checks its grep found a commit before it loops; an empty `merge=` never finishes (2026-10-23).
 
 ## Probing job sites
 - Call a site "blocked" only after testing the exact endpoint the reader uses, and name it
@@ -75,6 +79,7 @@ before every session (Anthropic: rules without `paths` load unconditionally).
   Worker briefs say "stop that ATS on the first 429", never "per host" (2026-10-20: 90 refusals).
 - A new doc's kind is LIVING/PLAN/LOG/REFERENCE/FROZEN/GENERATED only; run
   `python scripts/doc_sync_check.py` before pushing a docs PR (2026-10-20: `SNAPSHOT` blocked #935).
+- Open every web-search job hit before bringing it; hits go stale. Prefer live board APIs (hunt kit) (2026-10-24).
 
 ## Real applications for the owner
 - An answer that is not clearly yes/no gets one clarifying question.

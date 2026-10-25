@@ -503,3 +503,87 @@ async def test_i_submitted_it_on_another_users_application_is_404(authenticated_
         assert await _counts(owner, app_id) == (0, 0, 0)
         assert (await owner.get(f"/api/applications/{app_id}/controls")).json()["blocked"] is not None
 
+
+
+# ── a later document_uploaded closes the upload_failed ask (prod app 99, ask 32) ─────────────────
+
+
+async def _upload(user_id: str, app_id: int) -> int | None:
+    """One real server-written ``document_uploaded`` (the same call the browser and file link make)."""
+    import contextlib
+
+    from src.api.dependencies import get_request_db
+    from src.services.applications import uploads
+
+    async with contextlib.asynccontextmanager(get_request_db)() as db:
+        return await uploads.record(
+            db, user_id=user_id, application_id=app_id, kind="cv", artifact={"id": 1, "version_no": 1},
+            data=b"cv bytes", fmt="pdf", renderer_version="t1", host="jobs.northwind.example",
+            recorded_by="job360 browser",
+        )
+
+
+async def _open_block(user_id: str, app_id: int) -> dict[str, Any] | None:
+    import contextlib
+
+    from src.api.dependencies import get_request_db
+
+    async with contextlib.asynccontextmanager(get_request_db)() as db:
+        return await blocked_service.open_block(db, user_id, app_id)
+
+
+async def _ask(client: AsyncClient, ask_id: int) -> dict[str, Any]:
+    resp = await client.get("/api/asks", params={"status": "all"})
+    assert resp.status_code == 200, resp.text
+    return next(a for a in resp.json()["asks"] if a["id"] == ask_id)
+
+
+@pytest.mark.asyncio
+async def test_later_upload_closes_the_upload_failed_ask(authenticated_async_context, log_capture):
+    user_id = authenticated_async_context.fixture_user_id
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        resp = await _event(client, app_id, "blocked", _blocked(reason="upload_failed"))
+        assert resp.status_code == 201, resp.text
+        [ask] = await _open_asks(client, app_id)
+        assert (await _open_block(user_id, app_id))["ask_id"] == ask["id"]
+        assert await _upload(user_id, app_id) is not None
+        assert await _open_asks(client, app_id) == []
+        closed = await _ask(client, ask["id"])
+        assert closed["status"] != "open" and closed["withdrawn_reason"] == "the later upload worked"
+        assert await _open_block(user_id, app_id) is None
+    lines = [r for r in log_capture.records if r.get("event") == "upload_failed_ask_closed"]
+    assert len(lines) == 1
+    assert lines[0]["application_id"] == app_id and lines[0]["ask_id"] == ask["id"]
+    assert lines[0]["user_id"] == user_id
+
+
+@pytest.mark.asyncio
+async def test_upload_does_not_close_a_captcha_ask(authenticated_async_context):
+    user_id = authenticated_async_context.fixture_user_id
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        assert (await _event(client, app_id, "blocked", _blocked(reason="captcha"))).status_code == 201
+        [ask] = await _open_asks(client, app_id)
+        assert await _upload(user_id, app_id) is not None
+        assert [a["id"] for a in await _open_asks(client, app_id)] == [ask["id"]]
+        assert (await _open_block(user_id, app_id))["reason"] == "captcha"
+
+
+@pytest.mark.asyncio
+async def test_upload_on_another_application_leaves_this_ask_open(authenticated_async_context):
+    user_id = authenticated_async_context.fixture_user_id
+    async with authenticated_async_context() as client:
+        app_a = await _bring(client)
+        other = await client.post(
+            "/api/jobs/bring",
+            json={**_AD, "title": "Platform Engineer", "apply_url": "https://northwind.example/careers/8"},
+        )
+        assert other.status_code == 200, other.text
+        app_b = int(other.json()["application_id"])
+        assert app_b != app_a
+        assert (await _event(client, app_a, "blocked", _blocked(reason="upload_failed"))).status_code == 201
+        [ask] = await _open_asks(client, app_a)
+        assert await _upload(user_id, app_b) is not None
+        assert [a["id"] for a in await _open_asks(client, app_a)] == [ask["id"]]
+        assert (await _open_block(user_id, app_a))["reason"] == "upload_failed"

@@ -78,9 +78,14 @@ def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
+# Optional fields added after keys were first stored: left out while unset, so an old key still matches.
+_KEY_BODY_SKIP_WHEN_UNSET = ("draft_kind",)
+
+
 def _key_body(body: BaseModel) -> dict[str, Any]:
     """The idempotency body (slice 25): the request's own fields, minus the key itself."""
-    return body.model_dump(exclude={"client_key"})
+    skip = {k for k in _KEY_BODY_SKIP_WHEN_UNSET if getattr(body, k, None) is None}
+    return body.model_dump(exclude={"client_key"} | skip)
 
 
 async def _client_key_once(
@@ -136,6 +141,8 @@ class SaveArtifactRequest(BaseModel):
     # `contact_id` but no `application_id`.
     contact_id: Optional[int] = None
     channel: Optional[str] = None
+    # Owner 2026-10-24 - with contact_id: what the draft is (OUTREACH_DRAFT_KINDS), checked on save.
+    draft_kind: Optional[str] = None
     # Owner decision 2026-10-04 — the ASSISTANT's own ATS check of this
     # document (Job360 never computes one). Only kinds in
     # APPLICATION_ARTIFACT_ATS_KINDS (cv, cover_letter) may carry it — any
@@ -678,6 +685,8 @@ class ContactOut(BaseModel):
     confirmed: bool = False  # the user confirmed this person on the web (web-added = confirmed)
     # Derived, never stored: an email or LinkedIn URL is saved.
     reachable: bool = False
+    # Owner 2026-10-24 - LINKEDIN_STATES; null = unknown (rule #29).
+    linkedin_state: Optional[str] = None
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
@@ -1473,13 +1482,18 @@ class TypeFirstAnswer(BaseModel):
 class SubmitCheckResponse(BaseModel):
     """The answer to "may I press submit on this application?" - one gate
     (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
-    stop before submit and ask the user yes for this one; ``stop``: do not submit.
-    ``reason`` is a closed code; ``detail`` is one plain sentence."""
+    stop before submit and ask the user yes for this one; ``fill``: do ``next_action``
+    now, then check again (never a reason to end the run); ``stop``: do not submit
+    this one (``stop_run`` true = end the whole run). ``reason`` is a closed code;
+    ``detail`` is one plain sentence."""
 
     application_id: int
-    decision: Literal["submit", "ask", "stop"]
+    decision: Literal["submit", "ask", "fill", "stop"]
     reason: str
     detail: str
+    # Owner 2026-10-24: set only with ``fill`` (settings_rules.NEXT_ACTIONS).
+    next_action: Optional[str] = None
+    stop_run: bool = False
     # Owner decision 2026-10-19: answers the user changed on the web after the form was
     # filled. Type each one into its field (replacing what is there) BEFORE any submit.
     type_first: list[TypeFirstAnswer] = Field(default_factory=list)
@@ -1577,6 +1591,8 @@ class UpdateContactRequest(BaseModel):
     shared: Optional[str] = None  # "" clears it
     phone: Optional[str] = None  # "" clears it
     links: Optional[list[str]] = None  # [] clears it
+    # Owner 2026-10-24 - closed set LINKEDIN_STATES; "" clears it (reads as unknown).
+    linkedin_state: Optional[str] = None
 
 
 class RecordOutreachRequest(BaseModel):
@@ -1596,6 +1612,8 @@ class RecordOutreachRequest(BaseModel):
     follow_up_on: Optional[str] = None
     # pack #13 — only on entry="message"; contacts.record_outreach refuses it on sent/reply
     label: str = Field(default="", max_length=200)
+    # Owner 2026-10-24 - what the draft is (OUTREACH_DRAFT_KINDS); checked against LinkedIn's limits.
+    draft_kind: Optional[str] = None
     # A caller going through /applications/{id}/events can only ever touch a
     # contact linked to THAT SAME application — set by the wrapper below,
     # never by the request body itself.
@@ -2730,7 +2748,7 @@ async def update_contact(
             company=body.company,
             email_source=body.email_source,
             relationship=body.relationship, shared=body.shared,
-            phone=body.phone, links=body.links,
+            phone=body.phone, links=body.links, linkedin_state=body.linkedin_state,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2768,7 +2786,7 @@ async def record_outreach(
                 entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
                 source_message_id=source["message_id"] if source else "",
                 follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
-                label=body.label,
+                label=body.label, draft_kind=body.draft_kind,
             )
         except SpineError as exc:
             _raise(exc)
@@ -2927,7 +2945,7 @@ async def _save_artifact(
             result = await contacts_service.record_outreach(
                 db, user.id, body.contact_id, actor_for(user),
                 entry="message", channel=body.channel, text=body.text,
-                application_id_hint=application_id, label=body.label,
+                application_id_hint=application_id, label=body.label, draft_kind=body.draft_kind,
             )
             outreach = result["outreach"]
             return {
@@ -3333,16 +3351,26 @@ async def resolve_blocked(
 ) -> dict[str, Any]:
     """"Mark resolved" - the user sorted out what stopped their assistant: records
     ``unblocked`` {resolution: user_did_it} and closes the blocked ask. 409 when
-    nothing is blocked. Session only; assistants use ``record_event``."""
+    nothing is blocked. Session only; assistants use ``record_event``. A block the
+    assistant can try again (owner 2026-10-25) puts the job back on the queue and starts Apply."""
     if await spine.get_owned_application(db, user.id, application_id) is None:
         raise HTTPException(status_code=404, detail="application not found")
     try:
+        block = await blocked_service.open_block(db, user.id, application_id)
         stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
         await blocked_service.record(
             db, user, application_id, "unblocked", stored, occurred_at=datetime.now(timezone.utc).isoformat(),
         )
+        in_queue = block is not None and await queue_preflight.back_to_queue(
+            db, user.id, application_id, block["reason"], recorded_by=actor_for(user)
+        )
     except SpineError as exc:
         _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
+    if in_queue:
+        from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+        await duty_trigger.ignite(user.id, ("batch",), "job_unblocked", [application_id], db=db)
     return await _controls(db, user, application_id)
 
 
@@ -3472,20 +3500,19 @@ async def submit_check(
     verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
     type_first = await ready_service.changed_answers(db, user.id, app_row)
     verdict = ready_service.type_first_lock(verdict, type_first)
-    detail = verdict.detail
+    shown = settings_rules.present_verdict(verdict, has_cv=facts.has_cv)
     get_audit_logger().info(
         "submit_check",
         extra={
             "event": "submit_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
-            "decision": verdict.decision, "reason": verdict.reason,
+            "decision": shown["decision"], "reason": verdict.reason,
             "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)),
             "channel": "email" if settings_rules.is_mailto(form_url) else "form", "result": "ok",
         },
     )
     return {
-        "application_id": application_id, "decision": verdict.decision,
-        "reason": verdict.reason, "detail": detail, "type_first": type_first,
+        "application_id": application_id, **shown, "type_first": type_first,
         # Bulk-apply Q2: what is left of the user's own limits (null = no cap).
         "daily_left": settings_rules.daily_left(cfg, counts),
         "company_left": settings_rules.company_left(cfg, counts.company_applied_in_window),

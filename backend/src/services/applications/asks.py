@@ -225,6 +225,25 @@ def _log_no_proof_ask(user_id: str, application_id: Optional[int], result: str) 
     })
 
 
+async def _other_jobs_named(db: JobDatabase, user_id: str, app_row: dict[str, Any], text: str) -> list[str]:
+    """Owner 2026-10-24: ONE ask per job. The companies of the user's OTHER open applications that
+    ``text`` names as a whole word (case-insensitive; a company shorter than 3 letters, or the same
+    company as this application, never counts)."""
+    own = str(app_row.get("job_company") or "").strip().lower()
+    cur = await db._db.execute(
+        "SELECT DISTINCT job_company FROM applications WHERE user_id = ? AND id <> ? AND status = 'considering'",
+        (user_id, int(app_row["id"])),
+    )
+    named: list[str] = []
+    for row in await cur.fetchall():
+        company = str(dict(row)["job_company"] or "").strip()
+        if len(company) < 3 or company.lower() == own or company in named:
+            continue
+        if re.search(rf"(?<!\w){re.escape(company)}(?!\w)", text, re.IGNORECASE):
+            named.append(company)
+    return named
+
+
 async def _first_proof_ask(
     db: JobDatabase, user_id: str, application_id: Optional[int], proof_ctx: str
 ) -> Optional[dict[str, Any]]:
@@ -267,8 +286,15 @@ async def create_ask(
     clean_ctx = clean_text(context)
     if len(clean_ctx) > settings.ASKS_CONTEXT_MAX_CHARS:
         raise SpineError(422, f"context exceeds ASKS_CONTEXT_MAX_CHARS ({settings.ASKS_CONTEXT_MAX_CHARS} chars)")
-    if application_id is not None and await get_owned_application(db, user_id, application_id) is None:
+    app_row = await get_owned_application(db, user_id, application_id) if application_id is not None else None
+    if application_id is not None and app_row is None:
         raise SpineError(404, "application not found")
+    if app_row is not None and (others := await _other_jobs_named(db, user_id, app_row, f"{clean_q}\n{clean_ctx}")):
+        raise SpineError(
+            422,
+            f"one ask per job: this ask also names {', '.join(others)} (another open application). "
+            "Call ask_user once for each application_id, so Needs you shows one card per job.",
+        )
     # S7 - the "no proof yet" ask is asked ONCE per application, whatever its state:
     # a repeat (the assistant re-reading whats_new) returns the first one, writes nothing.
     proof_ctx = f"proof_missing:{application_id}" if application_id is not None else ""

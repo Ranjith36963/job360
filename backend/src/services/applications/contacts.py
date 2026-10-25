@@ -441,6 +441,8 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         "shared": row.get("shared") or None,
         "phone": row.get("phone") or None,
         "links": _decode_links(row.get("links")),
+        # Owner 2026-10-24: only ever set through an edit; None = unknown (rule #29).
+        "linkedin_state": row.get("linkedin_state") or None,
         "added_by": row["added_by"],
         "created_at": row["created_at"],
     }
@@ -1121,6 +1123,7 @@ async def update_contact(
     shared: Optional[str] = None,
     phone: Optional[str] = None,
     links: Optional[list[str]] = None,
+    linkedin_state: Optional[str] = None,
 ) -> dict[str, Any]:
     """Owner decision, 2026-09-25 — contacts ARE editable, but the base row
     stays append-only (S12): each provided field appends one ``contact_edits``
@@ -1171,6 +1174,10 @@ async def update_contact(
     if links is not None:
         v = _validate_links(links)
         given["links"] = json.dumps(v) if v else ""  # [] clears it
+    if linkedin_state is not None:
+        if linkedin_state and linkedin_state not in settings.LINKEDIN_STATES:
+            raise SpineError(422, f"linkedin_state must be one of {', '.join(settings.LINKEDIN_STATES)}")
+        given["linkedin_state"] = linkedin_state  # '' clears it (reads as unknown)
     if not given:
         raise SpineError(422, "at least one field must be given")
 
@@ -1560,6 +1567,32 @@ async def _linkedin_premium(user_id: str, contact_id: int) -> bool:
     return bool(getattr(prefs, "linkedin_premium", False))
 
 
+async def _check_draft_kind(
+    user_id: str, contact_id: int, entry: str, channel: str, text: str, draft_kind: str
+) -> None:
+    """Owner 2026-10-24: a draft that says what it is must fit it. LinkedIn's own limits: a connection
+    note is 200 characters (300 with Premium), an InMail body 1,900. Refused, never stored cut."""
+    if draft_kind not in settings.OUTREACH_DRAFT_KINDS:
+        raise SpineError(422, f"draft_kind must be one of {', '.join(settings.OUTREACH_DRAFT_KINDS)}")
+    if entry != "message":
+        raise SpineError(422, "draft_kind is only for a drafted message")
+    if (draft_kind == "email") != (channel == "email"):
+        raise SpineError(422, "an email draft goes on channel email; a LinkedIn draft on channel linkedin")
+    if draft_kind == "connection_note":
+        premium = await _linkedin_premium(user_id, contact_id)
+        limit = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if premium else settings.LINKEDIN_NOTE_MAX_CHARS
+        if len(text) > limit:
+            raise SpineError(
+                422, f"a connection note is at most {limit} characters on LinkedIn "
+                f"({'Premium' if premium else 'a free account'}); this one is {len(text)}. Shorten it.",
+            )
+    if draft_kind == "inmail" and len(text) > settings.LINKEDIN_INMAIL_BODY_MAX_CHARS:
+        raise SpineError(
+            422, f"an InMail body is at most {settings.LINKEDIN_INMAIL_BODY_MAX_CHARS} characters; "
+            f"this one is {len(text)}. Shorten it.",
+        )
+
+
 async def record_outreach(
     db: JobDatabase,
     user_id: str,
@@ -1574,6 +1607,7 @@ async def record_outreach(
     follow_up_on: Optional[str] = None,
     application_id_hint: Optional[int] = None,
     label: str = "",
+    draft_kind: Optional[str] = None,
 ) -> dict[str, Any]:
     """The one door every outreach write goes through — the direct
     ``POST /api/contacts/{contact_id}/outreach`` route, ``save_artifact``
@@ -1646,6 +1680,8 @@ async def record_outreach(
             raise SpineError(
                 422, "a bounce takes no text: Job360 stores the contact's current email as the bounced address"
             )
+    if draft_kind is not None:
+        await _check_draft_kind(user_id, contact_id, entry, channel, text or "", draft_kind)
     clean_label = clean_variant_label(label)
     if clean_label and entry != "message":
         raise SpineError(422, "label is only meaningful on a message version")
@@ -1959,7 +1995,10 @@ async def _full_contact_view(
         field_edits = edits.get(field, [])
         if field_edits:
             view[field] = field_edits[-1]["value"]
-            if field in ("found_via", "source_url", "company", "email_source", "relationship", "shared", "phone"):
+            if field in (
+                "found_via", "source_url", "company", "email_source", "relationship", "shared", "phone",
+                "linkedin_state",
+            ):
                 view[field] = view[field] or None  # a cleared value reads as unset
             if field == "links":
                 view[field] = _decode_links(view[field])
