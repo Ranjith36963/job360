@@ -1822,6 +1822,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Capabilities
+         * @description Store which helper tools this assistant has (append-only; a repeat of the newest report is not
+         *     stored again). Answers what is missing or failing, so the assistant can tell the user in chat.
+         */
+        post: operations["report_capabilities_api_capabilities_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/client-log": {
         parameters: {
             query?: never;
@@ -1836,6 +1857,47 @@ export interface paths {
          * @description Record a browser-side log event into the server's data/logs/ stream.
          */
         post: operations["client_log_api_client_log_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Connector View
+         * @description For Settings and Home: each assistant's last report (what is connected, what is missing with the
+         *     catalog's suggestions) and the cards to show now. Records when a card is first shown.
+         */
+        get: operations["connector_view_api_connectors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/connectors/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Card
+         * @description Never show this card again (remembered per user).
+         */
+        post: operations["dismiss_card_api_connectors_dismiss_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3087,8 +3149,9 @@ export interface paths {
         /**
          * Whats Due
          * @description The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``
-         *     (a routine that runs one job passes its own) limits the answer AND what it takes to those. An
-         *     assistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):
+         *     (a routine that runs one job passes its own) limits the answer AND what it takes to those; a read
+         *     without ``duties`` only looks. An assistant's read with ``duties`` takes each listed duty for this run
+         *     (one run per duty at a time, owner 2026-10-25):
          *     another run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until
          *     ``mark_done``. The website's own read only looks.
          */
@@ -4231,6 +4294,7 @@ export interface components {
             asked_at: string;
             /** Asked By */
             asked_by: string;
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -4400,6 +4464,23 @@ export interface components {
              */
             waiting: components["schemas"]["SettingRequestOut"][];
             weekly_cap: components["schemas"]["SettingFieldOut"];
+        };
+        /** AssistantViewOut */
+        AssistantViewOut: {
+            /** Assistant */
+            assistant: string;
+            /** Connected */
+            connected: {
+                [key: string]: string;
+            }[];
+            /** Label */
+            label: string;
+            /** Missing */
+            missing: {
+                [key: string]: components["schemas"]["EntryOut"][];
+            };
+            /** Reported At */
+            reported_at: string;
         };
         /**
          * AutoEmailCheckResponse
@@ -4623,6 +4704,21 @@ export interface components {
             url: string;
         };
         /**
+         * BrowserLabelOut
+         * @description Which browser a task uses (``services/browser_agent/routing.py``): the chip every card shows.
+         */
+        BrowserLabelOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "job360" | "own_browser" | "human";
+            /** Label */
+            label: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
          * CVDetail
          * @description Full extracted CV data for transparent display.
          */
@@ -4746,6 +4842,80 @@ export interface components {
             /** Exists */
             exists: boolean;
         };
+        /** CapabilitiesIn */
+        CapabilitiesIn: {
+            /**
+             * Assistant
+             * @enum {string}
+             */
+            assistant: "claude" | "chatgpt" | "gemini" | "other";
+            /** Categories */
+            categories?: components["schemas"]["CapabilityIn"][];
+            /** Needed */
+            needed?: ("gmail" | "calendar" | "job_search" | "people_lookup" | "company_lookup" | "browser" | "web_search")[];
+        };
+        /** CapabilitiesOut */
+        CapabilitiesOut: {
+            /**
+             * Assistant
+             * @enum {string}
+             */
+            assistant: "claude" | "chatgpt" | "gemini" | "other";
+            /** Failing */
+            failing: string[];
+            /** Missing Essential */
+            missing_essential: string[];
+            /** Missing Recommended */
+            missing_recommended: string[];
+            /** Reported At */
+            reported_at: string;
+            /** Saved */
+            saved: boolean;
+        };
+        /** CapabilityIn */
+        CapabilityIn: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "gmail" | "calendar" | "job_search" | "people_lookup" | "company_lookup" | "browser" | "web_search";
+            /**
+             * Status
+             * @default ok
+             * @enum {string}
+             */
+            status: "ok" | "needs_sign_in" | "not_on_plan" | "failing";
+            /**
+             * Via
+             * @default
+             */
+            via: string;
+        };
+        /** CardOut */
+        CardOut: {
+            /** Alternatives */
+            alternatives?: components["schemas"]["EntryOut"][];
+            /** Assistant */
+            assistant?: string | null;
+            /** Category */
+            category: string;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "fix" | "add";
+            /** Link */
+            link?: string | null;
+            suggested?: components["schemas"]["EntryOut"] | null;
+            /** Tier */
+            tier: string;
+            /** Title */
+            title: string;
+            /** Unlocks */
+            unlocks: string;
+        };
         /** ClientLogRequest */
         ClientLogRequest: {
             /** Context */
@@ -4768,6 +4938,15 @@ export interface components {
             answer?: string | null;
             /** Form Filled Event Id */
             form_filled_event_id: number;
+        };
+        /** ConnectorsOut */
+        ConnectorsOut: {
+            /** Assistants */
+            assistants: components["schemas"]["AssistantViewOut"][];
+            /** Cards */
+            cards: components["schemas"]["CardOut"][];
+            /** Has Calendar Feed */
+            has_calendar_feed: boolean;
         };
         /** ConsentDecisionRequest */
         ConsentDecisionRequest: {
@@ -4863,6 +5042,7 @@ export interface components {
             relationship?: string | null;
             /** Role */
             role: string;
+            send_browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Shared */
             shared?: string | null;
             /** Source Url */
@@ -4959,6 +5139,7 @@ export interface components {
             asked_at: string;
             /** Asked By */
             asked_by: string;
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -4981,6 +5162,8 @@ export interface components {
              * @default
              */
             kind: string;
+            /** Merged From */
+            merged_from?: number[];
             /** Question */
             question: string;
             /** Questions */
@@ -5071,6 +5254,11 @@ export interface components {
             job_company: string;
             /** Job Title */
             job_title: string;
+        };
+        /** DismissIn */
+        DismissIn: {
+            /** Key */
+            key: string;
         };
         /**
          * DoctorAuth
@@ -5207,6 +5395,13 @@ export interface components {
              *     }
              */
             auto_emails: components["schemas"]["DoctorAutoEmails"];
+            /**
+             * Connectors
+             * @default {}
+             */
+            connectors: {
+                [key: string]: unknown;
+            };
             /** Email Verified */
             email_verified: boolean;
             /**
@@ -5420,6 +5615,25 @@ export interface components {
         EmailVerificationConfirmRequest: {
             /** Token */
             token: string;
+        };
+        /** EntryOut */
+        EntryOut: {
+            /** Category */
+            category: string;
+            /** Connect Url */
+            connect_url?: string | null;
+            /** Free */
+            free?: boolean | null;
+            /** Name */
+            name: string;
+            /** Plan Note */
+            plan_note?: string | null;
+            /** Tier */
+            tier: string;
+            /** Unlocks */
+            unlocks: string;
+            /** Verified On */
+            verified_on?: string | null;
         };
         /**
          * EventSource
@@ -7043,6 +7257,7 @@ export interface components {
             relationship?: string | null;
             /** Role */
             role: string;
+            send_browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Shared */
             shared?: string | null;
             /** Source Url */
@@ -7553,6 +7768,7 @@ export interface components {
             brought_at?: string | null;
             /** Brought By */
             brought_by?: string | null;
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             cover_letter?: components["schemas"]["ReadyDoc"] | null;
             cv?: components["schemas"]["ReadyDoc"] | null;
             /** Filled At */
@@ -12829,6 +13045,43 @@ export interface operations {
             };
         };
     };
+    report_capabilities_api_capabilities_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilitiesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilitiesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     client_log_api_client_log_post: {
         parameters: {
             query?: never;
@@ -12843,6 +13096,74 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ClientLogRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connector_view_api_connectors_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_card_api_connectors_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DismissIn"];
             };
         };
         responses: {

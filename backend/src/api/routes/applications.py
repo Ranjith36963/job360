@@ -687,6 +687,8 @@ class ContactOut(BaseModel):
     reachable: bool = False
     # Owner 2026-10-24 - LINKEDIN_STATES; null = unknown (rule #29).
     linkedin_state: Optional[str] = None
+    # Which browser sends this person's LinkedIn message (null = the newest message is not a LinkedIn one).
+    send_browser: Optional[BrowserLabelOut] = None
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
@@ -733,6 +735,14 @@ class AskQuestionOut(BaseModel):
     remembered_on: Optional[str] = None
 
 
+class BrowserLabelOut(BaseModel):
+    """Which browser a task uses (``services/browser_agent/routing.py``): the chip every card shows."""
+
+    kind: Literal["job360", "own_browser", "human"]
+    label: str
+    reason: str
+
+
 class AskOut(BaseModel):
     """One "Needs you" ask (see ``services/applications/asks.py``)."""
 
@@ -773,6 +783,8 @@ class AskOut(BaseModel):
     questions: list[AskQuestionOut] = Field(default_factory=list)
     # The answers the user approved, one per question key ({} until answered).
     answers: dict[str, str] = Field(default_factory=dict)
+    # Which browser this open ask needs (null = answered, withdrawn or not computed).
+    browser: Optional[BrowserLabelOut] = None
 
 
 class ProofOut(BaseModel):

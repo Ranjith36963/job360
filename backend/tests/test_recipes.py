@@ -398,3 +398,19 @@ def test_one_ask_per_job_with_honest_sources():
     assert "one ask per job" in rules and "a guess is never memory" in rules
     assert "kind` captcha|login|upload|safety" in rules
     assert "never ask the user to send an outreach message through `ask_user`" in rules
+
+
+def test_rules_state_which_browser_once():
+    """Routing is stated in ONE place (rules, "Which browser"); the cards' labels are the same words."""
+    from src.api.routes.recipes import RECIPE_NAMES, load_recipe
+    from src.services.browser_agent import routing
+
+    rules = load_recipe("rules").text
+    assert rules.count("## Which browser") == 1
+    section = " ".join(rules.split("## Which browser", 1)[1].split("\n## ", 1)[0].split())
+    for text in routing.LABELS.values():
+        assert f'"{text}"' in section
+    assert "goes FIRST for everything" in section
+    for name in RECIPE_NAMES:
+        text = load_recipe(name).text
+        assert "Claude in Chrome" not in text and "Yours when you have one" not in text, name

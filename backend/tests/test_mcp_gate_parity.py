@@ -116,6 +116,8 @@ TOOL_ROUTES = {
     ),
     "doctor": ("doctor", "doctor", {}),
     "report_missing_tool": ("doctor", "report_missing_tool", {"name": "x"}),
+    # The connector check (owner 2026-10-25) - require_user, no email gate (it only stores what tools exist).
+    "report_capabilities": ("connectors", "report_capabilities", {"assistant": "claude", "categories": []}),
     # The Job360 browser agent (decision 29) - require_user, no email gate (submit_check owns that).
     "browser": ("browser", "browser_action", {"action": "look"}),
 }

@@ -226,12 +226,13 @@ async def test_events_appear_on_the_timeline_and_never_change_status(authenticat
 async def test_get_application_lists_open_asks_first(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
+        # One open ask per job (2026-10-25): answer the first, then the second one is a new open ask.
         first = (await _ask(client, application_id=app_id, question="first")).json()["id"]
+        await client.post(f"/api/asks/{first}/answer", json={"answer": "yes"})
         second = (await _ask(client, application_id=app_id, question="second")).json()["id"]
-        await client.post(f"/api/asks/{second}/answer", json={"answer": "yes"})
         other_app = (await _ask(client, question="not about this job")).json()["id"]
         asks = (await client.get(f"/api/applications/{app_id}")).json()["asks"]
-        assert [a["id"] for a in asks] == [first, second]
+        assert [a["id"] for a in asks] == [second, first]  # the open one first
         assert other_app not in [a["id"] for a in asks]
 
 
@@ -310,9 +311,9 @@ async def test_stats_are_unchanged_by_asks(authenticated_async_context):
         before = await client.get("/api/applications/stats")
         assert before.status_code == 200, before.text
         a1 = (await _ask(client, application_id=app_id, question="one")).json()["id"]
-        a2 = (await _ask(client, application_id=app_id, question="two")).json()["id"]
         await client.post(f"/api/asks/{a1}/answer", json={"answer": "yes"})
         await client.post(f"/api/asks/{a1}/answer", json={"answer": "changed"})
+        a2 = (await _ask(client, application_id=app_id, question="two")).json()["id"]
         await client.post(f"/api/asks/{a2}/withdraw")
         detail = (await client.get(f"/api/applications/{app_id}")).json()
         assert {"asked", "answered", "ask_withdrawn"} <= {e["event_type"] for e in detail["events"]}

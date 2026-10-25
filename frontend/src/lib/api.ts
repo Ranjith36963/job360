@@ -830,6 +830,11 @@ export async function postEmpty(path: string): Promise<void> {
   await request<unknown>(path, { method: "POST" });
 }
 
+/** A JSON POST (body optional) or GET to any API path; for adapters that own their path. */
+export async function requestJson<T = unknown>(path: string, method: "GET" | "POST", body?: unknown): Promise<T> {
+  return request<T>(path, body === undefined ? { method } : { method, body: JSON.stringify(body) });
+}
+
 export async function answerAsk(id: number, answer: string): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/answer`, {
     method: "POST",

@@ -53,6 +53,7 @@ from src.services.applications.spine import (
 )
 from src.services.applications.templates import clean_variant_label
 from src.services.auth import rate_limit
+from src.services.browser_agent import routing as browser_routing
 from src.services.profile import assistant_settings as settings_rules
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -2037,7 +2038,24 @@ async def _full_contact_view(
     view["reachable"] = is_reachable(view)
     rows = await _outreach_rows(db, contact_id)
     view["outreach"] = _outreach_view(rows, include_text=include_text)
+    view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"])
     return view
+
+
+def _send_browser(user_id: str, contact_id: int, messages: list[dict[str, Any]]) -> Optional[dict[str, str]]:
+    """Which browser sends this person's newest message: a LinkedIn one goes through Job360's browser
+    first (owner, 2026-10-25); email goes through Gmail, so no browser (None). Logs ids only."""
+    if not messages or messages[-1].get("channel") != "linkedin":
+        return None
+    route = browser_routing.browser_for()
+    get_audit_logger().info(
+        "contact_send_browser",
+        extra={
+            "event": "contact_send_browser", "user_id": safe_log_value(user_id), "contact_id": int(contact_id),
+            "result": safe_log_value(route.kind, max_len=20),
+        },
+    )
+    return browser_routing.label(route)
 
 
 def _group_key(row: dict[str, Any]) -> str:

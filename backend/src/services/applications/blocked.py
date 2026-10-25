@@ -25,6 +25,7 @@ from src.services.applications import asks as asks_service
 from src.services.applications import event_examples, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
+from src.services.browser_agent import routing
 from src.services.profile import assistant_settings as settings_rules
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -236,20 +237,93 @@ async def open_block(db: JobDatabase, user_id: str, application_id: int) -> Opti
     }
 
 
-async def finish_here_ask_ids(db: JobDatabase, user_id: str, asks: list[dict[str, Any]]) -> set[int]:
+def open_app_ids(asks: list[dict[str, Any]]) -> list[int]:
+    return sorted({int(a["application_id"]) for a in asks if a.get("status") == "open" and a.get("application_id")})
+
+
+async def open_blocks(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """The open block's payload (parsed) of each of these applications that has one, in ONE query: the
+    newest ``blocked`` / ``unblocked`` event is a ``blocked`` (the same rule as ``_open_block_event``), and an
+    ``upload_failed`` one is cleared by a later ``document_uploaded``. Applications with no open block are
+    absent. Read-only: callers read it once per request and share the map."""
+    if not app_ids:
+        return {}
+    marks = ",".join("?" for _ in app_ids)
+    cur = await db._db.execute(
+        f"SELECT e.id, e.application_id, e.payload FROM application_events e WHERE e.user_id = ? "  # noqa: S608
+        f"AND e.application_id IN ({marks}) AND e.event_type = 'blocked' "
+        "AND e.id = (SELECT MAX(y.id) FROM application_events y WHERE y.application_id = e.application_id "
+        "AND y.user_id = e.user_id AND y.event_type IN ('blocked', 'unblocked'))",
+        (user_id, *app_ids),
+    )
+    out: dict[int, dict[str, Any]] = {}
+    for row in await cur.fetchall():
+        raw = row["payload"]
+        try:
+            p = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            p = {}
+        p = p if isinstance(p, dict) else {}
+        app_id = int(row["application_id"])
+        if p.get("reason") == "upload_failed" and await _uploaded_after(db, user_id, app_id, int(row["id"])):
+            continue
+        out[app_id] = p
+    return out
+
+
+async def finish_here_ask_ids(
+    db: JobDatabase, user_id: str, asks: list[dict[str, Any]], blocks: Optional[dict[int, dict[str, Any]]] = None,
+) -> set[int]:
     """The open asks that are a CAPTCHA in Job360's own browser, still open: the user can finish those on
-    Needs you itself (FinishInBrowser). One open-block read per application with an open ask. Read-only.
+    Needs you itself (FinishInBrowser). ``blocks`` is the shared ``open_blocks`` map (read here when not
+    given). Read-only.
     A block Job360's browser wrote carries ``by: browser``; one written before that marker (no ``by``, step
     "Job360 browser") still shows the button. Display only, so harmless: the finish view is the user's own
     session, acts only on a browser that is already open, and never holds one."""
+    if blocks is None:
+        blocks = await open_blocks(db, user_id, open_app_ids(asks))
     out: set[int] = set()
-    for app_id in {a["application_id"] for a in asks if a.get("status") == "open" and a.get("application_id")}:
-        ev = await _open_block_event(db, user_id, int(app_id))
-        p = ev["payload"] if ev is not None else {}
+    for app_id in open_app_ids(asks):
+        p = blocks.get(app_id, {})
         by = p.get(BY_KEY)
         ours = by == BY_BROWSER or (by is None and p.get("step") == "Job360 browser")
         if p.get("reason") == "captcha" and ours and isinstance(p.get("ask_id"), int):
             out.add(int(p["ask_id"]))
+    return out
+
+
+async def browser_for_asks(
+    db: JobDatabase, user_id: str, asks: list[dict[str, Any]],
+    blocks: Optional[dict[int, dict[str, Any]]] = None, finish: Optional[set[int]] = None,
+) -> dict[int, dict[str, str]]:
+    """Which browser each OPEN ask needs, by ask id (``routing.label``). ``blocks`` is the shared
+    ``open_blocks`` map and ``finish`` the ``finish_here_ask_ids`` set (each read here when not given): the
+    block counts only for the ask it opened, ``by: browser`` marks Job360's own browser having failed (a
+    caller can never write it), and a CAPTCHA the user can finish right now on Needs you is theirs alone.
+    Read-only; logs counts only."""
+    if blocks is None:
+        blocks = await open_blocks(db, user_id, open_app_ids(asks))
+    if finish is None:
+        finish = await finish_here_ask_ids(db, user_id, asks, blocks)
+    out: dict[int, dict[str, str]] = {}
+    for a in asks:
+        if a.get("status") != "open":
+            continue
+        p = blocks.get(int(a["application_id"]), {}) if a.get("application_id") else {}
+        mine = p if p.get("ask_id") == a["id"] else {}
+        route = routing.ask_route(
+            a.get("kind") or "", block_reason=str(mine.get("reason") or ""),
+            block_by_browser=mine.get(BY_KEY) == BY_BROWSER, finish_here=a["id"] in finish,
+        )
+        out[int(a["id"])] = routing.label(route)
+    get_audit_logger().info(
+        "ask_browsers_read",
+        extra={
+            "event": "ask_browsers_read", "user_id": safe_log_value(user_id), "result": "ok", "count": len(out),
+            "own_browser": sum(1 for v in out.values() if v["kind"] == "own_browser"),
+            "human": sum(1 for v in out.values() if v["kind"] == "human"),
+        },
+    )
     return out
 
 

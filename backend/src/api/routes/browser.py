@@ -239,8 +239,8 @@ async def browser_action(
 # Slice 3: the browser's stop reasons, in the blocked record's closed set (services/applications/blocked.py).
 _BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed"}
 HAND_OFF_DETAIL = (
-    "Job360's cloud browser stopped here. Finish it with your own assistant's browser when your computer is on "
-    "(Claude in Chrome, Gemini in Chrome, ChatGPT's own browser), or sign in once on Settings, Job sites."
+    "Job360's cloud browser stopped here. It is waiting for your own browser: finish it with your assistant on "
+    "your computer when it is on, or sign in once on Settings, Job sites."
 )
 # A human check: the filled form is kept open for the user to finish here (agent.hold_for_user).
 CAPTCHA_DETAIL = (

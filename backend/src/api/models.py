@@ -586,6 +586,8 @@ class DoctorResponse(BaseModel):
     auto_emails: DoctorAutoEmails = DoctorAutoEmails()
     silent_after_interview: DoctorSilentBlock = DoctorSilentBlock()
     interviews: InterviewAgenda = InterviewAgenda()
+    # The connector check (owner 2026-10-25): {reported, missing_essential, missing_recommended, failing}.
+    connectors: dict[str, Any] = {}
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""

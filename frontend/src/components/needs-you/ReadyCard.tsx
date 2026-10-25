@@ -14,6 +14,8 @@ import type { ChipTone } from "@/lib/ready-to-send";
 import { whoLabel } from "@/lib/event-labels";
 import { nothingSent } from "@/lib/application-actions";
 import { cn } from "@/lib/utils";
+import { readyBrowser } from "@/lib/browser-contract";
+import { BrowserReason } from "./BrowserReason";
 import { AnswerText } from "@/components/AnswerText";
 
 // Every string here (company, title, questions, answers, flags) was written by
@@ -104,6 +106,14 @@ export function ReadyCard({
           </span>
         )}
       </div>
+
+      {readyBrowser(card) && (
+        <div className="flex flex-col gap-0.5" data-testid={`ready-browser-${card.application_id}`}>
+          <span className="w-fit rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+            data-testid={`ready-browser-label-${card.application_id}`}>{readyBrowser(card)!.label}</span>
+          <BrowserReason label={readyBrowser(card)!} testid={`ready-browser-reason-${card.application_id}`} />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {([["CV", card.cv], ["Cover letter", card.cover_letter]] as const).map(([name, doc]) => {

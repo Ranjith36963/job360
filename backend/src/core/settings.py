@@ -1001,7 +1001,8 @@ SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batc
 REACH_WINDOW_DAYS = 14
 # Owner 2026-10-25 - one run per duty at a time: a duty `whats_due` lists to an assistant is that run's for
 # DUTY_CLAIM_MINUTES (another run, an hourly tick or a Run now, is not given it); mark_done frees it sooner.
-DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "60"))
+# Only a read that names its `duties` takes them (2026-10-25): a read without them only looks.
+DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "30"))
 # Owner 2026-10-25 - back-pressure: the hunt is not due while the batch queue already holds this many
 # open jobs (whats_due `hunt_hold: queue_full`); it is due again as the queue drains.
 HUNT_QUEUE_MAX = int(os.getenv("HUNT_QUEUE_MAX", "25"))

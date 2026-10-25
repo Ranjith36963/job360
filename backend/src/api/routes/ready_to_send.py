@@ -15,12 +15,14 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
+from src.api.routes.applications import BrowserLabelOut
 from src.api.routes.profile import settings_view
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import ready as ready_service
 from src.services.applications import spine
 from src.services.applications.authorship import actor_for
+from src.services.browser_agent import routing
 from src.services.profile.edits import ProfileEditError
 from src.services.profile.models import UserProfile
 from src.services.profile.storage import load_profile
@@ -82,6 +84,8 @@ class ReadyCard(BaseModel):
     held_seconds: Optional[int] = None
     # Is that job's Job360 browser open now? False = it closed (idle or hold over); None = browser off / unknown.
     form_open: Optional[bool] = None
+    # Which browser finishes this form: Job360's, unless Job360's browser already failed on it.
+    browser: Optional[BrowserLabelOut] = None
 
 
 class ReadyToSendOut(BaseModel):
@@ -118,11 +122,19 @@ async def ready_to_send(
         paused=paused, total=len(cards), unflagged=len(cards) - flagged,
         items=[
             ReadyCard(
-                **c, held_seconds=_held(user.id, c["application_id"]), form_open=_open(user.id, c["application_id"])
+                **c, held_seconds=_held(user.id, c["application_id"]), form_open=_open(user.id, c["application_id"]),
+                browser=_browser(),
             )
             for c in cards[:limit]
         ],
     )
+
+
+def _browser() -> BrowserLabelOut:
+    """A ready card's form is filled in Job360's browser first. A form whose browser stopped has an open
+    block and is never listed here (``_READY_SQL``), so every ready card says Job360's browser; no read."""
+    route = routing.browser_for()
+    return BrowserLabelOut(kind=route.kind, label=routing.LABELS[route.kind], reason=route.reason)
 
 
 def _held(user_id: str, application_id: int) -> Optional[int]:

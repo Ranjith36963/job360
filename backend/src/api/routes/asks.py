@@ -62,6 +62,8 @@ class CreateAskRequest(BaseModel):
 class CreateAskOut(AskOut):
     # Slice 25 — true when this client_key was already used: the FIRST reply, nothing written.
     already_existed: bool = False
+    # Owner 2026-10-25: the open asks on this job this one replaced (their questions are merged in).
+    merged_from: list[int] = Field(default_factory=list)
 
 
 class AnswerAskRequest(BaseModel):
@@ -116,8 +118,15 @@ async def list_asks(
 ) -> dict[str, Any]:
     try:
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
-        finish = await blocked_service.finish_here_ask_ids(db, user.id, rows)
-        rows = [{**r, "finish_here": r["id"] in finish, "held_seconds": _held(user.id, r, finish)} for r in rows]
+        # Each application's open block is read once and shared by both.
+        blocks = await blocked_service.open_blocks(db, user.id, blocked_service.open_app_ids(rows))
+        finish = await blocked_service.finish_here_ask_ids(db, user.id, rows, blocks)
+        browsers = await blocked_service.browser_for_asks(db, user.id, rows, blocks, finish)
+        rows = [
+            {**r, "finish_here": r["id"] in finish, "held_seconds": _held(user.id, r, finish),
+             "browser": browsers.get(r["id"])}
+            for r in rows
+        ]
         return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id)}
     except SpineError as exc:
         _raise(exc)

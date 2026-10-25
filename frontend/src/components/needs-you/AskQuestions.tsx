@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
-import { initialRow, isSensitiveQuestion } from "@/lib/job-cards";
+import { initialRow, isSensitiveQuestion, isVerifiedSource } from "@/lib/job-cards";
 import type { MergedRow } from "@/lib/job-cards";
 
 // Question text, answers and choices are written by the user's assistant: untrusted, rendered as
@@ -38,7 +38,10 @@ export function AskQuestions({
       {items.map(({ id, q, askId }) => {
         const row = rows[id] ?? initialRow(q);
         const open = editing.has(id) || (!q.choices?.length && !q.answer);
-        const state = row.ok ? "Verified" : "Guessed";
+        // A saved fact (profile/memory/cv) left as it is reads Verified even while a consent or personal
+        // row waits for the owner's own click ("Needs your click" still shows); a guess reads Guessed until checked.
+        const saved = isVerifiedSource(q.source) && q.answer.trim() !== "" && row.value === q.answer;
+        const state = row.ok || saved ? "Verified" : "Guessed";
         const sensitive = isSensitiveQuestion(q);
         return (
           <div key={id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`q-${askId}-${q.key}`}>

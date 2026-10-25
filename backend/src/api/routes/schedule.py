@@ -136,8 +136,9 @@ async def whats_due(
     duties: Optional[list[Duty]] = Query(default=None),  # noqa: B008
 ) -> WhatsDueOut:
     """The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``
-    (a routine that runs one job passes its own) limits the answer AND what it takes to those. An
-    assistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):
+    (a routine that runs one job passes its own) limits the answer AND what it takes to those; a read
+    without ``duties`` only looks. An assistant's read with ``duties`` takes each listed duty for this run
+    (one run per duty at a time, owner 2026-10-25):
     another run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until
     ``mark_done``. The website's own read only looks."""
     _limit(user, "read", settings.SCHEDULE_READS_MAX_PER_HOUR)
@@ -148,7 +149,7 @@ async def whats_due(
         answer["due"] = [d for d in answer["due"] if d["duty"] in wanted]
         answer["held_by_running"] = [d for d in answer["held_by_running"] if d in wanted]
         answer["nothing_due"] = not answer["due"]
-    if actor_for(user) != "web" and answer["due"]:
+    if duties and actor_for(user) != "web" and answer["due"]:
         got = await schedule.claim(db, user.id, [d["duty"] for d in answer["due"]], now)
         lost = [d["duty"] for d in answer["due"] if d["duty"] not in got]
         answer["due"] = [d for d in answer["due"] if d["duty"] in got]

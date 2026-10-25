@@ -53,6 +53,10 @@ RUN_REASONS: tuple[str, ...] = (
     "needs_user", "error",
 )
 BACKOFF_CAP_HOURS = 24
+# An hourly routine wakes at a fixed minute but a duty is stamped when the run ENDS, so the next due time
+# lands a few minutes after the next wake and the duty skipped a whole hour (prod 2026-10-25: hunt done
+# 19:15, wake 20:12 read nothing due). A duty this close to its time counts as due now.
+DUE_GRACE = timedelta(minutes=10)
 FAILURE_CARD_AT = 3
 # The plain words a problem card shows: what happened, and what the user can do.
 REASON_WORDS: dict[str, tuple[str, str]] = {
@@ -173,7 +177,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         next_due[duty] = _iso(nxt)
         if duty == "hunt" and hunt_hold:
             continue
-        if nxt <= now:
+        if nxt - DUE_GRACE <= now:
             due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty],
                         "reason": "never_done" if last is None else "interval_elapsed"})
     if f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):

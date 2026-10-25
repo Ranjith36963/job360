@@ -158,6 +158,7 @@ include = ["src*"]
 [tool.setuptools.package-data]
 src = [
     "data/job_signals/*.txt",
+    "data/connector_catalog.json",
     "services/tailoring/fonts/*.ttf",
     "services/tailoring/fonts/LICENSE",
 ]

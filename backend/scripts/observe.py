@@ -93,6 +93,9 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("assistant_triggers", "user_id"),
     # Write-tool idempotency keys: request_id -> the first reply (migration 0070).
     ("idempotency_keys", "user_id"),
+    # The connector check (migration 0090): what the assistant reported, and the cards the user saw.
+    ("assistant_capability_reports", "user_id"),
+    ("connector_cards", "user_id"),
 )
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here
