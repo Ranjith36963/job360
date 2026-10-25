@@ -75,12 +75,13 @@ async def _resolve(client: AsyncClient, app_id: int) -> None:
 @pytest.mark.asyncio
 async def test_a_cleared_sign_in_puts_the_job_back_and_starts_apply(authenticated_async_context):
     async with authenticated_async_context() as client:
-        saved = await client.put("/api/assistant-duty-triggers/batch", json={"url": SEND, "token": "tok"})
-        assert saved.status_code == 200, saved.text
         app_id = await _queued_job(client, 1)
         await _block_twice_and_unqueue(client, app_id, "login_needed")
         assert app_id not in await _queue(client)
         await _event(client, app_id, "blocked", {"reason": "login_needed", "page_host": "jobs.northwind.example"})
+        # The link is saved only now: the earlier Mark resolved (job still queued) must not use up the cooldown.
+        saved = await client.put("/api/assistant-duty-triggers/batch", json={"url": SEND, "token": "tok"})
+        assert saved.status_code == 200, saved.text
         with aioresponses() as mocked:
             mocked.post(SEND, status=200, payload={}, repeat=True)
             await _resolve(client, app_id)
