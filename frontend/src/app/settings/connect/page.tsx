@@ -30,6 +30,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format-date";
+import { groupGrants } from "@/lib/grants";
 import {
   AddressStepCard,
   AssistantStepsCard,
@@ -454,16 +455,18 @@ export function DailyCheckCard({
 function GrantRow({
   grant,
   onRevoke,
+  older = false,
 }: {
   grant: OAuthGrant;
   onRevoke: (g: OAuthGrant) => void;
+  older?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
 
   return (
     <li
       className="flex items-center justify-between gap-4 py-3"
-      data-testid="grant-row"
+      data-testid={older ? "older-grant-row" : "grant-row"}
     >
       <div className="min-w-0">
         <p className="truncate font-normal">{grant.client_name}</p>
@@ -539,8 +542,33 @@ function ConnectedAppsCard({
           </p>
         ) : (
           <ul className="divide-y divide-border" data-testid="grant-list">
-            {grants.map((g) => (
-              <GrantRow key={g.id} grant={g} onRevoke={onRevoke} />
+            {groupGrants(grants).map((grp) => (
+              <li key={grp.key} data-testid={`grant-group-${grp.key}`}>
+                <ul>
+                  <GrantRow grant={grp.newest} onRevoke={onRevoke} />
+                </ul>
+                {grp.older.length > 0 && (
+                  <details
+                    className="pb-3 text-sm"
+                    data-testid={`older-grants-${grp.key}`}
+                  >
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      {grp.older.length} older{" "}
+                      {grp.older.length === 1 ? "connection" : "connections"}
+                    </summary>
+                    <ul className="mt-2 divide-y divide-border border-l border-border pl-3">
+                      {grp.older.map((g) => (
+                        <GrantRow
+                          key={g.id}
+                          grant={g}
+                          onRevoke={onRevoke}
+                          older
+                        />
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </li>
             ))}
           </ul>
         )}
