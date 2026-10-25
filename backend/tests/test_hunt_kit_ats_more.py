@@ -57,7 +57,7 @@ def _run(name: str, row: dict, http):
 def test_registry_and_hunt_kit_wiring():
     assert set(F) == {"rippling", "breezy", "pinpoint", "phenom", "ultipro", "adp", "cornerstone", "gem", "jazzhr",
                       "softgarden", "join", "jibe", "keka", "zohorecruit", "ripplehire", "paylocity"}
-    assert hk.ATS_MODULES == ("kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us", "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4", "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c", "kit_fh5")
+    assert hk.ATS_MODULES == ("kit_ats", "kit_ats_more", "kit_ats_eu", "kit_ats_extra", "kit_ats_misc1", "kit_ats_misc2", "kit_ats_us", "kit_sites_a", "kit_pubsec", "kit_latam", "kit_ats_misc3", "kit_ats_misc5", "kit_ats_misc4", "kit_markets4", "kit_asia2", "kit_market5", "kit_co6", "kit_fh4", "kit_w4a", "kit_w4b", "kit_w4f", "kit_w4c", "kit_fh5", "kit_co7", "kit_co8")
     assert set(F) <= set(hk.BOARD_SOURCES)
     src = (KIT_DIR / "kit_ats_more.py").read_text(encoding="utf-8")
     assert src.count("Borrowed from") + src.count("Source: own read") >= len(F)  # every reader names where it came from

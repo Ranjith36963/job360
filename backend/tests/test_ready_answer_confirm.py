@@ -172,11 +172,11 @@ async def test_edit_is_verified_send_stays_open_and_submit_check_hands_over_the_
         assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}]
         # The LOCK: even after the yes, no submit until a sweep proves the form holds the user's words.
         # Not swept yet: an earlier stop (form_not_swept) answers first - either way, no submit.
-        assert check.json()["decision"] == "stop", check.json()
+        assert (check.json()["decision"], check.json()["reason"]) == ("fill", "form_not_swept"), check.json()
         # Negative control: a sweep that still reads the OLD answer does not open the lock.
         await _sweep(client, app_id, GUESS["answer"])
         check = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
-        assert check.json()["decision"] == "stop", check.json()
+        assert (check.json()["decision"], check.json()["reason"]) == ("fill", "type_first_pending"), check.json()
         assert check.json()["type_first"] == [{"question": GUESS["question"], "answer": word}], check.json()
         # The assistant types the user's word and sweeps: the lock opens (the yes still stands).
         await _sweep(client, app_id, word)

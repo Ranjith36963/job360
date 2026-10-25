@@ -239,7 +239,7 @@ async def test_answers_the_user_changed_after_the_yes_never_void_it(authenticate
         edit = {"path": "user_info.answers", "value": [word]}
         assert (await client.patch("/api/profile", json={"edits": [edit]})).status_code == 200, "a web edit"
         locked = await _check(client, app_id)
-        assert (locked["decision"], locked["reason"]) == ("stop", "type_first_pending"), locked
+        assert (locked["decision"], locked["reason"]) == ("fill", "type_first_pending"), locked
         assert locked["type_first"] == [{"question": "Preferred start date", "answer": "2 months"}]
         await _fill(client, app_id, [{**NOTICE, "answer": "2 months", "source": "approved"}])
         verdict = await _check(client, app_id)

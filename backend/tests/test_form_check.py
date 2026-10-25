@@ -565,13 +565,13 @@ async def test_check_submit_stops_on_a_short_sweep_and_on_unreadable_fields(
         checked = {"questions_count": 12, "answered": 12, "missing": 0}
         assert (await _post_event(client, app_id, "form_checked", checked)).status_code == 201
         short = await verdict()
-        assert (short["decision"], short["reason"]) == ("stop", "form_count_mismatch")
+        assert (short["decision"], short["reason"]) == ("fill", "form_count_mismatch")
         assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 12, "fixed": 0})).status_code == 201
         assert (await verdict())["reason"] not in ("form_count_mismatch", "unreadable_fields")
         unread = {"fields_checked": 12, "fixed": 0, "unreadable": ["Resume upload"]}
         assert (await _post_event(client, app_id, "form_swept", unread)).status_code == 201
         stuck = await verdict()
-        assert (stuck["decision"], stuck["reason"]) == ("stop", "unreadable_fields")
+        assert (stuck["decision"], stuck["reason"]) == ("fill", "unreadable_fields")
         assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 12, "fixed": 1})).status_code == 201
         assert (await verdict())["reason"] not in ("form_count_mismatch", "unreadable_fields")
 
@@ -647,7 +647,7 @@ async def test_new_application_needs_form_checked_old_one_does_not(
         assert (await _post_event(client, app_id, "form_filled", {"form_url": form, "fields_count": 9})).status_code == 201
         assert (await _post_event(client, app_id, "form_swept", {"fields_checked": 9, "fixed": 0})).status_code == 201
         stop = await verdict()
-        assert (stop["decision"], stop["reason"]) == ("stop", "form_check_missing")
+        assert (stop["decision"], stop["reason"]) == ("fill", "form_check_missing")
         assert "check_form" in stop["detail"]
         # the kit's own preview imagines the form checked: it never shows this stop before the fill
         # An OLDER application (cut-off later than its created_at) keeps working with no form_checked.

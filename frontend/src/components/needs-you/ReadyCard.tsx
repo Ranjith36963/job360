@@ -14,6 +14,7 @@ import type { ChipTone } from "@/lib/ready-to-send";
 import { whoLabel } from "@/lib/event-labels";
 import { nothingSent } from "@/lib/application-actions";
 import { cn } from "@/lib/utils";
+import { AnswerText } from "@/components/AnswerText";
 
 // Every string here (company, title, questions, answers, flags) was written by
 // the user's assistants - untrusted. Only ever rendered as React text nodes.
@@ -284,13 +285,13 @@ function AnswerRow({
         <span className="flex flex-col gap-0.5 break-words">
           <span className="text-muted-foreground line-through">{a.answer || "(blank)"}</span>
           <span data-testid={`ready-answer-changed-${id}`} className="whitespace-pre-wrap font-medium">
-            {a.changed_to}
+            <AnswerText value={a.changed_to} />
           </span>
           <span className="text-xs text-info">Your answer. Your assistant types it in before it sends.</span>
         </span>
       ) : (
         <span className="whitespace-pre-wrap break-words">
-          {a.redacted ? "(not kept: sensitive - Edit to type it)" : a.answer || "(blank)"}
+          {a.redacted ? "(not kept: sensitive - Edit to type it)" : a.answer ? <AnswerText value={a.answer} /> : "(blank)"}
         </span>
       )}
       <span className="flex flex-wrap items-start gap-1.5 sm:justify-end">

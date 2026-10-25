@@ -9,6 +9,7 @@ import { MorningCheck } from "./MorningCheck";
 import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
 import { CvToApprove } from "./CvToApprove";
+import { StartLinkProblems } from "./StartLinkProblems";
 import { BatchApplyPanel } from "./BatchApplyPanel";
 import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
@@ -18,6 +19,7 @@ import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
+import { AnswerText } from "@/components/AnswerText";
 import { JobCards, loadJobCards } from "./JobCards";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
@@ -129,7 +131,7 @@ export function AskCard({
               You said (via {whoLabel(ask.answered_by ?? "").name}): {ask.user_words}
             </p>
           ) : null}
-          <p className="whitespace-pre-wrap text-sm">{ask.answer}</p>
+          <p className="whitespace-pre-wrap text-sm"><AnswerText value={ask.answer} /></p>
           <p className="text-xs text-muted-foreground" data-testid="ask-provenance">
             {ask.answered_by_user
               ? "You answered on Job360"
@@ -285,7 +287,7 @@ function AnsweredRow({ ask, onChanged }: { ask: Ask; onChanged: () => Promise<vo
     <li data-testid={`answered-${ask.id}`} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-sm">
       <span className="min-w-0 truncate">
         {job && <span className="text-muted-foreground">{job}: </span>}
-        {ask.question} <span className="text-muted-foreground">→ {ask.answer}</span>
+        {ask.question} <span className="text-muted-foreground">→ <AnswerText value={ask.answer} /></span>
       </span>
       <button type="button" data-testid={`answered-change-${ask.id}`} onClick={() => setOpenRow(true)} className={linkBtn}>
         Change
@@ -409,6 +411,7 @@ export function NeedsYou() {
     <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
       <MorningCheck />
+      <StartLinkProblems />
       <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
       <ReadyToSend onTotal={setReadyTotal} />
       <OutcomeSuggestions />

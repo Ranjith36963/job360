@@ -2726,6 +2726,20 @@
           "paused_until": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "people_hunt": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "people_hunt_last_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "People Hunt Last At"
+          },
           "practice_run": {
             "$ref": "#/components/schemas/PracticeRunOut"
           },
@@ -2771,6 +2785,7 @@
           "auto_employer_emails",
           "outreach_send",
           "hunt_every_hours",
+          "people_hunt",
           "paused",
           "practice_run"
         ],
@@ -3850,6 +3865,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "linkedin_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin State"
           },
           "linkedin_url": {
             "title": "Linkedin Url",
@@ -4988,11 +5014,26 @@
       },
       "DueItemOut": {
         "properties": {
+          "application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ids"
+          },
           "duty": {
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
@@ -5001,7 +5042,8 @@
             "enum": [
               "never_done",
               "interval_elapsed",
-              "queue_waiting"
+              "queue_waiting",
+              "new_applications"
             ],
             "title": "Reason",
             "type": "string"
@@ -5010,7 +5052,8 @@
             "enum": [
               "hunt",
               "daily",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Recipe",
             "type": "string"
@@ -5022,6 +5065,39 @@
           "reason"
         ],
         "title": "DueItemOut",
+        "type": "object"
+      },
+      "DutyRunIn": {
+        "additionalProperties": false,
+        "properties": {
+          "test": {
+            "default": false,
+            "title": "Test",
+            "type": "boolean"
+          }
+        },
+        "title": "DutyRunIn",
+        "type": "object"
+      },
+      "DutyTriggerIn": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Token",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "DutyTriggerIn",
         "type": "object"
       },
       "EmailChangeRequest": {
@@ -8118,11 +8194,27 @@
       "MarkDoneIn": {
         "additionalProperties": false,
         "properties": {
+          "application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ids"
+          },
           "duty": {
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
@@ -8144,7 +8236,8 @@
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
@@ -8975,6 +9068,17 @@
             },
             "title": "Jobs",
             "type": "array"
+          },
+          "linkedin_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin State"
           },
           "linkedin_url": {
             "title": "Linkedin Url",
@@ -11619,6 +11723,17 @@
             ],
             "title": "Client Key"
           },
+          "draft_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Kind"
+          },
           "entry": {
             "title": "Entry",
             "type": "string"
@@ -11847,6 +11962,17 @@
               }
             ],
             "title": "Contact Id"
+          },
+          "draft_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Kind"
           },
           "kind": {
             "title": "Kind",
@@ -15008,7 +15134,7 @@
         "type": "object"
       },
       "SubmitCheckResponse": {
-        "description": "The answer to \"may I press submit on this application?\" - one gate\n(``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,\nstop before submit and ask the user yes for this one; ``stop``: do not submit.\n``reason`` is a closed code; ``detail`` is one plain sentence.",
+        "description": "The answer to \"may I press submit on this application?\" - one gate\n(``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,\nstop before submit and ask the user yes for this one; ``fill``: do ``next_action``\nnow, then check again (never a reason to end the run); ``stop``: do not submit\nthis one (``stop_run`` true = end the whole run). ``reason`` is a closed code;\n``detail`` is one plain sentence.",
         "properties": {
           "application_id": {
             "title": "Application Id",
@@ -15040,6 +15166,7 @@
             "enum": [
               "submit",
               "ask",
+              "fill",
               "stop"
             ],
             "title": "Decision",
@@ -15049,9 +15176,25 @@
             "title": "Detail",
             "type": "string"
           },
+          "next_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action"
+          },
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "stop_run": {
+            "default": false,
+            "title": "Stop Run",
+            "type": "boolean"
           },
           "type_first": {
             "items": {
@@ -15578,6 +15721,17 @@
               }
             ],
             "title": "Found Via"
+          },
+          "linkedin_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin State"
           },
           "linkedin_url": {
             "anyOf": [
@@ -20374,6 +20528,329 @@
         "summary": "Withdraw Ask",
         "tags": [
           "asks"
+        ]
+      }
+    },
+    "/api/assistant-duty-triggers": {
+      "get": {
+        "description": "Every duty's start link: host and last result only; never the token.",
+        "operationId": "get_duty_triggers_api_assistant_duty_triggers_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Duty Triggers Api Assistant Duty Triggers Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Duty Triggers",
+        "tags": [
+          "assistant-trigger"
+        ]
+      }
+    },
+    "/api/assistant-duty-triggers/{duty}": {
+      "delete": {
+        "operationId": "delete_duty_trigger_api_assistant_duty_triggers__duty__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "duty",
+            "required": true,
+            "schema": {
+              "title": "Duty",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Duty Trigger Api Assistant Duty Triggers  Duty  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Duty Trigger",
+        "tags": [
+          "assistant-trigger"
+        ]
+      },
+      "put": {
+        "description": "Save (or replace) one duty's start link and token (encrypted). Like PUT /assistant-trigger, an\nunexpected error never carries the plaintext token into a report.",
+        "operationId": "put_duty_trigger_api_assistant_duty_triggers__duty__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "duty",
+            "required": true,
+            "schema": {
+              "title": "Duty",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DutyTriggerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Duty Trigger Api Assistant Duty Triggers  Duty  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Duty Trigger",
+        "tags": [
+          "assistant-trigger"
+        ]
+      }
+    },
+    "/api/assistant-duty-triggers/{duty}/run": {
+      "post": {
+        "description": "Run now (or Test): start the user's routine for ``duty`` once. Never a 500 for a start that did\nnot happen: ``fired: false`` and a closed reason the page shows.",
+        "operationId": "run_duty_api_assistant_duty_triggers__duty__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "duty",
+            "required": true,
+            "schema": {
+              "title": "Duty",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DutyRunIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Duty Api Assistant Duty Triggers  Duty  Run Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Duty",
+        "tags": [
+          "assistant-trigger"
         ]
       }
     },

@@ -1,7 +1,7 @@
 "use client";
 
 import { getApplication, getCvToApprove, listPeople } from "@/lib/api";
-import type { Ask } from "@/lib/api";
+import type { ApplicationDetail, Ask } from "@/lib/api";
 import { buildCard, groupAsks, sortCards } from "@/lib/job-cards";
 import type { JobCardData } from "@/lib/job-cards";
 import { JobCard } from "./JobCard";
@@ -48,6 +48,16 @@ export async function loadJobCards(open: Ask[]): Promise<{ cards: JobCardData[];
     if (card.asks.length > 0 || card.people.length > 0) cards.push(card);
   });
   return { cards: sortCards(cards), general };
+}
+
+/** ONE application's card, built exactly as the Needs-you page builds it (same asks filter, same CV
+ *  check, same people), so the application page and Needs you can never drift. null = nothing open. */
+export async function loadJobCard(detail: ApplicationDetail): Promise<JobCardData | null> {
+  const open = (detail.asks ?? []).filter((a) => a.status === "open" && !a.withdrawn_at);
+  const asks = groupAsks(open).byJob.get(detail.id) ?? [];
+  const cvs = await cvsToCheck();
+  const card = buildCard(detail, asks, cvs.get(detail.id) ?? null);
+  return card.asks.length > 0 || card.people.length > 0 ? card : null;
 }
 
 export function JobCards({ cards, onChanged }: { cards: JobCardData[]; onChanged: () => Promise<void> }) {

@@ -174,6 +174,35 @@ def test_failed_login_logs_only_a_masked_email(client, caplog):
     assert all(e and e.startswith("v***@example.com") for e in logged)
 
 
+def _failed_login_records(client, caplog, email):
+    import logging
+
+    audit_logger = logging.getLogger("job360.audit")
+    audit_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="job360.audit"):
+            r = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"},
+                            headers={"X-Forwarded-For": "6.6.6.6"})
+    finally:
+        audit_logger.removeHandler(caplog.handler)
+    assert r.status_code == 401
+    return [rec for rec in caplog.records if getattr(rec, "event", None) == "login"]
+
+
+def test_failed_test_login_records_the_forwarding_probe(client, caplog):
+    """TEMPORARY probe: an @example.com failure records the forwarded headers as they arrive."""
+    recs = _failed_login_records(client, caplog, "ip-test@example.com")
+    probe = getattr(recs[-1], "forwarding_probe", None)
+    assert probe is not None
+    assert probe["headers"]["x-forwarded-for"] == ["6.6.6.6"]
+    assert "peer" in probe and "hops" in probe
+
+
+def test_failed_real_login_has_no_forwarding_probe(client, caplog):
+    recs = _failed_login_records(client, caplog, "someone@gmail.com")
+    assert recs and all(not hasattr(rec, "forwarding_probe") for rec in recs)
+
+
 def test_login_happy_path_sets_cookie(client):
     client.post(
         "/api/auth/register",

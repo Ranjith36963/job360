@@ -1390,6 +1390,28 @@ export async function deleteAssistantTrigger(): Promise<{ deleted: boolean }> {
   return request("/api/assistant-trigger", { method: "DELETE" });
 }
 
+// ---- Ignition (owner 2026-10-24): one start link per duty; website only, never a token ----
+export type Duty = "hunt" | "batch" | "inbox" | "reach";
+export type DutyTrigger = { duty: Duty; label: string; retry_until?: string | null } & AssistantTrigger;
+export type DutyFire = { fired: boolean; duty?: Duty; reason?: string; detail?: string; session_url?: string | null };
+
+export async function getDutyTriggers(): Promise<{ duties: DutyTrigger[] }> {
+  return request<{ duties: DutyTrigger[] }>("/api/assistant-duty-triggers");
+}
+
+export async function saveDutyTrigger(duty: Duty, url: string, token: string): Promise<DutyTrigger> {
+  return request<DutyTrigger>(`/api/assistant-duty-triggers/${duty}`, { method: "PUT", body: JSON.stringify({ url, token }) });
+}
+
+export async function deleteDutyTrigger(duty: Duty): Promise<{ deleted: boolean }> {
+  return request(`/api/assistant-duty-triggers/${duty}`, { method: "DELETE" });
+}
+
+/** Run now (or Test): start the user's routine for one duty once. */
+export async function runDuty(duty: Duty, test = false): Promise<DutyFire> {
+  return request<DutyFire>(`/api/assistant-duty-triggers/${duty}/run`, { method: "POST", body: JSON.stringify({ test }) });
+}
+
 /** After Send / Send all: start the user's assistant once for every job they said yes to. */
 export async function fireAssistant(): Promise<AssistantFire> {
   return request<AssistantFire>("/api/assistant-trigger/fire", { method: "POST" });

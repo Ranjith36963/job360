@@ -45,6 +45,7 @@ import {
   mcpUrl,
 } from "@/components/connect/ConnectSteps";
 import { SendStartsAssistantCard } from "@/components/connect/SendStartsAssistantCard";
+import { DutyStartLinksCard } from "@/components/connect/DutyStartLinksCard";
 
 // ---------------------------------------------------------------------------
 // Connect your assistant — the page that gets a user's own AI assistant
@@ -952,6 +953,7 @@ export default function ConnectAgentPage() {
           modeSaving={savingMode}
         />
         <SendStartsAssistantCard />
+        <DutyStartLinksCard />
         <ConnectedAppsCard
           grants={grants}
           loading={grantsLoading}

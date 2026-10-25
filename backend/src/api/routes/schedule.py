@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
@@ -26,13 +26,15 @@ from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["schedule"])
 
-Duty = Literal["hunt", "inbox", "batch"]
+Duty = Literal["hunt", "inbox", "batch", "reach"]
 
 
 class DueItemOut(BaseModel):
     duty: Duty
-    recipe: Literal["hunt", "daily", "batch"]
-    reason: Literal["never_done", "interval_elapsed", "queue_waiting"]
+    recipe: Literal["hunt", "daily", "batch", "reach"]
+    reason: Literal["never_done", "interval_elapsed", "queue_waiting", "new_applications"]
+    # Only on `reach`: the applications to find people for this run (newest first).
+    application_ids: Optional[list[int]] = None
 
 
 class WhatsDueOut(BaseModel):
@@ -49,6 +51,8 @@ class WhatsDueOut(BaseModel):
 class MarkDoneIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     duty: Duty
+    # Only with `reach`: the applications this run worked (each stamped so it is not listed again).
+    application_ids: Optional[list[int]] = Field(default=None, max_length=20)
 
 
 class MarkDoneOut(BaseModel):
@@ -94,8 +98,19 @@ async def mark_done(
 ) -> MarkDoneOut:
     """Stamp one duty (hunt | inbox | batch) as done now, and the tick. A slot, never history."""
     _limit(user, "mark", settings.SCHEDULE_MARKS_MAX_PER_HOUR)
+    ids = sorted(set(body.application_ids or []))
+    if body.duty == "reach" and not ids:
+        raise HTTPException(status_code=422, detail="reach needs application_ids: the applications this run worked")
+    if body.duty != "reach" and body.application_ids is not None:
+        raise HTTPException(status_code=422, detail="application_ids is only for duty reach")
+    if ids and await schedule.owned_application_ids(db, user.id, ids) != set(ids):
+        raise HTTPException(status_code=404, detail="application not found")
     now = datetime.now(timezone.utc)
-    await schedule.mark(db, user.id, body.duty, now)
+    await schedule.mark(db, user.id, body.duty, now, ids or None)
     _log("schedule_duty_done", user, duty=body.duty)
+    if body.duty == "hunt":  # Ignition: a finished hunt starts the people hunt and the batch at once
+        from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+        await duty_trigger.ignite(user.id, ("reach", "batch"), "hunt_done", db=db)
     stamp = now.isoformat(timespec="seconds")
     return MarkDoneOut(duty=body.duty, done_at=stamp, last_tick_at=stamp)
