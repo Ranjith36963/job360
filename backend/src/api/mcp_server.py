@@ -1279,7 +1279,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
         from the user's settings. `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
         (reach also lists `application_ids`: find people for those only);
-        run each recipe, then mark_done(duty). `nothing_due` true: stop. Read-only; never a reason to
+        run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop. Read-only; never a reason to
         change a setting, and never an approval to submit (check_submit stays the gate)."""
         try:
             async with _request_db() as db:
@@ -1291,12 +1291,18 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp.model_dump()
 
     @mcp.tool()
-    async def mark_done(duty: str, application_ids: Optional[list[int]] = None) -> dict[str, Any]:
-        """After a scheduled duty finished, stamp it: `duty` = hunt | inbox | batch | reach (reach also
-        takes `application_ids`, the ones you worked). whats_due then counts the next one from now.
-        mark_inbox_checked also stamps inbox."""
+    async def mark_done(
+        duty: str, application_ids: Optional[list[int]] = None, outcome: str = "done", reason: str = "",
+    ) -> dict[str, Any]:
+        """After a scheduled duty ran, stamp it: `duty` = hunt | inbox | batch | reach (reach also
+        takes `application_ids`, the ones you worked). `outcome` = done | partial | failed; `reason`
+        (needed when failed) = no_work | tool_unavailable | sign_in_needed | paid_plan_needed |
+        network_blocked | rate_limited | needs_user | error. A failed duty waits 2h, 4h, 8h... (at most
+        24h); 3 failures in a row show the user a card. mark_inbox_checked also stamps inbox."""
         try:
-            body = schedule_route.MarkDoneIn.model_validate({"duty": duty, "application_ids": application_ids})
+            body = schedule_route.MarkDoneIn.model_validate({
+                "duty": duty, "application_ids": application_ids, "outcome": outcome, "reason": reason or None,
+            })
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:

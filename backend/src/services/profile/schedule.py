@@ -45,6 +45,39 @@ TICK = "tick"
 INBOX_AUTO_MODES = frozenset({"auto", "scheduled"})
 INBOX_DEFAULT_HOURS = 24
 _EVERY_RE = re.compile(r"^(\d{1,3})h$")
+# How a run ended (mark_done, owner 2026-10-25), and why - closed sets, never free text.
+RUN_OUTCOMES: tuple[str, ...] = ("done", "partial", "failed")
+RUN_REASONS: tuple[str, ...] = (
+    "no_work", "tool_unavailable", "sign_in_needed", "paid_plan_needed", "network_blocked", "rate_limited",
+    "needs_user", "error",
+)
+BACKOFF_CAP_HOURS = 24
+FAILURE_CARD_AT = 3
+# The plain words a problem card shows: what happened, and what the user can do.
+REASON_WORDS: dict[str, tuple[str, str]] = {
+    "tool_unavailable": ("your assistant could not use a tool it needs",
+                         "Check its connectors (Job360, Gmail, its browser) are connected, then press Run now."),
+    "sign_in_needed": ("a connected app needs you to sign in again",
+                       "Open your assistant's connector settings, sign in again, then press Run now."),
+    "paid_plan_needed": ("a tool it uses needs a paid plan",
+                         "Check the plan on your assistant's account, or turn this job off."),
+    "network_blocked": ("it could not reach a website it needs",
+                        "Check your routine's network access allows the sites it uses."),
+    "rate_limited": ("a site or tool said it was getting too many requests",
+                     "Nothing to do: it waits longer each time and tries again."),
+    "needs_user": ("it needs an answer only you can give", "Answer its question on Needs you."),
+    "error": ("something went wrong in the run",
+              "Open your assistant's last run to see what happened, then press Run now."),
+    "no_work": ("it had nothing to do", "Nothing to do."),
+}
+DUTY_WORDS: dict[str, str] = {"hunt": "Hunt", "inbox": "Gmail check", "reach": "People hunt", "batch": "Apply"}
+
+
+def backoff_hours(failures: int) -> int:
+    """Hours a duty waits after ``failures`` failed runs in a row: 2, 4, 8, 16, then 24 at most."""
+    return min(1 << max(1, min(failures, 5)), BACKOFF_CAP_HOURS)
+
+
 # Why a batch is not due (closed set, first that applies).
 BATCH_HOLDS: tuple[str, ...] = (
     "paused", "not_allowed", "queue_empty", "daily_cap_reached", "weekly_cap_reached", "outside_hours",
@@ -68,6 +101,8 @@ class DueFacts:
     # The user's people-hunt switch, and the applications it should work on this run (newest first, capped).
     people_hunt: bool = False
     reach_ids: list[int] = field(default_factory=list)
+    # Failed runs in a row per duty (0 or missing = the last run was done or partial).
+    failures: dict[str, int] = field(default_factory=dict)
 
 
 def inbox_every_hours(mode: str, check_every: str) -> Optional[int]:
@@ -104,22 +139,36 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     (a hunt fills the queue the batch then works; reach finds people for new applications)."""
     due: list[dict[str, Any]] = []
     next_due: dict[str, Optional[str]] = {}
+
+    def waiting_after_failure(duty: str) -> bool:
+        """After a failed run a duty waits (2h, 4h, 8h... at most 24h) instead of retrying every hour."""
+        n, last = f.failures.get(duty, 0), f.stamps.get(duty)
+        if n <= 0 or last is None:
+            return False
+        until = last + timedelta(hours=backoff_hours(n))
+        if until > now:
+            next_due[duty] = _iso(until)
+            return True
+        return False
+
     intervals = {"inbox": inbox_every_hours(f.inbox_mode, f.check_every), "hunt": f.hunt_every_hours}
     for duty in ("inbox", "hunt"):
         every = intervals[duty]
         if every is None:
             continue
         last = f.stamps.get(duty)
+        if f.failures.get(duty, 0) > 0:  # a failed run: the back-off decides, not the interval
+            every = backoff_hours(f.failures[duty])
         nxt = now if last is None else last + timedelta(hours=every)
         next_due[duty] = _iso(nxt)
         if nxt <= now:
             due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty],
                         "reason": "never_done" if last is None else "interval_elapsed"})
-    if f.people_hunt and f.reach_ids:
+    if f.people_hunt and f.reach_ids and not waiting_after_failure("reach"):
         due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
                     "reason": "new_applications", "application_ids": list(f.reach_ids)})
     hold = batch_hold(f)
-    if hold is None:
+    if hold is None and not waiting_after_failure("batch"):
         due.append({"duty": "batch", "recipe": settings.SCHEDULE_DUTY_RECIPES["batch"], "reason": "queue_waiting"})
     return {
         "due": due,
@@ -128,6 +177,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         "batch_hold": hold,
         "last_done_at": {d: _iso(f.stamps.get(d)) for d in settings.SCHEDULE_DUTIES},
         "last_tick_at": _iso(f.stamps.get(TICK)),
+        "failures_in_row": {d: int(f.failures.get(d, 0)) for d in settings.SCHEDULE_DUTIES},
         "expected_every_hours": settings.SCHEDULE_TICK_HOURS,
         "checked_at": _iso(now),
     }
@@ -156,13 +206,23 @@ def reach_key(application_id: int) -> str:
 
 
 async def mark(
-    db: JobDatabase, user_id: str, duty: str, now: datetime, application_ids: Optional[list[int]] = None
+    db: JobDatabase, user_id: str, duty: str, now: datetime, application_ids: Optional[list[int]] = None,
+    *, outcome: str = "done", reason: str = "",
 ) -> None:
-    """Stamp ``duty`` (and the tick) as done ``now``. A slot: replaced, never appended.
-    ``duty`` must already be one of ``SCHEDULE_DUTIES`` (the caller validates). ``reach`` also stamps
-    each of ``application_ids`` (already checked to be this user's)."""
+    """Stamp ``duty`` (and the tick) as run ``now``, with how it ended. A slot: replaced, never appended.
+    ``duty``, ``outcome`` and ``reason`` are already closed values (the caller validates). A failed run
+    adds one to the duty's failures in a row; done or partial resets it. ``reach`` also stamps each of
+    ``application_ids`` (already checked to be this user's) unless the run failed."""
     stamp = now.astimezone(timezone.utc).isoformat()
-    names = [duty, TICK] + [reach_key(a) for a in (application_ids or [])]
+    failed = outcome == "failed"
+    await db._db.execute(
+        "INSERT INTO assistant_duty_runs (user_id, duty, done_at, outcome, reason, failures) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at, outcome = EXCLUDED.outcome, "
+        "reason = EXCLUDED.reason, "
+        "failures = CASE WHEN EXCLUDED.outcome = 'failed' THEN assistant_duty_runs.failures + 1 ELSE 0 END",
+        (user_id, duty, stamp, outcome, reason, 1 if failed else 0),
+    )
+    names = [TICK] + ([] if failed else [reach_key(a) for a in (application_ids or [])])
     for name in names:
         await db._db.execute(
             "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
@@ -170,6 +230,35 @@ async def mark(
             (user_id, name, stamp),
         )
     await db._db.commit()
+
+
+async def load_runs(db: JobDatabase, user_id: str) -> dict[str, dict[str, Any]]:
+    """``{duty: {outcome, reason, failures, done_at}}`` for the user's four duties (rule #12)."""
+    marks = ",".join("?" for _ in settings.SCHEDULE_DUTIES)
+    cur = await db._db.execute(
+        "SELECT duty, done_at, outcome, reason, failures FROM assistant_duty_runs "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND duty IN ({marks})",
+        (user_id, *settings.SCHEDULE_DUTIES),
+    )
+    return {str(dict(r)["duty"]): dict(r) for r in await cur.fetchall()}
+
+
+def problems(runs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """One plain card per duty that failed ``FAILURE_CARD_AT`` times in a row (closed values only)."""
+    out: list[dict[str, Any]] = []
+    for duty in settings.SCHEDULE_DUTIES:
+        row = runs.get(duty)
+        n = int(row["failures"]) if row else 0
+        if n < FAILURE_CARD_AT:
+            continue
+        reason = str(row["reason"]) if row and row["reason"] in REASON_WORDS else "error"
+        what, todo = REASON_WORDS[reason]
+        out.append({
+            "duty": duty, "label": DUTY_WORDS[duty], "failures_in_row": n, "reason": reason,
+            "title": f"{DUTY_WORDS[duty]} failed {n} times in a row: {what}.", "what_to_do": todo,
+            "last_failed_at": row["done_at"] if row else None,
+        })
+    return out
 
 
 async def _open_queue_count(db: JobDatabase, user_id: str) -> int:
@@ -261,6 +350,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         weekly_left=weekly_left,
         inside_hours=inside,
         stamps=await load_stamps(db, user_id),
+        failures={d: int(r["failures"] or 0) for d, r in (await load_runs(db, user_id)).items()},
         people_hunt=cfg.people_hunt,
         reach_ids=await _reach_ids(db, user_id, now) if cfg.people_hunt else [],
     )

@@ -3096,6 +3096,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedule/problems": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Problems
+         * @description Owner 2026-10-25: one plain card per duty whose scheduled run failed ``FAILURE_CARD_AT`` times in a
+         *     row, saying what happened and what to do (Home and Needs you show them). Read-only; closed values.
+         */
+        get: operations["run_problems_api_schedule_problems_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -6566,6 +6587,14 @@ export interface components {
              * @enum {string}
              */
             duty: "hunt" | "inbox" | "batch" | "reach";
+            /**
+             * Outcome
+             * @default done
+             * @enum {string}
+             */
+            outcome: "done" | "partial" | "failed";
+            /** Reason */
+            reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error") | null;
         };
         /** MarkDoneOut */
         MarkDoneOut: {
@@ -6576,8 +6605,19 @@ export interface components {
              * @enum {string}
              */
             duty: "hunt" | "inbox" | "batch" | "reach";
+            /**
+             * Failures In Row
+             * @default 0
+             */
+            failures_in_row: number;
             /** Last Tick At */
             last_tick_at: string;
+            /**
+             * Outcome
+             * @default done
+             * @enum {string}
+             */
+            outcome: "done" | "partial" | "failed";
         };
         /** MatchEmailCandidateOut */
         MatchEmailCandidateOut: {
@@ -8052,6 +8092,34 @@ export interface components {
              */
             dismiss: boolean;
         };
+        /** RunProblemOut */
+        RunProblemOut: {
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch" | "reach";
+            /** Failures In Row */
+            failures_in_row: number;
+            /** Label */
+            label: string;
+            /** Last Failed At */
+            last_failed_at?: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error";
+            /** Title */
+            title: string;
+            /** What To Do */
+            what_to_do: string;
+        };
+        /** RunProblemsOut */
+        RunProblemsOut: {
+            /** Problems */
+            problems: components["schemas"]["RunProblemOut"][];
+        };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
             /** Ats Notes */
@@ -9400,6 +9468,10 @@ export interface components {
             due: components["schemas"]["DueItemOut"][];
             /** Expected Every Hours */
             expected_every_hours: number;
+            /** Failures In Row */
+            failures_in_row?: {
+                [key: string]: number;
+            };
             /** Last Done At */
             last_done_at: {
                 [key: string]: string | null;
@@ -14509,6 +14581,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WhatsDueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_problems_api_schedule_problems_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunProblemsOut"];
                 };
             };
             /** @description Validation Error */
