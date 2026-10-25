@@ -241,8 +241,9 @@ def test_telegram_hostile_markup_is_linear_and_loses_nothing():
         jobs, _ = _run("telegramchannel", _row("telegramchannel", "devjobs"), _stub({"t.me/s/devjobs": (200, "<html>" + posts)}))
         return len(jobs), time.perf_counter() - t
     assert [run(n, True)[0] for n in (100, 400)] == [100, 400]  # well-formed: every post kept
-    t1 = run(100, False)[1]
-    t4 = run(400, False)[1]  # unclosed wraps nest into one post (a digest, so no job), without raising or re-walking
+    # Best of three for each size: one busy moment on a shared CI runner must not read as a slow parser.
+    t1 = min(run(100, False)[1] for _ in range(3))
+    t4 = min(run(400, False)[1] for _ in range(3))  # unclosed wraps nest into one post (a digest, so no job)
     assert t4 < 2.0 and t4 < max(t1, 0.02) * 12
     deep = "<span>" * 5000 + "Role @ Deep" + "<br>" * 3000
     jobs, _ = _run("telegramchannel", _row("telegramchannel", "devjobs"), _stub({"t.me/s/devjobs": (200, _tg_page(_post(5, _iso(1), deep)))}))
