@@ -47,6 +47,8 @@ class WhatsDueOut(BaseModel):
     nothing_due: bool
     next_due_at: dict[str, Optional[str]]
     batch_hold: Optional[str] = None
+    # Owner 2026-10-25: why the hunt is not due although its time came (closed set: queue_full).
+    hunt_hold: Optional[Literal["queue_full"]] = None
     last_done_at: dict[str, Optional[str]]
     last_tick_at: Optional[str] = None
     # Owner 2026-10-25: failed runs in a row per duty (a failing duty waits 2h, 4h, 8h... at most 24h).
