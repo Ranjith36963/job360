@@ -3087,8 +3087,9 @@ export interface paths {
         /**
          * Whats Due
          * @description The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``
-         *     (a routine that runs one job passes its own) limits the answer AND what it takes to those. An
-         *     assistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):
+         *     (a routine that runs one job passes its own) limits the answer AND what it takes to those; a read
+         *     without ``duties`` only looks. An assistant's read with ``duties`` takes each listed duty for this run
+         *     (one run per duty at a time, owner 2026-10-25):
          *     another run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until
          *     ``mark_done``. The website's own read only looks.
          */
