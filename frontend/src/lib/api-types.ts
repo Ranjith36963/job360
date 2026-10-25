@@ -1029,6 +1029,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assistant-duty-triggers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Duty Triggers
+         * @description Every duty's start link: host and last result only; never the token.
+         */
+        get: operations["get_duty_triggers_api_assistant_duty_triggers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-duty-triggers/{duty}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Duty Trigger
+         * @description Save (or replace) one duty's start link and token (encrypted). Like PUT /assistant-trigger, an
+         *     unexpected error never carries the plaintext token into a report.
+         */
+        put: operations["put_duty_trigger_api_assistant_duty_triggers__duty__put"];
+        post?: never;
+        /** Delete Duty Trigger */
+        delete: operations["delete_duty_trigger_api_assistant_duty_triggers__duty__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-duty-triggers/{duty}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Duty
+         * @description Run now (or Test): start the user's routine for ``duty`` once. Never a 500 for a start that did
+         *     not happen: ``fired: false`` and a closed reason the page shows.
+         */
+        post: operations["run_duty_api_assistant_duty_triggers__duty__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assistant-settings": {
         parameters: {
             query?: never;
@@ -5233,6 +5296,24 @@ export interface components {
              * @enum {string}
              */
             recipe: "hunt" | "daily" | "batch";
+        };
+        /** DutyRunIn */
+        DutyRunIn: {
+            /**
+             * Test
+             * @default false
+             */
+            test: boolean;
+        };
+        /** DutyTriggerIn */
+        DutyTriggerIn: {
+            /**
+             * Token
+             * @default
+             */
+            token: string;
+            /** Url */
+            url: string;
         };
         /** EmailChangeRequest */
         EmailChangeRequest: {
@@ -11225,6 +11306,160 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_duty_triggers_api_assistant_duty_triggers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_duty_trigger_api_assistant_duty_triggers__duty__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                duty: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DutyTriggerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_duty_trigger_api_assistant_duty_triggers__duty__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                duty: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_duty_api_assistant_duty_triggers__duty__run_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                duty: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DutyRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
