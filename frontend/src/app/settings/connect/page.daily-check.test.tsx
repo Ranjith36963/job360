@@ -9,6 +9,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ConnectAgentPage from "./page";
 
+// The page reads ?tab= from the URL (Setup | Schedules | Connected apps | Developers).
+const nav = vi.hoisted(() => ({ tab: "schedules" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/settings/connect",
+  useSearchParams: () => new URLSearchParams(`tab=${nav.tab}`),
+}));
+
+
 const getProfile = vi.fn();
 const updateProfileFields = vi.fn();
 const listTokens = vi.fn();

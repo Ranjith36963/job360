@@ -9,6 +9,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import ConnectAgentPage from "./page";
 
+// The page reads ?tab= from the URL (Setup | Schedules | Connected apps | Developers).
+const nav = vi.hoisted(() => ({ tab: "setup" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/settings/connect",
+  useSearchParams: () => new URLSearchParams(`tab=${nav.tab}`),
+}));
+
+
 const listTokens = vi.fn();
 const listGrants = vi.fn();
 const getProfile = vi.fn();
@@ -31,6 +40,7 @@ describe("ConnectAgentPage — owner-approved copy", () => {
     listTokens.mockReset().mockResolvedValue([]);
     listGrants.mockReset().mockResolvedValue([]);
     getProfile.mockReset().mockResolvedValue({ preferences: {} });
+    nav.tab = "setup";
   });
 
   it("shows the plain heading and intro line", async () => {
@@ -75,8 +85,9 @@ describe("ConnectAgentPage — owner-approved copy", () => {
   });
 
   it("folds personal tokens under 'For developers' by default", async () => {
+    nav.tab = "developers";
     render(<ConnectAgentPage />);
-    await screen.findByText("Step 3 — Say hello");
+    await screen.findByTestId("developer-tokens-toggle");
     expect(
       screen.getByText(/for developers \(claude code, scripts\) — personal tokens/i)
     ).toBeInTheDocument();

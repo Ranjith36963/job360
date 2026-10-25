@@ -21,6 +21,18 @@ export const LABEL_CLASS =
 export const MONO_FIELD_CLASS = "h-9 border-border bg-background font-mono text-xs";
 export const QUIET_BTN_CLASS =
   "border-border bg-card font-medium text-muted-foreground hover:text-foreground";
+/** Long instruction text folded behind a quiet "Show instructions" link. The
+ *  Copy button stays OUTSIDE (beside) this so it is always visible. */
+export function ShowInstructions({ children }: { children: React.ReactNode }) {
+  return (
+    <details className="w-full basis-full text-sm">
+      <summary className="inline-block cursor-pointer text-muted-foreground hover:text-foreground">
+        Show instructions
+      </summary>
+      <div className="mt-2">{children}</div>
+    </details>
+  );
+}
 export const PRIMARY_BTN_CLASS =
   "bg-foreground text-background hover:bg-foreground/90";
 export const DANGER_BTN_CLASS =
