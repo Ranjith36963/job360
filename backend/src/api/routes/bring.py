@@ -648,6 +648,12 @@ async def _bring_job(body: BringJobRequest, db: JobDatabase, user: CurrentUser) 
         queued, queue_note = await applications_spine.queue_if_open(
             db, user.id, birth["application_id"], recorded_by=actor_for(user)
         )
+        if queued and body.origin == "ai_hunt":  # Ignition: a hunted job queued starts reach and the batch
+            from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+            await duty_trigger.ignite(
+                user.id, ("reach", "batch"), "job_queued", [int(birth["application_id"])], db=db
+            )
     return BringJobResponse(
         queued=queued,
         queue_note=queue_note,

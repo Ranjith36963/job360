@@ -108,5 +108,9 @@ async def mark_done(
     now = datetime.now(timezone.utc)
     await schedule.mark(db, user.id, body.duty, now, ids or None)
     _log("schedule_duty_done", user, duty=body.duty)
+    if body.duty == "hunt":  # Ignition: a finished hunt starts the people hunt and the batch at once
+        from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+        await duty_trigger.ignite(user.id, ("reach", "batch"), "hunt_done", db=db)
     stamp = now.isoformat(timespec="seconds")
     return MarkDoneOut(duty=body.duty, done_at=stamp, last_tick_at=stamp)

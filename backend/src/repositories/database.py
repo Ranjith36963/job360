@@ -707,7 +707,7 @@ class JobDatabase:
         "application_events",
         "application_receipts", "application_stage_history", "applications",
         "application_proof_screenshots", "artifact_links", "assistant_duty_runs", "assistant_setting_requests",
-        "assistant_triggers", "browser_sign_ins",
+        "assistant_duty_triggers", "assistant_triggers", "browser_sign_ins",
         "calendar_feeds", "contact_edits", "contact_outreach", "email_change_undos", "email_verifications",
         "idempotency_keys", "inbox_items", "missing_tool_reports",
         "oauth_grants",
@@ -719,7 +719,7 @@ class JobDatabase:
     # user's OWN data — what they authored or what we derived about them.
     # Deliberately EXCLUDED from _PER_USER_TABLES: sessions, password_resets,
     # email_change_undos, email_verifications, browser_sign_ins (encrypted site cookies, i.e. a live
-    # sign-in), assistant_triggers (an encrypted bearer token). Those hold
+    # sign-in), assistant_triggers and assistant_duty_triggers (an encrypted bearer token). Those hold
     # short-lived security tokens, not portable personal data; exporting them
     # would hand out live credentials.
     # (`oauth_states` used to be on that excluded list too — the table itself is

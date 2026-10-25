@@ -853,7 +853,27 @@ async def update_profile(
     """
     # `_apply_profile_edits` is a plain `def`: nothing can `await` while the lock is held.
     with profile_edits.user_edit_lock(user.id):
-        return _apply_profile_edits(body, user)
+        resp = _apply_profile_edits(body, user)
+    await _ignite_schedule_change(user, resp)
+    return resp
+
+
+# Ignition (owner 2026-10-24): a schedule change the user SAVED on the website starts that duty once.
+_SCHEDULE_PATH_DUTY = {
+    "assistant_settings.hunt_every_hours": "hunt",
+    "preferences.daily_check": "inbox",
+    "preferences.check_every": "inbox",
+}
+
+
+async def _ignite_schedule_change(user: CurrentUser, resp: UpdateProfileResponse) -> None:
+    if actor_for(user) != profile_edits.WEB_ACTOR:
+        return
+    duties = tuple(dict.fromkeys(_SCHEDULE_PATH_DUTY[e.path] for e in resp.applied if e.path in _SCHEDULE_PATH_DUTY))
+    if duties:
+        from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+        await duty_trigger.ignite(user.id, duties, "setting_changed")
 
 
 def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> UpdateProfileResponse:
