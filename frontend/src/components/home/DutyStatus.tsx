@@ -13,6 +13,7 @@ const HOLD_WORDS: Record<string, string> = {
   queue_full: "your queue is full, so it waits until it drains",
   paused: "you paused your assistant",
   queue_empty: "nothing is waiting in your queue",
+  waiting_on_you: "every job in your queue is waiting on you (see Needs you)",
   daily_cap_reached: "today's limit is reached",
   weekly_cap_reached: "this week's limit is reached",
   outside_hours: "it is outside your apply hours",
