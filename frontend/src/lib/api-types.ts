@@ -3084,8 +3084,10 @@ export interface paths {
         };
         /**
          * Whats Due
-         * @description The duties due NOW for the signed-in user, each with its recipe. Read-only: changes no setting
-         *     and stamps nothing.
+         * @description The duties due NOW for the signed-in user, each with its recipe. Changes no setting. An assistant's
+         *     read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25): another run
+         *     in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` until ``mark_done``. The website's own
+         *     read only looks.
          */
         get: operations["whats_due_api_schedule_due_get"];
         put?: never;
@@ -9484,6 +9486,10 @@ export interface components {
             };
             /** Nothing Due */
             nothing_due: boolean;
+            /** Running */
+            running?: {
+                [key: string]: string | null;
+            };
         };
         /** WhatsNewApplicationOut */
         WhatsNewApplicationOut: {

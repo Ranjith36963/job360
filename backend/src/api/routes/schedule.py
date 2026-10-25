@@ -51,6 +51,8 @@ class WhatsDueOut(BaseModel):
     last_tick_at: Optional[str] = None
     # Owner 2026-10-25: failed runs in a row per duty (a failing duty waits 2h, 4h, 8h... at most 24h).
     failures_in_row: dict[str, int] = Field(default_factory=dict)
+    # Owner 2026-10-25: duties another run has now (not listed in `due`): {duty: taken_at}.
+    running: dict[str, Optional[str]] = Field(default_factory=dict)
     expected_every_hours: int
     checked_at: str
 
@@ -107,11 +109,19 @@ async def whats_due(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> WhatsDueOut:
-    """The duties due NOW for the signed-in user, each with its recipe. Read-only: changes no setting
-    and stamps nothing."""
+    """The duties due NOW for the signed-in user, each with its recipe. Changes no setting. An assistant's
+    read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25): another run
+    in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` until ``mark_done``. The website's own
+    read only looks."""
     _limit(user, "read", settings.SCHEDULE_READS_MAX_PER_HOUR)
     now = datetime.now(timezone.utc)
     answer = schedule.due_now(await schedule.load_facts(db, user.id, now), now)
+    if actor_for(user) != "web" and answer["due"]:
+        got = await schedule.claim(db, user.id, [d["duty"] for d in answer["due"]], now)
+        lost = [d["duty"] for d in answer["due"] if d["duty"] not in got]
+        answer["due"] = [d for d in answer["due"] if d["duty"] in got]
+        answer["nothing_due"] = not answer["due"]
+        answer["running"] = {**answer["running"], **{d: now.isoformat(timespec="seconds") for d in lost}}
     _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
     return WhatsDueOut(**answer)
 
