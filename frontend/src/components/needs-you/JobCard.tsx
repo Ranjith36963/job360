@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
 import { browserTaskState, queueBrowserTask } from "@/lib/browser-contract";
-import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, isSensitiveQuestion, mergeQuestions, remindersCovered } from "@/lib/job-cards";
+import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
@@ -62,8 +62,7 @@ export function JobCard({
   // whether the user checked it, per merged row.
   const merged = mergeQuestions(structured.map((s) => s.ask));
   const [rows, setRows] = useState<Record<string, RowState>>({});
-  const rowOf = (id: string, answer: string): RowState => rows[id] ?? { value: answer, ok: false };
-  const [remember, setRemember] = useState(false);
+  const rowOf = (id: string, q: Parameters<typeof initialRow>[0]): RowState => rows[id] ?? initialRow(q);
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");
@@ -93,21 +92,21 @@ export function JobCard({
     }
   }
   const rowCount = merged.rows.length;
-  const allChecked = merged.rows.every((m) => rowOf(m.id, m.q.answer).ok && rowOf(m.id, m.q.answer).value.trim());
+  const allChecked = merged.rows.every((m) => rowOf(m.id, m.q).ok && rowOf(m.id, m.q).value.trim());
   const allAnswered = allChecked && questions.every((q) => (answers[q.ask.id] ?? "").trim().length > 0);
   const hasAnswers = questions.length > 0 || rowCount > 0;
   const canApprove = !busy && allAnswered && (hasAnswers || card.cv !== null);
   // Rows "Approve all pre-filled" can check: an answer is there, and it is not a consent or personal one.
   const prefillable = merged.rows.filter((m) => {
-    const r = rowOf(m.id, m.q.answer);
+    const r = rowOf(m.id, m.q);
     return !r.ok && r.value.trim() && !isSensitiveQuestion(m.q);
   });
-  const prefillMode = merged.rows.some((m) => !rowOf(m.id, m.q.answer).ok || !rowOf(m.id, m.q.answer).value.trim());
+  const prefillMode = merged.rows.some((m) => !rowOf(m.id, m.q).ok || !rowOf(m.id, m.q).value.trim());
 
   const approvePrefilled = () =>
     setRows((prev) => ({
       ...prev,
-      ...Object.fromEntries(prefillable.map((m) => [m.id, { value: rowOf(m.id, m.q.answer).value, ok: true }])),
+      ...Object.fromEntries(prefillable.map((m) => [m.id, { value: rowOf(m.id, m.q).value, ok: true }])),
     }));
 
   async function run(fn: () => Promise<unknown>, failMsg: string) {
@@ -127,16 +126,19 @@ export function JobCard({
       for (const q of questions) await answerAsk(q.ask.id, answers[q.ask.id].trim());
       const finalOf = (id: string) => {
         const m = merged.rows.find((r) => r.id === id)!;
-        return rowOf(id, m.q.answer).value.trim();
+        return rowOf(id, m.q).value.trim();
       };
       // Every underlying ask is answered with its own keys, even one whose rows were all merged away.
       for (const { ask } of structured) {
         const given = Object.fromEntries((merged.byAsk.get(ask.id) ?? []).map((k) => [k.key, finalOf(k.rowId)]));
         await answerAskQuestions(ask.id, given);
       }
-      if (remember) {
-        await rememberAnswers(merged.rows.map((m) => ({ topic: m.q.key || m.id, question: m.q.question, answer: finalOf(m.id) })));
-      }
+      // Every confirmed answer becomes a permanent fact, except one already stored and unchanged.
+      if (rowCount > 0) await rememberAnswers(
+        merged.rows
+          .filter((m) => !(isStoredSource(m.q.source) && finalOf(m.id) === m.q.answer.trim()))
+          .map((m) => ({ topic: m.q.key || m.id, question: m.q.question, answer: finalOf(m.id) })),
+      );
       if (card.cv) await markCvSeen(card.applicationId, card.cv.artifactId);
     }, "Couldn't save everything");
 
@@ -263,13 +265,6 @@ export function JobCard({
           {rowCount > 0 && (
             <AskQuestions items={merged.rows} rows={rows} busy={busy}
               onChange={(id, row) => setRows((prev) => ({ ...prev, [id]: row }))} />
-          )}
-          {rowCount > 0 && (
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={remember} disabled={busy} data-testid={`remember-${card.applicationId}`}
-                onChange={(e) => setRemember(e.target.checked)} />
-              Remember these answers for every form (saved to your profile)
-            </label>
           )}
           {questions.map(({ ask, kind }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`question-${ask.id}`}>

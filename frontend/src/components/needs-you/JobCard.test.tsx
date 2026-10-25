@@ -139,23 +139,24 @@ describe("JobCard", () => {
       ],
     } as unknown as Ask;
     render(<JobCard card={card([listed])} onChanged={onChanged} />);
-    expect(screen.getByText("From memory (2026-10-12)")).toBeInTheDocument();
-    expect(screen.getByText("Guessed, please check")).toBeInTheDocument();
-    expect(screen.getByText("Not known yet")).toBeInTheDocument();
+    expect(screen.getByTestId(`q-state-${listed.id}-country`)).toHaveTextContent("Verified"); // memory
+    expect(screen.getByTestId(`q-state-${listed.id}-visa`)).toHaveTextContent("Guessed"); // none
+    expect(screen.getByTestId(`q-state-${listed.id}-salary`)).toHaveTextContent("Guessed");
+    expect(screen.queryByText(/Not known|From memory|Guessed, please check/)).toBeNull();
+    expect(screen.getByTestId(`q-ok-${listed.id}-country`)).toHaveTextContent("Checked"); // Verified starts checked
     expect(screen.queryByTestId("approve-all-7")).toBeNull(); // one primary button at a time
-    fireEvent.click(screen.getByTestId(`q-ok-${listed.id}-country`));
     fireEvent.click(screen.getByRole("button", { name: "No" }));
     expect(screen.queryByTestId("approve-all-7")).toBeNull(); // the guess is not checked yet
     fireEvent.click(screen.getByTestId(`q-edit-${listed.id}-salary`));
     fireEvent.change(screen.getByTestId(`q-input-${listed.id}-salary`), { target: { value: "€55,000" } });
-    fireEvent.click(screen.getByTestId("remember-7"));
+    expect(screen.queryByTestId("remember-7")).toBeNull(); // no checkbox any more
     const approve = screen.getByTestId("approve-all-7");
     expect(approve).toHaveTextContent("Approve everything and continue");
     fireEvent.click(approve);
     const answers = { country: "Germany", visa: "No", salary: "€55,000" };
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(listed.id, answers));
+    // Called without a checkbox; the memory answer left unchanged is not saved again.
     expect(rememberAnswers).toHaveBeenCalledWith([
-      { topic: "country", question: "Where should your contract be based?", answer: "Germany" },
       { topic: "visa", question: "Do you need visa sponsorship?", answer: "No" },
       { topic: "salary", question: "Expected salary", answer: "€55,000" },
     ]);
@@ -171,9 +172,8 @@ describe("JobCard", () => {
     render(<JobCard card={card([a1, a2, a3])} onChanged={onChanged} />);
     expect(screen.getAllByText("City?")).toHaveLength(1);
     expect(screen.getByText("Form answers · 3")).toBeInTheDocument();
-    expect(screen.queryByText("Guessed, please check")).toBeNull(); // the profile copy won over the guess
+    expect(screen.getByTestId(`q-state-${a1.id}-city`)).toHaveTextContent("Verified"); // the profile copy won over the guess
     fireEvent.change(screen.getByTestId(`q-input-${a1.id}-phone`), { target: { value: "123" } });
-    fireEvent.click(screen.getByTestId("approve-prefilled-7"));
     fireEvent.click(screen.getByTestId("approve-all-7"));
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledTimes(3));
     expect(answerAskQuestions).toHaveBeenCalledWith(a1.id, { city: "Berlin", phone: "123" });
@@ -183,23 +183,45 @@ describe("JobCard", () => {
 
   it("Approve all pre-filled leaves consent and personal rows for the owner's own click", async () => {
     const a = listing({}, [
-      Q("city", "City?", "Berlin"),
-      Q("gdpr", "Do you consent to data processing?", "Yes"),
-      Q("gender", "Gender", "Female"),
+      Q("city", "City?", "Berlin", "guess"),
+      Q("gdpr", "Do you consent to data processing?", "Yes", "guess"),
+      Q("gender", "Gender", "Female", "guess"),
       Q("empty", "Anything else?", "", "none"),
     ]);
     render(<JobCard card={card([a])} onChanged={onChanged} />);
+    expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("Guessed");
     fireEvent.click(screen.getByTestId("approve-prefilled-7"));
     expect(screen.getByTestId(`q-ok-${a.id}-city`)).toHaveTextContent("Checked");
+    expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("Verified");
+    expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Guessed");
     expect(screen.getByTestId(`q-ok-${a.id}-gdpr`)).toHaveTextContent("Looks right");
     expect(screen.getAllByText("Needs your click")).toHaveLength(2);
     fireEvent.change(screen.getByTestId(`q-input-${a.id}-empty`), { target: { value: "No" } });
     expect(screen.queryByTestId("approve-all-7")).toBeNull();
     expect(screen.getByTestId("approve-prefilled-7")).toBeDisabled(); // nothing left it may check
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gdpr`));
+    expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Verified");
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gender`));
     fireEvent.click(screen.getByTestId("approve-all-7"));
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(a.id, { city: "Berlin", gdpr: "Yes", gender: "Female", empty: "No" }));
+    expect(rememberAnswers).toHaveBeenCalledTimes(1);
+  });
+
+  it("pre-guesses consent and referral rows as Guessed, and opens an empty free-text row to type in", () => {
+    const a = listing({}, [
+      Q("privacy", "I agree to the processing of my personal data", "", "none"),
+      Q("ref", "Were you referred by an employee?", "", "none"),
+      Q("other", "Why this company?", "", "none"),
+    ]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    expect(within(screen.getByTestId(`q-${a.id}-privacy`)).getByText("Yes")).toBeInTheDocument();
+    expect(within(screen.getByTestId(`q-${a.id}-ref`)).getByText("No")).toBeInTheDocument();
+    expect(screen.getByTestId(`q-state-${a.id}-privacy`)).toHaveTextContent("Guessed");
+    expect(screen.getByTestId(`q-state-${a.id}-ref`)).toHaveTextContent("Guessed");
+    const box = screen.getByTestId(`q-input-${a.id}-other`);
+    expect(box).toHaveAttribute("placeholder", "Type your answer");
+    expect(screen.getByTestId(`q-state-${a.id}-other`)).toHaveTextContent("Guessed");
+    expect(screen.queryByText(/Not known/)).toBeNull();
   });
 
   it("hides an old send-it-yourself reminder for someone already under People, and answers it from that row", async () => {
