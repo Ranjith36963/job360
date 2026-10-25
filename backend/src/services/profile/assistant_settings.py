@@ -464,7 +464,7 @@ def pc_on_state(hours: Optional[dict[str, Any]], now_local: datetime) -> tuple[b
         opening = datetime.combine(day, time(start // 60, start % 60), tzinfo=now_local.tzinfo)
         if opening > now_local:
             return False, opening
-    return False, None  # pragma: no cover - a non-empty day list always has an opening within a week
+    return False, None  # unreachable: a non-empty day list always opens within a week
 
 
 def _hours_tuple(raw: Any) -> Optional[tuple[str, str]]:
