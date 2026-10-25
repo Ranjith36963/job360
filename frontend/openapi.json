@@ -10703,6 +10703,22 @@
             "title": "Answer",
             "type": "string"
           },
+          "changed_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "owner_edit",
+                  "approved_for_employer",
+                  "saved_answer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed Reason"
+          },
           "changed_to": {
             "anyOf": [
               {

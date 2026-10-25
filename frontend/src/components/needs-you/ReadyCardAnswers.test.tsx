@@ -74,7 +74,7 @@ describe("Verify / Edit on each answer", () => {
 
   it("an edited answer is verified, shows the user's word, and Send stays open", () => {
     const c = card(64, {
-      answers: [answer({ source: "guessed", key: null, answer: "no", changed_to: "Yes", verified: true })],
+      answers: [answer({ source: "guessed", key: null, answer: "no", changed_to: "Yes", changed_reason: "owner_edit", verified: true })],
     });
     render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("ready-answer-changed-64-0")).toHaveTextContent("Yes");
@@ -83,6 +83,43 @@ describe("Verify / Edit on each answer", () => {
     expect(screen.getByTestId("ready-changed-64")).toHaveTextContent(
       "You changed 1 answer. Your assistant types it in before it sends.",
     );
+  });
+
+  it("saved answers the assistant will type are not the user's change (application 122)", () => {
+    const c = card(64, {
+      answers: [
+        answer({ question: "Phone", answer: "+44 7442 564327", key: "contact.phone", saved_by: "web",
+          changed_to: "+447442564327", changed_reason: "saved_answer", verified: true }),
+        answer({ question: "Location and right to work", answer: "", source: "approved", key: "right_to_work.GB.yes_no",
+          changed_to: "Yes", changed_reason: "saved_answer", verified: true }),
+      ],
+    });
+    render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-changed-64")).toHaveTextContent("2 saved answers will be typed in before it sends.");
+    expect(screen.getByTestId("ready-changed-64").textContent).not.toMatch(/You changed/);
+    // One label and the single value that will be typed: never "(blank) -> Yes", no struck-through old value.
+    const row = screen.getByTestId("ready-answer-64-1");
+    expect(row).toHaveTextContent("Location and right to work");
+    expect(screen.getByTestId("ready-answer-changed-64-1").textContent).toBe("Yes");
+    expect(row.textContent).not.toMatch(/\(blank\)/);
+    expect(row.querySelector(".line-through")).toBeNull();
+    expect(screen.getByTestId("ready-answer-64-0").textContent).not.toMatch(/\+44 7442 564327/);
+    expect(screen.getByTestId("ready-send-64")).toBeEnabled();
+  });
+
+  it("an edit and a saved answer on one card get one sentence each", () => {
+    const c = card(64, {
+      answers: [
+        answer({ source: "guessed", key: null, answer: "no", changed_to: "Yes", changed_reason: "owner_edit", verified: true }),
+        answer({ question: "Why Poolside?", answer: "x", source: "written", key: null,
+          changed_to: "I build agents.", changed_reason: "approved_for_employer", verified: true }),
+      ],
+    });
+    render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-changed-64")).toHaveTextContent(
+      "You changed 1 answer. Your assistant types it in before it sends. 1 saved answer will be typed in before it sends.",
+    );
+    expect(screen.getByTestId("ready-answer-64-1")).toHaveTextContent("Your approved answer for this employer.");
   });
 
   it("a stale card says look again and reloads", async () => {

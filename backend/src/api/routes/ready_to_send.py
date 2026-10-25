@@ -47,6 +47,10 @@ class ReadyAnswer(BaseModel):
     # what was typed (verified), or differs (changed_to = what they said instead).
     verified: bool = False
     changed_to: Optional[str] = None
+    # Whose act made ``changed_to`` differ (application 122): owner_edit = the user's web session saved
+    # it after this fill (the only one the card calls "You changed"); approved_for_employer / saved_answer
+    # = memory saved before the fill that the assistant will type. None when ``changed_to`` is None.
+    changed_reason: Optional[Literal["owner_edit", "approved_for_employer", "saved_answer"]] = None
     # G023 (slice 11): a sensitive answer the user did not agree to remember - stored as its
     # sha256 only, so ``answer`` is "" (Verify cannot see it; Edit types it again).
     redacted: bool = False
