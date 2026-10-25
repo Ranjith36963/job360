@@ -181,6 +181,14 @@ describe("JobCard", () => {
     expect(answerAskQuestions).toHaveBeenCalledWith(a3.id, { city: "Berlin" });
   });
 
+  it("a saved personal answer reads Verified but still waits for the owner's click", () => {
+    const a = listing({}, [Q("gender", "Gender", "Female", "profile")]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    expect(screen.getByTestId(`q-state-${a.id}-gender`)).toHaveTextContent("Verified");
+    expect(screen.getByTestId(`q-ok-${a.id}-gender`)).toHaveTextContent("Looks right");
+    expect(screen.getByText("Needs your click")).toBeInTheDocument();
+  });
+
   it("Approve all pre-filled leaves consent and personal rows for the owner's own click", async () => {
     const a = listing({}, [
       Q("city", "City?", "Berlin", "guess"),
