@@ -91,6 +91,24 @@ class RunProblemsOut(BaseModel):
     problems: list[RunProblemOut]
 
 
+class DutyStatusOut(BaseModel):
+    duty: Duty
+    label: str
+    state: Literal["off", "running", "due", "failing", "held", "waiting"]
+    # Why a duty that is on does not run now (hunt: queue_full; batch: one of the batch holds).
+    hold: Optional[str] = None
+    last_run_at: Optional[str] = None
+    last_outcome: Optional[Outcome] = None
+    last_reason: Optional[RunReason] = None
+    failures_in_row: int = 0
+    next_due_at: Optional[str] = None
+
+
+class ScheduleStatusOut(BaseModel):
+    duties: list[DutyStatusOut]
+    last_tick_at: Optional[str] = None
+
+
 def _limit(user: CurrentUser, kind: str, per_hour: int) -> None:
     if per_hour > 0 and not rate_limit.check_and_record(
         f"schedule-{kind}:{user.id}", max_in_window=per_hour, window_seconds=3600
@@ -168,3 +186,18 @@ async def run_problems(
     row, saying what happened and what to do (Home and Needs you show them). Read-only; closed values."""
     runs = await schedule.load_runs(db, user.id)
     return RunProblemsOut(problems=[RunProblemOut(**p) for p in schedule.problems(runs)])
+
+
+@router.get("/schedule/status", response_model=ScheduleStatusOut, dependencies=AUTH_FIRST)
+async def schedule_status(
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> ScheduleStatusOut:
+    """Owner 2026-10-25: the Home status card - for each duty, is it on, when it last ran and how that
+    ended, and when it runs next. Read-only (takes no duty); closed values only."""
+    _limit(user, "read", settings.SCHEDULE_READS_MAX_PER_HOUR)
+    now = datetime.now(timezone.utc)
+    facts = await schedule.load_facts(db, user.id, now)
+    answer = schedule.due_now(facts, now)
+    rows = schedule.status(facts, answer, await schedule.load_runs(db, user.id))
+    return ScheduleStatusOut(duties=[DutyStatusOut(**r) for r in rows], last_tick_at=answer["last_tick_at"])

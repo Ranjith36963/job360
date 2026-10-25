@@ -297,6 +297,43 @@ def problems(runs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+DUTY_STATES: tuple[str, ...] = ("off", "running", "due", "failing", "held", "waiting")
+
+
+def status(f: DueFacts, answer: dict[str, Any], runs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per duty for the Home status card (owner 2026-10-25), from the same facts and answer
+    ``whats_due`` uses. ``state`` is the first that applies: off, running, due, failing, held, waiting."""
+    on = {"hunt": f.hunt_every_hours is not None, "inbox": inbox_every_hours(f.inbox_mode, f.check_every) is not None,
+          "reach": f.people_hunt, "batch": f.apply_on_own}
+    holds = {"hunt": answer.get("hunt_hold"), "batch": answer.get("batch_hold")}
+    due = {d["duty"] for d in answer["due"]}
+    out: list[dict[str, Any]] = []
+    for duty in ("hunt", "inbox", "reach", "batch"):
+        row = runs.get(duty) or {}
+        failures = int(row.get("failures") or 0)
+        hold = holds.get(duty) if on[duty] else None
+        if not on[duty]:
+            state = "off"
+        elif duty in answer.get("running", {}):
+            state = "running"
+        elif duty in due:
+            state = "due"
+        elif failures > 0:
+            state = "failing"
+        elif hold:
+            state = "held"
+        else:
+            state = "waiting"
+        out.append({
+            "duty": duty, "label": DUTY_WORDS[duty], "state": state, "hold": hold,
+            "last_run_at": answer["last_done_at"].get(duty),
+            "last_outcome": (row.get("outcome") or "done") if row else None,
+            "last_reason": (row.get("reason") or None) if row else None,
+            "failures_in_row": failures, "next_due_at": answer["next_due_at"].get(duty) if on[duty] else None,
+        })
+    return out
+
+
 async def _open_queue_count(db: JobDatabase, user_id: str) -> int:
     """Applications in the batch queue that are still ``considering`` (as the batch list shows it)."""
     from src.services.applications import spine  # noqa: PLC0415 - spine imports the profile package
