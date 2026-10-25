@@ -3086,10 +3086,11 @@ export interface paths {
         };
         /**
          * Whats Due
-         * @description The duties due NOW for the signed-in user, each with its recipe. Changes no setting. An assistant's
-         *     read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25): another run
-         *     in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` until ``mark_done``. The website's own
-         *     read only looks.
+         * @description The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``
+         *     (a routine that runs one job passes its own) limits the answer AND what it takes to those. An
+         *     assistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):
+         *     another run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until
+         *     ``mark_done``. The website's own read only looks.
          */
         get: operations["whats_due_api_schedule_due_get"];
         put?: never;
@@ -9544,6 +9545,8 @@ export interface components {
             failures_in_row?: {
                 [key: string]: number;
             };
+            /** Held By Running */
+            held_by_running?: ("hunt" | "inbox" | "batch" | "reach")[];
             /** Hunt Hold */
             hunt_hold?: "queue_full" | null;
             /** Last Done At */
@@ -14646,7 +14649,9 @@ export interface operations {
     };
     whats_due_api_schedule_due_get: {
         parameters: {
-            query?: never;
+            query?: {
+                duties?: ("hunt" | "inbox" | "batch" | "reach")[] | null;
+            };
             header?: {
                 authorization?: string | null;
             };

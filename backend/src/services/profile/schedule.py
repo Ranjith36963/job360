@@ -183,11 +183,13 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     if hold is None and not waiting_after_failure("batch"):
         due.append({"duty": "batch", "recipe": settings.SCHEDULE_DUTY_RECIPES["batch"], "reason": "queue_waiting"})
     live = {d: at for d, at in f.running.items() if now - at < timedelta(minutes=settings.DUTY_CLAIM_MINUTES)}
+    held = [d["duty"] for d in due if d["duty"] in live]
     due = [d for d in due if d["duty"] not in live]  # another run has it now: one run per duty at a time
     return {
         "due": due,
         "nothing_due": not due,
         "running": {d: _iso(at) for d, at in sorted(live.items())},
+        "held_by_running": held,
         "next_due_at": next_due,
         "batch_hold": hold,
         "waiting_on_you": f.waiting_on_you,

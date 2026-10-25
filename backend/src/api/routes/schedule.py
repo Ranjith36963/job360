@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
@@ -58,6 +58,8 @@ class WhatsDueOut(BaseModel):
     failures_in_row: dict[str, int] = Field(default_factory=dict)
     # Owner 2026-10-25: duties another run has now (not listed in `due`): {duty: taken_at}.
     running: dict[str, Optional[str]] = Field(default_factory=dict)
+    # Duties that are due but another run has them now (so `nothing_due` is never silent about it).
+    held_by_running: list[Duty] = Field(default_factory=list)
     expected_every_hours: int
     checked_at: str
 
@@ -131,20 +133,28 @@ def _log(event: str, user: CurrentUser, **fields: str) -> None:
 async def whats_due(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
+    duties: Optional[list[Duty]] = Query(default=None),  # noqa: B008
 ) -> WhatsDueOut:
-    """The duties due NOW for the signed-in user, each with its recipe. Changes no setting. An assistant's
-    read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25): another run
-    in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` until ``mark_done``. The website's own
-    read only looks."""
+    """The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``
+    (a routine that runs one job passes its own) limits the answer AND what it takes to those. An
+    assistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):
+    another run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until
+    ``mark_done``. The website's own read only looks."""
     _limit(user, "read", settings.SCHEDULE_READS_MAX_PER_HOUR)
     now = datetime.now(timezone.utc)
     answer = schedule.due_now(await schedule.load_facts(db, user.id, now), now)
+    if duties:
+        wanted = set(duties)
+        answer["due"] = [d for d in answer["due"] if d["duty"] in wanted]
+        answer["held_by_running"] = [d for d in answer["held_by_running"] if d in wanted]
+        answer["nothing_due"] = not answer["due"]
     if actor_for(user) != "web" and answer["due"]:
         got = await schedule.claim(db, user.id, [d["duty"] for d in answer["due"]], now)
         lost = [d["duty"] for d in answer["due"] if d["duty"] not in got]
         answer["due"] = [d for d in answer["due"] if d["duty"] in got]
         answer["nothing_due"] = not answer["due"]
         answer["running"] = {**answer["running"], **{d: now.isoformat(timespec="seconds") for d in lost}}
+        answer["held_by_running"] = [*answer["held_by_running"], *lost]
     _log("schedule_due_read", user, due=",".join(d["duty"] for d in answer["due"]) or "none")
     return WhatsDueOut(**answer)
 
