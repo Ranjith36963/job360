@@ -81,7 +81,8 @@ def backoff_hours(failures: int) -> int:
 
 # Why a batch is not due (closed set, first that applies).
 BATCH_HOLDS: tuple[str, ...] = (
-    "paused", "not_allowed", "queue_empty", "daily_cap_reached", "weekly_cap_reached", "outside_hours",
+    "paused", "not_allowed", "queue_empty", "waiting_on_you", "daily_cap_reached", "weekly_cap_reached",
+    "outside_hours",
 )
 
 
@@ -102,6 +103,8 @@ class DueFacts:
     # The user's people-hunt switch, and the applications it should work on this run (newest first, capped).
     people_hunt: bool = False
     reach_ids: list[int] = field(default_factory=list)
+    # Queued jobs that wait on the user (an open ask, an open block, a CV not seen yet; owner 2026-10-25).
+    waiting_on_you: int = 0
     # Failed runs in a row per duty (0 or missing = the last run was done or partial).
     failures: dict[str, int] = field(default_factory=dict)
     # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
@@ -124,6 +127,8 @@ def batch_hold(f: DueFacts) -> Optional[str]:
         return "not_allowed"
     if f.queued <= 0:
         return "queue_empty"
+    if f.waiting_on_you >= f.queued:  # every queued job waits on the user: a run could do nothing
+        return "waiting_on_you"
     if f.daily_left is not None and f.daily_left <= 0:
         return "daily_cap_reached"
     if f.weekly_left is not None and f.weekly_left <= 0:
@@ -185,6 +190,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         "running": {d: _iso(at) for d, at in sorted(live.items())},
         "next_due_at": next_due,
         "batch_hold": hold,
+        "waiting_on_you": f.waiting_on_you,
         "hunt_hold": hunt_hold,
         "last_done_at": {d: _iso(f.stamps.get(d)) for d in settings.SCHEDULE_DUTIES},
         "last_tick_at": _iso(f.stamps.get(TICK)),
@@ -334,20 +340,35 @@ def status(f: DueFacts, answer: dict[str, Any], runs: dict[str, dict[str, Any]])
     return out
 
 
-async def _open_queue_count(db: JobDatabase, user_id: str) -> int:
+async def _open_queue_ids(db: JobDatabase, user_id: str) -> list[int]:
     """Applications in the batch queue that are still ``considering`` (as the batch list shows it)."""
     from src.services.applications import spine  # noqa: PLC0415 - spine imports the profile package
 
     queued = await spine.queued_at_by_app(db, user_id)
     if not queued:
-        return 0
+        return []
     marks = ",".join("?" for _ in queued)
     cur = await db._db.execute(
-        f"SELECT COUNT(*) FROM applications WHERE user_id = ? AND status = 'considering' AND id IN ({marks})",  # noqa: S608
+        f"SELECT id FROM applications WHERE user_id = ? AND status = 'considering' AND id IN ({marks})",  # noqa: S608
         (user_id, *queued),
     )
-    row = await cur.fetchone()
-    return int(row[0]) if row else 0
+    return [int(dict(r)["id"]) for r in await cur.fetchall()]
+
+
+async def _waiting_on_you(db: JobDatabase, user_id: str, ids: list[int]) -> int:
+    """How many of the queued ``ids`` no run can move on without the user (owner 2026-10-25): an open ask
+    on it, an open block, or its newest CV not seen yet (the gate's ``cv_not_seen``). The batch is due only
+    while the assistant may apply on its own, so a filled form is not waiting: check_submit decides it."""
+    if not ids:
+        return 0
+    from src.services.applications import blocked, queue_preflight, ready  # noqa: PLC0415 - profile <-> spine
+
+    waiting = await queue_preflight._open_ask_apps(db, user_id, ids)
+    waiting |= {a["application_id"] for a in await ready.cv_to_approve(db, user_id)} & set(ids)
+    for app_id in set(ids) - waiting:
+        if await blocked.open_block(db, user_id, app_id) is not None:
+            waiting.add(app_id)
+    return len(waiting)
 
 
 async def owned_application_ids(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
@@ -413,13 +434,15 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
     hours = cfg.apply_hours
     inside = hours is None or rules._in_hours(now.astimezone(rules._zone(counts.user_tz)), hours)
     stamps = await load_stamps(db, user_id)
+    queue_ids = await _open_queue_ids(db, user_id)
     return DueFacts(
         hunt_every_hours=cfg.hunt_every_hours,
         inbox_mode=profile.preferences.daily_check or "",
         check_every=profile.preferences.check_every or "",
         paused=rules.is_paused(cfg.paused_until, now),
         apply_on_own=apply_on_own,
-        queued=await _open_queue_count(db, user_id),
+        queued=len(queue_ids),
+        waiting_on_you=await _waiting_on_you(db, user_id, queue_ids) if apply_on_own else 0,
         daily_left=rules.daily_left(cfg, counts),
         weekly_left=weekly_left,
         inside_hours=inside,

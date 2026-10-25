@@ -16453,6 +16453,11 @@
             },
             "title": "Running",
             "type": "object"
+          },
+          "waiting_on_you": {
+            "default": 0,
+            "title": "Waiting On You",
+            "type": "integer"
           }
         },
         "required": [
