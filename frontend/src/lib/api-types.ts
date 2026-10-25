@@ -446,7 +446,8 @@ export interface paths {
          * Resolve Blocked
          * @description "Mark resolved" - the user sorted out what stopped their assistant: records
          *     ``unblocked`` {resolution: user_did_it} and closes the blocked ask. 409 when
-         *     nothing is blocked. Session only; assistants use ``record_event``.
+         *     nothing is blocked. Session only; assistants use ``record_event``. A block the
+         *     assistant can try again (owner 2026-10-25) puts the job back on the queue and starts Apply.
          */
         post: operations["resolve_blocked_api_applications__application_id__blocked_resolve_post"];
         delete?: never;

@@ -25,6 +25,12 @@ UNQUEUE_REASONS = (
 )
 
 
+# Owner 2026-10-25: a stuck job goes back on the queue once the user clears the block - only for a block
+# the assistant can try again after the user's own step (signed in, made the account, the site works again,
+# a new day). Never one the user finishes on the form themselves (a CAPTCHA, an upload, a question).
+RETRY_AFTER_CLEARED = frozenset({"login_needed", "account_creation", "site_error", "site_limit_reached"})
+
+
 def check_unqueue_payload(payload: dict[str, Any]) -> list[str]:
     """Problems with an ``unqueued`` payload: ``{}`` or ``{"reason": <one of UNQUEUE_REASONS>}``."""
     problems: list[str] = []
@@ -40,13 +46,17 @@ def _marks(ids: list[int]) -> str:
 
 
 async def _blocked_counts(db: JobDatabase, user_id: str, ids: list[int]) -> dict[int, int]:
-    """``blocked`` events per application that no later event retracts."""
+    """``blocked`` events per application since it was last queued, that no later event retracts
+    (a job put back on the queue after the user cleared its block starts again from 0)."""
     if not ids:
         return {}
     cur = await db._db.execute(
         f"SELECT e.application_id, COUNT(*) FROM application_events e "  # noqa: S608 - placeholders only
         f"WHERE e.user_id = ? AND e.event_type = 'blocked' AND e.application_id IN ({_marks(ids)}) "
         f"AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        f"AND e.id > COALESCE((SELECT MAX(q.id) FROM application_events q WHERE q.user_id = e.user_id "
+        f"  AND q.application_id = e.application_id AND q.event_type = 'queued' "
+        f"  AND NOT EXISTS (SELECT 1 FROM application_events c2 WHERE c2.corrects_event_id = q.id)), 0) "
         f"GROUP BY e.application_id",
         [user_id, *ids],
     )
@@ -205,3 +215,35 @@ async def queue_summary(db: JobDatabase, user_id: str, queued_ids: list[int], cf
         "daily_left": settings_rules.daily_left(cfg, counts),
         "removed_today": await _removed_today(db, user_id, now),
     }
+
+
+async def back_to_queue(
+    db: JobDatabase, user_id: str, application_id: int, block_reason: str, *, recorded_by: str
+) -> bool:
+    """After the user cleared a ``block_reason`` block: True when the job is on the queue now. A job the
+    batch took off the queue for being blocked (``unqueued`` {reason: blocked}, the newest surviving queue
+    event) is put back (a ``queued`` event) when it is still open. Any other way it left stays as it is."""
+    if block_reason not in RETRY_AFTER_CLEARED:
+        return False
+    if application_id in await spine.queued_at_by_app(db, user_id, [application_id]):
+        return True
+    cur = await db._db.execute(
+        "SELECT e.event_type, e.payload FROM application_events e WHERE e.user_id = ? AND e.application_id = ? "
+        "AND e.event_type IN ('queued', 'unqueued') "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) "
+        "ORDER BY e.id DESC LIMIT 1",
+        (user_id, application_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return False
+    last = dict(row)
+    raw = last.get("payload")
+    try:
+        payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except ValueError:
+        payload = {}
+    if last["event_type"] != "unqueued" or not isinstance(payload, dict) or payload.get("reason") != "blocked":
+        return False
+    in_queue, _note = await spine.queue_if_open(db, user_id, application_id, recorded_by=recorded_by)
+    return in_queue

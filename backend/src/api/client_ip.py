@@ -64,24 +64,6 @@ def client_ip(request: HTTPConnection) -> str:
     return _as_ip(entries[-hops]) or peer
 
 
-# TEMPORARY (2026-10-24): on Railway the backend records 100.64.0.5, the relay,
-# for every caller whether hops is 1 or 2, so the forwarded headers are not
-# arriving as expected. This shows what does arrive. Login records it only for
-# @example.com addresses (reserved, never a real account). Remove after one run.
-_PROBE_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-host",
-                  "x-forwarded-proto", "x-envoy-external-address", "cf-connecting-ip")
-
-
-def forwarding_probe(request: HTTPConnection) -> dict[str, object]:
-    """The address headers as they reach the backend, each truncated."""
-    seen = {h: [v[:200] for v in request.headers.getlist(h)] for h in _PROBE_HEADERS}
-    return {
-        "peer": request.client.host if request.client else None,
-        "hops": settings.TRUSTED_PROXY_HOPS,
-        "headers": {h: v for h, v in seen.items() if v},
-    }
-
-
 # One IPv6 host is normally handed a whole /64 (SLAAC, privacy addresses), so it
 # can rotate through ~2^64 addresses for free. Throttle keys count the /64.
 IPV6_THROTTLE_PREFIX = 64
