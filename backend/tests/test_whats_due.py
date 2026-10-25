@@ -120,7 +120,7 @@ def test_the_answer_holds_closed_values_only_never_instructions():
     answer = schedule.due_now(_facts(hunt_every_hours=6, inbox_mode="auto", apply_on_own=True, queued=1), NOW)
     assert set(answer) == {
         "due", "nothing_due", "next_due_at", "batch_hold", "last_done_at", "last_tick_at", "expected_every_hours",
-        "checked_at", "failures_in_row", "running", "hunt_hold", "waiting_on_you",
+        "checked_at", "failures_in_row", "running", "held_by_running", "hunt_hold", "waiting_on_you",
     }
     for item in answer["due"]:
         assert item["duty"] in settings.SCHEDULE_DUTIES

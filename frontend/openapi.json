@@ -16385,6 +16385,19 @@
             "title": "Failures In Row",
             "type": "object"
           },
+          "held_by_running": {
+            "items": {
+              "enum": [
+                "hunt",
+                "inbox",
+                "batch",
+                "reach"
+              ],
+              "type": "string"
+            },
+            "title": "Held By Running",
+            "type": "array"
+          },
           "hunt_hold": {
             "anyOf": [
               {
@@ -26950,9 +26963,34 @@
     },
     "/api/schedule/due": {
       "get": {
-        "description": "The duties due NOW for the signed-in user, each with its recipe. Changes no setting. An assistant's\nread takes each listed duty for this run (one run per duty at a time, owner 2026-10-25): another run\nin the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` until ``mark_done``. The website's own\nread only looks.",
+        "description": "The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``\n(a routine that runs one job passes its own) limits the answer AND what it takes to those. An\nassistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):\nanother run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until\n``mark_done``. The website's own read only looks.",
         "operationId": "whats_due_api_schedule_due_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "duties",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "hunt",
+                      "inbox",
+                      "batch",
+                      "reach"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Duties"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",

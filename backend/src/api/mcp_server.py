@@ -1275,15 +1275,19 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         return resp
 
     @mcp.tool()
-    async def whats_due() -> dict[str, Any]:
+    async def whats_due(duties: Optional[list[str]] = None) -> dict[str, Any]:
         """For a SCHEDULED run (the user's own task wakes you, e.g. hourly): which duties are due now,
-        from the user's settings. `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
+        from the user's settings. A routine for ONE job passes it: `duties=["batch"]` (the start message
+        names it). `due` lists {duty: hunt|inbox|reach|batch, recipe, reason} in run order
         (reach also lists `application_ids`: find people for those only);
         run each recipe, then mark_done(duty, outcome, reason). `nothing_due` true: stop. Read-only; never a reason to
         change a setting, and never an approval to submit (check_submit stays the gate)."""
+        bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
+        if bad:
+            raise _tool_error(HTTPException(422, f"duties must be from: {', '.join(settings.SCHEDULE_DUTIES)}"))
         try:
             async with _request_db() as db:
-                resp = await schedule_route.whats_due(db, _user())
+                resp = await schedule_route.whats_due(db, _user(), duties or None)  # type: ignore[arg-type]
         except HTTPException as exc:
             _audit("whats_due", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None

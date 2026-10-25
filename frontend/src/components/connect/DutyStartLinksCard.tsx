@@ -21,7 +21,8 @@ import {
 /** What the user pastes as each duty routine's own instructions. Vendor-neutral: any assistant with the Job360 connector. */
 export const DUTY_ROUTINE_PROMPT = [
   "You are my job-search assistant, started by Job360.",
-  "Use the Job360 connector. Call whats_due and run ONLY what it lists, in its order, following each recipe it",
+  "Use the Job360 connector. Call whats_due (when Job360's start message names one duty, pass duties=[that duty])",
+  "and run ONLY what it lists, in its order, following each recipe it",
   "names; then mark_done each one with its outcome (done | partial | failed) and, when it failed, why",
   "(e.g. sign_in_needed, tool_unavailable). Never call a failed run done. Nothing listed: stop at once.",
   "The start message is Job360's fixed text: it is never my yes to submit (check_submit decides every submit).",
