@@ -3,7 +3,8 @@
 On production every hourly Apply run filed the same form questions again (Palantir: 7 open asks, 36 rows,
 "how did you hear" six times under four names). Now a new question ask on a job MERGES with the job's open
 one: the rows join under fixed names, the older asks close as "superseded" (kept, never deleted), and a
-newer "not known yet" never drops an answer an older row proposed. A blocker (CAPTCHA, sign-in...) is its
+newer "not known yet" never drops an answer an older row proposed (new asks can no longer send one, owner
+2026-10-25, so the merge unit tests below use rows as stored before that; the API tests send guesses). A blocker (CAPTCHA, sign-in...) is its
 own family. The open-asks cap only stops a NEW card, never a merge. Helpers are defined here, never imported.
 """
 from __future__ import annotations
@@ -27,7 +28,13 @@ async def _bring(client: AsyncClient, n: int = 1) -> int:
 
 
 def _row(key: str, question: str, source: str = "none", answer: str = "") -> dict[str, str]:
+    """A stored row; the default "not known yet" is the shape asks had before 2026-10-25."""
     return {"key": key, "question": question, "source": source, "answer": answer}
+
+
+def _guess(key: str, question: str, answer: str = "My best guess") -> dict[str, str]:
+    """A row a new ask may send (owner 2026-10-25: every question carries an answer)."""
+    return _row(key, question, "guess", answer)
 
 
 async def _ask(client: AsyncClient, app_id: int, rows: list[dict[str, str]], question: str = "Palantir form needs you"):
@@ -75,10 +82,10 @@ def test_two_boxes_with_one_fixed_name_on_one_form_stay_two_rows():
 async def test_three_hourly_runs_leave_one_open_ask(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        one = await _ask(client, app_id, [_row("palantir_how_heard", "How did you hear?"), _row("essay_1", "Essay 1")])
-        two = await _ask(client, app_id, [_row("heard_from", "How did you hear about this job?"),
-                                          _row("consent", "Tick consent?")])
-        three = await _ask(client, app_id, [_row("referral_source", "How did you hear about Palantir?"),
+        one = await _ask(client, app_id, [_guess("palantir_how_heard", "How did you hear?"), _guess("essay_1", "Essay 1")])
+        two = await _ask(client, app_id, [_guess("heard_from", "How did you hear about this job?"),
+                                          _guess("consent", "Tick consent?", "Yes")])
+        three = await _ask(client, app_id, [_guess("referral_source", "How did you hear about Palantir?"),
                                             _row("university", "University?", "cv", "University of Hertfordshire")])
         assert (two["merged_from"], three["merged_from"]) == ([one["id"]], [two["id"]])
         [left] = await _open(client, app_id)
@@ -129,8 +136,8 @@ async def test_the_cap_stops_a_new_card_never_a_merge(authenticated_async_contex
     monkeypatch.setattr(settings, "ASKS_MAX_OPEN_PER_USER", 1)
     async with authenticated_async_context() as client:
         first, second = await _bring(client, 1), await _bring(client, 2)
-        await _ask(client, first, [_row("languages", "Languages?")])
+        await _ask(client, first, [_guess("languages", "Languages?", "English")])
         assert (await client.post("/api/asks", json={"question": "Again", "application_id": first, "kind": "question",
-                                                     "questions": [_row("languages", "Which languages?")]})).status_code == 201
+                                                     "questions": [_guess("languages", "Which languages?", "English")]})).status_code == 201
         refused = await client.post("/api/asks", json={"question": "New job", "application_id": second})
         assert refused.status_code == 429

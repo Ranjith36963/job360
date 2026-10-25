@@ -44,9 +44,16 @@ ASKS_WITHDRAW_REASON_MAX_CHARS = 200
 # Owner 2026-10-24 - one ask per job carries every open form question. `kind` says what the ask is:
 # a question, or a blocker only the user can clear on the form ("" = an ask from before 0087).
 ASK_KINDS = ("question", "captcha", "login", "upload", "safety")
-# Where an answer the assistant filled in came from (the web labels each row with it). `none` = not
-# known yet: its answer must be empty. A guess is never `memory` - the recipes say so.
-ASK_QUESTION_SOURCES = ("profile", "memory", "cv", "guess", "draft", "none")
+# Where an answer the assistant filled in came from (the web labels each row with it): profile/memory/cv
+# read as Verified, guess/draft as Guessed. Owner 2026-10-25: "not known yet" is banned, so every incoming
+# question carries an answer and `none` is refused on create. Rows stored before keep it (reads never
+# re-validate), and a merge still carries them (``merge_questions``, ``_sentence_row``).
+# A guess is never `memory` - the recipes say so.
+ASK_QUESTION_SOURCES = ("profile", "memory", "cv", "guess", "draft")
+_UNANSWERED_EXAMPLE = {
+    "key": "referred", "question": "Were you referred by an employee?", "answer": "No", "source": "guess",
+    "choices": ["Yes", "No"],
+}
 ASKS_QUESTIONS_MAX = 20
 ASK_ITEM_QUESTION_MAX_CHARS = 500
 ASK_ITEM_ANSWER_MAX_CHARS = 2000
@@ -102,10 +109,44 @@ def _item_text(where: str, raw: Any, limit: int, *, allow_empty: bool = False) -
     return text
 
 
+def unanswered_refusal(raw: Any) -> Optional[str]:
+    """The 422 text when any incoming question carries no answer (empty, or source ``none``), else None.
+
+    Owner 2026-10-25: every form question in a new ask carries an answer. ALL the unanswered ones are
+    named at once, then what to do and one valid example, so the assistant fixes the whole ask in one
+    resend. Non-dict items are left to ``validate_questions``. Runs on the INCOMING rows only, before any
+    merge: an older stored row with source none still merges and reads."""
+    if not isinstance(raw, list):
+        return None
+    missing: list[str] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        answer = item.get("answer")
+        if item.get("source") == "none" or not clean_text(answer if isinstance(answer, str) else ""):
+            key = item.get("key")
+            missing.append(f"questions[{i}]" + (f" ({key})" if isinstance(key, str) and key else ""))
+    if not missing:
+        return None
+    return "\n".join([
+        f"Nothing was saved: {len(missing)} question{'s' if len(missing) != 1 else ''} with no answer: "
+        f"{', '.join(missing)}.",
+        "Every question in an ask carries an answer; \"not known yet\" does not exist. Read the form yourself "
+        "and fill each answer: a fact the user said or saved = source profile|memory|cv; otherwise draft your "
+        "best guess, source guess (a choice or yes/no: data-processing consent = Yes, referred by an employee = "
+        "No) or draft (free text you wrote). Never leave an answer empty, never use source none, never ask the "
+        "user to paste or copy question text. Resend the whole ask in one call.",
+        f"Valid example question: {json.dumps(_UNANSWERED_EXAMPLE)}",
+    ])
+
+
 def validate_questions(raw: Optional[list[dict[str, Any]]]) -> list[dict[str, Any]]:
-    """The ask's question list, cleaned: unique keys, closed sources, capped text. [] = none."""
+    """The incoming question list, cleaned: unique keys, closed sources, capped text, every answer filled.
+    [] = none."""
     if not raw:
         return []
+    if (refusal := unanswered_refusal(raw)) is not None:
+        raise SpineError(422, refusal)
     if len(raw) > ASKS_QUESTIONS_MAX:
         raise SpineError(422, f"at most {ASKS_QUESTIONS_MAX} questions per ask")
     out: list[dict[str, Any]] = []
@@ -119,9 +160,7 @@ def validate_questions(raw: Optional[list[dict[str, Any]]]) -> list[dict[str, An
         source = item.get("source")
         if source not in ASK_QUESTION_SOURCES:
             raise SpineError(422, f"{where}.source must be one of {', '.join(ASK_QUESTION_SOURCES)}")
-        answer = _item_text(f"{where}.answer", item.get("answer"), ASK_ITEM_ANSWER_MAX_CHARS, allow_empty=True)
-        if (source == "none") != (answer == ""):
-            raise SpineError(422, f"{where}: source none goes with an empty answer, any other source with an answer")
+        answer = _item_text(f"{where}.answer", item.get("answer"), ASK_ITEM_ANSWER_MAX_CHARS)
         q: dict[str, Any] = {
             "key": key, "source": source, "answer": answer,
             "question": _item_text(f"{where}.question", item.get("question"), ASK_ITEM_QUESTION_MAX_CHARS),
@@ -167,7 +206,9 @@ def _fixed(rows: list[dict[str, Any]], keep: frozenset[str] | set[str] = frozens
 
 def merge_questions(older: list[dict[str, Any]], newer: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One row per fixed key, oldest first. A newer row replaces an older one, except a newer "not known
-    yet" row never drops an answer an older one proposed. At most ``ASKS_QUESTIONS_MAX`` rows (the newest)."""
+    yet" row never drops an answer an older one proposed. At most ``ASKS_QUESTIONS_MAX`` rows (the newest).
+    New asks can no longer carry "not known yet" (``unanswered_refusal``), but rows stored before
+    2026-10-25 and a sentence-only ask's row (``_sentence_row``) can, so source none stays tolerated here."""
     rows: dict[str, dict[str, Any]] = {}
     first = _fixed(older)
     for q in [*first, *_fixed(newer, keep={q["key"] for q in first})]:
@@ -226,6 +267,106 @@ async def supersede(
                 detail=f"Why: {reason}. Asked: {old['question']}"[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
                 payload={"ask_id": int(old["id"]), "reason": reason}, occurred_at=now, recorded_by=actor,
             )
+
+
+TIDY_ACTOR = "system"
+# A row that asks the user to paste the form's own question: the assistant reads the form itself (owner 2026-10-25).
+_PASTE_RE = re.compile(r"\bpaste\b", re.IGNORECASE)
+READ_FORM_NOTE = (
+    "Read this form's free-text questions yourself and draft the answers; do not ask the user to paste them."
+)
+
+
+async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
+    """Owner 2026-10-25: the one-time clean-up of asks filed before one-ask-per-job, run on the user's own
+    read (a no-op once tidy). Per job, family and side, the NEWEST open ask keeps every row (merged under
+    fixed names) and the older ones close as superseded; an open ask on a closed job closes too. Nothing is
+    deleted. Returns how many asks it closed."""
+    from src.core.settings import APPLICATION_FOLLOW_UP_CLOSED_STATUSES  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT k.id, a.status AS app_status FROM application_asks k JOIN applications a "
+        "ON a.id = k.application_id AND a.user_id = k.user_id WHERE k.user_id = ? AND k.answered_at IS NULL "
+        "AND k.withdrawn_at IS NULL AND k.context NOT LIKE ? ORDER BY k.id",
+        (user_id, "proof_missing:%"),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    if not rows:
+        return 0
+    groups: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
+    closed_job: list[dict[str, Any]] = []
+    for r in rows:
+        ask = await _get_ask(db, user_id, int(r["id"]))
+        if ask is None:
+            continue
+        if r["app_status"] in APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
+            closed_job.append(ask)
+            continue
+        family = "question" if ask["kind"] in QUESTION_FAMILY else ask["kind"]
+        side = "web" if ask["asked_by"] == "web" else "assistant"
+        groups.setdefault((int(ask["application_id"]), family, side), []).append(ask)
+    dupes = {k: v for k, v in groups.items() if len(v) > 1}
+    pasted = [a for (_app, fam, _side), v in groups.items() if fam == "question"
+              for a in v[-1:] if any(_PASTE_RE.search(str(q["question"])) for q in _rows_of_all(v))]
+    if not dupes and not closed_job and not pasted:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    closed = 0
+    async with db._db.transaction():
+        for (_app, family, _side), asks_ in dupes.items():
+            keep, olds = asks_[-1], asks_[:-1]
+            if family == "question":
+                merged = merge_questions([q for old in olds for q in _rows_of(old)], _rows_of(keep))
+                await db._db.execute(
+                    "UPDATE application_asks SET questions = ? WHERE id = ? AND user_id = ? AND answered_at IS NULL",
+                    (json.dumps(merged) if merged else "", int(keep["id"]), user_id),
+                )
+            await supersede(db, user_id, olds, int(keep["id"]), now, TIDY_ACTOR)
+            closed += len(olds)
+        for keep in pasted:
+            closed += await _drop_paste_rows(db, user_id, int(keep["id"]), now)
+        for ask in closed_job:
+            await db._db.execute(
+                "UPDATE application_asks SET withdrawn_at = ?, withdrawn_by = 'job_closed', "
+                "withdrawn_reason = 'the job is closed' WHERE id = ? AND user_id = ? AND answered_at IS NULL "
+                "AND withdrawn_at IS NULL",
+                (now, int(ask["id"]), user_id),
+            )
+            closed += 1
+    get_audit_logger().info("asks_tidied", extra={"event": "asks_tidied", "user_id": user_id, "closed": closed})
+    return closed
+
+
+def _rows_of_all(asks_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [q for a in asks_ for q in _rows_of(a)]
+
+
+async def _drop_paste_rows(db: JobDatabase, user_id: str, ask_id: int, now: str) -> int:
+    """Take the "paste the question" rows off an open ask and leave the job a note to read the form. An ask
+    with no row left closes. Returns 1 when the ask closed, else 0."""
+    ask = await _get_ask(db, user_id, ask_id)
+    if ask is None:
+        return 0
+    rows = _rows_of(ask)
+    kept = [q for q in rows if not _PASTE_RE.search(str(q["question"]))]
+    if len(kept) == len(rows):
+        return 0
+    await append_event(
+        db, user_id=user_id, application_id=int(ask["application_id"]), event_type="note",
+        detail=READ_FORM_NOTE, occurred_at=now, recorded_by=TIDY_ACTOR,
+    )
+    if kept:
+        await db._db.execute(
+            "UPDATE application_asks SET questions = ? WHERE id = ? AND user_id = ? AND answered_at IS NULL",
+            (json.dumps(kept), ask_id, user_id),
+        )
+        return 0
+    await db._db.execute(
+        "UPDATE application_asks SET withdrawn_at = ?, withdrawn_by = ?, withdrawn_reason = ? "
+        "WHERE id = ? AND user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL",
+        (now, TIDY_ACTOR, "the assistant reads the form's questions itself", ask_id, user_id),
+    )
+    return 1
 
 
 def _validate_answers(questions: list[dict[str, Any]], raw: Optional[dict[str, Any]]) -> dict[str, str]:

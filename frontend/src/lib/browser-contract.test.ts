@@ -4,7 +4,7 @@ const requestJson = vi.fn();
 vi.mock("@/lib/api", () => ({ requestJson: (...a: unknown[]) => requestJson(...a) }));
 
 import {
-  askBrowser, browserLabel, contactSendBrowser, decideOwnBrowserSend, needsOwnBrowser,
+  askBrowser, browserLabel, effectiveAskBrowser, contactSendBrowser, decideOwnBrowserSend, needsOwnBrowser,
   ownBrowserQueueCount, ownBrowserTask, readyBrowser, runOwnBrowserNow,
 } from "./browser-contract";
 
@@ -68,5 +68,27 @@ describe("calls", () => {
   it("returns null when the queue fails", async () => {
     requestJson.mockImplementation(async (path: string) => { if (path) throw new Error("boom"); return {}; });
     expect(await ownBrowserQueueCount()).toBeNull();
+  });
+});
+
+describe("effectiveAskBrowser", () => {
+  const plain = { question: "q" } as unknown as import("@/lib/api").Ask;
+  const labelled = { browser: { kind: "own_browser", label: "Your Chrome", reason: "r" } } as unknown as import("@/lib/api").Ask;
+
+  it.each(["captcha", "login", "upload", "safety"])("defaults an unlabelled %s to You (human)", (kind) => {
+    expect(effectiveAskBrowser(plain, kind)).toEqual({ kind: "human", label: "You", reason: "" });
+  });
+
+  it("lets a backend label win", () => {
+    expect(effectiveAskBrowser(labelled, "captcha")?.kind).toBe("own_browser");
+  });
+
+  it("ignores a malformed label and keeps the default", () => {
+    const bad = { browser: { kind: "mystery", label: "X" } } as unknown as import("@/lib/api").Ask;
+    expect(effectiveAskBrowser(bad, "login")?.label).toBe("You");
+  });
+
+  it("gives no default to other kinds", () => {
+    for (const k of ["question", "yes_no", "structured", "outreach"]) expect(effectiveAskBrowser(plain, k)).toBeNull();
   });
 });

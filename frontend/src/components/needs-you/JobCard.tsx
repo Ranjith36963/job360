@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
-import { askBrowser } from "@/lib/browser-contract";
+import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
 import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
@@ -14,6 +14,7 @@ import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 import { AskQuestions } from "./AskQuestions";
+import { AskText } from "./AskText";
 import { BrowserReason } from "./BrowserReason";
 import { PersonRow } from "./PersonRow";
 import type { RowState } from "./AskQuestions";
@@ -42,8 +43,8 @@ function BrowserChip({ label, testid }: { label: BrowserLabel | null; testid: st
 }
 
 /** The one label a whole card shows: the owner's Chrome first, then a human step, then any label. */
-function cardBrowser(asks: { ask: Ask }[]): BrowserLabel | null {
-  const labels = asks.map((a) => askBrowser(a.ask)).filter((l): l is BrowserLabel => l !== null);
+function cardBrowser(asks: { ask: Ask; kind: RowKind }[]): BrowserLabel | null {
+  const labels = asks.map((a) => effectiveAskBrowser(a.ask, a.kind)).filter((l): l is BrowserLabel => l !== null);
   return labels.find((l) => l.kind === "own_browser") ?? labels.find((l) => l.kind === "human") ?? labels[0] ?? null;
 }
 
@@ -178,11 +179,11 @@ export function JobCard({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="text-sm font-medium">{isBlocker(kind) ? BLOCKER_TITLE[kind] : ""}</p>
         <div className="flex flex-col items-end gap-0.5 text-right">
-          <BrowserChip label={askBrowser(ask)} testid={`browser-chip-${ask.id}`} />
-          {askBrowser(ask) && <BrowserReason label={askBrowser(ask)!} testid={`browser-reason-${ask.id}`} />}
+          <BrowserChip label={effectiveAskBrowser(ask, kind)} testid={`browser-chip-${ask.id}`} />
+          {effectiveAskBrowser(ask, kind) && <BrowserReason label={effectiveAskBrowser(ask, kind)!} testid={`browser-reason-${ask.id}`} />}
         </div>
       </div>
-      <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.question}</p>
+      <AskText id={ask.id} question={ask.question} headClass="text-xs text-muted-foreground" />
       {finishing === ask.id && <FinishInBrowser applicationId={card.applicationId} onDone={() => setFinishing(null)} />}
       <div className="flex flex-wrap gap-2">
         {ask.finish_here && finishing !== ask.id && (
@@ -255,8 +256,7 @@ export function JobCard({
           )}
           {questions.map(({ ask, kind }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`question-${ask.id}`}>
-              <p className="whitespace-pre-wrap text-sm font-medium">{ask.question}</p>
-              {ask.context && <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.context}</p>}
+              <AskText id={ask.id} question={ask.question} context={ask.context} headClass="text-sm font-medium" />
               <div>{rowLink(ask.id)}</div>
               {kind === "yes_no" ? (
                 <div className="flex gap-2">
@@ -321,7 +321,7 @@ export function JobCard({
           )}
           {reminders.map(({ ask }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`reminder-${ask.id}`}>
-              <p className="whitespace-pre-wrap text-sm">{ask.question}</p>
+              <AskText id={ask.id} question={ask.question} headClass="text-sm" />
               <div className="flex flex-wrap gap-2">
                 {rowLink(ask.id)}
                         <button type="button" className={btn} disabled={busy}

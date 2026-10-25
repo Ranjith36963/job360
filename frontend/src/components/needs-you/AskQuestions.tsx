@@ -37,7 +37,9 @@ export function AskQuestions({
     <>
       {items.map(({ id, q, askId }) => {
         const row = rows[id] ?? initialRow(q);
-        const open = editing.has(id) || (!q.choices?.length && !q.answer);
+        const open = editing.has(id);
+        // No answer yet and nothing to pick from: not a guess. The assistant drafts it, or the owner writes it.
+        const pending = !q.choices?.length && !open && row.value.trim() === "";
         // A saved fact (profile/memory/cv) left as it is reads Verified even while a consent or personal
         // row waits for the owner's own click ("Needs your click" still shows); a guess reads Guessed until checked.
         const saved = isVerifiedSource(q.source) && q.answer.trim() !== "" && row.value === q.answer;
@@ -49,10 +51,12 @@ export function AskQuestions({
               <p className="whitespace-pre-wrap text-sm font-medium">{q.question}</p>
               <span className="flex flex-wrap gap-1">
                 {sensitive && !row.ok && <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${warn}`}>Needs your click</span>}
-                <span data-testid={`q-state-${askId}-${q.key}`}
-                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${state === "Verified" ? good : warn}`}>
-                  {state}
-                </span>
+                {!pending && (
+                  <span data-testid={`q-state-${askId}-${q.key}`}
+                    className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${state === "Verified" ? good : warn}`}>
+                    {state}
+                  </span>
+                )}
               </span>
             </div>
             {q.choices?.length ? (
@@ -67,6 +71,17 @@ export function AskQuestions({
             ) : open ? (
               <Textarea aria-label={q.question} value={row.value} disabled={busy} placeholder="Type your answer" data-testid={`q-input-${askId}-${q.key}`}
                 onChange={(e) => onChange(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })} />
+            ) : pending ? (
+              <>
+                <p className="text-sm text-muted-foreground" data-testid={`q-pending-${askId}-${q.key}`}>
+                  Your assistant will draft this on its next run
+                </p>
+                <div className="flex gap-2">
+                  <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(id)}>
+                    Write it myself
+                  </button>
+                </div>
+              </>
             ) : (
               <>
                 <p className="whitespace-pre-wrap text-sm"><AnswerText value={row.value} /></p>

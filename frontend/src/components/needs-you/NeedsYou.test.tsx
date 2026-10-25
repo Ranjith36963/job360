@@ -120,6 +120,17 @@ describe("NeedsYou", () => {
     );
   });
 
+  it("puts a long question's tail and its context behind Details, as text", async () => {
+    setup([{ ...base, id: 9, question: "Batch run paused. <b>Three</b> jobs failed; open each form.", status: "open" }]);
+    const { container } = render(<NeedsYou />);
+    const d = await screen.findByTestId("details-9");
+    expect(d.tagName).toBe("DETAILS");
+    expect(d).toHaveTextContent("<b>Three</b> jobs failed; open each form.");
+    expect(d).toHaveTextContent("Form field");
+    expect(screen.getByText("Batch run paused.")).toBeInTheDocument();
+    expect(container.querySelector("b")).toBeNull();
+  });
+
   it("answers only after the confirm", async () => {
     setup([openAsk]);
     render(<NeedsYou />);
