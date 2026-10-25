@@ -167,6 +167,10 @@ describe("JobCard", () => {
     expect(screen.getAllByText("City?")).toHaveLength(1);
     expect(screen.getByText("Form answers · 3")).toBeInTheDocument();
     expect(screen.getByTestId(`q-state-${a1.id}-city`)).toHaveTextContent("Verified"); // the profile copy won over the guess
+    expect(screen.getByTestId(`q-pending-${a1.id}-phone`)).toHaveTextContent("Your assistant will draft this on its next run");
+    expect(screen.queryByTestId(`q-state-${a1.id}-phone`)).toBeNull();
+    expect(screen.queryByTestId(`q-ok-${a1.id}-phone`)).toBeNull();
+    fireEvent.click(screen.getByTestId(`q-edit-${a1.id}-phone`));
     fireEvent.change(screen.getByTestId(`q-input-${a1.id}-phone`), { target: { value: "123" } });
     fireEvent.click(screen.getByTestId("approve-all-7"));
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledTimes(3));
@@ -198,6 +202,9 @@ describe("JobCard", () => {
     expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Guessed");
     expect(screen.getByTestId(`q-ok-${a.id}-gdpr`)).toHaveTextContent("Looks right");
     expect(screen.getAllByText("Needs your click")).toHaveLength(2);
+    expect(screen.getByTestId(`q-pending-${a.id}-empty`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`q-ok-${a.id}-empty`)).toBeNull();
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-empty`));
     fireEvent.change(screen.getByTestId(`q-input-${a.id}-empty`), { target: { value: "No" } });
     expect(screen.queryByTestId("approve-all-7")).toBeNull();
     expect(screen.getByTestId("approve-prefilled-7")).toBeDisabled(); // nothing left it may check
@@ -209,7 +216,7 @@ describe("JobCard", () => {
     expect(rememberAnswers).toHaveBeenCalledTimes(1);
   });
 
-  it("pre-guesses consent and referral rows as Guessed, and opens an empty free-text row to type in", () => {
+  it("pre-guesses consent and referral rows as Guessed, and shows an empty free-text row as waiting for the assistant", () => {
     const a = listing({}, [
       Q("privacy", "I agree to the processing of my personal data", "", "none"),
       Q("ref", "Were you referred by an employee?", "", "none"),
@@ -220,6 +227,10 @@ describe("JobCard", () => {
     expect(within(screen.getByTestId(`q-${a.id}-ref`)).getByText("No")).toBeInTheDocument();
     expect(screen.getByTestId(`q-state-${a.id}-privacy`)).toHaveTextContent("Guessed");
     expect(screen.getByTestId(`q-state-${a.id}-ref`)).toHaveTextContent("Guessed");
+    expect(screen.getByTestId(`q-pending-${a.id}-other`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`q-state-${a.id}-other`)).toBeNull();
+    expect(screen.queryByTestId(`q-input-${a.id}-other`)).toBeNull();
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-other`));
     const box = screen.getByTestId(`q-input-${a.id}-other`);
     expect(box).toHaveAttribute("placeholder", "Type your answer");
     expect(screen.getByTestId(`q-state-${a.id}-other`)).toHaveTextContent("Guessed");
@@ -260,11 +271,11 @@ describe("JobCard", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
-  it("names Job360's browser by default, on the row and on the card", () => {
+  it("names the owner (You) for a blocker with no backend label, on the row and on the card", () => {
     const captcha = ask("Solve the CAPTCHA and press Submit");
     render(<JobCard card={card([captcha])} onChanged={onChanged} />);
-    expect(screen.getByTestId(`browser-chip-${captcha.id}`)).toHaveTextContent("Job360's browser");
-    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Job360's browser");
+    expect(screen.getByTestId(`browser-chip-${captcha.id}`)).toHaveTextContent("You");
+    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("You");
     expect(screen.queryByTestId("own-chrome-7")).toBeNull();
   });
 
@@ -277,7 +288,7 @@ describe("JobCard", () => {
     expect(within(group).getByTestId(`blocker-${b.id}`)).toBeInTheDocument();
     expect(within(group).queryByTestId(`blocker-${a.id}`)).toBeNull();
     expect(screen.getByTestId(`browser-chip-${b.id}`)).toHaveTextContent("Needs your Chrome, PC on");
-    expect(screen.getByTestId(`browser-chip-${a.id}`)).toHaveTextContent("Job360's browser");
+    expect(screen.getByTestId(`browser-chip-${a.id}`)).toHaveTextContent("You");
     expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Needs your Chrome, PC on");
   });
 
@@ -338,8 +349,29 @@ describe("JobCard", () => {
     const bad = { ...ask("Please sign in"), browser: { kind: "mystery", label: "X", reason: "Y" } } as unknown as Ask;
     render(<JobCard card={card([j, bad])} onChanged={onChanged} />);
     expect(screen.queryByTestId(`browser-reason-${j.id}`)).toBeNull();
-    expect(screen.getByTestId(`browser-chip-${bad.id}`)).toHaveTextContent("Job360's browser");
+    expect(screen.getByTestId(`browser-chip-${bad.id}`)).toHaveTextContent("You"); // bad label ignored: blocker default
     expect(screen.queryByTestId(`browser-reason-${bad.id}`)).toBeNull();
+  });
+
+  it("an unlabelled question row carries no browser chip, and a backend label still beats the default", () => {
+    const labelled = { ...ask("Solve the CAPTCHA and press Submit"), browser: { kind: "job360", label: "Job360's browser", reason: "" } } as unknown as Ask;
+    render(<JobCard card={card([labelled])} onChanged={onChanged} />);
+    expect(screen.getByTestId(`browser-chip-${labelled.id}`)).toHaveTextContent("Job360's browser");
+  });
+
+  it("puts a long ask behind Details with a one-line head", () => {
+    const long = ask("Solve the CAPTCHA now. Batch run paused after three failures; please finish the check on the form.");
+    render(<JobCard card={card([long])} onChanged={onChanged} />);
+    const d = screen.getByTestId(`details-${long.id}`);
+    expect(d.tagName).toBe("DETAILS");
+    expect(d).toHaveTextContent("Batch run paused after three failures");
+    expect(within(screen.getByTestId(`blocker-${long.id}`)).getByText("Solve the CAPTCHA now.")).toBeInTheDocument();
+  });
+
+  it("shows a short ask with no Details", () => {
+    const short = ask("Solve the CAPTCHA and press Submit");
+    render(<JobCard card={card([short])} onChanged={onChanged} />);
+    expect(screen.queryByTestId(`details-${short.id}`)).toBeNull();
   });
 
   it("has no ask-level browser button", () => {

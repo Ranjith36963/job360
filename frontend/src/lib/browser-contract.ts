@@ -48,6 +48,16 @@ export function needsOwnBrowser(ask: Ask): boolean {
   return askBrowser(ask)?.kind === "own_browser";
 }
 
+const OWNER_STEP_KINDS: readonly string[] = ["captcha", "login", "upload", "safety"];
+
+/** The label an ask shows: the backend's own label wins; a blocker the backend left unlabelled
+ *  (captcha, login, upload, safety) is the owner's step, so it reads "You". Anything else: null. */
+export function effectiveAskBrowser(ask: Ask, kind: string): BrowserLabel | null {
+  const sent = askBrowser(ask);
+  if (sent) return sent;
+  return OWNER_STEP_KINDS.includes(kind) ? { kind: "human", label: "You", reason: "" } : null;
+}
+
 export type OwnBrowserTaskState = "waiting_on_you" | "queued" | "in_progress" | "declined";
 export type OwnBrowserTask = {
   state: OwnBrowserTaskState;

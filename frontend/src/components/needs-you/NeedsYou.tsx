@@ -19,6 +19,7 @@ import { relativeTime } from "@/lib/utils";
 import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
+import { AskText } from "./AskText";
 import { JobCards } from "./JobCards";
 import type { JobCardsReport } from "./JobCards";
 import { groupAsks } from "@/lib/job-cards";
@@ -82,10 +83,8 @@ export function AskCard({
       className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-card"
     >
       <div className="flex flex-col gap-1.5">
-        <p className="whitespace-pre-wrap font-heading text-xl leading-snug">{ask.question}</p>
-        {ask.context && (
-          <p className="whitespace-pre-wrap text-sm text-muted-foreground">{ask.context}</p>
-        )}
+        <AskText id={ask.id} question={ask.question} context={ask.context}
+          headClass="font-heading text-xl leading-snug" restClass="whitespace-pre-wrap text-sm text-muted-foreground" />
         <p className="text-[12.5px] text-muted-foreground">
           asked by {ask.asked_by === "web" ? "you" : ask.asked_by} · <span className="font-mono">{relativeTime(ask.asked_at)}</span>
           {job && " · "}

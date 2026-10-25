@@ -24,7 +24,7 @@ _AD = {
 QUESTIONS = [
     {"key": "contract_country", "question": "Where should your contract be based?", "answer": "Germany",
      "source": "memory", "remembered_on": "2026-10-12"},
-    {"key": "visa_de", "question": "Do you need visa sponsorship for Germany?", "source": "none",
+    {"key": "visa_de", "question": "Do you need visa sponsorship for Germany?", "answer": "No", "source": "guess",
      "choices": ["Yes, I need it", "No"]},
     {"key": "story", "question": "A 300-word story", "answer": "Draft from the Calnex RAG work.", "source": "draft"},
 ]
@@ -78,8 +78,9 @@ async def test_an_ask_carries_its_questions_and_takes_one_answer_per_key(authent
     ("questions", "kind", "needle"),
     [
         ([{**QUESTIONS[0], "source": "hunch"}], None, "source"),
-        ([{**QUESTIONS[0], "source": "none"}], None, "source none goes with an empty answer"),
-        ([{**QUESTIONS[2], "answer": ""}], None, "source none goes with an empty answer"),
+        ([{**QUESTIONS[0], "source": "none"}], None, "never use source none"),
+        ([{**QUESTIONS[2], "answer": ""}], None, "draft your best guess"),
+        ([{**QUESTIONS[2], "answer": "   "}], None, "1 question with no answer: questions[0] (story)"),
         ([QUESTIONS[0], QUESTIONS[0]], None, "repeats an earlier key"),
         ([{**QUESTIONS[0], "key": "Bad Key!"}], None, "key must be"),
         ([{**QUESTIONS[2], "remembered_on": "2026-10-12"}], None, "only with source memory"),
@@ -177,3 +178,91 @@ async def test_mcp_ask_user_and_answer_ask_carry_questions_and_answers(authentic
             assert json.loads(done.content[0].text)["answers"] == answers
             mixed = await mcp.call_tool("answer_ask", {"ask_id": ask["id"], "answers": answers, "withdraw": "old"})
             assert mixed.is_error
+
+
+# ── Owner 2026-10-25: no "not known yet" ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_unanswered_questions_are_all_named_with_what_to_do(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        qs = [QUESTIONS[0], {**QUESTIONS[1], "answer": "", "source": "none"}, {**QUESTIONS[2], "answer": ""}]
+        resp = await _ask(client, application_id=app_id, kind="question", questions=qs)
+        assert resp.status_code == 422, resp.text
+        text = resp.text
+        assert "2 questions with no answer: questions[1] (visa_de), questions[2] (story)" in text
+        assert "source guess" in text and "Read the form yourself" in text and "Never leave an answer empty" in text
+        assert "paste or copy question text" in text and "Valid example question" in text
+        assert (await client.get("/api/asks")).json()["asks"] == []  # nothing was saved
+        events = (await client.get(f"/api/applications/{app_id}")).json()["events"]
+        assert not [e for e in events if e["event_type"] == "asked"]
+
+
+@pytest.mark.asyncio
+async def test_a_guess_and_a_draft_with_answers_are_accepted(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        qs = [
+            {"key": "consent", "question": "I agree to data processing", "answer": "Yes", "source": "guess",
+             "choices": ["Yes", "No"]},
+            {"key": "why", "question": "Why n8n?", "answer": "I build workflow tools.", "source": "draft"},
+        ]
+        resp = await _ask(client, application_id=app_id, kind="question", questions=qs)
+        assert resp.status_code == 201, resp.text
+        assert [(q["source"], q["answer"]) for q in resp.json()["questions"]] == [
+            ("guess", "Yes"), ("draft", "I build workflow tools."),
+        ]
+
+
+@pytest.mark.asyncio
+async def test_an_old_stored_ask_with_source_none_still_reads_and_merges(authenticated_async_context):
+    """Rows stored before the ban keep source none: reads never re-validate, and #1215's merge carries them."""
+    from src.core import settings
+    from src.repositories import pgsync
+
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        made = (await _ask(client, application_id=app_id, kind="question", questions=QUESTIONS[:1])).json()
+        old = [{"key": "visa_de", "question": "Visa?", "answer": "", "source": "none"}]
+        conn = pgsync.connect(str(settings.DB_PATH))
+        conn.execute("UPDATE application_asks SET questions = ? WHERE id = ?", (json.dumps(old), made["id"]))
+        conn.commit()
+        conn.close()
+
+        def shown(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return [{k: v for k, v in q.items() if v is not None} for q in rows]
+
+        listed = await client.get("/api/asks")
+        assert listed.status_code == 200, listed.text
+        assert shown(listed.json()["asks"][0]["questions"]) == old
+        got = await client.get(f"/api/applications/{app_id}")
+        assert got.status_code == 200 and shown(got.json()["asks"][0]["questions"]) == old
+
+        # A new ask on the job merges with the old row: the old none row is kept, the new row joins.
+        merged = await _ask(client, application_id=app_id, kind="question", questions=[QUESTIONS[2]])
+        assert merged.status_code == 201, merged.text
+        body = merged.json()
+        assert body["merged_from"] == [made["id"]]
+        assert [(q["key"], q["source"], q["answer"]) for q in body["questions"]] == [
+            ("visa_de", "none", ""), ("story", "draft", QUESTIONS[2]["answer"]),
+        ]
+        # A newer guess for the old row's key replaces its "not known yet".
+        again = await _ask(client, application_id=app_id, kind="question", questions=[QUESTIONS[1]])
+        assert [(q["key"], q["source"]) for q in again.json()["questions"]] == [("story", "draft"), ("visa_de", "guess")]
+
+
+@pytest.mark.asyncio
+async def test_mcp_ask_user_refuses_an_unanswered_question_with_guidance(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    token = await _mint_token(authenticated_async_context)
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            bad = await mcp.call_tool(
+                "ask_user", {"question": "x", "questions": [{**QUESTIONS[1], "answer": "", "source": "none"}]},
+            )
+            assert bad.is_error
+            text = bad.content[0].text
+            assert "Nothing was saved: 1 question with no answer: questions[0] (visa_de)" in text
+            assert "draft your best guess" in text and "never use source none" in text

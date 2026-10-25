@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
@@ -33,14 +33,15 @@ def _raise(exc: SpineError) -> None:
 
 class AskQuestionIn(BaseModel):
     """One form question of an ask (0087): the answer the assistant filled in and where it came from.
-    Lengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``."""
+    Every question carries an answer (owner 2026-10-25; no `none`): profile/memory/cv = Verified,
+    guess/draft = Guessed. Lengths, key shape and the caps are checked in ``asks.validate_questions``."""
 
     model_config = ConfigDict(extra="forbid")
 
     key: str
     question: str
     answer: str = ""
-    source: Literal["profile", "memory", "cv", "guess", "draft", "none"]
+    source: Literal["profile", "memory", "cv", "guess", "draft"]
     choices: Optional[list[str]] = None
     remembered_on: Optional[str] = None
 
@@ -57,6 +58,14 @@ class CreateAskRequest(BaseModel):
     # Gap roadmap slice 25 — optional idempotency key: the same key + same body returns the
     # FIRST ask (already_existed=true), writing nothing; another body under it is a 409.
     client_key: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _every_question_answered(cls, data: Any) -> Any:
+        """Before field checks, so an empty answer or source `none` gets the what-to-do refusal."""
+        if isinstance(data, dict) and (refusal := asks_service.unanswered_refusal(data.get("questions"))):
+            raise ValueError(refusal)
+        return data
 
 
 class CreateAskOut(AskOut):
@@ -117,6 +126,8 @@ async def list_asks(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if actor_for(user) == "web" and status == "open":  # the user's own page tidies old duplicates once
+            await asks_service.tidy_open_asks(db, user.id)
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
         # Each application's open block is read once and shared by both.
         blocks = await blocked_service.open_blocks(db, user.id, blocked_service.open_app_ids(rows))
