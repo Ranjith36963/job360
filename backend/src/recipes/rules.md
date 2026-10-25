@@ -260,6 +260,10 @@ empty answer). A guess is never memory. Yes/no or a closed list: give `choices`.
 user can do (CAPTCHA, sign-in, a failed upload, a safety block) is its own ask on the same job:
 record `blocked` (Job360 opens it with its kind) or `ask_user` `kind` captcha|login|upload|safety.
 The user approves the answers at once; `answer_ask` returns them as `answers` {key: answer}.
+A new ask on a job that has an open one MERGES into it (the reply's `merged_from`): never re-ask
+each run; read the job's open ask first and add only what is new. Fixed keys: how_heard, consent,
+demographic_consent, referred, worked_before, languages, university, equality.gender,
+equality.ethnicity, cv_ok, cv_unsupported_terms, essays, job_country, location_city.
 Never ask the user to send an outreach message through `ask_user`: a saved message nobody marked
 sent shows under People to reach on that job's card.
 

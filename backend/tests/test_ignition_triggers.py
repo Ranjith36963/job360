@@ -126,9 +126,11 @@ async def test_a_hunted_job_queued_starts_reach_and_the_batch_with_its_id(authen
 async def test_the_users_answer_starts_the_batch_an_assistants_does_not(authenticated_async_context):
     async with authenticated_async_context() as client:
         await _link_all(client)
+        # One open ask per job (2026-10-25): the two asks sit on two jobs.
         app_id = (await client.post("/api/jobs/bring", json=_ad(3))).json()["application_id"]
+        other = (await client.post("/api/jobs/bring", json=_ad(4))).json()["application_id"]
         first = (await client.post("/api/asks", json={"question": "Notice period?", "application_id": app_id})).json()
-        second = (await client.post("/api/asks", json={"question": "Salary?", "application_id": app_id})).json()
+        second = (await client.post("/api/asks", json={"question": "Salary?", "application_id": other})).json()
         async with await _agent(client) as agent:
             with aioresponses() as mocked:
                 _mock(mocked)

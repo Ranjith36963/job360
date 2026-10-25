@@ -4981,6 +4981,8 @@ export interface components {
              * @default
              */
             kind: string;
+            /** Merged From */
+            merged_from?: number[];
             /** Question */
             question: string;
             /** Questions */
