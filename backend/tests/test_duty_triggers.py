@@ -193,3 +193,37 @@ def test_the_start_text_is_fixed_words_and_ids_only():
             assert "whats_due" in duty_trigger.message(duty, cause)
     with pytest.raises(duty_trigger.DutyError):
         duty_trigger.check_duty("apply")
+
+
+@pytest.mark.asyncio
+async def test_send_obeys_a_429_and_shares_the_hourly_cap(authenticated_async_context, monkeypatch):
+    """The Send link is the batch duty's link: a Send obeys its Retry-After and counts toward its cap."""
+    from src.services.browser_agent import duty_trigger
+
+    monkeypatch.setattr(duty_trigger, "COOLDOWN_S", 0)
+    async with authenticated_async_context() as client:
+        bring = await client.post("/api/jobs/bring", json={
+            "title": "Data Engineer", "company": "Northwind", "location": "London",
+            "description": "Build the pipelines. " * 8, "apply_url": "https://northwind.example/careers/7",
+        })
+        app_id = int(bring.json()["application_id"])
+        await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada, engineer."})
+        assert (await client.post(f"/api/applications/{app_id}/send/approve")).status_code == 201
+        await client.put("/api/assistant-trigger", json={"url": SEND})
+        with aioresponses() as mocked:
+            mocked.post(SEND, status=429, repeat=True)
+            busy = (await client.post("/api/assistant-trigger/fire")).json()
+            held = (await client.post("/api/assistant-trigger/fire")).json()
+            run = (await client.post("/api/assistant-duty-triggers/batch/run")).json()
+            calls = _calls(mocked)
+        assert busy["reason"] == "rate_limited"
+        assert held["reason"] == "rate_limited" and run["reason"] == "rate_limited"
+        assert len(calls) == 1  # waited as asked: neither the next Send nor Run now called again
+        monkeypatch.setattr(duty_trigger, "FIRES_PER_HOUR", 1)
+        from src.api.dependencies import get_request_db
+
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            await db._db.execute("UPDATE assistant_triggers SET retry_until = NULL")
+            await db._db.commit()
+        capped = (await client.post("/api/assistant-trigger/fire")).json()
+        assert capped["reason"] == "hourly_cap"

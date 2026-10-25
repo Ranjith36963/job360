@@ -102,7 +102,7 @@ async def save(db: Any, user_id: str, url: str, token: str) -> None:
     await db._db.execute(
         "INSERT INTO assistant_triggers (user_id, url, token_enc, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT (user_id) DO UPDATE SET url = EXCLUDED.url, token_enc = EXCLUDED.token_enc, "
-        "updated_at = EXCLUDED.updated_at, last_result = '', last_fired_at = NULL",
+        "updated_at = EXCLUDED.updated_at, last_result = '', last_fired_at = NULL, retry_until = NULL",
         (user_id, clean, enc, now, now),
     )
     await db._db.commit()
@@ -212,14 +212,13 @@ async def fire(db: Any, user_id: str, *, site: str, resolve: ResolveFn) -> dict[
     now = _now()
     # Claim the start in ONE statement before any call: two presses at once cannot both pass a read-then-
     # write check (CodeRabbit on #913). Every exit below records its own result, which frees the claim.
-    cutoff = (now - timedelta(seconds=COOLDOWN_S)).isoformat()
-    cur = await db._db.execute(
-        "UPDATE assistant_triggers SET last_fired_at = ?, last_result = 'starting' WHERE user_id = ? "
-        "AND NOT (last_result IN ('started', 'starting') AND last_fired_at IS NOT NULL AND last_fired_at > ?)",
-        (now.isoformat(), user_id, cutoff),
-    )
-    await db._db.commit()
-    if not getattr(cur, "rowcount", 0):
+    # Ignition (0088): Send shares the batch duty's hourly cap and obeys a 429's Retry-After too.
+    from src.services.browser_agent import duty_trigger  # noqa: PLC0415 - duty_trigger imports this module
+
+    if not await duty_trigger._claim(db, user_id, "batch", now):
+        held = duty_trigger._held(await duty_trigger.load(db, user_id, "batch") or row, now)
+        if held["reason"] != "cooldown":
+            return held
         last = datetime.fromisoformat(row["last_fired_at"]) if row["last_fired_at"] else now
         wait = max(1, COOLDOWN_S - int((now - last).total_seconds()))
         return {"fired": False, "reason": "cooldown", "retry_after": wait,
@@ -245,7 +244,7 @@ async def fire(db: Any, user_id: str, *, site: str, resolve: ResolveFn) -> dict[
         await _remember(db, user_id, now, "failed: network")
         return {"fired": False, "reason": "network", "detail": str(exc).splitlines()[0][:160] if str(exc) else ""}
     if status == 429:
-        await _remember(db, user_id, now, "rate_limited")
+        await _remember(db, user_id, now, "rate_limited", retry_until=_retry_until(now))
         return {"fired": False, "reason": "rate_limited",
                 "detail": "Your assistant's start link is busy (too many starts this hour). Try later."}
     if not 200 <= status < 300:
@@ -265,9 +264,14 @@ def _saved_token(token_enc: str) -> Optional[str]:
     return None if token is None else str(token.get("token") or "")
 
 
-async def _remember(db: Any, user_id: str, when: datetime, result: str) -> None:
+def _retry_until(now: datetime) -> str:
+    """No Send start before this time after a 429 (one cool-down; duty_trigger reads Retry-After itself)."""
+    return (now + timedelta(seconds=COOLDOWN_S)).isoformat()
+
+
+async def _remember(db: Any, user_id: str, when: datetime, result: str, *, retry_until: Optional[str] = None) -> None:
     await db._db.execute(
-        "UPDATE assistant_triggers SET last_fired_at = ?, last_result = ? WHERE user_id = ?",
-        (when.isoformat(), result[:60], user_id),
+        "UPDATE assistant_triggers SET last_fired_at = ?, last_result = ?, retry_until = ? WHERE user_id = ?",
+        (when.isoformat(), result[:60], retry_until, user_id),
     )
     await db._db.commit()
