@@ -62,6 +62,15 @@ def test_a_newer_not_known_never_drops_a_proposed_answer():
     assert merged[0]["question"] == "How did you hear about this job?"  # the newest wording
 
 
+def test_two_boxes_with_one_fixed_name_on_one_form_stay_two_rows():
+    """Review of #1215: marketing_consent and gdpr_consent both fold to "consent"; one row must not vanish."""
+    form = [_row("marketing_consent", "Marketing emails?"), _row("gdpr_consent", "Store my data?")]
+    merged = asks.merge_questions([], form)
+    assert [q["key"] for q in merged] == ["marketing_consent", "gdpr_consent"]
+    again = asks.merge_questions(merged, [_row("marketing_consent", "Marketing emails?", "guess", "No")])
+    assert [(q["key"], q["answer"]) for q in again] == [("gdpr_consent", ""), ("marketing_consent", "No")]
+
+
 @pytest.mark.asyncio
 async def test_three_hourly_runs_leave_one_open_ask(authenticated_async_context):
     async with authenticated_async_context() as client:

@@ -154,13 +154,25 @@ def canonical_key(key: str) -> str:
     return key
 
 
+def _fixed(rows: list[dict[str, Any]], keep: frozenset[str] | set[str] = frozenset()) -> list[dict[str, Any]]:
+    """Rows under their fixed names, unless two different keys of the same list share one (marketing_consent
+    and gdpr_consent are two boxes on one form): those keep their own keys, so neither row is lost. A key
+    in ``keep`` (an older row already kept under it) stays as it is, so it merges with that row."""
+    fixed = [q["key"] if q["key"] in keep else canonical_key(q["key"]) for q in rows]
+    owners: dict[str, set[str]] = {}
+    for q, key in zip(rows, fixed):
+        owners.setdefault(key, set()).add(q["key"])
+    return [{**q, "key": key if len(owners[key]) == 1 else q["key"]} for q, key in zip(rows, fixed)]
+
+
 def merge_questions(older: list[dict[str, Any]], newer: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One row per fixed key, oldest first. A newer row replaces an older one, except a newer "not known
     yet" row never drops an answer an older one proposed. At most ``ASKS_QUESTIONS_MAX`` rows (the newest)."""
     rows: dict[str, dict[str, Any]] = {}
-    for q in [*older, *newer]:
-        key = canonical_key(q["key"])
-        merged = {**q, "key": key}
+    first = _fixed(older)
+    for q in [*first, *_fixed(newer, keep={q["key"] for q in first})]:
+        key = q["key"]
+        merged = q
         before = rows.get(key)
         if before is not None and merged["source"] == "none" and before["source"] != "none":
             merged = {**merged, "source": before["source"], "answer": before["answer"]}
