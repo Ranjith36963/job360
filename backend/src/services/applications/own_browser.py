@@ -93,7 +93,9 @@ def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]
     if any(r["entry"] in ("sent", "reply") and int(r["id"]) > mid for r in rows):
         return None
     decisions = [r for r in rows if r["entry"] in (APPROVED, DECLINED) and str(r.get("text")) == str(mid)]
-    base: dict[str, Any] = {"message_id": mid, "approved_at": None, "claim_until": None, "claimed_by": ""}
+    base: dict[str, Any] = {
+        "message_id": mid, "approved_at": None, "claim_until": None, "claimed_by": "", "claimed_actor": "",
+    }
     if not decisions:
         return {**base, "state": "waiting_on_you"}
     last = decisions[-1]
@@ -104,7 +106,10 @@ def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]
     if after and after[-1]["entry"] == CLAIMED:
         until = (_when(after[-1]["recorded_at"]) or now) + timedelta(minutes=CLAIM_MINUTES)
         if until > now:
-            return {**base, "state": "in_progress", "claim_until": until.isoformat(), "claimed_by": after[-1]["text"]}
+            return {
+                **base, "state": "in_progress", "claim_until": until.isoformat(),
+                "claimed_by": after[-1]["text"], "claimed_actor": after[-1].get("recorded_by") or "",
+            }
     return {**base, "state": "queued"}
 
 
@@ -129,13 +134,13 @@ async def _insert(
 ) -> None:
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
 
-    cur = await db._db.execute(
-        "SELECT COUNT(*) FROM contact_outreach WHERE contact_id = ? AND entry IN (?, ?, ?, ?)",
-        (contact_id, *ENTRIES),
-    )
-    got = await cur.fetchone()
-    if got is not None and int(got[0]) >= ROWS_PER_CONTACT_MAX:
-        raise SpineError(429, "too many own-browser entries for this person")
+    if entry == CLAIMED:  # the user's approve / decline and a release are never blocked by this cap
+        cur = await db._db.execute(
+            "SELECT COUNT(*) FROM contact_outreach WHERE contact_id = ? AND entry = ?", (contact_id, CLAIMED)
+        )
+        got = await cur.fetchone()
+        if got is not None and int(got[0]) >= ROWS_PER_CONTACT_MAX:
+            raise SpineError(429, "too many own-browser claims for this person")
     stamp = now.astimezone(timezone.utc).isoformat()
     await db._db.execute(
         "INSERT INTO contact_outreach (user_id, contact_id, entry, channel, text, version_no, occurred_at, "
@@ -250,10 +255,20 @@ async def window(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]
 async def _contact_tasks(db: JobDatabase, user: CurrentUser, now: datetime) -> list[dict[str, Any]]:
     from src.services.applications import contacts  # noqa: PLC0415
 
+    # Only a person whose NEWEST decision is an approval of their NEWEST message, a LinkedIn one with no
+    # sent / reply mark since: finished approvals must never fill the LIMIT.
     cur = await db._db.execute(
-        "SELECT contact_id, MAX(id) AS newest FROM contact_outreach WHERE user_id = ? AND entry = ? "
-        "GROUP BY contact_id ORDER BY newest ASC LIMIT ?",
-        (user.id, APPROVED, QUEUE_MAX),
+        "SELECT a.contact_id, a.id AS newest FROM contact_outreach a WHERE a.user_id = ? AND a.entry = ? "
+        "AND a.id = (SELECT MAX(d.id) FROM contact_outreach d WHERE d.contact_id = a.contact_id "
+        "            AND d.entry IN (?, ?)) "
+        "AND a.text = CAST((SELECT MAX(m.id) FROM contact_outreach m WHERE m.contact_id = a.contact_id "
+        "                   AND m.entry = 'message') AS TEXT) "
+        "AND EXISTS (SELECT 1 FROM contact_outreach m2 WHERE m2.contact_id = a.contact_id "
+        "            AND CAST(m2.id AS TEXT) = a.text AND m2.channel = 'linkedin') "
+        "AND NOT EXISTS (SELECT 1 FROM contact_outreach s WHERE s.contact_id = a.contact_id "
+        "                AND s.entry IN ('sent', 'reply') AND s.id > CAST(a.text AS INTEGER)) "
+        "ORDER BY a.id ASC LIMIT ?",
+        (user.id, APPROVED, APPROVED, DECLINED, QUEUE_MAX),
     )
     out: list[dict[str, Any]] = []
     for r in await cur.fetchall():
@@ -274,7 +289,7 @@ async def _contact_tasks(db: JobDatabase, user: CurrentUser, now: datetime) -> l
             "message_id": task["message_id"], "draft_text": text, "draft_chars": len(text),
             "linkedin_state": view.get("linkedin_state"), "why_own_browser": WHY_WORDS["default"],
             "owner_yes": True,
-            "claim": ({"session": task["claimed_by"], "until": task["claim_until"]}
+            "claim": ({"session": task["claimed_by"], "until": task["claim_until"], "actor": task["claimed_actor"]}
                       if task["state"] == "in_progress" else None),
             "browser": routing.label(route),
         })
@@ -300,7 +315,8 @@ async def _application_tasks(
         reason = str(p.get("reason") or "")
         route = routing.ask_route(
             blocked.ASK_KIND_FOR_REASON.get(reason, ""), block_reason=reason, block_by_browser=True,
-            finish_here=reason == "captcha",  # Job360's browser holds that page: the user finishes it on Needs you
+            # While Job360's browser still holds that page the user finishes it on Needs you; once it let go, no.
+            finish_here=reason == "captcha" and blocked.browser_hold_live(user.id, app_id),
         )
         if route.kind != "own_browser":
             continue
@@ -333,13 +349,22 @@ async def queue_tasks(
 # ── Take and release ────────────────────────────────────────────────────────────────────────────────────
 
 
+# A LinkedIn send, or a claim Job360 wrote itself that was neither released nor followed by a sent mark: a
+# send that was never recorded still counts toward the pace.
+_SENDS = (
+    "o.user_id = ? AND ((o.entry = 'sent' AND o.channel = 'linkedin') OR (o.entry = 'send_claimed' AND NOT EXISTS "
+    "(SELECT 1 FROM contact_outreach x WHERE x.contact_id = o.contact_id AND x.id > o.id "
+    "AND x.entry IN ('send_released', 'sent'))))"
+)
+
+
 async def _pace(db: JobDatabase, user_id: str, now: datetime) -> Optional[tuple[str, int]]:
     """``("wait", seconds_left)`` when the last LinkedIn send was under the minimum gap ago;
     ``("daily_limit", 0)`` at the day's maximum (the user's own day); else ``None``."""
     from src.services.profile import assistant_settings as rules  # noqa: PLC0415
 
     cur = await db._db.execute(
-        "SELECT MAX(recorded_at) FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND channel = 'linkedin'",
+        f"SELECT MAX(o.recorded_at) FROM contact_outreach o WHERE {_SENDS}",  # noqa: S608 - constant text
         (user_id,),
     )
     got = await cur.fetchone()
@@ -350,8 +375,7 @@ async def _pace(db: JobDatabase, user_id: str, now: datetime) -> Optional[tuple[
             return "wait", int(math.ceil(left))
     today = await rules.count_on_user_today(
         db, user_id, now,
-        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND channel = 'linkedin' "
-        "AND recorded_at >= ?",
+        f"SELECT o.recorded_at FROM contact_outreach o WHERE {_SENDS} AND o.recorded_at >= ?",  # noqa: S608
         (user_id,),
     )
     return ("daily_limit", 0) if today >= LINKEDIN_DAILY_MAX else None
@@ -364,7 +388,11 @@ def _answer(status: str, why: str = "", **extra: Any) -> dict[str, Any]:
 def _next_step(task: dict[str, Any]) -> str:
     if task["kind"] == "application":
         return f'get_application_kit(application_id={task["application_id"]}, session="<your session>")'
-    return "open the person's LinkedIn page in your own browser, send the draft as written, then record_event sent"
+    return (
+        f'call check_outreach(contact_id={task["contact_id"]}, message_id={task["message_id"]}); only if it says '
+        "send, open the person's LinkedIn page in your own browser and send the draft, then record_event sent. "
+        "Otherwise own_browser_queue release with reason other"
+    )
 
 
 async def take(db: JobDatabase, user: CurrentUser, session: str, now: datetime) -> dict[str, Any]:
@@ -378,6 +406,7 @@ async def take(db: JobDatabase, user: CurrentUser, session: str, now: datetime) 
     label = kit.clean_session(session)
     if not label:
         raise SpineError(422, "session is needed: a short label that tells your sessions apart")
+    actor = actor_for(user)
     win = await window(db, user.id, now)
     if win["why"] == "paused":
         _log("own_browser_take", user.id, "paused")
@@ -389,7 +418,10 @@ async def take(db: JobDatabase, user: CurrentUser, session: str, now: datetime) 
         await db._db.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", (user.id,))
         tasks = await queue_tasks(db, user, now, label)
         contacts_ = [t for t in tasks if t["kind"] == "linkedin_outreach"]
-        mine = next((t for t in contacts_ if t["claim"] and t["claim"]["session"] == label), None)
+        mine = next(
+            (t for t in contacts_ if t["claim"] and (t["claim"]["session"], t["claim"]["actor"]) == (label, actor)),
+            None,
+        )
         if mine is not None:
             _log("own_browser_take", user.id, "already_yours", contact_id=mine["contact_id"])
             return _answer("already_yours", task=mine, next=_next_step(mine))
@@ -402,16 +434,20 @@ async def take(db: JobDatabase, user: CurrentUser, session: str, now: datetime) 
             if pace is not None:
                 refusal = _answer(pace[0], pace[0], wait_seconds=pace[1])
             else:
-                chosen = free[0]
-                await db._db.execute(
-                    "SELECT id FROM application_contacts WHERE id = ? AND user_id = ? FOR UPDATE",
-                    (chosen["contact_id"], user.id),
-                )
-                state = derive(await _rows(db, chosen["contact_id"]), now)
-                if state is None or state["state"] != "queued":
-                    chosen = None
-                else:
-                    await _insert(db, user, chosen["contact_id"], CLAIMED, label, now)
+                for candidate in free:  # the first that is still queued once its row is locked
+                    await db._db.execute(
+                        "SELECT id FROM application_contacts WHERE id = ? AND user_id = ? FOR UPDATE",
+                        (candidate["contact_id"], user.id),
+                    )
+                    state = derive(await _rows(db, candidate["contact_id"]), now)
+                    if state is None or state["state"] != "queued":
+                        continue
+                    try:
+                        await _insert(db, user, candidate["contact_id"], CLAIMED, label, now)
+                    except SpineError:  # too many claims on this person: try the next one
+                        continue
+                    chosen = candidate
+                    break
         elif busy:
             refusal = _answer("busy", "another session is sending")
     if chosen is not None:
@@ -434,6 +470,7 @@ async def release(
     """Give a claimed person back. 409 unless this session holds the live claim; 422 for an unknown reason
     or task id."""
     from src.services.applications import kit  # noqa: PLC0415
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
 
     label = kit.clean_session(session)
     if reason not in RELEASE_REASONS:
@@ -449,7 +486,9 @@ async def release(
         if await cur.fetchone() is None:
             raise SpineError(404, "contact not found")
         state = derive(await _rows(db, contact_id), now)
-        if state is None or state["state"] != "in_progress" or not label or state["claimed_by"] != label:
+        if state is None or state["state"] != "in_progress" or not label or (
+            state["claimed_by"], state["claimed_actor"]
+        ) != (label, actor_for(user)):
             _log("own_browser_release", user.id, "refused", contact_id=contact_id)
             raise SpineError(409, "you do not hold a live claim on this person")
         await _insert(db, user, contact_id, RELEASED, reason, now)

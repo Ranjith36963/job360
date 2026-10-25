@@ -335,7 +335,8 @@ async def test_linkedin_sends_are_two_minutes_apart_and_ten_a_day(authenticated_
 
 
 @pytest.mark.asyncio
-async def test_application_tasks_come_only_from_blocks_job360s_browser_wrote(authenticated_async_context):
+async def test_application_tasks_come_only_from_blocks_job360s_browser_wrote(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(blocked_service, "browser_hold_live", lambda *_: True)  # the CAPTCHA page is still held
     async with authenticated_async_context() as client:
         by_browser = await _bring(client, 0)
         by_caller = await _bring(client, 1)
@@ -364,6 +365,144 @@ async def test_application_tasks_come_only_from_blocks_job360s_browser_wrote(aut
             q3 = (await agent.get("/api/own-browser/queue", params={"session": "desk"})).json()
             assert q3["count"] == 1
             assert (await client.get("/api/own-browser/queue")).json()["count"] == 1  # the website sees it all
+
+
+@pytest.mark.asyncio
+async def test_a_captcha_is_queued_only_once_job360s_browser_let_go_of_the_page(authenticated_async_context, monkeypatch):
+    held = {"live": True}
+    monkeypatch.setattr(blocked_service, "browser_hold_live", lambda *_: held["live"])
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _browser_block(authenticated_async_context, app_id, "captcha")
+        assert (await client.get("/api/own-browser/queue")).json()["count"] == 0  # live hold: Needs you, not queued
+        held["live"] = False
+        queue = (await client.get("/api/own-browser/queue")).json()
+        assert [t["task_id"] for t in queue["tasks"]] == [f"application:{app_id}"]
+        assert queue["tasks"][0]["browser"]["kind"] == "own_browser"
+        assert queue["tasks"][0]["browser"]["reason"] == "job360_bot_check"
+
+
+@pytest.mark.asyncio
+async def test_finished_approvals_never_fill_the_queue_limit(authenticated_async_context):
+    """51 people approved and then sent must not hide a fresh approval (the LIMIT runs after the filter)."""
+    async with authenticated_async_context() as client:
+        for n in range(own_browser.QUEUE_MAX + 1):
+            cid, mid = await _person(client, n)
+            assert (await _click(client, cid, mid)).status_code == 200
+            await _mark(client, cid, "sent")
+        fresh, fresh_mid = await _person(client, 99)
+        await _click(client, fresh, fresh_mid)
+        queue = (await client.get("/api/own-browser/queue")).json()
+        assert [t["task_id"] for t in queue["tasks"]] == [f"contact:{fresh}"]
+        _sql("UPDATE contact_outreach SET recorded_at = ? WHERE entry = 'sent'", ("2026-01-01T00:00:00+00:00",))
+        async with await _agent(client) as agent:
+            got = await _take(agent)
+            assert got["status"] == "task" and got["task"]["contact_id"] == fresh
+
+
+@pytest.mark.asyncio
+async def test_the_next_step_names_check_outreach_and_never_sends_without_it(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        contact_id, message_id = await _person(client)
+        await _click(client, contact_id, message_id)
+        async with await _agent(client) as agent:
+            step = (await _take(agent))["next"]
+        assert f"check_outreach(contact_id={contact_id}, message_id={message_id})" in step
+        assert "only if it says send" in step and "as written" not in step
+        assert step.index("check_outreach") < step.lower().index("send")
+
+
+@pytest.mark.asyncio
+async def test_a_claim_belongs_to_the_actor_as_well_as_the_label(authenticated_async_context):
+    """Two assistants that both call themselves "desk" cannot take or release each other's claim."""
+    async with authenticated_async_context() as client:
+        contact_id, message_id = await _person(client)
+        await _click(client, contact_id, message_id)
+        async with await _agent(client) as agent:
+            assert (await _take(agent, "desk"))["status"] == "task"
+            rival = await client.post("/api/own-browser/take", json={"session": "desk"})  # the web actor, same label
+            assert rival.json()["status"] == "busy"  # not already_yours
+            theirs = {"session": "desk", "task_id": f"contact:{contact_id}", "reason": "other"}
+            assert (await client.post("/api/own-browser/release", json=theirs)).status_code == 409
+            assert (await agent.post("/api/own-browser/release", json=theirs)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_unrecorded_send_still_counts_toward_the_gap(authenticated_async_context, monkeypatch):
+    """A claim Job360 wrote itself that nobody released or marked sent is a send nobody recorded: it counts."""
+    monkeypatch.setattr(own_browser, "CLAIM_MINUTES", 0)  # claims expire at once, so only the pace can stop a take
+    async with authenticated_async_context() as client:
+        contact_id, message_id = await _person(client)
+        await _click(client, contact_id, message_id)
+        body = {"session": "one", "task_id": f"contact:{contact_id}", "reason": "other"}
+        async with await _agent(client) as agent:
+            assert (await _take(agent, "one"))["status"] == "task"
+            waited = await _take(agent, "one")  # the claim above was never released or sent
+            assert waited["status"] == "wait" and 0 < waited["wait_seconds"] <= own_browser.LINKEDIN_MIN_GAP_SECONDS
+            monkeypatch.setattr(own_browser, "CLAIM_MINUTES", 15)
+            assert (await agent.post("/api/own-browser/release", json=body)).status_code == 200  # given back = no send
+            assert (await _take(agent, "one"))["status"] == "task"
+
+
+@pytest.mark.asyncio
+async def test_unrecorded_sends_count_toward_the_day(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(own_browser, "CLAIM_MINUTES", 0)
+    monkeypatch.setattr(own_browser, "LINKEDIN_MIN_GAP_SECONDS", 0)
+    monkeypatch.setattr(own_browser, "LINKEDIN_DAILY_MAX", 2)
+    async with authenticated_async_context() as client:
+        contact_id, message_id = await _person(client)
+        await _click(client, contact_id, message_id)
+        async with await _agent(client) as agent:
+            assert [(await _take(agent, "one"))["status"] for _ in range(2)] == ["task", "task"]
+            assert (await _take(agent, "one"))["status"] == "daily_limit"
+
+
+@pytest.mark.asyncio
+async def test_a_looping_take_and_release_can_never_block_the_users_click(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(own_browser, "ROWS_PER_CONTACT_MAX", 3)
+    monkeypatch.setattr(own_browser, "LINKEDIN_MIN_GAP_SECONDS", 0)
+    monkeypatch.setattr(own_browser, "LINKEDIN_DAILY_MAX", 1000)
+    async with authenticated_async_context() as client:
+        contact_id, message_id = await _person(client)
+        await _click(client, contact_id, message_id)
+        body = {"session": "loop", "task_id": f"contact:{contact_id}", "reason": "other"}
+        async with await _agent(client) as agent:
+            for _ in range(3):
+                assert (await _take(agent, "loop"))["status"] == "task"
+                assert (await agent.post("/api/own-browser/release", json=body)).status_code == 200
+            assert (await _take(agent, "loop"))["status"] == "empty"  # the cap stops the loop, no 500
+        assert (await _click(client, contact_id, message_id, "decline")).status_code == 200
+        assert (await _click(client, contact_id, message_id)).status_code == 200  # the click is never capped
+        assert (await _task(client, contact_id))["state"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_take_tries_the_next_person_when_the_first_cannot_be_claimed(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(own_browser, "ROWS_PER_CONTACT_MAX", 1)
+    monkeypatch.setattr(own_browser, "LINKEDIN_MIN_GAP_SECONDS", 0)
+    async with authenticated_async_context() as client:
+        first, m1 = await _person(client, 0)
+        second, m2 = await _person(client, 1)
+        await _click(client, first, m1)
+        await _click(client, second, m2)
+        body = {"session": "s", "task_id": f"contact:{first}", "reason": "other"}
+        async with await _agent(client) as agent:
+            assert (await _take(agent, "s"))["task"]["contact_id"] == first
+            assert (await agent.post("/api/own-browser/release", json=body)).status_code == 200
+            got = await _take(agent, "s")  # `first` is at its claim cap: the next person is handed out
+            assert got["status"] == "task" and got["task"]["contact_id"] == second
+
+
+@pytest.mark.asyncio
+async def test_the_mcp_take_refuses_a_session_label_over_the_limit(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+        async with mcp_runtime():
+            async with _mcp_client(token) as mcp:
+                bad = await mcp.call_tool("own_browser_queue", {"action": "take", "session": "x" * 300})
+                assert bad.is_error and "session" in bad.content[0].text
 
 
 # ── the MCP tool ─────────────────────────────────────────────────────────────
