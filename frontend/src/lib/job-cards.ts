@@ -74,10 +74,9 @@ export function peopleToReach(detail: ApplicationDetail): PersonToReach[] {
   return out;
 }
 
-/** Backend field not in api-types yet: true when the action must run in the owner's own Chrome. Absent = Job360's browser. */
-export function needsOwnBrowser(ask: Ask): boolean {
-  return (ask as Ask & { needs_own_browser?: boolean }).needs_own_browser === true;
-}
+// The browser fields live behind one adapter (the Browser agent owns their names).
+import { needsOwnBrowser } from "@/lib/browser-contract";
+export { needsOwnBrowser };
 
 export const OWN_CHROME_LABEL = "Needs your Chrome, PC on";
 export const JOB360_BROWSER_LABEL = "Job360's browser";
