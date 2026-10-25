@@ -52,6 +52,27 @@ ASK_ITEM_ANSWER_MAX_CHARS = 2000
 ASK_CHOICES_MAX = 6
 ASK_CHOICE_MAX_CHARS = 100
 _KEY_RE = re.compile(r"^[a-z0-9_.]{1,60}$")
+# Owner 2026-10-25: ONE open ask per job and kind. Hourly runs filed the same form questions again under new
+# names (how_heard, heard_from, referral_source, palantir_how_heard...). A key that IS one of these names, or
+# ends with "_name" / ".name", is stored under the fixed name, so a repeat merges instead of piling up.
+CANONICAL_KEYS: dict[str, tuple[str, ...]] = {
+    "how_heard": ("how_heard", "heard_from", "referral_source", "how_did_you_hear", "source_of_application"),
+    "consent": ("consent", "consents", "data_consent", "consent_radio", "privacy_consent"),
+    "demographic_consent": ("demographic_consent", "demographics_consent"),
+    "referred": ("referred", "referral", "referred_by_employee"),
+    "worked_before": ("worked_before", "previously_employed", "prior_employment"),
+    "languages": ("languages", "language_skills"),
+    "university": ("university", "school"),
+    "equality.gender": ("gender",),
+    "equality.ethnicity": ("ethnicity",),
+    "cv_ok": ("cv_ok", "cv_approve", "cv_approval"),
+    "cv_unsupported_terms": ("cv_unsupported_terms", "cv_unsupported", "unsupported_terms", "cv_terms"),
+    "essays": ("essays", "essay_questions"),
+    "job_country": ("job_country",),
+    "location_city": ("location_city", "location", "city"),
+}
+_ALIAS_TO_KEY = {alias: key for key, aliases in CANONICAL_KEYS.items() for alias in aliases}
+QUESTION_FAMILY = ("", "question")  # an older ask without a kind is a question ask
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Same banned set spine.validate_source uses (Cc/Zl/Zp + bidi overrides),
@@ -116,6 +137,79 @@ def validate_questions(raw: Optional[list[dict[str, Any]]]) -> list[dict[str, An
             q["remembered_on"] = remembered
         out.append(q)
     return out
+
+
+def canonical_key(key: str) -> str:
+    """The fixed name for a common form question (``CANONICAL_KEYS``), else the key as given."""
+    for whole in (key, key.replace(".", "_")):
+        if whole in _ALIAS_TO_KEY:
+            return _ALIAS_TO_KEY[whole]
+    for sep in (".", "_"):
+        head, _, tail = key.partition(sep)
+        while tail:
+            if tail in _ALIAS_TO_KEY:
+                return _ALIAS_TO_KEY[tail]
+            head, _, tail = tail.partition(sep)
+    return key
+
+
+def merge_questions(older: list[dict[str, Any]], newer: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per fixed key, oldest first. A newer row replaces an older one, except a newer "not known
+    yet" row never drops an answer an older one proposed. At most ``ASKS_QUESTIONS_MAX`` rows (the newest)."""
+    rows: dict[str, dict[str, Any]] = {}
+    for q in [*older, *newer]:
+        key = canonical_key(q["key"])
+        merged = {**q, "key": key}
+        before = rows.get(key)
+        if before is not None and merged["source"] == "none" and before["source"] != "none":
+            merged = {**merged, "source": before["source"], "answer": before["answer"]}
+        rows.pop(key, None)
+        rows[key] = merged
+    return list(rows.values())[-ASKS_QUESTIONS_MAX:]
+
+
+def _rows_of(ask: dict[str, Any]) -> list[dict[str, Any]]:
+    """An open ask's rows; an ask with only a sentence keeps that sentence as one row, so a merge loses nothing."""
+    if ask.get("questions"):
+        return list(ask["questions"])
+    text = str(ask["question"])[:ASK_ITEM_QUESTION_MAX_CHARS]
+    return [{"key": f"earlier_{int(ask['id'])}", "question": text, "source": "none", "answer": ""}]
+
+
+async def _open_family(
+    db: JobDatabase, user_id: str, application_id: int, kind: str, asked_by: str
+) -> list[dict[str, Any]]:
+    """This job's OPEN asks of the same family as ``kind`` (a question ask, or that one blocker), oldest first.
+    An assistant's ask never merges with (or closes) one the user wrote on the web, nor the other way round."""
+    kinds = QUESTION_FAMILY if kind in QUESTION_FAMILY else (kind,)
+    marks = ",".join("?" for _ in kinds)
+    side = "k.asked_by = 'web'" if asked_by == "web" else "k.asked_by <> 'web'"
+    cur = await db._db.execute(
+        _SELECT + f"WHERE k.user_id = ? AND k.application_id = ? AND k.kind IN ({marks}) "  # noqa: S608
+        f"AND {side} AND k.answered_at IS NULL AND k.withdrawn_at IS NULL AND k.context NOT LIKE ? "
+        "ORDER BY k.id",
+        (user_id, application_id, *kinds, "proof_missing:%"),
+    )
+    return [_serialize(dict(r)) for r in await cur.fetchall()]
+
+
+async def supersede(
+    db: JobDatabase, user_id: str, olds: list[dict[str, Any]], new_id: int, now: str, actor: str
+) -> None:
+    """Close ``olds`` as replaced by ask ``new_id`` (append-only: they stay, withdrawn by "superseded")."""
+    for old in olds:
+        reason = f"replaced by ask {new_id}"
+        await db._db.execute(
+            "UPDATE application_asks SET withdrawn_at = ?, withdrawn_by = 'superseded', withdrawn_reason = ? "
+            "WHERE id = ? AND user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL",
+            (now, reason, int(old["id"]), user_id),
+        )
+        if old["application_id"] is not None:
+            await append_event(
+                db, user_id=user_id, application_id=int(old["application_id"]), event_type="ask_withdrawn",
+                detail=f"Why: {reason}. Asked: {old['question']}"[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
+                payload={"ask_id": int(old["id"]), "reason": reason}, occurred_at=now, recorded_by=actor,
+            )
 
 
 def _validate_answers(questions: list[dict[str, Any]], raw: Optional[dict[str, Any]]) -> dict[str, str]:
@@ -301,7 +395,13 @@ async def create_ask(
     is_proof = bool(proof_ctx) and clean_ctx == proof_ctx
     if is_proof and (first := await _first_proof_ask(db, user_id, application_id, proof_ctx)):
         return first
-    if await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
+    clean_qs = merge_questions([], clean_qs)  # fixed names, one row per name
+    family = (
+        [] if is_proof or application_id is None
+        else await _open_family(db, user_id, application_id, kind, asked_by)
+    )
+    # A merge replaces asks, it never adds one: the cap only stops a NEW card.
+    if not family and await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
         raise SpineError(
             429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first"
         )
@@ -311,6 +411,11 @@ async def create_ask(
             await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:{clean_ctx}",))
             if first := await _first_proof_ask(db, user_id, application_id, proof_ctx):
                 return first
+        elif application_id is not None:  # two runs at once: the second merges into the first's ask
+            await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:ask:{application_id}",))
+            family = await _open_family(db, user_id, application_id, kind, asked_by)
+            if family and kind in QUESTION_FAMILY:
+                clean_qs = merge_questions([q for old in family for q in _rows_of(old)], clean_qs)
         cur = await db._db.execute(
             "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at, "
             "kind, questions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -318,6 +423,8 @@ async def create_ask(
              json.dumps(clean_qs) if clean_qs else ""),
         )
         ask_id = int(cur.lastrowid or 0)
+        if family:
+            await supersede(db, user_id, family, ask_id, now, asked_by)
         if application_id is not None:
             await append_event(
                 db, user_id=user_id, application_id=application_id, event_type="asked",
@@ -328,14 +435,14 @@ async def create_ask(
         "ask_created",
         extra={
             "event": "ask_created", "user_id": user_id, "ask_id": ask_id,
-            "has_application": application_id is not None,
+            "has_application": application_id is not None, "merged": len(family),
         },
     )
     if is_proof:
         _log_no_proof_ask(user_id, application_id, "created")
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None
-    return ask
+    return {**ask, "merged_from": [int(old["id"]) for old in family]}
 
 
 async def answer_ask(

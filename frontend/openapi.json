@@ -4327,6 +4327,13 @@
             "title": "Kind",
             "type": "string"
           },
+          "merged_from": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Merged From",
+            "type": "array"
+          },
           "question": {
             "title": "Question",
             "type": "string"

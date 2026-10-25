@@ -62,6 +62,8 @@ class CreateAskRequest(BaseModel):
 class CreateAskOut(AskOut):
     # Slice 25 — true when this client_key was already used: the FIRST reply, nothing written.
     already_existed: bool = False
+    # Owner 2026-10-25: the open asks on this job this one replaced (their questions are merged in).
+    merged_from: list[int] = Field(default_factory=list)
 
 
 class AnswerAskRequest(BaseModel):
