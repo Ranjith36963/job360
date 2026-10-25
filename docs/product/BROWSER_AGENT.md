@@ -121,7 +121,7 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   - `backend/src/services/browser_agent/`:
     - `safety.py`: pure rules, testable offline (password box: by its type, autocomplete or a label in many languages, "Passwort" included (seen live after #969: refused); final-submit button; CAPTCHA / sign-in wall; the URL screen reusing `services/fetch/guard.py`)
     - `page_js.py`: reads a page and tags each control with a `ref`
-    - `agent.py`: the browser pool (one Chromium; an isolated context per user, plus one for their live sign-in view), plus the actions
+    - `agent.py`: the browser pool (one Chromium; an isolated context per job, `agent.browser_key`, plus one scratch browser per user for calls with no `application_id` and one for their live sign-in view), plus the actions
   - `backend/src/api/routes/browser.py`: `POST /api/browser`, the route the MCP tool calls (rule M5)
   - The MCP tool `browser` in `mcp_server.py`, always listed (it answers `off` until the switch is on).
 - **Final submit:**
@@ -130,11 +130,12 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   - What counts as the final submit (`safety.control_kind`): any button that can submit its form itself (type submit or image, or a `<button>` with no type, that has a form owner) unless its name is a step ("Next", "Save and continue") or it is a pressed-or-not toggle (`aria-pressed`, Ashby's Yes / No), so a name we do not know ("Done") goes through the gate; "send / apply ... application" beats a step word ("Save and send application"); a link, tab, switch or option named with the whole word "Submit" ("Submitted applications" is a tab), or "Send application" once the page holds an answer; and "Apply", "Send", "Finish", "Complete" or "Confirm" (or the common EU verbs: absenden, envoyer, postuler, enviar, verzenden...) on a button in a form, or on any button once the page holds an answer, inside the `<form>` around a shadow root's host too. An answer is a typed value (not in a search or password box), a chosen file, a picked option, a ticked box or an `aria-checked` / `aria-pressed` choice, inside open shadow roots too, in the button's own frame; a box, option or switch the page already held when the first look read it (a cookie switch) is not one.
 - **Switch and limits:**
   - `BROWSER_AGENT_ENABLED=1` on Railway is the one switch: the Docker build installs Chromium and the browser answers. It is on in production (seen live 2026-10-20); the code default stays off.
-  - `BROWSER_AGENT_MAX_SESSIONS` (default 2), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
+  - `BROWSER_AGENT_MAX_SESSIONS` (default 2, all users together), `BROWSER_AGENT_IDLE_SECONDS` (default 600).
+  - `BROWSER_AGENT_MAX_PER_USER` (default 3, 2026-10-24): a new browser past a cap closes that user's least recently used one that is not held for them; when all are held it answers `busy` (`browsers_held`). The per-user cap is never above `BROWSER_AGENT_MAX_SESSIONS`, and a user with no browser takes another user's least recently used spare one (every user gets a slot); another user's only, held or busy browser is never closed.
   - `BROWSER_AGENT_MAX_LIVE` (default 2): the live sign-in views' own cap, so they never take an assistant's browser.
   - A started Chromium takes about 250 MB, and each browser adds about 100-250 MB (measured locally on test pages, 2026-10-20; real career sites not yet measured).
   - An idle browser is closed by a sweep the app runs every 60 s while the switch is on, not only on the next request.
-  - One assistant session at a time per browser: a call with another `session` label gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
+  - One browser per job (2026-10-24): a call naming another `application_id` gets its own browser, so the first job's filled form stays; a call naming a job with no browser yet takes over the user's scratch browser. One assistant session at a time per browser: a call with another `session` label on that job's browser gets `busy` (`browser_in_use`) until the first one closes it or it idles out. A call with no label is not refused.
   - A hung page never holds the browser: the frame-read, per-action and `fill` limits are `services/browser_agent/agent.FRAME_READ_TIMEOUT_S` / `ACT_TIMEOUT_S` / `FILL_TIMEOUT_S` (a breach answers `error`, `timeout`).
 - **Playbooks:** the `batch` recipe gets a "which browser" line (your own browser first, Job360's when you have none or the user is away); the `forms` recipe points to the tool.
 - **Tests:** `backend/tests/test_browser_agent.py` and the `test_browser_*` files beside it. The safety rules and the off switch always run; the real-Chromium runs run where Playwright + Chromium are installed and skip otherwise. CI's offline-suite installs both (since 2026-10-20), so they run on every PR, and the skip ratchet (`scripts/test_integrity.py`) is red if they ever skip there.
@@ -174,6 +175,8 @@ Decisions A and B are recorded in VISION decision 29; the quoted words are from 
   on a live picture of the assistant's own browser (`POST /api/browser/live` with `mode: finish`: shot, click, type,
   key, scroll, done; no start, no keep). Website session only, like the sign-in view: a token gets 403. Done puts the
   browser back on its idle clock; then "I submitted it" records the receipt. Job360 still never solves a CAPTCHA.
+  Since 2026-10-24 `form_swept` holds that job's browser the same 30 minutes (it waits on the user's yes; a form filled in the scratch browser moves to the job when the browser is on the swept `form_url`). A hold is not renewed while it runs (only a fresh CAPTCHA stop restarts its 30 minutes), a form page gets one `form_swept` hold (a new page or Done frees it), and one user holds at most `BROWSER_AGENT_MAX_SESSIONS - 1` browsers at once; a `form_swept` that could not hold its browser says so in `warnings`; the finish
+  view names the `application_id` whose browser it drives, Ready to send offers it too, and Needs you shows `held_seconds`.
 
 **`key` action (2026-10-19; Enter rule 2026-10-20):** ArrowDown, ArrowUp, Tab, Escape and Enter,
 for the suggestion lists real forms use: type, ArrowDown, Enter. Enter is refused outside a suggestion

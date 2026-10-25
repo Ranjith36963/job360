@@ -138,9 +138,11 @@ def _salary_saved(profile: Any, country: str) -> bool:
 
 
 def _missing_flags(profile: Any, missing: list[dict[str, str]], country: Optional[str]) -> list[dict[str, Any]]:
-    """The job-country facts the form needs and memory lacks, as flags."""
+    """The job-country facts the form needs and memory lacks, as flags. ``missing`` passes through
+    :func:`kit.kit_missing` (the one rule: only what the form asks counts, so no salary), also for the
+    queue preflight, which shares this function."""
     out: list[dict[str, Any]] = []
-    for m in missing:
+    for m in kit.kit_missing(missing):
         key = m["key"]
         if key == "job_country":
             out.append(_flag("missing", f"The job's country is not set {_DASH} answer it first", key))

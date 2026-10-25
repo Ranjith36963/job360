@@ -77,7 +77,7 @@ describe("Footer — no source-count copy (R14, C2)", () => {
 describe("Root layout metadata — no source-count copy (R14, C2)", () => {
   it("never mentions a job-source count in title/description/OpenGraph/Twitter", () => {
     // Read the source text rather than `import { metadata } from "../layout"`:
-    // layout.tsx also pulls in `next/font/google`, which needs the Next.js
+    // layout.tsx also pulls in `next/font/local`, which needs the Next.js
     // compiler and cannot be imported directly under plain Vite/vitest.
     // vitest runs with cwd = the frontend package root (vitest.config.ts).
     const layoutPath = join(process.cwd(), "src/app/layout.tsx");

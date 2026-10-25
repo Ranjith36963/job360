@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Newsreader } from "next/font/google";
+import localFont from "next/font/local";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/layout/AppShell";
 import { AuthProvider } from "@/components/layout/AuthProvider";
@@ -13,23 +13,35 @@ import "./globals.css";
 
 // Geist = body (--font-sans), Geist Mono = numbers, dates and IDs only
 // (--font-mono), Newsreader = the serif for headings (--font-heading).
-const geist = Geist({
+// Self-hosted from ./fonts (OFL; copied from the `geist` and
+// `@fontsource/newsreader` npm packages) so `npm run build` never downloads
+// from Google Fonts. Same variables, weights, latin set and display as the
+// old next/font/google set-up; the fallback fonts match it too (Arial for
+// Geist and Geist Mono, Times New Roman for the serif).
+const geist = localFont({
+  src: "./fonts/Geist-Variable.woff2",
   variable: "--font-geist",
-  subsets: ["latin"],
+  weight: "100 900",
   display: "swap",
+  adjustFontFallback: "Arial",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/GeistMono-Variable.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
   display: "swap",
+  adjustFontFallback: "Arial",
 });
 
-const newsreader = Newsreader({
+const newsreader = localFont({
+  src: [
+    { path: "./fonts/newsreader-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/newsreader-latin-500-normal.woff2", weight: "500", style: "normal" },
+  ],
   variable: "--font-newsreader",
-  subsets: ["latin"],
-  weight: ["400", "500"],
   display: "swap",
+  adjustFontFallback: "Times New Roman",
 });
 
 // C2 (application-spine review, VISION rule 4) — Job360 never sources or
