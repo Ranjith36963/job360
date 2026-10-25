@@ -136,3 +136,14 @@ describe("isSensitiveQuestion", () => {
     expect(s("x", "Describe a trace of your work")).toBe(false);
   });
 });
+
+describe("needsOwnBrowser", () => {
+  it("is true only for an explicit true; absent or anything else is Job360's browser", async () => {
+    const { needsOwnBrowser } = await import("./job-cards");
+    const a = { question: "q" } as never;
+    expect(needsOwnBrowser(a)).toBe(false);
+    expect(needsOwnBrowser({ ...(a as object), needs_own_browser: false } as never)).toBe(false);
+    expect(needsOwnBrowser({ ...(a as object), needs_own_browser: "yes" } as never)).toBe(false);
+    expect(needsOwnBrowser({ ...(a as object), needs_own_browser: true } as never)).toBe(true);
+  });
+});
