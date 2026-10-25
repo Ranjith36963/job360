@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ApplicationDetail, Ask } from "@/lib/api";
-import { buildCard, groupAsks, isSimulation, linkedinFor, peopleToReach, rowKind, sortCards } from "./job-cards";
+import { buildCard, groupAsks, isSensitiveQuestion, isSimulation, linkedinFor, mergeQuestions, peopleToReach, rowKind, sortCards } from "./job-cards";
 
 let nextId = 1;
 function ask(over: Partial<Ask> = {}): Ask {
@@ -101,5 +101,38 @@ describe("buildCard and sortCards", () => {
     const blocked = buildCard(detail({ id: 2 }), [ask({ question: "Solve the CAPTCHA" })], null);
     const ready = buildCard(detail({ id: 3, form_state: "filled" }), [ask({ question: "Attach your CV: upload failed" })], null);
     expect(sortCards([questions, blocked, ready]).map((c) => c.applicationId)).toEqual([3, 2, 1]);
+  });
+});
+
+describe("mergeQuestions", () => {
+  const q = (key: string, question: string, answer: string, source: string) => ({ key, question, answer, source });
+  const withQs = (questions: unknown[]) => ask({ questions } as Partial<Ask>);
+
+  it("dedupes by key, falls back to normalised text, and keeps the best copy", () => {
+    const a = withQs([q("city", "City?", "", "none"), q("", "Phone  number?", "1", "guess")]);
+    const b = withQs([q("city", "City?", "Berlin", "profile"), q("", " phone NUMBER? ", "2", "memory")]);
+    const m = mergeQuestions([a, b]);
+    expect(m.rows).toHaveLength(2);
+    expect(m.rows[0].q.answer).toBe("Berlin");
+    expect(m.rows[0].askId).toBe(b.id);
+    expect(m.rows[0].askIds).toEqual([a.id, b.id]);
+    expect(m.rows[1].q.source).toBe("memory");
+    expect(m.byAsk.get(a.id)).toEqual([{ key: "city", rowId: "city" }, { key: "", rowId: "phone number?" }]);
+  });
+});
+
+describe("isSensitiveQuestion", () => {
+  const s = (key: string, question: string, sensitive?: boolean) => isSensitiveQuestion({ key, question, sensitive });
+  it("flags consent and personal categories", () => {
+    expect(s("gdpr_consent", "OK?")).toBe(true);
+    expect(s("x", "Ethnic origin")).toBe(true);
+    expect(s("x", "Do you have a disability?")).toBe(true);
+    expect(s("date_of_birth", "When?")).toBe(true);
+    expect(s("x", "Anything", true)).toBe(true);
+  });
+  it("leaves ordinary and right-to-work questions alone", () => {
+    expect(s("city", "Where do you live?")).toBe(false);
+    expect(s("rtw", "Do you have the right to work in Germany?")).toBe(false);
+    expect(s("x", "Describe a trace of your work")).toBe(false);
   });
 });
