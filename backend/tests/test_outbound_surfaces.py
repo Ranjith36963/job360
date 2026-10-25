@@ -65,6 +65,7 @@ SCREENED_SURFACES = {
     "services/browser_agent/safety.py": "the browser agent's `open` action",
     "services/browser_agent/egress.py": "EgressProxy — Chromium's only way out",
     "services/browser_agent/trigger.py": "the user's \"start my assistant\" link, POSTed on Send",
+    "services/browser_agent/duty_trigger.py": "the user's per-duty start links (Ignition), POSTed on a press",
 }
 
 # Outbound, but never to a URL a caller chose, so the guard does not apply.
