@@ -111,6 +111,26 @@ describe("JobCards", () => {
     expect(order.indexOf("card-500")).toBeGreaterThan(order.findIndex((t) => t === "card-1"));
   });
 
+  it("says what waits in each collapsed header", () => {
+    getApplication.mockImplementation(() => new Promise(() => {})); // headers stay collapsed
+    const a = ask(1, 1, { kind: "captcha" } as Partial<Ask>);
+    const b = ask(2, 2, { kind: "login" } as Partial<Ask>);
+    const c = ask(3, 2, { kind: "question" } as Partial<Ask>);
+    render(<JobCards open={[a, b, c]} onChanged={async () => {}} />);
+    expect(screen.getByTestId("job-header-1")).toHaveTextContent("Solve a CAPTCHA");
+    expect(screen.getByTestId("job-header-2")).toHaveTextContent("Sign in · Check 1 answer");
+    expect(screen.getByTestId("job-header-1")).not.toHaveTextContent(/things? wait/);
+  });
+
+  it("a people-only header reads Send notes", async () => {
+    getApplication.mockImplementation(() => new Promise(() => {}));
+    listPeople.mockResolvedValue({
+      people: [{ message_count: 1, last_sent: null, jobs: [{ application_id: 500, job_company: "Reach Co", job_title: "Dev" }] }],
+    });
+    render(<JobCards open={twenty.slice(0, 8)} onChanged={async () => {}} />);
+    expect(await screen.findByTestId("job-header-500")).toHaveTextContent("Send notes");
+  });
+
   it("people-only jobs beyond the first page wait for Show more", async () => {
     listPeople.mockResolvedValue({
       people: [{ message_count: 1, last_sent: null, jobs: [{ application_id: 500, job_company: "Reach Co", job_title: "Dev" }] }],

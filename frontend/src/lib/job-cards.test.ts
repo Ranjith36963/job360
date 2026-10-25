@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ApplicationDetail, Ask } from "@/lib/api";
-import { buildCard, fallbackGuess, initialRow, groupAsks, isSensitiveQuestion, isSimulation, linkedinFor, mergeQuestions, peopleToReach, rowKind, sortCards } from "./job-cards";
+import { buildCard, fallbackGuess, initialRow, groupAsks, isSensitiveQuestion, isSimulation, linkedinFor, mergeQuestions, peopleToReach, rowKind, sortCards, splitAskText, waitSummary } from "./job-cards";
 
 let nextId = 1;
 function ask(over: Partial<Ask> = {}): Ask {
@@ -189,5 +189,75 @@ describe("initialRow never pre-checks a sensitive row", () => {
     expect(initialRow({ key: "gdpr", question: "Do you consent to data processing?", answer: "Yes", source: "profile" }).ok).toBe(false);
     expect(initialRow({ key: "gender", question: "Gender", answer: "Male", source: "memory" }).ok).toBe(false);
     expect(initialRow({ key: "city", question: "City", answer: "London", source: "profile" }).ok).toBe(true);
+  });
+});
+
+describe("waitSummary", () => {
+  const k = (kind: string, over: Partial<Ask> = {}) => ask({ kind, ...over } as Partial<Ask>);
+  const sq = (key: string, question: string) => ({ key, question, answer: "", source: "none" });
+
+  it.each([
+    ["captcha", "Solve a CAPTCHA"],
+    ["login", "Sign in"],
+    ["upload", "Attach your CV"],
+    ["safety", "Finish a step on the form"],
+  ])("names a %s blocker", (kind, text) => {
+    expect(waitSummary([k(kind)])).toBe(text);
+  });
+
+  it("counts merged form questions once plus plain questions", () => {
+    const a = k("", { questions: [sq("city", "City?"), sq("phone", "Phone?")] } as Partial<Ask>);
+    const b = k("", { questions: [sq("city", "City?")] } as Partial<Ask>);
+    expect(waitSummary([a, b])).toBe("Check 2 answers");
+    expect(waitSummary([a, b, k("question")])).toBe("Check 3 answers");
+    expect(waitSummary([k("question")])).toBe("Check 1 answer");
+  });
+
+  it("counts outreach reminders and adds people", () => {
+    expect(waitSummary([k("", { question: "Send this LinkedIn message to Ada yourself" })])).toBe("Send 1 note");
+    expect(waitSummary([k("", { question: "Send this LinkedIn message to Ada yourself" })], 2)).toBe("Send 3 notes");
+  });
+
+  it("reads people-only headers as Send notes", () => {
+    expect(waitSummary([])).toBe("Send notes");
+  });
+
+  it("joins at most three parts in priority order", () => {
+    const asks = [k("question"), k("safety"), k("upload"), k("login"), k("captcha")];
+    expect(waitSummary(asks)).toBe("Solve a CAPTCHA · Sign in · Attach your CV");
+    expect(waitSummary([k("question"), k("login")])).toBe("Sign in · Check 1 answer");
+  });
+});
+
+describe("splitAskText", () => {
+  it("returns the whole short text as the head", () => {
+    expect(splitAskText("Notice period?")).toEqual({ head: "Notice period?", rest: "" });
+    expect(splitAskText("")).toEqual({ head: "", rest: "" });
+  });
+
+  it("cuts at the first sentence end", () => {
+    expect(splitAskText("Batch run paused. Three jobs failed. Check the form.")).toEqual({
+      head: "Batch run paused.",
+      rest: "Three jobs failed. Check the form.",
+    });
+    expect(splitAskText("Ready? Then go! Now")).toEqual({ head: "Ready?", rest: "Then go! Now" });
+    expect(splitAskText("Done! More")).toEqual({ head: "Done!", rest: "More" });
+  });
+
+  it("cuts at a newline", () => {
+    expect(splitAskText("First line\nSecond line")).toEqual({ head: "First line", rest: "Second line" });
+  });
+
+  it("does not cut inside a number or url", () => {
+    expect(splitAskText("Salary is 55.5k or www.x.com/a?b=1")).toEqual({ head: "Salary is 55.5k or www.x.com/a?b=1", rest: "" });
+  });
+
+  it("caps the head at 140 characters with an ellipsis and keeps the remainder", () => {
+    const text = "word ".repeat(60).trim();
+    const { head, rest } = splitAskText(text);
+    expect(head.length).toBeLessThanOrEqual(140);
+    expect(head.endsWith("…")).toBe(true);
+    expect(rest.length).toBeGreaterThan(0);
+    expect(head.slice(0, -1) + " " + rest).toContain("word word");
   });
 });

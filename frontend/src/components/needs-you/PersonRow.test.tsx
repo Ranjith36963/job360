@@ -46,9 +46,29 @@ describe("PersonRow", () => {
     show(person({ linkedin_state: "not_connected", own_browser_task: task("waiting_on_you") }, "x".repeat(201)));
     expect(screen.getByTestId("note-count-4")).toHaveTextContent("201/200");
     expect(screen.getByTestId("note-count-4")).toHaveAttribute("data-over", "true");
-    const send = screen.getByTestId("send-browser-4");
-    expect(send).toBeDisabled();
-    expect(send).toHaveAttribute("title", expect.stringContaining("200"));
+    expect(screen.getByTestId("note-count-4")).toHaveClass("text-danger");
+    // Hidden, not just disabled: nothing to press that would send a too-long note.
+    expect(screen.queryByTestId("send-browser-4")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    expect(screen.getByTestId("note-too-long-4")).toHaveTextContent("Too long for a connection note. Use it as a message after you connect, or rewrite it.");
+    expect(screen.getByText("Open profile ↗")).toBeInTheDocument();
+    expect(screen.getByTestId("sent-4")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
+    expect(screen.getByTestId("decline-browser-4")).toBeInTheDocument();
+  });
+
+  it("keeps Copy and the browser button at exactly 200 characters", () => {
+    show(person({ linkedin_state: "not_connected", own_browser_task: task("waiting_on_you") }, "x".repeat(200)));
+    expect(screen.getByTestId("send-browser-4")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.queryByTestId("note-too-long-4")).toBeNull();
+  });
+
+  it("never limits a connected contact's message", () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you") }, "x".repeat(500)));
+    expect(screen.queryByTestId("note-too-long-4")).toBeNull();
+    expect(screen.getByTestId("send-browser-4")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
   });
 
   it("shows no counter for a connected person, only a Message label", () => {
