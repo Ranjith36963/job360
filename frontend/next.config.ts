@@ -50,20 +50,6 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  // The old /connect URL (shared in the wild) now lives at /settings/connect.
-  // Redirects keep the query string by default; Next strips a trailing slash
-  // first (308 to /connect), so /connect/ is covered too. Permanent: nothing
-  // else in the repo links to /connect.
-  async redirects() {
-    return [
-      {
-        source: "/connect",
-        destination: "/settings/connect",
-        permanent: true,
-      },
-    ];
-  },
-
   // M15 — no security headers were set at all before this. Applies to every
   // route (including /api/* rewrites, which pass through Next's own response
   // pipeline for the matched pages/assets).
