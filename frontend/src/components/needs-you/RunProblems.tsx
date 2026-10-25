@@ -7,9 +7,10 @@ import { getRunProblems, type RunProblem } from "@/lib/api";
 import { StartLinkProblems } from "./StartLinkProblems";
 
 /**
- * Owner 2026-10-25: any problem with Hunt, Apply, Gmail check or People hunt shows as a card on Home and
- * Needs you. One card per duty that failed 3 times in a row (in plain words, with what to do), and the
- * start-link problems below it. Silent when everything works or the list cannot load.
+ * Owner 2026-10-25: any problem with Hunt, Apply, Gmail check or People hunt shows as a card on Home (Job360-wide
+ * problems on Home; a single job's problems on Needs you). One card per duty that failed 3 times in a row (in
+ * plain words, with what to do), and the start-link problems below it. Silent when everything works or the list
+ * cannot load.
  */
 export function RunProblems() {
   const [problems, setProblems] = useState<RunProblem[]>([]);

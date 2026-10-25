@@ -3121,6 +3121,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedule/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Schedule Status
+         * @description Owner 2026-10-25: the Home status card - for each duty, is it on, when it last ran and how that
+         *     ended, and when it runs next. Read-only (takes no duty); closed values only.
+         */
+        get: operations["schedule_status_api_schedule_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -5338,6 +5359,36 @@ export interface components {
              * @default false
              */
             test: boolean;
+        };
+        /** DutyStatusOut */
+        DutyStatusOut: {
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "hunt" | "inbox" | "batch" | "reach";
+            /**
+             * Failures In Row
+             * @default 0
+             */
+            failures_in_row: number;
+            /** Hold */
+            hold?: string | null;
+            /** Label */
+            label: string;
+            /** Last Outcome */
+            last_outcome?: ("done" | "partial" | "failed") | null;
+            /** Last Reason */
+            last_reason?: ("no_work" | "tool_unavailable" | "sign_in_needed" | "paid_plan_needed" | "network_blocked" | "rate_limited" | "needs_user" | "error") | null;
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Next Due At */
+            next_due_at?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "off" | "running" | "due" | "failing" | "held" | "waiting";
         };
         /** DutyTriggerIn */
         DutyTriggerIn: {
@@ -8274,6 +8325,13 @@ export interface components {
             model?: string | null;
             /** Text */
             text: string;
+        };
+        /** ScheduleStatusOut */
+        ScheduleStatusOut: {
+            /** Duties */
+            duties: components["schemas"]["DutyStatusOut"][];
+            /** Last Tick At */
+            last_tick_at?: string | null;
         };
         /**
          * SetVisaRequest
@@ -14634,6 +14692,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunProblemsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    schedule_status_api_schedule_status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleStatusOut"];
                 };
             };
             /** @description Validation Error */

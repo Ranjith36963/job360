@@ -5079,6 +5079,118 @@
         "title": "DutyRunIn",
         "type": "object"
       },
+      "DutyStatusOut": {
+        "properties": {
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch",
+              "reach"
+            ],
+            "title": "Duty",
+            "type": "string"
+          },
+          "failures_in_row": {
+            "default": 0,
+            "title": "Failures In Row",
+            "type": "integer"
+          },
+          "hold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "done",
+                  "partial",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Outcome"
+          },
+          "last_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_work",
+                  "tool_unavailable",
+                  "sign_in_needed",
+                  "paid_plan_needed",
+                  "network_blocked",
+                  "rate_limited",
+                  "needs_user",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reason"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "next_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due At"
+          },
+          "state": {
+            "enum": [
+              "off",
+              "running",
+              "due",
+              "failing",
+              "held",
+              "waiting"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty",
+          "label",
+          "state"
+        ],
+        "title": "DutyStatusOut",
+        "type": "object"
+      },
       "DutyTriggerIn": {
         "additionalProperties": false,
         "properties": {
@@ -12593,6 +12705,33 @@
           "text"
         ],
         "title": "SaveTemplateRequest",
+        "type": "object"
+      },
+      "ScheduleStatusOut": {
+        "properties": {
+          "duties": {
+            "items": {
+              "$ref": "#/components/schemas/DutyStatusOut"
+            },
+            "title": "Duties",
+            "type": "array"
+          },
+          "last_tick_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tick At"
+          }
+        },
+        "required": [
+          "duties"
+        ],
+        "title": "ScheduleStatusOut",
         "type": "object"
       },
       "SetVisaRequest": {
@@ -26931,6 +27070,72 @@
           }
         },
         "summary": "Run Problems",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/schedule/status": {
+      "get": {
+        "description": "Owner 2026-10-25: the Home status card - for each duty, is it on, when it last ran and how that\nended, and when it runs next. Read-only (takes no duty); closed values only.",
+        "operationId": "schedule_status_api_schedule_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Schedule Status",
         "tags": [
           "schedule"
         ]

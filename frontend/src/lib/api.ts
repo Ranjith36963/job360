@@ -1405,6 +1405,23 @@ export async function getRunProblems(): Promise<{ problems: RunProblem[] }> {
   return request<{ problems: RunProblem[] }>("/api/schedule/problems");
 }
 
+/** Owner 2026-10-25: the Home status card, one row per duty. */
+export type DutyStatus = {
+  duty: "hunt" | "batch" | "inbox" | "reach";
+  label: string;
+  state: "off" | "running" | "due" | "failing" | "held" | "waiting";
+  hold?: string | null;
+  last_run_at?: string | null;
+  last_outcome?: "done" | "partial" | "failed" | null;
+  last_reason?: string | null;
+  failures_in_row: number;
+  next_due_at?: string | null;
+};
+
+export async function getScheduleStatus(): Promise<{ duties: DutyStatus[]; last_tick_at?: string | null }> {
+  return request<{ duties: DutyStatus[]; last_tick_at?: string | null }>("/api/schedule/status");
+}
+
 // ---- Ignition (owner 2026-10-24): one start link per duty; website only, never a token ----
 export type Duty = "hunt" | "batch" | "inbox" | "reach";
 export type DutyTrigger = { duty: Duty; label: string; retry_until?: string | null } & AssistantTrigger;

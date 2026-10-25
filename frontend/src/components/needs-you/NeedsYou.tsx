@@ -9,7 +9,6 @@ import { MorningCheck } from "./MorningCheck";
 import { OutcomeSuggestions } from "./OutcomeSuggestions";
 import { ReadyToSend } from "./ReadyToSend";
 import { CvToApprove } from "./CvToApprove";
-import { RunProblems } from "./RunProblems";
 import { BatchApplyPanel } from "./BatchApplyPanel";
 import { UnmatchedMail } from "./UnmatchedMail";
 import { SettingRequestCard } from "./SettingRequestCard";
@@ -411,7 +410,6 @@ export function NeedsYou() {
     <div className="grid gap-8 xl:grid-cols-[minmax(0,48rem)_minmax(0,30rem)]" data-testid="needs-you-layout">
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
       <MorningCheck />
-      <RunProblems />
       <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
       <ReadyToSend onTotal={setReadyTotal} />
       <OutcomeSuggestions />

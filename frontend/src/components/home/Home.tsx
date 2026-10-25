@@ -8,6 +8,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { AskCard } from "@/components/needs-you/NeedsYou";
 import { RunProblems } from "@/components/needs-you/RunProblems";
+import { DutyStatus } from "@/components/home/DutyStatus";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
 import { HomeAssistantNotes } from "@/components/home/HomeAssistantNotes";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
@@ -263,6 +264,7 @@ export function Home() {
           </header>
 
           <RunProblems />
+          <DutyStatus />
 
           {asks.status === "ok" && asks.value.asks.length > 0 && (
             <section aria-labelledby="home-asks" className="flex flex-col gap-3" data-testid="home-asks">
