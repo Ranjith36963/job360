@@ -39,7 +39,7 @@ beforeEach(() => {
   });
 });
 
-describe("Run my Chrome tasks now", () => {
+describe("Run my own-browser tasks now", () => {
   it("is absent when no card needs the owner's Chrome", async () => {
     cards = [{ applicationId: 1, ownBrowser: false, ownBrowserCount: 0 }];
     render(<NeedsYou />);
@@ -52,9 +52,9 @@ describe("Run my Chrome tasks now", () => {
     render(<NeedsYou />);
     fireEvent.click(await screen.findByTestId("run-chrome-tasks"));
     await waitFor(() => expect(requestJson).toHaveBeenCalledWith("/api/own-browser/run-now", "POST"));
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Your Chrome tasks are starting"));
-    expect(await screen.findByText("Keep your PC on and your assistant open in Chrome.")).toBeInTheDocument();
-    expect(screen.getByText(/It works through the jobs marked Needs your Chrome, PC on\./)).toBeInTheDocument();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Your own-browser tasks are starting"));
+    expect(await screen.findByText("Keep your PC on and your assistant open in your own browser.")).toBeInTheDocument();
+    expect(screen.getByText(/It works through the jobs marked Needs your own browser: turn your PC on\./)).toBeInTheDocument();
     expect(screen.queryByTestId("run-chrome-command")).toBeNull();
   });
 
@@ -68,7 +68,7 @@ describe("Run my Chrome tasks now", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<NeedsYou />);
     fireEvent.click(await screen.findByTestId("run-chrome-tasks"));
-    expect(await screen.findByText("Turn on your PC, open your assistant in Chrome and say:")).toBeInTheDocument();
+    expect(await screen.findByText("Turn on your PC, open your assistant in your own browser and say:")).toBeInTheDocument();
     expect(screen.getByTestId("run-chrome-command")).toHaveTextContent("run 360 batch");
     expect(toastSuccess).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("run-chrome-copy"));

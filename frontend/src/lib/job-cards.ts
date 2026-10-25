@@ -78,8 +78,7 @@ export function peopleToReach(detail: ApplicationDetail): PersonToReach[] {
 import { needsOwnBrowser } from "@/lib/browser-contract";
 export { needsOwnBrowser };
 
-export const OWN_CHROME_LABEL = "Needs your Chrome, PC on";
-export const JOB360_BROWSER_LABEL = "Job360's browser";
+export { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL } from "@/lib/browser-labels";
 
 export type JobCardData = {
   applicationId: number;
@@ -94,7 +93,7 @@ export type JobCardData = {
   latestCv: { artifactId: number; version: number } | null;
   formFilled: boolean;
   oldestAskAt: string;
-  /** How many of this card's open asks must run in the owner's own Chrome. */
+  /** How many of this card's open asks must run in the owner's own browser. */
   ownBrowserCount: number;
   /** True when any of them does. */
   ownBrowser: boolean;
