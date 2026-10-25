@@ -746,6 +746,10 @@ class AssistantSettings:
     # Owner 2026-10-24: may the user's scheduled task find people to reach for new applications (duty
     # ``reach``). False = off (rule #29: never set for the user). Turning it on is riskier; it never sends.
     people_hunt: bool = False
+    # Owner 2026-10-25: when the user's computer is usually on, {"days": [mon..sun], "from": "HH:MM", "to": "HH:MM"}
+    # in their timezone. Tasks Job360's own browser could not finish wait for it. None = any time (rule #29).
+    # Always a safer change: every send in the user's own browser still needs the user's click.
+    pc_on_hours: Optional[dict[str, Any]] = None
     # S4 - which of the six setup rounds are done: {round: {"done_at": ISO}}.
     # Not a setting (no gate, never "riskier"): progress the assistant reports.
     setup_progress: dict[str, dict[str, str]] = field(default_factory=dict)

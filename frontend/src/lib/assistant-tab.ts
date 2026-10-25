@@ -92,11 +92,16 @@ export const HUNT_EVERY_MAX = 168;
 export const P_PEOPLE_HUNT = "assistant_settings.people_hunt";
 export const PEOPLE_HUNT_HELP =
   "From its own scheduled task, your assistant finds up to 2 people for each new application and writes the messages. You send them yourself.";
+/** Owner 2026-10-25: when the user's PC is on, {days, from, to}; empty = any time. */
+export const P_PC_ON = "assistant_settings.pc_on_hours";
+export const PC_ON_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export const PC_ON_HELP =
+  "When your computer is usually on. Your assistant uses its own browser only then, for tasks Job360's browser could not finish. Blank = any time.";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
 export const SETTING_HISTORY_PATHS = [
   P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP, P_AUTO_EMAILS, P_OUTREACH_SEND,
   P_COMPANY_CAP, P_COMPANY_DAYS, P_WEEKLY_CAP, P_MIN_GAP, P_HOURS, P_GRANT_COUNT, P_GRANT_UNTIL, P_HUNT_EVERY,
-  P_PEOPLE_HUNT,
+  P_PEOPLE_HUNT, P_PC_ON,
 ] as const;
 export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
 export const HISTORY_PATHS: string[] = [...SETTING_HISTORY_PATHS, ...PREF_HISTORY_PATHS];
@@ -120,6 +125,7 @@ const KEY_LABEL: Record<string, string> = {
   [P_EVERY]: "Inbox check",
   [P_HUNT_EVERY]: "Job hunt",
   [P_PEOPLE_HUNT]: "People hunt",
+  [P_PC_ON]: "My PC-on time",
 };
 
 /** "auto"/"scheduled" -> auto, "declined" -> paused (Off); anything else as stored. */
@@ -145,6 +151,22 @@ export function huntText(v: unknown): string {
   return n === 1 ? "every hour" : `every ${n} hours`;
 }
 
+export type PcOn = { days: string[]; from: string; to: string };
+
+/** The saved PC-on window ({days:[], from:"", to:""} = not set = any time). */
+export function pcOnOf(f: { effective?: unknown; value?: unknown } | undefined): PcOn {
+  const v = f?.value as { days?: unknown; from?: unknown; to?: unknown } | null | undefined;
+  if (!v || typeof v !== "object") return { days: [], from: "", to: "" };
+  const days = Array.isArray(v.days) ? v.days.filter((d): d is string => typeof d === "string") : [];
+  return { days, from: String(v.from ?? ""), to: String(v.to ?? "") };
+}
+
+/** A PC-on window in words: "mon, tue 09:00 to 18:00"; nothing set = "any time". */
+export function pcOnText(v: unknown): string {
+  const w = pcOnOf({ value: v });
+  return w.days.length && w.from && w.to ? `${w.days.join(", ")} ${w.from} to ${w.to}` : "any time";
+}
+
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */
 export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
@@ -156,6 +178,7 @@ export function valueText(path: string, v: unknown): string {
     const h = v as { from?: unknown; to?: unknown } | null;
     return h && typeof h === "object" && h.from && h.to ? `${String(h.from)} to ${String(h.to)}` : "any time";
   }
+  if (path === P_PC_ON) return pcOnText(v);
   if (path === P_GRANT_UNTIL) return empty ? "not set" : historyWhen(String(v));
   if (path === P_HUNT_EVERY) return huntText(v);
   if (empty) return "not set";
