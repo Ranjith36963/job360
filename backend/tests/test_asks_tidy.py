@@ -7,6 +7,7 @@ second read changes nothing. Helpers are defined here, never imported (per-test 
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -21,18 +22,28 @@ def _row(key: str, question: str, source: str = "none", answer: str = "") -> dic
 
 
 async def _old_style_ask(client: AsyncClient, app_id: int, rows: list[dict[str, str]], monkeypatch) -> int:
-    """File an ask the way runs did before one-ask-per-job: never merged."""
+    """File an ask the way runs did before one-ask-per-job (never merged) and before #1226 (rows may carry
+    source none): filed answered, then its rows are stored as given, as ``test_ask_questions`` does."""
+    from src.core import settings
+    from src.repositories import pgsync
     from src.services.applications import asks
 
     async def none(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
         return []
 
     monkeypatch.setattr(asks, "_open_family", none)
+    filled = [{**q, "source": "guess", "answer": "x"} for q in rows]
     resp = await client.post("/api/asks", json={"question": "G-P form needs you", "application_id": app_id,
-                                                "kind": "question", "questions": rows})
+                                                "kind": "question", "questions": filled})
     monkeypatch.undo()
     assert resp.status_code == 201, resp.text
-    return int(resp.json()["id"])
+    ask_id = int(resp.json()["id"])
+    stored = [{**q, "key": asks.canonical_key(q["key"])} for q in rows]
+    conn = pgsync.connect(str(settings.DB_PATH))
+    conn.execute("UPDATE application_asks SET questions = ? WHERE id = ?", (json.dumps(stored), ask_id))
+    conn.commit()
+    conn.close()
+    return ask_id
 
 
 @pytest.mark.asyncio
