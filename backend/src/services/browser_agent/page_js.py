@@ -107,6 +107,10 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
     if (q) return ph && !q.includes(ph) ? q + ' (' + ph + ')' : q;
     return ph || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
   };
+  // A box whose answer is its typed text (not a choice, a file, a button or a password).
+  const textLike = (el) => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT'
+    && !['checkbox', 'radio', 'file', 'hidden', 'submit', 'button', 'image', 'reset', 'password']
+      .includes((el.type || '').toLowerCase()));
   // A control a person types into or picks in (not a button).
   const typed = (el) => el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
     || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset'].includes(el.type));
@@ -195,9 +199,36 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
   };
 """
 
+# A react-select's pick (Greenhouse, 2026-10-25): its <input role=combobox> stays empty and the pick is drawn
+# in a sibling div (class "select__single-value", or an emotion "css-...-singleValue"); the hidden input
+# beside it carries the value when no pick is drawn. Read only for an EMPTY suggestion-box input, and only
+# inside its own box: the climb stops at the first block that holds another control, so one select's pick is
+# never read as the next one's. The page's "option Yes, selected." live text is never the source.
+CHOSEN_OF_JS = r"""
+  const chosenOf = (el) => {
+    if (el.tagName !== 'INPUT' || (el.value || '') !== '') return '';
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role !== 'combobox' && !el.getAttribute('aria-autocomplete')
+        && !/select__input/.test(el.getAttribute('class') || '')) return '';
+    const other = 'input:not([type=hidden]), select, textarea, [role=combobox], [contenteditable=""], '
+      + '[contenteditable=true]';
+    let hidden = '';
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n && n !== el.ownerDocument.body; i++, n = n.parentElement) {
+      if (Array.from(n.querySelectorAll(other)).some((f) => f !== el && !f.contains(el))) break;
+      const one = n.querySelector('[class*="singleValue"], [class*="single-value"]');
+      const shown = one ? (one.innerText || one.textContent || '').trim() : '';
+      if (shown) return shown;
+      const kept = Array.from(n.querySelectorAll('input[type=hidden]')).filter((h) => (h.value || '').trim());
+      if (!hidden && kept.length === 1) hidden = kept[0].value.trim();
+    }
+    return hidden;
+  };
+"""
+
 SNAPSHOT_JS = r"""
 (args) => {
-""" + _LABEL_OF_JS + r"""
+""" + _LABEL_OF_JS + CHOSEN_OF_JS + r"""
   const maxElements = args.maxElements, maxText = args.maxText, maxName = 120, maxAttr = 40;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
     + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=""], '
@@ -226,6 +257,12 @@ SNAPSHOT_JS = r"""
         if (f.tagName === 'SELECT') {
           f.setAttribute('data-j360-sel0', Array.from(f.selectedOptions).map((o) => o.index).join(','));
         } else if (f.tagName === 'INPUT') f.setAttribute('data-j360-checked0', String(f.checked));
+      }
+      // A text the site wrote itself (BambooHR's "Link to This Job"): read only by the gate's "still the
+      // ad?" (ELEMENT_FACTS_JS answeredSinceRead), never by page_has_answers. A long one is not stamped.
+      for (const f of root.querySelectorAll('input, textarea')) {
+        if (!textLike(f) || (f.value || '').length > 2000) continue;
+        f.setAttribute('data-j360-val0', f.value || '');
       }
       if (depth > 6) return;
       for (const host of root.querySelectorAll('*')) if (host.shadowRoot) stamp(host.shadowRoot, depth + 1);
@@ -323,7 +360,7 @@ SNAPSHOT_JS = r"""
         if (group && group !== item.name) item.group = group;
       }
       else if (type === 'file') item.value = Array.from(el.files || []).map(f => f.name).join(', ');
-      else item.value = clip(el.value, 300);
+      else item.value = clip(el.value || chosenOf(el), 300);
     } else if (el.getAttribute('aria-checked') !== null) item.checked = el.getAttribute('aria-checked') === 'true';
     else if (el.getAttribute('aria-pressed') !== null) item.pressed = el.getAttribute('aria-pressed') === 'true';
     // Ashby's Yes/No buttons: the chosen one carries a hashed "_active_" class (ApplYourself
@@ -377,6 +414,33 @@ ELEMENT_FACTS_JS = r"""
     }
     return f.isContentEditable && !!(f.innerText || '').trim();
   };
+  // The same, except a text the site wrote before Job360 first read the page (its data-j360-val0 stamp,
+  // unchanged) is not one: for "is this still the ad?" only. Unstamped, it counts (safe side).
+  const answeredSinceRead = (f) => {
+    if (textLike(f) && f.hasAttribute('data-j360-val0') && f.getAttribute('data-j360-val0') === (f.value || '')) {
+      return false;
+    }
+    return answered(f);
+  };
+  const answerable = deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
+    + '[aria-checked=true], [aria-pressed=true]', 0);
+  // The fields a person can see (any kind but a button), and whether the page has a file box at all
+  // (hidden or not: file boxes hide behind styled buttons). The gate's "is this still the ad?".
+  const seen = (f) => {
+    const r = f.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    const st = getComputedStyle(f);
+    return st.visibility !== 'hidden' && st.display !== 'none';
+  };
+  const isField = (f) => {
+    if (f.tagName === 'INPUT') {
+      return !['hidden', 'submit', 'button', 'image', 'reset', 'file'].includes((f.type || '').toLowerCase());
+    }
+    return f.tagName === 'TEXTAREA' || f.tagName === 'SELECT' || f.isContentEditable || !!f.getAttribute('role');
+  };
+  const fieldsShown = deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], [role=textbox], '
+    + '[role=combobox], [role=checkbox], [role=radio], [role=switch]', 0)
+    .filter((f) => isField(f) && seen(f)).length;
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
@@ -385,8 +449,13 @@ ELEMENT_FACTS_JS = r"""
     // Whether it can submit a form itself: a button in a shadow root has no form owner.
     owns_form: !!el.form, toggle: el.hasAttribute('aria-pressed'),
     // Any answer anywhere on the page, shadow roots included: the form is being filled.
-    page_has_answers: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
-      + '[aria-checked=true], [aria-pressed=true]', 0).some(answered),
+    page_has_answers: answerable.some(answered),
+    answers_since_read: answerable.some(answeredSinceRead),
+    fields_shown: fieldsShown,
+    // A visible field the site marks required: an answer is asked for, so it is a form, not the ad.
+    required_shown: deepAll(el.ownerDocument, 'input, select, textarea', 0)
+      .some((f) => (f.required || f.getAttribute('aria-required') === 'true') && isField(f) && seen(f)),
+    file_box: deepAll(el.ownerDocument, 'input[type=file]', 0).length > 0,
   };
 }
 """
@@ -500,8 +569,13 @@ TYPEABLE_TARGET_JS = r"""
 """
 
 # The value a field shows now (inputs, textareas, contenteditable boxes, custom dropdown buttons).
+# A react-select's empty input shows its drawn pick (CHOSEN_OF_JS).
 SHOWN_VALUE_JS = r"""
-(el) => ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '')
+(el) => {
+""" + CHOSEN_OF_JS + r"""
+  if ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') return el.value || chosenOf(el);
+  return el.innerText || '';
+}
 """
 
 # A suggestion box (react-select, Workday prompt, Lever location): typed key by key so the site's

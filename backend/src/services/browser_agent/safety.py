@@ -84,6 +84,11 @@ _APPLICATION_WORD = re.compile(
 )
 # Roles the look lists that are clicked like a link: named the way a link is.
 _LINK_ROLES = ("link", "tab", "switch", "option")
+# The "apply" verbs of _SUBMIT_WORDS: on a job ad's own button they open the form (BambooHR's "Apply for This
+# Job", 2026-10-25). Only these: "Send", "Finish", "Confirm" are never an opener.
+_APPLY_VERBS = re.compile(
+    r"\b(apply|bewerben|postuler|postular|candidatar|candidati|solliciteren|solliciteer)\b", re.IGNORECASE
+)
 
 
 def control_kind(
@@ -96,6 +101,7 @@ def control_kind(
     page_has_answers: bool = False,
     owns_form: Optional[bool] = None,
     toggle: bool = False,
+    page_is_ad: bool = False,
 ) -> str:
     """``password`` | ``submit`` | ``field`` for one control on the page.
 
@@ -108,6 +114,10 @@ def control_kind(
     control itself can submit a form (``el.form``: a button in a shadow root
     cannot submit the ``<form>`` around its host); unknown, it is ``in_form``.
     ``toggle`` is a pressed-or-not button (``aria-pressed``), a choice.
+    ``page_is_ad`` is the gate's own read that the page is still the job ad (agent._kind): no answer given
+    since Job360 first read it, no file box, no visible required field, fewer than ``MIN_LABELLED_FIELDS``
+    fields. There an "Apply" button outside any form opens the form, even when the site filled a box itself
+    (a share link).
     "Apply" / "Send" / "Finish" on a
     button counts as the final submit inside a form OR on a page with answers
     (React forms often have no ``<form>``); on a page with nothing typed it is
@@ -146,7 +156,14 @@ def control_kind(
         # "Send application" as a link, once answers are held; a bare "Apply" link opens the form.
         return "submit" if page_has_answers and sends_application else "field"
     if (in_form or page_has_answers) and _SUBMIT_WORDS.search(name):
-        return "submit"
+        # The ad's opener: an apply verb and no other end word, on a button that is outside every form and
+        # cannot submit one, on a page that is still the ad. Anything else here stays the final submit.
+        opener = (
+            page_is_ad and not in_form and not owns and not sends_application
+            and bool(_APPLY_VERBS.search(name)) and not _SUBMIT_WORDS.search(_APPLY_VERBS.sub(" ", name))
+        )
+        if not opener:
+            return "submit"
     if toggle:
         return "field"
     # Not a tab ("Overview | Application") and not the bare noun, a section's own toggle.

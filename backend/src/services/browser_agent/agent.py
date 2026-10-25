@@ -36,6 +36,7 @@ from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHA
 from src.services.browser_agent.page_js import (
     BODY_TEXT_JS,
     CHOSEN_NEARBY_JS,
+    CHOSEN_OF_JS,
     CONTROL_STATE_JS,
     ELEMENT_FACTS_JS,
     FOCUS_IN_LIST_JS,
@@ -59,6 +60,7 @@ from src.services.browser_agent.page_js import (
 )
 from src.services.browser_agent.safety import RequestScreen, _captcha_frame, blocker_for, control_kind
 from src.services.browser_agent.sites import (
+    MIN_LABELLED_FIELDS,
     account_step,
     greenhouse_embed_url,
     is_honeypot,
@@ -1075,12 +1077,21 @@ def _is_trap(name: Any, hints: Any) -> bool:
 
 async def _kind(loc: Any) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
+    # Still the job ad (look's own "form or ad" test, read now): nothing answered since Job360 first read
+    # the page, no file box, no visible required field, too few fields for a form. A fact missing reads as
+    # a form (the safe side).
+    fields_shown = facts.get("fields_shown")
+    page_is_ad = (
+        facts.get("answers_since_read") is False and facts.get("file_box") is False
+        and facts.get("required_shown") is False
+        and isinstance(fields_shown, int) and fields_shown < MIN_LABELLED_FIELDS
+    )
 
     def kind_of(name: str) -> str:
         return control_kind(
             facts.get("tag", ""), facts.get("type", ""), name, facts.get("autocomplete", ""),
             bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
-            bool(facts.get("owns_form")), bool(facts.get("toggle")),
+            bool(facts.get("owns_form")), bool(facts.get("toggle")), page_is_ad,
         )
 
     kind = kind_of(str(facts.get("name") or ""))
@@ -1602,15 +1613,18 @@ _TICK_WORDS = {
     "yes": True, "true": True, "on": True, "1": True, "checked": True, "tick": True,
     "no": False, "false": False, "off": False, "0": False, "unchecked": False, "untick": False,
 }
-# What a field holds now: a select's chosen option text, a box's yes / no, else its value or text.
+# What a field holds now: a select's chosen option text, a box's yes / no, else its value or text (a
+# react-select's empty input: its drawn pick, CHOSEN_OF_JS).
 READ_BACK_JS = r"""
 (el) => {
+""" + CHOSEN_OF_JS + r"""
   if (el.tagName === 'SELECT') return Array.from(el.selectedOptions, (o) => o.text).join(', ');
   const t = (el.type || '').toLowerCase();
   if (el.tagName === 'INPUT' && (t === 'checkbox' || t === 'radio')) return el.checked ? 'yes' : 'no';
   const a = el.getAttribute('aria-checked');
   if (a === 'true' || a === 'false') return a === 'true' ? 'yes' : 'no';
-  return ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '');
+  if ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') return el.value || chosenOf(el);
+  return el.innerText || '';
 }
 """
 
