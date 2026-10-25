@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { startAssistantAfterSend } from "@/lib/assistant-start";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -143,12 +144,12 @@ export function SendStartsAssistantCard() {
               {view.last_fired_at ? `, ${formatDateTime(view.last_fired_at)}` : ""}
             </p>
             <div className="flex gap-2">
-              <button type="button" className={PRIMARY_BTN_CLASS} disabled={busy} onClick={() => void startNow()}>
+              <Button variant="default" size="sm" type="button" className={PRIMARY_BTN_CLASS} disabled={busy} onClick={() => void startNow()}>
                 Start now
-              </button>
-              <button type="button" className={DANGER_BTN_CLASS} disabled={busy} onClick={() => void remove()}>
+              </Button>
+              <Button variant="destructive" size="sm" type="button" className={DANGER_BTN_CLASS} disabled={busy} onClick={() => void remove()}>
                 Remove
-              </button>
+              </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               Start now sends every job still waiting on your yes, for example one you sent within a minute of
@@ -163,9 +164,9 @@ export function SendStartsAssistantCard() {
             <pre className={PRE_CLASS} data-testid="routine-prompt">
               {ROUTINE_PROMPT}
             </pre>
-            <button type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(ROUTINE_PROMPT, "Instructions")}>
+            <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(ROUTINE_PROMPT, "Instructions")}>
               Copy instructions
-            </button>
+            </Button>
           </li>
           <li>Add an API trigger to it, copy its URL, press Generate token, and paste both here.</li>
         </ol>
@@ -200,9 +201,9 @@ export function SendStartsAssistantCard() {
               onChange={(e) => setToken(e.target.value)}
             />
           </div>
-          <button type="submit" className={PRIMARY_BTN_CLASS} disabled={busy || !url.trim()}>
+          <Button variant="default" size="sm" type="submit" className={PRIMARY_BTN_CLASS} disabled={busy || !url.trim()}>
             {view?.set ? "Replace" : "Save"}
-          </button>
+          </Button>
         </form>
 
         <details className="text-muted-foreground">
@@ -214,9 +215,9 @@ export function SendStartsAssistantCard() {
           <pre className={PRE_CLASS} data-testid="pc-loop-command">
             {PC_LOOP_COMMAND}
           </pre>
-          <button type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(PC_LOOP_COMMAND, "Command")}>
+          <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(PC_LOOP_COMMAND, "Command")}>
             Copy command
-          </button>
+          </Button>
         </details>
       </CardContent>
     </Card>

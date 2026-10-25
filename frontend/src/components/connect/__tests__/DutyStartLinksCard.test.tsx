@@ -53,7 +53,9 @@ describe("Start each job at once", () => {
   it("Run now and Test start that duty; a held start says why", async () => {
     render(<DutyStartLinksCard />);
     const row = await screen.findByTestId("duty-hunt");
-    fireEvent.click(within(row).getByRole("button", { name: "Run now" }));
+    const runNow = within(row).getByRole("button", { name: "Run now" });
+    expect(runNow).toHaveAttribute("data-slot", "button");
+    fireEvent.click(runNow);
     await waitFor(() => expect(runDuty).toHaveBeenCalledWith("hunt", false));
     expect(success).toHaveBeenCalledWith("Hunt started.");
     runDuty.mockResolvedValueOnce({ fired: false, reason: "cooldown" });

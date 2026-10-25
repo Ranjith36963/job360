@@ -38,7 +38,7 @@ const MAX_ASK_PAGES = 10;
 async function openJobCount(): Promise<number> {
   const open: Ask[] = [];
   for (let page = 0; page < MAX_ASK_PAGES; page++) {
-    const { asks } = await listAsks("open", open.length);
+    const { asks } = await (open.length ? listAsks("open", open.length) : listAsks("open"));
     open.push(...asks);
     if (asks.length < ASKS_PAGE) break;
   }
