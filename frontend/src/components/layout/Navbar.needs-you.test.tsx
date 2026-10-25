@@ -21,6 +21,12 @@ vi.mock("@/lib/api", () => ({
   getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
 }));
 
+// n open asks, each on its own job (the badge counts jobs, not asks).
+const ask = (id: number, application_id: number | null, over: Record<string, unknown> = {}) => ({
+  id, application_id, question: "Q?", context: "", job_title: "Dev", job_company: "Acme", ...over,
+});
+const jobs = (n: number) => Array.from({ length: n }, (_, i) => ask(i + 1, 100 + i));
+
 beforeEach(() => {
   listAsks.mockReset();
   getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
@@ -35,7 +41,7 @@ const openDrawer = () =>
 
 describe("Navbar drawer — Needs you badge", () => {
   it("shows the open count when there are open asks", async () => {
-    listAsks.mockResolvedValue({ asks: [], open_count: 3 });
+    listAsks.mockResolvedValue({ asks: jobs(3) });
     render(<Navbar />);
     await waitFor(() => expect(listAsks).toHaveBeenCalled());
     openDrawer();
@@ -46,7 +52,7 @@ describe("Navbar drawer — Needs you badge", () => {
   });
 
   it("counts the setting changes waiting for the user's OK with the open asks", async () => {
-    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    listAsks.mockResolvedValue({ asks: jobs(2) });
     getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }, { id: 2 }] });
     render(<Navbar />);
     await waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
@@ -55,7 +61,7 @@ describe("Navbar drawer — Needs you badge", () => {
   });
 
   it("counts the applications ready to send (a counts-only read) with the rest", async () => {
-    listAsks.mockResolvedValue({ asks: [], open_count: 1 });
+    listAsks.mockResolvedValue({ asks: jobs(1) });
     getReadyToSend.mockResolvedValue({ total: 3 });
     render(<Navbar />);
     await waitFor(() => expect(getReadyToSend).toHaveBeenCalledWith({ limit: 0 }));
@@ -64,7 +70,7 @@ describe("Navbar drawer — Needs you badge", () => {
   });
 
   it("a failed settings read still shows the open asks", async () => {
-    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    listAsks.mockResolvedValue({ asks: jobs(2) });
     getAssistantSettings.mockRejectedValue(new Error("down"));
     render(<Navbar />);
     await waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
@@ -72,8 +78,32 @@ describe("Navbar drawer — Needs you badge", () => {
     expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("2");
   });
 
+  it("counts jobs, not asks: many asks on one job are one, practice asks are left out, no-job asks count each", async () => {
+    listAsks.mockResolvedValue({
+      asks: [
+        ask(1, 7), ask(2, 7), ask(3, 7), ask(4, 8),
+        ask(5, 9, { question: "SIMULATION: do not apply" }),
+        ask(6, null), ask(7, null),
+      ],
+    });
+    render(<Navbar />);
+    await waitFor(() => expect(listAsks).toHaveBeenCalled());
+    openDrawer();
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
+  });
+
+  it("reads every page of open asks", async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => ask(i + 1, 1000 + i));
+    listAsks.mockResolvedValueOnce({ asks: page1 }).mockResolvedValueOnce({ asks: [ask(99, 5000)] });
+    render(<Navbar />);
+    await waitFor(() => expect(listAsks).toHaveBeenCalledTimes(2));
+    expect(listAsks).toHaveBeenNthCalledWith(2, "open", 50);
+    openDrawer();
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("51");
+  });
+
   it("shows no badge at zero", async () => {
-    listAsks.mockResolvedValue({ asks: [], open_count: 0 });
+    listAsks.mockResolvedValue({ asks: jobs(0) });
     render(<Navbar />);
     await waitFor(() => expect(listAsks).toHaveBeenCalled());
     openDrawer();
@@ -82,7 +112,7 @@ describe("Navbar drawer — Needs you badge", () => {
   });
 
   it("clears while the user answers on the same page (no navigation)", async () => {
-    listAsks.mockResolvedValue({ asks: [], open_count: 3 });
+    listAsks.mockResolvedValue({ asks: jobs(3) });
     render(<Navbar />);
     await waitFor(() => expect(listAsks).toHaveBeenCalled());
     openDrawer();
@@ -96,7 +126,7 @@ describe("Navbar drawer — Needs you badge", () => {
 
 describe("Sidebar — Needs you badge", () => {
   it("shows the same badge, and clears it on the same event", async () => {
-    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    listAsks.mockResolvedValue({ asks: jobs(2) });
     render(<Sidebar />);
     const badge = await screen.findByTestId("needs-you-badge");
     expect(badge).toHaveTextContent("2");

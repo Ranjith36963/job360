@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { ASKS_CHANGED_EVENT, getReadyToSend, listAsks } from "@/lib/api";
 import { fetchSettingsShared } from "@/lib/assistant-state";
+import { isSimulation } from "@/lib/job-cards";
+import type { Ask } from "@/lib/api";
 
 /**
- * Count of things waiting on the user (the Needs-you badge): open questions plus
+ * Count of things waiting on the user (the Needs-you badge): jobs with an open ask plus
  * the setting changes an assistant asked for that wait for the user's OK (S2)
  * plus the applications ready to send (S5d).
  * The settings read is best-effort: if it fails the badge still counts the asks.
@@ -28,18 +30,40 @@ async function readyTotal(): Promise<number> {
   }
 }
 
+const ASKS_PAGE = 50; // the server's default page size
+const MAX_ASK_PAGES = 10;
+
+/** Jobs that need the owner, not asks: one per job with an open ask (practice asks left out), plus
+ *  each open ask that belongs to no job. Reads every page of open asks (capped). */
+async function openJobCount(): Promise<number> {
+  const open: Ask[] = [];
+  for (let page = 0; page < MAX_ASK_PAGES; page++) {
+    const { asks } = await (open.length ? listAsks("open", open.length) : listAsks("open"));
+    open.push(...asks);
+    if (asks.length < ASKS_PAGE) break;
+  }
+  const jobs = new Set<number>();
+  let general = 0;
+  for (const ask of open) {
+    if (isSimulation(ask)) continue;
+    if (ask.application_id == null) general++;
+    else jobs.add(ask.application_id);
+  }
+  return jobs.size + general;
+}
+
 let inFlight: { key: string; count: Promise<number> } | null = null;
 
 function fetchOpenCount(key: string): Promise<number> {
   if (inFlight?.key === key) return inFlight.count;
   const count = Promise.all([
-    listAsks("open"),
+    openJobCount(),
     fetchSettingsShared(key).then(
       (view) => view.waiting.length,
       () => 0,
     ),
     readyTotal(),
-  ]).then(([asks, waiting, ready]) => asks.open_count + waiting + ready);
+  ]).then(([jobs, waiting, ready]) => jobs + waiting + ready);
   const entry = { key, count };
   inFlight = entry;
   const clear = () => {
