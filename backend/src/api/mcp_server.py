@@ -562,6 +562,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     from src.api.routes import asks as asks_route
     from src.api.routes import bring as bring_route
     from src.api.routes import browser as browser_route
+    from src.api.routes import connectors as connectors_route
     from src.api.routes import doctor as doctor_route
     from src.api.routes import profile as profile_route
     from src.api.routes import proof as proof_route
@@ -2272,7 +2273,8 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         is not empty, send no automatic email and tell the owner),
         `silent_after_interview` (interview-stage jobs with no word for over 30 days
         since the last interview_done; confirm with the user before any nudge),
-        `interviews` {upcoming, just_passed} (same as whats_new) and
+        `interviews` {upcoming, just_passed} (same as whats_new), `connectors` (your last
+        report_capabilities and what is missing or failing) and
         when the last event was recorded - then whats_new(since=<your last
         check>) for what changed. Writes only one thing: a `ghosted` mark on
         applications silent 45 days after applying and only after your inbox was checked
@@ -2314,6 +2316,31 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             raise _tool_error(exc) from None
         _audit("report_missing_tool", "ok", report_id=resp["id"])
         return resp
+
+    @mcp.tool()
+    async def report_capabilities(
+        assistant: str, categories: list[dict[str, str]], needed: Optional[list[str]] = None
+    ) -> dict[str, Any]:
+        """Tell Job360 which helper tools YOU have, read off your own tool list (Job360 cannot see them).
+        `assistant`: claude | chatgpt | gemini | other. `categories`: one item per tool kind you have,
+        {category, via?, status?}: category gmail | calendar | job_search | people_lookup |
+        company_lookup | browser | web_search; via = the connector's name (max 40); status ok |
+        needs_sign_in | not_on_plan | failing. `needed`: categories a run needed but you lack. Answers
+        what is missing or failing: tell the user; their Job360 Home shows what to connect."""
+        try:
+            body = connectors_route.CapabilitiesIn.model_validate(
+                {"assistant": assistant, "categories": categories, "needed": needed or []}
+            )
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await connectors_route.report_capabilities(body, db, _user())
+        except HTTPException as exc:
+            _audit("report_capabilities", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("report_capabilities", "ok", saved=resp.saved)
+        return resp.model_dump()
 
     @mcp.tool()
     async def get_application_kit(application_id: int, include_text: bool = True, session: str = "") -> dict[str, Any]:

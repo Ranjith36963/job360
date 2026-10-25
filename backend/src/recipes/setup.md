@@ -3,7 +3,7 @@
 
 Print this checklist and tick each step:
 [ ] 0 Resume  [ ] 1 Six rounds (targets, you, visa, logistics, equality, settings)
-[ ] 2 Fix profile  [ ] 3 Connect  [ ] 4 Watched daily run  [ ] 5 Schedule  [ ] 6 Finish
+[ ] 2 Fix profile  [ ] 3 Check your tools  [ ] 4 Watched daily run  [ ] 5 Schedule  [ ] 6 Finish
 
 This is an INTERVIEW: you ask, the user answers, you save their words. Never answer for them from the CV.
 Job360 is the record. Every edit holding the user's own answer: `"source": "user_said"` (`agent_inferred` only
@@ -59,9 +59,9 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If
    GitHub). Write `cv_data.cv_positions`, `cv_data.cv_projects` (one per real
    GitHub project), links, summary when missing or wrong (`"source": "agent_inferred"`: you
    read these). Never invent a fact; never overwrite a target the user gave.
-3. **Tell the user what to connect in their app:** Gmail, a job-search connector
-   (for example Indeed), browser control. Job360 does not connect to these - you
-   do. No browser control = the user submits. **Done when** you said it.
+3. **Check your tools.** From your OWN tool list, call `report_capabilities` (which of gmail, calendar,
+   job_search, people_lookup... you have, and any needing sign-in); tell the user what it says is missing.
+   Job360 never connects these - you do; their Home shows the links. **Done when** you reported and said it.
 4. **Watched first daily run.** Follow `get_recipe("daily")` with the user
    watching. **Done when** it printed its report.
 5. **Schedule.** Claude Code: a routine. ChatGPT: a Task. claude.ai: tell the user
