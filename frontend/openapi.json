@@ -2792,6 +2792,51 @@
         "title": "AssistantSettingsView",
         "type": "object"
       },
+      "AssistantViewOut": {
+        "properties": {
+          "assistant": {
+            "title": "Assistant",
+            "type": "string"
+          },
+          "connected": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Connected",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "missing": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/EntryOut"
+              },
+              "type": "array"
+            },
+            "title": "Missing",
+            "type": "object"
+          },
+          "reported_at": {
+            "title": "Reported At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assistant",
+          "label",
+          "reported_at",
+          "connected",
+          "missing"
+        ],
+        "title": "AssistantViewOut",
+        "type": "object"
+      },
       "AutoEmailCheckResponse": {
         "description": "``GET /api/applications/{id}/auto-email-check`` - the gate before an automatic employer email.\n``send`` only means the gate is open; ``due_since`` is \"\" when the kind has no starting event.",
         "properties": {
@@ -3618,6 +3663,225 @@
         "title": "CalendarFeedStatus",
         "type": "object"
       },
+      "CapabilitiesIn": {
+        "additionalProperties": false,
+        "properties": {
+          "assistant": {
+            "enum": [
+              "claude",
+              "chatgpt",
+              "gemini",
+              "other"
+            ],
+            "title": "Assistant",
+            "type": "string"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityIn"
+            },
+            "maxItems": 7,
+            "title": "Categories",
+            "type": "array"
+          },
+          "needed": {
+            "items": {
+              "enum": [
+                "gmail",
+                "calendar",
+                "job_search",
+                "people_lookup",
+                "company_lookup",
+                "browser",
+                "web_search"
+              ],
+              "type": "string"
+            },
+            "maxItems": 7,
+            "title": "Needed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "assistant"
+        ],
+        "title": "CapabilitiesIn",
+        "type": "object"
+      },
+      "CapabilitiesOut": {
+        "properties": {
+          "assistant": {
+            "enum": [
+              "claude",
+              "chatgpt",
+              "gemini",
+              "other"
+            ],
+            "title": "Assistant",
+            "type": "string"
+          },
+          "failing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failing",
+            "type": "array"
+          },
+          "missing_essential": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Essential",
+            "type": "array"
+          },
+          "missing_recommended": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Recommended",
+            "type": "array"
+          },
+          "reported_at": {
+            "title": "Reported At",
+            "type": "string"
+          },
+          "saved": {
+            "title": "Saved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "assistant",
+          "reported_at",
+          "saved",
+          "missing_essential",
+          "missing_recommended",
+          "failing"
+        ],
+        "title": "CapabilitiesOut",
+        "type": "object"
+      },
+      "CapabilityIn": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "enum": [
+              "gmail",
+              "calendar",
+              "job_search",
+              "people_lookup",
+              "company_lookup",
+              "browser",
+              "web_search"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "status": {
+            "default": "ok",
+            "enum": [
+              "ok",
+              "needs_sign_in",
+              "not_on_plan",
+              "failing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "via": {
+            "default": "",
+            "maxLength": 40,
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "title": "CapabilityIn",
+        "type": "object"
+      },
+      "CardOut": {
+        "properties": {
+          "alternatives": {
+            "items": {
+              "$ref": "#/components/schemas/EntryOut"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "assistant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fix",
+              "add"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "suggested": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unlocks": {
+            "title": "Unlocks",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "tier",
+          "category",
+          "title",
+          "unlocks"
+        ],
+        "title": "CardOut",
+        "type": "object"
+      },
       "ClientLogRequest": {
         "properties": {
           "context": {
@@ -3698,6 +3962,35 @@
           "form_filled_event_id"
         ],
         "title": "ConfirmAnswerRequest",
+        "type": "object"
+      },
+      "ConnectorsOut": {
+        "properties": {
+          "assistants": {
+            "items": {
+              "$ref": "#/components/schemas/AssistantViewOut"
+            },
+            "title": "Assistants",
+            "type": "array"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/CardOut"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "has_calendar_feed": {
+            "title": "Has Calendar Feed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "assistants",
+          "has_calendar_feed",
+          "cards"
+        ],
+        "title": "ConnectorsOut",
         "type": "object"
       },
       "ConsentDecisionRequest": {
@@ -4327,6 +4620,13 @@
             "title": "Kind",
             "type": "string"
           },
+          "merged_from": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Merged From",
+            "type": "array"
+          },
           "question": {
             "title": "Question",
             "type": "string"
@@ -4569,6 +4869,23 @@
         "title": "CvToApproveRow",
         "type": "object"
       },
+      "DismissIn": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "maxLength": 80,
+            "minLength": 3,
+            "pattern": "^(fix|add):[a-z_]+(:[a-z_]+)?$",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "DismissIn",
+        "type": "object"
+      },
       "DoctorAuth": {
         "description": "How this caller is signed in: ``session`` (browser), ``token`` (personal\n``j360_\u2026`` token) or ``oauth`` (an OAuth-connected assistant), and the\nactor string every event it records will carry.",
         "properties": {
@@ -4778,6 +5095,12 @@
               "stop_hint": "",
               "violations": []
             }
+          },
+          "connectors": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Connectors",
+            "type": "object"
           },
           "email_verified": {
             "title": "Email Verified",
@@ -5259,6 +5582,78 @@
           "token"
         ],
         "title": "EmailVerificationConfirmRequest",
+        "type": "object"
+      },
+      "EntryOut": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "connect_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connect Url"
+          },
+          "free": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plan_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Note"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "unlocks": {
+            "title": "Unlocks",
+            "type": "string"
+          },
+          "verified_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified On"
+          }
+        },
+        "required": [
+          "category",
+          "name",
+          "tier",
+          "unlocks"
+        ],
+        "title": "EntryOut",
         "type": "object"
       },
       "EventSource": {
@@ -23312,6 +23707,82 @@
         ]
       }
     },
+    "/api/capabilities": {
+      "post": {
+        "description": "Store which helper tools this assistant has (append-only; a repeat of the newest report is not\nstored again). Answers what is missing or failing, so the assistant can tell the user in chat.",
+        "operationId": "report_capabilities_api_capabilities_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilitiesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Capabilities",
+        "tags": [
+          "connectors"
+        ]
+      }
+    },
     "/api/client-log": {
       "post": {
         "description": "Record a browser-side log event into the server's data/logs/ stream.",
@@ -23378,6 +23849,141 @@
         "summary": "Client Log",
         "tags": [
           "client-log"
+        ]
+      }
+    },
+    "/api/connectors": {
+      "get": {
+        "description": "For Settings and Home: each assistant's last report (what is connected, what is missing with the\ncatalog's suggestions) and the cards to show now. Records when a card is first shown.",
+        "operationId": "connector_view_api_connectors_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connector View",
+        "tags": [
+          "connectors"
+        ]
+      }
+    },
+    "/api/connectors/dismiss": {
+      "post": {
+        "description": "Never show this card again (remembered per user).",
+        "operationId": "dismiss_card_api_connectors_dismiss_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Card",
+        "tags": [
+          "connectors"
         ]
       }
     },
@@ -26963,7 +27569,7 @@
     },
     "/api/schedule/due": {
       "get": {
-        "description": "The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``\n(a routine that runs one job passes its own) limits the answer AND what it takes to those. An\nassistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):\nanother run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until\n``mark_done``. The website's own read only looks.",
+        "description": "The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``\n(a routine that runs one job passes its own) limits the answer AND what it takes to those; a read\nwithout ``duties`` only looks. An assistant's read with ``duties`` takes each listed duty for this run\n(one run per duty at a time, owner 2026-10-25):\nanother run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until\n``mark_done``. The website's own read only looks.",
         "operationId": "whats_due_api_schedule_due_get",
         "parameters": [
           {

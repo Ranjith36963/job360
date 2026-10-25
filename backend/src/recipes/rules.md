@@ -260,6 +260,10 @@ empty answer). A guess is never memory. Yes/no or a closed list: give `choices`.
 user can do (CAPTCHA, sign-in, a failed upload, a safety block) is its own ask on the same job:
 record `blocked` (Job360 opens it with its kind) or `ask_user` `kind` captcha|login|upload|safety.
 The user approves the answers at once; `answer_ask` returns them as `answers` {key: answer}.
+A new ask on a job that has an open one MERGES into it (the reply's `merged_from`): never re-ask
+each run; read the job's open ask first and add only what is new. Fixed keys: how_heard, consent,
+demographic_consent, referred, worked_before, languages, university, equality.gender,
+equality.ethnicity, cv_ok, cv_unsupported_terms, essays, job_country, location_city.
 Never ask the user to send an outreach message through `ask_user`: a saved message nobody marked
 sent shows under People to reach on that job's card.
 
@@ -322,7 +326,8 @@ runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
 `reach` = get_recipe("reach") for its `application_ids` only, `batch`), then `mark_done` each (reach with
 its `application_ids`); `nothing_due` = end at once without
 writing anything. A duty under `running` is another run's right now: leave it. `hunt_hold` queue_full =
-the queue is full, so no hunt until it drains. `batch_hold` waiting_on_you = every queued job waits on the user. Say how each ended: `mark_done(duty, outcome, reason)`, outcome done | partial | failed;
+the queue is full, so no hunt until it drains. `batch_hold` waiting_on_you = every queued job waits on the user.
+A tool a run needed was missing, asks for a sign-in or is not on the plan: `report_capabilities` (status, `needed`). Say how each ended: `mark_done(duty, outcome, reason)`, outcome done | partial | failed;
 a failed run always names its reason (tool_unavailable, sign_in_needed, paid_plan_needed, network_blocked,
 rate_limited, needs_user, error) - never mark a failed run done. A failed duty waits 2h, 4h, 8h (at most
 24h); after 3 in a row the user sees a card saying what to fix. Job360 counts each duty from when it was last done

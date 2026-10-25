@@ -42,8 +42,9 @@ async def _setup(client: AsyncClient, user_id: str) -> AsyncClient:
                        headers={"Authorization": f"Bearer {token}"})
 
 
-async def _due(client: AsyncClient) -> dict[str, Any]:
-    resp = await client.get("/api/schedule/due")
+async def _due(client: AsyncClient, duties: tuple[str, ...] = ("hunt",)) -> dict[str, Any]:
+    """A routine for one job names it (2026-10-25: a read without `duties` only looks)."""
+    resp = await client.get("/api/schedule/due", params={"duties": list(duties)} if duties else None)
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -67,6 +68,16 @@ async def test_a_second_run_does_not_get_the_same_duty(authenticated_async_conte
             done = await agent.post("/api/schedule/done", json={"duty": "hunt"})
             assert done.status_code == 200, done.text
             assert (await _due(agent))["running"] == {}  # mark_done freed it
+
+
+@pytest.mark.asyncio
+async def test_a_read_that_names_no_duty_only_looks(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        async with await _setup(client, fixture_user_id) as agent:
+            for _ in range(2):
+                plain = await _due(agent, duties=())
+                assert [d["duty"] for d in plain["due"]] == ["hunt"] and plain["running"] == {}
+            assert [d["duty"] for d in (await _due(agent))["due"]] == ["hunt"]
 
 
 @pytest.mark.asyncio
