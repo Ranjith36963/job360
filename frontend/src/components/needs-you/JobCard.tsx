@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
+import { browserTaskState, queueBrowserTask } from "@/lib/browser-contract";
 import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, isSensitiveQuestion, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -146,6 +147,45 @@ export function JobCard({
 
   const setAnswer = (id: number, v: string) => setAnswers((prev) => ({ ...prev, [id]: v }));
 
+  const [queuing, setQueuing] = useState<number | null>(null);
+  async function queueTask(askId: number) {
+    setQueuing(askId);
+    try {
+      await queueBrowserTask(askId);
+      await onChanged();
+    } catch (err) {
+      toast.apiError(err, "Couldn't queue that");
+    } finally {
+      setQueuing(null);
+    }
+  }
+  // Shown only when the backend sends the browser_task field (feature detection).
+  const browserBtn = (ask: Ask) => {
+    const st = browserTaskState(ask);
+    if (st === "unsupported") return null;
+    return st === "queued" ? (
+      <button type="button" className={btn} disabled data-testid={`task-queued-${ask.id}`}>
+        Queued for your browser
+      </button>
+    ) : (
+      <button type="button" className={btn} disabled={busy || queuing === ask.id} data-testid={`task-browser-${ask.id}`}
+        onClick={() => void queueTask(ask.id)}>
+        Use my assistant&apos;s browser
+      </button>
+    );
+  };
+  // Every row that asks the owner to act carries a link: the form, else the application page.
+  const rowLink = (id: number) =>
+    card.formUrl ? (
+      <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn} data-testid={`row-link-${id}`}>
+        Open the form ↗
+      </a>
+    ) : (
+      <Link href={`/applications/${card.applicationId}`} className={btn} data-testid={`row-link-${id}`}>
+        Open the application
+      </Link>
+    );
+
   const blockerRow = ({ ask, kind }: { ask: Ask; kind: RowKind }) => (
     <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`blocker-${ask.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -160,11 +200,8 @@ export function JobCard({
             Finish it here{heldText(ask.held_seconds)}
           </button>
         )}
-        {card.formUrl && (
-          <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn}>
-            Open the form ↗
-          </a>
-        )}
+        {rowLink(ask.id)}
+        {browserBtn(ask)}
         {kind === "upload" && card.latestCv && (
           <button type="button" className={btn} onClick={() => void downloadCv(card)}>
             Download CV
@@ -187,10 +224,25 @@ export function JobCard({
         </Link>
         <p className="text-sm">{card.role || "Untitled role"}</p>
         <p className="text-xs text-muted-foreground">
-          {card.formFilled ? "Form filled, waiting for you" : "Waiting for you"} · since {relativeTime(card.oldestAskAt)}
+          since {relativeTime(card.oldestAskAt)}
         </p>
       </div>
       )}
+
+      <section className="flex flex-col gap-3" data-testid={`section-job-${card.applicationId}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-heading text-base">Job</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground" data-testid={`apply-status-${card.applicationId}`}>
+            {card.formFilled ? "Form filled, waiting for you" : "Waiting for you"}
+          </span>
+          {card.formUrl && (
+            <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn} data-testid={`section-form-link-${card.applicationId}`}>
+              Open the form ↗
+            </a>
+          )}
+        </div>
+      </div>
 
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
@@ -223,6 +275,7 @@ export function JobCard({
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`question-${ask.id}`}>
               <p className="whitespace-pre-wrap text-sm font-medium">{ask.question}</p>
               {ask.context && <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.context}</p>}
+              <div>{rowLink(ask.id)}</div>
               {kind === "yes_no" ? (
                 <div className="flex gap-2">
                   {["Yes", "No"].map((v) => (
@@ -259,9 +312,12 @@ export function JobCard({
         </section>
       )}
 
+      </section>
+
       {(people.length > 0 || reminders.length > 0) && (
-        <section className="flex flex-col gap-2" data-testid="people-to-reach">
-          <h3 className={label}>People to reach</h3>
+        <section className="flex flex-col gap-2" data-testid={`section-outreach-${card.applicationId}`}>
+          <h2 className="font-heading text-base">Outreach</h2>
+          <div className="flex flex-col gap-2" data-testid="people-to-reach">
           {people.map((p) => (
             <PersonRow key={p.contact.id} person={p} busy={busy} onChanged={onChanged}
               onSent={() => void run(async () => {
@@ -283,7 +339,9 @@ export function JobCard({
           {reminders.map(({ ask }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`reminder-${ask.id}`}>
               <p className="whitespace-pre-wrap text-sm">{ask.question}</p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                {rowLink(ask.id)}
+                {browserBtn(ask)}
                 <button type="button" className={btn} disabled={busy}
                   onClick={() => void run(() => answerAsk(ask.id, "I sent it myself."), "Couldn't save that")}>
                   I sent it
@@ -295,6 +353,7 @@ export function JobCard({
               </div>
             </div>
           ))}
+          </div>
         </section>
       )}
 

@@ -58,19 +58,31 @@ describe("PersonRow", () => {
 
   it("has no send button without the ready_to_send key", () => {
     show(person({ linkedin_state: "connected" }));
-    expect(screen.queryByText("Send with my assistant's browser")).toBeNull();
+    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
   });
 
   it("queues a send when ready_to_send is false", async () => {
     show(person({ linkedin_state: "connected", ready_to_send: false }));
-    fireEvent.click(screen.getByText("Send with my assistant's browser"));
+    fireEvent.click(screen.getByText("Use my assistant's browser"));
     await waitFor(() => expect(updateContact).toHaveBeenCalledWith(4, { ready_to_send: true }));
     expect(onChanged).toHaveBeenCalled();
   });
 
   it("shows a disabled queued state when ready_to_send is true", () => {
     show(person({ linkedin_state: "connected", ready_to_send: true }));
-    expect(screen.getByText("Queued for your assistant's browser")).toBeDisabled();
-    expect(screen.queryByText("Send with my assistant's browser")).toBeNull();
+    expect(screen.getByText("Queued for your browser")).toBeDisabled();
+    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+  });
+
+  it("shows LinkedIn as the channel when the contact has no email", () => {
+    show(person({ linkedin_state: "connected", email: "" }));
+    expect(screen.getByTestId("channel-4")).toHaveTextContent("LinkedIn");
+    expect(screen.queryByTestId("email-4")).toBeNull();
+  });
+
+  it("shows Email as the channel, the address and where it came from", () => {
+    show(person({ linkedin_state: "connected", email: "ada@acme.com", email_source: "hunter" }));
+    expect(screen.getByTestId("channel-4")).toHaveTextContent("Email");
+    expect(screen.getByTestId("email-4")).toHaveTextContent("ada@acme.com · from Hunter");
   });
 });
