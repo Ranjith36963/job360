@@ -126,6 +126,10 @@ EXPECTED: dict[str, tuple[float, str]] = {
     # 2026-10-05; until then SCHEDULE_SINCE makes it "not due yet", not STOPPED.
     "daily-digest.yml": (36, "daily 07:45"),
     "claude-md-apply.yml": (9 * 24, "weekly Mon 06:30"),
+    # Added 2026-10-23 with the file itself (a new file, so its created_at is
+    # its schedule start and it needs no SCHEDULE_SINCE). Not yet measured;
+    # budget copies the other daily entries.
+    "nightly-audit.yml": (36, "daily 03:23"),
     # ci.yml is event-triggered only — silence is normal, so it is
     # deliberately NOT watched here. Watching it would produce a permanent
     # false alarm, and a permanent alarm is how a loop dies.

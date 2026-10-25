@@ -117,10 +117,11 @@ async def test_each_flag_fires_on_its_own_row_and_is_absent_otherwise(authentica
         assert _codes(cards[gone]) == ["not_in_memory"]
         assert _codes(cards[nocv]) == ["no_cv"]
         missing = [f for f in cards[german]["flags"] if f["code"] == "missing"]
+        # only what the form asks counts as missing (owner, 2026-10-23): no salary flag, the real gaps stay
         assert {f["key"] for f in missing} == {
-            "right_to_work.DE.work_authorization", "right_to_work.DE.needs_sponsorship", "salary.DE",
+            "right_to_work.DE.work_authorization", "right_to_work.DE.needs_sponsorship",
         }
-        assert any(f["text"] == "Salary for DE not saved yet — answer it first" and f["country"] == "DE" for f in missing)
+        assert not any("alary" in f["text"] for f in cards[german]["flags"])
         assert dup_a not in cards, "a sent application is not ready"
 
 
@@ -285,3 +286,17 @@ async def test_send_refuses_a_stale_card_and_records_nothing(authenticated_async
         ok = {"artifact_id": now["cv"]["artifact_id"], "form_filled_event_id": now["form_filled_event_id"]}
         assert (await client.post(f"/api/applications/{app_id}/send/approve", params=ok)).status_code == 201
         assert (await _ready(client))["total"] == 0
+
+
+def test_missing_flags_list_only_what_the_form_asks_not_salary():
+    """The one filter (kit.kit_missing) sits in _missing_flags, so Ready cards and the queue preflight share it."""
+    from types import SimpleNamespace
+
+    from src.services.applications.ready import _missing_flags
+
+    profile = SimpleNamespace(preferences=SimpleNamespace(salary_by_country=[]))
+    missing = [
+        {"key": "salary.DE", "why": "expected salary for DE is not saved"},
+        {"key": "right_to_work.DE.work_authorization", "why": "x"},
+    ]
+    assert [f["key"] for f in _missing_flags(profile, missing, "DE")] == ["right_to_work.DE.work_authorization"]

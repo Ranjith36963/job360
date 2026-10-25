@@ -8,7 +8,8 @@ import { approveSend, confirmAnswer, declineSend } from "@/lib/api";
 import { startAssistantAfterSend } from "@/lib/assistant-start";
 import { ApiError } from "@/lib/api-error";
 import type { ReadyAnswer, ReadyCardData } from "@/lib/api";
-import { canCheck, clock, docText, flagText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
+import { canCheck, clock, docText, flagText, heldText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
+import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 import type { ChipTone } from "@/lib/ready-to-send";
 import { whoLabel } from "@/lib/event-labels";
 import { nothingSent } from "@/lib/application-actions";
@@ -47,6 +48,7 @@ export function ReadyCard({
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   const preparer = whoLabel(card.filled_by).name;
   const prepared = clock(card.filled_at);
   // Answers the user edited: the yes still goes through, and the assistant types them before it sends.
@@ -90,6 +92,11 @@ export function ReadyCard({
           <p className="font-mono text-xs text-faint">{readyEyebrow(card)}</p>
           <h3 className="font-heading text-2xl leading-tight">{card.job_title || "Untitled role"}</h3>
           <p className="text-sm text-muted-foreground">{readySub(card)}</p>
+          {card.form_open === false && (
+            <p data-testid="ready-form-closed" className="text-[13px] text-muted-foreground">
+              The form was closed. Press Send and it will be filled again, then sent.
+            </p>
+          )}
         </div>
         {prepared && (
           <span className="rounded-full bg-brand-soft px-2.5 py-0.5 font-mono text-[11.5px] font-medium text-brand">
@@ -162,6 +169,16 @@ export function ReadyCard({
         >
           Don&apos;t send
         </button>
+        {card.held_seconds != null && card.held_seconds > 0 && !finishing && (
+          <button
+            type="button"
+            data-testid={`ready-finish-${card.application_id}`}
+            onClick={() => setFinishing(true)}
+            className={cn(tap, "rounded-lg border border-border px-4 py-1.5 text-sm font-medium hover:bg-muted")}
+          >
+            {`Finish it here${heldText(card.held_seconds)}`}
+          </button>
+        )}
         {nothingSent(status) && (
           <p data-testid="nothing-sent" className="text-xs text-muted-foreground">
             {changes === undefined ? (
@@ -181,6 +198,16 @@ export function ReadyCard({
           <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
         )}
       </div>
+      {/* The filled form, kept open in Job360's browser: the user can look at it and press Submit themselves. */}
+      {finishing && (
+        <FinishInBrowser
+          applicationId={card.application_id}
+          onDone={() => {
+            setFinishing(false);
+            onChanged();
+          }}
+        />
+      )}
     </article>
   );
 }

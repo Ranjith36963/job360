@@ -527,7 +527,7 @@ jobs:
       # registry: an image that builds is the whole assertion.
       - name: Docker image builds (frontend/Dockerfile)
         if: needs.scope.outputs.scope == 'full'
-        run: docker build --quiet -t job360-frontend-ci frontend
+        run: docker build -t job360-frontend-ci frontend
 
   # Failures on main / on the schedule are reported as an issue by loop-red.yml
   # (one workflow_run watcher, so PRs no longer show a 'skipping' row for it).

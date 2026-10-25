@@ -1618,6 +1618,12 @@ DEPENDABOT = "dependabot[bot]"
 DEPENDABOT_SKIPPED_REVIEWERS = ("reviewer-security", "reviewer-bugs")
 
 
+def _newest_first(r: dict) -> tuple:
+    """Sort key: a run still going is the newest; else by completion time, then id."""
+    done = r.get("status") == "completed"
+    return (not done, (r.get("completed_at") or "") if done else "", r.get("id") or 0)
+
+
 def judge_review_evidence(check_runs: list[dict], author: str = "") -> list[str]:
     """Pure half: did a reviewer really look at this PR?
 
@@ -1625,11 +1631,13 @@ def judge_review_evidence(check_runs: list[dict], author: str = "") -> list[str]
     commit statuses are normalised into it by `review_evidence()` below, so this
     function needs no network and the drill can feed it the real shapes.
 
-    EVERY entry named in `REVIEWER_CHECKS` must exist, be completed and be a
-    `success`; a `{REVIEWER_CHECK}` entry only has to be completed. Judging all
-    entries rather than "the newest" is the fail-CLOSED direction:
-    `?filter=latest` already collapses re-runs, so a second entry is an oddity,
-    and an oddity must not be the thing that decides a merge. Exact-name
+    The NEWEST entry of each name in `REVIEWER_CHECKS` must exist, be completed
+    and be a `success`; a `{REVIEWER_CHECK}` entry only has to be completed.
+    Only the newest, because `?filter=latest` collapses re-runs of ONE workflow
+    run, not two runs: a PR opened as a draft gets a `skipped` reviewer, then a
+    second run when it is marked ready, and judging both refused it forever
+    (#1174, 2026-10-24). Still fail-closed: an entry not yet completed sorts as
+    the newest, so a review in flight is always waited for. Exact-name
     matching, never a substring — B21 is the case where `Frontend` matched
     `frontend-e2e` and an absent check looked present.
     """
@@ -1644,7 +1652,7 @@ def judge_review_evidence(check_runs: list[dict], author: str = "") -> list[str]
                 f"threads' means 'nobody looked', not 'nothing was found'. "
                 f"FIX: wait for it to run (every push of a non-draft PR starts it), then re-judge.")
             continue
-        for r in seen:
+        for r in [max(seen, key=_newest_first)]:
             if r.get("status") != "completed":
                 reasons.append(
                     f"no reviewer has looked at this PR yet: `{name}` has not finished "
@@ -2893,6 +2901,22 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("our reviewer that FAILED (a P0/P1, or it could not run) is refused",
         judge_review_evidence(done + [_ours[0], {**_ours[1], "conclusion": "failure"}]),
         "did not pass", RE)
+    _skip_then_pass = [{**_ours[0], "id": 1, "conclusion": "skipped",
+                        "completed_at": "2026-10-24T17:43:02Z"},
+                       {**_ours[0], "id": 2, "completed_at": "2026-10-24T17:45:16Z"}, _ours[1]]
+    ok("a PR opened as a DRAFT (reviewer skipped) then marked ready (reviewer passed) passes",
+       not judge_review_evidence(done + _skip_then_pass),
+       f"the draft-time skip still refuses it (#1174): {judge_review_evidence(done + _skip_then_pass)}",
+       RE)
+    _pass_then_skip = [{**_ours[0], "id": 1, "completed_at": "2026-10-24T17:43:02Z"},
+                       {**_ours[0], "id": 2, "conclusion": "skipped",
+                        "completed_at": "2026-10-24T17:45:16Z"}, _ours[1]]
+    red("...but a pass followed by a NEWER skip is refused (the newest decides)",
+        judge_review_evidence(done + _pass_then_skip), "did not pass", RE)
+    red("...and an older pass beside a newer run still going waits for it",
+        judge_review_evidence(done + [{**_ours[0], "id": 1, "completed_at": "2026-10-24T17:43:02Z"},
+                                      {**_ours[0], "id": 2, "status": "in_progress"}, _ours[1]]),
+        "has not finished", RE)
     _ours_skipped = [{**r, "conclusion": "skipped"} for r in _ours]
     ok("a Dependabot PR whose reviewers SKIPPED by design passes (dependabot-auto owns it)",
        not judge_review_evidence(done + _ours_skipped, DEPENDABOT),

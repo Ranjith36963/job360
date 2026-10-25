@@ -201,10 +201,9 @@ def test_throttle_ip_drops_an_ipv6_scope_id():
     assert throttle_ip("fe80::1%eth0") == "fe80::/64"
 
 
-def test_forwarding_probe_reports_the_headers_as_they_arrive(hops):
-    from src.api.client_ip import forwarding_probe
-
+def test_railway_chain_one_hop_reads_the_edge_entry_not_the_relay(hops):
+    """Railway 2026-10-25: the relay is the socket peer, the edge appends the
+    caller; one hop takes the caller and ignores what the caller wrote."""
     hops(1)
-    probe = forwarding_probe(_request("6.6.6.6", "82.4.59.9"))
-    assert probe == {"peer": PEER, "hops": 1, "headers": {"x-forwarded-for": ["6.6.6.6", "82.4.59.9"]}}
-    assert forwarding_probe(_request())["headers"] == {}
+    req = _request("6.6.6.6, 84.17.44.226", peer="100.64.0.12")
+    assert client_ip(req) == "84.17.44.226"

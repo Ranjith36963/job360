@@ -9,10 +9,12 @@ import { dayMonth } from "@/lib/ready-to-send";
 const getReadyToSend = vi.fn();
 const approveSend = vi.fn();
 const declineSend = vi.fn();
+const browserLive = vi.fn();
 vi.mock("@/lib/api", () => ({
   getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: (...a: unknown[]) => declineSend(...a),
+  browserLive: (...a: unknown[]) => browserLive(...a),
 }));
 vi.mock("@/lib/assistant-state", () => ({ PAUSE_CHANGED_EVENT: "job360:pause-changed", READY_CHANGED_EVENT: "job360:ready-changed" }));
 const toastSuccess = vi.fn();
@@ -146,5 +148,43 @@ describe("nothing-sent", () => {
     render(<ReadyCard card={card(5)} paused={false} onChanged={() => undefined} />);
     expect(screen.getByTestId("nothing-sent")).toHaveTextContent("Nothing sent yet");
     expect(screen.queryByTestId("changes-since-approved")).toBeNull();
+  });
+});
+
+describe("Finish it here on a ready card", () => {
+  it("shows only while the filled form is held, says for how long, and opens that job's browser", async () => {
+    browserLive.mockReset().mockResolvedValue({
+      status: "ok", url: "https://jobs.example.com/apply", title: "Apply", width: 1280, height: 800,
+      image: "data:image/jpeg;base64,AAAA",
+    });
+    const { rerender } = render(<ReadyCard card={card(5)} paused={false} onChanged={() => undefined} />);
+    expect(screen.queryByTestId("ready-finish-5")).toBeNull(); // no browser holds it: nothing to show
+    rerender(<ReadyCard card={card(5, { held_seconds: 1500 })} paused={false} onChanged={() => undefined} />);
+    expect(screen.getByTestId("ready-finish-5")).toHaveTextContent("Finish it here · kept open 25 more minutes");
+    expect(screen.getByTestId("ready-send-5")).toHaveTextContent("Send"); // Send stays as it was
+    fireEvent.click(screen.getByTestId("ready-finish-5"));
+    await waitFor(() => expect(screen.getByTestId("finish-view")).toBeTruthy());
+    expect(browserLive).toHaveBeenCalledWith({ action: "shot" }, "finish", 5);
+    expect(approveSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("the form was closed line", () => {
+  const text = "The form was closed. Press Send and it will be filled again, then sent.";
+
+  it("says so when the browser is gone, with no Finish button, and Send unchanged", () => {
+    render(<ReadyCard card={card(5, { form_open: false })} paused={false} onChanged={() => undefined} />);
+    expect(screen.getByTestId("ready-form-closed")).toHaveTextContent(text);
+    expect(screen.queryByTestId("ready-finish-5")).toBeNull();
+    expect(screen.getByTestId("ready-send-5")).toHaveTextContent("Send");
+    expect(screen.getByTestId("ready-decline-5")).toBeTruthy();
+  });
+
+  it("says nothing while the form is open or unknown", () => {
+    const { rerender } = render(<ReadyCard card={card(5, { form_open: true, held_seconds: 600 })} paused={false} onChanged={() => undefined} />);
+    expect(screen.queryByTestId("ready-form-closed")).toBeNull();
+    expect(screen.getByTestId("ready-finish-5")).toBeTruthy();
+    rerender(<ReadyCard card={card(5, { form_open: null })} paused={false} onChanged={() => undefined} />);
+    expect(screen.queryByTestId("ready-form-closed")).toBeNull();
   });
 });
