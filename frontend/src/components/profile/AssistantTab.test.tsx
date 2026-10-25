@@ -526,4 +526,33 @@ describe("AssistantTab", () => {
       ]),
     );
   });
+
+  it("the PC-on row is hidden until the backend sends pc_on_time", async () => {
+    await ready();
+    expect(screen.queryByTestId("pc-on-time")).toBeNull();
+  });
+
+  it("the PC-on row shows the saved text, saves a change, and a blank clears it", async () => {
+    getAssistantSettings.mockResolvedValue(view({ pc_on_time: field("Weekdays 9:00-18:00") }));
+    await ready();
+    const box = screen.getByTestId("pc-on-time") as HTMLInputElement;
+    expect(box.value).toBe("Weekdays 9:00-18:00");
+    expect(box.maxLength).toBe(60);
+    fireEvent.change(box, { target: { value: "Evenings" } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.pc_on_time", value: "Evenings" }]));
+    updateProfileFields.mockClear();
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.pc_on_time", value: null }]));
+  });
+
+  it("the PC-on row with an empty value stays empty and saves nothing on blur", async () => {
+    getAssistantSettings.mockResolvedValue(view({ pc_on_time: field(null, null) }));
+    await ready();
+    const box = screen.getByTestId("pc-on-time") as HTMLInputElement;
+    expect(box.value).toBe("");
+    fireEvent.blur(box);
+    expect(updateProfileFields).not.toHaveBeenCalled();
+  });
 });

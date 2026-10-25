@@ -17,6 +17,8 @@ import {
   P_GRANT_UNTIL,
   P_HOURS,
   P_MIN_GAP,
+  P_PC_ON,
+  PC_ON_MAX,
   P_SUBMIT,
   P_WEEKLY_CAP,
   WEEKLY_CAP_MAX,
@@ -27,6 +29,7 @@ import {
   isoToLocalInput,
   localInputToIso,
   numText,
+  pcOnText,
   scopeText,
   settingEffective,
 } from "@/lib/assistant-tab";
@@ -127,6 +130,7 @@ export function BatchRuleRows({
   const [grantCount, setGrantCount] = useState("");
   const [grantUntil, setGrantUntil] = useState("");
   const [confirmGrant, setConfirmGrant] = useState(false);
+  const [pcOn, setPcOn] = useState("");
   const enterDone = useRef(false);
 
   // Show what the server now holds whenever a new view arrives (state adjusted
@@ -147,6 +151,17 @@ export function BatchRuleRows({
     setGrantCount(numText(view.auto_grant_count));
     setGrantUntil(isoToLocalInput(String(view.auto_grant_until?.value ?? "")));
     setConfirmGrant(false);
+    setPcOn(pcOnText((view as Record<string, unknown>).pc_on_time));
+  }
+
+  // Shown only once the backend sends the field (feature-detected), so it never appears as a dead row.
+  const hasPcOn = "pc_on_time" in view;
+  const savedPcOn = pcOnText((view as Record<string, unknown>).pc_on_time);
+  function commitPcOn() {
+    const t = pcOn.trim();
+    if (t === savedPcOn) return;
+    // Empty stays empty (rule #29): clearing saves null, nothing is ever defaulted.
+    void save(P_PC_ON, t === "" ? null : t);
   }
 
   const savedCap = view.daily_cap.value == null ? "" : String(view.daily_cap.value);
@@ -395,6 +410,26 @@ export function BatchRuleRows({
               s
             </span>
           </Row>
+          {hasPcOn && (
+            <Row title="My PC-on time" sub="Optional. When your PC is usually on, for jobs that need your own Chrome. Example: Weekdays 9:00-18:00.">
+              <input
+                type="text"
+                maxLength={PC_ON_MAX}
+                aria-label="My PC-on time"
+                data-testid="pc-on-time"
+                placeholder="Not set"
+                value={pcOn}
+                disabled={busy}
+                onChange={(e) => {
+                  enterDone.current = false;
+                  setPcOn(e.target.value);
+                }}
+                onBlur={onBlurCommit(commitPcOn)}
+                onKeyDown={onEnter(commitPcOn)}
+                className={cn(NUMBOX, "w-64 max-w-full text-left")}
+              />
+            </Row>
+          )}
           <div className="border-t border-border py-3">
             <div className="font-medium">How your assistant applies</div>
             <div className="text-[12.5px] text-muted-foreground">

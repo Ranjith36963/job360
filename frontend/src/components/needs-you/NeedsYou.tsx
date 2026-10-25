@@ -20,6 +20,7 @@ import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
 import { JobCards, loadJobCards } from "./JobCards";
+import { RunChromeTasks } from "./RunChromeTasks";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
 // Every string on an ask (question, context, answer, job fields) is written by
@@ -443,6 +444,7 @@ export function NeedsYou() {
           </p>
         ) : (
           <>
+            {jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
             <JobCards cards={jobs.cards} onChanged={load} />
             {jobs.general.length > 0 && (
               <>
