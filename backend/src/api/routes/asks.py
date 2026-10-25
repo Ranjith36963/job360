@@ -132,12 +132,22 @@ async def answer_ask(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        return await asks_service.answer_ask(
+        out = await asks_service.answer_ask(
             db, user.id, ask_id, body.answer, actor_for(user), body.user_words, answers=body.answers
         )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+    if actor_for(user) == "web":  # Ignition: the user's own answer starts the batch at once
+        await _ignite_batch(db, user, out)
+    return out
+
+
+async def _ignite_batch(db: JobDatabase, user: CurrentUser, ask: dict[str, Any]) -> None:
+    from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+    app_id = ask.get("application_id")
+    await duty_trigger.ignite(user.id, ("batch",), "ask_answered", [int(app_id)] if app_id else None, db=db)
 
 
 @router.post("/asks/{ask_id}/confirm", response_model=AskOut, dependencies=AUTH_FIRST)
@@ -151,10 +161,12 @@ async def confirm_ask(
     if actor_for(user) != "web":
         raise HTTPException(status_code=403, detail="only you can confirm this, on Job360")
     try:
-        return await asks_service.confirm_ask(db, user.id, ask_id)
+        out = await asks_service.confirm_ask(db, user.id, ask_id)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+    await _ignite_batch(db, user, out)
+    return out
 
 
 class WithdrawAskRequest(BaseModel):

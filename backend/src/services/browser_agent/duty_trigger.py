@@ -255,3 +255,66 @@ async def _remember(
         (when.isoformat(), result[:60], retry_until, *_key(duty, user_id)),
     )
     await db._db.commit()
+
+
+# ── Ignition part 2: start a duty after a web action commits ─────────────────
+# A start runs in the background with its own database connection, after the action that caused it
+# has committed, so a slow or failing start link never slows down or breaks the user's action.
+_PENDING: set[Any] = set()
+
+
+async def ignite(
+    user_id: str, duties: tuple[str, ...], cause: str, application_ids: Optional[list[int]] = None,
+    *, db: Any = None,
+) -> None:
+    """Start each of ``duties`` that has a start link, once, in the background. Never raises.
+
+    The quick check for a saved link runs here (on ``db``, or a fresh connection), so a user with no
+    link never spawns background work; the start itself runs on its own connection."""
+    import asyncio  # noqa: PLC0415
+    import contextlib  # noqa: PLC0415
+
+    for duty in duties:
+        check_duty(duty)
+    try:
+        if db is None:
+            from src.api.dependencies import get_request_db  # noqa: PLC0415
+
+            async with contextlib.asynccontextmanager(get_request_db)() as fresh:
+                wanted = [d for d in duties if await load(fresh, user_id, d) is not None]
+        else:
+            wanted = [d for d in duties if await load(db, user_id, d) is not None]
+    except Exception:  # noqa: BLE001 - a start never breaks the user's action
+        return
+    if not wanted:
+        return
+    task = asyncio.get_running_loop().create_task(_ignite(user_id, tuple(wanted), cause, application_ids))
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
+
+
+async def _ignite(user_id: str, duties: tuple[str, ...], cause: str, application_ids: Optional[list[int]]) -> None:
+    import contextlib  # noqa: PLC0415
+    import logging  # noqa: PLC0415
+
+    from src.api.dependencies import get_request_db  # noqa: PLC0415
+    from src.services.fetch import fetcher  # noqa: PLC0415
+
+    log = logging.getLogger("job360.ignition")
+    try:
+        async with contextlib.asynccontextmanager(get_request_db)() as db:
+            for duty in duties:
+                out = await fire(db, user_id, duty, cause=cause, resolve=fetcher.DEFAULT_RESOLVE,
+                                 application_ids=application_ids)
+                log.info("ignition", extra={"event": "ignition", "duty": duty, "cause": cause,
+                                            "result": "started" if out.get("fired") else str(out.get("reason"))})
+    except Exception:  # noqa: BLE001 - a start never breaks anything; the hourly run is the backup
+        log.warning("ignition_failed", extra={"event": "ignition_failed", "cause": cause})
+
+
+async def drain() -> None:
+    """Wait for every start still running (tests, and a clean shutdown)."""
+    import asyncio  # noqa: PLC0415
+
+    while _PENDING:
+        await asyncio.gather(*list(_PENDING), return_exceptions=True)
