@@ -92,6 +92,11 @@ export function ReadyCard({
           <p className="font-mono text-xs text-faint">{readyEyebrow(card)}</p>
           <h3 className="font-heading text-2xl leading-tight">{card.job_title || "Untitled role"}</h3>
           <p className="text-sm text-muted-foreground">{readySub(card)}</p>
+          {card.form_open === false && (
+            <p data-testid="ready-form-closed" className="text-[13px] text-muted-foreground">
+              The form was closed. Press Send and it will be filled again, then sent.
+            </p>
+          )}
         </div>
         {prepared && (
           <span className="rounded-full bg-brand-soft px-2.5 py-0.5 font-mono text-[11.5px] font-medium text-brand">

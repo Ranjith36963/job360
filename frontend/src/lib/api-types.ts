@@ -7513,6 +7513,8 @@ export interface components {
             flags: components["schemas"]["ReadyFlag"][];
             /** Form Filled Event Id */
             form_filled_event_id: number;
+            /** Form Open */
+            form_open?: boolean | null;
             /** Held Seconds */
             held_seconds?: number | null;
             /** Job Company */
