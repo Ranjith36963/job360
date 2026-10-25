@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
-import { closedSetLabel } from "@/lib/closed-sets";
 import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -13,6 +12,7 @@ import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 import { AskQuestions } from "./AskQuestions";
+import { PersonRow } from "./PersonRow";
 import type { RowState } from "./AskQuestions";
 
 // Every string on a card (questions, job fields, names, drafted messages) is written by an
@@ -69,7 +69,19 @@ export function JobCard({
   // A reminder about someone already under People to reach is not a second row (owner 2026-10-24).
   const covered = remindersCovered(card.people, allReminders.map((r) => r.ask));
   const reminders = allReminders.filter((r) => !covered.has(r.ask.id));
-  const people = card.people.filter((p) => !hidden.has(p.contact.id));
+  const allPeople = card.people.filter((p) => !hidden.has(p.contact.id));
+  const [showAllPeople, setShowAllPeople] = useState(false);
+  const rankOf = (p: PersonToReach) => {
+    const c = p.contact as unknown as { rank?: unknown; priority?: unknown };
+    const v = typeof c.rank === "number" ? c.rank : typeof c.priority === "number" ? c.priority : null;
+    return v;
+  };
+  // Best first: an explicit numeric rank/priority (ascending) wins; otherwise the order given.
+  const ordered = allPeople.some((p) => rankOf(p) !== null)
+    ? [...allPeople].sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity))
+    : allPeople;
+  const people = showAllPeople ? ordered : ordered.slice(0, 3);
+  const morePeople = ordered.length - people.length;
 
   /** After `contactId` is sent or skipped: answer each covered reminder whose people are all done. */
   async function resolveReminders(contactId: number, answer: string) {
@@ -246,7 +258,7 @@ export function JobCard({
         <section className="flex flex-col gap-2" data-testid="people-to-reach">
           <h3 className={label}>People to reach</h3>
           {people.map((p) => (
-            <PersonRow key={p.contact.id} person={p} busy={busy}
+            <PersonRow key={p.contact.id} person={p} busy={busy} onChanged={onChanged}
               onSent={() => void run(async () => {
                 await markOutreachSent(p.contact.id, "linkedin");
                 setHidden((prev) => new Set(prev).add(p.contact.id)); // sent: handled, before the reload
@@ -257,6 +269,12 @@ export function JobCard({
                 void run(() => resolveReminders(p.contact.id, "Skip: do not send it."), "Couldn't save that");
               }} />
           ))}
+          {morePeople > 0 && (
+            <button type="button" className={btn} data-testid={`people-more-${card.applicationId}`}
+              onClick={() => setShowAllPeople(true)}>
+              Show {morePeople} more
+            </button>
+          )}
           {reminders.map(({ ask }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`reminder-${ask.id}`}>
               <p className="whitespace-pre-wrap text-sm">{ask.question}</p>
@@ -318,35 +336,4 @@ async function downloadCv(card: JobCardData) {
   } catch (err) {
     toast.apiError(err, "Couldn't download this CV");
   }
-}
-
-function PersonRow({ person, busy, onSent, onSkip }: { person: PersonToReach; busy: boolean; onSent: () => void; onSkip: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const c = person.contact;
-  const where = c.found_via ? `Found via ${closedSetLabel(c.found_via)}` : "";
-  return (
-    <div className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`person-${c.id}`}>
-      <p className="text-sm font-medium">
-        {c.name}
-        {c.role && <span className="font-normal text-muted-foreground"> · {c.role}</span>}
-      </p>
-      {where && <p className="text-xs text-muted-foreground">{where}</p>}
-      <p className="whitespace-pre-wrap rounded-md border border-border bg-card p-2 text-sm">{person.message}</p>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className={btn}
-          onClick={() => navigator.clipboard.writeText(person.message).then(() => setCopied(true), () => toast.error("Couldn't copy"))}>
-          {copied ? "Copied" : "Copy message"}
-        </button>
-        <a href={person.linkedinUrl} target="_blank" rel="noopener noreferrer" className={btn}>
-          Open LinkedIn profile ↗
-        </a>
-        <button type="button" className={btn} disabled={busy} data-testid={`sent-${c.id}`} onClick={onSent}>
-          I sent it
-        </button>
-        <button type="button" className={btn} onClick={onSkip}>
-          Skip
-        </button>
-      </div>
-    </div>
-  );
 }
