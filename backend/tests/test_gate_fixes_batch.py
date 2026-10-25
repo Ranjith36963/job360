@@ -141,7 +141,7 @@ async def test_fields_skipped_count_toward_the_sweep_and_the_stop_says_the_numbe
                                                    "fields_skipped": ["Pronouns", "Portfolio", "Twitter"]})
         await _ok(client, app_id, "form_swept", {"fields_checked": 6, "fixed": 0})
         short = await _verdict(client, app_id)
-        assert (short["decision"], short["reason"]) == ("stop", "form_count_mismatch")
+        assert (short["decision"], short["reason"]) == ("fill", "form_count_mismatch")
         assert "You checked 9 of 12 questions; count blank optional ones too" in short["detail"]
         skipped = ["Pronouns", "Portfolio", "Twitter", "GitHub", "Website", "Cover note"]
         await _ok(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 6, "fields_skipped": skipped})

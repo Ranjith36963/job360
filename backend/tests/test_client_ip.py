@@ -199,3 +199,11 @@ def test_no_other_module_reads_forwarded_for():
 def test_throttle_ip_drops_an_ipv6_scope_id():
     """A link-local address with a zone (``fe80::1%eth0``) still collapses to its /64."""
     assert throttle_ip("fe80::1%eth0") == "fe80::/64"
+
+
+def test_railway_chain_one_hop_reads_the_edge_entry_not_the_relay(hops):
+    """Railway 2026-10-25: the relay is the socket peer, the edge appends the
+    caller; one hop takes the caller and ignores what the caller wrote."""
+    hops(1)
+    req = _request("6.6.6.6, 84.17.44.226", peer="100.64.0.12")
+    assert client_ip(req) == "84.17.44.226"

@@ -6519,5 +6519,8 @@
 {"name":"DOIT Software","ats":"cleverstaff","board":"doit-software1","source":"freehire"},
 {"name":"IT Geo","ats":"friendwork","board":"c656f1c111eb44075d21d77f57216c72","source":"freehire"},
 {"name":"WowVendor","ats":"friendwork","board":"wowvendor","source":"freehire"},
-{"name":"joinup.ch (newest page)","ats":"joinup","board":"all","source":"career-ops"}
+{"name":"joinup.ch (newest page)","ats":"joinup","board":"all","source":"career-ops"},
+{"name":"tbca","ats":"prevueaps","board":"tbca","source":"career-ops"},
+{"name":"Ridgefield School District","ats":"redrover","board":"1651","source":"career-ops"},
+{"name":"Senjob (Senegal)","ats":"senjob","board":"all","source":"career-ops"}
 ]

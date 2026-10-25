@@ -33,6 +33,16 @@ delete a lesson; if one stops being true, say so on its line and why.
   by dropping `factorialhr.com` but kept `trakstar.com`, though part 1 had just started reading
   Trakstar. Only the part's own test caught it. **Rule:** when a reader for a host lands, grep
   `_UNSUPPORTED_HOSTS` (and the `--why-missed` chain) for that host in the same commit.
+- 2026-10-23 to 10-24: a worker used `pytest.importorskip` to get past a missing dependency, twice
+  (#1107, then #1135), and the test-integrity check went red both times. **Rule:** a worker brief
+  forbids `pytest.importorskip` and every other skip or quarantine; a missing dependency is fixed or
+  reported, never skipped.
+- 2026-10-24: I launched two workers without `model:` on the Agent call. They inherited the lead's
+  model, one had to be stopped and restarted on Sonnet, and the owner had to point it out.
+  **Rule:** name `model:` on every Agent call, as the model-delegation skill says.
+- 2026-10-23: a deploy watcher grepped main for a commit subject that did not exist (`merge=` came
+  back empty), so its loop could never finish. **Rule:** a watcher checks that its grep found a
+  commit (non-empty sha) before it starts looping, and fails loudly otherwise.
 
 ## Watching PRs
 
@@ -124,6 +134,13 @@ delete a lesson; if one stops being true, say so on its line and why.
   which loaded React twice and failed 19 account tests ("Invalid hook call") on a correct change.
   **Rule:** link a shared `node_modules` only when the worktree has none; a frontend failure that is
   "Invalid hook call" is a duplicate React, not a code bug.
+- 2026-10-23: `npm run lint` passed in my long-lived checkout and failed in CI on #1134: the stale
+  `node_modules` lacked the `react-hooks/set-state-in-effect` rule. **Rule:** run `npm ci` before
+  `npm run lint` in any checkout that has lived across merges.
+- 2026-10-23: #1135 and #1142 both took migration 0082 within the same hour. `doc_sync_check` and
+  `test_migration_prefixes_are_unique` went red on every PR until one was renumbered (#1150).
+  Third time after 0067 and 0077. **Rule:** as above; re-read `origin/main`'s migration list in the
+  minute before the merge call.
 
 ## Handing work to another Claude session
 
@@ -173,6 +190,9 @@ delete a lesson; if one stops being true, say so on its line and why.
   from Recruitee, and Workable 429'd twice (Retry-After 314 s). Both throttle the service as a whole.
   **Rule:** a brief names the SERVICE as the unit ("stop that ATS on its first 429 for this run") and
   forbids slug-guessing bursts; verify known slugs only.
+- 2026-10-24: 3 of the first 4 jobs I opened from a web search (Prolific, Abound, Clarium) were
+  already closed. Search results go stale. **Rule:** open every hit and confirm it is live before
+  bringing it; prefer live board APIs (hunt kit) over web search.
 
 ## Real applications for the owner
 

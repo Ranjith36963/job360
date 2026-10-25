@@ -28,6 +28,8 @@ are the user's standing rules that the CONNECTED assistant reads and obeys:
   ``preferences.daily_check`` (owner 2026-10-20, G087).
 * ``hunt_every_hours`` — hunt for jobs every N hours, 1-168; ``None`` / ``0`` = off (owner 2026-10-23).
   The user's own scheduled task reads it through MCP ``whats_due``; Job360 never runs a hunt itself.
+* ``people_hunt`` — ``True`` | ``False`` (default): may the user's scheduled task find people to reach
+  for new applications (``whats_due`` duty ``reach``). It never sends (owner 2026-10-24).
 
 ``""`` / ``None`` mean "not chosen": the SAFE default applies (rule #29: an empty
 shelf stays silent, it is never an invented value). Storage is the S1 pattern:
@@ -106,11 +108,13 @@ DEFAULT_OUTREACH_SEND = "draft_only"
 OUTREACH_SEND_AUTO = "auto"
 HUNT_EVERY_PATH = f"{HEAD}.hunt_every_hours"
 HUNT_EVERY_MAX = 168  # one week
+PEOPLE_HUNT_PATH = f"{HEAD}.people_hunt"
 SETTING_PATHS: tuple[str, ...] = (
     APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
     DAILY_CAP_PATH, COMPANY_CAP_PATH, COMPANY_CAP_DAYS_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
     AUTO_EMPLOYER_EMAILS_PATH, WEEKLY_CAP_PATH, MIN_GAP_PATH, APPLY_HOURS_PATH,
     AUTO_GRANT_COUNT_PATH, AUTO_GRANT_UNTIL_PATH, OUTREACH_SEND_PATH, HUNT_EVERY_PATH,
+    PEOPLE_HUNT_PATH,
 )
 VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # Below the line only: ``skip`` = drop the job, never apply (owner 2026-10-19).
@@ -350,7 +354,7 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
         return _validate_paused_until(path, value, when)
     if path == PAUSE_REASON_PATH:
         return _validate_pause_reason(path, value)
-    if path == AUTO_EMPLOYER_EMAILS_PATH:
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
         if not isinstance(value, bool):
             raise _bad(path, f"must be true or false, not {type(value).__name__}")
         return value
@@ -387,6 +391,7 @@ class EffectiveSettings:
     auto_grant_until: str = ""
     outreach_send: str = DEFAULT_OUTREACH_SEND
     hunt_every_hours: Optional[int] = None  # None = no scheduled hunt
+    people_hunt: bool = False
 
 
 def _hunt_every(raw: Any) -> Optional[int]:
@@ -432,6 +437,7 @@ def effective(s: AssistantSettings) -> EffectiveSettings:
         auto_grant_until=s.auto_grant_until or "",
         outreach_send=_outreach_send(s.outreach_send),
         hunt_every_hours=_hunt_every(s.hunt_every_hours),
+        people_hunt=bool(s.people_hunt),
     )
 
 
@@ -478,7 +484,7 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
         return raw or ""
     if path == INBOX_MODE_PATH:
         return raw or ""
-    if path == AUTO_EMPLOYER_EMAILS_PATH:
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
         return bool(raw)
     if path == OUTREACH_SEND_PATH:
         return _outreach_send(raw)
@@ -627,7 +633,7 @@ def classify_change(
         return "safer"
     if path == INBOX_MODE_PATH:
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
-    if path == AUTO_EMPLOYER_EMAILS_PATH:
+    if path in (AUTO_EMPLOYER_EMAILS_PATH, PEOPLE_HUNT_PATH):
         return "riskier" if (bool(after) and not bool(before)) else "safer"
     if path == OUTREACH_SEND_PATH:
         return "riskier" if (after == OUTREACH_SEND_AUTO and before != OUTREACH_SEND_AUTO) else "safer"
@@ -785,6 +791,8 @@ class SubmitFacts:
     # ``cv_unsupported_claims``; a yes for THIS CV clears it (2026-10-17, career-ops
     # verify-cv-facts.mjs blocks invented metrics; here it is an ask, not a stop).
     cv_unsupported: bool = False
+    # A CV is saved for this application (check_submit's ``fill`` names ``write_cv`` first when not).
+    has_cv: bool = True
     # Bulk-apply D1: a ``submit_attempted`` is the newest of submit_attempted / applied /
     # submit_resolved (a later `blocked` does not clear it). STOP ``submit_unconfirmed``; a yes never clears it.
     submit_unconfirmed: bool = False
@@ -850,6 +858,42 @@ REASONS: tuple[str, ...] = (
     "approval_stale",
     "required_unanswered", "grant_scope", "email_not_drafted",
 )
+
+# Owner 2026-10-24: check_submit tells the assistant plainly what to do next. A stop whose fix is the
+# assistant's OWN next step is answered ``fill`` with ``next_action`` (never a reason to end the run);
+# only these reasons end the whole run (``stop_run``). Every other stop skips just this application.
+FILL_NEXT_ACTIONS: dict[str, str] = {
+    "form_not_recorded": "open_and_fill_form",
+    "form_not_swept": "sweep_form",
+    "unreadable_fields": "sweep_form",
+    "form_count_mismatch": "sweep_form",
+    "form_check_missing": "check_form",
+    "form_pages_incomplete": "sweep_pages",
+    "email_not_drafted": "draft_email",
+    "type_first_pending": "type_answers",
+}
+NEXT_ACTIONS: tuple[str, ...] = (
+    "write_cv", "open_and_fill_form", "sweep_form", "check_form", "sweep_pages", "draft_email", "type_answers",
+)
+RUN_STOP_REASONS: frozenset[str] = frozenset({"paused", "daily_cap_reached", "weekly_cap_reached", "outside_hours"})
+
+
+def present_verdict(verdict: SubmitDecision, *, has_cv: bool) -> dict[str, Any]:
+    """What check_submit returns for ``verdict``: ``fill`` + ``next_action`` for a stop the assistant
+    fixes itself (``write_cv`` when the form is not filled and no CV is saved yet), and ``stop_run``
+    true only for a stop that ends the whole run. A client that knows only submit/ask/stop/pace_wait
+    never reads ``fill`` as ``submit``."""
+    action = FILL_NEXT_ACTIONS.get(verdict.reason) if verdict.decision == "stop" else None
+    if action == "open_and_fill_form" and not has_cv:
+        action = "write_cv"
+    return {
+        "decision": "fill" if action else verdict.decision,
+        "reason": verdict.reason,
+        "detail": verdict.detail,
+        "next_action": action,
+        "stop_run": verdict.decision == "stop" and verdict.reason in RUN_STOP_REASONS,
+    }
+
 
 # What each ``approval_stale`` part means, in the words the ask shows the user.
 APPROVAL_STALE_WORDS: dict[str, str] = {
@@ -1754,6 +1798,15 @@ def grant_state(user_id: str) -> tuple[Optional[str], int, Optional[dict[int, Op
         return began, int(cnt[0]) if cnt else 0, scope
 
 
+def people_hunt_last_at(user_id: str) -> Optional[str]:
+    """When the user's scheduled task last marked the people hunt (``reach``) done; ``None`` = never."""
+    with pgsync.connect(str(settings.DB_PATH)) as conn:
+        row = conn.execute(
+            "SELECT done_at FROM assistant_duty_runs WHERE user_id = ? AND duty = 'reach'", (user_id,)
+        ).fetchone()
+    return str(row[0]) if row and row[0] else None
+
+
 def practice_info(user_id: str) -> tuple[Optional[str], int]:
     """``(auto_on_since, applied_since_auto_on)`` — DERIVED, never stored.
 
@@ -2138,6 +2191,7 @@ def build_settings_view(
         "auto_employer_emails": {"value": raw.auto_employer_emails, "effective": eff.auto_employer_emails},
         "outreach_send": {"value": raw.outreach_send, "effective": eff.outreach_send},
         "hunt_every_hours": {"value": raw.hunt_every_hours, "effective": eff.hunt_every_hours},
+        "people_hunt": {"value": raw.people_hunt, "effective": eff.people_hunt},
         "paused": is_paused(eff.paused_until, when),
         "inbox_mode": profile.preferences.daily_check,
         "check_every": profile.preferences.check_every,

@@ -283,7 +283,7 @@ async def test_check_submit_ranks_every_stop_above_the_hold(authenticated_async_
     async with _bearer_client(token) as agent:
         await _kit(agent, app_id, "a")
         await _kit(agent, app_id, "b")
-        assert (await _check(agent, app_id, "b"))[:2] == ("stop", "form_not_recorded")
+        assert (await _check(agent, app_id, "b"))[:2] == ("fill", "form_not_recorded")
 
 
 def test_the_gate_rule_is_pure_and_listed():

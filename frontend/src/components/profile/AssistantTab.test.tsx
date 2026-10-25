@@ -201,6 +201,34 @@ describe("AssistantTab", () => {
     );
   });
 
+  it("people hunt: off by default; one click turns it on, no confirm (it never sends)", async () => {
+    await ready();
+    const toggle = screen.getByTestId("people-hunt-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByTestId("people-hunt-last")).toBeNull();
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.people_hunt", value: true }]),
+    );
+  });
+
+  it("people hunt: when on, says when it last ran and turns off in one click", async () => {
+    getAssistantSettings.mockResolvedValue(view({ people_hunt: field(true, true), people_hunt_last_at: null }));
+    await ready();
+    expect(screen.getByTestId("people-hunt-last")).toHaveTextContent("Not run yet");
+    expect(screen.getByTestId("assistant-rail")).toHaveTextContent("People hunt");
+    fireEvent.click(screen.getByTestId("people-hunt-toggle"));
+    await waitFor(() =>
+      expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.people_hunt", value: false }]),
+    );
+  });
+
+  it("people hunt: a past run shows its time", async () => {
+    getAssistantSettings.mockResolvedValue(view({ people_hunt: field(true, true), people_hunt_last_at: NOW }));
+    await ready();
+    expect(screen.getByTestId("people-hunt-last")).toHaveTextContent(/^Last ran Today/);
+  });
+
   it("a blank daily limit clears it (no limit)", async () => {
     getAssistantSettings.mockResolvedValue(view({ daily_cap: field(10, 10) }));
     await ready();

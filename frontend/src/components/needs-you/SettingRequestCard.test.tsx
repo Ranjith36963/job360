@@ -101,6 +101,13 @@ describe("describeSettingRequest", () => {
     expect(describeSettingRequest("assistant_settings.hunt_every_hours", null).change).toBe("Stop the scheduled job hunt");
   });
 
+  it("people hunt: on says you still send; off says it stops", () => {
+    const on = describeSettingRequest("assistant_settings.people_hunt", true);
+    expect(on.title).toBe("People hunt");
+    expect(on.change).toMatch(/you still send every message/);
+    expect(describeSettingRequest("assistant_settings.people_hunt", false).change).toBe("Stop the people hunt");
+  });
+
   it("says EVERY job plainly when the auto side covers all of them", () => {
     expect(describeSettingRequest("assistant_settings.above_line", "auto", 0).change).toBe(
       "Apply on its own for EVERY job (your score line is 0)",

@@ -1029,6 +1029,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assistant-duty-triggers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Duty Triggers
+         * @description Every duty's start link: host and last result only; never the token.
+         */
+        get: operations["get_duty_triggers_api_assistant_duty_triggers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-duty-triggers/{duty}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Duty Trigger
+         * @description Save (or replace) one duty's start link and token (encrypted). Like PUT /assistant-trigger, an
+         *     unexpected error never carries the plaintext token into a report.
+         */
+        put: operations["put_duty_trigger_api_assistant_duty_triggers__duty__put"];
+        post?: never;
+        /** Delete Duty Trigger */
+        delete: operations["delete_duty_trigger_api_assistant_duty_triggers__duty__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-duty-triggers/{duty}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Duty
+         * @description Run now (or Test): start the user's routine for ``duty`` once. Never a 500 for a start that did
+         *     not happen: ``fired: false`` and a closed reason the page shows.
+         */
+        post: operations["run_duty_api_assistant_duty_triggers__duty__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assistant-settings": {
         parameters: {
             query?: never;
@@ -4268,6 +4331,9 @@ export interface components {
             /** Paused */
             paused: boolean;
             paused_until: components["schemas"]["SettingFieldOut"];
+            people_hunt: components["schemas"]["SettingFieldOut"];
+            /** People Hunt Last At */
+            people_hunt_last_at?: string | null;
             practice_run: components["schemas"]["PracticeRunOut"];
             /**
              * @default {
@@ -4726,6 +4792,8 @@ export interface components {
             found_via?: string | null;
             /** Id */
             id: number;
+            /** Linkedin State */
+            linkedin_state?: string | null;
             /** Linkedin Url */
             linkedin_url: string;
             /** Links */
@@ -5216,21 +5284,41 @@ export interface components {
         };
         /** DueItemOut */
         DueItemOut: {
+            /** Application Ids */
+            application_ids?: number[] | null;
             /**
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch";
+            duty: "hunt" | "inbox" | "batch" | "reach";
             /**
              * Reason
              * @enum {string}
              */
-            reason: "never_done" | "interval_elapsed" | "queue_waiting";
+            reason: "never_done" | "interval_elapsed" | "queue_waiting" | "new_applications";
             /**
              * Recipe
              * @enum {string}
              */
-            recipe: "hunt" | "daily" | "batch";
+            recipe: "hunt" | "daily" | "batch" | "reach";
+        };
+        /** DutyRunIn */
+        DutyRunIn: {
+            /**
+             * Test
+             * @default false
+             */
+            test: boolean;
+        };
+        /** DutyTriggerIn */
+        DutyTriggerIn: {
+            /**
+             * Token
+             * @default
+             */
+            token: string;
+            /** Url */
+            url: string;
         };
         /** EmailChangeRequest */
         EmailChangeRequest: {
@@ -6471,11 +6559,13 @@ export interface components {
         };
         /** MarkDoneIn */
         MarkDoneIn: {
+            /** Application Ids */
+            application_ids?: number[] | null;
             /**
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch";
+            duty: "hunt" | "inbox" | "batch" | "reach";
         };
         /** MarkDoneOut */
         MarkDoneOut: {
@@ -6485,7 +6575,7 @@ export interface components {
              * Duty
              * @enum {string}
              */
-            duty: "hunt" | "inbox" | "batch";
+            duty: "hunt" | "inbox" | "batch" | "reach";
             /** Last Tick At */
             last_tick_at: string;
         };
@@ -6829,6 +6919,8 @@ export interface components {
             id: number;
             /** Jobs */
             jobs: components["schemas"]["PersonJobOut"][];
+            /** Linkedin State */
+            linkedin_state?: string | null;
             /** Linkedin Url */
             linkedin_url: string;
             /** Links */
@@ -7892,6 +7984,8 @@ export interface components {
             channel: string;
             /** Client Key */
             client_key?: string | null;
+            /** Draft Kind */
+            draft_kind?: string | null;
             /** Entry */
             entry: string;
             /** Follow Up On */
@@ -7970,6 +8064,8 @@ export interface components {
             client_key?: string | null;
             /** Contact Id */
             contact_id?: number | null;
+            /** Draft Kind */
+            draft_kind?: string | null;
             /** Kind */
             kind: string;
             /**
@@ -8953,8 +9049,10 @@ export interface components {
          * SubmitCheckResponse
          * @description The answer to "may I press submit on this application?" - one gate
          *     (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
-         *     stop before submit and ask the user yes for this one; ``stop``: do not submit.
-         *     ``reason`` is a closed code; ``detail`` is one plain sentence.
+         *     stop before submit and ask the user yes for this one; ``fill``: do ``next_action``
+         *     now, then check again (never a reason to end the run); ``stop``: do not submit
+         *     this one (``stop_run`` true = end the whole run). ``reason`` is a closed code;
+         *     ``detail`` is one plain sentence.
          */
         SubmitCheckResponse: {
             /** Application Id */
@@ -8967,11 +9065,18 @@ export interface components {
              * Decision
              * @enum {string}
              */
-            decision: "submit" | "ask" | "stop";
+            decision: "submit" | "ask" | "fill" | "stop";
             /** Detail */
             detail: string;
+            /** Next Action */
+            next_action?: string | null;
             /** Reason */
             reason: string;
+            /**
+             * Stop Run
+             * @default false
+             */
+            stop_run: boolean;
             /** Type First */
             type_first?: components["schemas"]["TypeFirstAnswer"][];
         };
@@ -9170,6 +9275,8 @@ export interface components {
             email_source?: string | null;
             /** Found Via */
             found_via?: string | null;
+            /** Linkedin State */
+            linkedin_state?: string | null;
             /** Linkedin Url */
             linkedin_url?: string | null;
             /** Links */
@@ -11206,6 +11313,160 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_duty_triggers_api_assistant_duty_triggers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_duty_trigger_api_assistant_duty_triggers__duty__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                duty: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DutyTriggerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_duty_trigger_api_assistant_duty_triggers__duty__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                duty: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_duty_api_assistant_duty_triggers__duty__run_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                duty: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DutyRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

@@ -398,10 +398,12 @@ def settings_view(profile: UserProfile, user_id: str) -> dict[str, Any]:
     """The assistant-settings read model for ``profile`` (already overlaid): the
     waiting requests and the derived practice-run state are the two reads."""
     now = datetime.now(timezone.utc)
-    return settings_rules.build_settings_view(
+    view = settings_rules.build_settings_view(
         profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id), now,
         grant_scope=grant_scope.scope_view(user_id, settings_rules.effective(profile.assistant_settings), now),
     )
+    view["people_hunt_last_at"] = settings_rules.people_hunt_last_at(user_id)
+    return view
 
 
 def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
@@ -564,7 +566,7 @@ _SETTING_LOG_VALUE_PATHS = frozenset(
         settings_rules.COMPANY_CAP_PATH, settings_rules.COMPANY_CAP_DAYS_PATH,
         settings_rules.WEEKLY_CAP_PATH, settings_rules.MIN_GAP_PATH, settings_rules.APPLY_HOURS_PATH,
         settings_rules.AUTO_GRANT_COUNT_PATH, settings_rules.AUTO_GRANT_UNTIL_PATH,
-        settings_rules.HUNT_EVERY_PATH,
+        settings_rules.HUNT_EVERY_PATH, settings_rules.PEOPLE_HUNT_PATH,
     }
 )
 
@@ -851,7 +853,27 @@ async def update_profile(
     """
     # `_apply_profile_edits` is a plain `def`: nothing can `await` while the lock is held.
     with profile_edits.user_edit_lock(user.id):
-        return _apply_profile_edits(body, user)
+        resp = _apply_profile_edits(body, user)
+    await _ignite_schedule_change(user, resp)
+    return resp
+
+
+# Ignition (owner 2026-10-24): a schedule change the user SAVED on the website starts that duty once.
+_SCHEDULE_PATH_DUTY = {
+    "assistant_settings.hunt_every_hours": "hunt",
+    "preferences.daily_check": "inbox",
+    "preferences.check_every": "inbox",
+}
+
+
+async def _ignite_schedule_change(user: CurrentUser, resp: UpdateProfileResponse) -> None:
+    if actor_for(user) != profile_edits.WEB_ACTOR:
+        return
+    duties = tuple(dict.fromkeys(_SCHEDULE_PATH_DUTY[e.path] for e in resp.applied if e.path in _SCHEDULE_PATH_DUTY))
+    if duties:
+        from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+        await duty_trigger.ignite(user.id, duties, "setting_changed")
 
 
 def _apply_profile_edits(body: UpdateProfileRequest, user: CurrentUser) -> UpdateProfileResponse:

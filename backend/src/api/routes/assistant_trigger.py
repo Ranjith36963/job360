@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user
 from src.api.dependencies import get_request_db
 from src.core import settings
+from src.services.browser_agent import duty_trigger as duty_service
 from src.services.browser_agent import trigger as trigger_service
 from src.services.browser_agent.sign_ins import SignInKeyMissingError
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -93,4 +94,83 @@ async def fire_trigger(user: CurrentUser = Depends(require_session_user)) -> dic
     async with _db() as db:
         result = await trigger_service.fire(db, user.id, site=settings.SITE_BASE_URL, resolve=DEFAULT_RESOLVE)
     _audit(user, "fire", "started" if result.get("fired") else str(result.get("reason")))
+    return result
+
+
+# ── Ignition (owner 2026-10-24): one start link per duty ─────────────────────
+# Same rule as above: a browser session only. `batch` (Apply) is the Send link above.
+
+
+class DutyTriggerIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(max_length=2048)
+    token: str = Field("", max_length=4096)
+
+
+def _duty_or_404(duty: str) -> str:
+    if duty not in duty_service.DUTIES:
+        raise HTTPException(status_code=404, detail="unknown duty")
+    return duty
+
+
+@router.get("/assistant-duty-triggers", dependencies=AUTH_FIRST)
+async def get_duty_triggers(user: CurrentUser = Depends(require_session_user)) -> dict[str, Any]:  # noqa: B008
+    """Every duty's start link: host and last result only; never the token."""
+    async with _db() as db:
+        return {"duties": await duty_service.views(db, user.id)}
+
+
+@router.put("/assistant-duty-triggers/{duty}", dependencies=AUTH_FIRST)
+async def put_duty_trigger(
+    duty: str, body: DutyTriggerIn, user: CurrentUser = Depends(require_session_user)  # noqa: B008
+) -> dict[str, Any]:
+    """Save (or replace) one duty's start link and token (encrypted). Like PUT /assistant-trigger, an
+    unexpected error never carries the plaintext token into a report."""
+    _duty_or_404(duty)
+    try:
+        async with _db() as db:
+            await duty_service.save(db, user.id, duty, body.url, body.token)
+            view = duty_service.public_view(duty, await duty_service.load(db, user.id, duty))
+    except (duty_service.DutyError, trigger_service.TriggerError) as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from None
+    except SignInKeyMissingError:
+        raise HTTPException(status_code=503, detail="This server cannot keep tokens yet (no SESSION_SECRET).") from None
+    except Exception:  # noqa: BLE001 - its message and frames can hold the token
+        logger.error("duty trigger not saved for user %s", safe_log_value(user.id))
+        raise HTTPException(status_code=500, detail="The start link could not be saved. Try again.") from None
+    finally:
+        body.token = ""
+    _audit(user, f"save_{duty}", "ok")
+    return view
+
+
+@router.delete("/assistant-duty-triggers/{duty}", dependencies=AUTH_FIRST)
+async def delete_duty_trigger(duty: str, user: CurrentUser = Depends(require_session_user)) -> dict[str, Any]:  # noqa: B008
+    _duty_or_404(duty)
+    async with _db() as db:
+        deleted = await duty_service.delete(db, user.id, duty)
+    _audit(user, f"delete_{duty}", "ok" if deleted else "none")
+    return {"deleted": deleted}
+
+
+class DutyRunIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    test: bool = False
+
+
+@router.post("/assistant-duty-triggers/{duty}/run", dependencies=AUTH_FIRST)
+async def run_duty(
+    duty: str, body: DutyRunIn | None = None, user: CurrentUser = Depends(require_session_user)  # noqa: B008
+) -> dict[str, Any]:
+    """Run now (or Test): start the user's routine for ``duty`` once. Never a 500 for a start that did
+    not happen: ``fired: false`` and a closed reason the page shows."""
+    from src.services.fetch.fetcher import DEFAULT_RESOLVE  # noqa: PLC0415
+
+    _duty_or_404(duty)
+    cause = "test" if body is not None and body.test else "run_now"
+    async with _db() as db:
+        result = await duty_service.fire(db, user.id, duty, cause=cause, resolve=DEFAULT_RESOLVE)
+    _audit(user, f"{cause}_{duty}", "started" if result.get("fired") else str(result.get("reason")))
     return result

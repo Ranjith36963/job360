@@ -13,6 +13,11 @@ Three duties, each named by the recipe that runs it (``SCHEDULE_DUTY_RECIPES``):
   ``scheduled``) and ``preferences.check_every`` hours have passed (empty = 24, the daily
   recipe's own "once a day"). ``ask`` / ``paused`` / empty never run on a schedule: nobody is
   there to say yes.
+* ``reach`` (recipe ``reach``, owner 2026-10-24: the PEOPLE hunt) - only while the user's own switch
+  ``assistant_settings.people_hunt`` is on: open applications (considering or
+  applied) brought or applied in the last ``REACH_WINDOW_DAYS`` that have no assistant-added person and
+  no ``reach:<id>`` stamp, newest first, at most ``REACH_MAX_PER_RUN``; listed as ``application_ids``.
+  An application whose only people are still an invite pending on LinkedIn is not listed.
 * ``batch`` (recipe ``batch``) - the queue holds open applications AND the assistant may apply
   on its own (``submit_mode`` ``auto_when_sure`` or a live auto grant) AND not paused AND the
   daily and weekly limits have room AND now is inside ``apply_hours``. No interval: it is due
@@ -60,6 +65,9 @@ class DueFacts:
     weekly_left: Optional[int]
     inside_hours: bool
     stamps: dict[str, datetime] = field(default_factory=dict)
+    # The user's people-hunt switch, and the applications it should work on this run (newest first, capped).
+    people_hunt: bool = False
+    reach_ids: list[int] = field(default_factory=list)
 
 
 def inbox_every_hours(mode: str, check_every: str) -> Optional[int]:
@@ -92,9 +100,9 @@ def _iso(when: Optional[datetime]) -> Optional[str]:
 
 
 def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
-    """The ``whats_due`` answer. Pure. ``due`` is in run order: inbox, then hunt, then batch
-    (a hunt fills the queue the batch then works)."""
-    due: list[dict[str, str]] = []
+    """The ``whats_due`` answer. Pure. ``due`` is in run order: inbox, hunt, reach, then batch
+    (a hunt fills the queue the batch then works; reach finds people for new applications)."""
+    due: list[dict[str, Any]] = []
     next_due: dict[str, Optional[str]] = {}
     intervals = {"inbox": inbox_every_hours(f.inbox_mode, f.check_every), "hunt": f.hunt_every_hours}
     for duty in ("inbox", "hunt"):
@@ -107,6 +115,9 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         if nxt <= now:
             due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty],
                         "reason": "never_done" if last is None else "interval_elapsed"})
+    if f.people_hunt and f.reach_ids:
+        due.append({"duty": "reach", "recipe": settings.SCHEDULE_DUTY_RECIPES["reach"],
+                    "reason": "new_applications", "application_ids": list(f.reach_ids)})
     hold = batch_hold(f)
     if hold is None:
         due.append({"duty": "batch", "recipe": settings.SCHEDULE_DUTY_RECIPES["batch"], "reason": "queue_waiting"})
@@ -139,11 +150,20 @@ async def load_stamps(db: JobDatabase, user_id: str) -> dict[str, datetime]:
     return out
 
 
-async def mark(db: JobDatabase, user_id: str, duty: str, now: datetime) -> None:
+def reach_key(application_id: int) -> str:
+    """The stamp slot for one application the people hunt has worked."""
+    return f"reach:{application_id}"
+
+
+async def mark(
+    db: JobDatabase, user_id: str, duty: str, now: datetime, application_ids: Optional[list[int]] = None
+) -> None:
     """Stamp ``duty`` (and the tick) as done ``now``. A slot: replaced, never appended.
-    ``duty`` must already be one of ``SCHEDULE_DUTIES`` (the caller validates)."""
+    ``duty`` must already be one of ``SCHEDULE_DUTIES`` (the caller validates). ``reach`` also stamps
+    each of ``application_ids`` (already checked to be this user's)."""
     stamp = now.astimezone(timezone.utc).isoformat()
-    for name in (duty, TICK):
+    names = [duty, TICK] + [reach_key(a) for a in (application_ids or [])]
+    for name in names:
         await db._db.execute(
             "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
             "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at",
@@ -166,6 +186,56 @@ async def _open_queue_count(db: JobDatabase, user_id: str) -> int:
     )
     row = await cur.fetchone()
     return int(row[0]) if row else 0
+
+
+async def owned_application_ids(db: JobDatabase, user_id: str, ids: list[int]) -> set[int]:
+    """Which of ``ids`` are this user's applications (rule #12)."""
+    if not ids:
+        return set()
+    marks = ",".join("?" for _ in ids)
+    cur = await db._db.execute(
+        f"SELECT id FROM applications WHERE user_id = ? AND id IN ({marks})",  # noqa: S608 - placeholders only
+        (user_id, *ids),
+    )
+    return {int(dict(r)["id"]) for r in await cur.fetchall()}
+
+
+async def _reach_ids(db: JobDatabase, user_id: str, now: datetime) -> list[int]:
+    """Open applications for the people hunt this run (see the module docstring), newest first."""
+    since = (now - timedelta(days=settings.REACH_WINDOW_DAYS)).astimezone(timezone.utc).isoformat()
+    cur = await db._db.execute(
+        "SELECT a.id FROM applications a WHERE a.user_id = ? AND a.status IN ('considering', 'applied') "
+        "AND (a.created_at >= ? OR EXISTS (SELECT 1 FROM application_events e WHERE e.application_id = a.id "
+        "     AND e.user_id = a.user_id AND e.event_type = 'applied' AND e.occurred_at >= ?)) "
+        "AND NOT EXISTS (SELECT 1 FROM application_contacts c WHERE c.application_id = a.id "
+        "     AND c.user_id = a.user_id AND c.added_by <> 'web') "
+        "AND NOT EXISTS (SELECT 1 FROM assistant_duty_runs r WHERE r.user_id = a.user_id "
+        "     AND r.duty = 'reach:' || a.id) "
+        "ORDER BY a.created_at DESC, a.id DESC LIMIT ?",
+        (user_id, since, since, settings.REACH_MAX_PER_RUN * 4),
+    )
+    candidates = [int(dict(r)["id"]) for r in await cur.fetchall()]
+    pending_only = await _pending_only(db, user_id, candidates)
+    return [a for a in candidates if a not in pending_only][: settings.REACH_MAX_PER_RUN]
+
+
+async def _pending_only(db: JobDatabase, user_id: str, app_ids: list[int]) -> set[int]:
+    """Applications whose people (all of them) are an invite still pending on LinkedIn."""
+    if not app_ids:
+        return set()
+    marks = ",".join("?" for _ in app_ids)
+    # Only "?" placeholders are formatted into this query.
+    sql = (
+        "SELECT c.application_id, (SELECT e.value FROM contact_edits e WHERE e.contact_id = c.id "  # noqa: S608
+        "  AND e.user_id = c.user_id AND e.field = 'linkedin_state' ORDER BY e.id DESC LIMIT 1) AS state "
+        f"FROM application_contacts c WHERE c.user_id = ? AND c.application_id IN ({marks})"
+    )
+    cur = await db._db.execute(sql, (user_id, *app_ids))
+    states: dict[int, list[str]] = {}
+    for r in await cur.fetchall():
+        row = dict(r)
+        states.setdefault(int(row["application_id"]), []).append(row["state"] or "")
+    return {a for a, s in states.items() if s and all(v == "pending" for v in s)}
 
 
 async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
@@ -191,4 +261,6 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         weekly_left=weekly_left,
         inside_hours=inside,
         stamps=await load_stamps(db, user_id),
+        people_hunt=cfg.people_hunt,
+        reach_ids=await _reach_ids(db, user_id, now) if cfg.people_hunt else [],
     )
