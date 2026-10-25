@@ -26970,7 +26970,7 @@
     },
     "/api/schedule/due": {
       "get": {
-        "description": "The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``\n(a routine that runs one job passes its own) limits the answer AND what it takes to those. An\nassistant's read takes each listed duty for this run (one run per duty at a time, owner 2026-10-25):\nanother run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until\n``mark_done``. The website's own read only looks.",
+        "description": "The duties due NOW for the signed-in user, each with its recipe. Changes no setting. ``duties``\n(a routine that runs one job passes its own) limits the answer AND what it takes to those; a read\nwithout ``duties`` only looks. An assistant's read with ``duties`` takes each listed duty for this run\n(one run per duty at a time, owner 2026-10-25):\nanother run in the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` / ``held_by_running`` until\n``mark_done``. The website's own read only looks.",
         "operationId": "whats_due_api_schedule_due_get",
         "parameters": [
           {
