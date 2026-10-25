@@ -10,10 +10,15 @@ vi.mock("@/lib/api", () => ({
   answerAsk: vi.fn(), withdrawAsk: vi.fn(), confirmAsk: vi.fn(),
   confirmSettingRequest: vi.fn(), declineSettingRequest: vi.fn(),
 }));
-vi.mock("./JobCards", () => ({
-  loadJobCards: async () => ({ cards, general: [] }),
-  JobCards: () => <ul data-testid="job-cards" />,
-}));
+vi.mock("./JobCards", async () => {
+  const { useEffect } = await import("react");
+  return {
+    JobCards: ({ onReport }: { onReport: (r: unknown) => void }) => {
+      useEffect(() => onReport({ cards, failed: [], total: cards.length, settled: true }), [onReport]);
+      return <ul data-testid="job-cards" />;
+    },
+  };
+});
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
