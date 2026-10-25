@@ -9486,6 +9486,8 @@ export interface components {
             failures_in_row?: {
                 [key: string]: number;
             };
+            /** Hunt Hold */
+            hunt_hold?: "queue_full" | null;
             /** Last Done At */
             last_done_at: {
                 [key: string]: string | null;

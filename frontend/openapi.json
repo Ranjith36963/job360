@@ -16246,6 +16246,18 @@
             "title": "Failures In Row",
             "type": "object"
           },
+          "hunt_hold": {
+            "anyOf": [
+              {
+                "const": "queue_full",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Hold"
+          },
           "last_done_at": {
             "additionalProperties": {
               "anyOf": [

@@ -155,6 +155,8 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         return False
 
     intervals = {"inbox": inbox_every_hours(f.inbox_mode, f.check_every), "hunt": f.hunt_every_hours}
+    # Back-pressure: no new jobs while the queue is already full; due again as it drains.
+    hunt_hold = "queue_full" if f.hunt_every_hours is not None and f.queued >= settings.HUNT_QUEUE_MAX else None
     for duty in ("inbox", "hunt"):
         every = intervals[duty]
         if every is None:
@@ -164,6 +166,8 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
             every = backoff_hours(f.failures[duty])
         nxt = now if last is None else last + timedelta(hours=every)
         next_due[duty] = _iso(nxt)
+        if duty == "hunt" and hunt_hold:
+            continue
         if nxt <= now:
             due.append({"duty": duty, "recipe": settings.SCHEDULE_DUTY_RECIPES[duty],
                         "reason": "never_done" if last is None else "interval_elapsed"})
@@ -181,6 +185,7 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
         "running": {d: _iso(at) for d, at in sorted(live.items())},
         "next_due_at": next_due,
         "batch_hold": hold,
+        "hunt_hold": hunt_hold,
         "last_done_at": {d: _iso(f.stamps.get(d)) for d in settings.SCHEDULE_DUTIES},
         "last_tick_at": _iso(f.stamps.get(TICK)),
         "failures_in_row": {d: int(f.failures.get(d, 0)) for d in settings.SCHEDULE_DUTIES},
