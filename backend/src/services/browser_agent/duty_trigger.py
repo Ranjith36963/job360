@@ -34,6 +34,7 @@ CAUSES: dict[str, str] = {
     "ask_answered": "the user answered a question",
     "send": "the user pressed Send",
     "job_queued": "a new job was queued",
+    "job_unblocked": "the user cleared what stopped a job, so it is back on the queue",
     "hunt_done": "a job hunt finished",
     "setting_changed": "the user changed a schedule setting",
 }
