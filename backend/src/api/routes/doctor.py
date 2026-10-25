@@ -64,7 +64,8 @@ def _missing(profile: UserProfile, overlay: list[dict[str, Any]], has_profile: b
         out.append({"key": "preferences.target_job_titles", "why": "no target job titles saved"})
     try:
         _answers, kit_missing = kit_service.compute_answers(profile, overlay, None)
-        out.extend({"key": m["key"], "why": m["why"]} for m in kit_missing if m["key"].startswith("contact."))
+        asked = kit_service.kit_missing(kit_missing)  # the one "only what the form asks" rule
+        out.extend({"key": m["key"], "why": m["why"]} for m in asked if m["key"].startswith("contact."))
     except Exception:  # noqa: BLE001 - doctor never 500s on a partial profile
         log.warning("doctor_missing_kit_failed", extra={"event": "doctor_missing_kit_failed"})
     try:

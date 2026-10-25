@@ -3353,16 +3353,26 @@ async def resolve_blocked(
 ) -> dict[str, Any]:
     """"Mark resolved" - the user sorted out what stopped their assistant: records
     ``unblocked`` {resolution: user_did_it} and closes the blocked ask. 409 when
-    nothing is blocked. Session only; assistants use ``record_event``."""
+    nothing is blocked. Session only; assistants use ``record_event``. A block the
+    assistant can try again (owner 2026-10-25) puts the job back on the queue and starts Apply."""
     if await spine.get_owned_application(db, user.id, application_id) is None:
         raise HTTPException(status_code=404, detail="application not found")
     try:
+        block = await blocked_service.open_block(db, user.id, application_id)
         stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
         await blocked_service.record(
             db, user, application_id, "unblocked", stored, occurred_at=datetime.now(timezone.utc).isoformat(),
         )
+        in_queue = block is not None and await queue_preflight.back_to_queue(
+            db, user.id, application_id, block["reason"], recorded_by=actor_for(user)
+        )
     except SpineError as exc:
         _raise(exc)
+        raise AssertionError("unreachable")  # _raise always raises
+    if in_queue:
+        from src.services.browser_agent import duty_trigger  # noqa: PLC0415
+
+        await duty_trigger.ignite(user.id, ("batch",), "job_unblocked", [application_id], db=db)
     return await _controls(db, user, application_id)
 
 

@@ -34,6 +34,7 @@ from src.services.applications.job_checks import redact_url_for_display
 from src.services.browser_agent.deploy_hold import Beacon
 from src.services.browser_agent.egress import BLOCK_HEADER, BLOCK_MARK, UNREACHABLE_MARK, EgressProxy, OpenFn
 from src.services.browser_agent.page_js import (
+    BODY_TEXT_JS,
     CHOSEN_NEARBY_JS,
     CONTROL_STATE_JS,
     ELEMENT_FACTS_JS,
@@ -946,6 +947,11 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
     # Chromium switches to its error page a moment after a failed load: check again after the reads.
     if page.url.startswith("chrome-error://"):
         return _load_failed(page, after_action)
+    # A trap field for bots: its name, title or name attribute says to leave it blank. The hints are
+    # dropped here, before the size cut: the assistant reads the name.
+    for e in elements:
+        if _is_trap(e.get("name"), e.pop("hints", None)):
+            e["leave_blank"] = True
     elements, cut_above, cut_below = _within_size(elements, places)
     above += cut_above
     below += cut_below
@@ -964,9 +970,6 @@ async def look(s: Session, *, after_action: bool = False) -> dict[str, Any]:
         step = None
     if step:
         out["form_step"] = step
-    for e in elements:
-        if is_honeypot(str(e.get("name") or "")):
-            e["leave_blank"] = True
     out["application_form"] = looks_like_application(elements)
     site = site_for(page.url, frame_urls[1:])
     if site is not None:
@@ -1004,9 +1007,6 @@ def _refuse_captcha_frame(frame: Any) -> None:
         frame = frame.parent_frame
 
 
-# The frame's text as look reads it (whitespace folded, so a phrase split over lines still matches).
-_BODY_TEXT_JS = "(n) => (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, n)"
-
 
 async def _page_captcha(page: Any) -> bool:
     """Whether the page shows a CAPTCHA now: the same frames and text ``look`` reads."""
@@ -1020,7 +1020,9 @@ async def _page_captcha(page: Any) -> bool:
         if i >= MAX_FRAMES_CHECKED or read >= MAX_FRAMES:
             continue
         try:
-            texts.append(await asyncio.wait_for(f.evaluate(_BODY_TEXT_JS, MAX_TEXT), FRAME_READ_TIMEOUT_S))
+            # The frame's text as look reads it (whitespace folded, so a phrase split over lines still
+            # matches; a long <select>'s options never push the check's words past the cut).
+            texts.append(await asyncio.wait_for(f.evaluate(BODY_TEXT_JS, MAX_TEXT), FRAME_READ_TIMEOUT_S))
         except Exception:  # noqa: BLE001, S112 - a frame mid-navigation: its address still counts
             continue
         read += 1
@@ -1053,13 +1055,40 @@ async def _find(s: Session, ref: str) -> tuple[Any, Any]:
     raise BrowserError("refused", "ref_not_found", "That ref is not on the page any more. Call look and use a new one.")
 
 
+def _safety_parts(name: Any, hints: Any) -> list[str]:
+    """A control's name, title and name attribute, each its own string: the safety checks test each part
+    alone (any part a trap, a trap; any part a password, a password), never a joined string, where one
+    part's words could end, start or spell another's phrase (#1174 re-review). ``hints`` comes from
+    page_js ``hintsOf``: a field named by the question above it keeps name="password" or a title
+    "Leave this field blank" in view."""
+    parts = [str(name or "")]
+    if isinstance(hints, (list, tuple)):
+        parts.extend(str(h or "") for h in hints)
+    elif hints:
+        parts.append(str(hints))
+    return [p for p in parts if p.strip()]
+
+
+def _is_trap(name: Any, hints: Any) -> bool:
+    return any(is_honeypot(p) for p in _safety_parts(name, hints))
+
+
 async def _kind(loc: Any) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
-    return control_kind(
-        facts.get("tag", ""), facts.get("type", ""), facts.get("name", ""), facts.get("autocomplete", ""),
-        bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
-        bool(facts.get("owns_form")), bool(facts.get("toggle")),
-    )
+
+    def kind_of(name: str) -> str:
+        return control_kind(
+            facts.get("tag", ""), facts.get("type", ""), name, facts.get("autocomplete", ""),
+            bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
+            bool(facts.get("owns_form")), bool(facts.get("toggle")),
+        )
+
+    kind = kind_of(str(facts.get("name") or ""))
+    # A title or name attribute that names a password box makes it one; each part read on its own.
+    hints = facts.get("hints") if isinstance(facts.get("hints"), list) else []
+    if kind != "password" and any(kind_of(str(h or "")) == "password" for h in hints):
+        return "password"
+    return kind
 
 
 SETTLE_IDLE_MS = 3000
@@ -1343,7 +1372,7 @@ async def _act(
         facts.get("tag") in ("input", "textarea", "select") or str(facts.get("role")).lower() in _TICK_ROLES
     ):
         fills = False
-    if fills and is_honeypot(str(facts.get("name") or "")):
+    if fills and _is_trap(facts.get("name"), facts.get("hints")):
         raise BrowserError(
             "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
         )
@@ -1617,7 +1646,7 @@ async def _fill_one(s: Session, ref: str, text: str) -> tuple[bool, str]:
     on = _TICK_WORDS.get(text.strip().casefold()) if how == "tick" else None
     if how == "tick" and on is None:
         raise BrowserError("refused", "bad_tick_text", 'For a box use text "yes" or "no".')
-    if is_honeypot(str(facts.get("name") or "")) and (on if how == "tick" else bool(text)):
+    if _is_trap(facts.get("name"), facts.get("hints")) and (on if how == "tick" else bool(text)):
         raise BrowserError("refused", "leave_blank", "That field says to leave it blank (a trap for bots).")
     if how == "type":
         text = _plain_text(text)
