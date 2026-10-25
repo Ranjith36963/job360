@@ -43,6 +43,20 @@ test.describe("Connect your assistant", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
+  test("old /connect URL redirects to /settings/connect, keeping the query", async ({
+    page,
+  }) => {
+    // Anonymous, so the middleware then bounces to /login?next=/settings/connect.
+    // That `next` value proves the redirect landed on /settings/connect.
+    for (const from of ["/connect", "/connect/?ref=old"]) {
+      await page.goto(from);
+      await expect(page).toHaveURL(/\/login\?.*next=%2Fsettings%2Fconnect/);
+    }
+    const res = await page.request.get("/connect?ref=old", { maxRedirects: 0 });
+    expect(res.status()).toBe(308);
+    expect(res.headers()["location"]).toBe("/settings/connect?ref=old");
+  });
+
   test("create → token shown once with the connect command → revoke", async ({
     page,
     context,

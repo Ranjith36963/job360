@@ -130,7 +130,7 @@ describe("Home", () => {
     expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "/needs-you");
   });
 
-  it("after an answer the badge hears asks + waiting changes + ready to send, never the asks alone", async () => {
+  it("after an answer the badge hears jobs + waiting changes + ready to send, never the asks alone", async () => {
     happy({ asks: [ask(1)] });
     api.answerAsk.mockResolvedValue({});
     api.getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }], paused: false });
@@ -141,7 +141,8 @@ describe("Home", () => {
     try {
       render(<Home />);
       await screen.findByTestId("ask-1");
-      api.listAsks.mockResolvedValue({ asks: [], open_count: 1 });
+      // One job still waits (two of its asks are open): it counts once.
+      api.listAsks.mockResolvedValue({ asks: [ask(2), ask(3)], open_count: 2 });
       fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Yes" } });
       fireEvent.click(screen.getByTestId("ask-save"));
       fireEvent.click(screen.getByTestId("ask-answer-confirm"));
