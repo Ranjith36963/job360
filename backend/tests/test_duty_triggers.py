@@ -227,3 +227,19 @@ async def test_send_obeys_a_429_and_shares_the_hourly_cap(authenticated_async_co
             await db._db.commit()
         capped = (await client.post("/api/assistant-trigger/fire")).json()
         assert capped["reason"] == "hourly_cap"
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_sends_nothing_gives_its_hourly_slot_back(authenticated_async_context, monkeypatch):
+    """Send with nothing approved, or a refused address, reaches no one: it must not use up the hour's starts."""
+    from src.services.browser_agent import duty_trigger
+
+    monkeypatch.setattr(duty_trigger, "COOLDOWN_S", 0)
+    monkeypatch.setattr(duty_trigger, "FIRES_PER_HOUR", 2)
+    async with authenticated_async_context() as client:
+        await client.put("/api/assistant-trigger", json={"url": SEND})
+        for _ in range(4):
+            assert (await client.post("/api/assistant-trigger/fire")).json()["reason"] == "nothing_approved"
+        await client.put("/api/assistant-duty-triggers/hunt", json={"url": "https://inside.example/hook"})
+        for _ in range(4):
+            assert (await client.post("/api/assistant-duty-triggers/hunt/run")).json()["reason"] == "refused"

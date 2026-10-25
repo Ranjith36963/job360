@@ -225,12 +225,12 @@ async def fire(db: Any, user_id: str, *, site: str, resolve: ResolveFn) -> dict[
                 "detail": "Your assistant was started a moment ago."}
     rows = await approved_waiting(db, user_id)
     if not rows:
-        await _remember(db, user_id, now, "nothing_approved")
+        await _remember(db, user_id, now, "nothing_approved", release=True)
         return {"fired": False, "reason": "nothing_approved"}
     # Only a variable NAMED token holds it: an error report scrubs that name, never a dict under another one.
     token = _saved_token(row["token_enc"]) if row["token_enc"] else ""
     if token is None:
-        await _remember(db, user_id, now, "refused: token unreadable")
+        await _remember(db, user_id, now, "refused: token unreadable", release=True)
         return {"fired": False, "reason": "token_unreadable",
                 "detail": "The saved token can no longer be read: save the trigger again."}
     host = screen_url(row["url"]).host
@@ -238,7 +238,7 @@ async def fire(db: Any, user_id: str, *, site: str, resolve: ResolveFn) -> dict[
     try:
         status, data = await _post(row["url"], headers_for(host, token), {"text": message(rows, site, label)}, resolve)
     except TriggerError as exc:
-        await _remember(db, user_id, now, f"refused: {exc.reason}")
+        await _remember(db, user_id, now, f"refused: {exc.reason}", release=True)  # nothing was sent
         return {"fired": False, "reason": exc.reason, "detail": exc.detail}
     except Exception as exc:  # noqa: BLE001 - network failure: say so, never a 500
         await _remember(db, user_id, now, "failed: network")
@@ -269,9 +269,14 @@ def _retry_until(now: datetime) -> str:
     return (now + timedelta(seconds=COOLDOWN_S)).isoformat()
 
 
-async def _remember(db: Any, user_id: str, when: datetime, result: str, *, retry_until: Optional[str] = None) -> None:
+async def _remember(
+    db: Any, user_id: str, when: datetime, result: str, *, retry_until: Optional[str] = None, release: bool = False
+) -> None:
+    """Record the result. ``release``: nothing was sent, so the claimed hourly slot is given back."""
+    give_back = 1 if release else 0
     await db._db.execute(
-        "UPDATE assistant_triggers SET last_fired_at = ?, last_result = ?, retry_until = ? WHERE user_id = ?",
-        (when.isoformat(), result[:60], retry_until, user_id),
+        "UPDATE assistant_triggers SET last_fired_at = ?, last_result = ?, retry_until = ?, "
+        "hour_count = GREATEST(hour_count - ?, 0) WHERE user_id = ?",
+        (when.isoformat(), result[:60], retry_until, give_back, user_id),
     )
     await db._db.commit()

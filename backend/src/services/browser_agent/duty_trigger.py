@@ -193,7 +193,7 @@ async def fire(
         return _held(row, now)
     token = send_trigger._saved_token(row["token_enc"]) if row["token_enc"] else ""
     if token is None:
-        await _remember(db, user_id, duty, now, "refused: token unreadable")
+        await _remember(db, user_id, duty, now, "refused: token unreadable", release=True)
         return {"fired": False, "reason": "token_unreadable",
                 "detail": "The saved token can no longer be read: save the start link again."}
     host = screen_url(row["url"]).host
@@ -201,7 +201,7 @@ async def fire(
     try:
         status, data, headers = await _post(row["url"], send_trigger.headers_for(host, token), body, resolve)
     except send_trigger.TriggerError as exc:
-        await _remember(db, user_id, duty, now, f"refused: {exc.reason}")
+        await _remember(db, user_id, duty, now, f"refused: {exc.reason}", release=True)  # nothing was sent
         return {"fired": False, "reason": exc.reason, "detail": exc.detail}
     except Exception:  # noqa: BLE001 - network failure: say so, never a 500, never retried
         await _remember(db, user_id, duty, now, "failed: network")
@@ -247,11 +247,14 @@ async def _post(
 
 
 async def _remember(
-    db: Any, user_id: str, duty: str, when: datetime, result: str, *, retry_until: Optional[str] = None
+    db: Any, user_id: str, duty: str, when: datetime, result: str, *, retry_until: Optional[str] = None,
+    release: bool = False,
 ) -> None:
+    """Record the result. ``release``: nothing was sent, so the claimed hourly slot is given back."""
     table, extra = _where(duty)
     await db._db.execute(
-        f"UPDATE {table} SET last_fired_at = ?, last_result = ?, retry_until = ? WHERE user_id = ?{extra}",  # noqa: S608
-        (when.isoformat(), result[:60], retry_until, *_key(duty, user_id)),
+        f"UPDATE {table} SET last_fired_at = ?, last_result = ?, retry_until = ?, "  # noqa: S608
+        f"hour_count = GREATEST(hour_count - ?, 0) WHERE user_id = ?{extra}",
+        (when.isoformat(), result[:60], retry_until, 1 if release else 0, *_key(duty, user_id)),
     )
     await db._db.commit()
