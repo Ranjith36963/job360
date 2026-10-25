@@ -275,7 +275,7 @@ async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
         for (_app, family, _side), asks_ in dupes.items():
             keep, olds = asks_[-1], asks_[:-1]
             if family == "question":
-                merged = merge_questions([q for old in olds for q in _rows_of(old)], keep.get("questions") or [])
+                merged = merge_questions([q for old in olds for q in _rows_of(old)], _rows_of(keep))
                 await db._db.execute(
                     "UPDATE application_asks SET questions = ? WHERE id = ? AND user_id = ? AND answered_at IS NULL",
                     (json.dumps(merged) if merged else "", int(keep["id"]), user_id),

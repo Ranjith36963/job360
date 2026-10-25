@@ -85,3 +85,23 @@ async def test_paste_the_question_rows_go_and_the_job_gets_a_note(authenticated_
         await client.get("/api/asks")  # a second read writes nothing more
         assert len([e for e in (await client.get(f"/api/applications/{only}")).json()["events"]
                     if e["event_type"] == "note"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_newest_sentence_only_ask_keeps_its_sentence(authenticated_async_context, monkeypatch):
+    """Review of #1224: the kept ask asked only a sentence; the tidy must not hide it under the old rows."""
+    async with authenticated_async_context() as client:
+        app_id = int((await client.post("/api/jobs/bring", json=_AD)).json()["application_id"])
+        await _old_style_ask(client, app_id, [_row("gender", "Gender?", "memory", "Male")], monkeypatch)
+        from src.services.applications import asks
+
+        async def none(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
+            return []
+
+        monkeypatch.setattr(asks, "_open_family", none)
+        newest = (await client.post("/api/asks", json={"question": "Please approve CV 90.", "application_id": app_id,
+                                                       "kind": "question"})).json()["id"]
+        monkeypatch.undo()
+        [kept] = (await client.get("/api/asks")).json()["asks"]
+        assert kept["id"] == newest
+        assert [q["question"] for q in kept["questions"]] == ["Gender?", "Please approve CV 90."]
