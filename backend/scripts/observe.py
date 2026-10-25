@@ -89,6 +89,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # The browser agent's saved job-site sign-ins (migration 0065, encrypted cookies only).
     ("browser_sign_ins", "user_id"),
     # "Send starts my assistant": the user's start link, token encrypted (migration 0066).
+    ("assistant_duty_triggers", "user_id"),
     ("assistant_triggers", "user_id"),
     # Write-tool idempotency keys: request_id -> the first reply (migration 0070).
     ("idempotency_keys", "user_id"),
