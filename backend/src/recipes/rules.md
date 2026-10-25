@@ -252,11 +252,20 @@ the SAME key.
 
 An ask can also be answered by the user on the Job360 Needs-you page.
 
-ONE ASK PER JOB: Needs you shows one card per job. Put every open question for a job in ONE
-`ask_user` (`application_id`, `kind` question) as `questions`: [{key, question, answer, source,
-choices?, remembered_on?}]. `source` says where YOUR answer came from, honestly: profile, memory
-(a saved answer; `remembered_on` its date), cv, draft (you wrote it), guess, or none (not known:
-empty answer). A guess is never memory. Yes/no or a closed list: give `choices`. A step only the
+ONE ASK PER JOB: Needs you shows one card per job. Read the job's open asks first (get_application
+`asks`, whats_new `open_asks`) and never re-ask what one holds; an `ask_user` for a job that has an
+open ask of the same kind UPDATES that ask (`updated_open_ask`), so always send the full set. Put
+every open question for a job in ONE `ask_user` (`application_id`, `kind` question) as `questions`:
+[{key, question, answer, source, choices?, remembered_on?}]. Every question carries an answer; there
+is no "not known yet" (an empty answer or source none is refused). `source` says where YOUR answer
+came from, honestly: profile, memory (a saved answer; `remembered_on` its date) or cv = Verified;
+guess (your best guess; data-processing consent = Yes, referred by an employee = No) or draft (text
+you wrote from profile facts) = Guessed. A guess is never memory. Yes/no or a closed list: give
+`choices`. Read the form yourself (another reader if the page is cut off); never ask the user to
+paste or copy question text. Set job facts yourself (`update_job`, e.g. country); never ask the
+user to confirm a fact the profile already holds. An ask is only for what you may not do for
+safety: a CAPTCHA, a sign-in, a consent only the user can give, the final Send; its `question`
+says exactly what the user must do, with the link. A step only the
 user can do (CAPTCHA, sign-in, a failed upload, a safety block) is its own ask on the same job:
 record `blocked` (Job360 opens it with its kind) or `ask_user` `kind` captcha|login|upload|safety.
 The user approves the answers at once; `answer_ask` returns them as `answers` {key: answer}.

@@ -4291,7 +4291,8 @@ export interface components {
         /**
          * AskQuestionIn
          * @description One form question of an ask (0087): the answer the assistant filled in and where it came from.
-         *     Lengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``.
+         *     Every question carries an answer (owner 2026-10-25; no `none`): profile/memory/cv = Verified,
+         *     guess/draft = Guessed. Lengths, key shape and the caps are checked in ``asks.validate_questions``.
          */
         AskQuestionIn: {
             /**
@@ -4311,7 +4312,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "profile" | "memory" | "cv" | "guess" | "draft" | "none";
+            source: "profile" | "memory" | "cv" | "guess" | "draft";
         };
         /** AskQuestionOut */
         AskQuestionOut: {
@@ -4981,6 +4982,8 @@ export interface components {
              * @default
              */
             kind: string;
+            /** Note */
+            note?: string | null;
             /** Question */
             question: string;
             /** Questions */
@@ -4998,6 +5001,11 @@ export interface components {
             said_by: "you" | "assistant";
             /** Status */
             status: string;
+            /**
+             * Updated Open Ask
+             * @default false
+             */
+            updated_open_ask: boolean;
             /**
              * User Words
              * @default

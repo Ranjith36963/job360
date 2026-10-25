@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
@@ -33,14 +33,15 @@ def _raise(exc: SpineError) -> None:
 
 class AskQuestionIn(BaseModel):
     """One form question of an ask (0087): the answer the assistant filled in and where it came from.
-    Lengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``."""
+    Every question carries an answer (owner 2026-10-25; no `none`): profile/memory/cv = Verified,
+    guess/draft = Guessed. Lengths, key shape and the caps are checked in ``asks.validate_questions``."""
 
     model_config = ConfigDict(extra="forbid")
 
     key: str
     question: str
     answer: str = ""
-    source: Literal["profile", "memory", "cv", "guess", "draft", "none"]
+    source: Literal["profile", "memory", "cv", "guess", "draft"]
     choices: Optional[list[str]] = None
     remembered_on: Optional[str] = None
 
@@ -58,10 +59,21 @@ class CreateAskRequest(BaseModel):
     # FIRST ask (already_existed=true), writing nothing; another body under it is a 409.
     client_key: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _every_question_answered(cls, data: Any) -> Any:
+        """Before field checks, so an empty answer or source `none` gets the what-to-do refusal."""
+        if isinstance(data, dict) and (refusal := asks_service.unanswered_refusal(data.get("questions"))):
+            raise ValueError(refusal)
+        return data
+
 
 class CreateAskOut(AskOut):
     # Slice 25 — true when this client_key was already used: the FIRST reply, nothing written.
     already_existed: bool = False
+    # Owner 2026-10-25 — true when this job's open ask of the same kind was updated instead of a new card.
+    updated_open_ask: bool = False
+    note: Optional[str] = None
 
 
 class AnswerAskRequest(BaseModel):
@@ -90,6 +102,7 @@ async def create_ask(
                 db, user.id, body.application_id, body.question, body.context, actor_for(user),
                 kind=body.kind or "",
                 questions=[q.model_dump(exclude_none=True) for q in body.questions] if body.questions else None,
+                merge_open=True,
             )
         except SpineError as exc:
             _raise(exc)

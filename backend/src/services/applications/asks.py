@@ -43,9 +43,15 @@ ASKS_WITHDRAW_REASON_MAX_CHARS = 200
 # Owner 2026-10-24 - one ask per job carries every open form question. `kind` says what the ask is:
 # a question, or a blocker only the user can clear on the form ("" = an ask from before 0087).
 ASK_KINDS = ("question", "captcha", "login", "upload", "safety")
-# Where an answer the assistant filled in came from (the web labels each row with it). `none` = not
-# known yet: its answer must be empty. A guess is never `memory` - the recipes say so.
-ASK_QUESTION_SOURCES = ("profile", "memory", "cv", "guess", "draft", "none")
+# Where an answer the assistant filled in came from (the web labels each row with it): profile/memory/cv
+# read as Verified, guess/draft as Guessed. Owner 2026-10-25: "not known yet" is banned, so every question
+# carries an answer and `none` is refused on create (rows stored before keep it; reads never re-validate).
+# A guess is never `memory` - the recipes say so.
+ASK_QUESTION_SOURCES = ("profile", "memory", "cv", "guess", "draft")
+_UNANSWERED_EXAMPLE = {
+    "key": "referred", "question": "Were you referred by an employee?", "answer": "No", "source": "guess",
+    "choices": ["Yes", "No"],
+}
 ASKS_QUESTIONS_MAX = 20
 ASK_ITEM_QUESTION_MAX_CHARS = 500
 ASK_ITEM_ANSWER_MAX_CHARS = 2000
@@ -80,10 +86,42 @@ def _item_text(where: str, raw: Any, limit: int, *, allow_empty: bool = False) -
     return text
 
 
+def unanswered_refusal(raw: Any) -> Optional[str]:
+    """The 422 text when any question carries no answer (empty, or source ``none``), else None.
+
+    Owner 2026-10-25: every form question in an ask carries an answer. ALL the unanswered ones are
+    named at once, then what to do and one valid example (the ``event_examples.refusal`` shape), so the
+    assistant fixes the whole ask in one resend. Non-dict items are left to ``validate_questions``."""
+    if not isinstance(raw, list):
+        return None
+    missing: list[str] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        answer = item.get("answer")
+        if item.get("source") == "none" or not clean_text(answer if isinstance(answer, str) else ""):
+            key = item.get("key")
+            missing.append(f"questions[{i}]" + (f" ({key})" if isinstance(key, str) and key else ""))
+    if not missing:
+        return None
+    return "\n".join([
+        f"Nothing was saved: {len(missing)} question{'s' if len(missing) != 1 else ''} with no answer: "
+        f"{', '.join(missing)}.",
+        "Every question in an ask carries an answer; \"not known yet\" does not exist. Read the form yourself "
+        "and fill each answer: a fact the user said or saved = source profile|memory|cv; otherwise draft your "
+        "best guess, source guess (a choice or yes/no: data-processing consent = Yes, referred by an employee = "
+        "No) or draft (free text you wrote). Never leave an answer empty, never use source none, never ask the "
+        "user to paste or copy question text. Resend the whole ask in one call.",
+        f"Valid example question: {json.dumps(_UNANSWERED_EXAMPLE)}",
+    ])
+
+
 def validate_questions(raw: Optional[list[dict[str, Any]]]) -> list[dict[str, Any]]:
-    """The ask's question list, cleaned: unique keys, closed sources, capped text. [] = none."""
+    """The ask's question list, cleaned: unique keys, closed sources, capped text, every answer filled. [] = none."""
     if not raw:
         return []
+    if (refusal := unanswered_refusal(raw)) is not None:
+        raise SpineError(422, refusal)
     if len(raw) > ASKS_QUESTIONS_MAX:
         raise SpineError(422, f"at most {ASKS_QUESTIONS_MAX} questions per ask")
     out: list[dict[str, Any]] = []
@@ -97,9 +135,7 @@ def validate_questions(raw: Optional[list[dict[str, Any]]]) -> list[dict[str, An
         source = item.get("source")
         if source not in ASK_QUESTION_SOURCES:
             raise SpineError(422, f"{where}.source must be one of {', '.join(ASK_QUESTION_SOURCES)}")
-        answer = _item_text(f"{where}.answer", item.get("answer"), ASK_ITEM_ANSWER_MAX_CHARS, allow_empty=True)
-        if (source == "none") != (answer == ""):
-            raise SpineError(422, f"{where}: source none goes with an empty answer, any other source with an answer")
+        answer = _item_text(f"{where}.answer", item.get("answer"), ASK_ITEM_ANSWER_MAX_CHARS)
         q: dict[str, Any] = {
             "key": key, "source": source, "answer": answer,
             "question": _item_text(f"{where}.question", item.get("question"), ASK_ITEM_QUESTION_MAX_CHARS),
@@ -269,10 +305,17 @@ async def create_ask(
     asked_by: str,
     kind: str = "",
     questions: Optional[list[dict[str, Any]]] = None,
+    merge_open: bool = False,
 ) -> dict[str, Any]:
     """Record one ask. 422 on empty/oversized text, 404 if the application is
     not the caller's, 429 when too many asks are already open. ``kind`` (ASK_KINDS, "" = unsaid)
-    and ``questions`` (validate_questions) are optional; a blocker carries no questions."""
+    and ``questions`` (validate_questions) are optional; a blocker carries no questions.
+
+    ``merge_open`` (the assistant's ask_user, owner 2026-10-25 "one ask per job"): when this job
+    already has an OPEN ask of the same kind, that ask is UPDATED in place (its question, context and
+    questions replaced by this full set) and returned with ``updated_open_ask`` true, instead of a
+    second card. Same kind = a question ask (kind question, or any questions) meets an open question
+    ask; a blocker meets an open blocker of the same kind. A plain prose ask never merges."""
     if kind and kind not in ASK_KINDS:
         raise SpineError(422, f"kind must be one of {', '.join(ASK_KINDS)}")
     clean_qs = validate_questions(questions)
@@ -301,23 +344,40 @@ async def create_ask(
     is_proof = bool(proof_ctx) and clean_ctx == proof_ctx
     if is_proof and (first := await _first_proof_ask(db, user_id, application_id, proof_ctx)):
         return first
-    if await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
-        raise SpineError(
-            429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first"
-        )
+    group = _merge_group(kind, clean_qs) if merge_open and application_id is not None and not is_proof else ""
     now = datetime.now(timezone.utc).isoformat()
+    target: Optional[int] = None
     async with db._db.transaction():
         if is_proof:  # two parallel callers: the loser waits here, then finds the winner's ask
             await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:{clean_ctx}",))
             if first := await _first_proof_ask(db, user_id, application_id, proof_ctx):
                 return first
-        cur = await db._db.execute(
-            "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at, "
-            "kind, questions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, application_id, clean_q, clean_ctx, asked_by, now, kind,
-             json.dumps(clean_qs) if clean_qs else ""),
-        )
-        ask_id = int(cur.lastrowid or 0)
+        if group:  # two parallel runs for one job: the loser waits, then updates the winner's ask
+            await db._db.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:ask:{application_id}:{group}",)
+            )
+            target = await _open_ask_to_update(db, user_id, int(application_id or 0), group)
+        if target is None:
+            if await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
+                raise SpineError(
+                    429,
+                    f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); "
+                    "answer some first",
+                )
+            cur = await db._db.execute(
+                "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at, "
+                "kind, questions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, application_id, clean_q, clean_ctx, asked_by, now, kind,
+                 json.dumps(clean_qs) if clean_qs else ""),
+            )
+            ask_id = int(cur.lastrowid or 0)
+        else:  # the open ask's row is a cache slot; the `asked` event below keeps this version in history
+            ask_id = target
+            await db._db.execute(
+                "UPDATE application_asks SET question = ?, context = ?, kind = ?, questions = ? "
+                "WHERE id = ? AND user_id = ?",
+                (clean_q, clean_ctx, kind, json.dumps(clean_qs) if clean_qs else "", ask_id, user_id),
+            )
         if application_id is not None:
             await append_event(
                 db, user_id=user_id, application_id=application_id, event_type="asked",
@@ -325,9 +385,9 @@ async def create_ask(
                 occurred_at=now, recorded_by=asked_by,
             )
     get_audit_logger().info(
-        "ask_created",
+        "ask_updated" if target is not None else "ask_created",
         extra={
-            "event": "ask_created", "user_id": user_id, "ask_id": ask_id,
+            "event": "ask_updated" if target is not None else "ask_created", "user_id": user_id, "ask_id": ask_id,
             "has_application": application_id is not None,
         },
     )
@@ -335,7 +395,31 @@ async def create_ask(
         _log_no_proof_ask(user_id, application_id, "created")
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None
+    if target is not None:
+        ask["updated_open_ask"] = True
+        ask["note"] = (
+            f"updated your open ask {ask_id} for this job (one ask per job): its questions are now this full set"
+        )
     return ask
+
+
+def _merge_group(kind: str, questions: list[dict[str, Any]]) -> str:
+    """Which open ask a new ask_user call folds into: 'question' (a question ask), a blocker kind, or ''."""
+    if kind == "question" or questions:
+        return "question"
+    return kind if kind in ASK_KINDS else ""
+
+
+async def _open_ask_to_update(db: JobDatabase, user_id: str, application_id: int, group: str) -> Optional[int]:
+    """The newest OPEN ask on this job in the same group (see ``_merge_group``), or None."""
+    cur = await db._db.execute(
+        "SELECT id FROM application_asks WHERE user_id = ? AND application_id = ? AND answered_at IS NULL "
+        "AND withdrawn_at IS NULL AND (kind = ? OR (? = 'question' AND questions <> '')) "
+        "ORDER BY id DESC LIMIT 1",
+        (user_id, application_id, group, group),
+    )
+    row = await cur.fetchone()
+    return int(row[0]) if row else None
 
 
 async def answer_ask(

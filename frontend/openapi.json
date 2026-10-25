@@ -2531,7 +2531,7 @@
       },
       "AskQuestionIn": {
         "additionalProperties": false,
-        "description": "One form question of an ask (0087): the answer the assistant filled in and where it came from.\nLengths, key shape, the source/answer pairing and the caps are checked in ``asks.validate_questions``.",
+        "description": "One form question of an ask (0087): the answer the assistant filled in and where it came from.\nEvery question carries an answer (owner 2026-10-25; no `none`): profile/memory/cv = Verified,\nguess/draft = Guessed. Lengths, key shape and the caps are checked in ``asks.validate_questions``.",
         "properties": {
           "answer": {
             "default": "",
@@ -2577,8 +2577,7 @@
               "memory",
               "cv",
               "guess",
-              "draft",
-              "none"
+              "draft"
             ],
             "title": "Source",
             "type": "string"
@@ -4327,6 +4326,17 @@
             "title": "Kind",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "question": {
             "title": "Question",
             "type": "string"
@@ -4355,6 +4365,11 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "updated_open_ask": {
+            "default": false,
+            "title": "Updated Open Ask",
+            "type": "boolean"
           },
           "user_words": {
             "default": "",
