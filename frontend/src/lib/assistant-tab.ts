@@ -72,14 +72,6 @@ export const P_COMPANY_DAYS = "assistant_settings.company_cap_days";
 export const P_WEEKLY_CAP = "assistant_settings.weekly_cap";
 export const P_MIN_GAP = "assistant_settings.min_gap_minutes";
 export const P_HOURS = "assistant_settings.apply_hours";
-/** Owner 2026-10-25: free-text "my PC is on" time (max 60). The backend field may not exist yet; the row feature-detects it. */
-export const P_PC_ON = "assistant_settings.pc_on_time";
-export const PC_ON_MAX = 60;
-/** The saved PC-on text from a settings view value (a string, or a field object holding one). */
-export function pcOnText(v: unknown): string {
-  const raw = v && typeof v === "object" && "value" in v ? (v as { value: unknown }).value : v;
-  return typeof raw === "string" ? raw : "";
-}
 export const P_GRANT_COUNT = "assistant_settings.auto_grant_count";
 export const P_GRANT_UNTIL = "assistant_settings.auto_grant_until";
 /** Server limits (core/settings.py + assistant_settings.py); the server re-checks every save. */
@@ -127,7 +119,6 @@ const KEY_LABEL: Record<string, string> = {
   [P_INBOX]: "Gmail check",
   [P_EVERY]: "Inbox check",
   [P_HUNT_EVERY]: "Job hunt",
-  [P_PC_ON]: "My PC-on time",
   [P_PEOPLE_HUNT]: "People hunt",
 };
 

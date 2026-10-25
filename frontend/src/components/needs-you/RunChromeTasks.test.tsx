@@ -3,12 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NeedsYou } from "./NeedsYou";
 import type { JobCardData } from "@/lib/job-cards";
 
-const getAssistantSettings = vi.fn();
 let cards: Partial<JobCardData>[] = [];
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   listAsks: async () => ({ asks: [], open_count: 0 }),
-  getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   answerAsk: vi.fn(), withdrawAsk: vi.fn(), confirmAsk: vi.fn(),
   confirmSettingRequest: vi.fn(), declineSettingRequest: vi.fn(),
 }));
@@ -26,7 +24,6 @@ const toastSuccess = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: vi.fn() } }));
 
 beforeEach(() => {
-  getAssistantSettings.mockReset().mockResolvedValue({ waiting: [], pc_on_time: { value: "Weekdays 9:00-18:00" } });
   toastSuccess.mockReset();
 });
 
@@ -38,7 +35,7 @@ describe("Run my Chrome tasks now", () => {
     expect(screen.queryByTestId("run-chrome-tasks")).toBeNull();
   });
 
-  it("opens an inline panel with the command, a Copy button and the PC-on time", async () => {
+  it("opens an inline panel with the command, and a Copy button; no PC-on time", async () => {
     cards = [{ applicationId: 1, ownBrowser: true, ownBrowserCount: 1 }];
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -47,7 +44,7 @@ describe("Run my Chrome tasks now", () => {
     expect(screen.getByText("Turn on your PC, open your assistant in Chrome and say:")).toBeInTheDocument();
     expect(screen.getByTestId("run-chrome-command")).toHaveTextContent("run 360 batch");
     expect(screen.getByText(/It works through the jobs marked Needs your Chrome, PC on\./)).toBeInTheDocument();
-    expect(await screen.findByTestId("run-chrome-pc-on")).toHaveTextContent("Your PC is usually on: Weekdays 9:00-18:00");
+    expect(screen.queryByTestId("run-chrome-pc-on")).toBeNull();
     fireEvent.click(screen.getByTestId("run-chrome-copy"));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("run 360 batch"));
   });
