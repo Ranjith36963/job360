@@ -80,6 +80,8 @@ class ReadyCard(BaseModel):
     flags: list[ReadyFlag]
     # Seconds left on the hold keeping this filled form's Job360 browser open (None = none held).
     held_seconds: Optional[int] = None
+    # Is that job's Job360 browser open now? False = it closed (idle or hold over); None = browser off / unknown.
+    form_open: Optional[bool] = None
 
 
 class ReadyToSendOut(BaseModel):
@@ -114,7 +116,12 @@ async def ready_to_send(
     )
     return ReadyToSendOut(
         paused=paused, total=len(cards), unflagged=len(cards) - flagged,
-        items=[ReadyCard(**c, held_seconds=_held(user.id, c["application_id"])) for c in cards[:limit]],
+        items=[
+            ReadyCard(
+                **c, held_seconds=_held(user.id, c["application_id"]), form_open=_open(user.id, c["application_id"])
+            )
+            for c in cards[:limit]
+        ],
     )
 
 
@@ -125,6 +132,15 @@ def _held(user_id: str, application_id: int) -> Optional[int]:
     from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
 
     return browser_agent.held_seconds(browser_agent.get_pool(), user_id, int(application_id))
+
+
+def _open(user_id: str, application_id: int) -> Optional[bool]:
+    """Is that job's browser open now (in memory, this process); None when the browser feature is off."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        return None
+    from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
+
+    return browser_agent.form_open(browser_agent.get_pool(), user_id, int(application_id))
 
 
 class CvToApproveRow(BaseModel):

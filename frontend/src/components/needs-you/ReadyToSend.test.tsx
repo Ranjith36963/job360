@@ -168,3 +168,23 @@ describe("Finish it here on a ready card", () => {
     expect(approveSend).not.toHaveBeenCalled();
   });
 });
+
+describe("the form was closed line", () => {
+  const text = "The form was closed. Press Send and it will be filled again, then sent.";
+
+  it("says so when the browser is gone, with no Finish button, and Send unchanged", () => {
+    render(<ReadyCard card={card(5, { form_open: false })} paused={false} onChanged={() => undefined} />);
+    expect(screen.getByTestId("ready-form-closed")).toHaveTextContent(text);
+    expect(screen.queryByTestId("ready-finish-5")).toBeNull();
+    expect(screen.getByTestId("ready-send-5")).toHaveTextContent("Send");
+    expect(screen.getByTestId("ready-decline-5")).toBeTruthy();
+  });
+
+  it("says nothing while the form is open or unknown", () => {
+    const { rerender } = render(<ReadyCard card={card(5, { form_open: true, held_seconds: 600 })} paused={false} onChanged={() => undefined} />);
+    expect(screen.queryByTestId("ready-form-closed")).toBeNull();
+    expect(screen.getByTestId("ready-finish-5")).toBeTruthy();
+    rerender(<ReadyCard card={card(5, { form_open: null })} paused={false} onChanged={() => undefined} />);
+    expect(screen.queryByTestId("ready-form-closed")).toBeNull();
+  });
+});

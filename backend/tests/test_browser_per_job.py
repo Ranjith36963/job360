@@ -499,3 +499,35 @@ async def test_a_refill_never_renews_the_captcha_hold_and_reholds_once_per_page(
         s.held_until = time.monotonic() - 1  # it ran out
         out = (await client.post("/api/browser", json={**_FILL, "application_id": app_id})).json()
         assert out["held_for_you"] is False and s.held_until < time.monotonic()  # no second one on this page
+
+
+@pytest.mark.asyncio
+async def test_ready_card_says_whether_that_jobs_form_is_still_open(authenticated_async_context, monkeypatch):
+    from src.core import settings
+    from src.services.browser_agent import agent
+
+    monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", True)
+    pool = _pool(monkeypatch, max_sessions=3)
+    monkeypatch.setattr(agent, "get_pool", lambda: pool)
+    answer = {"question": "Name", "answer": "Ada Lovelace", "source": "memory", "key": "contact.legal_last_name"}
+    async with authenticated_async_context() as client:
+        user_id = authenticated_async_context.fixture_user_id
+        app_id = await _bring(client, 1)
+        other = await _bring(client, 2)
+        await pool.get(agent.browser_key(user_id, app_id), create=True)
+        filled = {"form_url": "https://jobs.acme.com/apply/1", "fields_count": 1, "answers": [answer]}
+        resp = await client.post(f"/api/applications/{app_id}/events", json={"event_type": "form_filled", "payload": filled})
+        assert resp.status_code == 201, resp.text
+
+        async def form_open() -> object:
+            items = (await client.get("/api/ready-to-send", params={"application_id": app_id})).json()["items"]
+            return items[0]["form_open"]
+
+        before = pool._sessions[agent.browser_key(user_id, app_id)].last_used  # noqa: SLF001
+        assert await form_open() is True
+        assert agent.form_open(pool, user_id, other) is False  # another job's key: no browser there
+        assert pool._sessions[agent.browser_key(user_id, app_id)].last_used == before  # noqa: SLF001 - a read renews nothing
+        await pool.close(agent.browser_key(user_id, app_id), "idle")  # the idle reaper's close
+        assert await form_open() is False
+        monkeypatch.setattr(settings, "BROWSER_AGENT_ENABLED", False)
+        assert await form_open() is None

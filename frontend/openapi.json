@@ -10317,6 +10317,17 @@
             "title": "Form Filled Event Id",
             "type": "integer"
           },
+          "form_open": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Form Open"
+          },
           "held_seconds": {
             "anyOf": [
               {

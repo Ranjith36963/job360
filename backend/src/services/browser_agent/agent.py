@@ -1800,6 +1800,13 @@ def held_seconds(pool: Optional[BrowserPool], user_id: str, application_id: int)
     return int(left) if left > 0 else None
 
 
+def form_open(pool: Optional[BrowserPool], user_id: str, application_id: int) -> Optional[bool]:
+    """Whether that job's Job360 browser is open right now (read-only: renews and holds nothing); None = no pool."""
+    if pool is None:
+        return None
+    return browser_key(user_id, application_id) in pool._sessions
+
+
 SHOT_TRIES = 3
 
 
