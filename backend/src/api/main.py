@@ -39,6 +39,7 @@ from src.api.routes import (
     browser,
     calendar,
     client_log,
+    connectors,
     doctor,
     files,
     health,
@@ -279,6 +280,7 @@ app.include_router(recipes.router, prefix="/api")
 app.include_router(hunt_kit.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
 app.include_router(doctor.router, prefix="/api")  # agent doctor + report_missing_tool (feature 7)
+app.include_router(connectors.router, prefix="/api")  # the connector check (owner 2026-10-25)
 app.include_router(browser.router, prefix="/api")  # the Job360 browser agent (decision 29), off by default
 app.include_router(assistant_trigger.router, prefix="/api")  # Send starts my assistant (session only)
 app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)

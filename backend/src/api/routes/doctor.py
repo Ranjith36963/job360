@@ -169,6 +169,7 @@ async def doctor(
         "auto_emails": await _auto_emails_block(db, user.id, eff, now),
         "silent_after_interview": await _silent_after_interview(db, user.id, now),
         "interviews": await _interviews_block(db, user.id, now),
+        "connectors": await _connectors_block(db, user.id),
         **_tools_block(client_tools_version, client_tools_rev),
     }
 
@@ -250,6 +251,19 @@ async def _interviews_block(db: JobDatabase, user_id: str, now: datetime) -> dic
             exc_info=True,
         )
         return {"upcoming": [], "just_passed": []}
+
+
+async def _connectors_block(db: JobDatabase, user_id: str) -> dict[str, Any]:
+    """The connector check (owner 2026-10-25): the last report_capabilities per assistant and what is
+    missing or failing (services/profile/connectors.py). A failure reads as empty, never a 500."""
+    try:
+        from src.services.profile import connectors  # noqa: PLC0415
+
+        return connectors.summary(await connectors.latest_reports(db, user_id),
+                                  has_feed=await connectors.has_calendar_feed(db, user_id))
+    except Exception:  # noqa: BLE001
+        log.warning("doctor_connectors_failed", extra={"event": "doctor_connectors_failed"}, exc_info=True)
+        return {"reported": [], "missing_essential": [], "missing_recommended": [], "failing": []}
 
 
 def _tools_block(client_tools_version: str, client_tools_rev: Optional[int] = None) -> dict[str, Any]:

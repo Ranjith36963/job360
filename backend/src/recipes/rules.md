@@ -322,7 +322,8 @@ runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
 `reach` = get_recipe("reach") for its `application_ids` only, `batch`), then `mark_done` each (reach with
 its `application_ids`); `nothing_due` = end at once without
 writing anything. A duty under `running` is another run's right now: leave it. `hunt_hold` queue_full =
-the queue is full, so no hunt until it drains. Say how each ended: `mark_done(duty, outcome, reason)`, outcome done | partial | failed;
+the queue is full, so no hunt until it drains.
+A tool a run needed was missing, asks for a sign-in or is not on the plan: `report_capabilities` (status, `needed`). Say how each ended: `mark_done(duty, outcome, reason)`, outcome done | partial | failed;
 a failed run always names its reason (tool_unavailable, sign_in_needed, paid_plan_needed, network_blocked,
 rate_limited, needs_user, error) - never mark a failed run done. A failed duty waits 2h, 4h, 8h (at most
 24h); after 3 in a row the user sees a card saying what to fix. Job360 counts each duty from when it was last done

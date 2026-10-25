@@ -71,6 +71,8 @@ EXPECTED_TOOLS = {
     "check_auto_email",
     "doctor",
     "report_missing_tool",
+    # The connector check (owner 2026-10-25): which helper tools the assistant has - 37 -> 38.
+    "report_capabilities",
     # The form check (weak spot #1) - which live-form questions have a saved answer - 29 -> 30.
     "check_form",
     # The Job360 browser agent (VISION decision 29, 2026-10-19) - 32 -> 33.

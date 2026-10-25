@@ -1,0 +1,116 @@
+{
+  "_doc": "DATA, not code (owner 2026-10-25). Helper connectors Job360 suggests per assistant and category. Job360 never ranks, never calls a vendor and stores no key. Every link is https on a domain in vendor_domains. A plan Job360 could not verify has plan_note null and tier optional. Re-check entries older than 60 days.",
+  "vendor_domains": [
+    "claude.ai", "chatgpt.com", "gemini.google.com", "support.google.com", "indeed.com", "ziprecruiter.com",
+    "apollo.io", "clay.com", "lusha.com", "vibeprospecting.ai", "hunter.io"
+  ],
+  "tiers": {
+    "gmail": "essential",
+    "job_search": "recommended",
+    "people_lookup": "recommended",
+    "calendar": "optional",
+    "company_lookup": "optional",
+    "browser": "optional",
+    "web_search": "optional"
+  },
+  "assistants": {
+    "claude": {
+      "label": "Claude",
+      "connect_url": "https://claude.ai/settings/connectors",
+      "verified_on": "2026-10-25",
+      "entries": [
+        {"category": "gmail", "name": "Gmail", "tier": "essential", "free": null, "plan_note": null,
+         "unlocks": "Your assistant reads replies and drafts emails for you. Job360 never sends through it.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"},
+        {"category": "calendar", "name": "Google Calendar", "tier": "optional", "free": null, "plan_note": null,
+         "unlocks": "Your assistant can see your calendar when it plans around interviews.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"},
+        {"category": "job_search", "name": "Indeed", "tier": "recommended", "free": null, "plan_note": null,
+         "unlocks": "Your assistant searches Indeed jobs. Many company job boards already work without it.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"},
+        {"category": "people_lookup", "name": "Hunter", "tier": "optional", "free": true,
+         "plan_note": "50 free credits a month.",
+         "unlocks": "Finds a work email for a person your assistant wants to reach.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"},
+        {"category": "people_lookup", "name": "Sprouts Data Intelligence", "tier": "recommended", "free": null,
+         "plan_note": "Uses credits.",
+         "unlocks": "Finds the people at a company who can help with your application.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"},
+        {"category": "people_lookup", "name": "Vibe Prospecting", "tier": "recommended", "free": null,
+         "plan_note": "Free sign-up, then credits.",
+         "unlocks": "Finds the people at a company who can help with your application.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"},
+        {"category": "people_lookup", "name": "Apollo.io", "tier": "optional", "free": false,
+         "plan_note": "People search needs a paid plan.",
+         "unlocks": "Finds people at a company.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"},
+        {"category": "company_lookup", "name": "Apollo.io", "tier": "optional", "free": true,
+         "plan_note": "Company lookup is free.",
+         "unlocks": "Looks up facts about a company before you apply.",
+         "connect_url": "https://claude.ai/settings/connectors", "verified_on": "2026-10-25"}
+      ]
+    },
+    "chatgpt": {
+      "label": "ChatGPT",
+      "connect_url": "https://chatgpt.com/plugins",
+      "verified_on": "2026-10-25",
+      "entries": [
+        {"category": "gmail", "name": "Gmail", "tier": "essential", "free": null,
+         "plan_note": "Plus, Pro, Business or Enterprise. Free plans not verified.",
+         "unlocks": "Your assistant reads replies and drafts emails for you. Job360 never sends through it.",
+         "connect_url": "https://chatgpt.com/plugins", "verified_on": "2026-10-25"},
+        {"category": "calendar", "name": "Google Calendar", "tier": "optional", "free": null, "plan_note": null,
+         "unlocks": "Your assistant can see your calendar when it plans around interviews.",
+         "connect_url": "https://chatgpt.com/plugins", "verified_on": "2026-10-25"},
+        {"category": "job_search", "name": "Indeed", "tier": "recommended", "free": null,
+         "plan_note": "You apply on Indeed itself.",
+         "unlocks": "Your assistant searches Indeed jobs. Many company job boards already work without it.",
+         "connect_url": "https://chatgpt.com/plugins",
+         "source_url": "https://www.indeed.com/news/releases/indeed-launches-app-in-chatgpt",
+         "verified_on": "2026-10-25"},
+        {"category": "job_search", "name": "ZipRecruiter", "tier": "optional", "free": null, "plan_note": null,
+         "unlocks": "Your assistant searches ZipRecruiter jobs.",
+         "connect_url": "https://chatgpt.com/plugins", "source_url": "https://www.ziprecruiter.com/blog/chatgpt-app/",
+         "verified_on": "2026-10-25"},
+        {"category": "people_lookup", "name": "Clay", "tier": "recommended", "free": true,
+         "plan_note": "500 free credits, then paid.",
+         "unlocks": "Finds the people at a company who can help with your application.",
+         "connect_url": "https://chatgpt.com/plugins",
+         "source_url": "https://www.clay.com/guides/how-to-use-clay-in-chatgpt", "verified_on": "2026-10-25"},
+        {"category": "people_lookup", "name": "Lusha", "tier": "optional", "free": null, "plan_note": "Uses credits.",
+         "unlocks": "Finds contact details for a person your assistant wants to reach.",
+         "connect_url": "https://chatgpt.com/plugins",
+         "source_url": "https://docs.lusha.com/user-guide/mcp/using-lusha-inside-llms", "verified_on": "2026-10-25"},
+        {"category": "people_lookup", "name": "Apollo", "tier": "optional", "free": false,
+         "plan_note": "People search needs a paid plan or a work email.",
+         "unlocks": "Finds people at a company.",
+         "connect_url": "https://chatgpt.com/plugins", "source_url": "https://docs.apollo.io/docs/apollo-mcp",
+         "verified_on": "2026-10-25"}
+      ]
+    },
+    "gemini": {
+      "label": "Gemini",
+      "connect_url": "https://gemini.google.com/apps",
+      "verified_on": "2026-10-25",
+      "entries": [
+        {"category": "gmail", "name": "Google Workspace", "tier": "essential", "free": null,
+         "plan_note": "Needs Gmail smart features and Keep Activity turned on.",
+         "unlocks": "Your assistant reads replies and drafts emails for you. Job360 never sends through it.",
+         "connect_url": "https://gemini.google.com/apps", "verified_on": "2026-10-25"},
+        {"category": "calendar", "name": "Google Workspace", "tier": "optional", "free": null, "plan_note": null,
+         "unlocks": "Your assistant can see your calendar when it plans around interviews.",
+         "connect_url": "https://gemini.google.com/apps", "verified_on": "2026-10-25"},
+        {"category": "browser", "name": "Gemini Tasks", "tier": "optional", "free": false,
+         "plan_note": "Google AI Pro or Ultra. Not available in the UK, EEA or Switzerland.",
+         "unlocks": "Your assistant can fill forms in a browser.",
+         "connect_url": "https://gemini.google.com/apps", "verified_on": "2026-10-25"}
+      ]
+    },
+    "other": {
+      "label": "Your assistant",
+      "connect_url": null,
+      "verified_on": null,
+      "entries": []
+    }
+  }
+}
