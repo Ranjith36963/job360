@@ -7736,6 +7736,8 @@ export interface components {
         ReadyAnswer: {
             /** Answer */
             answer: string;
+            /** Changed Reason */
+            changed_reason?: ("owner_edit" | "approved_for_employer" | "saved_answer") | null;
             /** Changed To */
             changed_to?: string | null;
             /** Key */

@@ -53,8 +53,10 @@ export function ReadyCard({
   const [finishing, setFinishing] = useState(false);
   const preparer = whoLabel(card.filled_by).name;
   const prepared = clock(card.filled_at);
-  // Answers the user edited: the yes still goes through, and the assistant types them before it sends.
-  const changed = card.answers.filter((a) => a.changed_to != null).length;
+  // Answers the user edited after this fill (owner_edit), and saved answers the assistant did not type
+  // as saved: the yes still goes through, and the assistant types them before it sends.
+  const changed = card.answers.filter((a) => a.changed_to != null && isOwnerEdit(a)).length;
+  const savedTyped = card.answers.filter((a) => a.changed_to != null && !isOwnerEdit(a)).length;
 
   async function decide(send: boolean) {
     setBusy(true);
@@ -200,9 +202,16 @@ export function ReadyCard({
             )}
           </p>
         )}
-        {changed > 0 ? (
+        {changed + savedTyped > 0 ? (
           <span data-testid={`ready-changed-${card.application_id}`} className="text-xs text-info">
-            {`You changed ${changed} answer${changed === 1 ? "" : "s"}. Your assistant types ${changed === 1 ? "it" : "them"} in before it sends.`}
+            {[
+              changed > 0 &&
+                `You changed ${changed} answer${changed === 1 ? "" : "s"}. Your assistant types ${changed === 1 ? "it" : "them"} in before it sends.`,
+              savedTyped > 0 &&
+                `${savedTyped} saved answer${savedTyped === 1 ? "" : "s"} will be typed in before it sends.`,
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </span>
         ) : (
           <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
@@ -220,6 +229,12 @@ export function ReadyCard({
       )}
     </article>
   );
+}
+
+/** The user's own edit after this fill - the only answer the card says "You changed" about. A
+ * missing ``changed_reason`` (an older backend) reads as a saved answer, never as the user's act. */
+function isOwnerEdit(a: ReadyAnswer): boolean {
+  return a.changed_reason === "owner_edit";
 }
 
 /** One answer: what was typed, where it came from, and - for a memory answer or a
@@ -296,6 +311,18 @@ function AnswerRow({
             </button>
           </div>
         </div>
+      ) : a.changed_to != null && !isOwnerEdit(a) ? (
+        // A saved answer, not the user's edit: just the one value that will be typed, never "(blank) -> Yes".
+        <span className="flex flex-col gap-0.5 break-words">
+          <span data-testid={`ready-answer-changed-${id}`} className="whitespace-pre-wrap font-medium">
+            <AnswerText value={a.changed_to} />
+          </span>
+          <span className="text-xs text-info">
+            {a.changed_reason === "approved_for_employer"
+              ? "Your approved answer for this employer. Your assistant types it in before it sends."
+              : "Your saved answer. Your assistant types it in before it sends."}
+          </span>
+        </span>
       ) : a.changed_to != null ? (
         <span className="flex flex-col gap-0.5 break-words">
           <span className="text-muted-foreground line-through">{a.answer || "(blank)"}</span>

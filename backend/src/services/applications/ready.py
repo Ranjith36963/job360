@@ -194,17 +194,17 @@ def _company_key(company: str) -> Optional[str]:
     return kit.normalized_company_key(company) if company.strip() else None
 
 
-def _approved_for(
+def _approved_record(
     profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None
-) -> Optional[str]:
-    """The user's approved answer to ``question`` (or one of its other wordings), for this
+) -> Optional[dict[str, Any]]:
+    """The user's approved answer RECORD to ``question`` (or one of its other wordings), for this
     company or any company; the last one in the list wins. None when there is none.
     ``topic`` (the key the fill named) wins over the wording, as check_form matches it: a
     "Current location" saved on an India form is not the answer on a UK form that typed the
     international topic (application 107, 2026-10-20)."""
     q = _norm(question)
-    by_topic: Optional[str] = None
-    hit: Optional[str] = None
+    by_topic: Optional[dict[str, Any]] = None
+    hit: Optional[dict[str, Any]] = None
     for rec in kit._records(profile.user_info.answers):
         if rec.get("approved") is not True or not kit._present(rec.get("answer")):
             continue
@@ -212,11 +212,44 @@ def _approved_for(
         if scoped and kit.normalized_company_key(scoped) != company_key:
             continue
         if topic and str(rec.get("topic") or "") == topic:
-            by_topic = str(rec["answer"])
+            by_topic = rec
         wordings = [rec.get("question"), *(rec.get("aliases") or [])]
         if q in {_norm(w) for w in wordings if isinstance(w, str)}:
-            hit = str(rec["answer"])
+            hit = rec
     return by_topic if by_topic is not None else hit
+
+
+def _approved_for(
+    profile: Any, question: str, company_key: Optional[str], topic: Optional[str] = None
+) -> Optional[str]:
+    """The answer text of :func:`_approved_record`; None when there is none."""
+    rec = _approved_record(profile, question, company_key, topic)
+    return None if rec is None else str(rec["answer"])
+
+
+def _when(value: Any) -> Optional[datetime]:
+    """A stored timestamp (ISO text or datetime) as an aware datetime; None when unreadable."""
+    if isinstance(value, datetime):
+        at = value
+    else:
+        try:
+            at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+
+
+def _after_fill(saved_at: Any, filled_at: Any) -> bool:
+    """True only when both times read and ``saved_at`` is later than the fill."""
+    s, f = _when(saved_at), _when(filled_at)
+    return s is not None and f is not None and s > f
+
+
+# Why a typed answer has ``changed_to`` (application 122, 2026-10-25): only ``owner_edit`` is the
+# user changing it - their web session saved this word AFTER the assistant filled this form (an Edit
+# on the card, an answer on Needs you). A word saved BEFORE the fill is memory the assistant did not
+# type as saved: ``approved_for_employer`` (approved for this company only) or ``saved_answer``.
+OWNER_EDIT, APPROVED_FOR_EMPLOYER, SAVED_ANSWER = "owner_edit", "approved_for_employer", "saved_answer"
 
 
 def _memory_text(profile: Any, key: str) -> Optional[str]:
@@ -231,24 +264,37 @@ def _memory_text(profile: Any, key: str) -> Optional[str]:
 
 def _user_check(
     a: dict[str, Any], profile: Any, saved: dict[str, tuple[Any, Any]], company_key: Optional[str],
-    have: dict[str, dict[str, Any]],
-) -> tuple[bool, Optional[str]]:
-    """(verified, changed_to) for one typed answer, read from the user's OWN word:
+    have: dict[str, dict[str, Any]], filled_at: Any = None,
+) -> tuple[bool, Optional[str], Optional[str]]:
+    """(verified, changed_to, changed_reason) for one typed answer, read from the user's OWN word:
     their approved answer to this question, else a memory row they saved on the web
     that still holds this key. ``changed_to`` = the user's word when it differs from
-    what the assistant typed."""
-    word = _approved_for(profile, a["question"], company_key, str(a.get("key") or "") or None)
-    if word is not None:
-        return (True, None) if _typed_is(a, word) else (False, word)
+    what the assistant typed; ``changed_reason`` says whose act made it differ (see OWNER_EDIT)."""
+    rec = _approved_record(profile, a["question"], company_key, str(a.get("key") or "") or None)
+    if rec is not None:
+        word = str(rec["answer"])
+        if _typed_is(a, word):
+            return True, None, None
+        by_list = saved.get(user_info.USER_INFO_ANSWERS_PATH, (None, None))[0]
+        if (by_list and not is_assistant_actor(str(by_list))
+                and _after_fill(rec.get("recorded_at"), filled_at)):
+            reason = OWNER_EDIT
+        elif str(rec.get("company") or "").strip():
+            reason = APPROVED_FOR_EMPLOYER
+        else:
+            reason = SAVED_ANSWER
+        return False, word, reason
     key = str(a.get("key") or "")
     path = _BLOCK_PATH.get(key.split(".", 1)[0], "")
-    by = saved.get(path, (None, None))[0] if a["source"] == "memory" and path and key in have else None
+    by, at = saved.get(path, (None, None)) if a["source"] == "memory" and path and key in have else (None, None)
     if not by or is_assistant_actor(str(by)):
-        return False, None
+        return False, None, None
     text = _memory_text(profile, key)
     if text is not None and not _typed_is(a, text):
-        return False, text if _field_target(key) else None
-    return True, None
+        if not _field_target(key):
+            return False, None, None
+        return False, text, OWNER_EDIT if _after_fill(at, filled_at) else SAVED_ANSWER
+    return True, None, None
 
 
 def _typed_is(a: dict[str, Any], text: str) -> bool:
@@ -259,11 +305,19 @@ def _typed_is(a: dict[str, Any], text: str) -> bool:
     return _norm(text) == _norm(a["answer"])
 
 
+_CHANGED_TEXT = {
+    OWNER_EDIT: f"You changed an answer: {{q}} {_DASH} your assistant types your answer before it sends",
+    APPROVED_FOR_EMPLOYER: "Your approved answer for this employer will be typed: {q}",
+    SAVED_ANSWER: "Your saved answer will be typed: {q}",
+}
+
+
 def _answer_rows(
     typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
-    profile: Any = None, company_key: Optional[str] = None,
+    profile: Any = None, company_key: Optional[str] = None, filled_at: Any = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """(answers with saved_by / saved_at / verified / changed_to, the flags they raise)."""
+    """(answers with saved_by / saved_at / verified / changed_to / changed_reason, the flags they
+    raise). ``filled_at`` is when the fill was recorded: only a web save after it is an owner edit."""
     answers: list[dict[str, Any]] = []
     flags: list[dict[str, Any]] = []
     for a in typed:
@@ -275,17 +329,18 @@ def _answer_rows(
             at = have[key]["saved_at"]
             if src == "memory":
                 by, at = saved.get(_BLOCK_PATH.get(str(key).split(".", 1)[0], ""), (None, at))
-        verified, changed_to = (
-            _user_check(a, profile, saved, company_key, have) if profile is not None else (False, None)
+        verified, changed_to, reason = (
+            _user_check(a, profile, saved, company_key, have, filled_at) if profile is not None
+            else (False, None, None)
         )
         answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
-                        "changed_to": changed_to})
+                        "changed_to": changed_to, "changed_reason": reason})
         if changed_to is not None:
             # Owner decision 2026-10-19: the user's own word IS verified, and Send stays open -
             # check_submit hands the assistant this answer to type before it submits.
             answers[-1]["verified"] = True
-            flags.append(_flag("changed", f"You changed an answer: {a['question']} {_DASH} your assistant types "
-                                          "your answer before it sends", key))
+            # The code stays "changed" (Send all holds on it); only the user's own edit says "You changed".
+            flags.append(_flag("changed", _CHANGED_TEXT[reason or SAVED_ANSWER].format(q=a["question"]), key))
             continue  # the user's word replaces the typed one: no guessed / blank / memory flag for it
         if src == "guessed" and not verified:
             flags.append(_flag("guessed", f"An answer was guessed: {a['question']}", key))
@@ -517,7 +572,9 @@ async def ready_cards(
         if not isinstance(typed, list) or not typed:
             flags.append(_flag("no_answers", "Your assistant did not list the answers it typed"))
             typed = []
-        answers, answer_flags = _answer_rows(typed, have, saved, profile, _company_key(r["job_company"] or ""))
+        answers, answer_flags = _answer_rows(
+            typed, have, saved, profile, _company_key(r["job_company"] or ""), r["filled_at"]
+        )
         flags += answer_flags + _missing_flags(profile, missing, country)
         cv = await _doc(db, user_id, app_id, "cv")
         letter = await _doc(db, user_id, app_id, "cover_letter")

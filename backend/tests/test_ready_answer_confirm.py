@@ -337,3 +337,91 @@ def test_verify_keeps_a_same_worded_answer_saved_for_another_topic():
     out = _with_approved(profile, "Notice period?", "30 days", None)
     assert uk in out and old in out and plain not in out
     assert out[-1] == {"question": "Notice period?", "answer": "30 days", "approved": True}
+
+
+# -- Whose act made an answer differ (application 122, 2026-10-25) -----------------------------
+# The owner was asleep; the Dwelly card still said "You changed an answer: Phone". Only a web save
+# AFTER the fill is the owner's edit; memory saved before it is a saved answer the assistant types.
+
+
+def _changed(card: dict[str, Any]) -> list[tuple[str, Any, Any]]:
+    return [(a["question"], a["changed_to"], a["changed_reason"]) for a in card["answers"]]
+
+
+def _changed_texts(card: dict[str, Any]) -> list[str]:
+    return [f["text"] for f in card["flags"] if f["code"] == "changed"]
+
+
+@pytest.mark.asyncio
+async def test_an_edit_after_the_fill_is_an_owner_edit(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _fill(client, app_id, [GUESS])
+        fill = (await _card(client, app_id))["form_filled_event_id"]
+        card = (await _confirm(client, app_id, 0, fill, "No")).json()
+        assert _changed(card) == [(GUESS["question"], "No", "owner_edit")]
+        assert _changed_texts(card) == [f"You changed an answer: {GUESS['question']} — your assistant types "
+                                        "your answer before it sends"]
+
+
+@pytest.mark.asyncio
+async def test_an_approved_answer_saved_before_the_fill_is_a_saved_answer_not_an_edit(
+    authenticated_async_context, fixture_user_id
+):
+    """The Needs-you approve (PR #1219) saves the owner's yes from their web session BEFORE the
+    assistant fills; the fill then typed something else. The gate still hands over the saved word."""
+    from src.api import dependencies as api_deps
+    from src.services.applications import ready, spine
+
+    rtw = {"question": "Location and right to work", "answer": "Yes", "approved": True,
+           "topic": "right_to_work.GB.yes_no"}
+    async with authenticated_async_context() as client:
+        resp = await client.patch("/api/profile", json={"edits": [_e("user_info.answers", [rtw])]})
+        assert resp.status_code == 200, resp.text
+        app_id = await _bring(client)
+        await _fill(client, app_id, [{"question": rtw["question"], "answer": "", "source": "approved",
+                                      "key": rtw["topic"]}])
+        card = await _card(client, app_id)
+        assert _changed(card) == [(rtw["question"], "Yes", "saved_answer")]
+        assert _changed_texts(card) == ["Your saved answer will be typed: Location and right to work"]
+        assert not any("You changed" in f["text"] for f in card["flags"])
+        db = await api_deps.get_db()
+        row = await spine.get_owned_application(db, fixture_user_id, app_id)
+        assert await ready.changed_answers(db, fixture_user_id, row) == [
+            {"question": rtw["question"], "answer": "Yes"}
+        ], "the gate still types the saved word"
+
+
+@pytest.mark.asyncio
+async def test_an_answer_approved_for_this_employer_says_so(authenticated_async_context, fixture_user_id):
+    why = {"question": "Why Certa?", "answer": "I like the pipelines.", "approved": True, "company": "Certa"}
+    async with authenticated_async_context() as client:
+        resp = await client.patch("/api/profile", json={"edits": [_e("user_info.answers", [why])]})
+        assert resp.status_code == 200, resp.text
+        app_id = await _bring(client)
+        await _fill(client, app_id, [{"question": "Why Certa?", "answer": "Because.", "source": "written"}])
+        card = await _card(client, app_id)
+        assert _changed(card) == [("Why Certa?", "I like the pipelines.", "approved_for_employer")]
+        assert _changed_texts(card) == ["Your approved answer for this employer will be typed: Why Certa?"]
+
+
+@pytest.mark.asyncio
+async def test_a_phone_saved_on_the_web_before_the_fill_is_a_saved_answer(
+    authenticated_async_context, fixture_user_id
+):
+    """Application 122's Phone row: the contact block's newest row is the owner's web save, made long
+    before the fill, and the assistant typed the number another way."""
+    phone = {"question": "Phone", "answer": "+44 7442 564327", "source": "memory", "key": "contact.phone"}
+    async with authenticated_async_context() as client:
+        resp = await client.patch("/api/profile", json={"edits": [_e("user_info.contact", {"phone": "+447442564327"})]})
+        assert resp.status_code == 200, resp.text
+        app_id = await _bring(client)
+        await _fill(client, app_id, [phone])
+        card = await _card(client, app_id)
+        assert _changed(card) == [("Phone", "+447442564327", "saved_answer")]
+        assert _changed_texts(card) == ["Your saved answer will be typed: Phone"]
+        # The owner edits it on the card AFTER the fill: now it is their change.
+        fill = card["form_filled_event_id"]
+        card = (await _confirm(client, app_id, 0, fill, "+44 7700 900123")).json()
+        assert _changed(card) == [("Phone", "+44 7700 900123", "owner_edit")]
+        assert _changed_texts(card)[0].startswith("You changed an answer: Phone")
