@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { deleteDutyTrigger, getDutyTriggers, runDuty, saveDutyTrigger, type Duty, type DutyTrigger } from "@/lib/api";
@@ -9,9 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatDateTime } from "@/lib/format-date";
+import { fetchSettingsShared } from "@/lib/assistant-state";
+import { settingScore } from "@/lib/assistant-tab";
+import type { AssistantSettingsView } from "@/lib/api";
 import {
   CARD_CLASS,
-  DANGER_BTN_CLASS,
   DESC_CLASS,
   PRIMARY_BTN_CLASS,
   QUIET_BTN_CLASS,
@@ -57,7 +59,34 @@ function lastText(row: DutyTrigger): string {
   return `Last start: ${result}${row.last_fired_at ? `, ${formatDateTime(row.last_fired_at)}` : ""}`;
 }
 
-function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promise<void> }) {
+/**
+ * "Every N hours" for a duty, or "" when no interval is saved anywhere. Only two duties have one:
+ * Hunt (hunt_every_hours) and Gmail check (check_every). Apply has a time window, People hunt an on/off
+ * switch: neither is an interval, so they show nothing.
+ */
+export function scheduleText(duty: Duty, view: AssistantSettingsView | null): string {
+  if (!view) return "";
+  if (duty === "hunt") {
+    const n = settingScore(view.hunt_every_hours);
+    if (n == null || n <= 0) return "";
+    return `Every ${n} ${n === 1 ? "hour" : "hours"}`;
+  }
+  if (duty === "inbox") {
+    const raw = (view.check_every ?? "").trim();
+    if (!raw) return "";
+    const m = /^(\d+)\s*h(?:ours?)?$/i.exec(raw);
+    if (m) {
+      const n = Number(m[1]);
+      return `Every ${n} ${n === 1 ? "hour" : "hours"}`;
+    }
+    return `Every ${raw}`;
+  }
+  return "";
+}
+
+function DutyRow({ row, schedule, onChanged }: { row: DutyTrigger; schedule: string; onChanged: () => Promise<void> }) {
+  const [replacing, setReplacing] = useState(false);
+  const menuRef = useRef<HTMLDetailsElement>(null);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,6 +109,7 @@ function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promis
       await saveDutyTrigger(row.duty, url.trim(), token.trim());
       setUrl("");
       setToken("");
+      setReplacing(false);
       toast.success(`Saved. ${row.label} can now start at once.`);
     }, "Could not save that link.");
 
@@ -98,8 +128,21 @@ function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promis
 
   return (
     <li className="space-y-2 rounded-lg border border-border p-3" data-testid={id}>
-      <div>
-        <p className="font-medium">{row.label}</p>
+      <div className="space-y-0.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium">{row.label}</p>
+          <span
+            className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+            data-testid={`${id}-pill`}
+          >
+            {row.set ? "Linked" : "Not linked"}
+          </span>
+          {schedule && (
+            <span className="text-xs text-muted-foreground" data-testid={`${id}-schedule`}>
+              {schedule}
+            </span>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground">Your assistant {WHAT[row.duty]}.</p>
       </div>
       {row.set ? (
@@ -115,14 +158,44 @@ function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promis
             <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} disabled={busy} onClick={() => void run(true)}>
               Test
             </Button>
-            <Button variant="destructive" size="sm" type="button" className={DANGER_BTN_CLASS} disabled={busy} onClick={() => void remove()}>
-              Remove
-            </Button>
+            <details ref={menuRef} className="relative">
+              <summary
+                aria-label={`More actions for ${row.label}`}
+                className="inline-flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-border text-sm hover:bg-muted [&::-webkit-details-marker]:hidden"
+              >
+                <span aria-hidden="true">⋯</span>
+              </summary>
+              <div className="absolute left-0 z-10 mt-1 flex min-w-32 flex-col rounded-md border border-border bg-card p-1 shadow-md sm:left-auto sm:right-0">
+                <button
+                  type="button"
+                  className="rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => {
+                    if (menuRef.current) menuRef.current.open = false;
+                    setReplacing(true);
+                  }}
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  className="rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-muted disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => {
+                    if (menuRef.current) menuRef.current.open = false;
+                    void remove();
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </details>
           </div>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">Not set: it waits for your hourly run.</p>
       )}
+      {(!row.set || replacing) && (
       <form
         className="flex flex-col gap-2 sm:flex-row"
         onSubmit={(e) => {
@@ -147,7 +220,13 @@ function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promis
         <Button variant="default" size="sm" type="submit" className={PRIMARY_BTN_CLASS} disabled={busy || !url.trim()}>
           {row.set ? "Replace" : "Save"}
         </Button>
+        {replacing && (
+          <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => setReplacing(false)}>
+            Cancel
+          </Button>
+        )}
       </form>
+      )}
     </li>
   );
 }
@@ -159,6 +238,7 @@ function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promis
  */
 export function DutyStartLinksCard() {
   const [rows, setRows] = useState<DutyTrigger[] | null>(null);
+  const [settings, setSettings] = useState<AssistantSettingsView | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -172,6 +252,22 @@ export function DutyStartLinksCard() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load on mount, like SendStartsAssistantCard
     void load();
   }, [load]);
+
+  useEffect(() => {
+    // Read-only: the schedule is shown, never edited here. A failed read just hides the schedules.
+    let cancelled = false;
+    try {
+      fetchSettingsShared("connect-duties").then(
+        (v) => !cancelled && setSettings(v),
+        () => {},
+      );
+    } catch {
+      // never block the start links on the schedule read
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <Card className={CARD_CLASS} data-testid="duty-start-links">
@@ -200,7 +296,7 @@ export function DutyStartLinksCard() {
         {rows && (
           <ul className="space-y-3">
             {rows.map((row) => (
-              <DutyRow key={row.duty} row={row} onChanged={load} />
+              <DutyRow key={row.duty} row={row} schedule={scheduleText(row.duty, settings)} onChanged={load} />
             ))}
           </ul>
         )}
