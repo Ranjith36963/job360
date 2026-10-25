@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
@@ -19,7 +19,9 @@ import { relativeTime } from "@/lib/utils";
 import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
-import { JobCards, loadJobCards } from "./JobCards";
+import { JobCards } from "./JobCards";
+import type { JobCardsReport } from "./JobCards";
+import { groupAsks } from "@/lib/job-cards";
 import { RunChromeTasks } from "./RunChromeTasks";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
@@ -308,10 +310,10 @@ async function waitingRequests(): Promise<WaitingRequest[]> {
   }
 }
 
-/** Open + answered asks, the waiting setting changes, and the open asks as one card per job. */
+/** Open + answered asks and the waiting setting changes. The job cards load themselves, lazily. */
 async function fetchAll() {
   const [o, a, w] = await Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()]);
-  return [o, a, w, await loadJobCards(o.asks)] as const;
+  return [o, a, w] as const;
 }
 
 function announce(openCount: number) {
@@ -320,7 +322,8 @@ function announce(openCount: number) {
 
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
-  const [jobs, setJobs] = useState<Awaited<ReturnType<typeof loadJobCards>>>({ cards: [], general: [] });
+  // What the job list reports: its loaded cards, the asks it could not place, how many jobs it lists.
+  const [jobs, setJobs] = useState<JobCardsReport>({ cards: [], failed: [], total: 0, settled: false });
   // Setting changes an assistant asked for, waiting for the user's OK (S2).
   const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
@@ -338,10 +341,8 @@ export function NeedsYou() {
       o: Awaited<ReturnType<typeof listAsks>>,
       a: Awaited<ReturnType<typeof listAsks>>,
       w: WaitingRequest[],
-      j: Awaited<ReturnType<typeof loadJobCards>>,
     ) => {
       setOpen(o.asks);
-      setJobs(j);
       setAnswered(a.asks);
       setWaiting(w);
       setMoreAnswered(a.asks.length >= PAGE);
@@ -353,6 +354,8 @@ export function NeedsYou() {
 
   // Reload after an answer or withdraw. On failure the old lists stay on
   // screen and the error shows above them with a retry.
+  const general = useMemo(() => (open ? [...groupAsks(open).general, ...jobs.failed] : []), [open, jobs.failed]);
+
   const load = useCallback(async () => {
     try {
       apply(...(await fetchAll()));
@@ -438,19 +441,19 @@ export function NeedsYou() {
         <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Waiting for you
         </h2>
-        {jobs.cards.length === 0 && jobs.general.length === 0 ? (
+        {jobs.settled && jobs.total === 0 && general.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
             {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
         ) : (
           <>
             {jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
-            <JobCards cards={jobs.cards} onChanged={load} />
-            {jobs.general.length > 0 && (
+            <JobCards open={open} onChanged={load} onReport={setJobs} />
+            {general.length > 0 && (
               <>
                 <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
                 <ul className="flex flex-col gap-3">
-                  {jobs.general.map((a) => (
+                  {general.map((a) => (
                     <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
                   ))}
                 </ul>
