@@ -17,6 +17,7 @@ vi.mock("@/lib/api", () => ({
   answerAskQuestions: (...a: unknown[]) => answerAskQuestions(...a),
   rememberAnswers: (...a: unknown[]) => rememberAnswers(...a),
   downloadApplicationArtifact: vi.fn(),
+  updateContact: vi.fn(),
 }));
 vi.mock("@/components/applications/FinishInBrowser", () => ({ FinishInBrowser: () => <div data-testid="finish-browser" /> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -84,9 +85,21 @@ describe("JobCard", () => {
     render(<JobCard card={card([], { people: [person] })} onChanged={onChanged} />);
     expect(screen.getByText(/I applied on 14 October/)).toBeInTheDocument();
     expect(screen.getByText("Found via Company team page")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open LinkedIn profile ↗" })).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
+    expect(screen.getByRole("link", { name: "Open profile ↗" })).toHaveAttribute("href", "https://www.linkedin.com/in/ada");
     fireEvent.click(screen.getByTestId("sent-4"));
     await waitFor(() => expect(markOutreachSent).toHaveBeenCalledWith(4, "linkedin"));
+  });
+
+  it("shows the first 3 people, then Show 2 more expands the rest", () => {
+    const person = (id: number) =>
+      ({ contact: { id, name: `Person ${id}`, role: "", found_via: null }, message: `Hi ${id}`, linkedinUrl: "https://www.linkedin.com/in/x" }) as unknown as JobCardData["people"][number];
+    render(<JobCard card={card([], { people: [1, 2, 3, 4, 5].map(person) })} onChanged={onChanged} />);
+    expect(screen.getByTestId("person-3")).toBeInTheDocument();
+    expect(screen.queryByTestId("person-4")).toBeNull();
+    fireEvent.click(screen.getByTestId("people-more-7"));
+    expect(screen.getByTestId("person-4")).toBeInTheDocument();
+    expect(screen.getByTestId("person-5")).toBeInTheDocument();
+    expect(screen.queryByTestId("people-more-7")).toBeNull();
   });
 
   it("skips the whole job only after a confirm", async () => {
