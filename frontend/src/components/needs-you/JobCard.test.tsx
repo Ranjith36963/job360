@@ -10,6 +10,11 @@ const markCvSeen = vi.fn();
 const markOutreachSent = vi.fn();
 const answerAskQuestions = vi.fn();
 const rememberAnswers = vi.fn();
+const queueBrowserTask = vi.fn();
+vi.mock("@/lib/browser-contract", async (orig) => ({
+  ...(await orig<typeof import("@/lib/browser-contract")>()),
+  queueBrowserTask: (...a: unknown[]) => queueBrowserTask(...a),
+}));
 vi.mock("@/lib/api", () => ({
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
@@ -47,6 +52,7 @@ beforeEach(() => {
   markOutreachSent.mockReset().mockResolvedValue({});
   answerAskQuestions.mockReset().mockResolvedValue({});
   rememberAnswers.mockReset().mockResolvedValue(undefined);
+  queueBrowserTask.mockReset().mockResolvedValue(undefined);
   onChanged.mockClear();
 });
 
@@ -56,7 +62,8 @@ describe("JobCard", () => {
     render(<JobCard card={card([captcha])} onChanged={onChanged} />);
     expect(screen.getByText("Only you can do this")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.getByRole("link", { name: "Open the form ↗" })).toHaveAttribute("href", "https://jobs.example.com/7");
+    for (const l of screen.getAllByRole("link", { name: "Open the form ↗" })) expect(l).toHaveAttribute("href", "https://jobs.example.com/7");
+    expect(within(screen.getByTestId(`blocker-${captcha.id}`)).getByRole("link", { name: "Open the form ↗" })).toBeInTheDocument();
     fireEvent.click(screen.getByTestId(`did-it-${captcha.id}`));
     await waitFor(() => expect(answerAsk).toHaveBeenCalledWith(captcha.id, "I did it myself on the form."));
     expect(onChanged).toHaveBeenCalled();
@@ -270,5 +277,63 @@ describe("JobCard", () => {
     expect(screen.getByTestId(`browser-chip-${b.id}`)).toHaveTextContent("Needs your Chrome, PC on");
     expect(screen.getByTestId(`browser-chip-${a.id}`)).toHaveTextContent("Job360's browser");
     expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Needs your Chrome, PC on");
+  });
+
+  const reach = (id: number, extra: Record<string, unknown> = {}) =>
+    ({ contact: { id, name: `Person ${id}`, role: "", found_via: null, email: "", ...extra }, message: `Hi ${id}`, linkedinUrl: "https://www.linkedin.com/in/x" }) as unknown as JobCardData["people"][number];
+
+  it("has a Job section and an Outreach section, with outreach reminders only under Outreach", () => {
+    const blocker = ask("Solve the CAPTCHA and press Submit");
+    const q = ask("What is your notice period?");
+    const reminder = ask("Send an intro note to the hiring team yourself");
+    const rem = { ...reminder, kind: "outreach" } as Ask;
+    const c = card([blocker, q, rem], { people: [reach(4)], cv: { artifactId: 1, version: 2 } });
+    c.asks[2] = { ask: rem, kind: "outreach" };
+    render(<JobCard card={c} onChanged={onChanged} />);
+    const job = screen.getByTestId("section-job-7");
+    const out = screen.getByTestId("section-outreach-7");
+    expect(within(job).getByRole("heading", { name: "Job" })).toBeInTheDocument();
+    expect(within(out).getByRole("heading", { name: "Outreach" })).toBeInTheDocument();
+    expect(within(job).getByTestId(`blocker-${blocker.id}`)).toBeInTheDocument();
+    expect(within(job).getByTestId(`question-${q.id}`)).toBeInTheDocument();
+    expect(within(job).getByTestId("cv-to-check")).toBeInTheDocument();
+    expect(within(job).getByText("Form filled, waiting for you")).toBeInTheDocument();
+    expect(within(job).getByTestId("section-form-link-7")).toHaveAttribute("href", "https://jobs.example.com/7");
+    expect(within(job).queryByTestId(`reminder-${rem.id}`)).toBeNull();
+    expect(within(out).getByTestId(`reminder-${rem.id}`)).toBeInTheDocument();
+    expect(within(out).getByTestId("person-4")).toBeInTheDocument();
+    expect(within(job).queryByTestId("person-4")).toBeNull();
+  });
+
+  it("omits the Outreach section when there is no outreach", () => {
+    render(<JobCard card={card([ask("Notice period?")])} onChanged={onChanged} />);
+    expect(screen.queryByTestId("section-outreach-7")).toBeNull();
+  });
+
+  it("gives every question row a link: the form, else the application page", () => {
+    const q = ask("What is your notice period?");
+    const { unmount } = render(<JobCard card={card([q])} onChanged={onChanged} />);
+    expect(within(screen.getByTestId(`question-${q.id}`)).getByRole("link", { name: "Open the form ↗" })).toHaveAttribute("href", "https://jobs.example.com/7");
+    unmount();
+    render(<JobCard card={card([q], { formUrl: "" })} onChanged={onChanged} />);
+    expect(within(screen.getByTestId(`question-${q.id}`)).getByRole("link", { name: "Open the application" })).toHaveAttribute("href", "/applications/7");
+  });
+
+  it("shows the browser button on a blocked row only when the ask has browser_task, and queues it", async () => {
+    const plain = ask("Solve the CAPTCHA and press Submit");
+    const { unmount } = render(<JobCard card={card([plain])} onChanged={onChanged} />);
+    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+    unmount();
+    const withField = { ...ask("Please sign in on the job site"), browser_task: null } as unknown as Ask;
+    render(<JobCard card={card([withField])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId(`task-browser-${withField.id}`));
+    await waitFor(() => expect(queueBrowserTask).toHaveBeenCalledWith(withField.id));
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("shows Queued for your browser when browser_task is set", () => {
+    const queued = { ...ask("Upload your CV on the form"), browser_task: { id: 1 } } as unknown as Ask;
+    render(<JobCard card={card([queued])} onChanged={onChanged} />);
+    expect(screen.getByTestId(`task-queued-${queued.id}`)).toHaveTextContent("Queued for your browser");
   });
 });

@@ -1,4 +1,4 @@
-import { updateContact } from "@/lib/api";
+import { postEmpty, updateContact } from "@/lib/api";
 import type { Ask, Contact } from "@/lib/api";
 
 /**
@@ -12,6 +12,10 @@ export const BROWSER_CONTRACT = {
   ownBrowserField: "needs_own_browser",
   /** On a contact: true = the owner approved a send by the assistant's browser. */
   readyToSendField: "ready_to_send",
+  /** On an ask: present (truthy = queued) once the backend supports queueing it for the owner's browser. */
+  askBrowserTaskField: "browser_task",
+  /** POST, {id} = the ask id. Placeholder until the Browser agent's endpoint lands. */
+  queueTaskPath: "/api/asks/{id}/browser-task",
 } as const;
 
 /** True only when the backend marks this ask for the owner's own Chrome. Absent = Job360's browser. */
@@ -29,4 +33,16 @@ export function browserSendState(contact: Contact): "unsupported" | "ready" | "q
 /** The owner's yes for one send by the assistant's browser. */
 export async function queueBrowserSend(contactId: number): Promise<void> {
   await updateContact(contactId, { [BROWSER_CONTRACT.readyToSendField]: true } as never);
+}
+
+/** "unsupported" when the ask has no browser_task key; "queued" when it is truthy; else "ready". */
+export function browserTaskState(ask: Ask): "unsupported" | "ready" | "queued" {
+  const a = ask as unknown as Record<string, unknown>;
+  if (!(BROWSER_CONTRACT.askBrowserTaskField in a)) return "unsupported";
+  return a[BROWSER_CONTRACT.askBrowserTaskField] ? "queued" : "ready";
+}
+
+/** Queue one ask's task for the owner's own browser. */
+export async function queueBrowserTask(askId: number): Promise<void> {
+  await postEmpty(BROWSER_CONTRACT.queueTaskPath.replace("{id}", String(askId)));
 }

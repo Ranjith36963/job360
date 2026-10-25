@@ -41,6 +41,8 @@ export function PersonRow({
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const c = person.contact;
+  const email = c.email?.trim() ?? "";
+  const emailFrom = c.email_source ?? c.found_via;
   const where = c.found_via ? `Found via ${closedSetLabel(c.found_via)}` : "";
   const state = c.linkedin_state && c.linkedin_state in STATE_LABEL ? c.linkedin_state : "unknown";
   const isMessage = state === "connected";
@@ -70,8 +72,14 @@ export function PersonRow({
           {c.name}
           {c.role && <span className="font-normal text-muted-foreground"> · {c.role}</span>}
         </p>
+        <span className={chip} data-testid={`channel-${c.id}`}>{email ? "Email" : "LinkedIn"}</span>
         <span className={chip} data-testid={`li-state-${c.id}`}>{STATE_LABEL[state]}</span>
       </div>
+      {email && (
+        <p className="text-xs text-muted-foreground" data-testid={`email-${c.id}`}>
+          {email}{emailFrom ? ` · from ${closedSetLabel(emailFrom)}` : ""}
+        </p>
+      )}
       {where && <p className="text-xs text-muted-foreground">{where}</p>}
       <p className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         {isMessage ? "Message" : "Connection note"}
@@ -90,14 +98,14 @@ export function PersonRow({
         {canQueue &&
           (queued ? (
             <button type="button" className={primaryBtn} disabled data-testid={`queued-${c.id}`}>
-              Queued for your assistant&apos;s browser
+              Queued for your browser
             </button>
           ) : (
             <button type="button" className={primaryBtn} data-testid={`send-browser-${c.id}`}
               disabled={busy || sending || over}
               title={over ? "This connection note is over 200 characters. Shorten it first." : undefined}
               onClick={() => void queueSend()}>
-              Send with my assistant&apos;s browser
+              Use my assistant&apos;s browser
             </button>
           ))}
         <button type="button" className={btn}
