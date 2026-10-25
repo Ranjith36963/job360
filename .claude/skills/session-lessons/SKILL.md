@@ -220,6 +220,15 @@ delete a lesson; if one stops being true, say so on its line and why.
   **Rule:** name every artifact the form actually took. Leave the letter out only
   when the code no longer guesses (weak spot #2 PR); until then, check the
   receipt after recording it.
+- 2026-10-25: to prove a react-select fix live on a UK Greenhouse form
+  (Globalization Partners, app 113), the assistant chose "Yes" for "require visa
+  sponsorship". It carried that over from a US (H1B) answer the owner gave for
+  Cadence. The owner has UK right to work, and his saved UK answer is No. The
+  needs-me session caught it. Nothing was recorded, because it was a throwaway
+  fill-only session that was closed without submitting. **Rule:** right-to-work
+  and sponsorship answers belong to one country. Read the saved answer for that
+  job's country (the kit or the ask), and never reuse another country's. Even a
+  test pick on a live form uses the owner's real answer for that form.
 
 ## Reference index (open these before "borrowing" anything)
 
