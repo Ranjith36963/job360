@@ -4,15 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
 import { closedSetLabel } from "@/lib/closed-sets";
-import { BLOCKER_TITLE, isBlocker, remindersCovered } from "@/lib/job-cards";
+import { BLOCKER_TITLE, isBlocker, isSensitiveQuestion, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach } from "@/lib/job-cards";
-import type { Ask } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
 import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
-import { AskQuestions, initialRows } from "./AskQuestions";
+import { AskQuestions } from "./AskQuestions";
 import type { RowState } from "./AskQuestions";
 
 // Every string on a card (questions, job fields, names, drafted messages) is written by an
@@ -45,9 +44,11 @@ export function JobCard({
   // A CAPTCHA on a form filled in Job360's own browser: the user can finish it right here.
   const [finishing, setFinishing] = useState<number | null>(null);
   const structured = card.asks.filter((a) => a.kind === "structured");
-  // Each listed question's answer as it stands and whether the user checked it, per ask.
-  const [rows, setRows] = useState<Record<number, Record<string, RowState>>>({});
-  const rowsFor = (ask: Ask) => rows[ask.id] ?? initialRows(ask.questions ?? []);
+  // Each question is shown once, however many open asks listed it; its answer as it stands and
+  // whether the user checked it, per merged row.
+  const merged = mergeQuestions(structured.map((s) => s.ask));
+  const [rows, setRows] = useState<Record<string, RowState>>({});
+  const rowOf = (id: string, answer: string): RowState => rows[id] ?? { value: answer, ok: false };
   const [remember, setRemember] = useState(false);
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
@@ -65,13 +66,23 @@ export function JobCard({
       if (ids.includes(contactId) && ids.every((id) => done.has(id))) await answerAsk(askId, answer);
     }
   }
-  const rowCount = structured.reduce((n, { ask }) => n + (ask.questions?.length ?? 0), 0);
-  const allChecked = structured.every(({ ask }) =>
-    (ask.questions ?? []).every((q) => rowsFor(ask)[q.key]?.ok && rowsFor(ask)[q.key].value.trim()),
-  );
+  const rowCount = merged.rows.length;
+  const allChecked = merged.rows.every((m) => rowOf(m.id, m.q.answer).ok && rowOf(m.id, m.q.answer).value.trim());
   const allAnswered = allChecked && questions.every((q) => (answers[q.ask.id] ?? "").trim().length > 0);
   const hasAnswers = questions.length > 0 || rowCount > 0;
   const canApprove = !busy && allAnswered && (hasAnswers || card.cv !== null);
+  // Rows "Approve all pre-filled" can check: an answer is there, and it is not a consent or personal one.
+  const prefillable = merged.rows.filter((m) => {
+    const r = rowOf(m.id, m.q.answer);
+    return !r.ok && r.value.trim() && !isSensitiveQuestion(m.q);
+  });
+  const prefillMode = merged.rows.some((m) => !rowOf(m.id, m.q.answer).ok || !rowOf(m.id, m.q.answer).value.trim());
+
+  const approvePrefilled = () =>
+    setRows((prev) => ({
+      ...prev,
+      ...Object.fromEntries(prefillable.map((m) => [m.id, { value: rowOf(m.id, m.q.answer).value, ok: true }])),
+    }));
 
   async function run(fn: () => Promise<unknown>, failMsg: string) {
     setBusy(true);
@@ -88,11 +99,17 @@ export function JobCard({
   const approveAll = () =>
     run(async () => {
       for (const q of questions) await answerAsk(q.ask.id, answers[q.ask.id].trim());
+      const finalOf = (id: string) => {
+        const m = merged.rows.find((r) => r.id === id)!;
+        return rowOf(id, m.q.answer).value.trim();
+      };
+      // Every underlying ask is answered with its own keys, even one whose rows were all merged away.
       for (const { ask } of structured) {
-        const qs = ask.questions ?? [];
-        const given = Object.fromEntries(qs.map((q) => [q.key, rowsFor(ask)[q.key].value.trim()]));
+        const given = Object.fromEntries((merged.byAsk.get(ask.id) ?? []).map((k) => [k.key, finalOf(k.rowId)]));
         await answerAskQuestions(ask.id, given);
-        if (remember) await rememberAnswers(qs.map((q) => ({ topic: q.key, question: q.question, answer: given[q.key] })));
+      }
+      if (remember) {
+        await rememberAnswers(merged.rows.map((m) => ({ topic: m.q.key || m.id, question: m.q.question, answer: finalOf(m.id) })));
       }
       if (card.cv) await markCvSeen(card.applicationId, card.cv.artifactId);
     }, "Couldn't save everything");
@@ -155,10 +172,10 @@ export function JobCard({
       {hasAnswers && (
         <section className="flex flex-col gap-2" data-testid="form-answers">
           <h3 className={label}>Form answers · {questions.length + rowCount}</h3>
-          {structured.map(({ ask }) => (
-            <AskQuestions key={ask.id} askId={ask.id} questions={ask.questions ?? []} rows={rowsFor(ask)} busy={busy}
-              onChange={(key, row) => setRows((prev) => ({ ...prev, [ask.id]: { ...rowsFor(ask), ...prev[ask.id], [key]: row } }))} />
-          ))}
+          {rowCount > 0 && (
+            <AskQuestions items={merged.rows} rows={rows} busy={busy}
+              onChange={(id, row) => setRows((prev) => ({ ...prev, [id]: row }))} />
+          )}
           {rowCount > 0 && (
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={remember} disabled={busy} data-testid={`remember-${card.applicationId}`}
@@ -240,11 +257,18 @@ export function JobCard({
       )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
-        {(hasAnswers || card.cv) && (
-          <button type="button" className={mainBtn} disabled={!canApprove} data-testid={`approve-all-${card.applicationId}`}
-            onClick={() => void approveAll()}>
-            {busy ? "Saving…" : "Approve everything and continue"}
+        {prefillMode ? (
+          <button type="button" className={mainBtn} disabled={busy || prefillable.length === 0}
+            data-testid={`approve-prefilled-${card.applicationId}`} onClick={approvePrefilled}>
+            Approve all pre-filled
           </button>
+        ) : (
+          (hasAnswers || card.cv) && (
+            <button type="button" className={mainBtn} disabled={!canApprove} data-testid={`approve-all-${card.applicationId}`}
+              onClick={() => void approveAll()}>
+              {busy ? "Saving…" : "Approve everything and continue"}
+            </button>
+          )
         )}
         {card.asks.length > 0 &&
           (confirmSkip ? (
@@ -258,7 +282,7 @@ export function JobCard({
               </button>
             </span>
           ) : (
-            <button type="button" className={btn} data-testid={`skip-job-${card.applicationId}`} onClick={() => setConfirmSkip(true)}>
+            <button type="button" className="rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/50" data-testid={`skip-job-${card.applicationId}`} onClick={() => setConfirmSkip(true)}>
               Skip this job
             </button>
           ))}

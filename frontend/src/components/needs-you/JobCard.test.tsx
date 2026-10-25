@@ -121,13 +121,15 @@ describe("JobCard", () => {
     expect(screen.getByText("From memory (2026-10-12)")).toBeInTheDocument();
     expect(screen.getByText("Guessed, please check")).toBeInTheDocument();
     expect(screen.getByText("Not known yet")).toBeInTheDocument();
-    const approve = screen.getByTestId("approve-all-7");
+    expect(screen.queryByTestId("approve-all-7")).toBeNull(); // one primary button at a time
     fireEvent.click(screen.getByTestId(`q-ok-${listed.id}-country`));
     fireEvent.click(screen.getByRole("button", { name: "No" }));
-    expect(approve).toBeDisabled(); // the guess is not checked yet
+    expect(screen.queryByTestId("approve-all-7")).toBeNull(); // the guess is not checked yet
     fireEvent.click(screen.getByTestId(`q-edit-${listed.id}-salary`));
     fireEvent.change(screen.getByTestId(`q-input-${listed.id}-salary`), { target: { value: "€55,000" } });
     fireEvent.click(screen.getByTestId("remember-7"));
+    const approve = screen.getByTestId("approve-all-7");
+    expect(approve).toHaveTextContent("Approve everything and continue");
     fireEvent.click(approve);
     const answers = { country: "Germany", visa: "No", salary: "€55,000" };
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(listed.id, answers));
@@ -136,6 +138,47 @@ describe("JobCard", () => {
       { topic: "visa", question: "Do you need visa sponsorship?", answer: "No" },
       { topic: "salary", question: "Expected salary", answer: "€55,000" },
     ]);
+  });
+
+  const listing = (over: Partial<Ask>, questions: unknown[]) => ({ ...ask("Form answers"), kind: "question", questions, ...over }) as unknown as Ask;
+  const Q = (key: string, question: string, answer: string, source = "profile") => ({ key, question, answer, source });
+
+  it("shows a question once when several open asks list it, and answers every ask", async () => {
+    const a1 = listing({}, [Q("city", "City?", "Berlin"), Q("phone", "Phone?", "")]);
+    const a2 = listing({}, [Q("city", "  CITY?  ", "Berlin", "guess"), Q("notice", "Notice period?", "1 month")]);
+    const a3 = listing({}, [Q("city", "City?", "Berlin")]); // every key merged away
+    render(<JobCard card={card([a1, a2, a3])} onChanged={onChanged} />);
+    expect(screen.getAllByText("City?")).toHaveLength(1);
+    expect(screen.getByText("Form answers · 3")).toBeInTheDocument();
+    expect(screen.queryByText("Guessed, please check")).toBeNull(); // the profile copy won over the guess
+    fireEvent.change(screen.getByTestId(`q-input-${a1.id}-phone`), { target: { value: "123" } });
+    fireEvent.click(screen.getByTestId("approve-prefilled-7"));
+    fireEvent.click(screen.getByTestId("approve-all-7"));
+    await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledTimes(3));
+    expect(answerAskQuestions).toHaveBeenCalledWith(a1.id, { city: "Berlin", phone: "123" });
+    expect(answerAskQuestions).toHaveBeenCalledWith(a2.id, { city: "Berlin", notice: "1 month" });
+    expect(answerAskQuestions).toHaveBeenCalledWith(a3.id, { city: "Berlin" });
+  });
+
+  it("Approve all pre-filled leaves consent and personal rows for the owner's own click", async () => {
+    const a = listing({}, [
+      Q("city", "City?", "Berlin"),
+      Q("gdpr", "Do you consent to data processing?", "Yes"),
+      Q("gender", "Gender", "Female"),
+      Q("empty", "Anything else?", "", "none"),
+    ]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId("approve-prefilled-7"));
+    expect(screen.getByTestId(`q-ok-${a.id}-city`)).toHaveTextContent("Checked");
+    expect(screen.getByTestId(`q-ok-${a.id}-gdpr`)).toHaveTextContent("Looks right");
+    expect(screen.getAllByText("Needs your click")).toHaveLength(2);
+    fireEvent.change(screen.getByTestId(`q-input-${a.id}-empty`), { target: { value: "No" } });
+    expect(screen.queryByTestId("approve-all-7")).toBeNull();
+    expect(screen.getByTestId("approve-prefilled-7")).toBeDisabled(); // nothing left it may check
+    fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gdpr`));
+    fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gender`));
+    fireEvent.click(screen.getByTestId("approve-all-7"));
+    await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(a.id, { city: "Berlin", gdpr: "Yes", gender: "Female", empty: "No" }));
   });
 
   it("hides an old send-it-yourself reminder for someone already under People, and answers it from that row", async () => {
