@@ -16288,6 +16288,20 @@
           "nothing_due": {
             "title": "Nothing Due",
             "type": "boolean"
+          },
+          "running": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Running",
+            "type": "object"
           }
         },
         "required": [
@@ -26780,7 +26794,7 @@
     },
     "/api/schedule/due": {
       "get": {
-        "description": "The duties due NOW for the signed-in user, each with its recipe. Read-only: changes no setting\nand stamps nothing.",
+        "description": "The duties due NOW for the signed-in user, each with its recipe. Changes no setting. An assistant's\nread takes each listed duty for this run (one run per duty at a time, owner 2026-10-25): another run\nin the next ``DUTY_CLAIM_MINUTES`` sees it under ``running`` until ``mark_done``. The website's own\nread only looks.",
         "operationId": "whats_due_api_schedule_due_get",
         "parameters": [
           {

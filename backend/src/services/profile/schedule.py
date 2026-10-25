@@ -42,6 +42,7 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
 
 TICK = "tick"
+RUNNING = "running:"  # + duty: the slot that says a run has this duty now (owner 2026-10-25)
 INBOX_AUTO_MODES = frozenset({"auto", "scheduled"})
 INBOX_DEFAULT_HOURS = 24
 _EVERY_RE = re.compile(r"^(\d{1,3})h$")
@@ -103,6 +104,8 @@ class DueFacts:
     reach_ids: list[int] = field(default_factory=list)
     # Failed runs in a row per duty (0 or missing = the last run was done or partial).
     failures: dict[str, int] = field(default_factory=dict)
+    # Duties a run took within DUTY_CLAIM_MINUTES and has not marked done yet: {duty: taken_at}.
+    running: dict[str, datetime] = field(default_factory=dict)
 
 
 def inbox_every_hours(mode: str, check_every: str) -> Optional[int]:
@@ -170,9 +173,12 @@ def due_now(f: DueFacts, now: datetime) -> dict[str, Any]:
     hold = batch_hold(f)
     if hold is None and not waiting_after_failure("batch"):
         due.append({"duty": "batch", "recipe": settings.SCHEDULE_DUTY_RECIPES["batch"], "reason": "queue_waiting"})
+    live = {d: at for d, at in f.running.items() if now - at < timedelta(minutes=settings.DUTY_CLAIM_MINUTES)}
+    due = [d for d in due if d["duty"] not in live]  # another run has it now: one run per duty at a time
     return {
         "due": due,
         "nothing_due": not due,
+        "running": {d: _iso(at) for d, at in sorted(live.items())},
         "next_due_at": next_due,
         "batch_hold": hold,
         "last_done_at": {d: _iso(f.stamps.get(d)) for d in settings.SCHEDULE_DUTIES},
@@ -200,6 +206,27 @@ async def load_stamps(db: JobDatabase, user_id: str) -> dict[str, datetime]:
     return out
 
 
+async def claim(db: JobDatabase, user_id: str, duties: list[str], now: datetime) -> set[str]:
+    """Take each of ``duties`` for this run, in ONE statement per duty: a duty another run took less than
+    ``DUTY_CLAIM_MINUTES`` ago is not taken. Returns the duties this run got (rule #12: scoped by user)."""
+    stamp = now.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    cutoff = (now - timedelta(minutes=settings.DUTY_CLAIM_MINUTES)).astimezone(timezone.utc).isoformat(
+        timespec="microseconds"
+    )
+    got: set[str] = set()
+    for duty in duties:
+        cur = await db._db.execute(
+            "INSERT INTO assistant_duty_runs (user_id, duty, done_at) VALUES (?, ?, ?) "
+            "ON CONFLICT (user_id, duty) DO UPDATE SET done_at = EXCLUDED.done_at "
+            "WHERE assistant_duty_runs.done_at < ? RETURNING duty",
+            (user_id, RUNNING + duty, stamp, cutoff),
+        )
+        if await cur.fetchone() is not None:
+            got.add(duty)
+    await db._db.commit()
+    return got
+
+
 def reach_key(application_id: int) -> str:
     """The stamp slot for one application the people hunt has worked."""
     return f"reach:{application_id}"
@@ -209,7 +236,8 @@ async def mark(
     db: JobDatabase, user_id: str, duty: str, now: datetime, application_ids: Optional[list[int]] = None,
     *, outcome: str = "done", reason: str = "",
 ) -> None:
-    """Stamp ``duty`` (and the tick) as run ``now``, with how it ended. A slot: replaced, never appended.
+    """Stamp ``duty`` (and the tick) as run ``now``, with how it ended, and free the duty for the next run.
+    A slot: replaced, never appended.
     ``duty``, ``outcome`` and ``reason`` are already closed values (the caller validates). A failed run
     adds one to the duty's failures in a row; done or partial resets it. ``reach`` also stamps each of
     ``application_ids`` (already checked to be this user's) unless the run failed."""
@@ -221,6 +249,9 @@ async def mark(
         "reason = EXCLUDED.reason, "
         "failures = CASE WHEN EXCLUDED.outcome = 'failed' THEN assistant_duty_runs.failures + 1 ELSE 0 END",
         (user_id, duty, stamp, outcome, reason, 1 if failed else 0),
+    )
+    await db._db.execute(  # the run is over: the duty is free for the next run
+        "DELETE FROM assistant_duty_runs WHERE user_id = ? AND duty = ?", (user_id, RUNNING + duty)
     )
     names = [TICK] + ([] if failed else [reach_key(a) for a in (application_ids or [])])
     for name in names:
@@ -339,6 +370,7 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
     weekly_left = None if cfg.weekly_cap is None else max(0, cfg.weekly_cap - counts.submitted_this_week)
     hours = cfg.apply_hours
     inside = hours is None or rules._in_hours(now.astimezone(rules._zone(counts.user_tz)), hours)
+    stamps = await load_stamps(db, user_id)
     return DueFacts(
         hunt_every_hours=cfg.hunt_every_hours,
         inbox_mode=profile.preferences.daily_check or "",
@@ -349,7 +381,8 @@ async def load_facts(db: JobDatabase, user_id: str, now: datetime) -> DueFacts:
         daily_left=rules.daily_left(cfg, counts),
         weekly_left=weekly_left,
         inside_hours=inside,
-        stamps=await load_stamps(db, user_id),
+        stamps=stamps,
+        running={k[len(RUNNING):]: v for k, v in stamps.items() if k.startswith(RUNNING)},
         failures={d: int(r["failures"] or 0) for d, r in (await load_runs(db, user_id)).items()},
         people_hunt=cfg.people_hunt,
         reach_ids=await _reach_ids(db, user_id, now) if cfg.people_hunt else [],

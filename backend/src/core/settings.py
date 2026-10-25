@@ -999,6 +999,9 @@ SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batc
 # applied in the last REACH_WINDOW_DAYS with no assistant-added person and no reach stamp yet, newest
 # first, at most REACH_MAX_PER_RUN per run. Sends stay capped by check_outreach (OUTREACH_COMPANY_MAX).
 REACH_WINDOW_DAYS = 14
+# Owner 2026-10-25 - one run per duty at a time: a duty `whats_due` lists to an assistant is that run's for
+# DUTY_CLAIM_MINUTES (another run, an hourly tick or a Run now, is not given it); mark_done frees it sooner.
+DUTY_CLAIM_MINUTES = int(os.getenv("DUTY_CLAIM_MINUTES", "60"))
 REACH_MAX_PER_RUN = 5
 SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
 SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
