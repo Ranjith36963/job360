@@ -62,7 +62,7 @@ export function JobCard({
   // whether the user checked it, per merged row.
   const merged = mergeQuestions(structured.map((s) => s.ask));
   const [rows, setRows] = useState<Record<string, RowState>>({});
-  const rowOf = (id: string, q: { answer: string; source: string }): RowState => rows[id] ?? initialRow(q);
+  const rowOf = (id: string, q: Parameters<typeof initialRow>[0]): RowState => rows[id] ?? initialRow(q);
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");

@@ -250,9 +250,14 @@ export function isStoredSource(source: string): boolean {
   return STORED_SOURCES.includes(source);
 }
 
-/** A row's first state: a Verified answer starts checked, a Guessed or empty one does not. */
-export function initialRow(q: { answer: string; source: string }): { value: string; ok: boolean } {
-  return { value: q.answer, ok: isVerifiedSource(q.source) && q.answer.trim().length > 0 };
+/** A row's first state: a Verified answer starts checked, a Guessed or empty one does not. `source`
+ *  is written by the assistant (untrusted), so a consent or personal-category question never starts
+ *  checked whatever its source: only the owner's own click checks it. */
+export function initialRow(q: { key: string; question: string; answer: string; source: string; sensitive?: boolean }): {
+  value: string;
+  ok: boolean;
+} {
+  return { value: q.answer, ok: isVerifiedSource(q.source) && q.answer.trim().length > 0 && !isSensitiveQuestion(q) };
 }
 
 const NEGATED = /\b(?:object|withdraw|opt[- ]?out|decline|refuse|do not|don't)\b/i;

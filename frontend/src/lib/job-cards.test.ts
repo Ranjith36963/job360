@@ -172,11 +172,20 @@ describe("fallbackGuess", () => {
 
 describe("initialRow", () => {
   it("starts Verified sources checked and Guessed or empty ones unchecked", () => {
-    expect(initialRow({ answer: "x", source: "profile" }).ok).toBe(true);
-    expect(initialRow({ answer: "x", source: "memory" }).ok).toBe(true);
-    expect(initialRow({ answer: "x", source: "cv" }).ok).toBe(true);
-    expect(initialRow({ answer: "x", source: "guess" }).ok).toBe(false);
-    expect(initialRow({ answer: "x", source: "draft" }).ok).toBe(false);
-    expect(initialRow({ answer: "", source: "profile" }).ok).toBe(false);
+    expect(initialRow({ key: "city", question: "City", answer: "x", source: "profile" }).ok).toBe(true);
+    expect(initialRow({ key: "city", question: "City", answer: "x", source: "memory" }).ok).toBe(true);
+    expect(initialRow({ key: "city", question: "City", answer: "x", source: "cv" }).ok).toBe(true);
+    expect(initialRow({ key: "city", question: "City", answer: "x", source: "guess" }).ok).toBe(false);
+    expect(initialRow({ key: "city", question: "City", answer: "x", source: "draft" }).ok).toBe(false);
+    expect(initialRow({ key: "city", question: "City", answer: "", source: "profile" }).ok).toBe(false);
+  });
+});
+
+describe("initialRow never pre-checks a sensitive row", () => {
+  it("a consent or EEO question claiming a profile source still waits for the owner's click", async () => {
+    const { initialRow } = await import("./job-cards");
+    expect(initialRow({ key: "gdpr", question: "Do you consent to data processing?", answer: "Yes", source: "profile" }).ok).toBe(false);
+    expect(initialRow({ key: "gender", question: "Gender", answer: "Male", source: "memory" }).ok).toBe(false);
+    expect(initialRow({ key: "city", question: "City", answer: "London", source: "profile" }).ok).toBe(true);
   });
 });
