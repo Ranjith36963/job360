@@ -13,9 +13,9 @@ describe("ReadyCard browser label", () => {
   });
 
   it("shows the label and, for own_browser, its reason", () => {
-    const browser = { kind: "own_browser", label: "Your Chrome", reason: "Job360's browser failed" };
+    const browser = { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Job360's browser failed" };
     render(<ReadyCard card={card(5, { browser }) as never} paused={false} onChanged={() => {}} />);
-    expect(screen.getByTestId("ready-browser-label-5")).toHaveTextContent("Your Chrome");
+    expect(screen.getByTestId("ready-browser-label-5")).toHaveTextContent("Needs your own browser: turn your PC on");
     expect(screen.getByTestId("ready-browser-reason-5")).toHaveTextContent("Job360's browser failed");
   });
 

@@ -24,6 +24,8 @@ import { JobCards } from "./JobCards";
 import type { JobCardsReport } from "./JobCards";
 import { groupAsks } from "@/lib/job-cards";
 import { RunChromeTasks } from "./RunChromeTasks";
+import { OwnBrowserQueueCard } from "./OwnBrowserQueueCard";
+import { getOwnBrowserQueue, type OwnBrowserQueue } from "@/lib/browser-contract";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 
 // Every string on an ask (question, context, answer, job fields) is written by
@@ -334,6 +336,8 @@ export function NeedsYou() {
   // null until Ready to send has answered (0 if its read failed): announcing
   // before then would drop the ready count from the badge for a moment.
   const [readyTotal, setReadyTotal] = useState<number | null>(null);
+  // Tasks waiting for the user's own browser (null: unknown or none).
+  const [queue, setQueue] = useState<OwnBrowserQueue | null>(null);
 
   const apply = useCallback(
     (
@@ -356,6 +360,7 @@ export function NeedsYou() {
   const general = useMemo(() => (open ? [...groupAsks(open).general, ...jobs.failed] : []), [open, jobs.failed]);
 
   const load = useCallback(async () => {
+    void getOwnBrowserQueue().then(setQueue);
     try {
       apply(...(await fetchAll()));
     } catch {
@@ -365,6 +370,7 @@ export function NeedsYou() {
 
   useEffect(() => {
     let cancelled = false;
+    void getOwnBrowserQueue().then((q) => !cancelled && setQueue(q));
     fetchAll()
       .then((all) => {
         if (!cancelled) apply(...all);
@@ -440,13 +446,14 @@ export function NeedsYou() {
         <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Waiting for you
         </h2>
+        {queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
         {jobs.settled && jobs.total === 0 && general.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
             {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
         ) : (
           <>
-            {jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
+            {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
             <JobCards open={open} onChanged={load} onReport={setJobs} />
             {general.length > 0 && (
               <>

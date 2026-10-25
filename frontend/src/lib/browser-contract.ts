@@ -1,5 +1,8 @@
 import { requestJson } from "@/lib/api";
 import type { Ask, Contact, ReadyCardData } from "@/lib/api";
+import type { components } from "@/lib/api-types";
+
+export type OwnBrowserQueue = components["schemas"]["QueueOut"];
 
 /**
  * The ONE place that knows the browser fields and calls (the Job 360 Browser agent's contract,
@@ -43,7 +46,7 @@ export const readyBrowser = (card: ReadyCardData): BrowserLabel | null =>
 export const contactSendBrowser = (c: Contact): BrowserLabel | null =>
   browserLabel(c, BROWSER_CONTRACT.contactField);
 
-/** True only when the backend labels this ask for the owner's own Chrome. Absent = Job360's browser. */
+/** True only when the backend labels this ask for the owner's own browser. Absent = Job360's browser. */
 export function needsOwnBrowser(ask: Ask): boolean {
   return askBrowser(ask)?.kind === "own_browser";
 }
@@ -94,9 +97,19 @@ export async function decideOwnBrowserSend(
   });
 }
 
-/** Start the owner's queued Chrome tasks. Throws ApiError (404/405 = the backend has no run-now yet). */
+/** Open the queue for the owner's own browser for the next hour. Throws ApiError (404/405 = the backend has no run-now yet). */
 export async function runOwnBrowserNow(): Promise<void> {
   await requestJson(BROWSER_CONTRACT.runNowPath, "POST");
+}
+
+/** The own-browser queue (generated QueueOut); null when the call fails. */
+export async function getOwnBrowserQueue(): Promise<OwnBrowserQueue | null> {
+  try {
+    const r = await requestJson<OwnBrowserQueue>(BROWSER_CONTRACT.queuePath, "GET");
+    return r && typeof r === "object" && Array.isArray(r.tasks) && typeof r.count === "number" ? r : null;
+  } catch {
+    return null;
+  }
 }
 
 /** How many tasks wait for the owner's browser; null when the endpoint fails or answers an unknown shape. */
