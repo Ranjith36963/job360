@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+import zlib
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -172,8 +173,11 @@ def _rows_of(ask: dict[str, Any]) -> list[dict[str, Any]]:
     """An open ask's rows; an ask with only a sentence keeps that sentence as one row, so a merge loses nothing."""
     if ask.get("questions"):
         return list(ask["questions"])
-    text = str(ask["question"])[:ASK_ITEM_QUESTION_MAX_CHARS]
-    return [{"key": f"earlier_{int(ask['id'])}", "question": text, "source": "none", "answer": ""}]
+    return [_sentence_row(f"earlier_{int(ask['id'])}", str(ask["question"]))]
+
+
+def _sentence_row(key: str, text: str) -> dict[str, Any]:
+    return {"key": key, "question": text[:ASK_ITEM_QUESTION_MAX_CHARS], "source": "none", "answer": ""}
 
 
 async def _open_family(
@@ -415,7 +419,9 @@ async def create_ask(
             await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:ask:{application_id}",))
             family = await _open_family(db, user_id, application_id, kind, asked_by)
             if family and kind in QUESTION_FAMILY:
-                clean_qs = merge_questions([q for old in family for q in _rows_of(old)], clean_qs)
+                # A sentence-only ask joins as a row too, or the merged card would hide what it asked.
+                mine = clean_qs or [_sentence_row(f"said_{zlib.crc32(clean_q.encode()):08x}", clean_q)]
+                clean_qs = merge_questions([q for old in family for q in _rows_of(old)], mine)
         cur = await db._db.execute(
             "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at, "
             "kind, questions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

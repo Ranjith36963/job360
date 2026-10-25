@@ -102,6 +102,18 @@ async def test_a_sentence_only_ask_is_kept_as_a_row_and_a_blocker_is_its_own_car
 
 
 @pytest.mark.asyncio
+async def test_a_sentence_only_ask_merged_into_rows_keeps_its_sentence(authenticated_async_context):
+    """Review of #1215: a sentence-only ask on a job whose open ask has rows lost its own question."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _ask(client, app_id, [_row("gender", "Gender?", "memory", "Male")])
+        later = (await client.post("/api/asks", json={"question": "Please approve CV 88.", "application_id": app_id,
+                                                      "kind": "question"})).json()
+        assert [q["question"] for q in later["questions"]] == ["Gender?", "Please approve CV 88."]
+        assert len(await _open(client, app_id)) == 1
+
+
+@pytest.mark.asyncio
 async def test_the_cap_stops_a_new_card_never_a_merge(authenticated_async_context, monkeypatch):
     from src.core import settings
 
