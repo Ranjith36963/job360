@@ -36,5 +36,8 @@ describe("DutyStatus", () => {
   it("says plainly what a running or full-queue job is doing", () => {
     expect(stateText(row({ state: "running" }))).toBe("Running now.");
     expect(stateText(row({ state: "held", hold: "queue_full" }))).toBe("Waiting: your queue is full, so it waits until it drains.");
+    expect(stateText(row({ duty: "batch", state: "held", hold: "waiting_on_you" }))).toBe(
+      "Waiting: every job in your queue is waiting on you (see Needs you).",
+    );
   });
 });

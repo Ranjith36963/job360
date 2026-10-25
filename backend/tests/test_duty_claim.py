@@ -87,3 +87,17 @@ async def test_a_run_that_never_marks_done_frees_the_duty_in_time(
             assert [d["duty"] for d in (await _due(agent))["due"]] == ["hunt"]
             monkeypatch.setattr(settings, "DUTY_CLAIM_MINUTES", 0)
             assert [d["duty"] for d in (await _due(agent))["due"]] == ["hunt"]
+
+
+@pytest.mark.asyncio
+async def test_a_routine_for_one_job_takes_only_its_own(authenticated_async_context, fixture_user_id):
+    """2026-10-25 on prod: an Apply routine's read took the Gmail check and the people hunt it never ran."""
+    async with authenticated_async_context() as client:
+        async with await _setup(client, fixture_user_id) as agent:
+            other = await agent.get("/api/schedule/due", params={"duties": ["batch"]})
+            assert other.status_code == 200 and other.json()["due"] == [] and other.json()["running"] == {}
+            mine = (await agent.get("/api/schedule/due", params={"duties": ["hunt"]})).json()
+            assert [d["duty"] for d in mine["due"]] == ["hunt"]
+            again = (await agent.get("/api/schedule/due", params={"duties": ["hunt"]})).json()
+            assert (again["nothing_due"], again["held_by_running"]) == (True, ["hunt"])  # never a silent nothing
+            assert (await agent.get("/api/schedule/due", params={"duties": ["nap"]})).status_code == 422

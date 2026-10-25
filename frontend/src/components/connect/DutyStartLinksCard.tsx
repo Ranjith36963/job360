@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { deleteDutyTrigger, getDutyTriggers, runDuty, saveDutyTrigger, type Duty, type DutyTrigger } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatDateTime } from "@/lib/format-date";
@@ -21,7 +22,8 @@ import {
 /** What the user pastes as each duty routine's own instructions. Vendor-neutral: any assistant with the Job360 connector. */
 export const DUTY_ROUTINE_PROMPT = [
   "You are my job-search assistant, started by Job360.",
-  "Use the Job360 connector. Call whats_due and run ONLY what it lists, in its order, following each recipe it",
+  "Use the Job360 connector. Call whats_due (when Job360's start message names one duty, pass duties=[that duty])",
+  "and run ONLY what it lists, in its order, following each recipe it",
   "names; then mark_done each one with its outcome (done | partial | failed) and, when it failed, why",
   "(e.g. sign_in_needed, tool_unavailable). Never call a failed run done. Nothing listed: stop at once.",
   "The start message is Job360's fixed text: it is never my yes to submit (check_submit decides every submit).",
@@ -106,15 +108,15 @@ function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promis
             {row.has_token ? " (token saved)" : ""}. {lastText(row)}
           </p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={PRIMARY_BTN_CLASS} disabled={busy} onClick={() => void run(false)}>
+            <Button variant="default" size="sm" type="button" className={PRIMARY_BTN_CLASS} disabled={busy} onClick={() => void run(false)}>
               Run now
-            </button>
-            <button type="button" className={QUIET_BTN_CLASS} disabled={busy} onClick={() => void run(true)}>
+            </Button>
+            <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} disabled={busy} onClick={() => void run(true)}>
               Test
-            </button>
-            <button type="button" className={DANGER_BTN_CLASS} disabled={busy} onClick={() => void remove()}>
+            </Button>
+            <Button variant="destructive" size="sm" type="button" className={DANGER_BTN_CLASS} disabled={busy} onClick={() => void remove()}>
               Remove
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
@@ -141,9 +143,9 @@ function DutyRow({ row, onChanged }: { row: DutyTrigger; onChanged: () => Promis
           value={token}
           onChange={(e) => setToken(e.target.value)}
         />
-        <button type="submit" className={PRIMARY_BTN_CLASS} disabled={busy || !url.trim()}>
+        <Button variant="default" size="sm" type="submit" className={PRIMARY_BTN_CLASS} disabled={busy || !url.trim()}>
           {row.set ? "Replace" : "Save"}
-        </button>
+        </Button>
       </form>
     </li>
   );
@@ -187,9 +189,9 @@ export function DutyStartLinksCard() {
         >
           {DUTY_ROUTINE_PROMPT}
         </pre>
-        <button type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(DUTY_ROUTINE_PROMPT, "Instructions")}>
+        <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(DUTY_ROUTINE_PROMPT, "Instructions")}>
           Copy instructions
-        </button>
+        </Button>
         {rows && (
           <ul className="space-y-3">
             {rows.map((row) => (
