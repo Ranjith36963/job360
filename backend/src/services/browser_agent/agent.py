@@ -220,6 +220,13 @@ class Session:
     held_until: Optional[float] = None
     # The page whose form_swept hold this browser already used (one per form; a new page or Done frees it).
     swept_on: Optional[tuple[str, ...]] = None
+    # The pages (``_page_key``) where anything was put into a field: type, fill, choose, tick, upload, key,
+    # a click on a field, or a hand-off step by the user. Kept by the server, never read from the page: an
+    # "Apply" there may send what was put in, so it is always gated (#1227 review).
+    typed_on: set[tuple[str, ...]] = field(default_factory=set)
+    # The hosts (cookie domains, storage origins) of the saved sign-ins this browser loaded or was handed.
+    # None = not known: every page counts as signed in.
+    signed_in: Optional[set[str]] = None
 
 
 def _held(s: Session, now: float) -> bool:
@@ -404,7 +411,7 @@ class BrowserPool:
 
         await context.route("**/*", _route)
         page = await context.new_page()
-        s = Session(context=context, page=page)
+        s = Session(context=context, page=page, signed_in=_state_hosts(state))
 
         def _on_page(new_page: Any) -> None:
             # "Apply" often opens the form in a new tab: follow it.
@@ -1075,23 +1082,109 @@ def _is_trap(name: Any, hints: Any) -> bool:
     return any(is_honeypot(p) for p in _safety_parts(name, hints))
 
 
-async def _kind(loc: Any) -> str:
+def _state_hosts(state: Optional[dict[str, Any]]) -> set[str]:
+    """The hosts a storage state carries: its cookies' domains and its storage origins (lower case)."""
+    from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+    hosts: set[str] = set()
+    for c in (state or {}).get("cookies") or []:
+        if isinstance(c, dict) and (d := str(c.get("domain") or "").lower().lstrip(".").rstrip(".")):
+            hosts.add(d)
+    for o in (state or {}).get("origins") or []:
+        if isinstance(o, dict) and (h := site_host(str(o.get("origin") or ""))):
+            hosts.add(h)
+    return hosts
+
+
+def _base_domain(host: str) -> str:
+    # The last two labels: "yomobile.bamboohr.com" -> "bamboohr.com". Too wide for "co.uk" hosts, which only
+    # gates more (the safe side).
+    return ".".join(host.split(".")[-2:])
+
+
+def _signed_in_for(s: Session, url: str) -> bool:
+    """Whether a saved sign-in of the user may reach this page's site: the same host or a parent / child of
+    it, the same base domain, or the same applicant system (sites). Not known = signed in."""
+    if s.signed_in is None:
+        return True
+    from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
+
+    host = site_host(url)
+    if not host:
+        return True
+    site = site_for("https://" + host)
+    for d in s.signed_in:
+        if host == d or host.endswith("." + d) or d.endswith("." + host) or _base_domain(host) == _base_domain(d):
+            return True
+        if site is not None and site_for("https://" + d) is site:
+            return True
+    return False
+
+
+def _mark_typed(s: Session) -> None:
+    """Something is about to go into a field of the current page: its "Apply" is gated from now on."""
+    try:
+        s.typed_on.add(_page_key(str(_live_page(s).url or "")))
+    except BrowserError:
+        pass  # no page open: nothing to mark, and the action itself refuses
+
+
+def _typed_here(s: Optional[Session]) -> bool:
+    """Whether anything was put into a field of the current page (the server's record, never the DOM)."""
+    if s is None:
+        return False
+    try:
+        return _page_key(str(_live_page(s).url or "")) in s.typed_on
+    except BrowserError:
+        return False
+
+
+def _site_knows_user(s: Optional[Session]) -> bool:
+    """A saved sign-in of the user may reach the current page's site; no session or no page = it may."""
+    if s is None:
+        return True
+    try:
+        url = str(_live_page(s).url or "")
+    except BrowserError:
+        return True
+    return _signed_in_for(s, url)
+
+
+def _opener_allowed(s: Optional[Session]) -> bool:
+    """The server's own facts that an "Apply" here cannot send the user's application: nothing was put into
+    a field of this page, and no saved sign-in lets the site know the user. Unknown = not allowed."""
+    if s is None:
+        return False
+    try:
+        url = str(_live_page(s).url or "")
+    except BrowserError:
+        return False
+    return _page_key(url) not in s.typed_on and not _signed_in_for(s, url)
+
+
+async def _kind(loc: Any, s: Optional[Session] = None) -> str:
     facts = await loc.evaluate(ELEMENT_FACTS_JS)
-    # Still the job ad (look's own "form or ad" test, read now): nothing answered since Job360 first read
-    # the page, no file box, no visible required field, too few fields for a form. A fact missing reads as
-    # a form (the safe side).
+    # Still the job ad. The server decides (_opener_allowed: nothing typed on this page, no saved sign-in for
+    # the site); the page's own facts only narrow it: no file box, no visible required field, too few fields
+    # for a form. A fact missing reads as a form (the safe side).
     fields_shown = facts.get("fields_shown")
     page_is_ad = (
-        facts.get("answers_since_read") is False and facts.get("file_box") is False
-        and facts.get("required_shown") is False
+        _opener_allowed(s) and facts.get("file_box") is False and facts.get("required_shown") is False
+        and facts.get("choice_answered") is False
         and isinstance(fields_shown, int) and fields_shown < MIN_LABELLED_FIELDS
     )
+    # Something was put into a field of this page (the server's record): the page holds answers, whatever its
+    # DOM now shows. A page that empties a box after it is typed in cannot make "Apply" read as an opener.
+    answers = bool(facts.get("page_has_answers")) or _typed_here(s)
+    # A saved sign-in may reach this site (or that is not known): every apply-verb button is the final submit,
+    # so only check_submit's `submit` lets it through (owner decision on #1227).
+    site_knows_user = _site_knows_user(s)
 
     def kind_of(name: str) -> str:
         return control_kind(
             facts.get("tag", ""), facts.get("type", ""), name, facts.get("autocomplete", ""),
-            bool(facts.get("in_form")), facts.get("role", ""), bool(facts.get("page_has_answers")),
-            bool(facts.get("owns_form")), bool(facts.get("toggle")), page_is_ad,
+            bool(facts.get("in_form")), facts.get("role", ""), answers,
+            bool(facts.get("owns_form")), bool(facts.get("toggle")), page_is_ad, site_knows_user,
         )
 
     kind = kind_of(str(facts.get("name") or ""))
@@ -1359,8 +1452,10 @@ async def _act(
     if await _page_captcha(_live_page(s)):
         raise BrowserError("needs_you", "captcha", CAPTCHA_DETAIL)
     if action == "key":
+        _mark_typed(s)  # a key can pick a suggestion or change a field
         return await _press(s, ref, text)
     if action == "fill":
+        _mark_typed(s)
         return await _fill(s, fields or [])
     if action == "scroll":
         if text not in ("down", "up"):
@@ -1372,7 +1467,7 @@ async def _act(
 
     frame, loc = await _find(s, ref)
     _refuse_captcha_frame(frame)
-    kind = await _kind(loc)
+    kind = await _kind(loc, s)
     page = _live_page(s)
 
     # A trap field for bots says to leave it blank: never fill, pick, tick or upload into it, and never
@@ -1387,6 +1482,15 @@ async def _act(
         raise BrowserError(
             "refused", "leave_blank", "That field says to leave it blank (a trap for bots). Leave it empty.",
         )
+    # Anything put into a field of this page, before it is put there (a failure part-way still counts): from
+    # now on an "Apply" on this page is gated. A click counts when it lands on a field or a choice.
+    if action in ("type", "choose", "tick", "upload") or (
+        action == "click" and kind != "submit" and (
+            facts.get("tag") in ("input", "textarea", "select")
+            or str(facts.get("role")).lower() in (*_TICK_ROLES, "option", "combobox", "listbox", "textbox")
+        )
+    ):
+        _mark_typed(s)
 
     if action == "click":
         submitted = False
@@ -1647,7 +1751,7 @@ async def _fill_one(s: Session, ref: str, text: str) -> tuple[bool, str]:
     """Set one field: (it holds what was asked, what it shows now). A refusal raises BrowserError."""
     frame, loc = await _find(s, ref)
     _refuse_captcha_frame(frame)
-    kind = await _kind(loc)
+    kind = await _kind(loc, s)
     if kind == "submit":
         raise BrowserError("refused", "submit_control", "fill never clicks the final submit.")
     _refuse_password(kind)
@@ -1930,6 +2034,8 @@ async def live(
         if by_user:
             s.last_used = time.monotonic()
         page = _live_page(s)
+        if finish and action in ("click", "type", "key"):
+            _mark_typed(s)  # the user may answer a field in the hand-off view: that page's "Apply" stays gated
         try:
             if action == "start":
                 verdict = await pool.screen.screen(url)
@@ -1970,6 +2076,9 @@ async def live(
                 # The assistant's browsers, if open, loaded the saved sign-ins before this one: hand them the cookies.
                 cookies = [c for h in sorted(hosts) for c in state_for_host(state, h)["cookies"]]
                 for agent_s in [pool._sessions[k] for k in pool.user_keys(user_id)] if cookies else []:
+                    # Before the cookies: from now on that site may know the user, so its "Apply" is gated.
+                    if agent_s.signed_in is not None:
+                        agent_s.signed_in |= set(hosts) | _state_hosts({"cookies": cookies})
                     try:
                         async with agent_s.lock:
                             await agent_s.context.add_cookies(cookies)

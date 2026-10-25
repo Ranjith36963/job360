@@ -68,7 +68,28 @@ ONE_CLICK = """<!doctype html><html><head><title>Apply</title></head><body>
 <button type="button" onclick="document.title = 'SENT'">Apply</button>
 </body></html>"""
 
-PAGES = {"/careers/194": AD, "/one-click": ONE_CLICK, "/form-apply": FORM_APPLY, "/react-apply": REACT_APPLY, "/prefilled": PREFILLED}
+# A page that hides what was typed (#1227 review): no <form>, one box it empties the moment anything is put
+# in, a plain "Apply". After a fill its DOM looks exactly like an ad.
+FORGED = """<!doctype html><html><head><title>Apply</title></head><body>
+<label>Email <input type="text" name="email" id="email"></label>
+<button type="button" onclick="document.title = 'SENT'">Apply</button>
+<script>
+const box = document.getElementById('email');
+for (const t of ['input', 'change', 'blur']) box.addEventListener(t, () => { window.kept = box.value; box.value = ''; });
+</script>
+</body></html>"""
+
+# A signed-in one-click step: the site already holds the profile. No <form>, no field, nothing typed, and a
+# plain "Apply" (type=button) whose script sends the application. Main read it as the ad's opener.
+SIGNED_ONE_CLICK = """<!doctype html><html><head><title>Apply</title></head><body>
+<h1>Engineer</h1><p>Apply with your saved profile.</p>
+<button type="button" onclick="document.title = 'SENT'">Apply</button>
+</body></html>"""
+
+PAGES = {
+    "/careers/194": AD, "/one-click": ONE_CLICK, "/form-apply": FORM_APPLY, "/react-apply": REACT_APPLY,
+    "/prefilled": PREFILLED, "/forged": FORGED, "/signed-one-click": SIGNED_ONE_CLICK,
+}
 
 
 @pytest.fixture
@@ -200,6 +221,132 @@ async def test_a_one_click_page_with_a_required_site_filled_field_keeps_its_appl
     assert out["status"] == "refused" and out["reason"] == "check_submit", out
     assert calls == ["http://jobs.example/one-click"]
     assert (await run(pool, "u1", "look"))["title"] == "Apply"   # never sent
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_after_a_fill_a_formless_apply_stays_gated_though_the_page_looks_like_an_ad(pool):
+    from src.services.browser_agent.agent import run
+
+    page = await run(pool, "u1", "open", url="http://jobs.example/forged")
+    out = await run(pool, "u1", "fill", fields=[{"ref": _ref(page, "Email"), "text": "ada@example.com"}])
+    assert _el(out, "Email")["value"] == ""   # the page hid it: its DOM now looks like an untouched ad
+    calls: list[str] = []
+    out = await run(pool, "u1", "click", ref=_ref(out, "Apply"), gate=_counting_gate(calls))
+    assert out["status"] == "refused" and out["reason"] == "check_submit", out
+    assert calls == ["http://jobs.example/forged"]
+    assert (await run(pool, "u1", "look"))["title"] == "Apply"   # never sent
+
+
+def _signed_in_on(domain: str):
+    async def load_state():
+        return {"cookies": [{"name": "sid", "value": "x", "domain": domain, "path": "/"}], "origins": []}
+    return load_state
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_with_a_saved_sign_in_for_the_site_apply_stays_gated(pool):
+    from src.services.browser_agent.agent import run
+
+    page = await run(
+        pool, "u1", "open", url="http://jobs.example/careers/194", load_state=_signed_in_on("jobs.example"),
+    )
+    calls: list[str] = []
+    out = await run(pool, "u1", "click", ref=_ref(page, "Apply for This Job"), gate=_counting_gate(calls))
+    assert out["status"] == "refused" and out["reason"] == "check_submit", out
+    assert calls == ["http://jobs.example/careers/194"]
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_sign_in_for_another_site_does_not_gate_the_ads_opener(pool):
+    from src.services.browser_agent.agent import run
+
+    page = await run(
+        pool, "u1", "open", url="http://jobs.example/careers/194", load_state=_signed_in_on("other.test"),
+    )
+    calls: list[str] = []
+    out = await run(pool, "u1", "click", ref=_ref(page, "Apply for This Job"), gate=_counting_gate(calls))
+    assert out["status"] == "ok" and calls == [], out
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_new_page_starts_untyped_and_the_typed_page_stays_gated(pool):
+    from src.services.browser_agent.agent import run
+
+    page = await run(pool, "u1", "open", url="http://jobs.example/forged")
+    await run(pool, "u1", "type", ref=_ref(page, "Email"), text="ada@example.com")
+    # A new page key: nothing was typed there, so the ad's opener opens the form ungated.
+    page = await run(pool, "u1", "open", url="http://jobs.example/careers/194")
+    calls: list[str] = []
+    out = await run(pool, "u1", "click", ref=_ref(page, "Apply for This Job"), gate=_counting_gate(calls))
+    assert out["status"] == "ok" and calls == [], out
+    # Back on the page that was typed into (a fresh load of it, same page key): still gated.
+    page = await run(pool, "u1", "open", url="http://jobs.example/forged?again=1")
+    out = await run(pool, "u1", "click", ref=_ref(page, "Apply"), gate=_counting_gate(calls))
+    assert out["status"] == "refused" and calls == ["http://jobs.example/forged?again=1"], out
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_signed_in_one_click_apply_is_refused_unless_check_submit_says_submit(pool):
+    from src.services.browser_agent.agent import run
+
+    page = await run(
+        pool, "u1", "open", url="http://jobs.example/signed-one-click", load_state=_signed_in_on("jobs.example"),
+    )
+    assert not any(e["tag"] in ("input", "select", "textarea") for e in page["elements"])
+    calls: list[str] = []
+    out = await run(pool, "u1", "click", ref=_ref(page, "Apply"), gate=_counting_gate(calls))
+    # Nothing typed, so check_submit answers fill: that is a refusal, never a click.
+    assert out["status"] == "refused" and out["decision"] == "fill", out
+    assert calls == ["http://jobs.example/signed-one-click"]
+    assert (await run(pool, "u1", "look"))["title"] != "SENT"
+
+
+@needs_chromium
+@pytest.mark.real_sleep
+@pytest.mark.asyncio
+async def test_a_signed_in_one_click_apply_goes_through_the_gate_on_submit(pool):
+    from src.services.browser_agent.agent import Gate, run
+
+    page = await run(
+        pool, "u1", "open", url="http://jobs.example/signed-one-click", load_state=_signed_in_on("jobs.example"),
+    )
+    calls: list[str] = []
+
+    async def go(form_url):
+        calls.append(form_url)
+        return {"decision": "submit", "reason": "auto_when_sure", "detail": ""}
+
+    async def mark():
+        calls.append("submit_attempted")
+
+    out = await run(pool, "u1", "click", ref=_ref(page, "Apply"), gate=Gate(check=go, mark_attempt=mark))
+    assert calls == ["http://jobs.example/signed-one-click", "submit_attempted"]   # through the gate
+    assert out["submit_clicked"] is True and out["title"] == "SENT"
+
+
+def test_which_sign_ins_reach_a_page():
+    from src.services.browser_agent.agent import Session, _signed_in_for
+
+    def s(hosts):
+        return Session(context=None, page=None, signed_in=hosts)
+
+    assert _signed_in_for(s(None), "https://yomobile.bamboohr.com/careers/194")   # not known: signed in
+    assert _signed_in_for(s({"yomobile.bamboohr.com"}), "https://yomobile.bamboohr.com/careers/194")
+    assert _signed_in_for(s({"bamboohr.com"}), "https://yomobile.bamboohr.com/careers/194")
+    assert _signed_in_for(s({"other.bamboohr.com"}), "https://yomobile.bamboohr.com/careers/194")
+    assert _signed_in_for(s({"acme.wd5.myworkdayjobs.com"}), "https://beta.wd1.myworkdayjobs.com/x")
+    assert not _signed_in_for(s(set()), "https://yomobile.bamboohr.com/careers/194")
+    assert not _signed_in_for(s({"linkedin.com"}), "https://yomobile.bamboohr.com/careers/194")
 
 
 @needs_chromium

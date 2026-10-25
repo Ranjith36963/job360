@@ -102,6 +102,7 @@ def control_kind(
     owns_form: Optional[bool] = None,
     toggle: bool = False,
     page_is_ad: bool = False,
+    site_knows_user: bool = False,
 ) -> str:
     """``password`` | ``submit`` | ``field`` for one control on the page.
 
@@ -118,6 +119,9 @@ def control_kind(
     since Job360 first read it, no file box, no visible required field, fewer than ``MIN_LABELLED_FIELDS``
     fields. There an "Apply" button outside any form opens the form, even when the site filled a box itself
     (a share link).
+    ``site_knows_user``: a saved sign-in of the user may reach this site (agent._signed_in_for), or that is not
+    known. Then every button with an apply verb is the final submit, form or no form, answers or none: a
+    signed-in one-click page can send the profile the site already holds (owner decision, #1227 review).
     "Apply" / "Send" / "Finish" on a
     button counts as the final submit inside a form OR on a page with answers
     (React forms often have no ``<form>``); on a page with nothing typed it is
@@ -143,6 +147,8 @@ def control_kind(
     is_link = not is_button and (tag == "a" or role in _LINK_ROLES)
     if not is_button and not is_link:
         return "field"
+    if is_button and site_knows_user and _APPLY_VERBS.search(name):
+        return "submit"
     # A <button role="tab"> (the ARIA tab pattern) that cannot submit its form needs the whole word "submit"
     # ("Submitted applications" is a tab); every other button rule still holds ("Finish", "Send application").
     tab_button = is_button and role in _LINK_ROLES and not native_submit

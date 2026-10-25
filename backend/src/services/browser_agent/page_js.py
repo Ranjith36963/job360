@@ -107,10 +107,6 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
     if (q) return ph && !q.includes(ph) ? q + ' (' + ph + ')' : q;
     return ph || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '';
   };
-  // A box whose answer is its typed text (not a choice, a file, a button or a password).
-  const textLike = (el) => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT'
-    && !['checkbox', 'radio', 'file', 'hidden', 'submit', 'button', 'image', 'reset', 'password']
-      .includes((el.type || '').toLowerCase()));
   // A control a person types into or picks in (not a button).
   const typed = (el) => el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable
     || (el.tagName === 'INPUT' && !['submit', 'button', 'image', 'reset'].includes(el.type));
@@ -257,12 +253,6 @@ SNAPSHOT_JS = r"""
         if (f.tagName === 'SELECT') {
           f.setAttribute('data-j360-sel0', Array.from(f.selectedOptions).map((o) => o.index).join(','));
         } else if (f.tagName === 'INPUT') f.setAttribute('data-j360-checked0', String(f.checked));
-      }
-      // A text the site wrote itself (BambooHR's "Link to This Job"): read only by the gate's "still the
-      // ad?" (ELEMENT_FACTS_JS answeredSinceRead), never by page_has_answers. A long one is not stamped.
-      for (const f of root.querySelectorAll('input, textarea')) {
-        if (!textLike(f) || (f.value || '').length > 2000) continue;
-        f.setAttribute('data-j360-val0', f.value || '');
       }
       if (depth > 6) return;
       for (const host of root.querySelectorAll('*')) if (host.shadowRoot) stamp(host.shadowRoot, depth + 1);
@@ -414,18 +404,9 @@ ELEMENT_FACTS_JS = r"""
     }
     return f.isContentEditable && !!(f.innerText || '').trim();
   };
-  // The same, except a text the site wrote before Job360 first read the page (its data-j360-val0 stamp,
-  // unchanged) is not one: for "is this still the ad?" only. Unstamped, it counts (safe side).
-  const answeredSinceRead = (f) => {
-    if (textLike(f) && f.hasAttribute('data-j360-val0') && f.getAttribute('data-j360-val0') === (f.value || '')) {
-      return false;
-    }
-    return answered(f);
-  };
-  const answerable = deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
-    + '[aria-checked=true], [aria-pressed=true]', 0);
-  // The fields a person can see (any kind but a button), and whether the page has a file box at all
-  // (hidden or not: file boxes hide behind styled buttons). The gate's "is this still the ad?".
+  // The fields a person can see (any kind but a button), a required one among them, and whether the page has
+  // a file box at all (hidden or not: file boxes hide behind styled buttons). Only NARROW the gate's "is this
+  // still the ad?": the page writes them, so the server's own facts decide (agent._opener_allowed).
   const seen = (f) => {
     const r = f.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return false;
@@ -449,8 +430,14 @@ ELEMENT_FACTS_JS = r"""
     // Whether it can submit a form itself: a button in a shadow root has no form owner.
     owns_form: !!el.form, toggle: el.hasAttribute('aria-pressed'),
     // Any answer anywhere on the page, shadow roots included: the form is being filled.
-    page_has_answers: answerable.some(answered),
-    answers_since_read: answerable.some(answeredSinceRead),
+    page_has_answers: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
+      + '[aria-checked=true], [aria-pressed=true]', 0).some(answered),
+    // The same answers minus plain typed text (a site writes its own share link into a text box): a tick, a
+    // pick, a pressed choice, a chosen file, rich text. Only narrows the "still the ad?" read.
+    choice_answered: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
+      + '[aria-checked=true], [aria-pressed=true]', 0)
+      .some((f) => answered(f) && !(f.tagName === 'TEXTAREA' || (f.tagName === 'INPUT'
+        && !['checkbox', 'radio', 'file'].includes((f.type || '').toLowerCase())))),
     fields_shown: fieldsShown,
     // A visible field the site marks required: an answer is asked for, so it is a form, not the ad.
     required_shown: deepAll(el.ownerDocument, 'input, select, textarea', 0)
