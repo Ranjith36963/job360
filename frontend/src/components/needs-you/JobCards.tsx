@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getApplication, getCvToApprove, listPeople } from "@/lib/api";
 import type { ApplicationDetail, Ask } from "@/lib/api";
-import { buildCard, groupAsks, isBlocker, rowKind } from "@/lib/job-cards";
+import { buildCard, groupAsks, isBlocker, rowKind, waitSummary } from "@/lib/job-cards";
 import type { JobCardData } from "@/lib/job-cards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { JobCard } from "./JobCard";
@@ -86,7 +86,7 @@ export type JobCardsReport = {
   settled: boolean;
 };
 
-type Header = { id: number; company: string; role: string; waiting: number };
+type Header = { id: number; company: string; role: string; waiting: number; asks: Ask[] };
 
 /** With only the asks to go on: a blocker first, then questions, then the rest; oldest first. */
 function headerRank(asks: Ask[]): number {
@@ -143,6 +143,7 @@ export function JobCards({
         company: first?.job_company ?? "",
         role: first?.job_title ?? "",
         waiting: asks.length,
+        asks,
         rank: headerRank(asks),
         oldest: asks.map((a) => a.asked_at).sort()[0] ?? "",
       });
@@ -153,7 +154,7 @@ export function JobCards({
     for (const j of people ?? []) {
       if (seen.has(j.application_id)) continue;
       seen.add(j.application_id);
-      reach.push({ id: j.application_id, company: j.job_company, role: j.job_title, waiting: 0 });
+      reach.push({ id: j.application_id, company: j.job_company, role: j.job_title, waiting: 0, asks: [] });
     }
     return [...out, ...reach];
   }, [byJob, people]);
@@ -217,7 +218,7 @@ export function JobCards({
                   {title}
                 </Link>
                 <span className="text-xs text-muted-foreground">
-                  {h.waiting > 0 ? `${h.waiting} ${h.waiting === 1 ? "thing waits" : "things wait"}` : "someone to reach"}
+                  {h.waiting > 0 ? waitSummary(h.asks) : waitSummary([])}
                 </span>
               </div>
               {slot?.status === "loading" && <Skeleton data-testid={`job-skeleton-${h.id}`} className="h-16 w-full" />}

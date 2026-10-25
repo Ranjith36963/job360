@@ -92,22 +92,28 @@ export function PersonRow({
       <p className="whitespace-pre-wrap rounded-md border border-border bg-card p-2 text-sm">{person.message}</p>
       {!isMessage && (
         <div className="flex flex-col gap-0.5">
-          <p className={`text-xs ${over ? "font-semibold text-amber-600" : "text-muted-foreground"}`}
+          <p className={`text-xs ${over ? "font-semibold text-danger" : "text-muted-foreground"}`}
             data-testid={`note-count-${c.id}`} data-over={over ? "true" : "false"}>
             {count}/{NOTE_LIMIT}
           </p>
           <p className="text-xs text-muted-foreground">LinkedIn connection notes are 200 characters at most</p>
         </div>
       )}
+      {over && (
+        <p className="text-xs text-danger" data-testid={`note-too-long-${c.id}`}>
+          Too long for a connection note. Use it as a message after you connect, or rewrite it.
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {task?.state === "waiting_on_you" && (
           <>
-            <button type="button" className={primaryBtn} data-testid={`send-browser-${c.id}`}
-              disabled={busy || sending || over}
-              title={over ? "This connection note is over 200 characters. Shorten it first." : undefined}
-              onClick={() => void decide("approve")}>
-              Use my assistant&apos;s browser
-            </button>
+            {!over && (
+              <button type="button" className={primaryBtn} data-testid={`send-browser-${c.id}`}
+                disabled={busy || sending}
+                onClick={() => void decide("approve")}>
+                Use my assistant&apos;s browser
+              </button>
+            )}
             <button type="button" className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:underline disabled:opacity-50"
               data-testid={`decline-browser-${c.id}`} disabled={busy || sending}
               onClick={() => void decide("decline")}>
@@ -130,10 +136,12 @@ export function PersonRow({
             You said not to use your browser
           </span>
         )}
+        {!over && (
         <button type="button" className={btn}
           onClick={() => navigator.clipboard.writeText(person.message).then(() => setCopied(true), () => toast.error("Couldn't copy"))}>
           {copied ? "Copied" : "Copy"}
         </button>
+        )}
         <a href={person.linkedinUrl} target="_blank" rel="noopener noreferrer" className={btn}>
           Open profile ↗
         </a>

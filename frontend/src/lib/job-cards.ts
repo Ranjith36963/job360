@@ -287,3 +287,42 @@ export function isSensitiveQuestion(q: { key: string; question: string; sensitiv
   if (q.sensitive === true) return true;
   return SENSITIVE.test(`${q.key.replace(/[_-]+/g, " ")} ${q.question}`);
 }
+
+/** One short line saying what waits on a job, from its open asks (owner 2026-10-25). Up to three parts,
+ *  in this order: CAPTCHA, sign in, CV upload, a step on the form, answers to check, notes to send.
+ *  `peopleCount` (people with an unsent drafted note) adds to the notes; without it and with no asks,
+ *  a people-only header reads "Send notes". */
+export function waitSummary(asks: Ask[], peopleCount?: number): string {
+  const kinds = asks.map(rowKind);
+  const has = (k: RowKind) => kinds.includes(k);
+  const answers =
+    mergeQuestions(asks.filter((a) => rowKind(a) === "structured")).rows.length +
+    kinds.filter((k) => k === "question" || k === "yes_no").length;
+  const notes = kinds.filter((k) => k === "outreach").length + (peopleCount ?? 0);
+  const parts: string[] = [];
+  if (has("captcha")) parts.push("Solve a CAPTCHA");
+  if (has("login")) parts.push("Sign in");
+  if (has("upload")) parts.push("Attach your CV");
+  if (has("safety")) parts.push("Finish a step on the form");
+  if (answers > 0) parts.push(`Check ${answers} ${answers === 1 ? "answer" : "answers"}`);
+  if (notes > 0) parts.push(`Send ${notes} ${notes === 1 ? "note" : "notes"}`);
+  else if (asks.length === 0 && peopleCount === undefined) parts.push("Send notes");
+  return parts.slice(0, 3).join(" · ");
+}
+
+const HEAD_MAX = 140;
+
+/** An ask's text as a one-line action and the rest: the head is the first sentence or line (cut at
+ *  ". ", "? ", "! " or a newline, at most 140 characters, "…" when cut mid-sentence); the rest is
+ *  everything after it (empty = nothing to hide). Plain text only. */
+export function splitAskText(text: string): { head: string; rest: string } {
+  const t = (text ?? "").trim();
+  const m = /[.?!](?=\s)|\n/.exec(t);
+  let cut = m ? (t[m.index] === "\n" ? m.index : m.index + 1) : t.length;
+  let head = t.slice(0, cut).trim();
+  if (head.length > HEAD_MAX) {
+    cut = HEAD_MAX - 1;
+    head = `${t.slice(0, cut).trimEnd()}…`;
+  }
+  return { head, rest: t.slice(cut).trim() };
+}
