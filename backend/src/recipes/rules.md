@@ -321,7 +321,10 @@ SCHEDULE: create ONE hourly task. Each run calls `whats_due` first and
 runs only what it lists, in order (`inbox` = get_recipe("daily"), `hunt`,
 `reach` = get_recipe("reach") for its `application_ids` only, `batch`), then `mark_done` each (reach with
 its `application_ids`); `nothing_due` = end at once without
-writing anything. Job360 counts each duty from when it was last done
+writing anything. Say how each ended: `mark_done(duty, outcome, reason)`, outcome done | partial | failed;
+a failed run always names its reason (tool_unavailable, sign_in_needed, paid_plan_needed, network_blocked,
+rate_limited, needs_user, error) - never mark a failed run done. A failed duty waits 2h, 4h, 8h (at most
+24h); after 3 in a row the user sees a card saying what to fix. Job360 counts each duty from when it was last done
 (preferences.check_every for the inbox, assistant_settings.hunt_every_hours
 for the hunt), so a missed hour catches up. It lists `reach` only while
 assistant_settings.people_hunt is on, the inbox only in

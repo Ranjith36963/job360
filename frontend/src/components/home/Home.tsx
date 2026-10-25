@@ -7,6 +7,7 @@ import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { AskCard } from "@/components/needs-you/NeedsYou";
+import { RunProblems } from "@/components/needs-you/RunProblems";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
 import { HomeAssistantNotes } from "@/components/home/HomeAssistantNotes";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
@@ -260,6 +261,8 @@ export function Home() {
               Jobs in
             </Link>
           </header>
+
+          <RunProblems />
 
           {asks.status === "ok" && asks.value.asks.length > 0 && (
             <section aria-labelledby="home-asks" className="flex flex-col gap-3" data-testid="home-asks">

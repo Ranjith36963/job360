@@ -1390,6 +1390,21 @@ export async function deleteAssistantTrigger(): Promise<{ deleted: boolean }> {
   return request("/api/assistant-trigger", { method: "DELETE" });
 }
 
+// ---- Run problems (owner 2026-10-25): a duty that failed 3 times in a row, in plain words ----
+export type RunProblem = {
+  duty: "hunt" | "batch" | "inbox" | "reach";
+  label: string;
+  failures_in_row: number;
+  reason: string;
+  title: string;
+  what_to_do: string;
+  last_failed_at?: string | null;
+};
+
+export async function getRunProblems(): Promise<{ problems: RunProblem[] }> {
+  return request<{ problems: RunProblem[] }>("/api/schedule/problems");
+}
+
 // ---- Ignition (owner 2026-10-24): one start link per duty; website only, never a token ----
 export type Duty = "hunt" | "batch" | "inbox" | "reach";
 export type DutyTrigger = { duty: Duty; label: string; retry_until?: string | null } & AssistantTrigger;

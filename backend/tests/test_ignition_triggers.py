@@ -171,3 +171,16 @@ async def test_no_start_link_means_no_background_work(authenticated_async_contex
             assert not duty_trigger._PENDING
             await _settle()
             assert _started(mocked) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_hunt_starts_nothing(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        await _link_all(client)
+        with aioresponses() as mocked:
+            _mock(mocked)
+            failed = await client.post("/api/schedule/done", json={"duty": "hunt", "outcome": "failed",
+                                                                   "reason": "tool_unavailable"})
+            assert failed.status_code == 200, failed.text
+            await _settle()
+            assert _started(mocked) == {}

@@ -8218,6 +8218,37 @@
             ],
             "title": "Duty",
             "type": "string"
+          },
+          "outcome": {
+            "default": "done",
+            "enum": [
+              "done",
+              "partial",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_work",
+                  "tool_unavailable",
+                  "sign_in_needed",
+                  "paid_plan_needed",
+                  "network_blocked",
+                  "rate_limited",
+                  "needs_user",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "required": [
@@ -8242,8 +8273,23 @@
             "title": "Duty",
             "type": "string"
           },
+          "failures_in_row": {
+            "default": 0,
+            "title": "Failures In Row",
+            "type": "integer"
+          },
           "last_tick_at": {
             "title": "Last Tick At",
+            "type": "string"
+          },
+          "outcome": {
+            "default": "done",
+            "enum": [
+              "done",
+              "partial",
+              "failed"
+            ],
+            "title": "Outcome",
             "type": "string"
           }
         },
@@ -11901,6 +11947,87 @@
           }
         },
         "title": "ResolveInboxItemRequest",
+        "type": "object"
+      },
+      "RunProblemOut": {
+        "properties": {
+          "duty": {
+            "enum": [
+              "hunt",
+              "inbox",
+              "batch",
+              "reach"
+            ],
+            "title": "Duty",
+            "type": "string"
+          },
+          "failures_in_row": {
+            "title": "Failures In Row",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_failed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failed At"
+          },
+          "reason": {
+            "enum": [
+              "no_work",
+              "tool_unavailable",
+              "sign_in_needed",
+              "paid_plan_needed",
+              "network_blocked",
+              "rate_limited",
+              "needs_user",
+              "error"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "what_to_do": {
+            "title": "What To Do",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duty",
+          "label",
+          "failures_in_row",
+          "reason",
+          "title",
+          "what_to_do"
+        ],
+        "title": "RunProblemOut",
+        "type": "object"
+      },
+      "RunProblemsOut": {
+        "properties": {
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/RunProblemOut"
+            },
+            "title": "Problems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "problems"
+        ],
+        "title": "RunProblemsOut",
         "type": "object"
       },
       "SaveArtifactRequest": {
@@ -16100,6 +16227,13 @@
           "expected_every_hours": {
             "title": "Expected Every Hours",
             "type": "integer"
+          },
+          "failures_in_row": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Failures In Row",
+            "type": "object"
           },
           "last_done_at": {
             "additionalProperties": {
@@ -26694,6 +26828,72 @@
           }
         },
         "summary": "Whats Due",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/schedule/problems": {
+      "get": {
+        "description": "Owner 2026-10-25: one plain card per duty whose scheduled run failed ``FAILURE_CARD_AT`` times in a\nrow, saying what happened and what to do (Home and Needs you show them). Read-only; closed values.",
+        "operationId": "run_problems_api_schedule_problems_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunProblemsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Problems",
         "tags": [
           "schedule"
         ]
