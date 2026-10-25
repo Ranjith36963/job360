@@ -244,10 +244,10 @@ async def test_preflight_kit_missing_names_what_memory_lacks_for_the_job_country
         rows = _by_id(await _queued(client))
         assert rows[no_country]["preflight"]["kit_missing"] == ["job_country"]
         gb_missing = rows[gb]["preflight"]["kit_missing"]
-        # the seeded profile has no UK right to work or salary: exactly those, from the job's country
-        assert gb_missing == [
-            "right_to_work.GB.work_authorization", "right_to_work.GB.needs_sponsorship", "salary.GB",
-        ]
+        # the seeded profile has no UK right to work or salary: only the right-to-work facts are listed -
+        # salary is left to check_form (owner, 2026-10-23: only what the form asks counts as missing)
+        assert gb_missing == ["right_to_work.GB.work_authorization", "right_to_work.GB.needs_sponsorship"]
+        assert not any(k.startswith("salary") for k in gb_missing)
 
 
 @pytest.mark.asyncio

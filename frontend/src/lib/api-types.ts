@@ -446,7 +446,8 @@ export interface paths {
          * Resolve Blocked
          * @description "Mark resolved" - the user sorted out what stopped their assistant: records
          *     ``unblocked`` {resolution: user_did_it} and closes the blocked ask. 409 when
-         *     nothing is blocked. Session only; assistants use ``record_event``.
+         *     nothing is blocked. Session only; assistants use ``record_event``. A block the
+         *     assistant can try again (owner 2026-10-25) puts the job back on the queue and starts Apply.
          */
         post: operations["resolve_blocked_api_applications__application_id__blocked_resolve_post"];
         delete?: never;
@@ -1728,7 +1729,8 @@ export interface paths {
          * @description One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
          *     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
          *     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
-         *     human check in their assistant's browser instead (shot, click, type, key, scroll, done).
+         *     human check in their assistant's browser instead (shot, click, type, key, scroll, done), in the
+         *     browser of ``application_id``.
          */
         post: operations["browser_live_api_browser_live_post"];
         delete?: never;
@@ -4216,6 +4218,8 @@ export interface components {
              * @default false
              */
             finish_here: boolean;
+            /** Held Seconds */
+            held_seconds?: number | null;
             /** Id */
             id: number;
             /** Job Company */
@@ -4942,6 +4946,8 @@ export interface components {
              * @default false
              */
             finish_here: boolean;
+            /** Held Seconds */
+            held_seconds?: number | null;
             /** Id */
             id: number;
             /** Job Company */
@@ -6513,6 +6519,8 @@ export interface components {
         LiveActionRequest: {
             /** Action */
             action: string;
+            /** Application Id */
+            application_id?: number | null;
             /**
              * Dy
              * @default 0
@@ -7507,6 +7515,8 @@ export interface components {
             flags: components["schemas"]["ReadyFlag"][];
             /** Form Filled Event Id */
             form_filled_event_id: number;
+            /** Held Seconds */
+            held_seconds?: number | null;
             /** Job Company */
             job_company: string;
             /** Job Country */

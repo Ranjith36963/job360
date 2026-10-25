@@ -331,9 +331,9 @@ describe("Your assistant got stuck (blocked record)", () => {
     rerender(<ApplicationDecisions applicationId={7} controls={controls({ blocked })} onChanged={() => undefined} />);
     fireEvent.click(screen.getByTestId("blocked-finish-here"));
     await waitFor(() => expect(screen.getByTestId("finish-view")).toBeTruthy());
-    expect(browserLive).toHaveBeenCalledWith({ action: "shot" }, "finish");
+    expect(browserLive).toHaveBeenCalledWith({ action: "shot" }, "finish", 7); // that job's own browser
     fireEvent.click(screen.getByTestId("finish-done"));
-    await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "done" }, "finish"));
+    await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "done" }, "finish", 7));
     await waitFor(() => expect(screen.getByTestId("blocked-finish-here")).toBeTruthy());
   });
 
@@ -350,7 +350,7 @@ describe("Your assistant got stuck (blocked record)", () => {
     await waitFor(() => expect(browserLive).toHaveBeenCalledTimes(2), { timeout: 3000 }); // the refresh is in flight
     fireEvent.click(screen.getByTestId("finish-done"));
     release(shot);
-    await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "done" }, "finish"), { timeout: 3000 });
+    await waitFor(() => expect(browserLive).toHaveBeenCalledWith({ action: "done" }, "finish", 7), { timeout: 3000 });
     await waitFor(() => expect(screen.getByTestId("blocked-finish-here")).toBeTruthy());
   });
 

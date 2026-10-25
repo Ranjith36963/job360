@@ -174,7 +174,7 @@ def test_failed_login_logs_only_a_masked_email(client, caplog):
     assert all(e and e.startswith("v***@example.com") for e in logged)
 
 
-def _failed_login_records(client, caplog, email):
+def _failed_login_audit(client, caplog, email, xff):
     import logging
 
     audit_logger = logging.getLogger("job360.audit")
@@ -182,24 +182,27 @@ def _failed_login_records(client, caplog, email):
     try:
         with caplog.at_level(logging.INFO, logger="job360.audit"):
             r = client.post("/api/auth/login", json={"email": email, "password": "wrongpassword"},
-                            headers={"X-Forwarded-For": "6.6.6.6"})
+                            headers={"X-Forwarded-For": xff})
     finally:
         audit_logger.removeHandler(caplog.handler)
     assert r.status_code == 401
     return [rec for rec in caplog.records if getattr(rec, "event", None) == "login"]
 
 
-def test_failed_test_login_records_the_forwarding_probe(client, caplog):
-    """TEMPORARY probe: an @example.com failure records the forwarded headers as they arrive."""
-    recs = _failed_login_records(client, caplog, "ip-test@example.com")
-    probe = getattr(recs[-1], "forwarding_probe", None)
-    assert probe is not None
-    assert probe["headers"]["x-forwarded-for"] == ["6.6.6.6"]
-    assert "peer" in probe and "hops" in probe
+def test_failed_login_audit_keeps_the_proxy_written_address_not_a_forged_one(client, caplog, monkeypatch):
+    """The production check of 2026-10-25: a forged entry in front of the one
+    Railway's edge appends is ignored; the audit row keeps the edge's entry."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 1)
+    recs = _failed_login_audit(client, caplog, "ip-test@example.com", "6.6.6.6, 84.17.44.226")
+    assert recs and recs[-1].client_ip == "84.17.44.226"
 
 
-def test_failed_real_login_has_no_forwarding_probe(client, caplog):
-    recs = _failed_login_records(client, caplog, "someone@gmail.com")
+def test_failed_login_audit_carries_no_header_dump(client, caplog):
+    """The temporary forwarding probe (#1187) is gone: no request headers ride
+    along in the audit row, not even for the reserved test domain."""
+    recs = _failed_login_audit(client, caplog, "ip-test@example.com", "6.6.6.6")
     assert recs and all(not hasattr(rec, "forwarding_probe") for rec in recs)
 
 

@@ -8,7 +8,7 @@ with the caller's assistant; the safety stays here and in
 
 * OFF until ``BROWSER_AGENT_ENABLED`` (the answer is ``status: off``);
 * the browser is the caller's own (keyed by ``user.id``, never a parameter —
-  rule #12);
+  rule #12), one per job: each ``application_id`` gets its own browser;
 * the final submit runs the caller's ``submit_check`` and records
   ``submit_attempted`` first, both scoped to the caller;
 * uploads are only the caller's own saved CV / cover letter for that
@@ -122,7 +122,7 @@ def _gate_and_files(
             )
         pdf = await render_document_pdf(user.id, kind, row.get("text") or "")
         # Slice 29: the receipt names exactly these bytes (sha256 only). Never blocks the upload.
-        host = await _page_host(user)
+        host = await _page_host(user, application_id)
         try:
             async with _db() as db:
                 await uploads.record(
@@ -159,13 +159,13 @@ def _gate_and_files(
     ), _files
 
 
-async def _page_host(user: CurrentUser) -> Optional[str]:
-    """The host of the page the caller's browser is on (the form an upload goes into); ``None``
+async def _page_host(user: CurrentUser, application_id: int) -> Optional[str]:
+    """The host of the page that job's browser is on (the form an upload goes into); ``None``
     when there is no browser or the address has no host. Never raises."""
     from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
 
     try:
-        s = await browser_agent.get_pool().get(user.id, create=False)
+        s = await browser_agent.get_pool().get(browser_agent.browser_key(user.id, application_id), create=False)
         if s is None:
             return None
         return site_host(str(s.page.url)) or None
@@ -217,7 +217,7 @@ async def browser_action(
         result = await browser_agent.run(
             browser_agent.get_pool(), user.id, body.action, url=body.url, ref=body.ref, text=body.text,
             on=body.on, doc_kind=body.doc_kind, gate=gate, files=files, load_state=_loader(user),
-            owner=body.session, fields=[f.model_dump() for f in body.fields],
+            owner=body.session, fields=[f.model_dump() for f in body.fields], application_id=body.application_id,
         )
     except browser_agent.BrowserError as exc:
         _audit(user, body.action, exc.status, exc.reason)
@@ -254,30 +254,37 @@ _FILL_ACTIONS = frozenset({"fill", "type", "choose", "tick", "upload"})
 
 
 async def _hold_if_waiting(user: CurrentUser, application_id: int) -> bool:
-    """The application's open block is a CAPTCHA in Job360's browser: hold the browser 30 minutes so the
-    user finishes it on Needs you instead of the 10-minute idle close. True when held."""
+    """The application's open block is a CAPTCHA that Job360's browser itself recorded (``by: browser``,
+    never a caller's look-alike): keep the browser held for the user instead of the 10-minute idle close.
+    True when held. A running hold is never extended here (only ``_hand_off``, a fresh CAPTCHA, renews),
+    and a new one follows the form_swept rule: at most one per form page (Done or a new page frees it),
+    under the held cap. Otherwise an assistant's fills could keep a browser held forever (review of #1176)."""
     from src.services.applications import blocked as blocked_service  # noqa: PLC0415
 
     async with _db() as db:
-        block = await blocked_service.open_block(db, user.id, application_id)
-    if not block or block["reason"] != "captcha" or block["step"] != "Job360 browser":
-        return False
-    return browser_agent.hold_for_user(browser_agent.get_pool(), user.id)
+        if not await blocked_service.browser_captcha_open(db, user.id, application_id):
+            return False
+    return browser_agent.hold_for_user(browser_agent.get_pool(), user.id, application_id, swept=True)
 
 
 async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, Any]) -> bool:
     """Record ``blocked`` for the application the browser stopped on, so the job waits on Needs you
     whatever the assistant does next. Once per open block of the same reason (no event per look).
     True when a new ``blocked`` was recorded."""
-    from src.api.routes import applications as applications_route  # noqa: PLC0415 - avoid an import cycle
     from src.services.applications import blocked as blocked_service  # noqa: PLC0415
     from src.services.browser_agent.sign_ins import site_host  # noqa: PLC0415
 
     reason = _BLOCKED_REASON.get(str(result.get("reason")), "other")
-    held = reason == "captcha" and browser_agent.hold_for_user(browser_agent.get_pool(), user.id)
+    # A fresh CAPTCHA gets its full 30 minutes, even inside a form_swept hold that is almost over.
+    held = reason == "captcha" and browser_agent.hold_for_user(
+        browser_agent.get_pool(), user.id, application_id, renew=True
+    )
     async with _db() as db:
         current = await blocked_service.open_block(db, user.id, application_id)
-        if current is not None and current["reason"] == reason:
+        # A caller's look-alike CAPTCHA block (no ``by: browser``) is replaced by the browser's own.
+        if current is not None and current["reason"] == reason and (
+            reason != "captcha" or await blocked_service.browser_captcha_open(db, user.id, application_id)
+        ):
             return False
         # "Job360 browser" is read by the web (ApplicationDecisions.tsx) to offer "Sign in once on Job sites".
         payload: dict[str, Any] = {
@@ -286,9 +293,11 @@ async def _hand_off(user: CurrentUser, application_id: int, result: dict[str, An
         host = site_host(str(result.get("url", "")))
         if host and "." in host:
             payload["page_host"] = host
-        await applications_route.record_event(
-            application_id, applications_route.RecordEventRequest(event_type="blocked", payload=payload), db, user
-        )
+        # Not record_event: this path stores the server-only ``by: browser`` a caller can never write.
+        try:
+            await blocked_service.record_browser_block(db, user, application_id, payload)
+        except applications_spine.SpineError as exc:  # the same HTTP error record_event gave
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     return True
 
 
@@ -307,6 +316,8 @@ class LiveActionRequest(BaseModel):
     dy: float = 0
     # "finish": the hand-off view, in the user's own assistant browser (a CAPTCHA the user solves).
     mode: Literal["sign_in", "finish"] = "sign_in"
+    # finish: whose job's browser (required); sign_in ignores it (its own live view).
+    application_id: Optional[int] = None
 
 
 _LIVE_AUDIT = {"sign_in": "live", "finish": "finish"}
@@ -320,7 +331,10 @@ async def browser_live(
     """One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
-    human check in their assistant's browser instead (shot, click, type, key, scroll, done)."""
+    human check in their assistant's browser instead (shot, click, type, key, scroll, done), in the
+    browser of ``application_id``."""
+    if body.mode == "finish" and body.application_id is None:
+        raise HTTPException(status_code=422, detail="application_id is required for mode finish")
     if not settings.BROWSER_AGENT_ENABLED:
         _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", "off")
         return dict(OFF)
@@ -339,6 +353,7 @@ async def browser_live(
         result = await browser_agent.live(
             browser_agent.get_pool(), user.id, body.action, url=body.url, x=body.x, y=body.y, text=body.text,
             key=body.key, dy=body.dy, load_state=_loader(user), keep=_keep, finish=body.mode == "finish",
+            application_id=body.application_id,
         )
     except browser_agent.BrowserError as exc:
         _audit(user, f"{_LIVE_AUDIT[body.mode]}_{body.action}", exc.status, exc.reason)
@@ -374,7 +389,7 @@ async def forget_sign_in(
         forgotten = await sign_ins.forget(db, user.id, clean)
     if not forgotten:
         raise HTTPException(status_code=404, detail="no saved sign-in for that site")
-    await browser_agent.get_pool().close(user.id, "sign_in_forgotten")
+    await browser_agent.get_pool().close_user(user.id, "sign_in_forgotten")
     await browser_agent.get_pool().close(browser_agent.live_key(user.id), "sign_in_forgotten")
     _audit(user, "forget_sign_in", "ok")
     return {"forgotten": clean}
