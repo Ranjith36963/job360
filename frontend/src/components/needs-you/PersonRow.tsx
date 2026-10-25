@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { updateContact } from "@/lib/api";
+import { browserSendState, queueBrowserSend } from "@/lib/browser-contract";
 import { closedSetLabel } from "@/lib/closed-sets";
 import type { PersonToReach } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -24,9 +24,6 @@ const STATE_LABEL: Record<string, string> = {
   unknown: "LinkedIn state unknown",
 };
 
-/** `ready_to_send` is added by the backend later; it is not in api-types yet. */
-type WithReady = { ready_to_send?: boolean | null };
-type ContactPatch = Parameters<typeof updateContact>[1] & WithReady;
 
 export function PersonRow({
   person,
@@ -49,14 +46,15 @@ export function PersonRow({
   const isMessage = state === "connected";
   const count = person.message.length;
   const over = !isMessage && count > NOTE_LIMIT;
-  const canQueue = "ready_to_send" in c;
-  const queued = canQueue && (c as WithReady).ready_to_send === true;
+  // The send field's name is the Browser agent's contract: read only through the adapter.
+  const sendState = browserSendState(c);
+  const canQueue = sendState !== "unsupported";
+  const queued = sendState === "queued";
 
   async function queueSend() {
     setSending(true);
     try {
-      const patch: ContactPatch = { ready_to_send: true };
-      await updateContact(c.id, patch as never);
+      await queueBrowserSend(c.id);
       await onChanged();
     } catch (err) {
       toast.apiError(err, "Couldn't queue that");
