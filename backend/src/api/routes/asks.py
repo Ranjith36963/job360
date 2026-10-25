@@ -117,6 +117,8 @@ async def list_asks(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if actor_for(user) == "web" and status == "open":  # the user's own page tidies old duplicates once
+            await asks_service.tidy_open_asks(db, user.id)
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
         finish = await blocked_service.finish_here_ask_ids(db, user.id, rows)
         rows = [{**r, "finish_here": r["id"] in finish, "held_seconds": _held(user.id, r, finish)} for r in rows]

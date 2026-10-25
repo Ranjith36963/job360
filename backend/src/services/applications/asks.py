@@ -228,6 +228,106 @@ async def supersede(
             )
 
 
+TIDY_ACTOR = "system"
+# A row that asks the user to paste the form's own question: the assistant reads the form itself (owner 2026-10-25).
+_PASTE_RE = re.compile(r"\bpaste\b", re.IGNORECASE)
+READ_FORM_NOTE = (
+    "Read this form's free-text questions yourself and draft the answers; do not ask the user to paste them."
+)
+
+
+async def tidy_open_asks(db: JobDatabase, user_id: str) -> int:
+    """Owner 2026-10-25: the one-time clean-up of asks filed before one-ask-per-job, run on the user's own
+    read (a no-op once tidy). Per job, family and side, the NEWEST open ask keeps every row (merged under
+    fixed names) and the older ones close as superseded; an open ask on a closed job closes too. Nothing is
+    deleted. Returns how many asks it closed."""
+    from src.core.settings import APPLICATION_FOLLOW_UP_CLOSED_STATUSES  # noqa: PLC0415
+
+    cur = await db._db.execute(
+        "SELECT k.id, a.status AS app_status FROM application_asks k JOIN applications a "
+        "ON a.id = k.application_id AND a.user_id = k.user_id WHERE k.user_id = ? AND k.answered_at IS NULL "
+        "AND k.withdrawn_at IS NULL AND k.context NOT LIKE ? ORDER BY k.id",
+        (user_id, "proof_missing:%"),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    if not rows:
+        return 0
+    groups: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
+    closed_job: list[dict[str, Any]] = []
+    for r in rows:
+        ask = await _get_ask(db, user_id, int(r["id"]))
+        if ask is None:
+            continue
+        if r["app_status"] in APPLICATION_FOLLOW_UP_CLOSED_STATUSES:
+            closed_job.append(ask)
+            continue
+        family = "question" if ask["kind"] in QUESTION_FAMILY else ask["kind"]
+        side = "web" if ask["asked_by"] == "web" else "assistant"
+        groups.setdefault((int(ask["application_id"]), family, side), []).append(ask)
+    dupes = {k: v for k, v in groups.items() if len(v) > 1}
+    pasted = [a for (_app, fam, _side), v in groups.items() if fam == "question"
+              for a in v[-1:] if any(_PASTE_RE.search(str(q["question"])) for q in _rows_of_all(v))]
+    if not dupes and not closed_job and not pasted:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    closed = 0
+    async with db._db.transaction():
+        for (_app, family, _side), asks_ in dupes.items():
+            keep, olds = asks_[-1], asks_[:-1]
+            if family == "question":
+                merged = merge_questions([q for old in olds for q in _rows_of(old)], _rows_of(keep))
+                await db._db.execute(
+                    "UPDATE application_asks SET questions = ? WHERE id = ? AND user_id = ? AND answered_at IS NULL",
+                    (json.dumps(merged) if merged else "", int(keep["id"]), user_id),
+                )
+            await supersede(db, user_id, olds, int(keep["id"]), now, TIDY_ACTOR)
+            closed += len(olds)
+        for keep in pasted:
+            closed += await _drop_paste_rows(db, user_id, int(keep["id"]), now)
+        for ask in closed_job:
+            await db._db.execute(
+                "UPDATE application_asks SET withdrawn_at = ?, withdrawn_by = 'job_closed', "
+                "withdrawn_reason = 'the job is closed' WHERE id = ? AND user_id = ? AND answered_at IS NULL "
+                "AND withdrawn_at IS NULL",
+                (now, int(ask["id"]), user_id),
+            )
+            closed += 1
+    get_audit_logger().info("asks_tidied", extra={"event": "asks_tidied", "user_id": user_id, "closed": closed})
+    return closed
+
+
+def _rows_of_all(asks_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [q for a in asks_ for q in _rows_of(a)]
+
+
+async def _drop_paste_rows(db: JobDatabase, user_id: str, ask_id: int, now: str) -> int:
+    """Take the "paste the question" rows off an open ask and leave the job a note to read the form. An ask
+    with no row left closes. Returns 1 when the ask closed, else 0."""
+    ask = await _get_ask(db, user_id, ask_id)
+    if ask is None:
+        return 0
+    rows = _rows_of(ask)
+    kept = [q for q in rows if not _PASTE_RE.search(str(q["question"]))]
+    if len(kept) == len(rows):
+        return 0
+    await append_event(
+        db, user_id=user_id, application_id=int(ask["application_id"]), event_type="note",
+        detail=READ_FORM_NOTE, occurred_at=now, recorded_by=TIDY_ACTOR,
+    )
+    if kept:
+        await db._db.execute(
+            "UPDATE application_asks SET questions = ? WHERE id = ? AND user_id = ? AND answered_at IS NULL",
+            (json.dumps(kept), ask_id, user_id),
+        )
+        return 0
+    await db._db.execute(
+        "UPDATE application_asks SET withdrawn_at = ?, withdrawn_by = ?, withdrawn_reason = ? "
+        "WHERE id = ? AND user_id = ? AND answered_at IS NULL AND withdrawn_at IS NULL",
+        (now, TIDY_ACTOR, "the assistant reads the form's questions itself", ask_id, user_id),
+    )
+    return 1
+
+
 def _validate_answers(questions: list[dict[str, Any]], raw: Optional[dict[str, Any]]) -> dict[str, str]:
     """One non-empty answer per question key, nothing else; a question with choices takes one of them."""
     if not questions:
