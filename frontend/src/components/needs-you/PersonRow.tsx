@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { browserSendState, queueBrowserSend } from "@/lib/browser-contract";
+import { contactSendBrowser, decideOwnBrowserSend, ownBrowserTask } from "@/lib/browser-contract";
+import { BrowserReason } from "./BrowserReason";
 import { closedSetLabel } from "@/lib/closed-sets";
 import type { PersonToReach } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -48,18 +49,18 @@ export function PersonRow({
   const isMessage = state === "connected";
   const count = person.message.length;
   const over = !isMessage && count > NOTE_LIMIT;
-  // The send field's name is the Browser agent's contract: read only through the adapter.
-  const sendState = browserSendState(c);
-  const canQueue = sendState !== "unsupported";
-  const queued = sendState === "queued";
+  // Field names are the Browser agent's contract: read only through the adapter.
+  const task = ownBrowserTask(c);
+  const sendBrowser = contactSendBrowser(c);
 
-  async function queueSend() {
+  async function decide(decision: "approve" | "decline") {
+    if (!task) return;
     setSending(true);
     try {
-      await queueBrowserSend(c.id);
+      await decideOwnBrowserSend(c.id, task.message_id, decision);
       await onChanged();
     } catch (err) {
-      toast.apiError(err, "Couldn't queue that");
+      toast.apiError(err, "Couldn't save that");
     } finally {
       setSending(false);
     }
@@ -73,8 +74,12 @@ export function PersonRow({
           {c.role && <span className="font-normal text-muted-foreground"> · {c.role}</span>}
         </p>
         <span className={chip} data-testid={`channel-${c.id}`}>{email ? "Email" : "LinkedIn"}</span>
+        {sendBrowser && (
+          <span className={chip} data-testid={`send-browser-label-${c.id}`}>{sendBrowser.label}</span>
+        )}
         <span className={chip} data-testid={`li-state-${c.id}`}>{STATE_LABEL[state]}</span>
       </div>
+      {sendBrowser && <BrowserReason label={sendBrowser} testid={`send-browser-reason-${c.id}`} />}
       {email && (
         <p className="text-xs text-muted-foreground" data-testid={`email-${c.id}`}>
           {email}{emailFrom ? ` · from ${closedSetLabel(emailFrom)}` : ""}
@@ -95,19 +100,36 @@ export function PersonRow({
         </div>
       )}
       <div className="flex flex-wrap gap-2">
-        {canQueue &&
-          (queued ? (
-            <button type="button" className={primaryBtn} disabled data-testid={`queued-${c.id}`}>
-              Queued for your browser
-            </button>
-          ) : (
+        {task?.state === "waiting_on_you" && (
+          <>
             <button type="button" className={primaryBtn} data-testid={`send-browser-${c.id}`}
               disabled={busy || sending || over}
               title={over ? "This connection note is over 200 characters. Shorten it first." : undefined}
-              onClick={() => void queueSend()}>
+              onClick={() => void decide("approve")}>
               Use my assistant&apos;s browser
             </button>
-          ))}
+            <button type="button" className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:underline disabled:opacity-50"
+              data-testid={`decline-browser-${c.id}`} disabled={busy || sending}
+              onClick={() => void decide("decline")}>
+              Don&apos;t use it
+            </button>
+          </>
+        )}
+        {task?.state === "queued" && (
+          <button type="button" className={primaryBtn} disabled data-testid={`queued-${c.id}`}>
+            Queued for your browser
+          </button>
+        )}
+        {task?.state === "in_progress" && (
+          <button type="button" className={primaryBtn} disabled data-testid={`in-progress-${c.id}`}>
+            Sending in your browser…
+          </button>
+        )}
+        {task?.state === "declined" && (
+          <span className="self-center text-xs text-muted-foreground" data-testid={`declined-${c.id}`}>
+            You said not to use your browser
+          </span>
+        )}
         <button type="button" className={btn}
           onClick={() => navigator.clipboard.writeText(person.message).then(() => setCopied(true), () => toast.error("Couldn't copy"))}>
           {copied ? "Copied" : "Copy"}
