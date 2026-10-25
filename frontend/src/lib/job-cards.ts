@@ -74,6 +74,13 @@ export function peopleToReach(detail: ApplicationDetail): PersonToReach[] {
   return out;
 }
 
+// The browser fields live behind one adapter (the Browser agent owns their names).
+import { needsOwnBrowser } from "@/lib/browser-contract";
+export { needsOwnBrowser };
+
+export const OWN_CHROME_LABEL = "Needs your Chrome, PC on";
+export const JOB360_BROWSER_LABEL = "Job360's browser";
+
 export type JobCardData = {
   applicationId: number;
   company: string;
@@ -87,6 +94,10 @@ export type JobCardData = {
   latestCv: { artifactId: number; version: number } | null;
   formFilled: boolean;
   oldestAskAt: string;
+  /** How many of this card's open asks must run in the owner's own Chrome. */
+  ownBrowserCount: number;
+  /** True when any of them does. */
+  ownBrowser: boolean;
 };
 
 /** Open asks grouped by job (one card each), the rest (no job) left over. Practice asks dropped. */
@@ -119,6 +130,8 @@ export function buildCard(
     latestCv: cvs[0] ? { artifactId: cvs[0].id, version: cvs[0].version_no } : null,
     formFilled: detail.form_state === "filled",
     oldestAskAt: sorted[0]?.asked_at ?? detail.updated_at,
+    ownBrowserCount: sorted.filter(needsOwnBrowser).length,
+    ownBrowser: sorted.some(needsOwnBrowser),
   };
 }
 

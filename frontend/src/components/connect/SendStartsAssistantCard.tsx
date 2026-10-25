@@ -23,6 +23,7 @@ import {
   LABEL_CLASS,
   PRIMARY_BTN_CLASS,
   QUIET_BTN_CLASS,
+  ShowInstructions,
   TITLE_CLASS,
   copyText,
 } from "@/components/connect/ConnectSteps";
@@ -161,12 +162,16 @@ export function SendStartsAssistantCard() {
         <ol className="list-decimal space-y-2 pl-5 text-muted-foreground">
           <li>
             On claude.ai/code/routines, make a routine with the Job360 connector and paste these instructions:
-            <pre className={PRE_CLASS} data-testid="routine-prompt">
-              {ROUTINE_PROMPT}
-            </pre>
-            <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(ROUTINE_PROMPT, "Instructions")}>
-              Copy instructions
-            </Button>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(ROUTINE_PROMPT, "Instructions")}>
+                Copy instructions
+              </Button>
+              <ShowInstructions>
+                <pre className={PRE_CLASS} data-testid="routine-prompt">
+                  {ROUTINE_PROMPT}
+                </pre>
+              </ShowInstructions>
+            </div>
           </li>
           <li>Add an API trigger to it, copy its URL, press Generate token, and paste both here.</li>
         </ol>
@@ -212,12 +217,16 @@ export function SendStartsAssistantCard() {
             Leave Claude Code open on your computer with this running. It checks every 5 minutes and applies with
             your own Chrome and your own sign-ins (your computer must be on):
           </p>
-          <pre className={PRE_CLASS} data-testid="pc-loop-command">
-            {PC_LOOP_COMMAND}
-          </pre>
-          <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(PC_LOOP_COMMAND, "Command")}>
-            Copy command
-          </Button>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(PC_LOOP_COMMAND, "Command")}>
+              Copy command
+            </Button>
+            <ShowInstructions>
+              <pre className={PRE_CLASS} data-testid="pc-loop-command">
+                {PC_LOOP_COMMAND}
+              </pre>
+            </ShowInstructions>
+          </div>
         </details>
       </CardContent>
     </Card>

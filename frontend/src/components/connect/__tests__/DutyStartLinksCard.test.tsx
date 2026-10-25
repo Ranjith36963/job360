@@ -11,6 +11,8 @@ vi.mock("@/lib/api", () => ({
   deleteDutyTrigger: (...a: unknown[]) => deleteDutyTrigger(...a),
   runDuty: (...a: unknown[]) => runDuty(...a),
 }));
+const fetchSettingsShared = vi.fn();
+vi.mock("@/lib/assistant-state", () => ({ fetchSettingsShared: (...a: unknown[]) => fetchSettingsShared(...a) }));
 const success = vi.fn();
 const error = vi.fn();
 const info = vi.fn();
@@ -29,6 +31,12 @@ const HUNT_SET = {
 beforeEach(() => {
   getDutyTriggers.mockReset().mockResolvedValue({
     duties: [HUNT_SET, unset("batch", "Apply"), unset("inbox", "Gmail check"), unset("reach", "People hunt")],
+  });
+  fetchSettingsShared.mockReset().mockResolvedValue({
+    hunt_every_hours: { effective: 6 },
+    check_every: "12h",
+    apply_hours: { effective: { from: "09:00", to: "17:00" } },
+    people_hunt: { effective: true },
   });
   saveDutyTrigger.mockReset().mockResolvedValue({});
   deleteDutyTrigger.mockReset().mockResolvedValue({ deleted: true });
@@ -72,5 +80,37 @@ describe("Start each job at once", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(saveDutyTrigger).toHaveBeenCalledWith("reach", "https://x.example/fire", "tok"));
     await waitFor(() => expect(within(row).getByLabelText("People hunt token")).toHaveValue(""));
+  });
+
+  it("shows a Linked / Not linked pill and the schedule only where an interval exists", async () => {
+    render(<DutyStartLinksCard />);
+    const hunt = await screen.findByTestId("duty-hunt");
+    expect(within(hunt).getByTestId("duty-hunt-pill")).toHaveTextContent("Linked");
+    expect(within(await screen.findByTestId("duty-batch")).getByTestId("duty-batch-pill")).toHaveTextContent("Not linked");
+    await waitFor(() => expect(within(hunt).getByTestId("duty-hunt-schedule")).toHaveTextContent("Every 6 hours"));
+    expect(within(screen.getByTestId("duty-inbox")).getByTestId("duty-inbox-schedule")).toHaveTextContent("Every 12 hours");
+    expect(screen.queryByTestId("duty-batch-schedule")).toBeNull();
+    expect(screen.queryByTestId("duty-reach-schedule")).toBeNull();
+  });
+
+  it("hides the link form on a linked row until Replace is chosen from the menu", async () => {
+    render(<DutyStartLinksCard />);
+    const row = await screen.findByTestId("duty-hunt");
+    expect(within(row).queryByLabelText("Hunt start link")).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Replace" }));
+    expect(within(row).getByLabelText("Hunt start link")).toBeInTheDocument();
+    fireEvent.change(within(row).getByLabelText("Hunt start link"), { target: { value: "https://x.example/new" } });
+    fireEvent.change(within(row).getByLabelText("Hunt token"), { target: { value: "t2" } });
+    fireEvent.submit(within(row).getByLabelText("Hunt start link").closest("form")!);
+    await waitFor(() => expect(saveDutyTrigger).toHaveBeenCalledWith("hunt", "https://x.example/new", "t2"));
+    await waitFor(() => expect(within(row).queryByLabelText("Hunt start link")).toBeNull());
+  });
+
+  it("Remove from the menu deletes the link", async () => {
+    render(<DutyStartLinksCard />);
+    const row = await screen.findByTestId("duty-hunt");
+    expect(within(row).getByLabelText("More actions for Hunt")).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(deleteDutyTrigger).toHaveBeenCalledWith("hunt"));
   });
 });

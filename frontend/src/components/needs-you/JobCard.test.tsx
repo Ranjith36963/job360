@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Ask } from "@/lib/api";
 import type { JobCardData } from "@/lib/job-cards";
-import { rowKind } from "@/lib/job-cards";
+import { needsOwnBrowser, rowKind } from "@/lib/job-cards";
 import { JobCard } from "./JobCard";
 
 const answerAsk = vi.fn();
@@ -35,7 +35,8 @@ function card(asks: Ask[], over: Partial<JobCardData> = {}): JobCardData {
   return {
     applicationId: 7, company: "Acme", role: "AI Engineer", formUrl: "https://jobs.example.com/7",
     asks: asks.map((a) => ({ ask: a, kind: rowKind(a) })), people: [], cv: null, latestCv: null,
-    formFilled: true, oldestAskAt: "2026-10-20T10:00:00+00:00", ...over,
+    formFilled: true, oldestAskAt: "2026-10-20T10:00:00+00:00",
+    ownBrowserCount: asks.filter(needsOwnBrowser).length, ownBrowser: asks.some(needsOwnBrowser), ...over,
   };
 }
 
@@ -226,5 +227,26 @@ describe("JobCard", () => {
   it("renders assistant text as text, never HTML", () => {
     const { container } = render(<JobCard card={card([ask("<img src=x onerror=alert(1)>")])} onChanged={onChanged} />);
     expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("names Job360's browser by default, on the row and on the card", () => {
+    const captcha = ask("Solve the CAPTCHA and press Submit");
+    render(<JobCard card={card([captcha])} onChanged={onChanged} />);
+    expect(screen.getByTestId(`browser-chip-${captcha.id}`)).toHaveTextContent("Job360's browser");
+    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Job360's browser");
+    expect(screen.queryByTestId("own-chrome-7")).toBeNull();
+  });
+
+  it("groups own-Chrome asks under their own heading, with the amber chip", () => {
+    const a = ask("Solve the CAPTCHA and press Submit");
+    const b = { ...ask("Please sign in on the job site"), needs_own_browser: true } as Ask;
+    render(<JobCard card={card([a, b])} onChanged={onChanged} />);
+    const group = screen.getByTestId("own-chrome-7");
+    expect(within(group).getByText("Needs your Chrome, PC on", { selector: "h4" })).toBeInTheDocument();
+    expect(within(group).getByTestId(`blocker-${b.id}`)).toBeInTheDocument();
+    expect(within(group).queryByTestId(`blocker-${a.id}`)).toBeNull();
+    expect(screen.getByTestId(`browser-chip-${b.id}`)).toHaveTextContent("Needs your Chrome, PC on");
+    expect(screen.getByTestId(`browser-chip-${a.id}`)).toHaveTextContent("Job360's browser");
+    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Needs your Chrome, PC on");
   });
 });

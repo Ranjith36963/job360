@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
 
@@ -19,6 +20,7 @@ import {
 import { apiErrorMessage } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -28,6 +30,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format-date";
+import { groupGrants } from "@/lib/grants";
 import {
   AddressStepCard,
   AssistantStepsCard,
@@ -41,6 +44,7 @@ import {
   PRIMARY_BTN_CLASS,
   DANGER_BTN_CLASS,
   DANGER_CONFIRM_BTN_CLASS,
+  ShowInstructions,
   copyText,
   mcpUrl,
 } from "@/components/connect/ConnectSteps";
@@ -354,14 +358,6 @@ export function DailyCheckCard({
             {statusLine}
           </p>
         )}
-        <textarea
-          readOnly
-          rows={6}
-          value={DAILY_CHECK_PROMPT}
-          className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
-          data-testid="daily-check-prompt"
-          onFocus={(e) => e.currentTarget.select()}
-        />
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -383,6 +379,16 @@ export function DailyCheckCard({
               {resetting ? "Resetting…" : "Let my assistant ask again"}
             </Button>
           )}
+          <ShowInstructions>
+            <textarea
+              readOnly
+              rows={6}
+              value={DAILY_CHECK_PROMPT}
+              className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
+              data-testid="daily-check-prompt"
+              onFocus={(e) => e.currentTarget.select()}
+            />
+          </ShowInstructions>
         </div>
         {showControls && (
           <div
@@ -449,16 +455,18 @@ export function DailyCheckCard({
 function GrantRow({
   grant,
   onRevoke,
+  older = false,
 }: {
   grant: OAuthGrant;
   onRevoke: (g: OAuthGrant) => void;
+  older?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
 
   return (
     <li
       className="flex items-center justify-between gap-4 py-3"
-      data-testid="grant-row"
+      data-testid={older ? "older-grant-row" : "grant-row"}
     >
       <div className="min-w-0">
         <p className="truncate font-normal">{grant.client_name}</p>
@@ -534,8 +542,33 @@ function ConnectedAppsCard({
           </p>
         ) : (
           <ul className="divide-y divide-border" data-testid="grant-list">
-            {grants.map((g) => (
-              <GrantRow key={g.id} grant={g} onRevoke={onRevoke} />
+            {groupGrants(grants).map((grp) => (
+              <li key={grp.key} data-testid={`grant-group-${grp.key}`}>
+                <ul>
+                  <GrantRow grant={grp.newest} onRevoke={onRevoke} />
+                </ul>
+                {grp.older.length > 0 && (
+                  <details
+                    className="pb-3 text-sm"
+                    data-testid={`older-grants-${grp.key}`}
+                  >
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      {grp.older.length} older{" "}
+                      {grp.older.length === 1 ? "connection" : "connections"}
+                    </summary>
+                    <ul className="mt-2 divide-y divide-border border-l border-border pl-3">
+                      {grp.older.map((g) => (
+                        <GrantRow
+                          key={g.id}
+                          grant={g}
+                          onRevoke={onRevoke}
+                          older
+                        />
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </li>
             ))}
           </ul>
         )}
@@ -749,7 +782,41 @@ function DeveloperTokensSection({
 // Page
 // ---------------------------------------------------------------------------
 
+const TAB_KEYS = ["setup", "schedules", "apps", "developers"] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+const TAB_LABELS: Record<TabKey, string> = {
+  setup: "Setup",
+  schedules: "Schedules & start links",
+  apps: "Connected apps",
+  developers: "Developers",
+};
+
+function tabFromParam(value: string | null): TabKey {
+  return (TAB_KEYS as readonly string[]).includes(value ?? "")
+    ? (value as TabKey)
+    : "setup";
+}
+
+// useSearchParams needs a Suspense boundary for the production build.
 export default function ConnectAgentPage() {
+  return (
+    <Suspense fallback={null}>
+      <ConnectAgentPageInner />
+    </Suspense>
+  );
+}
+
+function ConnectAgentPageInner() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<TabKey>(() =>
+    tabFromParam(searchParams?.get("tab") ?? null)
+  );
+  function selectTab(next: TabKey) {
+    setTab(next);
+    router.replace(`${pathname}?tab=${next}`, { scroll: false });
+  }
   const [tokens, setTokens] = useState<TokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [created, setCreated] = useState<TokenCreated | null>(null);
@@ -887,6 +954,7 @@ export default function ConnectAgentPage() {
 
   async function onCreated(t: TokenCreated) {
     setCreated(t);
+    selectTab("developers");
     await refresh();
   }
 
@@ -912,8 +980,8 @@ export default function ConnectAgentPage() {
   }
 
   return (
-    <div className="space-y-8 py-12">
-      <div className="max-w-3xl">
+    <div className="max-w-3xl space-y-8 py-12">
+      <div>
         <h1 className="text-balance font-heading text-[clamp(1.9rem,3.6vw,2.75rem)] font-normal leading-[1.08] tracking-[-0.022em]">
           Connect your assistant
         </h1>
@@ -929,45 +997,62 @@ export default function ConnectAgentPage() {
         </p>
       </div>
 
-      <div className="max-w-3xl">
-        <AddressStepCard />
-      </div>
+      <Tabs value={tab} onValueChange={(v) => selectTab(tabFromParam(String(v)))} className="gap-6">
+        <TabsList className="h-auto w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto">
+          {TAB_KEYS.map((k) => (
+            <TabsTrigger
+              key={k}
+              value={k}
+              data-testid={`connect-tab-${k}`}
+              className="h-8 flex-none px-3"
+            >
+              {TAB_LABELS[k]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
 
-      {/* A list of similar cards (one row per assistant) — free to use the
-          full page width in a 2-column grid at lg instead of staying pinned
-          to the narrow form width above/below. */}
-      <AssistantStepsCard />
+        <TabsContent value="setup" className="space-y-8">
+          <AddressStepCard />
+          <AssistantStepsCard />
+          <SayHelloCard />
+          <ExamplePromptsCard />
+        </TabsContent>
 
-      <div className="max-w-3xl space-y-8">
-        <SayHelloCard />
-        <ExamplePromptsCard />
-        <DailyCheckCard
-          dailyCheck={dailyCheck}
-          connected={connected}
-          loadFailed={dailyCheckLoadFailed}
-          onResetOffer={onResetDailyCheckOffer}
-          resetting={resettingDailyCheck}
-          checkEvery={checkEvery}
-          onModeChange={onModeChange}
-          onCheckEveryChange={onCheckEveryChange}
-          modeSaving={savingMode}
-        />
-        <SendStartsAssistantCard />
-        <DutyStartLinksCard />
-        <ConnectedAppsCard
-          grants={grants}
-          loading={grantsLoading}
-          onRevoke={onRevokeGrant}
-        />
-        <DeveloperTokensSection
-          created={created}
-          tokens={tokens}
-          tokensLoading={loading}
-          onCreated={onCreated}
-          onDismissReveal={() => setCreated(null)}
-          onRevoke={onRevoke}
-        />
-      </div>
+        <TabsContent value="schedules" className="space-y-8">
+          <DailyCheckCard
+            dailyCheck={dailyCheck}
+            connected={connected}
+            loadFailed={dailyCheckLoadFailed}
+            onResetOffer={onResetDailyCheckOffer}
+            resetting={resettingDailyCheck}
+            checkEvery={checkEvery}
+            onModeChange={onModeChange}
+            onCheckEveryChange={onCheckEveryChange}
+            modeSaving={savingMode}
+          />
+          <SendStartsAssistantCard />
+          <DutyStartLinksCard />
+        </TabsContent>
+
+        <TabsContent value="apps" className="space-y-8">
+          <ConnectedAppsCard
+            grants={grants}
+            loading={grantsLoading}
+            onRevoke={onRevokeGrant}
+          />
+        </TabsContent>
+
+        <TabsContent value="developers" className="space-y-8">
+          <DeveloperTokensSection
+            created={created}
+            tokens={tokens}
+            tokensLoading={loading}
+            onCreated={onCreated}
+            onDismissReveal={() => setCreated(null)}
+            onRevoke={onRevoke}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

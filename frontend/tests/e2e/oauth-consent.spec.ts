@@ -177,7 +177,7 @@ test.describe("Connected apps (oauth_grants) on /settings/connect", () => {
       return route.continue();
     });
 
-    await page.goto("/settings/connect");
+    await page.goto("/settings/connect?tab=apps");
     await expect(page).not.toHaveURL(/\/login/);
 
     const rows = page.getByTestId("grant-row");

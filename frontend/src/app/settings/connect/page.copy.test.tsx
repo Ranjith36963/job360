@@ -9,6 +9,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import ConnectAgentPage from "./page";
 
+// The page reads ?tab= from the URL (Setup | Schedules | Connected apps | Developers).
+const nav = vi.hoisted(() => ({ tab: "setup" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/settings/connect",
+  useSearchParams: () => new URLSearchParams(`tab=${nav.tab}`),
+}));
+
+
 const listTokens = vi.fn();
 const listGrants = vi.fn();
 const getProfile = vi.fn();
@@ -31,6 +40,7 @@ describe("ConnectAgentPage — owner-approved copy", () => {
     listTokens.mockReset().mockResolvedValue([]);
     listGrants.mockReset().mockResolvedValue([]);
     getProfile.mockReset().mockResolvedValue({ preferences: {} });
+    nav.tab = "setup";
   });
 
   it("shows the plain heading and intro line", async () => {
@@ -54,16 +64,13 @@ describe("ConnectAgentPage — owner-approved copy", () => {
     expect(screen.getByText("Step 3 — Say hello")).toBeInTheDocument();
   });
 
-  it("shows Tested: works only for Claude — every other assistant carries no testing claim", async () => {
+  it("marks only Claude Tested; the other four say Not tested yet", async () => {
     render(<ConnectAgentPage />);
     await screen.findByText("Step 2 — Add it in your assistant");
-    expect(screen.getByTestId("assistant-status-claude")).toHaveTextContent(/tested: works/i);
+    expect(screen.getByTestId("assistant-status-claude")).toHaveTextContent(/^Tested$/);
     for (const name of ["chatgpt", "perplexity", "grok", "gemini"]) {
-      expect(screen.queryByTestId(`assistant-status-${name}`)).not.toBeInTheDocument();
+      expect(screen.getByTestId(`assistant-status-${name}`)).toHaveTextContent(/^Not tested yet$/);
     }
-    // Never a guess either way for the untested four.
-    expect(screen.queryByText(/we have not run a full connection/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/not tested/i)).not.toBeInTheDocument();
   });
 
   it("never shows the retired 'accepted this assistant's sign-in address' note", async () => {
@@ -75,8 +82,9 @@ describe("ConnectAgentPage — owner-approved copy", () => {
   });
 
   it("folds personal tokens under 'For developers' by default", async () => {
+    nav.tab = "developers";
     render(<ConnectAgentPage />);
-    await screen.findByText("Step 3 — Say hello");
+    await screen.findByTestId("developer-tokens-toggle");
     expect(
       screen.getByText(/for developers \(claude code, scripts\) — personal tokens/i)
     ).toBeInTheDocument();

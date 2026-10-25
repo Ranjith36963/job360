@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
-import { BLOCKER_TITLE, isBlocker, isSensitiveQuestion, mergeQuestions, remindersCovered } from "@/lib/job-cards";
-import type { JobCardData, PersonToReach } from "@/lib/job-cards";
+import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, isSensitiveQuestion, mergeQuestions, remindersCovered } from "@/lib/job-cards";
+import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
 import { heldText } from "@/lib/ready-to-send";
@@ -23,6 +24,18 @@ const mainBtn =
 const btn =
   "rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted/50 disabled:opacity-50";
 const picked = "rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground";
+
+const chipBase = "rounded px-1.5 py-0.5 text-[11px] font-medium";
+const warn = "bg-amber-100 text-amber-950 dark:bg-amber-400/20 dark:text-amber-100";
+
+/** Which browser does this action: Job360's own (muted) or the owner's Chrome with the PC on (amber). */
+function BrowserChip({ own, testid }: { own: boolean; testid: string }) {
+  return (
+    <span data-testid={testid} className={`${chipBase} ${own ? warn : "bg-muted text-muted-foreground"}`}>
+      {own ? OWN_CHROME_LABEL : JOB360_BROWSER_LABEL}
+    </span>
+  );
+}
 
 const DID_IT = "I did it myself on the form.";
 const SKIP_JOB = "Skip this job: do not apply.";
@@ -133,6 +146,38 @@ export function JobCard({
 
   const setAnswer = (id: number, v: string) => setAnswers((prev) => ({ ...prev, [id]: v }));
 
+  const blockerRow = ({ ask, kind }: { ask: Ask; kind: RowKind }) => (
+    <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`blocker-${ask.id}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="text-sm font-medium">{isBlocker(kind) ? BLOCKER_TITLE[kind] : ""}</p>
+        <BrowserChip own={needsOwnBrowser(ask)} testid={`browser-chip-${ask.id}`} />
+      </div>
+      <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.question}</p>
+      {finishing === ask.id && <FinishInBrowser applicationId={card.applicationId} onDone={() => setFinishing(null)} />}
+      <div className="flex flex-wrap gap-2">
+        {ask.finish_here && finishing !== ask.id && (
+          <button type="button" className={btn} data-testid={`finish-here-${ask.id}`} onClick={() => setFinishing(ask.id)}>
+            Finish it here{heldText(ask.held_seconds)}
+          </button>
+        )}
+        {card.formUrl && (
+          <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn}>
+            Open the form ↗
+          </a>
+        )}
+        {kind === "upload" && card.latestCv && (
+          <button type="button" className={btn} onClick={() => void downloadCv(card)}>
+            Download CV
+          </button>
+        )}
+        <button type="button" className={btn} disabled={busy} data-testid={`did-it-${ask.id}`}
+          onClick={() => void run(() => answerAsk(ask.id, DID_IT), "Couldn't save that")}>
+          I did it
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <li data-testid={`job-card-${card.applicationId}`} className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-card">
       {showHeader && (
@@ -150,34 +195,13 @@ export function JobCard({
       {blockers.length > 0 && (
         <section className="flex flex-col gap-2" data-testid="only-you">
           <h3 className={label}>Only you can do this</h3>
-          {blockers.map(({ ask, kind }) => (
-            <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`blocker-${ask.id}`}>
-              <p className="text-sm font-medium">{isBlocker(kind) ? BLOCKER_TITLE[kind] : ""}</p>
-              <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.question}</p>
-              {finishing === ask.id && <FinishInBrowser applicationId={card.applicationId} onDone={() => setFinishing(null)} />}
-              <div className="flex flex-wrap gap-2">
-                {ask.finish_here && finishing !== ask.id && (
-                  <button type="button" className={btn} data-testid={`finish-here-${ask.id}`} onClick={() => setFinishing(ask.id)}>
-                    Finish it here{heldText(ask.held_seconds)}
-                  </button>
-                )}
-                {card.formUrl && (
-                  <a href={card.formUrl} target="_blank" rel="noopener noreferrer" className={btn}>
-                    Open the form ↗
-                  </a>
-                )}
-                {kind === "upload" && card.latestCv && (
-                  <button type="button" className={btn} onClick={() => void downloadCv(card)}>
-                    Download CV
-                  </button>
-                )}
-                <button type="button" className={btn} disabled={busy} data-testid={`did-it-${ask.id}`}
-                  onClick={() => void run(() => answerAsk(ask.id, DID_IT), "Couldn't save that")}>
-                  I did it
-                </button>
-              </div>
+          {blockers.filter((b) => !needsOwnBrowser(b.ask)).map(blockerRow)}
+          {blockers.some((b) => needsOwnBrowser(b.ask)) && (
+            <div className="flex flex-col gap-2" data-testid={`own-chrome-${card.applicationId}`}>
+              <h4 className="text-xs font-semibold">{OWN_CHROME_LABEL}</h4>
+              {blockers.filter((b) => needsOwnBrowser(b.ask)).map(blockerRow)}
             </div>
-          ))}
+          )}
         </section>
       )}
 
@@ -275,6 +299,7 @@ export function JobCard({
       )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+        {card.asks.length > 0 && <BrowserChip own={card.ownBrowser} testid={`browser-chip-card-${card.applicationId}`} />}
         {prefillMode ? (
           <button type="button" className={mainBtn} disabled={busy || prefillable.length === 0}
             data-testid={`approve-prefilled-${card.applicationId}`} onClick={approvePrefilled}>
