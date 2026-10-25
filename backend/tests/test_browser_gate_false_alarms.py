@@ -131,24 +131,25 @@ async def test_a_switch_on_at_load_is_not_an_answer_but_a_tick_is(alarm_site):
     pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_site_resolver(), open_connection=_to_site(alarm_site))
     try:
         page = await run(pool, "u1", "open", url="http://jobs.example/ad")
-        tab = pool._sessions["u1"].page  # noqa: SLF001
+        session = pool._sessions["u1"]  # noqa: SLF001
+        tab = session.page
         apply = tab.locator(f'[data-j360-ref="{_ref(page, "Apply")}"]')
-        assert await _kind(apply) == "field"   # the ad's Apply opens the form
+        assert await _kind(apply, session) == "field"   # the ad's Apply opens the form
         page = await run(pool, "u1", "click", ref=_ref(page, "Apply"))
         assert await tab.title() == "OPENED"
         # Off and back on is where the page started: still not an answer.
         await tab.evaluate("() => { const c = document.getElementById('cookies'); "
                            "c.setAttribute('aria-checked', 'false'); c.setAttribute('aria-checked', 'true'); }")
-        assert await _kind(apply) == "field"
+        assert await _kind(apply, session) == "field"
         # A box the page held off, now on: an answer.
         await tab.evaluate("() => document.getElementById('agree').setAttribute('aria-checked', 'true')")
-        assert await _kind(apply) == "submit"
+        assert await _kind(apply, session) == "submit"
         await tab.evaluate("() => document.getElementById('agree').setAttribute('aria-checked', 'false')")
         # An aria-pressed added after the first read was never stamped: it counts (the safe side).
         await tab.evaluate("() => { const b = document.createElement('button'); b.textContent = 'Yes'; "
                            "b.setAttribute('aria-pressed', 'true'); document.body.appendChild(b); }")
         await run(pool, "u1", "look")
-        assert await _kind(apply) == "submit"
+        assert await _kind(apply, session) == "submit"
     finally:
         await pool.shutdown()
 

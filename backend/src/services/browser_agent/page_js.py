@@ -195,9 +195,36 @@ _LABEL_OF_JS = _VISIBLE_TEXT_JS + r"""
   };
 """
 
+# A react-select's pick (Greenhouse, 2026-10-25): its <input role=combobox> stays empty and the pick is drawn
+# in a sibling div (class "select__single-value", or an emotion "css-...-singleValue"); the hidden input
+# beside it carries the value when no pick is drawn. Read only for an EMPTY suggestion-box input, and only
+# inside its own box: the climb stops at the first block that holds another control, so one select's pick is
+# never read as the next one's. The page's "option Yes, selected." live text is never the source.
+CHOSEN_OF_JS = r"""
+  const chosenOf = (el) => {
+    if (el.tagName !== 'INPUT' || (el.value || '') !== '') return '';
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role !== 'combobox' && !el.getAttribute('aria-autocomplete')
+        && !/select__input/.test(el.getAttribute('class') || '')) return '';
+    const other = 'input:not([type=hidden]), select, textarea, [role=combobox], [contenteditable=""], '
+      + '[contenteditable=true]';
+    let hidden = '';
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n && n !== el.ownerDocument.body; i++, n = n.parentElement) {
+      if (Array.from(n.querySelectorAll(other)).some((f) => f !== el && !f.contains(el))) break;
+      const one = n.querySelector('[class*="singleValue"], [class*="single-value"]');
+      const shown = one ? (one.innerText || one.textContent || '').trim() : '';
+      if (shown) return shown;
+      const kept = Array.from(n.querySelectorAll('input[type=hidden]')).filter((h) => (h.value || '').trim());
+      if (!hidden && kept.length === 1) hidden = kept[0].value.trim();
+    }
+    return hidden;
+  };
+"""
+
 SNAPSHOT_JS = r"""
 (args) => {
-""" + _LABEL_OF_JS + r"""
+""" + _LABEL_OF_JS + CHOSEN_OF_JS + r"""
   const maxElements = args.maxElements, maxText = args.maxText, maxName = 120, maxAttr = 40;
   const sel = 'input, textarea, select, button, a[href], [role=button], [role=checkbox], [role=radio], '
     + '[role=combobox], [role=option], [role=tab], [role=link], [role=switch], [contenteditable=""], '
@@ -323,7 +350,7 @@ SNAPSHOT_JS = r"""
         if (group && group !== item.name) item.group = group;
       }
       else if (type === 'file') item.value = Array.from(el.files || []).map(f => f.name).join(', ');
-      else item.value = clip(el.value, 300);
+      else item.value = clip(el.value || chosenOf(el), 300);
     } else if (el.getAttribute('aria-checked') !== null) item.checked = el.getAttribute('aria-checked') === 'true';
     else if (el.getAttribute('aria-pressed') !== null) item.pressed = el.getAttribute('aria-pressed') === 'true';
     // Ashby's Yes/No buttons: the chosen one carries a hashed "_active_" class (ApplYourself
@@ -377,6 +404,24 @@ ELEMENT_FACTS_JS = r"""
     }
     return f.isContentEditable && !!(f.innerText || '').trim();
   };
+  // The fields a person can see (any kind but a button), a required one among them, and whether the page has
+  // a file box at all (hidden or not: file boxes hide behind styled buttons). Only NARROW the gate's "is this
+  // still the ad?": the page writes them, so the server's own facts decide (agent._opener_allowed).
+  const seen = (f) => {
+    const r = f.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    const st = getComputedStyle(f);
+    return st.visibility !== 'hidden' && st.display !== 'none';
+  };
+  const isField = (f) => {
+    if (f.tagName === 'INPUT') {
+      return !['hidden', 'submit', 'button', 'image', 'reset', 'file'].includes((f.type || '').toLowerCase());
+    }
+    return f.tagName === 'TEXTAREA' || f.tagName === 'SELECT' || f.isContentEditable || !!f.getAttribute('role');
+  };
+  const fieldsShown = deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], [role=textbox], '
+    + '[role=combobox], [role=checkbox], [role=radio], [role=switch]', 0)
+    .filter((f) => isField(f) && seen(f)).length;
   return {
     tag: el.tagName.toLowerCase(), type: (el.type || el.getAttribute('type') || '').toLowerCase(),
     name: name.replace(/\s+/g, ' ').trim().slice(0, 200), autocomplete: el.getAttribute('autocomplete') || '',
@@ -387,6 +432,17 @@ ELEMENT_FACTS_JS = r"""
     // Any answer anywhere on the page, shadow roots included: the form is being filled.
     page_has_answers: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
       + '[aria-checked=true], [aria-pressed=true]', 0).some(answered),
+    // The same answers minus plain typed text (a site writes its own share link into a text box): a tick, a
+    // pick, a pressed choice, a chosen file, rich text. Only narrows the "still the ad?" read.
+    choice_answered: deepAll(el.ownerDocument, 'input, textarea, select, [contenteditable], '
+      + '[aria-checked=true], [aria-pressed=true]', 0)
+      .some((f) => answered(f) && !(f.tagName === 'TEXTAREA' || (f.tagName === 'INPUT'
+        && !['checkbox', 'radio', 'file'].includes((f.type || '').toLowerCase())))),
+    fields_shown: fieldsShown,
+    // A visible field the site marks required: an answer is asked for, so it is a form, not the ad.
+    required_shown: deepAll(el.ownerDocument, 'input, select, textarea', 0)
+      .some((f) => (f.required || f.getAttribute('aria-required') === 'true') && isField(f) && seen(f)),
+    file_box: deepAll(el.ownerDocument, 'input[type=file]', 0).length > 0,
   };
 }
 """
@@ -500,8 +556,13 @@ TYPEABLE_TARGET_JS = r"""
 """
 
 # The value a field shows now (inputs, textareas, contenteditable boxes, custom dropdown buttons).
+# A react-select's empty input shows its drawn pick (CHOSEN_OF_JS).
 SHOWN_VALUE_JS = r"""
-(el) => ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') ? el.value : (el.innerText || '')
+(el) => {
+""" + CHOSEN_OF_JS + r"""
+  if ('value' in el && typeof el.value === 'string' && el.tagName !== 'BUTTON') return el.value || chosenOf(el);
+  return el.innerText || '';
+}
 """
 
 # A suggestion box (react-select, Workday prompt, Lever location): typed key by key so the site's
