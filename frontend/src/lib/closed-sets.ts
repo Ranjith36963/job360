@@ -22,6 +22,9 @@ export const CLOSED_SET_LABEL: Record<string, string> = {
   pasted_by_user: "You pasted it",
   // contact found via
   apollo: "Apollo",
+  hunter: "Hunter",
+  sprouts: "Sprouts",
+  vibe: "Vibe",
   job_ad: "Job ad",
   event: "Event",
   company_team_page: "Company team page",

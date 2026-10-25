@@ -825,6 +825,11 @@ export async function listAsks(
 /** Fired after the Needs-you page reloads, so the header badge follows. */
 export const ASKS_CHANGED_EVENT = "job360:asks-changed";
 
+/** A bare POST (no body) to any API path; for adapters that own their path (lib/browser-contract.ts). */
+export async function postEmpty(path: string): Promise<void> {
+  await request<unknown>(path, { method: "POST" });
+}
+
 export async function answerAsk(id: number, answer: string): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/answer`, {
     method: "POST",
