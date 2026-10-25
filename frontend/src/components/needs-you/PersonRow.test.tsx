@@ -3,8 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PersonToReach } from "@/lib/job-cards";
 import { PersonRow } from "./PersonRow";
 
-const updateContact = vi.fn();
-vi.mock("@/lib/api", () => ({ updateContact: (...a: unknown[]) => updateContact(...a) }));
+const requestJson = vi.fn();
+vi.mock("@/lib/api", () => ({ requestJson: (...a: unknown[]) => requestJson(...a) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 function person(contact: Record<string, unknown>, message = "Hi Ada"): PersonToReach {
@@ -14,13 +14,14 @@ function person(contact: Record<string, unknown>, message = "Hi Ada"): PersonToR
     linkedinUrl: "https://www.linkedin.com/in/ada",
   } as unknown as PersonToReach;
 }
+const task = (state: string, message_id = 5) => ({ state, message_id, approved_at: null, claim_until: null });
 const onChanged = vi.fn(async () => {});
 function show(p: PersonToReach) {
   return render(<PersonRow person={p} busy={false} onSent={vi.fn()} onSkip={vi.fn()} onChanged={onChanged} />);
 }
 
 beforeEach(() => {
-  updateContact.mockReset().mockResolvedValue({});
+  requestJson.mockReset().mockResolvedValue({});
   onChanged.mockClear();
 });
 
@@ -42,7 +43,7 @@ describe("PersonRow", () => {
     expect(screen.getByTestId("note-count-4")).toHaveAttribute("data-over", "false");
     expect(screen.getByText("LinkedIn connection notes are 200 characters at most")).toBeInTheDocument();
     unmount();
-    show(person({ linkedin_state: "not_connected", ready_to_send: false }, "x".repeat(201)));
+    show(person({ linkedin_state: "not_connected", own_browser_task: task("waiting_on_you") }, "x".repeat(201)));
     expect(screen.getByTestId("note-count-4")).toHaveTextContent("201/200");
     expect(screen.getByTestId("note-count-4")).toHaveAttribute("data-over", "true");
     const send = screen.getByTestId("send-browser-4");
@@ -56,22 +57,54 @@ describe("PersonRow", () => {
     expect(screen.getByText("Message")).toBeInTheDocument();
   });
 
-  it("has no send button without the ready_to_send key", () => {
+  it("has no browser button without own_browser_task", () => {
     show(person({ linkedin_state: "connected" }));
     expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+    expect(screen.queryByText("Don't use it")).toBeNull();
   });
 
-  it("queues a send when ready_to_send is false", async () => {
-    show(person({ linkedin_state: "connected", ready_to_send: false }));
+  it("approves with the task's message_id", async () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you", 77) }));
     fireEvent.click(screen.getByText("Use my assistant's browser"));
-    await waitFor(() => expect(updateContact).toHaveBeenCalledWith(4, { ready_to_send: true }));
+    await waitFor(() =>
+      expect(requestJson).toHaveBeenCalledWith("/api/contacts/4/own-browser-send", "POST", { message_id: 77, decision: "approve" }));
     expect(onChanged).toHaveBeenCalled();
   });
 
-  it("shows a disabled queued state when ready_to_send is true", () => {
-    show(person({ linkedin_state: "connected", ready_to_send: true }));
+  it("declines with a quiet button", async () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you", 77) }));
+    fireEvent.click(screen.getByText("Don't use it"));
+    await waitFor(() =>
+      expect(requestJson).toHaveBeenCalledWith("/api/contacts/4/own-browser-send", "POST", { message_id: 77, decision: "decline" }));
+  });
+
+  it("shows queued, in-progress and declined states without an approve button", () => {
+    const { unmount } = show(person({ linkedin_state: "connected", own_browser_task: task("queued") }));
     expect(screen.getByText("Queued for your browser")).toBeDisabled();
     expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+    unmount();
+    const r2 = show(person({ linkedin_state: "connected", own_browser_task: task("in_progress") }));
+    expect(screen.getByText("Sending in your browser…")).toBeDisabled();
+    r2.unmount();
+    show(person({ linkedin_state: "connected", own_browser_task: task("declined") }));
+    expect(screen.getByText("You said not to use your browser")).toBeInTheDocument();
+    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+  });
+
+  it("ignores a malformed own_browser_task", () => {
+    show(person({ linkedin_state: "connected", own_browser_task: { state: "weird", message_id: 1 } }));
+    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+  });
+
+  it("shows the send browser label, and its reason only for own_browser or human", () => {
+    const { unmount } = show(person({ linkedin_state: "connected",
+      send_browser: { kind: "own_browser", label: "Your Chrome", reason: "Job360's browser failed twice" } }));
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your Chrome");
+    expect(screen.getByTestId("send-browser-reason-4")).toHaveTextContent("Job360's browser failed twice");
+    unmount();
+    show(person({ linkedin_state: "connected", send_browser: { kind: "job360", label: "Job360's browser", reason: "first choice" } }));
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Job360's browser");
+    expect(screen.queryByTestId("send-browser-reason-4")).toBeNull();
   });
 
   it("shows LinkedIn as the channel when the contact has no email", () => {

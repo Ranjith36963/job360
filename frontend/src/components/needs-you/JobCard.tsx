@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
-import { browserTaskState, queueBrowserTask } from "@/lib/browser-contract";
+import { askBrowser } from "@/lib/browser-contract";
+import type { BrowserLabel } from "@/lib/browser-contract";
 import { BLOCKER_TITLE, JOB360_BROWSER_LABEL, OWN_CHROME_LABEL, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -13,6 +14,7 @@ import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 import { AskQuestions } from "./AskQuestions";
+import { BrowserReason } from "./BrowserReason";
 import { PersonRow } from "./PersonRow";
 import type { RowState } from "./AskQuestions";
 
@@ -29,14 +31,24 @@ const picked = "rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-pri
 const chipBase = "rounded px-1.5 py-0.5 text-[11px] font-medium";
 const warn = "bg-amber-100 text-amber-950 dark:bg-amber-400/20 dark:text-amber-100";
 
-/** Which browser does this action: Job360's own (muted) or the owner's Chrome with the PC on (amber). */
-function BrowserChip({ own, testid }: { own: boolean; testid: string }) {
+/** Which browser does this action: the backend's label (amber when it is the owner's Chrome), else Job360's browser. */
+function BrowserChip({ label, testid }: { label: BrowserLabel | null; testid: string }) {
+  const own = label?.kind === "own_browser";
   return (
     <span data-testid={testid} className={`${chipBase} ${own ? warn : "bg-muted text-muted-foreground"}`}>
-      {own ? OWN_CHROME_LABEL : JOB360_BROWSER_LABEL}
+      {label ? label.label : JOB360_BROWSER_LABEL}
     </span>
   );
 }
+
+/** The one label a whole card shows: the owner's Chrome first, then a human step, then any label. */
+function cardBrowser(asks: { ask: Ask }[]): BrowserLabel | null {
+  const labels = asks.map((a) => askBrowser(a.ask)).filter((l): l is BrowserLabel => l !== null);
+  return labels.find((l) => l.kind === "own_browser") ?? labels.find((l) => l.kind === "human") ?? labels[0] ?? null;
+}
+
+const PACE_TEXT =
+  "Job360's browser sends first; your Chrome only if it fails. 1–3 minutes between sends, at most 10 LinkedIn sends a day.";
 
 const DID_IT = "I did it myself on the form.";
 const SKIP_JOB = "Skip this job: do not apply.";
@@ -149,33 +161,6 @@ export function JobCard({
 
   const setAnswer = (id: number, v: string) => setAnswers((prev) => ({ ...prev, [id]: v }));
 
-  const [queuing, setQueuing] = useState<number | null>(null);
-  async function queueTask(askId: number) {
-    setQueuing(askId);
-    try {
-      await queueBrowserTask(askId);
-      await onChanged();
-    } catch (err) {
-      toast.apiError(err, "Couldn't queue that");
-    } finally {
-      setQueuing(null);
-    }
-  }
-  // Shown only when the backend sends the browser_task field (feature detection).
-  const browserBtn = (ask: Ask) => {
-    const st = browserTaskState(ask);
-    if (st === "unsupported") return null;
-    return st === "queued" ? (
-      <button type="button" className={btn} disabled data-testid={`task-queued-${ask.id}`}>
-        Queued for your browser
-      </button>
-    ) : (
-      <button type="button" className={btn} disabled={busy || queuing === ask.id} data-testid={`task-browser-${ask.id}`}
-        onClick={() => void queueTask(ask.id)}>
-        Use my assistant&apos;s browser
-      </button>
-    );
-  };
   // Every row that asks the owner to act carries a link: the form, else the application page.
   const rowLink = (id: number) =>
     card.formUrl ? (
@@ -192,7 +177,10 @@ export function JobCard({
     <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`blocker-${ask.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="text-sm font-medium">{isBlocker(kind) ? BLOCKER_TITLE[kind] : ""}</p>
-        <BrowserChip own={needsOwnBrowser(ask)} testid={`browser-chip-${ask.id}`} />
+        <div className="flex flex-col items-end gap-0.5 text-right">
+          <BrowserChip label={askBrowser(ask)} testid={`browser-chip-${ask.id}`} />
+          {askBrowser(ask) && <BrowserReason label={askBrowser(ask)!} testid={`browser-reason-${ask.id}`} />}
+        </div>
       </div>
       <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ask.question}</p>
       {finishing === ask.id && <FinishInBrowser applicationId={card.applicationId} onDone={() => setFinishing(null)} />}
@@ -203,7 +191,6 @@ export function JobCard({
           </button>
         )}
         {rowLink(ask.id)}
-        {browserBtn(ask)}
         {kind === "upload" && card.latestCv && (
           <button type="button" className={btn} onClick={() => void downloadCv(card)}>
             Download CV
@@ -312,6 +299,7 @@ export function JobCard({
       {(people.length > 0 || reminders.length > 0) && (
         <section className="flex flex-col gap-2" data-testid={`section-outreach-${card.applicationId}`}>
           <h2 className="font-heading text-base">Outreach</h2>
+          <p className="text-xs text-muted-foreground" data-testid={`outreach-pace-${card.applicationId}`}>{PACE_TEXT}</p>
           <div className="flex flex-col gap-2" data-testid="people-to-reach">
           {people.map((p) => (
             <PersonRow key={p.contact.id} person={p} busy={busy} onChanged={onChanged}
@@ -336,8 +324,7 @@ export function JobCard({
               <p className="whitespace-pre-wrap text-sm">{ask.question}</p>
               <div className="flex flex-wrap gap-2">
                 {rowLink(ask.id)}
-                {browserBtn(ask)}
-                <button type="button" className={btn} disabled={busy}
+                        <button type="button" className={btn} disabled={busy}
                   onClick={() => void run(() => answerAsk(ask.id, "I sent it myself."), "Couldn't save that")}>
                   I sent it
                 </button>
@@ -353,7 +340,15 @@ export function JobCard({
       )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
-        {card.asks.length > 0 && <BrowserChip own={card.ownBrowser} testid={`browser-chip-card-${card.applicationId}`} />}
+        {card.asks.length > 0 && (() => {
+          const cb = cardBrowser(card.asks);
+          return (
+            <span className="flex flex-col gap-0.5">
+              <BrowserChip label={cb} testid={`browser-chip-card-${card.applicationId}`} />
+              {cb && <BrowserReason label={cb} testid={`browser-reason-card-${card.applicationId}`} />}
+            </span>
+          );
+        })()}
         {prefillMode ? (
           <button type="button" className={mainBtn} disabled={busy || prefillable.length === 0}
             data-testid={`approve-prefilled-${card.applicationId}`} onClick={approvePrefilled}>

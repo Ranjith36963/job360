@@ -10,11 +10,6 @@ const markCvSeen = vi.fn();
 const markOutreachSent = vi.fn();
 const answerAskQuestions = vi.fn();
 const rememberAnswers = vi.fn();
-const queueBrowserTask = vi.fn();
-vi.mock("@/lib/browser-contract", async (orig) => ({
-  ...(await orig<typeof import("@/lib/browser-contract")>()),
-  queueBrowserTask: (...a: unknown[]) => queueBrowserTask(...a),
-}));
 vi.mock("@/lib/api", () => ({
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
@@ -52,7 +47,6 @@ beforeEach(() => {
   markOutreachSent.mockReset().mockResolvedValue({});
   answerAskQuestions.mockReset().mockResolvedValue({});
   rememberAnswers.mockReset().mockResolvedValue(undefined);
-  queueBrowserTask.mockReset().mockResolvedValue(undefined);
   onChanged.mockClear();
 });
 
@@ -276,7 +270,7 @@ describe("JobCard", () => {
 
   it("groups own-Chrome asks under their own heading, with the amber chip", () => {
     const a = ask("Solve the CAPTCHA and press Submit");
-    const b = { ...ask("Please sign in on the job site"), needs_own_browser: true } as Ask;
+    const b = { ...ask("Please sign in on the job site"), browser: { kind: "own_browser", label: "Needs your Chrome, PC on", reason: "Job360 could not sign in" } } as unknown as Ask;
     render(<JobCard card={card([a, b])} onChanged={onChanged} />);
     const group = screen.getByTestId("own-chrome-7");
     expect(within(group).getByText("Needs your Chrome, PC on", { selector: "h4" })).toBeInTheDocument();
@@ -327,21 +321,38 @@ describe("JobCard", () => {
     expect(within(screen.getByTestId(`question-${q.id}`)).getByRole("link", { name: "Open the application" })).toHaveAttribute("href", "/applications/7");
   });
 
-  it("shows the browser button on a blocked row only when the ask has browser_task, and queues it", async () => {
-    const plain = ask("Solve the CAPTCHA and press Submit");
-    const { unmount } = render(<JobCard card={card([plain])} onChanged={onChanged} />);
-    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
-    unmount();
-    const withField = { ...ask("Please sign in on the job site"), browser_task: null } as unknown as Ask;
-    render(<JobCard card={card([withField])} onChanged={onChanged} />);
-    fireEvent.click(screen.getByTestId(`task-browser-${withField.id}`));
-    await waitFor(() => expect(queueBrowserTask).toHaveBeenCalledWith(withField.id));
-    expect(onChanged).toHaveBeenCalled();
+  it("shows the label and its reason on the row and the card for own_browser and human", () => {
+    const own = { ...ask("Please sign in on the job site"), browser: { kind: "own_browser", label: "Your Chrome", reason: "Sign-in needs your PC" } } as unknown as Ask;
+    const human = { ...ask("Solve the CAPTCHA and press Submit"), browser: { kind: "human", label: "Only you", reason: "A person must click" } } as unknown as Ask;
+    render(<JobCard card={card([own, human])} onChanged={onChanged} />);
+    expect(screen.getByTestId(`browser-chip-${own.id}`)).toHaveTextContent("Your Chrome");
+    expect(screen.getByTestId(`browser-reason-${own.id}`)).toHaveTextContent("Sign-in needs your PC");
+    expect(screen.getByTestId(`browser-chip-${human.id}`)).toHaveTextContent("Only you");
+    expect(screen.getByTestId(`browser-reason-${human.id}`)).toHaveTextContent("A person must click");
+    expect(screen.getByTestId("browser-chip-card-7")).toHaveTextContent("Your Chrome");
+    expect(screen.getByTestId("browser-reason-card-7")).toHaveTextContent("Sign-in needs your PC");
   });
 
-  it("shows Queued for your browser when browser_task is set", () => {
-    const queued = { ...ask("Upload your CV on the form"), browser_task: { id: 1 } } as unknown as Ask;
-    render(<JobCard card={card([queued])} onChanged={onChanged} />);
-    expect(screen.getByTestId(`task-queued-${queued.id}`)).toHaveTextContent("Queued for your browser");
+  it("shows no reason line for job360, and ignores a bad kind", () => {
+    const j = { ...ask("Solve the CAPTCHA and press Submit"), browser: { kind: "job360", label: "Job360's browser", reason: "first" } } as unknown as Ask;
+    const bad = { ...ask("Please sign in"), browser: { kind: "mystery", label: "X", reason: "Y" } } as unknown as Ask;
+    render(<JobCard card={card([j, bad])} onChanged={onChanged} />);
+    expect(screen.queryByTestId(`browser-reason-${j.id}`)).toBeNull();
+    expect(screen.getByTestId(`browser-chip-${bad.id}`)).toHaveTextContent("Job360's browser");
+    expect(screen.queryByTestId(`browser-reason-${bad.id}`)).toBeNull();
+  });
+
+  it("has no ask-level browser button", () => {
+    const a = ask("Please sign in on the job site");
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    expect(screen.queryByText("Use my assistant's browser")).toBeNull();
+  });
+
+  it("shows the pace line at the top of Outreach", () => {
+    const c = card([ask("Notice period?")], { people: [reach(4)] });
+    render(<JobCard card={c} onChanged={onChanged} />);
+    const pace = screen.getByTestId("outreach-pace-7");
+    expect(pace).toHaveTextContent("Job360's browser sends first; your Chrome only if it fails. 1–3 minutes between sends, at most 10 LinkedIn sends a day.");
+    expect(within(screen.getByTestId("section-outreach-7")).getByTestId("outreach-pace-7")).toBe(pace);
   });
 });
