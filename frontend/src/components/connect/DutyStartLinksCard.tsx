@@ -15,6 +15,7 @@ import {
   DESC_CLASS,
   PRIMARY_BTN_CLASS,
   QUIET_BTN_CLASS,
+  ShowInstructions,
   TITLE_CLASS,
   copyText,
 } from "@/components/connect/ConnectSteps";
@@ -183,15 +184,19 @@ export function DutyStartLinksCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <pre
-          className="whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-xs"
-          data-testid="duty-routine-prompt"
-        >
-          {DUTY_ROUTINE_PROMPT}
-        </pre>
-        <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(DUTY_ROUTINE_PROMPT, "Instructions")}>
-          Copy instructions
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" type="button" className={QUIET_BTN_CLASS} onClick={() => void copyText(DUTY_ROUTINE_PROMPT, "Instructions")}>
+            Copy instructions
+          </Button>
+          <ShowInstructions>
+            <pre
+              className="whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-xs"
+              data-testid="duty-routine-prompt"
+            >
+              {DUTY_ROUTINE_PROMPT}
+            </pre>
+          </ShowInstructions>
+        </div>
         {rows && (
           <ul className="space-y-3">
             {rows.map((row) => (

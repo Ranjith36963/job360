@@ -89,7 +89,9 @@ test.describe("Connect your assistant", () => {
     await expect(page.getByRole("heading", { name: "Connect your assistant" })).toBeVisible();
     await expect(page.getByTestId("mcp-url")).toHaveValue(/\/api\/mcp$/);
 
-    // Personal tokens live folded under "For developers" — open it first.
+    // Personal tokens live on the Developers tab, folded under "For developers".
+    await page.getByTestId("connect-tab-developers").click();
+    await expect(page).toHaveURL(/tab=developers/);
     await page.getByTestId("developer-tokens-toggle").click();
     await expect(page.getByTestId("tokens-empty")).toBeVisible({ timeout: 10_000 });
 
