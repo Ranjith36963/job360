@@ -47,6 +47,8 @@ SIX = (
     "assistant_settings.outreach_send",
     # 2026-10-23 hunt_every_hours (tests/test_hunt_schedule.py).
     "assistant_settings.hunt_every_hours",
+    # 2026-10-24 people_hunt (tests/test_people_hunt.py).
+    "assistant_settings.people_hunt",
 )
 PROGRESS = "assistant_settings.setup_progress"
 

@@ -158,6 +158,14 @@ export function describeSettingRequest(
             ? "Stop the scheduled job hunt"
             : `Let your assistant hunt for jobs on its own every ${String(value)} hour${value === 1 ? "" : "s"}`,
       };
+    case "assistant_settings.people_hunt":
+      return {
+        title: "People hunt",
+        change:
+          value === true
+            ? "Let your assistant find people to reach for your new applications on its schedule (you still send every message)"
+            : "Stop the people hunt",
+      };
     case "assistant_settings.paused_until":
       if (value === "" || value === null || value === undefined) {
         return { title: "Pause", change: "Start applying again" };

@@ -941,6 +941,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.outreach_send",
     # Owner 2026-10-23 - hunt for jobs every N hours (1-168; null / 0 = off). Turning it on is riskier.
     "assistant_settings.hunt_every_hours",
+    # Owner 2026-10-24 - find people to reach for new applications on the schedule (true / false). On is riskier.
+    "assistant_settings.people_hunt",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
     "assistant_settings.setup_progress",
 )
@@ -991,8 +993,13 @@ ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUE
 # is expected to wake (returned as `expected_every_hours`). Duties are a closed set; `tick` is the
 # stamp of the last scheduled run. Reads and marks are per-user rate limited (a loop cannot hammer).
 SCHEDULE_TICK_HOURS = int(os.getenv("SCHEDULE_TICK_HOURS", "1"))
-SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch")
-SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batch": "batch"}
+SCHEDULE_DUTIES: tuple[str, ...] = ("hunt", "inbox", "batch", "reach")
+SCHEDULE_DUTY_RECIPES: dict[str, str] = {"hunt": "hunt", "inbox": "daily", "batch": "batch", "reach": "reach"}
+# Owner 2026-10-24 - the PEOPLE hunt (duty `reach`): open applications (considering/applied) brought or
+# applied in the last REACH_WINDOW_DAYS with no assistant-added person and no reach stamp yet, newest
+# first, at most REACH_MAX_PER_RUN per run. Sends stay capped by check_outreach (OUTREACH_COMPANY_MAX).
+REACH_WINDOW_DAYS = 14
+REACH_MAX_PER_RUN = 5
 SCHEDULE_READS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_READS_MAX_PER_HOUR", "60"))
 SCHEDULE_MARKS_MAX_PER_HOUR = int(os.getenv("SCHEDULE_MARKS_MAX_PER_HOUR", "60"))
 # Sites where auto-submit never runs: the assistant fills the form, stops and

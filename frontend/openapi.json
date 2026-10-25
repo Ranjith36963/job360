@@ -2715,6 +2715,20 @@
           "paused_until": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
+          "people_hunt": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "people_hunt_last_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "People Hunt Last At"
+          },
           "practice_run": {
             "$ref": "#/components/schemas/PracticeRunOut"
           },
@@ -2760,6 +2774,7 @@
           "auto_employer_emails",
           "outreach_send",
           "hunt_every_hours",
+          "people_hunt",
           "paused",
           "practice_run"
         ],
@@ -4977,11 +4992,26 @@
       },
       "DueItemOut": {
         "properties": {
+          "application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ids"
+          },
           "duty": {
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
@@ -4990,7 +5020,8 @@
             "enum": [
               "never_done",
               "interval_elapsed",
-              "queue_waiting"
+              "queue_waiting",
+              "new_applications"
             ],
             "title": "Reason",
             "type": "string"
@@ -4999,7 +5030,8 @@
             "enum": [
               "hunt",
               "daily",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Recipe",
             "type": "string"
@@ -8096,11 +8128,27 @@
       "MarkDoneIn": {
         "additionalProperties": false,
         "properties": {
+          "application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ids"
+          },
           "duty": {
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
@@ -8122,7 +8170,8 @@
             "enum": [
               "hunt",
               "inbox",
-              "batch"
+              "batch",
+              "reach"
             ],
             "title": "Duty",
             "type": "string"
