@@ -2392,6 +2392,16 @@
             "title": "Asked By",
             "type": "string"
           },
+          "browser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserLabelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "confirmed_at": {
             "anyOf": [
               {
@@ -3482,6 +3492,35 @@
         "title": "BrowserActionRequest",
         "type": "object"
       },
+      "BrowserLabelOut": {
+        "description": "Which browser a task uses (``services/browser_agent/routing.py``): the chip every card shows.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "job360",
+              "own_browser",
+              "human"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "reason"
+        ],
+        "title": "BrowserLabelOut",
+        "type": "object"
+      },
       "CVDetail": {
         "description": "Full extracted CV data for transparent display.",
         "properties": {
@@ -4222,6 +4261,16 @@
             "title": "Role",
             "type": "string"
           },
+          "send_browser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserLabelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "shared": {
             "anyOf": [
               {
@@ -4556,6 +4605,16 @@
           "asked_by": {
             "title": "Asked By",
             "type": "string"
+          },
+          "browser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserLabelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "confirmed_at": {
             "anyOf": [
@@ -9685,6 +9744,16 @@
             "title": "Role",
             "type": "string"
           },
+          "send_browser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserLabelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "shared": {
             "anyOf": [
               {
@@ -10807,6 +10876,16 @@
               }
             ],
             "title": "Brought By"
+          },
+          "browser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserLabelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cover_letter": {
             "anyOf": [

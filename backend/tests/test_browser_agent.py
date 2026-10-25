@@ -764,7 +764,7 @@ async def test_a_captcha_refusal_on_an_action_also_records_blocked(authenticated
             rows = [json.loads(r["payload"]) for r in await cur.fetchall()]
         assert len(rows) == 1 and rows[0]["reason"] == "captcha" and rows[0]["page_host"] == "jobs.acme.com"
         # "ChatGPT agent" was retired by OpenAI: the hand-off names a browser that survives renames.
-        assert "ChatGPT's own browser" in rows[0]["detail"] and "ChatGPT agent" not in rows[0]["detail"]
+        assert "waiting for your own browser" in rows[0]["detail"] and "ChatGPT" not in rows[0]["detail"]
 
 
 @pytest.mark.asyncio
@@ -813,7 +813,7 @@ async def test_a_stop_records_blocked_once_and_opens_a_needs_you_ask(authenticat
             asks = [r["question"] for r in await cur.fetchall()]
         assert len(rows) == 1
         assert rows[0]["reason"] == "captcha" and rows[0]["page_host"] == "jobs.acme.com"
-        assert rows[0]["step"] == "Job360 browser" and "own assistant's browser" in rows[0]["detail"]
+        assert rows[0]["step"] == "Job360 browser" and "waiting for your own browser" in rows[0]["detail"]
         assert len(asks) == 1 and "CAPTCHA" in asks[0]
 
         # A different stop (a sign-in wall after the CAPTCHA was cleared elsewhere) is recorded on its own.

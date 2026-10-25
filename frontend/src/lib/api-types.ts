@@ -4294,6 +4294,7 @@ export interface components {
             asked_at: string;
             /** Asked By */
             asked_by: string;
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -4704,6 +4705,21 @@ export interface components {
             url: string;
         };
         /**
+         * BrowserLabelOut
+         * @description Which browser a task uses (``services/browser_agent/routing.py``): the chip every card shows.
+         */
+        BrowserLabelOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "job360" | "own_browser" | "human";
+            /** Label */
+            label: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
          * CVDetail
          * @description Full extracted CV data for transparent display.
          */
@@ -5027,6 +5043,7 @@ export interface components {
             relationship?: string | null;
             /** Role */
             role: string;
+            send_browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Shared */
             shared?: string | null;
             /** Source Url */
@@ -5123,6 +5140,7 @@ export interface components {
             asked_at: string;
             /** Asked By */
             asked_by: string;
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Confirmed At */
             confirmed_at?: string | null;
             /** Context */
@@ -7240,6 +7258,7 @@ export interface components {
             relationship?: string | null;
             /** Role */
             role: string;
+            send_browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Shared */
             shared?: string | null;
             /** Source Url */
@@ -7750,6 +7769,7 @@ export interface components {
             brought_at?: string | null;
             /** Brought By */
             brought_by?: string | null;
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             cover_letter?: components["schemas"]["ReadyDoc"] | null;
             cv?: components["schemas"]["ReadyDoc"] | null;
             /** Filled At */

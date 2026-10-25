@@ -10,7 +10,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
 2. **Open one form, in ONE foreground tab.** Typing only lands in the foreground tab. One browser action at a time
    (two uploads at once both fail). Close the tab after submit. Greenhouse: use the plain embed URL (table).
    Name the site; if it is not in the table below, read `get_recipe("ats")`.
-   No browser of your own: Job360's `browser` tool (open, look, then act on the `ref`s; `upload` with `doc_kind`
+   Job360's `browser` tool goes first (rules, "Which browser"): (open, look, then act on the `ref`s; `upload` with `doc_kind`
    "cv" and this job's `application_id` sends the saved CV; `fill` sets up to 40 fields in ONE call and reads each
    back: prefer it to one `type` per field). After a page changes, use the refs it returned.
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the

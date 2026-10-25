@@ -124,6 +124,17 @@ profile edit comes after it (`approval_stale`: expired, cover_letter, form_fill,
 the answers the user changed (`type_first`) never cancels it. A setting that says to apply is never a reason
 to apply to a job the user did not bring.
 
+## Which browser
+
+Job360's browser (the `browser` tool) goes FIRST for everything, job forms and LinkedIn: it runs in the cloud,
+so it works with the user's computer off. Only when it stops on a task (a sign-in wall, a CAPTCHA or bot check,
+or a safety stop: its `needs_you` / open `blocked`) does that task wait for the user's own browser: the one your
+app drives on the user's PC, there only while the PC is on and the user agrees. A scheduled cloud run never has
+one: leave the task on Needs you and go on. Passwords, one-time codes and MFA are the user's alone; no browser
+solves a CAPTCHA: it is always solved by the user, on Needs you while Job360's browser holds the page
+(Finish it here), otherwise in their own browser. Every card on Needs you says which: "I'll use Job360's browser", "Needs your own
+browser: turn your PC on" or "Only you can do this".
+
 ## Writing the CV
 
 A CV is the first impression; write it like a strong human candidate would.
