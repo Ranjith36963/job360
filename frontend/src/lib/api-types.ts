@@ -9562,6 +9562,11 @@ export interface components {
             running?: {
                 [key: string]: string | null;
             };
+            /**
+             * Waiting On You
+             * @default 0
+             */
+            waiting_on_you: number;
         };
         /** WhatsNewApplicationOut */
         WhatsNewApplicationOut: {
