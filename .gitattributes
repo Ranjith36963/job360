@@ -38,3 +38,4 @@
 *.zip     binary
 *.db      binary
 *.sqlite  binary
+*.woff2   binary
