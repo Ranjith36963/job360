@@ -299,3 +299,11 @@ async def test_the_mcp_tools_answer_through_the_same_routes(authenticated_async_
                 await tools.get_tool("mark_done").fn(duty="apply")
     finally:
         m._current_user.reset(token)
+
+
+def test_a_duty_a_few_minutes_short_of_its_time_is_due():
+    """Prod 2026-10-25: hunt done 19:15, the hourly wake at 20:12 read nothing due and lost an hour."""
+    near = schedule.due_now(_facts(hunt_every_hours=1, stamps={"hunt": NOW - timedelta(minutes=55)}), NOW)
+    assert [d["duty"] for d in near["due"]] == ["hunt"]
+    early = schedule.due_now(_facts(hunt_every_hours=1, stamps={"hunt": NOW - timedelta(minutes=45)}), NOW)
+    assert early["due"] == [] and early["nothing_due"] is True
