@@ -147,3 +147,79 @@ export function remindersCovered(people: PersonToReach[], reminders: Ask[]): Map
   }
   return out;
 }
+
+// ---- Form answers, each question once (owner 2026-10-25) -------------------------------------
+
+export type FormQuestion = NonNullable<Ask["questions"]>[number];
+
+/** One form question on a card, however many open asks listed it. */
+export type MergedRow = {
+  /** Identity inside the card (the question's key, or its normalised text when it has no key). */
+  id: string;
+  /** The version shown: the one with a real source and an answer. */
+  q: FormQuestion;
+  /** The ask whose copy is shown; row test ids are `q-<askId>-<q.key>`. */
+  askId: number;
+  /** Every ask that listed this question. */
+  askIds: number[];
+};
+
+export type MergedQuestions = {
+  rows: MergedRow[];
+  /** Per ask: each of its own keys and the merged row that now carries the answer. */
+  byAsk: Map<number, { key: string; rowId: string }[]>;
+};
+
+const SOURCE_RANK: Record<string, number> = { profile: 6, memory: 5, cv: 4, draft: 3, guess: 2, none: 1 };
+
+function normText(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function betterThan(a: FormQuestion, b: FormQuestion): boolean {
+  const ae = a.answer.trim() ? 1 : 0;
+  const be = b.answer.trim() ? 1 : 0;
+  if (ae !== be) return ae > be;
+  return (SOURCE_RANK[a.source] ?? 0) > (SOURCE_RANK[b.source] ?? 0);
+}
+
+/** The questions of every structured ask, deduped by key (else by question text). Several open asks
+ *  on one job often list the same questions; each is shown once and every ask is still answered. */
+export function mergeQuestions(asks: Ask[]): MergedQuestions {
+  const rows: MergedRow[] = [];
+  const byId = new Map<string, MergedRow>();
+  const byText = new Map<string, MergedRow>();
+  const byAsk = new Map<number, { key: string; rowId: string }[]>();
+  for (const ask of asks) {
+    const mine: { key: string; rowId: string }[] = [];
+    byAsk.set(ask.id, mine);
+    for (const q of ask.questions ?? []) {
+      const text = normText(q.question);
+      const id = q.key.trim() ? q.key : text;
+      let row = byId.get(id) ?? (text ? byText.get(text) : undefined);
+      if (!row) {
+        row = { id, q, askId: ask.id, askIds: [ask.id] };
+        rows.push(row);
+        byId.set(id, row);
+        if (text) byText.set(text, row);
+      } else {
+        if (!row.askIds.includes(ask.id)) row.askIds.push(ask.id);
+        if (betterThan(q, row.q)) {
+          row.q = q;
+          row.askId = ask.id;
+        }
+      }
+      mine.push({ key: q.key, rowId: row.id });
+    }
+  }
+  return { rows, byAsk };
+}
+
+const SENSITIVE =
+  /consent|\bagree|privacy|gdpr|data processing|\bterms\b|\beeo|\bgender|\bsex\b|\bsexual|ethnic|\brace\b|disabilit|veteran|religio|criminal|convict|marital|pregnan|date of birth|birth ?date|\bdob\b/i;
+
+/** Consent and personal-category questions: shown pre-filled, but only the owner's own click checks them. */
+export function isSensitiveQuestion(q: { key: string; question: string; sensitive?: boolean }): boolean {
+  if (q.sensitive === true) return true;
+  return SENSITIVE.test(`${q.key.replace(/[_-]+/g, " ")} ${q.question}`);
+}
