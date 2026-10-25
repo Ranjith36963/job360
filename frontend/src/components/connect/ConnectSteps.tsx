@@ -102,47 +102,114 @@ export function AddressStepCard() {
 }
 
 // ---------------------------------------------------------------------------
-// Step 2 — one plain line per assistant (owner-approved copy, 2026-09-27).
-// Only Claude carries a "Tested: works" line — a hand-checked, dated result
-// (2026-09-19, docs/product/VISION.md), never a live reading. The other four
-// carry no testing claim at all: neither "works" nor "not tested" — we have
-// not run them end-to-end, and a guess here would be a claim we can't back.
+// Step 2 — one card per assistant, every card the same shape: name, status
+// badge, "What you need", numbered steps, the address to paste.
+// Only Claude is "Tested": a hand-checked, dated result (2026-09-19,
+// docs/product/VISION.md decision 24). The other four are "Not tested yet":
+// we have not run them end-to-end. Plan facts come only from the owner-approved
+// copy that was already on this card (2026-09-27); where it said nothing the
+// card says to check the plan, never a guessed tier.
+// ChatGPT Atlas has no card: docs/product/BROWSER_AGENT.md:40 says it is retired.
 // ---------------------------------------------------------------------------
 
 type AssistantStep = {
   name: string;
-  /** Plan + how-to, combined into one plain line. */
-  line: string;
+  /** The plan / tier / mode needed to add a custom connector (MCP). */
+  need: string;
+  /** Numbered steps. The address is pasted in the step that says "paste". */
+  steps: string[];
   /** Only true for an assistant actually run end-to-end, hand-checked and
    *  dated — see the comment above. Never set from a guess. */
   tested?: boolean;
 };
 
-const ASSISTANT_STEPS: AssistantStep[] = [
+const CHECK_PLAN = "Check your plan supports custom connectors (MCP).";
+
+export const ASSISTANT_STEPS: AssistantStep[] = [
   {
     name: "Claude",
-    line: "Settings → Connectors → Add custom connector → paste → Connect. Every plan, including Free.",
+    need: "Every plan, including Free.",
+    steps: [
+      "Open Settings, then Connectors.",
+      "Choose Add custom connector.",
+      "Paste the address below.",
+      "Choose Connect and sign in.",
+    ],
     tested: true,
   },
   {
     name: "ChatGPT",
-    line: "Business, Enterprise or Edu (Plus and Pro may be read-only). An admin adds it as a custom app.",
-  },
-  {
-    name: "Perplexity",
-    line: "Pro or Max. Settings → Connectors → add → paste.",
-  },
-  {
-    name: "Grok",
-    line: "Paid accounts. Add a connection with the address.",
+    need: "Business, Enterprise or Edu (Plus and Pro may be read-only). An admin adds it as a custom app.",
+    steps: [
+      "Ask your workspace admin to add a custom app.",
+      "Paste the address below.",
+      "Sign in when asked.",
+    ],
   },
   {
     name: "Gemini",
-    line: "Business editions only. An admin adds it.",
+    need: "Business editions only. An admin adds it.",
+    steps: [
+      "Ask your workspace admin to add it.",
+      "Paste the address below.",
+      "Sign in when asked.",
+    ],
+  },
+  {
+    name: "Perplexity",
+    need: "Pro or Max.",
+    steps: [
+      "Open Settings, then Connectors.",
+      "Choose add.",
+      "Paste the address below.",
+    ],
+  },
+  {
+    name: "Grok",
+    need: "Paid accounts.",
+    steps: [
+      "Open your connections.",
+      "Add a connection.",
+      "Paste the address below.",
+    ],
   },
 ];
 
+function AssistantAddress({ name, url }: { name: string; url: string }) {
+  const id = `assistant-address-${name.toLowerCase()}`;
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id} className={LABEL_CLASS}>
+        Address to paste
+      </Label>
+      <div className="flex gap-2">
+        <Input
+          id={id}
+          readOnly
+          value={url}
+          className={MONO_FIELD_CLASS}
+          data-testid={id}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          className={`h-9 ${QUIET_BTN_CLASS}`}
+          aria-label={`Copy address for ${name}`}
+          onClick={() => {
+            posthog.capture("connect_address_copied");
+            copyText(url, "Address");
+          }}
+        >
+          Copy
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function AssistantStepsCard() {
+  const url = mcpUrl();
   return (
     <Card className={CARD_CLASS}>
       <CardHeader>
@@ -152,21 +219,39 @@ export function AssistantStepsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ul className="grid gap-0 border-t border-border lg:grid-cols-2 lg:gap-x-8">
-          {ASSISTANT_STEPS.map((a) => (
-            <li key={a.name} className="space-y-1 border-b border-border py-3">
-              <p className="font-normal">{a.name}</p>
-              <p className="text-xs text-muted-foreground">{a.line}</p>
-              {a.tested && (
-                <p
-                  className="font-mono text-[11px] text-brand"
-                  data-testid={`assistant-status-${a.name.toLowerCase()}`}
-                >
-                  ✅ Tested: works
-                </p>
-              )}
-            </li>
-          ))}
+        <ul className="grid gap-4 lg:grid-cols-2">
+          {ASSISTANT_STEPS.map((a) => {
+            const key = a.name.toLowerCase();
+            return (
+              <li
+                key={a.name}
+                data-testid={`assistant-card-${key}`}
+                className="flex min-w-0 flex-col gap-3 rounded-lg border border-border p-4"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-normal">{a.name}</p>
+                  <span
+                    className={`font-mono text-[11px] ${a.tested ? "text-brand" : "text-muted-foreground"}`}
+                    data-testid={`assistant-status-${key}`}
+                  >
+                    {a.tested ? "Tested" : "Not tested yet"}
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <p className={LABEL_CLASS}>What you need</p>
+                  <p className="text-sm text-muted-foreground">{a.need || CHECK_PLAN}</p>
+                </div>
+                <ol className="list-decimal space-y-1 pl-5 text-sm">
+                  {a.steps.map((st) => (
+                    <li key={st}>{st}</li>
+                  ))}
+                </ol>
+                <div className="mt-auto">
+                  <AssistantAddress name={a.name} url={url} />
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </CardContent>
     </Card>
