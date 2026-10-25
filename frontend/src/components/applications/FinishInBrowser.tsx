@@ -14,9 +14,10 @@ const REFRESH_MS = 1500;
  * Finish it here: the hand-off view (docs/product/BROWSER_AGENT.md). Job360's browser stopped on a human
  * check (a CAPTCHA) on a form it filled; the person solves it THEMSELVES on a live picture of that same
  * browser, so nothing is typed again. Website only: an assistant's token can never drive it. Done hands
- * the browser back to its idle clock; then "I submitted it" records the receipt.
+ * the browser back to its idle clock; then "I submitted it" records the receipt. Each job has its own
+ * browser: `applicationId` names whose form this is.
  */
-export function FinishInBrowser({ onDone }: { onDone: () => void }) {
+export function FinishInBrowser({ applicationId, onDone }: { applicationId: number; onDone: () => void }) {
   const [shot, setShot] = useState<BrowserLiveShot | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,7 +29,7 @@ export function FinishInBrowser({ onDone }: { onDone: () => void }) {
     busyRef.current = true;
     if (!quiet) setBusy(true);
     try {
-      const res = await browserLive(s, "finish");
+      const res = await browserLive(s, "finish", applicationId);
       if (res.status === "ok" && res.image) setShot(res);
       else if (res.reason === "no_form") {
         setShot(null);
@@ -42,7 +43,7 @@ export function FinishInBrowser({ onDone }: { onDone: () => void }) {
       busyRef.current = false;
       if (!quiet) setBusy(false);
     }
-  }, []);
+  }, [applicationId]);
 
   // The first picture, fetched from a timer callback (not in the effect body: react-hooks/set-state-in-effect).
   useEffect(() => {
@@ -89,7 +90,7 @@ export function FinishInBrowser({ onDone }: { onDone: () => void }) {
   return (
     <div data-testid="finish-view" className="flex flex-col gap-2">
       <p className="text-xs text-muted-foreground">
-        Solve the check yourself: click on the picture where you would click. Your filled form is behind it.
+        Your filled form, live: click on the picture where you would click (solve a check, or press Submit).
       </p>
       <button
         type="button"

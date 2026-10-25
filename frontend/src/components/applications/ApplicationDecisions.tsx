@@ -125,7 +125,7 @@ export function ApplicationDecisions({
               Finish it here
             </button>
           )}
-          {finishing && <FinishInBrowser onDone={() => setFinishing(false)} />}
+          {finishing && <FinishInBrowser applicationId={applicationId} onDone={() => setFinishing(false)} />}
           <label className={`${NOTE} flex flex-col gap-1`}>
             Pressed Submit yourself? Paste the confirmation text (optional).
             <textarea

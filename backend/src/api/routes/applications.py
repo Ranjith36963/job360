@@ -765,6 +765,8 @@ class AskOut(BaseModel):
     status: str
     # True = this ask is a human check (CAPTCHA) in Job360's own browser: Needs you offers "Finish it here".
     finish_here: bool = False
+    # Seconds left on the hold keeping that form's Job360 browser open (None = not held): "kept open N minutes".
+    held_seconds: Optional[int] = None
     # 0087 - "" (an older ask), "question", or a blocker only the user can clear on the form.
     kind: str = ""
     # The form questions this ask carries, each with the answer filled in and where it came from.
@@ -3727,6 +3729,29 @@ async def _record_event(
             )
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
+        hold_warning = ""  # form_swept whose browser could not be held: the assistant tells the user
+        if body.event_type == "form_swept" and settings.BROWSER_AGENT_ENABLED:
+            # The form is filled and checked; it now waits on the user's yes (or a human check): keep this
+            # job's Job360 browser open 30 minutes, not 10. A no-op when no browser is open for it.
+            from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
+
+            pool = browser_agent.get_pool()
+            form_url = str((payload or {}).get("form_url") or "")
+            if form_url and browser_agent.browser_key(user.id, application_id) not in pool.user_keys(user.id):
+                # Filled in the scratch browser (no application named): on the same page it becomes this job's.
+                kit_hold = await kit_service.live_hold(db, user, application_id, datetime.now(timezone.utc))
+                browser_agent.adopt_for_form(
+                    pool, user.id, application_id, form_url, str((kit_hold or {}).get("session") or "")
+                )
+            if not browser_agent.hold_for_user(pool, user.id, application_id, swept=True) and (
+                browser_agent.browser_key(user.id, application_id) in pool.user_keys(user.id)
+            ):
+                held = browser_agent.held_count(pool, user.id)
+                hold_warning = (
+                    f"Job360's browser is not held for this form: {held} forms already wait on the user"
+                    if held >= max(1, pool.max_sessions - 1)
+                    else "Job360's browser is not held again for this form: it already had its 30-minute hold"
+                ) + f". It closes after {max(1, int(pool.idle_s // 60))} idle minutes; tell the user."
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
         if body.event_type in interview_payloads.INTERVIEW_EVENT_TYPES:
@@ -3736,7 +3761,8 @@ async def _record_event(
         # Judge the STORED type: a duplicate message_id returns the existing event.
         stored_type = str(result.get("event_type") or body.event_type)
         missing = await spine.missing_applied_warnings(db, application_id, stored_type)
-        return {**result, "warnings": [*result.get("warnings", []), *missing]}
+        warnings = [*result.get("warnings", []), *missing, *([hold_warning] if hold_warning else [])]
+        return {**result, "warnings": warnings}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

@@ -2412,6 +2412,17 @@
             "title": "Finish Here",
             "type": "boolean"
           },
+          "held_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Seconds"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -4273,6 +4284,17 @@
             "default": false,
             "title": "Finish Here",
             "type": "boolean"
+          },
+          "held_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Seconds"
           },
           "id": {
             "title": "Id",
@@ -8036,6 +8058,17 @@
             "title": "Action",
             "type": "string"
           },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
           "dy": {
             "default": 0,
             "title": "Dy",
@@ -10283,6 +10316,17 @@
           "form_filled_event_id": {
             "title": "Form Filled Event Id",
             "type": "integer"
+          },
+          "held_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Seconds"
           },
           "job_company": {
             "title": "Job Company",
@@ -22493,7 +22537,7 @@
     },
     "/api/browser/live": {
       "post": {
-        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only. ``mode: finish``: the user finishes a\nhuman check in their assistant's browser instead (shot, click, type, key, scroll, done).",
+        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only. ``mode: finish``: the user finishes a\nhuman check in their assistant's browser instead (shot, click, type, key, scroll, done), in the\nbrowser of ``application_id``.",
         "operationId": "browser_live_api_browser_live_post",
         "parameters": [
           {

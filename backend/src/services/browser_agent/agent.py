@@ -11,9 +11,11 @@ click. This module only carries the action out, inside the hard lines in
   ``check_submit`` every assistant uses) says ``submit``, and records
   ``submit_attempted`` first;
 * every request the page makes is screened by the SSRF guard;
-* no downloads, no service workers, one browser per user (and a separate one
-  for the user's own sign-in view), closed when idle, and at most
-  ``max_sessions`` assistant browsers and ``max_live`` sign-in views at once.
+* no downloads, no service workers, one browser per job (``browser_key``: the
+  user plus the application; one scratch browser per user for calls with no
+  application) and a separate one for the user's own sign-in view, closed when
+  idle, at most ``max_per_user`` per user, and at most ``max_sessions``
+  assistant browsers and ``max_live`` sign-in views at once.
 
 Playwright is imported lazily (rule #16) and is an optional dependency
 (``pip install .[browser]``); without it every action answers ``off``.
@@ -123,6 +125,8 @@ def _no_browser_error(user_id: str, idle_s: float) -> BrowserError:
         why = "The browser was closed; the page is gone."
     elif reason == "sign_in_forgotten":
         why = "The browser was closed when a saved sign-in was forgotten; the page is gone."
+    elif reason == "replaced":
+        why = "The browser was closed to make room for another job's browser; the page is gone."
     elif time.monotonic() - _BOOT_AT < RESTART_WINDOW_S:
         why = "Job360 restarted (an update); the page is gone."
     else:
@@ -174,6 +178,17 @@ StateFn = Callable[[], Awaitable[dict[str, Any]]]
 VIEWPORT = {"width": 1280, "height": 900}
 # The pool key prefix of a live sign-in view (live_key): those count against max_live, not max_sessions.
 LIVE_PREFIX = "live:"
+# Between the user and the application in a job's pool key (browser_key).
+JOB_SEP = "#job:"
+
+
+def browser_key(user_id: str, application_id: Optional[int] = None) -> str:
+    """The pool slot of one job's browser; no application = the user's scratch browser (hunting, reading)."""
+    return user_id if application_id is None else f"{user_id}{JOB_SEP}{int(application_id)}"
+
+
+def _user_of(key: str) -> str:
+    return key.split(JOB_SEP, 1)[0]
 
 
 @dataclass
@@ -201,10 +216,16 @@ class Session:
     # Kept open past idle_s until this time (monotonic): a form stopped on a human check waits for the
     # user to finish it themselves in the hand-off view (hold_for_user). None = no hold.
     held_until: Optional[float] = None
+    # The page whose form_swept hold this browser already used (one per form; a new page or Done frees it).
+    swept_on: Optional[tuple[str, ...]] = None
+
+
+def _held(s: Session, now: float) -> bool:
+    return s.held_until is not None and now < s.held_until
 
 
 class BrowserPool:
-    """One Chromium process, one isolated context (cookies, storage) per user."""
+    """One Chromium process, one isolated context (cookies, storage) per job (``browser_key``)."""
 
     def __init__(
         self,
@@ -212,12 +233,14 @@ class BrowserPool:
         max_sessions: int,
         idle_s: float,
         max_live: int = 2,
+        max_per_user: int = 3,
         resolve: ResolveFn,
         launch_args: Optional[list[str]] = None,
         open_connection: Optional[OpenFn] = None,
     ) -> None:
         self.max_sessions = max_sessions
         self.max_live = max_live
+        self.max_per_user = max_per_user
         self.idle_s = idle_s
         self.screen = RequestScreen(resolve)
         # The one way out for Chromium's traffic (egress.py): screens and pins every connection.
@@ -262,11 +285,65 @@ class BrowserPool:
     async def reap(self) -> None:
         """Close every session idle longer than ``idle_s``, and every live view past its lifetime."""
         now = time.monotonic()
-        for user_id, s in list(self._sessions.items()):
+        for key, s in list(self._sessions.items()):
             expired = s.closes_at is not None and now > s.closes_at
-            held = s.held_until is not None and now < s.held_until
-            if (now - s.last_used > self.idle_s or expired) and not held and not s.lock.locked():
-                await self.close(user_id, "idle")
+            if (now - s.last_used > self.idle_s or expired) and not _held(s, now) and not s.lock.locked():
+                await self.close(key, "idle")
+
+    def user_keys(self, user_id: str) -> list[str]:
+        """The pool keys of one user's assistant browsers (every job's and the scratch one; no live view)."""
+        return [k for k in self._sessions if not k.startswith(LIVE_PREFIX) and _user_of(k) == user_id]
+
+    def adopt(self, user_id: str, key: str, owner: str) -> None:
+        """A call that names its job and has no browser for it takes the user's scratch browser (the form was
+        opened before the job was named), unless another assistant session drives that one. No await."""
+        scratch = self._sessions.get(user_id)
+        if key == user_id or key in self._sessions or scratch is None or (scratch.owner and scratch.owner != owner):
+            return
+        self._sessions[key] = self._sessions.pop(user_id)
+
+    def per_user_cap(self) -> int:
+        """Browsers one user may have open: never more than the whole pool."""
+        return max(1, min(self.max_per_user, self.max_sessions))
+
+    def _spare_of_others(self, user_id: str) -> Optional[str]:
+        """Another user's least recently used browser that may close so this user gets a slot: not held,
+        not mid-action, and its owner keeps at least one other browser. None: nothing qualifies."""
+        now = time.monotonic()
+        spare = [
+            k for k, s in self._sessions.items()
+            if not k.startswith(LIVE_PREFIX) and _user_of(k) != user_id and not _held(s, now)
+            and not s.lock.locked() and len(self.user_keys(_user_of(k))) > 1
+        ]
+        return min(spare, key=lambda k: self._sessions[k].last_used) if spare else None
+
+    async def _make_room(self, user_id: str) -> None:
+        """Room for one more browser of this user under both caps: close the user's own least recently
+        used browser that is not held for them. A user with none takes another user's spare one (every
+        user gets a slot); never another user's only, held or busy browser. Called with ``_create_lock``."""
+        while True:
+            mine = self.user_keys(user_id)
+            agents = sum(1 for k in self._sessions if not k.startswith(LIVE_PREFIX))
+            if len(mine) < self.per_user_cap() and agents < self.max_sessions:
+                return
+            if not mine:
+                spare = self._spare_of_others(user_id)
+                if spare is None:
+                    return  # _create refuses: all_browsers_busy
+                await self.close(spare, "replaced")
+                continue
+            now = time.monotonic()
+            free = [k for k in mine if not _held(self._sessions[k], now) and not self._sessions[k].lock.locked()]
+            if not free:
+                break
+            await self.close(min(free, key=lambda k: self._sessions[k].last_used), "replaced")
+        if len(mine) >= self.per_user_cap():
+            raise BrowserError(
+                "busy", "browsers_held",
+                f"This user has {len(mine)} Job360 browsers open and each holds a form waiting on them (their yes "
+                "or a human check on Needs you). Wait for them, or ask the user before you close one (action "
+                "close with its application_id).",
+            )
 
     def busy_count(self, quiet_s: float, now: Optional[float] = None) -> int:
         """Sessions used within ``quiet_s`` seconds, or running an action now (deploy hold)."""
@@ -274,8 +351,9 @@ class BrowserPool:
         return sum(1 for s in self._sessions.values() if now - s.last_used <= quiet_s or s.lock.locked())
 
     async def get(
-        self, user_id: str, *, create: bool, load_state: Optional[StateFn] = None
+        self, key: str, *, create: bool, load_state: Optional[StateFn] = None
     ) -> Optional[Session]:
+        """The browser at ``key`` (``browser_key`` or ``live_key``), started when ``create`` and none is open."""
         await self.reap()
         if self._browser is not None and not self._browser.is_connected():
             # Chromium died: every session was bound to it. Free them, or each one errors and
@@ -283,19 +361,21 @@ class BrowserPool:
             logger.warning("browser_agent chromium died; closing %d session(s)", len(self._sessions))
             for uid in list(self._sessions):
                 await self.close(uid, "crashed")
-        s =self._sessions.get(user_id)
+        s = self._sessions.get(key)
         if s is not None or not create:
             return s
         async with self._create_lock:
-            s = self._sessions.get(user_id)
+            s = self._sessions.get(key)
             if s is not None:
                 return s
-            return await self._create(user_id, load_state)
+            return await self._create(key, load_state)
 
-    async def _create(self, user_id: str, load_state: Optional[StateFn]) -> Session:
-        """Build one user's browser. Called with ``_create_lock`` held."""
+    async def _create(self, key: str, load_state: Optional[StateFn]) -> Session:
+        """Build one browser. Called with ``_create_lock`` held."""
         # Live sign-in views have their own small cap: they never take an assistant's browser.
-        is_live = user_id.startswith(LIVE_PREFIX)
+        is_live = key.startswith(LIVE_PREFIX)
+        if not is_live:
+            await self._make_room(_user_of(key))
         same_kind = sum(1 for k in self._sessions if k.startswith(LIVE_PREFIX) == is_live)
         if same_kind >= (self.max_live if is_live else self.max_sessions):
             raise BrowserError(
@@ -364,26 +444,31 @@ class BrowserPool:
 
         context.on("request", _on_request)
         context.on("response", _on_response)
-        self._sessions[user_id] = s
-        _CLOSE_REASONS.pop(user_id, None)
+        self._sessions[key] = s
+        _CLOSE_REASONS.pop(key, None)
         # Tell a deploying container a form is open now, not at the next sweep. Never raises, and
         # is bounded, so a DB trouble cannot hold up the browser.
         await beacon.sync(True)
         return s
 
-    async def close(self, user_id: str, reason: Optional[str] = "closed") -> bool:
+    async def close(self, key: str, reason: Optional[str] = "closed") -> bool:
         """Close one browser. ``reason`` is remembered for the next call's refusal (None: not recorded)."""
-        s = self._sessions.pop(user_id, None)
+        s = self._sessions.pop(key, None)
         if s is None:
             return False
         if reason:
-            _note_closed(user_id, reason)
+            _note_closed(key, reason)
         try:
             async with s.lock:  # never under an action in flight: it finishes first
                 await s.context.close()
         except Exception:  # noqa: BLE001 - a dead context is already closed
             logger.debug("browser_agent context close failed", exc_info=True)
         return True
+
+    async def close_user(self, user_id: str, reason: str) -> None:
+        """Close every assistant browser of one user (each job's and the scratch one)."""
+        for key in self.user_keys(user_id):
+            await self.close(key, reason)
 
     async def shutdown(self) -> None:
         for user_id in list(self._sessions):
@@ -1136,26 +1221,31 @@ async def run(
     load_state: Optional[StateFn] = None,
     owner: str = "",
     fields: Optional[list[dict[str, str]]] = None,
+    application_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """Carry out one action for one user and return what the page looks like after it.
 
-    ``fields`` is fill's list of ``{ref, text}``. ``owner`` is the caller's session label: while one
-    session drives the user's browser, a call with another label is refused (``busy``), so two
-    assistant runs never fill one form."""
+    ``fields`` is fill's list of ``{ref, text}``. Each job (``application_id``) has its own browser; no
+    application = the user's scratch browser. ``owner`` is the caller's session label: while one session
+    drives a browser, a call with another label on that browser is refused (``busy``), so two assistant
+    runs never fill one form."""
     if action not in ACTIONS:
         raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(ACTIONS) + ".")
+    key = browser_key(user_id, application_id)
     if action == "close":
-        closed = await pool.close(user_id)
+        closed = await pool.close(key)
         return {"status": "ok", "closed": closed}
-    s = await pool.get(user_id, create=action == "open", load_state=load_state)
+    if action != "open":
+        pool.adopt(user_id, key, owner)
+    s = await pool.get(key, create=action == "open", load_state=load_state)
     if s is None:
-        raise _no_browser_error(user_id, pool.idle_s)
+        raise _no_browser_error(key, pool.idle_s)
     if owner:
         # Checked and claimed with no await between: two sessions cannot both pass.
         if s.owner and s.owner != owner:
             raise BrowserError(
                 "busy", "browser_in_use",
-                "Another assistant session is using this user's Job360 browser. Wait for it to finish (it is "
+                "Another assistant session is using this job's Job360 browser. Wait for it to finish (it is "
                 f"closed after {max(1, int(pool.idle_s // 60))} idle minutes), or ask the user before you close "
                 "it (action close).",
             )
@@ -1668,13 +1758,75 @@ FINISH_ACTIONS = ("shot", "click", "type", "key", "scroll", "done")
 HANDOFF_HOLD_SECONDS = 30 * 60
 
 
-def hold_for_user(pool: Optional[BrowserPool], user_id: str, seconds: float = HANDOFF_HOLD_SECONDS) -> bool:
-    """Keep the user's assistant browser open ``seconds`` more for the hand-off view. False: none is open."""
-    s = pool._sessions.get(user_id) if pool is not None else None
-    if s is None:
+def hold_for_user(
+    pool: Optional[BrowserPool], user_id: str, application_id: Optional[int] = None,
+    seconds: float = HANDOFF_HOLD_SECONDS, *, renew: bool = False, swept: bool = False,
+) -> bool:
+    """Keep one job's browser open ``seconds`` more for the user (a human check, or a swept form waiting on
+    their yes). An active hold is not extended unless ``renew`` (a fresh CAPTCHA hand-off: the user gets the
+    full time). ``swept``: a form_swept hold, at most one per form page (a new page or Done frees it). A new
+    hold needs the user to hold fewer than ``max_sessions - 1`` browsers. False: none open, or not held."""
+    s = pool._sessions.get(browser_key(user_id, application_id)) if pool is not None else None
+    if pool is None or s is None:
         return False
-    s.held_until = time.monotonic() + seconds
+    now = time.monotonic()
+    if _held(s, now):
+        if renew:
+            s.held_until = max(s.held_until or now, now + seconds)
+        return True
+    page = _page_key(str(getattr(s.page, "url", "") or ""))
+    if swept and s.swept_on == page:
+        return False
+    if held_count(pool, user_id) >= max(1, pool.max_sessions - 1):
+        return False
+    s.held_until = now + seconds
+    if swept:
+        s.swept_on = page
     return True
+
+
+def held_count(pool: BrowserPool, user_id: str) -> int:
+    """How many of the user's browsers are held for them now."""
+    now = time.monotonic()
+    return sum(1 for k in pool.user_keys(user_id) if _held(pool._sessions[k], now))
+
+
+def _page_key(url: str) -> tuple[str, ...]:
+    """A page's scheme, host, port and path (query and fragment ignored); the raw text when unparsable."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    try:
+        x = urlsplit(url)
+        return (x.scheme.lower(), x.hostname or "", str(x.port or ""), x.path or "/")
+    except ValueError:
+        return (url,)
+
+
+def _same_page(a: str, b: str) -> bool:
+    """Same scheme, host and path (query and fragment ignored)."""
+    x = _page_key(a)
+    return len(x) == 4 and bool(x[1]) and x == _page_key(b)
+
+
+def adopt_for_form(pool: Optional[BrowserPool], user_id: str, application_id: int, form_url: str, owner: str) -> bool:
+    """A form swept for a job but filled in the user's scratch browser: when that job has no browser and the
+    scratch one is on the form's page and not held, it becomes the job's (``adopt``, ``owner`` = the
+    session holding the job). True when it moved."""
+    key = browser_key(user_id, application_id)
+    scratch = pool._sessions.get(user_id) if pool is not None else None
+    if pool is None or scratch is None or key in pool._sessions or _held(scratch, time.monotonic()):
+        return False
+    if not form_url or not _same_page(str(getattr(scratch.page, "url", "") or ""), form_url):
+        return False
+    pool.adopt(user_id, key, owner)
+    return key in pool._sessions
+
+
+def held_seconds(pool: Optional[BrowserPool], user_id: str, application_id: int) -> Optional[int]:
+    """Seconds left on the hold of that job's browser (the pool is in memory, one process); None = not held."""
+    s = pool._sessions.get(browser_key(user_id, application_id)) if pool is not None else None
+    left = (s.held_until - time.monotonic()) if s is not None and s.held_until is not None else 0
+    return int(left) if left > 0 else None
 
 
 SHOT_TRIES = 3
@@ -1724,20 +1876,22 @@ async def live(
     load_state: Optional[StateFn] = None,
     keep: Optional[Callable[[str, dict[str, Any]], Awaitable[int]]] = None,
     finish: bool = False,
+    application_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """One step of the user's own sign-in, returning a fresh picture of the page. ``finish``: one step
-    of the hand-off view instead, in the user's assistant browser (FINISH_ACTIONS)."""
+    of the hand-off view instead, in that application's browser (FINISH_ACTIONS)."""
     actions = FINISH_ACTIONS if finish else LIVE_ACTIONS
     if action not in actions:
         raise BrowserError("refused", "bad_action", "action must be one of: " + ", ".join(actions) + ".")
     if finish:
-        s = await pool.get(user_id, create=False)
+        s = await pool.get(browser_key(user_id, application_id), create=False)
         if s is None:
             raise BrowserError(
                 "refused", "no_form", "The form has closed. Ask your assistant to fill it again, or apply yourself.",
             )
         if action == "done":  # the user is finished: the browser goes back to its idle clock
             s.held_until = None
+            s.swept_on = None
             s.last_used = time.monotonic()
             return {"status": "ok", "done": True}
     else:
@@ -1792,10 +1946,9 @@ async def live(
                 if not hosts:
                     raise BrowserError("refused", "no_site", "Open the job site first.")
                 kept = {h: await keep(h, state) for h in sorted(hosts)}
-                # The assistant's browser, if open, loaded the saved sign-ins before this one: hand it the cookies.
-                agent_s = pool._sessions.get(user_id)
+                # The assistant's browsers, if open, loaded the saved sign-ins before this one: hand them the cookies.
                 cookies = [c for h in sorted(hosts) for c in state_for_host(state, h)["cookies"]]
-                if agent_s is not None and cookies:
+                for agent_s in [pool._sessions[k] for k in pool.user_keys(user_id)] if cookies else []:
                     try:
                         async with agent_s.lock:
                             await agent_s.context.add_cookies(cookies)
@@ -1832,6 +1985,7 @@ def get_pool() -> BrowserPool:
         _pool = BrowserPool(
             max_sessions=settings.BROWSER_AGENT_MAX_SESSIONS,
             max_live=settings.BROWSER_AGENT_MAX_LIVE,
+            max_per_user=settings.BROWSER_AGENT_MAX_PER_USER,
             idle_s=settings.BROWSER_AGENT_IDLE_SECONDS,
             resolve=DEFAULT_RESOLVE,
         )
