@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ApplicationDetail, Ask } from "@/lib/api";
-import { buildCard, groupAsks, isSensitiveQuestion, isSimulation, linkedinFor, mergeQuestions, peopleToReach, rowKind, sortCards } from "./job-cards";
+import { buildCard, fallbackGuess, initialRow, groupAsks, isSensitiveQuestion, isSimulation, linkedinFor, mergeQuestions, peopleToReach, rowKind, sortCards } from "./job-cards";
 
 let nextId = 1;
 function ask(over: Partial<Ask> = {}): Ask {
@@ -145,5 +145,38 @@ describe("needsOwnBrowser", () => {
     expect(needsOwnBrowser({ ...(a as object), needs_own_browser: false } as never)).toBe(false);
     expect(needsOwnBrowser({ ...(a as object), needs_own_browser: "yes" } as never)).toBe(false);
     expect(needsOwnBrowser({ ...(a as object), needs_own_browser: true } as never)).toBe(true);
+  });
+});
+
+describe("fallbackGuess", () => {
+  const g = (question: string, choices?: string[], key = "q") => fallbackGuess({ key, question, choices });
+  it("guesses Yes for data-processing / privacy consent and I agree", () => {
+    expect(g("I agree to the processing of my personal data")).toBe("Yes");
+    expect(g("Do you consent to our privacy policy?")).toBe("Yes");
+    expect(g("Anything", undefined, "gdpr_consent")).toBe("Yes");
+  });
+  it("guesses No for referred by an employee", () => {
+    expect(g("Were you referred by an employee?")).toBe("No");
+    expect(g("Do you have an employee referral?")).toBe("No");
+  });
+  it("leaves unrelated or negated questions alone", () => {
+    expect(g("Why do you want to work here?")).toBe("");
+    expect(g("Expected salary")).toBe("");
+    expect(g("Do you object to data processing?")).toBe("");
+  });
+  it("uses the matching choice text, or nothing when no choice fits", () => {
+    expect(g("Were you referred by an employee?", ["Yes, by someone", "No, I was not"])).toBe("No, I was not");
+    expect(g("I agree to the privacy policy", ["Maybe", "Later"])).toBe("");
+  });
+});
+
+describe("initialRow", () => {
+  it("starts Verified sources checked and Guessed or empty ones unchecked", () => {
+    expect(initialRow({ answer: "x", source: "profile" }).ok).toBe(true);
+    expect(initialRow({ answer: "x", source: "memory" }).ok).toBe(true);
+    expect(initialRow({ answer: "x", source: "cv" }).ok).toBe(true);
+    expect(initialRow({ answer: "x", source: "guess" }).ok).toBe(false);
+    expect(initialRow({ answer: "x", source: "draft" }).ok).toBe(false);
+    expect(initialRow({ answer: "", source: "profile" }).ok).toBe(false);
   });
 });

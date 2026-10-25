@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Ask } from "@/lib/api";
 import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
-import { isSensitiveQuestion } from "@/lib/job-cards";
+import { initialRow, isSensitiveQuestion } from "@/lib/job-cards";
 import type { MergedRow } from "@/lib/job-cards";
 
 // Question text, answers and choices are written by the user's assistant: untrusted, rendered as
@@ -14,22 +14,9 @@ export type AskQuestion = NonNullable<Ask["questions"]>[number];
 /** One row's state: the answer as it stands and whether the user has checked it. */
 export type RowState = { value: string; ok: boolean };
 
-const SOURCE_LABEL: Record<string, string> = {
-  profile: "From your profile",
-  memory: "From memory",
-  cv: "From your CV",
-  guess: "Guessed, please check",
-  draft: "Drafted for you",
-  none: "Not known yet",
-};
-
-export function sourceLabel(q: AskQuestion): string {
-  const label = SOURCE_LABEL[q.source] ?? "From your assistant";
-  return q.source === "memory" && q.remembered_on ? `${label} (${q.remembered_on})` : label;
-}
-
 const btn = "rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted/50 disabled:opacity-50";
 const picked = "rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground";
+const good = "bg-success-soft text-success";
 const warn = "bg-amber-100 text-amber-950 dark:bg-amber-400/20 dark:text-amber-100";
 
 export function AskQuestions({
@@ -49,9 +36,9 @@ export function AskQuestions({
   return (
     <>
       {items.map(({ id, q, askId }) => {
-        const row = rows[id] ?? { value: q.answer, ok: false };
+        const row = rows[id] ?? initialRow(q);
         const open = editing.has(id) || (!q.choices?.length && !q.answer);
-        const unsure = q.source === "guess" || q.source === "none";
+        const state = row.ok ? "Verified" : "Guessed";
         const sensitive = isSensitiveQuestion(q);
         return (
           <div key={id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`q-${askId}-${q.key}`}>
@@ -59,8 +46,9 @@ export function AskQuestions({
               <p className="whitespace-pre-wrap text-sm font-medium">{q.question}</p>
               <span className="flex flex-wrap gap-1">
                 {sensitive && !row.ok && <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${warn}`}>Needs your click</span>}
-                <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${unsure ? warn : "bg-muted text-muted-foreground"}`}>
-                  {sourceLabel(q)}
+                <span data-testid={`q-state-${askId}-${q.key}`}
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${state === "Verified" ? good : warn}`}>
+                  {state}
                 </span>
               </span>
             </div>
@@ -74,7 +62,7 @@ export function AskQuestions({
                 ))}
               </div>
             ) : open ? (
-              <Textarea aria-label={q.question} value={row.value} disabled={busy} data-testid={`q-input-${askId}-${q.key}`}
+              <Textarea aria-label={q.question} value={row.value} disabled={busy} placeholder="Type your answer" data-testid={`q-input-${askId}-${q.key}`}
                 onChange={(e) => onChange(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })} />
             ) : (
               <>

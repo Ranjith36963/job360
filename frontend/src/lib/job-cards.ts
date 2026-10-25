@@ -225,7 +225,53 @@ export function mergeQuestions(asks: Ask[]): MergedQuestions {
       mine.push({ key: q.key, rowId: row.id });
     }
   }
+  // An empty answer to a plain consent / yes-no question is pre-guessed (shown as Guessed).
+  for (const row of rows) {
+    if (row.q.answer.trim()) continue;
+    const guess = fallbackGuess(row.q);
+    if (guess) row.q = { ...row.q, answer: guess, source: "guess" };
+  }
   return { rows, byAsk };
+}
+
+// Owner 2026-10-25: only two states. "Verified" = the owner said it or it is a saved fact;
+// "Guessed" = the assistant's best guess, one click to confirm.
+const VERIFIED_SOURCES: readonly string[] = ["profile", "memory", "cv", "owner", "user", "answered", "confirmed"];
+/** Sources whose answer is already stored on the profile, so approving them unchanged saves nothing new. */
+const STORED_SOURCES: readonly string[] = ["profile", "memory", "cv"];
+
+export type AnswerState = "Verified" | "Guessed";
+
+export function isVerifiedSource(source: string): boolean {
+  return VERIFIED_SOURCES.includes(source);
+}
+
+export function isStoredSource(source: string): boolean {
+  return STORED_SOURCES.includes(source);
+}
+
+/** A row's first state: a Verified answer starts checked, a Guessed or empty one does not. */
+export function initialRow(q: { answer: string; source: string }): { value: string; ok: boolean } {
+  return { value: q.answer, ok: isVerifiedSource(q.source) && q.answer.trim().length > 0 };
+}
+
+const NEGATED = /\b(?:object|withdraw|opt[- ]?out|decline|refuse|do not|don't)\b/i;
+const CONSENT =
+  /\bi (?:agree|accept|acknowledge|consent)\b|\b(?:consent|agree)\b[^?\n]{0,60}\b(?:data|privacy|personal information|processing|gdpr|terms|policy|retain|stored?)\b|\b(?:data processing|privacy (?:policy|notice|statement)|gdpr)\b/i;
+const REFERRED =
+  /\breferred\b[^?\n]{0,40}\b(?:employee|employees|staff|team member)\b|\b(?:employee|staff)\b[^?\n]{0,30}\breferr/i;
+
+/** A sensible answer for a plain consent or "referred by an employee?" question, else "". With
+ *  choices, the matching choice's own text; none of them matching means no guess. */
+export function fallbackGuess(q: { key: string; question: string; choices?: string[] | null }): string {
+  const text = `${q.key.replace(/[_-]+/g, " ")} ${q.question}`;
+  let want = "";
+  if (REFERRED.test(text)) want = "No";
+  else if (CONSENT.test(text) && !NEGATED.test(text)) want = "Yes";
+  if (!want) return "";
+  if (!q.choices?.length) return want;
+  const re = want === "Yes" ? /^yes\b/i : /^no\b/i;
+  return q.choices.find((c) => re.test(c.trim())) ?? "";
 }
 
 const SENSITIVE =
