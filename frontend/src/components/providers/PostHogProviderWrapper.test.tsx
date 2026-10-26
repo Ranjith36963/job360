@@ -34,9 +34,14 @@ import { CONSENT_KEY } from "@/lib/consent";
 // Mocks — hoisted before module evaluation
 // ---------------------------------------------------------------------------
 
+// Mutable so a test can place the tracker on a secret-bearing URL.
+const { nav } = vi.hoisted(() => ({
+  nav: { path: "/profile", search: "" },
+}));
+
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/profile",
-  useSearchParams: () => new URLSearchParams(""),
+  usePathname: () => nav.path,
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
 
 // Order tape: every posthog call appends its name, so the test can assert the
@@ -66,7 +71,7 @@ vi.mock("posthog-js/react", () => ({
   PostHogProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import { PostHogProviderWrapper } from "./PostHogProviderWrapper";
+import { PostHogProviderWrapper, scrubUrlProperties } from "./PostHogProviderWrapper";
 
 describe("PostHogProviderWrapper — $pageview ordering", () => {
   beforeEach(() => {
@@ -84,6 +89,8 @@ describe("PostHogProviderWrapper — $pageview ordering", () => {
     posthogMock.opt_in_capturing.mockClear();
     posthogMock.opt_out_capturing.mockClear();
     posthogMock.reset.mockClear();
+    nav.path = "/profile";
+    nav.search = "";
     window.localStorage.clear();
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_KEY", "phc_test_key");
   });
@@ -200,5 +207,92 @@ describe("PostHogProviderWrapper — $pageview ordering", () => {
     await waitFor(() => expect(posthogMock.opt_in_capturing).toHaveBeenCalled());
     // ...and the opt-IN must be the LAST word, or the session stays silent.
     expect(calls.lastIndexOf("opt_in")).toBeGreaterThan(calls.lastIndexOf("opt_out"));
+  });
+});
+
+// ── Secrets in URLs and equality clicks must never reach PostHog (S2) ───────
+describe("PostHogProviderWrapper — no secrets to PostHog", () => {
+  beforeEach(() => {
+    calls.length = 0;
+    posthogMock.__loaded = false;
+    posthogMock.init.mockClear();
+    posthogMock.capture.mockClear();
+    nav.path = "/profile";
+    nav.search = "";
+    window.localStorage.clear();
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_KEY", "phc_test_key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("never captures a query string from /auth/magic?token=...", async () => {
+    window.localStorage.setItem(CONSENT_KEY, "accepted");
+    nav.path = "/auth/magic";
+    nav.search = "token=abc123";
+
+    render(
+      <PostHogProviderWrapper>
+        <div>child</div>
+      </PostHogProviderWrapper>
+    );
+
+    await waitFor(() => expect(posthogMock.capture).toHaveBeenCalled());
+    const sent = JSON.stringify(posthogMock.capture.mock.calls);
+    expect(sent).toContain("/auth/magic");
+    expect(sent).not.toContain("abc123");
+    expect(sent).not.toContain("token=");
+  });
+
+  it("turns autocapture off and masks recorded inputs", async () => {
+    window.localStorage.setItem(CONSENT_KEY, "accepted");
+
+    render(
+      <PostHogProviderWrapper>
+        <div>child</div>
+      </PostHogProviderWrapper>
+    );
+
+    await waitFor(() => expect(posthogMock.init).toHaveBeenCalledTimes(1));
+    const config = (posthogMock.init.mock.calls[0] as unknown[])[1] as {
+      autocapture?: boolean;
+      before_send?: unknown;
+      session_recording?: { maskAllInputs?: boolean };
+    };
+    expect(config.autocapture).toBe(false);
+    expect(typeof config.before_send).toBe("function");
+    expect(config.session_recording?.maskAllInputs).toBe(true);
+  });
+});
+
+describe("scrubUrlProperties", () => {
+  it("strips query and hash from every URL-valued property", () => {
+    const out = scrubUrlProperties({
+      event: "$pageleave",
+      properties: {
+        $current_url: "https://job360.uk/auth/magic?token=abc123#x",
+        $referrer: "https://job360.uk/reset?code=zzz",
+        $initial_referrer: "https://example.com/a?b=c",
+        $pathname: "/auth/magic?token=abc123",
+        $initial_current_url: "https://job360.uk/x?token=abc123",
+        custom: "https://job360.uk/p?state=s1",
+        $referring_domain: "job360.uk",
+        keep: 5,
+      },
+      $set: { $initial_referrer: "https://e.com/?t=abc123" },
+    });
+    const sent = JSON.stringify(out);
+    expect(sent).not.toContain("abc123");
+    expect(sent).not.toContain("token=");
+    expect(sent).not.toContain("code=");
+    expect(sent).not.toContain("state=");
+    expect(out?.properties.$current_url).toBe("https://job360.uk/auth/magic");
+    expect(out?.properties.$referring_domain).toBe("job360.uk");
+    expect(out?.properties.keep).toBe(5);
+  });
+
+  it("passes null through", () => {
+    expect(scrubUrlProperties(null)).toBeNull();
   });
 });
