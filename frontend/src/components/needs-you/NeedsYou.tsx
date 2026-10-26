@@ -425,7 +425,7 @@ export function NeedsYou() {
           Waiting for you
         </h2>
         {queue && queue.count > 0 && <OwnBrowserQueueCard queue={queue} />}
-        {jobs.settled && jobs.total === 0 && general.length === 0 && (
+        {jobs.settled && jobs.total === 0 && !jobs.connections && general.length === 0 && (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
             {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
