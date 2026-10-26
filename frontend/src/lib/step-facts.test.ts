@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { factRoom, factsFor, withFact, withoutFact } from "./step-facts";
+import { factRoom, factsFor, isStepFact, withFact, withoutFact } from "./step-facts";
 
 const notes = ["Never apply to agencies.", "About you: I go by Alex.", "Logistics: No travel in August.", "About you: Pronouns they/them."];
 
@@ -25,4 +25,12 @@ describe("step facts", () => {
   it("leaves room for the step name inside the 200-character note cap", () => {
     expect(factRoom("About you")).toBe(200 - "About you: ".length);
   });
+
+  it("tells a step fact from a general instruction by its step name", () => {
+    expect(isStepFact("About you: I go by Alex.")).toBe(true);
+    expect(isStepFact("Equality: Ask me first")).toBe(true);
+    expect(isStepFact("Never apply to agencies.")).toBe(false);
+    expect(isStepFact("About your company: ask")).toBe(false);
+  });
 });
+
