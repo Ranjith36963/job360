@@ -40,7 +40,7 @@ vi.mock("@/components/layout/AuthProvider", () => ({
 // so it is back. Dashboard was deleted outright in slice 5
 // (delete-sourcing-era); Channels was deleted outright in the mission sweep
 // (notifications are pull-not-push, VISION:133).
-const APP_LINKS = ["Profile", "Applications", "People", "Receipts"];
+const APP_LINKS = ["Profile", "Applications", "Outreach", "Receipts"];
 
 beforeEach(() => {
   mockPathname = "/";

@@ -96,7 +96,6 @@ describe("AppShell", () => {
     "Jobs in",
     "Applications",
     "Outreach",
-    "People",
     "Receipts",
     "Stats",
     "Profile",
@@ -111,7 +110,7 @@ describe("AppShell", () => {
       .map((l) => (l.textContent ?? "").replace(/\d+$/, "").trim())
       .filter((t) => t !== "");
 
-  it("sidebar order is exactly the owner's, sub-items under their parent, no Settings item", () => {
+  it("sidebar order is exactly the owner's, every item top-level, no People or Settings item", () => {
     mockAuth.user = { email: "someone@example.com" };
     mockPathname = "/applications";
     render(
@@ -122,18 +121,19 @@ describe("AppShell", () => {
     const side = screen.getByTestId("app-sidebar");
     expect(linkNames(side)).toEqual(EXPECTED_ORDER);
     expect(within(side).queryByRole("link", { name: "Settings" })).toBeNull();
-    expect(within(side).getByRole("link", { name: "People" })).toHaveAttribute("href", "/outreach/people");
+    expect(within(side).queryByRole("link", { name: "People" })).toBeNull();
+    expect(within(side).getByRole("link", { name: "Outreach" })).toHaveAttribute("href", "/outreach/people");
     expect(within(side).getByRole("link", { name: "Memory" })).toHaveAttribute("href", "/profile/memory");
     expect(within(side).getByRole("link", { name: "Connect your assistant" })).toHaveAttribute("href", "/connect");
     expect(within(side).getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
   });
 
-  it("sub-items light up for the current page, and only the sub-item, not its parent", () => {
+  it("only the current page's item lights up: Memory, not Profile, on /profile/memory", () => {
     mockAuth.user = { email: "someone@example.com" };
     for (const [path, active] of [
       ["/profile", ["Profile"]],
       ["/profile/memory", ["Memory"]],
-      ["/outreach/people", ["People"]],
+      ["/outreach/people", ["Outreach"]],
       ["/connect", ["Connect your assistant"]],
       ["/account", ["Account"]],
     ] as const) {
