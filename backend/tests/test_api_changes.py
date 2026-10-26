@@ -23,6 +23,22 @@ from src.repositories import pgsync
 PAUSE = "assistant_settings.paused_until"
 
 
+@pytest.fixture(autouse=True)
+def _restore_audit_logger():
+    """setup_audit_logger() sets ``propagate=False`` on the process-global ``job360.audit``
+    logger; put it back, or later tests that read audit records off the root logger see none."""
+    import logging
+
+    audit = logging.getLogger("job360.audit")
+    saved = (list(audit.handlers), audit.propagate, audit.level)
+    yield
+    for h in audit.handlers:
+        if h not in saved[0]:
+            h.close()
+    audit.handlers[:] = saved[0]
+    audit.propagate, audit.level = saved[1], saved[2]
+
+
 def _sql(statement: str, params: tuple = ()) -> list[Any]:
     with pgsync.connect(str(settings.DB_PATH)) as conn:
         cur = conn.execute(statement, params)
@@ -155,6 +171,9 @@ async def test_an_mcp_tool_call_alone_moves_only_the_assistant_marker(authentica
 
 @pytest.mark.asyncio
 async def test_web_reads_never_move_the_cursor_though_they_write_audit_rows(authenticated_async_context):
+    from src.utils.logger import setup_audit_logger
+
+    setup_audit_logger()
     async with authenticated_async_context() as client:
         user_id = authenticated_async_context.fixture_user_id
         await _bring(client)
