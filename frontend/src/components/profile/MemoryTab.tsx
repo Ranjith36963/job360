@@ -313,8 +313,19 @@ export function MemoryTab() {
     ),
     you: (
       <>
-              {contactRows().map((s) => row(s))}
-              {rtwTopRows().map((s) => row(s, { emptyNote: s.id.endsWith("sanctions_country_citizen") ? "Your assistant will ask" : undefined }))}
+              {(() => {
+                // Identity first, then where you belong: citizenship, the country
+                // and city you live in now, then the sanctions question.
+                const contact = contactRows();
+                const lives = contact.filter((r) => r.id.includes(".residence_"));
+                const [citizenship, sanctions] = rtwTopRows();
+                return [
+                  ...contact.filter((r) => !lives.includes(r)).map((r) => row(r)),
+                  row(citizenship),
+                  ...lives.map((r) => row(r)),
+                  row(sanctions, { emptyNote: "Your assistant will ask" }),
+                ];
+              })()}
       </>
     ),
     visa: (

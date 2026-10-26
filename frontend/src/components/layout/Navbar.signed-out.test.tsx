@@ -91,7 +91,7 @@ describe("Navbar — signed in", () => {
     expect(screen.queryByRole("link", { name: /log in/i })).toBeNull();
   });
 
-  it("the drawer holds the app links, Settings, the account and the theme toggle", () => {
+  it("the drawer holds the app links, no Settings, the account and the theme toggle", () => {
     mockAuth.user = { email: "someone@example.com" };
     render(<Navbar />);
 
@@ -100,7 +100,7 @@ describe("Navbar — signed in", () => {
     for (const label of APP_LINKS) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
-    expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
     expect(screen.getByText("someone@example.com")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Theme" })).toBeInTheDocument();

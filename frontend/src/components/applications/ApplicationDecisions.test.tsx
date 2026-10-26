@@ -389,7 +389,7 @@ describe("Your assistant got stuck (blocked record)", () => {
       />
     );
     const link = screen.getByTestId("blocked-sign-in-link");
-    expect(link).toHaveAttribute("href", "/settings/job-sites");
+    expect(link).toHaveAttribute("href", "/connect?tab=job-sites");
     expect(link.textContent).toBe("Sign in once to jobs.example.com on Job sites");
     // A CAPTCHA, or a sign-in page met by the assistant's own browser: no such link.
     rerender(

@@ -53,6 +53,8 @@ export const FIELD_LABEL: Record<string, string> = {
   phone: "Phone",
   address: "Home address",
   date_of_birth: "Date of birth",
+  residence_country: "Country you live in",
+  residence_city: "City you live in",
   preferred_name: "Preferred name",
   work_authorization: "Allowed to work here",
   needs_sponsorship: "Needs sponsorship",
@@ -172,6 +174,10 @@ export function contactRows(): RowSpec[] {
     single(CONTACT, `${CONTACT}.phone`, "phone", "text", d),
     { id: `${CONTACT}.address`, path: CONTACT, label: FIELD_LABEL.address, scope: d, sensitive: true, composite: true, parts: ADDRESS_PARTS },
     single(CONTACT, `${CONTACT}.date_of_birth`, "date_of_birth", "date", d),
+    // Owner, 2026-10-26: where you live now is its own question, apart from
+    // citizenship. A typed name ("United Kingdom") is stored as its code (GB).
+    single(CONTACT, `${CONTACT}.residence_country`, "residence_country", "text", d, { placeholder: "e.g. United Kingdom" }),
+    single(CONTACT, `${CONTACT}.residence_city`, "residence_city", "text", d, { placeholder: "e.g. London" }),
   ];
 }
 
@@ -476,6 +482,7 @@ export function showRow(spec: RowSpec, value: unknown): string {
   if (key === "remote_priority" || key === "onsite_priority") return PRIORITY_LABEL[String(value)] ?? String(value);
   if (key === "work_authorization") return WORK_AUTH_LABEL[String(value)] ?? String(value);
   if (key === "citizenship" && Array.isArray(value)) return value.map((c) => countryName(String(c))).join(", ");
+  if (key === "residence_country") return countryName(String(value));
   if (key === "languages" && Array.isArray(value)) {
     return recordsOf(value).map((r) => `${String(r.language)} (${String(r.level)})`).join(" · ");
   }

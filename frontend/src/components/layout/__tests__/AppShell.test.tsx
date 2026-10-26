@@ -3,7 +3,7 @@
  * EXISTING nav links and labels; signed-out = top bar + footer, no sidebar.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { AppShell } from "@/components/layout/AppShell";
 
 let mockPathname = "/";
@@ -42,7 +42,7 @@ describe("nav-links — stays in step with the middleware", () => {
 });
 
 describe("AppShell", () => {
-  it("signed in: a sidebar with the existing links, Settings, account and theme toggle", () => {
+  it("signed in: a sidebar with the links, account and theme toggle", () => {
     mockAuth.user = { email: "someone@example.com" };
     mockPathname = "/applications";
     render(
@@ -55,24 +55,26 @@ describe("AppShell", () => {
     const labels = [
       "Needs you",
       "Home",
-      "Profile",
       "Jobs in",
       "Applications",
-      "People",
-      "Stats",
+      "Outreach",
       "Receipts",
+      "Stats",
+      "Profile",
       "Connect your assistant",
+      "Account",
     ];
     const hrefs = [
       "/needs-you",
       "/",
-      "/profile",
       "/bring",
       "/applications",
-      "/people",
-      "/stats",
+      "/outreach/people",
       "/receipts",
-      "/settings/connect",
+      "/stats",
+      "/profile",
+      "/connect",
+      "/account",
     ];
     labels.forEach((label, i) => {
       expect(within(side).getByRole("link", { name: label })).toHaveAttribute("href", hrefs[i]);
@@ -81,11 +83,87 @@ describe("AppShell", () => {
       "aria-current",
       "page"
     );
-    expect(within(side).getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(within(side).queryByRole("link", { name: "Settings" })).toBeNull();
     expect(within(side).getByText("someone@example.com")).toBeInTheDocument();
     expect(within(side).getByRole("button", { name: "Log out" })).toBeInTheDocument();
     expect(within(side).getByRole("group", { name: "Theme" })).toBeInTheDocument();
     expect(screen.getByText("page body")).toBeInTheDocument();
+  });
+
+  const EXPECTED_ORDER = [
+    "Needs you",
+    "Home",
+    "Jobs in",
+    "Applications",
+    "Outreach",
+    "People",
+    "Receipts",
+    "Stats",
+    "Profile",
+    "Memory",
+    "Connect your assistant",
+    "Account",
+  ];
+  const linkNames = (root: HTMLElement) =>
+    within(root)
+      .getAllByRole("link")
+      .filter((l) => l.getAttribute("aria-label") !== "job360")
+      .map((l) => (l.textContent ?? "").replace(/\d+$/, "").trim())
+      .filter((t) => t !== "");
+
+  it("sidebar order is exactly the owner's, sub-items under their parent, no Settings item", () => {
+    mockAuth.user = { email: "someone@example.com" };
+    mockPathname = "/applications";
+    render(
+      <AppShell>
+        <p>page body</p>
+      </AppShell>
+    );
+    const side = screen.getByTestId("app-sidebar");
+    expect(linkNames(side)).toEqual(EXPECTED_ORDER);
+    expect(within(side).queryByRole("link", { name: "Settings" })).toBeNull();
+    expect(within(side).getByRole("link", { name: "People" })).toHaveAttribute("href", "/outreach/people");
+    expect(within(side).getByRole("link", { name: "Memory" })).toHaveAttribute("href", "/profile/memory");
+    expect(within(side).getByRole("link", { name: "Connect your assistant" })).toHaveAttribute("href", "/connect");
+    expect(within(side).getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
+  });
+
+  it("sub-items light up for the current page, and only the sub-item, not its parent", () => {
+    mockAuth.user = { email: "someone@example.com" };
+    for (const [path, active] of [
+      ["/profile", ["Profile"]],
+      ["/profile/memory", ["Memory"]],
+      ["/outreach/people", ["People"]],
+      ["/connect", ["Connect your assistant"]],
+      ["/account", ["Account"]],
+    ] as const) {
+      mockPathname = path;
+      const { unmount } = render(
+        <AppShell>
+          <p>page body</p>
+        </AppShell>
+      );
+      const side = screen.getByTestId("app-sidebar");
+      const current = within(side)
+        .getAllByRole("link")
+        .filter((l) => l.getAttribute("aria-current") === "page")
+        .map((l) => l.textContent);
+      expect(current).toEqual(active);
+      unmount();
+    }
+  });
+
+  it("phone menu has the same order", async () => {
+    mockAuth.user = { email: "someone@example.com" };
+    mockPathname = "/applications";
+    render(
+      <AppShell>
+        <p>page body</p>
+      </AppShell>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
+    const nav = await screen.findByRole("navigation", { name: "Mobile navigation" });
+    expect(linkNames(nav)).toEqual(EXPECTED_ORDER);
   });
 
   it("Needs you is first, Home second; Home is active only on exactly /", () => {

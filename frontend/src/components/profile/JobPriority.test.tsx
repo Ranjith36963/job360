@@ -167,7 +167,7 @@ describe("JobPriority", () => {
     ];
     updateProfileFields.mockImplementation(async () => ({ preferences: {} }) as unknown as ProfileResponse);
     render(<JobPriority rightToWork={BLOCK} salaries={salaries} onSaved={() => {}} />);
-    expect(screen.getByTestId("work-grid-salary-GB")).toHaveTextContent("Salary £80k–95k GBP");
+    expect(screen.getByTestId("work-grid-salary-GB")).toHaveTextContent("£80k–95k GBP");
     expect(screen.getByTestId("work-grid-salary-FR")).toHaveTextContent("Add salary");
     expect(screen.queryByTestId("work-grid-salary-ANY")).toBeNull(); // set per country
     fireEvent.click(screen.getByTestId("work-grid-salary-FR"));
@@ -191,6 +191,18 @@ describe("JobPriority", () => {
     expect(within(form).getByRole("alert")).toHaveTextContent("Salary needs a figure above 0, a 3-letter currency, and a period.");
     expect(within(form).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(updateProfileFields).not.toHaveBeenCalled();
+  });
+
+  it("is a table with four columns: country, work type, visa, salary range (one line per country)", () => {
+    render(<JobPriority rightToWork={BLOCK} salaries={[]} onSaved={() => {}} />);
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Country", "Work type", "Visa", "Salary range"]);
+    const gb = screen.getByTestId("work-grid-row-GB");
+    const cells = within(gb).getAllByRole("cell");
+    expect(within(gb).getByRole("rowheader")).toHaveTextContent("United Kingdom");
+    expect(within(cells[0]).getAllByRole("button").map((b) => b.textContent)).toEqual(["☑Remote", "☑On-site", "☐Contract"]);
+    expect(within(cells[1]).getAllByRole("button").map((b) => b.textContent)).toEqual(["Need", "No need"]);
+    expect(cells[2]).toHaveTextContent("Add salary");
+    expect(within(screen.getByTestId("work-grid-row-ANY")).getAllByRole("cell")[2]).toHaveTextContent("Set per country");
   });
 });
 

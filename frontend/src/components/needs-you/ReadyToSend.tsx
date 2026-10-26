@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getReadyToSend } from "@/lib/api";
-import type { ReadyToSend as ReadyData } from "@/lib/api";
+import type { Ask, ReadyToSend as ReadyData } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { splitReady } from "@/lib/ready-to-send";
+import { openQuestionAsks } from "./useReadyAsks";
 import { ReadyCard } from "./ReadyCard";
 import { SendAllCard } from "./SendAllCard";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,7 @@ const sectionLabel = "font-mono text-[11px] font-medium uppercase tracking-[0.09
  * the answers and where they came from; "Send all unflagged" sends the clean
  * ones after one confirm. Nothing waiting = no section at all.
  */
-export function ReadyToSend({ onTotal }: { onTotal?: (total: number) => void }) {
+export function ReadyToSend({ onTotal, asks }: { onTotal?: (total: number) => void; asks?: Ask[] }) {
   const [data, setData] = useState<ReadyData | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -51,7 +52,12 @@ export function ReadyToSend({ onTotal }: { onTotal?: (total: number) => void }) 
     window.dispatchEvent(new CustomEvent(READY_CHANGED_EVENT));
   }, [load]);
 
-  const { clean, held } = useMemo(() => splitReady(data?.items ?? []), [data]);
+  const askedApps = useMemo(() => new Set(openQuestionAsks(asks).map((a) => a.application_id)), [asks]);
+  // A job with an unanswered open ask never goes in "Send all": it is answered on its own card.
+  const { clean, held } = useMemo(() => {
+    const s = splitReady(data?.items ?? []);
+    return { clean: s.clean.filter((c) => !askedApps.has(c.application_id)), held: s.held };
+  }, [data, askedApps]);
 
   if (failed && !data) {
     return (
@@ -73,7 +79,7 @@ export function ReadyToSend({ onTotal }: { onTotal?: (total: number) => void }) 
       <ul className="flex flex-col gap-3">
         {data.items.map((c) => (
           <li key={c.application_id}>
-            <ReadyCard card={c} paused={data.paused} onChanged={changed} />
+            <ReadyCard card={c} asks={asks?.filter((a) => a.application_id === c.application_id)} paused={data.paused} onChanged={changed} />
           </li>
         ))}
       </ul>

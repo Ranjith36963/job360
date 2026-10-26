@@ -27,7 +27,7 @@ export default function ApplicationsPage() {
       <ApplicationList />
       <p className="text-xs text-muted-foreground">
         <Link
-          href="/settings/account#your-data"
+          href="/account#your-data"
           data-testid="applications-download-all"
           className="underline"
         >

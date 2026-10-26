@@ -68,7 +68,7 @@ export default function PrivacyPage() {
               <span className="text-foreground">Screen recordings</span> —
               screen recordings are masked (all text and images are hidden)
               and happen only if you turn on &ldquo;Help improve Job360&rdquo;
-              in Settings. They are off by default. When on, Sentry (session
+              in Account. They are off by default. When on, Sentry (session
               replay) records about 1 in 10 of your sessions, plus every
               session where an error happens, to help us fix problems.
               Recordings are stored by Sentry in Germany (EU) and kept for as
@@ -120,7 +120,7 @@ export default function PrivacyPage() {
             connection exists. What your assistant does with your data once
             it has read it is governed by that assistant&rsquo;s own terms
             and privacy policy, not this one. You can revoke a connection at
-            any time in Settings → Connect, which immediately stops that
+            any time in Connect your assistant, which immediately stops that
             assistant&rsquo;s access.
           </p>
         </section>
@@ -205,7 +205,7 @@ export default function PrivacyPage() {
           <p className="mt-2">
             Under UK GDPR you can access, correct, export, or delete your
             personal data, object to processing, and withdraw consent.
-            Deleting your account (Settings → Account → Delete) erases your
+            Deleting your account (Account → Delete) erases your
             per-user data immediately — this is our built-in Article 17
             (&ldquo;right to erasure&rdquo;) mechanism. For anything else,
             email{" "}

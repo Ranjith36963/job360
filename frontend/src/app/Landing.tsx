@@ -22,7 +22,7 @@ import {
 // in use; do not invent another. Same line as the MCP server's own
 // description/INSTRUCTIONS (backend/src/api/mcp_server.py) and the
 // <title>/meta description (layout.tsx) and the Connect page intro
-// (settings/connect/page.tsx). Audience: people who already use an AI
+// (connect/page.tsx). Audience: people who already use an AI
 // assistant. First action: connect it. The assistant judges and writes, the
 // user applies — Job360 never applies for anyone.
 const CATEGORY_LINE =
@@ -153,7 +153,7 @@ export default function Landing() {
               middleware.ts, same as any other protected route. */}
           <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link
-              href="/settings/connect"
+              href="/connect"
               className="group inline-flex h-12 items-center gap-2 rounded-lg bg-primary px-8 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
               <Plug className="h-4 w-4" />
@@ -322,7 +322,7 @@ export default function Landing() {
             </p>
             <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
               <Link
-                href="/settings/connect"
+                href="/connect"
                 className="group inline-flex h-14 items-center gap-3 rounded-lg bg-primary px-10 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
               >
                 <Plug className="h-5 w-5" />
