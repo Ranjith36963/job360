@@ -200,7 +200,7 @@ async def save_ask_row_answers(
         return await asks_service.save_row_answers(db, user.id, ask_id, body.answers)
     except SpineError as exc:
         _raise(exc)
-        raise AssertionError("unreachable")  # pragma: no cover
+        raise AssertionError("unreachable")  # _raise always raises
 
 
 @router.post("/asks/{ask_id}/confirm", response_model=AskOut, dependencies=AUTH_FIRST)
