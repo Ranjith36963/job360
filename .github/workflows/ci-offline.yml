@@ -554,6 +554,137 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  fullstack-e2e:
+    # THE TRUE END-TO-END RUN: real Chromium -> real Next.js (production build) ->
+    # real FastAPI (uvicorn) -> real Postgres. frontend-e2e above mocks the API with
+    # page.route and test_e2e_lifecycle.py never opens a browser; nothing else ran
+    # the pieces together. One journey (frontend/tests/fullstack/journey.spec.ts):
+    # register + sign in, bring a job, open the Application, a tailor edit survives
+    # a reload, one MCP call with a personal token. Not a required check (yet).
+    #
+    # Offline apart from installs: no mailer is configured (register's verification
+    # mail goes nowhere), no LLM key, and the spec pastes the ad instead of fetching
+    # a URL.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [scope]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: job360
+          POSTGRES_PASSWORD: job360dev
+          POSTGRES_DB: job360
+        options: >-
+          --health-cmd "pg_isready -U job360 -d job360"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgresql://job360:job360dev@localhost:5432/job360
+      # Dummy test value, never used outside this job.
+      SESSION_SECRET: ci-fullstack-e2e-secret-not-used-in-prod
+      # Email verification needs a link from a mail this job cannot receive. The
+      # gate (auth_deps.email_verification_satisfied) reads this env var; every
+      # other check on the register -> login -> token path still runs.
+      REQUIRE_EMAIL_VERIFICATION: "false"
+      # The backend's CSRF origin check allows this origin (the browser sends it).
+      FRONTEND_ORIGIN: http://localhost:3000
+      # Where the frontend's /api/* proxy and its auth middleware reach the backend.
+      BACKEND_ORIGIN: http://127.0.0.1:8000
+      FULLSTACK_BASE_URL: http://localhost:3000
+      FULLSTACK_BACKEND_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.scope.outputs.scope == 'full'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        if: needs.scope.outputs.scope == 'full'
+        with:
+          python-version: "3.12"
+      # From the hashed lock, then the app with --no-deps (as the shard jobs do).
+      # The browser is the frontend's Node Playwright, not the Python one.
+      - name: Install backend
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements-dev.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip check
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: needs.scope.outputs.scope == 'full'
+        with:
+          node-version: "22"
+      - name: Install frontend deps
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: frontend
+        run: npm ci
+      # Same pattern as the offline-suite shards' Chromium step (2026-10-26: a
+      # plain `--with-deps` took 14 min on the runner's apt mirror): fetch only the
+      # browser from Playwright's CDN, PROVE it launches, and fall back to the apt
+      # deps only if that launch fails.
+      - name: Install Chromium
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: frontend
+        run: |
+          for attempt in 1 2; do
+            if timeout -k 10 300 npx playwright install chromium; then break; fi
+            echo "::warning title=chromium::browser download attempt $attempt failed or took over 5 min"
+            if [ "$attempt" = 2 ]; then echo "::error title=chromium::Chromium download failed twice"; exit 1; fi
+          done
+          launch() {
+            node -e "require('playwright').chromium.launch().then(b => b.close())"
+          }
+          if launch; then echo "Chromium launches with the runner's own libraries"; exit 0; fi
+          echo "::warning title=chromium::Chromium did not launch; installing its system libraries"
+          timeout -k 10 900 npx playwright install-deps chromium
+          launch
+      # Migrations auto-apply on boot (api.main.lifespan -> init_db).
+      - name: Start the backend
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: backend
+        run: |
+          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/backend.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/api/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "::error title=backend::backend did not answer /api/health within 120s"
+          tail -60 "$RUNNER_TEMP/backend.log"
+          exit 1
+      # BACKEND_ORIGIN is read at BUILD time by the rewrites in next.config.ts, so
+      # the job env carries it through the build as well as the server.
+      - name: Build and start the frontend
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: frontend
+        run: |
+          npm run build
+          nohup npm run start -- --port 3000 > "$RUNNER_TEMP/frontend.log" 2>&1 &
+          for i in $(seq 1 30); do
+            # Through the proxy: proves frontend -> backend in one request.
+            if curl -fsS http://localhost:3000/api/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "::error title=frontend::frontend did not answer within 60s"
+          tail -60 "$RUNNER_TEMP/frontend.log"
+          exit 1
+      - name: Run the full-stack journey
+        if: needs.scope.outputs.scope == 'full'
+        working-directory: frontend
+        run: npx playwright test -c playwright.fullstack.config.ts --reporter=list,html
+      - name: Keep the evidence (report, traces, backend and frontend logs)
+        if: always() && needs.scope.outputs.scope == 'full'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fullstack-e2e-${{ github.event.pull_request.number || github.run_id }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            ${{ runner.temp }}/backend.log
+            ${{ runner.temp }}/frontend.log
+          retention-days: 14
+          if-no-files-found: ignore
+
   loop2-e2e-spotlight:
     # Reports the lifecycle file's verdict from offline-suite, as its own
     # REQUIRED check, so a lifecycle/log-fill regression is obvious in the
