@@ -6995,6 +6995,10 @@ export interface components {
         ListApplicationsResponse: {
             /** Applications */
             applications: components["schemas"]["ApplicationSummaryOut"][];
+            /** Outreach */
+            outreach?: components["schemas"]["QueuedOutreachOut"][] | null;
+            /** Queue Order */
+            queue_order?: string[] | null;
             /** Queue Summary */
             queue_summary?: {
                 [key: string]: unknown;
@@ -8113,6 +8117,43 @@ export interface components {
              * @enum {string}
              */
             why: "any_time" | "pc_on_hours" | "run_now" | "closed" | "paused";
+        };
+        /**
+         * QueuedOutreachOut
+         * @description One approved, unsent LinkedIn send on the one batch queue (owner 2026-10-26). Read-only: the name is
+         *     untrusted text; no draft text is carried.
+         */
+        QueuedOutreachOut: {
+            /** Application Id */
+            application_id?: number | null;
+            /** Approved At */
+            approved_at?: string | null;
+            browser: components["schemas"]["BrowserLabelOut"];
+            /** Contact Id */
+            contact_id: number;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "outreach";
+            /** Message Id */
+            message_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Outreach Kind
+             * @enum {string}
+             */
+            outreach_kind: "linkedin_note" | "linkedin_message";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "in_progress";
+            /** Task Id */
+            task_id: string;
+            /** Title */
+            title: string;
         };
         /** ReadyAnswer */
         ReadyAnswer: {

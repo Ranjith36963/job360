@@ -8,7 +8,7 @@ const KINDS: readonly string[] = ["job360", "own_browser", "human"];
 type Chip = { kind?: string; label?: string; reason?: string } | null | undefined;
 
 /** Which browser runs one queued job, with the reason in plain words. Text from the API renders as React text only. */
-export function QueueBrowserChip({ id, browser }: { id: number; browser: Chip }) {
+export function QueueBrowserChip({ id, browser }: { id: number | string; browser: Chip }) {
   if (!browser || typeof browser.label !== "string" || !browser.kind || !KINDS.includes(browser.kind)) return null;
   const why = browserReasonWords(browser.reason);
   return (

@@ -8691,6 +8691,34 @@
             "title": "Applications",
             "type": "array"
           },
+          "outreach": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/QueuedOutreachOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outreach"
+          },
+          "queue_order": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Order"
+          },
           "queue_summary": {
             "anyOf": [
               {
@@ -11281,6 +11309,90 @@
           "tasks"
         ],
         "title": "QueueOut",
+        "type": "object"
+      },
+      "QueuedOutreachOut": {
+        "description": "One approved, unsent LinkedIn send on the one batch queue (owner 2026-10-26). Read-only: the name is\nuntrusted text; no draft text is carried.",
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "browser": {
+            "$ref": "#/components/schemas/BrowserLabelOut"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "outreach",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outreach_kind": {
+            "enum": [
+              "linkedin_note",
+              "linkedin_message"
+            ],
+            "title": "Outreach Kind",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "in_progress"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "kind",
+          "outreach_kind",
+          "title",
+          "name",
+          "contact_id",
+          "message_id",
+          "state",
+          "browser"
+        ],
+        "title": "QueuedOutreachOut",
         "type": "object"
       },
       "ReadyAnswer": {
