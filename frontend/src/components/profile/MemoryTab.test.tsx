@@ -162,4 +162,25 @@ describe("MemoryTab", () => {
     expect(screen.getByTestId("memory-row-user_info.equality.gender")).toBeInTheDocument();
     expect(screen.getByTestId("memory-step-toggle-visa")).toHaveAttribute("aria-expanded", "true");
   });
+
+  it("Add my own fact saves the whole note list with the step name in front; Remove takes only that fact", async () => {
+    const withNotes = { ...profile, preferences: { ...profile.preferences, assistant_notes: ["Never apply to agencies."] } };
+    getProfile.mockResolvedValue(withNotes);
+    const added = { ...withNotes, preferences: { ...withNotes.preferences, assistant_notes: ["Never apply to agencies.", "About you: I go by Alex."] } };
+    updateProfileFields.mockResolvedValueOnce(added).mockResolvedValueOnce(withNotes);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    fireEvent.change(screen.getByLabelText("Add a fact to About you"), { target: { value: "I go by Alex." } });
+    fireEvent.click(within(screen.getByTestId("step-facts-you")).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.assistant_notes", value: ["Never apply to agencies.", "About you: I go by Alex."] },
+    ]));
+    const facts = screen.getByTestId("step-facts-you");
+    expect(await within(facts).findByText("I go by Alex.")).toBeInTheDocument();
+    expect(within(screen.getByTestId("step-facts-logistics")).queryByText("I go by Alex.")).toBeNull();
+    fireEvent.click(within(facts).getByRole("button", { name: 'Remove "I go by Alex."' }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenLastCalledWith([
+      { path: "preferences.assistant_notes", value: ["Never apply to agencies."] },
+    ]));
+  });
 });

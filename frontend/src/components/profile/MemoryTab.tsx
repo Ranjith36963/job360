@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CountryCard } from "@/components/profile/CountryCard";
 import { CountryPicker } from "@/components/profile/CountryPicker";
 import { MemoryRow } from "@/components/profile/MemoryRow";
+import { StepFacts } from "@/components/profile/StepFacts";
 import { useSetupProgress } from "@/components/profile/SetupProgress";
 import { doneDate } from "@/lib/assistant-tab";
 import { getProfile, getProfileEditHistory, keepProfileEdit, updateProfileFields } from "@/lib/api";
@@ -156,6 +157,19 @@ export function MemoryTab() {
     return done;
   }, [loadHistory]);
 
+  /** Save the whole note list (the user's own facts live there), in the same
+   *  queue as every other write so two saves never land out of order. */
+  const saveNotes = useCallback((next: string[]): Promise<void> => {
+    const run = async () => {
+      const updated = await updateProfileFields([{ path: "preferences.assistant_notes", value: next }]);
+      latest.current = updated;
+      setProfile(updated);
+    };
+    const done = queue.current.then(run, run);
+    queue.current = done.catch(() => undefined);
+    return done;
+  }, []);
+
   /** Confirm an inferred fact: Keep writes a web row marked user_said, then re-read. */
   const confirm = useCallback(async (spec: RowSpec): Promise<void> => {
     const updated = await keepProfileEdit(spec.path);
@@ -198,13 +212,15 @@ export function MemoryTab() {
 
   // The five setup steps and the rows each one holds. Assistant settings, the
   // sixth setup round, lives on the Assistant tab (owner, 2026-10-26).
-  const steps: { id: string; title: string; specs: RowSpec[] }[] = [
-    { id: "targets", title: "Job targets", specs: salaryCodes.map(salaryRow) },
-    { id: "you", title: "About you", specs: contactRows() },
-    { id: "visa", title: "Right to work", specs: [...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
-    { id: "logistics", title: "Logistics", specs: logisticsRows() },
-    { id: "equality", title: "Equality (voluntary)", specs: equalityRows() },
+  // `fact` names the step in front of the user's own facts ("About you: …").
+  const steps: { id: string; title: string; fact: string; specs: RowSpec[] }[] = [
+    { id: "targets", title: "Job targets", fact: "Job targets", specs: salaryCodes.map(salaryRow) },
+    { id: "you", title: "About you", fact: "About you", specs: contactRows() },
+    { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
+    { id: "logistics", title: "Logistics", fact: "Logistics", specs: logisticsRows() },
+    { id: "equality", title: "Equality (voluntary)", fact: "Equality", specs: equalityRows() },
   ];
+  const notes = Array.isArray(profile?.preferences?.assistant_notes) ? profile.preferences.assistant_notes.map(String) : [];
 
   /** The rows of a step an assistant saved and the user has not confirmed. */
   const unconfirmedIn = (specs: RowSpec[]) => {
@@ -323,6 +339,7 @@ export function MemoryTab() {
                 defaultOpen={doneAt === undefined || waiting > 0}
                 confirming={keepingAll === st.id} onConfirmAll={() => void confirmStep(st.id, st.specs)}>
                 {STEP_BODY[st.id]}
+                <StepFacts id={st.id} step={st.fact} notes={notes} onSave={saveNotes} />
               </Step>
             );
           })}
