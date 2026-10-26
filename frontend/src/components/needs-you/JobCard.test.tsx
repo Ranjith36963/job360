@@ -213,7 +213,22 @@ describe("JobCard", () => {
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gender`));
     fireEvent.click(screen.getByTestId("approve-all-7"));
     await waitFor(() => expect(answerAskQuestions).toHaveBeenCalledWith(a.id, { city: "Berlin", gdpr: "Yes", gender: "Female", empty: "No" }));
-    expect(rememberAnswers).toHaveBeenCalledTimes(1);
+    // Each row the owner clicked was saved at once (2026-10-26), then Approve all saved the card once.
+    expect(rememberAnswers).toHaveBeenNthCalledWith(1, [{ topic: "gdpr", question: "Do you consent to data processing?", answer: "Yes" }]);
+    expect(rememberAnswers).toHaveBeenNthCalledWith(2, [{ topic: "gender", question: "Gender", answer: "Female" }]);
+    expect(rememberAnswers).toHaveBeenCalledTimes(3);
+  });
+
+  it("a personal answer the owner edits is saved at once, before Approve all (2026-10-26)", async () => {
+    const a = listing({}, [Q("gender", "Gender", "Male", "guess"), Q("city", "City?", "", "none")]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-gender`));
+    const box = screen.getByTestId(`q-input-${a.id}-gender`);
+    fireEvent.change(box, { target: { value: "Female" } });
+    expect(rememberAnswers).not.toHaveBeenCalled(); // nothing saved while typing
+    fireEvent.blur(box);
+    expect(rememberAnswers).toHaveBeenCalledWith([{ topic: "gender", question: "Gender", answer: "Female" }]);
+    expect(screen.queryByTestId("approve-all-7")).toBeNull(); // the card itself is not done yet
   });
 
   it("pre-guesses consent and referral rows as Guessed, and shows an empty free-text row as waiting for the assistant", () => {
