@@ -4,6 +4,8 @@ When a CAPTCHA (or a sign-in) stops a filled form and the page is then lost (a d
 process, the browser idles out), the user presses "Refill the form" on the website. Job360's own browser
 opens the form again and replays, in order, exactly the steps the assistant carried out last time - the
 same answers, the same CV upload, the same option clicks - then holds the page for "Finish it here".
+A deploy no longer needs the click while the old hold would still run: on boot, ``restore.py`` replays the
+same script for each such form and holds it for the time left.
 
 * Recording (:func:`note`): every successful type / choose / tick / upload, a click on a radio or a list
   option, and a fill row, keeps a STABLE locator (``page_js.LOCATOR_OF_JS``: tag, type, role, label,
