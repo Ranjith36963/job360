@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { JobPriority } from "./JobPriority";
 import type { ProfileResponse } from "@/lib/types";
 
@@ -157,6 +157,39 @@ describe("JobPriority", () => {
     render(<JobPriority rightToWork={{ countries: [{ country: "IN", work_authorization: "citizen", remote_ok: true }] }} onSaved={() => {}} />);
     fireEvent.click(screen.getByTestId("work-grid-visa-need-IN"));
     expect(screen.getByRole("alert")).toHaveTextContent("You saved that you're a citizen of India, so no visa is needed there.");
+    expect(updateProfileFields).not.toHaveBeenCalled();
+  });
+
+  it("salary column: shows the saved range, and saving one country keeps the others", async () => {
+    const salaries = [
+      { country: "GB", min: 80000, max: 95000, currency: "GBP", period: "year" },
+      { country: "DE", min: 70000, max: 70000, currency: "EUR", period: "year" },
+    ];
+    updateProfileFields.mockImplementation(async () => ({ preferences: {} }) as unknown as ProfileResponse);
+    render(<JobPriority rightToWork={BLOCK} salaries={salaries} onSaved={() => {}} />);
+    expect(screen.getByTestId("work-grid-salary-GB")).toHaveTextContent("Salary £80k–95k GBP");
+    expect(screen.getByTestId("work-grid-salary-FR")).toHaveTextContent("Add salary");
+    expect(screen.queryByTestId("work-grid-salary-ANY")).toBeNull(); // set per country
+    fireEvent.click(screen.getByTestId("work-grid-salary-FR"));
+    const form = screen.getByTestId("work-grid-salary-form-FR");
+    fireEvent.change(within(form).getByLabelText("From"), { target: { value: "60000" } });
+    fireEvent.change(within(form).getByLabelText("Up to"), { target: { value: "75000" } });
+    fireEvent.change(within(form).getByLabelText("Currency"), { target: { value: "EUR" } });
+    fireEvent.change(within(form).getByLabelText("Per"), { target: { value: "year" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{
+      path: "preferences.salary_by_country",
+      value: [...salaries, { country: "FR", min: 60000, max: 75000, currency: "EUR", period: "year" }],
+    }]));
+  });
+
+  it("salary form refuses an incomplete range in plain words and sends nothing", () => {
+    render(<JobPriority rightToWork={BLOCK} salaries={[]} onSaved={() => {}} />);
+    fireEvent.click(screen.getByTestId("work-grid-salary-GB"));
+    const form = screen.getByTestId("work-grid-salary-form-GB");
+    fireEvent.change(within(form).getByLabelText("From"), { target: { value: "50000" } });
+    expect(within(form).getByRole("alert")).toHaveTextContent("Salary needs a figure above 0, a 3-letter currency, and a period.");
+    expect(within(form).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(updateProfileFields).not.toHaveBeenCalled();
   });
 });

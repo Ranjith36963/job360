@@ -6,7 +6,9 @@ import { CountryPicker } from "@/components/profile/CountryPicker";
 import { updateProfileFields } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { countryName } from "@/lib/countries";
-import { PRIORITY_LABEL, PRIORITY_OPTIONS, RTW } from "@/lib/memory";
+import {
+  PRIORITY_LABEL, PRIORITY_OPTIONS, RTW, SALARY, fromInputs, inputProblem, readRow, salaryRow, salaryText, toInputs, writeRow,
+} from "@/lib/memory";
 import type { ProfileResponse } from "@/lib/types";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
@@ -132,19 +134,73 @@ export function withPlace(block: unknown, code: string): Rec {
   return { ...base, countries: [...list, { country: code }] };
 }
 
+// FIELD without w-full, so the four salary boxes sit side by side.
+const SMALL_FIELD = FIELD.replace("w-full ", "");
 const TICK_LABEL: Record<Tick, string> = { remote: "Remote", onsite: "On-site", contract: "Contract" };
 const CHIP =
   "inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-sm md:min-h-8 disabled:opacity-60 " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const chipTone = (on: boolean) => (on ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground");
 
+/** Salary for one country: the saved range, or an inline From / To / Currency / Per
+ *  editor. Same rules as Memory (a figure above 0, a 3-letter currency, a period). */
+function SalaryCell({ code, salaries, busy, onSave }: {
+  code: string; salaries: unknown; busy: boolean; onSave: (value: unknown) => void;
+}) {
+  const spec = salaryRow(code);
+  const value = readRow(spec, salaries);
+  const [inputs, setInputs] = useState<Record<string, string> | null>(null);
+  const shown = value && typeof value === "object" ? salaryText(value as Rec) : "";
+  if (!inputs) {
+    return (
+      <button type="button" data-testid={`work-grid-salary-${code}`} disabled={busy}
+        className={`${CHIP} ${chipTone(!!shown)}`} onClick={() => setInputs(toInputs(spec, value))}>
+        {shown ? `Salary ${shown}` : "Add salary"}
+      </button>
+    );
+  }
+  const problem = inputProblem(spec, inputs);
+  const field = (key: string, label: string, width: string, extra: Record<string, string> = {}) => (
+    <input aria-label={label} placeholder={label} value={inputs[key] ?? ""} {...extra}
+      onChange={(e) => setInputs({ ...inputs, [key]: e.target.value })}
+      className={`${SMALL_FIELD} ${width}`} />
+  );
+  return (
+    <form data-testid={`work-grid-salary-form-${code}`} className="flex w-full flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (problem) return;
+        onSave(fromInputs(spec, inputs));
+        setInputs(null);
+      }}>
+      {field("min", "From", "w-24", { inputMode: "numeric" })}
+      {field("max", "Up to", "w-24", { inputMode: "numeric" })}
+      {field("currency", "Currency", "w-24", { maxLength: "3" })}
+      <select aria-label="Per" value={inputs.period ?? ""} className={`${SMALL_FIELD} w-24`}
+        onChange={(e) => setInputs({ ...inputs, period: e.target.value })}>
+        <option value="">Per…</option>
+        <option value="year">year</option>
+        <option value="month">month</option>
+      </select>
+      <button type="submit" disabled={!!problem} className={`${CHIP} border-border`}>Save</button>
+      <button type="button" className={`${CHIP} border-border`} onClick={() => setInputs(null)}>Cancel</button>
+      {value !== undefined && (
+        <button type="button" className={`${CHIP} border-border`} onClick={() => { onSave(undefined); setInputs(null); }}>
+          Remove
+        </button>
+      )}
+      {problem && <p role="alert" className="w-full text-xs text-destructive">{problem}</p>}
+    </form>
+  );
+}
+
 type Status = "saving" | "saved" | "error";
 
 /** Profile -> CV tab: where should the assistant look first. Writes the two
  *  optional priority keys on each right-to-work record, nothing else. */
 export function JobPriority({
-  rightToWork, onSaved,
-}: { rightToWork: unknown; onSaved: (profile: ProfileResponse) => void }) {
+  rightToWork, salaries, onSaved,
+}: { rightToWork: unknown; salaries?: unknown; onSaved: (profile: ProfileResponse) => void }) {
   // Saves start from the LATEST block (not the render's copy) and run one
   // after another, so two quick changes never drop each other.
   const latest = useRef<unknown>(rightToWork);
@@ -152,6 +208,8 @@ export function JobPriority({
   const [status, setStatus] = useState<Record<string, { state: Status; message?: string }>>({});
 
   useEffect(() => { latest.current = rightToWork; }, [rightToWork]);
+  const latestSalaries = useRef<unknown>(salaries);
+  useEffect(() => { latestSalaries.current = salaries; }, [salaries]);
 
   const rows = priorityRows(rightToWork);
 
@@ -169,6 +227,26 @@ export function JobPriority({
         setStatus((s) => ({
           ...s, [key]: { state: "error", message: apiErrorMessage(err, "Could not save.") },
         }));
+      }
+    };
+    const done = queue.current.then(run, run);
+    queue.current = done;
+    return done;
+  };
+
+  /** Save one country's salary: the whole list, built from the last saved one, in the same queue. */
+  const saveSalary = (code: string, value: unknown): Promise<void> => {
+    const key = `grid-${code}`;
+    setStatus((s) => ({ ...s, [key]: { state: "saving" } }));
+    const run = async () => {
+      try {
+        const list = writeRow(salaryRow(code), latestSalaries.current, value);
+        const updated = await updateProfileFields([{ path: SALARY, value: list }]);
+        latestSalaries.current = (updated.preferences as Rec | undefined)?.salary_by_country ?? list;
+        onSaved(updated);
+        setStatus((s) => ({ ...s, [key]: { state: "saved" } }));
+      } catch (err: unknown) {
+        setStatus((s) => ({ ...s, [key]: { state: "error", message: apiErrorMessage(err, "Could not save.") } }));
       }
     };
     const done = queue.current.then(run, run);
@@ -245,7 +323,7 @@ export function JobPriority({
       <div data-testid="work-grid" className="mt-6 border-t border-border pt-5">
         <h4 className={LABEL}>Where you&apos;ll work</h4>
         <p className="mt-2 text-xs text-muted-foreground">
-          For each place: the kinds of work you&apos;ll take, and whether you need a visa there.
+          For each place: the kinds of work you&apos;ll take, whether you need a visa there, and your salary range.
         </p>
         <ul className="mt-3 flex flex-col">
           {records.map(({ rec }) => {
@@ -288,6 +366,14 @@ export function JobPriority({
                   </div>
                   <span role="status" className="text-xs text-muted-foreground">{busy ? "Saving…" : st?.state === "saved" ? "Saved" : ""}</span>
                 </div>
+                {code === "ANY" ? (
+                  <p className="text-xs text-muted-foreground">Salary is set per country.</p>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <SalaryCell code={code} salaries={salaries} busy={busy}
+                      onSave={(v) => void saveSalary(code, v)} />
+                  </div>
+                )}
                 {st?.state === "error" && <p role="alert" className="break-words text-xs text-destructive">{st.message}</p>}
               </li>
             );
