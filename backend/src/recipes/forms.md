@@ -56,8 +56,8 @@ Per ATS (only what was seen):
 Facts a form asks:
 - "Must be located in <country>" or "authorised to work in <country>": answer from the stored record, confirmed with the user on this form (visa status is `sensitive`). A willingness
   answer ("willing to work from <country>") is NOT a "yes" to either: ask the user.
-- Consent and marketing boxes: the privacy-safe choice (No), unless the user approved that employer. Never tick an
-  attestation for the user.
+- Consent and marketing boxes (SMS, email, data): never skipped silently; each goes in the job's ONE ask with the
+  privacy-safe choice (No) pre-filled, unless the user approved that employer, or "Leave blank". Never tick an attestation for the user.
 - Salary: use the hiring country's record, in its currency. Pick the band that holds the number (lower bound
   inclusive) and show it in step 6.
 - A fact the kit lacks (city, years, over-18): a row in the job's one ask with your best guess (`source` guess) for the user to approve; never typed unapproved.

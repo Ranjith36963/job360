@@ -421,6 +421,51 @@ async def has_unconfirmed_sensitive(db: JobDatabase, user_id: str, app_row: dict
     return any(f["code"] == "sensitive" for f in flags)
 
 
+def _wordings(row: dict[str, Any], *names: str) -> set[str]:
+    """The normalized wordings a row answers to: its question text and its key (whole and last part)."""
+    out = {kit._norm_question(row.get(n)) for n in names}
+    key = str(row.get("key") or "")
+    out |= {kit._norm_question(key), kit._norm_question(key.rsplit(".", 1)[-1])}
+    return out - {""}
+
+
+async def blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> list[str]:
+    """Owner rule 2026-10-26 ("ask ALL the blank questions"): the fields the NEWEST ``form_filled`` left blank
+    (``fields_skipped``; optional, consent and file fields included) that nobody asked the user about. A
+    field is covered when that fill answered it, an open or answered ask on this application holds it in
+    its ``questions`` (by key or wording), or the user saved an approved answer to that wording for this
+    employer or any (a "Leave blank" counts). Exact normalized matching only. Scoped by ``user_id`` (#12)."""
+    from src.services.applications import asks as asks_service  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    app_id = int(app_row["id"])
+    fills = await kit._events(db, user_id, app_id, ("form_filled",))
+    skipped = fills[0]["payload"].get("fields_skipped") if fills else None
+    if not isinstance(skipped, list) or not skipped:
+        return []
+    typed = fills[0]["payload"].get("answers")
+    covered: set[str] = set()
+    for a in typed if isinstance(typed, list) else []:
+        if isinstance(a, dict) and (str(a.get("answer") or "").strip() or a.get("redacted")):
+            covered |= _wordings(a, "question")
+    for q in await asks_service.asked_questions(db, user_id, app_id):
+        covered |= _wordings(q, "question")
+    loaded, _overlay = load_profile_with_overlay(user_id)
+    profile = loaded or UserProfile()
+    company_key = _company_key(str(app_row.get("job_company") or ""))
+    out: list[str] = []
+    seen: set[str] = set()
+    for label in (str(s) for s in skipped):
+        norm = kit._norm_question(label)
+        if not norm or norm in covered or norm in seen:
+            continue
+        seen.add(norm)
+        if _approved_record(profile, label, company_key) is None:
+            out.append(label)
+    return out
+
+
 def type_first_lock(verdict: Any, type_first: list[dict[str, str]]) -> Any:
     """The LOCK (owner decision 2026-10-19 - not just an instruction): answers the user changed
     on the web hold every submit, even after their yes, until a ``form_swept`` newer than the fill
