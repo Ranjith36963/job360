@@ -31,16 +31,18 @@ export function AskQuestions({
   rows: Record<string, RowState>;
   busy: boolean;
   onChange: (rowId: string, row: RowState) => void;
-  /** The owner settled this row (a pick, "Looks right", or leaving an edited box): save it now, so it
-   *  survives a reload even before every other row is checked (owner, 2026-10-26). */
+  /** Saves one row at once (Save after an Edit, Looks right, a choice): the owner's click is the consent. */
   onSave?: (rowId: string, value: string) => void;
 }) {
-  const settle = (id: string, row: RowState) => {
-    onChange(id, row);
-    if (row.ok && row.value.trim()) onSave?.(id, row.value);
-  };
-  const [editing, setEditing] = useState<Set<string>>(new Set());
-  const edit = (id: string) => setEditing((prev) => new Set(prev).add(id));
+  // Open editors, each with the row as it was, so Cancel puts it back.
+  const [editing, setEditing] = useState<Map<string, RowState>>(new Map());
+  const edit = (id: string, row: RowState) => setEditing((prev) => new Map(prev).set(id, row));
+  const close = (id: string) =>
+    setEditing((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
 
   return (
     <>
@@ -67,28 +69,51 @@ export function AskQuestions({
                     {state}
                   </span>
                 )}
+                {row.ok && q.answer.trim() !== "" && row.value.trim() !== q.answer.trim() && (
+                  <span data-testid={`q-changed-${askId}-${q.key}`} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${good}`}>You changed</span>
+                )}
               </span>
             </div>
             {q.choices?.length ? (
               <div className="flex flex-wrap gap-2">
                 {q.choices.map((c) => (
                   <button key={c} type="button" disabled={busy} aria-pressed={row.ok && row.value === c}
-                    className={row.ok && row.value === c ? picked : btn} onClick={() => settle(id, { value: c, ok: true })}>
+                    className={row.ok && row.value === c ? picked : btn} onClick={() => {
+                      onChange(id, { value: c, ok: true });
+                      onSave?.(id, c);
+                    }}>
                     {c}
                   </button>
                 ))}
               </div>
             ) : open ? (
-              <Textarea aria-label={q.question} value={row.value} disabled={busy} placeholder="Type your answer" data-testid={`q-input-${askId}-${q.key}`}
-                onChange={(e) => onChange(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })}
-                onBlur={(e) => settle(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })} />
+              <>
+                <Textarea aria-label={q.question} value={row.value} disabled={busy} placeholder="Type your answer" data-testid={`q-input-${askId}-${q.key}`}
+                  onChange={(e) => onChange(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })} />
+                <div className="flex gap-2">
+                  <button type="button" className={picked} disabled={busy || !row.value.trim()} data-testid={`q-save-${askId}-${q.key}`}
+                    onClick={() => {
+                      onSave?.(id, row.value);
+                      close(id);
+                    }}>
+                    Save
+                  </button>
+                  <button type="button" className={btn} disabled={busy} data-testid={`q-cancel-${askId}-${q.key}`}
+                    onClick={() => {
+                      onChange(id, editing.get(id) ?? row);
+                      close(id);
+                    }}>
+                    Cancel
+                  </button>
+                </div>
+              </>
             ) : pending ? (
               <>
                 <p className="text-sm text-muted-foreground" data-testid={`q-pending-${askId}-${q.key}`}>
                   Your assistant will draft this on its next run
                 </p>
                 <div className="flex gap-2">
-                  <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(id)}>
+                  <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(id, row)}>
                     Write it myself
                   </button>
                 </div>
@@ -99,12 +124,15 @@ export function AskQuestions({
                   {stub ? <DraftMissing id={`${askId}-${q.key}`} value={row.value} /> : <AnswerValue id={`${askId}-${q.key}`} value={row.value} />}
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(id)}>
+                  <button type="button" className={btn} disabled={busy} data-testid={`q-edit-${askId}-${q.key}`} onClick={() => edit(id, row)}>
                     Edit
                   </button>
                   {!stub && (
                     <button type="button" disabled={busy || row.ok} data-testid={`q-ok-${askId}-${q.key}`}
-                      className={row.ok ? picked : btn} onClick={() => settle(id, { value: row.value, ok: true })}>
+                      className={row.ok ? picked : btn} onClick={() => {
+                        onChange(id, { value: row.value, ok: true });
+                        onSave?.(id, row.value);
+                      }}>
                       {row.ok ? "Checked" : "Looks right"}
                     </button>
                   )}

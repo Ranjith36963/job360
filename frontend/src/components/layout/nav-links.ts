@@ -44,10 +44,11 @@ const PROTECTED_PREFIXES = [
   "/bring",
   "/receipts",
   "/applications",
-  "/people",
+  "/outreach",
   "/stats",
   "/needs-you",
-  "/settings",
+  "/account",
+  "/connect",
   "/oauth",
 ];
 

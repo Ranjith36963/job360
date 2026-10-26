@@ -4,7 +4,7 @@ import {
   DailyCheckCard,
   dailyCheckStatusLine,
   type DailyCheckState,
-} from "./page";
+} from "./ConnectPage";
 
 // ---------------------------------------------------------------------------
 // Owner decision 2026-09-25 — Job360 (not any one assistant) remembers the

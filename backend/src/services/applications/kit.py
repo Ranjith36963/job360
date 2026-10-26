@@ -1776,6 +1776,12 @@ def compute_answers(
         str(r["path"]) for r in overlay
         if is_assistant_actor(str(r.get("set_by") or "")) and str(r.get("source") or "") == "user_said"
     }
+    # Review of #1261: an assistant can save an answer with approved: true itself. A private question is
+    # filled without the user's click only when the USER wrote the answers list last (web), never the
+    # assistant - approved_text items carry ``by_user`` for that check.
+    answers_by_user = not any(
+        str(r["path"]) == "user_info.answers" and is_assistant_actor(str(r.get("set_by") or "")) for r in overlay
+    )
     current = [""]
 
     def when(path: str) -> Optional[str]:
@@ -1872,6 +1878,7 @@ def compute_answers(
                 continue  # a sponsorship / right-to-work answer for another country (owner, 2026-10-26)
             out["approved_text"].append(
                 _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"),
+                    by_user=answers_by_user,
                     **({"company": scoped} if scoped else {}),
                     **({"topic": rec["topic"]} if _present(rec.get("topic")) else {}))
             )
@@ -2477,9 +2484,11 @@ def _over_limit(value: Any, limit: Any, unit: str) -> bool:
     return (len(value.split()) if unit == "words" else len(value)) > limit
 
 
-def _record_item(rec: dict[str, Any]) -> dict[str, Any]:
-    # approved: true = the user stood behind this wording (the kit's approved_text reads "confirmed" too).
-    return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text", "state": "confirmed"}
+def _record_item(rec: dict[str, Any], by_user: bool = False) -> dict[str, Any]:
+    # approved: true = the user stood behind this wording (the kit's approved_text reads "confirmed" too);
+    # ``by_user`` = the user, not an assistant, wrote the answers list last.
+    return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text", "state": "confirmed",
+            "by_user": by_user}
 
 
 def _file_kind(text: str) -> Optional[str]:
@@ -2512,6 +2521,7 @@ def form_check(
 
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
+    answers_by_user = any(i.get("by_user") for i in answers.get("approved_text", []))
     approved = {
         _norm_question(i["key"]): i for i in answers.get("approved_text", [])
         if not str(i.get("topic") or "").casefold().startswith(NEVER_REUSED_TOPIC_PREFIXES)
@@ -2538,7 +2548,7 @@ def form_check(
                 if note:
                     why = note
                 elif rec is not None:
-                    item = _record_item(rec)
+                    item = _record_item(rec, answers_by_user)
                     matched_by = "topic"
             if item is None and not why:
                 why = f"key '{key}' is not in this application's kit"
@@ -2548,7 +2558,7 @@ def form_check(
             if note:
                 why = note
             elif rec is not None:
-                item = _record_item(rec)
+                item = _record_item(rec, answers_by_user)
             else:
                 item = approved.get(_norm_question(text)) if _norm_question(text) else None
             if item is None and not why:
@@ -2596,7 +2606,8 @@ def form_check(
             row["over_limit"] = True
         # A private question answered with the user's own confirmed answer is filled as it is (owner,
         # 2026-10-26); only an answer the user has not stood behind waits for them on this form.
-        if (sensitive and item.get("state") != "confirmed") or item.get("confirmed") is False:
+        owned = item.get("state") == "confirmed" and (item.get("source") != "approved_text" or item.get("by_user"))
+        if (sensitive and not owned) or item.get("confirmed") is False:
             row["needs_confirmation"] = True
             confirm.append(text)
         answered.append(row)

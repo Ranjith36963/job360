@@ -30,7 +30,7 @@ const REFRESH_MS = 1500;
  * site remembers (its cookies), encrypted. Job360 never stores or shows what was typed, and an
  * assistant can never reach this page's endpoints (a browser session only, never a token).
  */
-export default function JobSitesPage() {
+export function JobSitesPanel() {
   const [data, setData] = useState<BrowserSignIns | null>(null);
   const [url, setUrl] = useState("");
   const [shot, setShot] = useState<BrowserLiveShot | null>(null);
