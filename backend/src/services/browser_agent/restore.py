@@ -43,7 +43,9 @@ _REASONS = ("captcha", "bot_check")  # blocked.FINISH_HERE_REASONS: the blocks t
 _CANDIDATES_SQL = (
     "SELECT e.user_id, e.application_id, e.payload, e.recorded_at, "
     "(SELECT MAX(f.recorded_at) FROM application_events f WHERE f.user_id = e.user_id "
-    " AND f.application_id = e.application_id AND f.event_type = 'form_filled') AS filled_at, "
+    " AND f.application_id = e.application_id AND f.event_type = 'form_filled' "
+    # A restore's own form_filled (recorded_by SYSTEM_ACTOR) never re-arms the hold: the old end stands.
+    " AND f.recorded_by <> 'system') AS filled_at, "
     "(SELECT MAX(s.recorded_at) FROM application_fill_steps s WHERE s.user_id = e.user_id "
     " AND s.application_id = e.application_id) AS step_at "
     "FROM application_events e WHERE e.event_type = 'blocked' "

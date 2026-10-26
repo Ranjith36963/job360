@@ -89,6 +89,26 @@ async def test_a_held_captcha_form_is_restored_on_boot_for_the_remaining_time(
 
 
 @pytest.mark.asyncio
+async def test_a_second_deploy_never_extends_the_hold_past_its_first_end(
+    authenticated_async_context, fake_pool, replays
+):
+    """reviewer-bugs P2 on #1292: the restore's own form_filled must not re-arm the hold's start."""
+    from src.services.browser_agent import agent, restore
+
+    async with authenticated_async_context() as client:
+        app_id = await _job(client)
+        await _filled_and_blocked(client, app_id)
+        _backdate(authenticated_async_context.fixture_user_id, app_id, 20)
+        fake_pool._sessions.clear()  # noqa: SLF001 - first deploy
+        assert [r["result"] for r in await restore.restore_held_forms()] == ["ok"]
+        fake_pool._sessions.clear()  # noqa: SLF001 - a second deploy right after
+        async with _db() as db:
+            (c,) = await restore.candidates(db, datetime.now(timezone.utc))
+        left = (c["ends_at"] - datetime.now(timezone.utc)).total_seconds()
+        assert left <= agent.HANDOFF_HOLD_SECONDS - 20 * 60, "the first hold's end stands"
+
+
+@pytest.mark.asyncio
 async def test_a_block_older_than_the_hold_window_is_not_restored(authenticated_async_context, fake_pool, replays):
     from src.services.browser_agent import restore
 
