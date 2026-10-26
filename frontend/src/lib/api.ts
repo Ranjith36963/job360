@@ -246,7 +246,7 @@ export type User = {
   id: string;
   email: string;
   timezone?: string;
-  /** "Help improve Job360" (Settings > Account). Gates Sentry session replay. */
+  /** "Help improve Job360" (Account). Gates Sentry session replay. */
   analytics_consent?: boolean;
   /** GET /api/auth/me only: false for an account only a magic link has ever
    * signed in; the account page then deletes without a password. */
@@ -812,7 +812,8 @@ export async function listApplications(
 }
 
 // ---- Needs you (asks the assistant could not answer without the user) ----
-export type Ask = _Schemas["AskOut"];
+/** `can_refill`: the filled form was closed but Job360 can fill it again (a newer backend sends it; absent = no). */
+export type Ask = _Schemas["AskOut"] & { can_refill?: boolean };
 export type AskStatus = "open" | "answered" | "all";
 
 export async function listAsks(
@@ -845,6 +846,15 @@ export async function answerAsk(id: number, answer: string): Promise<Ask> {
 /** Answer an ask that lists form questions: one answer per question key. */
 export async function answerAskQuestions(id: number, answers: Record<string, string>): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ answers }),
+  });
+}
+
+/** Save SOME rows of an open ask at once (the user's Edit / Looks right / choice click). The ask stays
+ *  open; a reload reads the rows back from its `answers`. Web session only. */
+export async function saveAskRowAnswers(id: number, answers: Record<string, string>): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/answers/save`, {
     method: "POST",
     body: JSON.stringify({ answers }),
   });
@@ -1364,6 +1374,20 @@ export async function browserLive(
 ): Promise<BrowserLiveShot> {
   const body = applicationId === undefined ? { ...step, mode } : { ...step, mode, application_id: applicationId };
   return request<BrowserLiveShot>("/api/browser/live", { method: "POST", body: JSON.stringify(body) });
+}
+
+export type RefillResult = {
+  status: "ok" | "refused";
+  reason?: string;
+  detail?: string;
+  steps_ok?: number;
+  steps_failed?: { label: string; reason: string }[];
+  held_seconds?: number;
+};
+
+/** Fill this application's form again in Job360's browser (about a minute), so "Finish it here" works again. */
+export async function refillForm(applicationId: number): Promise<RefillResult> {
+  return request<RefillResult>(`/api/applications/${applicationId}/browser/refill`, { method: "POST" });
 }
 
 // ---- Send starts my assistant (browser agent, "Send trigger"; website only, never a token) ----

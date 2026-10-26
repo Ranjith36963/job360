@@ -18,6 +18,7 @@ from src.services.applications.kit import _json
 from src.services.profile import edits as profile_edits
 from src.services.profile import user_info
 from src.services.profile.edits import is_assistant_actor
+from src.services.profile.regions import region_of
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -129,9 +130,11 @@ def _flag(code: str, text: str, key: Optional[str] = None, country: Optional[str
 
 
 def _salary_saved(profile: Any, country: str) -> bool:
-    """Any salary record with a value for ``country`` counts (one amount or a min / max)."""
+    """Any salary record with a value for ``country`` - or for its region (owner decision
+    2026-10-26) - counts (one amount or a min / max)."""
+    places = {country.upper(), region_of(country) or country.upper()}
     return any(
-        str(r.get("country") or "").upper() == country
+        str(r.get("country") or "").upper() in places
         and any(kit._present(r.get(k)) for k in ("amount", "min", "max"))
         for r in kit._records(profile.preferences.salary_by_country)
     )
@@ -312,6 +315,14 @@ _CHANGED_TEXT = {
 }
 
 
+def answer_check(answer: dict[str, Any]) -> str:
+    """Owner 2026-10-26 - which of the user's two checks a typed answer needs. ``confirm``: text written
+    for THIS job (an essay, a project example), the user reads it each time. ``verify``: a fact reused
+    form after form (contact, right to work, logistics, consent, pay, skills, years of experience) - once
+    the user has verified it in Memory it is filled without asking."""
+    return "confirm" if answer.get("source") == "written" else "verify"
+
+
 def _answer_rows(
     typed: list[dict[str, Any]], have: dict[str, dict[str, Any]], saved: dict[str, tuple[Any, Any]],
     profile: Any = None, company_key: Optional[str] = None, filled_at: Any = None,
@@ -334,7 +345,7 @@ def _answer_rows(
             else (False, None, None)
         )
         answers.append({**a, "key": key, "saved_by": by, "saved_at": at, "verified": verified,
-                        "changed_to": changed_to, "changed_reason": reason})
+                        "changed_to": changed_to, "changed_reason": reason, "check": answer_check(a)})
         if changed_to is not None:
             # Owner decision 2026-10-19: the user's own word IS verified, and Send stays open -
             # check_submit hands the assistant this answer to type before it submits.

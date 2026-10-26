@@ -733,3 +733,29 @@ def test_no_mcp_tool_keeps_or_takes_back():
 
     src = inspect.getsource(mcp_server)
     assert "keep_edit" not in src and "take_back_edit" not in src
+
+
+@pytest.mark.asyncio
+async def test_a_cv_tab_save_keeps_the_job_targets_it_does_not_send(authenticated_async_context, fixture_user_id):
+    """Owner decision 2026-10-26: job targets and salary moved to Memory, so the
+    CV-tab form sends only its own keys. An omitted key keeps the stored value;
+    an explicit [] / null still clears it."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        stored = {
+            "target_job_titles": ["Analytics Engineer"], "preferred_locations": ["Leeds"],
+            "salary_min": 50000, "salary_max": 70000,
+        }
+        assert (await _save_prefs(client, stored)).status_code == 200
+        # what the CV-tab card now sends: its own keys only
+        resp = await _save_prefs(client, {"about_me": "Data engineer", "additional_skills": ["dbt"]})
+        assert resp.status_code == 200, resp.text
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert {k: prefs[k] for k in stored} == stored
+        assert prefs["about_me"] == "Data engineer"
+        # an explicit clear still clears
+        cleared = {"target_job_titles": [], "preferred_locations": [], "salary_min": None, "salary_max": None}
+        assert (await _save_prefs(client, cleared)).status_code == 200
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert prefs["target_job_titles"] == [] and prefs["preferred_locations"] == []
+        assert prefs["salary_min"] is None and prefs["salary_max"] is None

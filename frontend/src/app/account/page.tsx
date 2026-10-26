@@ -47,7 +47,6 @@ import {
   DANGER_BTN_CLASS,
   DANGER_CONFIRM_BTN_CLASS,
 } from "@/components/connect/ConnectSteps";
-import { CalendarFeedSection } from "@/components/settings/CalendarFeedSection";
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -718,7 +717,7 @@ export default function AccountSettingsPage() {
     <div className="max-w-3xl space-y-8 py-12">
       <div>
         <h1 className="text-balance font-heading text-[clamp(1.9rem,3.6vw,2.75rem)] font-normal leading-[1.08] tracking-[-0.022em]">
-          Account settings
+          Account
         </h1>
         <p className="mt-2 text-muted-foreground">
           Manage your password, email address, and deleting your account.
@@ -726,7 +725,6 @@ export default function AccountSettingsPage() {
       </div>
       <VerifyEmailCard />
       <TimezoneCard />
-      <CalendarFeedSection />
       <ChangePasswordCard />
       <ChangeEmailCard />
       <YourDataCard />

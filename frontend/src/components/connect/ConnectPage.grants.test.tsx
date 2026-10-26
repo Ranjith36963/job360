@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  usePathname: () => "/settings/connect",
+  usePathname: () => "/connect",
   useSearchParams: () => new URLSearchParams("tab=apps"),
 }));
 
@@ -34,7 +34,7 @@ vi.mock("@/components/connect/SendStartsAssistantCard", () => ({
   SendStartsAssistantCard: () => <div />,
 }));
 
-import ConnectAgentPage from "./page";
+import ConnectAgentPage from "./ConnectPage";
 
 describe("Connected apps grouping", () => {
   beforeEach(() => {

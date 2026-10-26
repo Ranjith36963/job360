@@ -2,16 +2,19 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Job360 never sources or ranks jobs (VISION rule 4) — there is no shared
-// catalog left to expose, so every one of these paths is one user's data.
+// catalog left to expose, so every one of these paths is one user's data. The old
+// /settings/* and /people/* URLs are only redirects to /account, /connect and
+// /outreach/people (which are protected), so they are left open to reach them.
 const PROTECTED_PATHS = [
   "/profile",
   "/bring",
   "/receipts",
   "/applications",
-  "/people",
+  "/outreach",
   "/stats",
   "/needs-you",
-  "/settings",
+  "/account",
+  "/connect",
   "/oauth",
 ];
 

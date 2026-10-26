@@ -4,7 +4,7 @@ import { PeopleClient } from "./PeopleClient";
 
 export const metadata: Metadata = { title: "People" };
 
-// Protected by middleware.ts (`/people` is in PROTECTED_PATHS).
+// Protected by middleware.ts (`/people` and `/outreach` are in PROTECTED_PATHS).
 export default function PeoplePage() {
   return (
     <PageContainer className="flex flex-col gap-6 py-8">

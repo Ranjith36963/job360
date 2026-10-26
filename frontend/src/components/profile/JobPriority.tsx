@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CountryPicker } from "@/components/profile/CountryPicker";
 import { updateProfileFields } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { countryName } from "@/lib/countries";
+import { REGIONS, isRegion } from "@/lib/regions";
 import {
   PRIORITY_LABEL, PRIORITY_OPTIONS, RTW, SALARY, fromInputs, inputProblem, readRow, salaryRow, salaryText, toInputs, writeRow,
 } from "@/lib/memory";
@@ -33,11 +34,15 @@ const isObj = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 function placeName(code: unknown): string {
   const c = String(code ?? "");
   if (c === "ANY") return "anywhere else";
-  return c ? countryName(c) : "unknown place";
+  return c ? countryName(c) : "unknown place"; // a region code reads as its name ("Europe")
 }
 
-/** One row per place the user can work, in record order. Nothing is invented:
- *  a record with neither remote_ok nor an on-site yes gives no row. */
+/** Countries, then regions, then all other countries: the order a job's place is answered in. */
+const placeRank = (code: unknown) => (code === "ANY" ? 2 : isRegion(String(code)) ? 1 : 0);
+
+/** One row per place the user can work: countries, then regions, then all other countries
+ *  (record order within each). Nothing is invented: a record with neither remote_ok nor an
+ *  on-site yes gives no row. */
 export function priorityRows(block: unknown): PlaceRow[] {
   const out: PlaceRow[] = [];
   // Index into the RAW countries list (not the filtered one) so a write lands on the right record.
@@ -61,7 +66,8 @@ export function priorityRows(block: unknown): PlaceRow[] {
       });
     }
   });
-  return out;
+  const code = (row: PlaceRow) => (list[row.index] as Rec).country;
+  return out.sort((a, b) => placeRank(code(a)) - placeRank(code(b)));
 }
 
 /** A copy of the WHOLE right_to_work block with one key of one record changed.
@@ -154,7 +160,7 @@ function SalaryCell({ code, salaries, busy, onSave }: {
     return (
       <button type="button" data-testid={`work-grid-salary-${code}`} disabled={busy}
         className={`${CHIP} ${chipTone(!!shown)}`} onClick={() => setInputs(toInputs(spec, value))}>
-        {shown ? `Salary ${shown}` : "Add salary"}
+        {shown || "Add salary"}
       </button>
     );
   }
@@ -264,7 +270,7 @@ export function JobPriority({
   const records: { rec: Rec; index: number }[] = (
     isObj(rightToWork) && Array.isArray(rightToWork.countries) ? rightToWork.countries : []
   ).flatMap((rec: unknown, index: number) => (isObj(rec) && typeof rec.country === "string" ? [{ rec, index }] : []));
-  records.sort((a, b) => Number(a.rec.country === "ANY") - Number(b.rec.country === "ANY"));
+  records.sort((a, b) => placeRank(a.rec.country) - placeRank(b.rec.country));
   const hasAny = records.some((r) => r.rec.country === "ANY");
   const [adding, setAdding] = useState(false);
   // A grid write is keyed by country, not index: the index can move when a place is added.
@@ -277,7 +283,129 @@ export function JobPriority({
 
   return (
     <section data-testid="job-priority" className={embedded ? "" : "rounded-xl border border-border bg-card p-6"}>
-      <h3 className={LABEL}>Job priority</h3>
+      <div data-testid="work-grid">
+        <h4 className={LABEL}>Where you&apos;ll work</h4>
+        <p className="mt-2 text-xs text-muted-foreground">
+          For each place: the kinds of work you&apos;ll take, whether you need a visa there, and your salary range.
+        </p>
+        {/* Owner, 2026-10-26: one line per country, four columns. On a narrow
+            screen the table scrolls inside its own box; the page never does. */}
+        <p className="mt-2 text-xs text-muted-foreground md:hidden">Swipe the table sideways to see Visa and Salary.</p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[40rem] border-collapse text-sm">
+            <thead>
+              <tr className={`${LABEL} text-left`}>
+                <th scope="col" className="py-2 pr-3 font-medium">Country</th>
+                <th scope="col" className="py-2 pr-3 font-medium">Work type</th>
+                <th scope="col" className="py-2 pr-3 font-medium">Visa</th>
+                <th scope="col" className="py-2 font-medium">Salary range</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map(({ rec }) => {
+                const code = String(rec.country);
+                const st = status[`grid-${code}`];
+                const busy = st?.state === "saving";
+                const name = code === "ANY" ? "All other countries" : countryName(code);
+                return (
+                  <Fragment key={code}>
+                    <tr data-testid={`work-grid-row-${code}`} className="border-t border-border align-top">
+                      <th scope="row" className="py-3 pr-3 text-left font-medium">
+                        {name}
+                        <span role="status" className="block text-xs font-normal text-muted-foreground">
+                          {busy ? "Saving…" : st?.state === "saved" ? "Saved" : ""}
+                        </span>
+                      </th>
+                      <td className="py-3 pr-3">
+                        <div className="flex gap-1 whitespace-nowrap">
+                          {(["remote", "onsite", "contract"] as const).map((tick) => {
+                            const on = tickOn(rec, tick);
+                            return (
+                              <button key={tick} type="button" aria-pressed={on} disabled={busy}
+                                data-testid={`work-grid-${tick}-${code}`} aria-label={`${TICK_LABEL[tick]} in ${name}`}
+                                className={`${CHIP} ${chipTone(on)} px-2`}
+                                onClick={() => void editPlace(code, (r) => flipTick(r, tick))}>
+                                <span aria-hidden="true">{on ? "☑" : "☐"}</span>{TICK_LABEL[tick]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+                      <td className="py-3 pr-3">
+                        <div role="group" aria-label={`Visa in ${name}`} className="inline-flex whitespace-nowrap">
+                          {([true, false] as const).map((need) => {
+                            const on = rec.needs_sponsorship === need;
+                            return (
+                              <button key={String(need)} type="button" aria-pressed={on} disabled={busy}
+                                data-testid={`work-grid-visa-${need ? "need" : "noneed"}-${code}`}
+                                className={`${CHIP} ${chipTone(on)} px-2 ${need ? "rounded-r-none" : "-ml-px rounded-l-none"}`}
+                                onClick={() => {
+                                  const why = need ? visaNeedBlocked(rec, name) : null;
+                                  if (why) setStatus((s) => ({ ...s, [`grid-${code}`]: { state: "error", message: why } }));
+                                  else void editPlace(code, (r) => setVisa(r, need));
+                                }}>
+                                {need ? "Need" : "No need"}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        {code === "ANY" ? (
+                          <span className="text-xs text-muted-foreground">Set per country</span>
+                        ) : (
+                          <SalaryCell code={code} salaries={salaries} busy={busy}
+                            onSave={(v) => void saveSalary(code, v)} />
+                        )}
+                      </td>
+                    </tr>
+                    {st?.state === "error" && (
+                      <tr>
+                        <td colSpan={4} className="pb-3">
+                          <p role="alert" className="break-words text-xs text-destructive">{st.message}</p>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {adding ? (
+            <CountryPicker label="Add a country" tags={[]} testId="work-grid-picker" onChange={(codes) => {
+              setAdding(false);
+              for (const c of codes) void write(`grid-${c}`, (b) => withPlace(b, c));
+            }} />
+          ) : (
+            <button type="button" data-testid="work-grid-add" className={`${CHIP} border-border`} onClick={() => setAdding(true)}>
+              Add a country
+            </button>
+          )}
+          {!hasAny && (
+            <button type="button" data-testid="work-grid-add-any" className={`${CHIP} border-border`}
+              onClick={() => void write("grid-ANY", (b) => withPlace(b, "ANY"))}>
+              Add all other countries
+            </button>
+          )}
+        </div>
+        {/* One line for a whole region (owner, 2026-10-26). A country's own line wins over it. */}
+        <div data-testid="work-grid-regions" className="mt-3">
+          <p className="text-xs text-muted-foreground">Or add a whole region (a country&apos;s own line wins over it):</p>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {REGIONS.filter((r) => !records.some(({ rec }) => rec.country === r.code)).map((r) => (
+              <button key={r.code} type="button" data-testid={`work-grid-add-region-${r.code}`} title={r.hint}
+                className={`${CHIP} border-border`}
+                onClick={() => void write(`grid-${r.code}`, (b) => withPlace(b, r.code))}>
+                + {r.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div data-testid="priorities" className="mt-6 border-t border-border pt-5">
+      <h4 className={LABEL}>Priorities</h4>
       <p className="mt-2 text-xs text-muted-foreground">
         Where should your assistant look first? It spends more of the hunt on higher priorities. Off = never search there.
       </p>
@@ -321,84 +449,6 @@ export function JobPriority({
           })}
         </ul>
       )}
-
-      <div data-testid="work-grid" className="mt-6 border-t border-border pt-5">
-        <h4 className={LABEL}>Where you&apos;ll work</h4>
-        <p className="mt-2 text-xs text-muted-foreground">
-          For each place: the kinds of work you&apos;ll take, whether you need a visa there, and your salary range.
-        </p>
-        <ul className="mt-3 flex flex-col">
-          {records.map(({ rec }) => {
-            const code = String(rec.country);
-            const st = status[`grid-${code}`];
-            const busy = st?.state === "saving";
-            const name = code === "ANY" ? "All other countries" : countryName(code);
-            return (
-              <li key={code} data-testid={`work-grid-row-${code}`} className="flex flex-col gap-2 border-t border-border py-3 first:border-t-0">
-                <span className="text-sm font-medium">{name}</span>
-                <div className="flex flex-wrap items-center gap-2">
-                  {(["remote", "onsite", "contract"] as const).map((tick) => {
-                    const on = tickOn(rec, tick);
-                    return (
-                      <button key={tick} type="button" aria-pressed={on} disabled={busy}
-                        data-testid={`work-grid-${tick}-${code}`} aria-label={`${TICK_LABEL[tick]} in ${name}`}
-                        className={`${CHIP} ${chipTone(on)}`}
-                        onClick={() => void editPlace(code, (r) => flipTick(r, tick))}>
-                        <span aria-hidden="true">{on ? "☑" : "☐"}</span>{TICK_LABEL[tick]}
-                      </button>
-                    );
-                  })}
-                  <span className="ml-1 text-xs text-muted-foreground">Visa</span>
-                  <div role="group" aria-label={`Visa in ${name}`} className="inline-flex">
-                    {([true, false] as const).map((need) => {
-                      const on = rec.needs_sponsorship === need;
-                      return (
-                        <button key={String(need)} type="button" aria-pressed={on} disabled={busy}
-                          data-testid={`work-grid-visa-${need ? "need" : "noneed"}-${code}`}
-                          className={`${CHIP} ${chipTone(on)} ${need ? "rounded-r-none" : "-ml-px rounded-l-none"}`}
-                          onClick={() => {
-                            const why = need ? visaNeedBlocked(rec, name) : null;
-                            if (why) setStatus((s) => ({ ...s, [`grid-${code}`]: { state: "error", message: why } }));
-                            else void editPlace(code, (r) => setVisa(r, need));
-                          }}>
-                          {need ? "Need" : "No need"}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <span role="status" className="text-xs text-muted-foreground">{busy ? "Saving…" : st?.state === "saved" ? "Saved" : ""}</span>
-                </div>
-                {code === "ANY" ? (
-                  <p className="text-xs text-muted-foreground">Salary is set per country.</p>
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <SalaryCell code={code} salaries={salaries} busy={busy}
-                      onSave={(v) => void saveSalary(code, v)} />
-                  </div>
-                )}
-                {st?.state === "error" && <p role="alert" className="break-words text-xs text-destructive">{st.message}</p>}
-              </li>
-            );
-          })}
-        </ul>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {adding ? (
-            <CountryPicker label="Add a country" tags={[]} testId="work-grid-picker" onChange={(codes) => {
-              setAdding(false);
-              for (const c of codes) void write(`grid-${c}`, (b) => withPlace(b, c));
-            }} />
-          ) : (
-            <button type="button" data-testid="work-grid-add" className={`${CHIP} border-border`} onClick={() => setAdding(true)}>
-              Add a country
-            </button>
-          )}
-          {!hasAny && (
-            <button type="button" data-testid="work-grid-add-any" className={`${CHIP} border-border`}
-              onClick={() => void write("grid-ANY", (b) => withPlace(b, "ANY"))}>
-              Add all other countries
-            </button>
-          )}
-        </div>
       </div>
     </section>
   );

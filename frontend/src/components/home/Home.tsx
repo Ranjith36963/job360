@@ -10,7 +10,6 @@ import { AskCard } from "@/components/needs-you/NeedsYou";
 import { RunProblems } from "@/components/needs-you/RunProblems";
 import { DutyStatus } from "@/components/home/DutyStatus";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
-import { HomeAssistantNotes } from "@/components/home/HomeAssistantNotes";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
 import { SetupCard } from "@/components/profile/SetupProgress";
 import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
@@ -214,8 +213,6 @@ export function Home() {
         className={`grid gap-10 ${showRail ? "min-[1000px]:grid-cols-[minmax(0,1fr)_332px] min-[1000px]:gap-0" : ""}`}
       >
         <div className="flex min-w-0 flex-col gap-10 min-[1000px]:pr-10">
-          <HomeAssistantNotes />
-
           <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
             <div className="min-w-0 flex-1 basis-80">
               <p className="font-mono text-xs text-faint" data-testid="home-date">

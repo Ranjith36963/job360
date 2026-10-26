@@ -20,6 +20,10 @@ import {
 import { apiErrorMessage } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AssistantTab } from "@/components/profile/AssistantTab";
+import { AssistantInstructions } from "@/components/connect/AssistantInstructions";
+import { JobSitesPanel } from "@/components/connect/JobSitesPanel";
+import { CalendarFeedSection } from "@/components/settings/CalendarFeedSection";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import {
@@ -782,11 +786,13 @@ function DeveloperTokensSection({
 // Page
 // ---------------------------------------------------------------------------
 
-const TAB_KEYS = ["setup", "schedules", "apps", "developers"] as const;
+const TAB_KEYS = ["setup", "assistant", "schedules", "job-sites", "apps", "developers"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 const TAB_LABELS: Record<TabKey, string> = {
   setup: "Setup",
+  assistant: "Assistant configure",
   schedules: "Schedules & start links",
+  "job-sites": "Job sites",
   apps: "Connected apps",
   developers: "Developers",
 };
@@ -1018,6 +1024,15 @@ function ConnectAgentPageInner() {
           <ExamplePromptsCard />
         </TabsContent>
 
+        <TabsContent value="assistant" className="space-y-8">
+          <AssistantTab />
+          <AssistantInstructions />
+        </TabsContent>
+
+        <TabsContent value="job-sites" className="space-y-8">
+          <JobSitesPanel />
+        </TabsContent>
+
         <TabsContent value="schedules" className="space-y-8">
           <DailyCheckCard
             dailyCheck={dailyCheck}
@@ -1032,6 +1047,7 @@ function ConnectAgentPageInner() {
           />
           <SendStartsAssistantCard />
           <DutyStartLinksCard />
+          <CalendarFeedSection />
         </TabsContent>
 
         <TabsContent value="apps" className="space-y-8">

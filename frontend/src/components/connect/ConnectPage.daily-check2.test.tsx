@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import ConnectAgentPage from "../page";
+import ConnectAgentPage from "./ConnectPage";
 
 // The page reads ?tab= from the URL (Setup | Schedules | Connected apps | Developers).
 const nav = vi.hoisted(() => ({ tab: "schedules" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  usePathname: () => "/settings/connect",
+  usePathname: () => "/connect",
   useSearchParams: () => new URLSearchParams(`tab=${nav.tab}`),
 }));
 
@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 const listTokens = vi.fn();
 const listGrants = vi.fn();
 
+vi.mock("@/components/settings/CalendarFeedSection", () => ({ CalendarFeedSection: () => null }));
 vi.mock("@/lib/api", () => ({
   createToken: vi.fn(),
   listGrants: (...args: unknown[]) => listGrants(...args),

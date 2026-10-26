@@ -7,13 +7,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import ConnectAgentPage from "./page";
+import ConnectAgentPage from "./ConnectPage";
 
 // The page reads ?tab= from the URL (Setup | Schedules | Connected apps | Developers).
 const nav = vi.hoisted(() => ({ tab: "schedules" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  usePathname: () => "/settings/connect",
+  usePathname: () => "/connect",
   useSearchParams: () => new URLSearchParams(`tab=${nav.tab}`),
 }));
 
@@ -26,6 +26,7 @@ const connectedTokens = [
   { id: 1, name: "cli", prefix: "j360_ab", created_at: "2026-10-01T00:00:00Z" },
 ];
 
+vi.mock("@/components/settings/CalendarFeedSection", () => ({ CalendarFeedSection: () => null }));
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
   getProfile: () => getProfile(),

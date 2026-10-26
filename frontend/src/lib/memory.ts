@@ -18,7 +18,16 @@ export const LANGUAGES = "user_info.languages";
 export const EQUALITY = "user_info.equality";
 export const ANSWERS = "user_info.answers";
 export const SALARY = "preferences.salary_by_country";
-export const MEMORY_PATHS = [CONTACT, RTW, LOGISTICS, LANGUAGES, EQUALITY, ANSWERS, SALARY] as const;
+// Owner decision 2026-10-26: what the setup's "targets" round asks lives in
+// Memory -> Job targets (it left the CV tab). Each is a whole preference.
+export const TARGET_PATHS = [
+  "preferences.target_job_titles", "preferences.experience_level", "preferences.experience_years_min",
+  "preferences.experience_years_max", "preferences.preferred_locations", "preferences.work_arrangement",
+  "preferences.looking_for", "preferences.dealbreakers",
+] as const;
+export const MEMORY_PATHS = [CONTACT, RTW, LOGISTICS, LANGUAGES, EQUALITY, ANSWERS, SALARY, ...TARGET_PATHS] as const;
+export const EXPERIENCE_OPTIONS = ["entry", "mid", "senior", "lead", "executive"] as const;
+export const ARRANGEMENT_OPTIONS = ["remote", "hybrid", "onsite"] as const;
 
 export const PNS = "Prefer not to say";
 export const WORK_AUTH_OPTIONS = ["citizen", "permanent_resident", "visa", "needs_sponsorship"] as const;
@@ -44,6 +53,8 @@ export const FIELD_LABEL: Record<string, string> = {
   phone: "Phone",
   address: "Home address",
   date_of_birth: "Date of birth",
+  residence_country: "Country you live in",
+  residence_city: "City you live in",
   preferred_name: "Preferred name",
   work_authorization: "Allowed to work here",
   needs_sponsorship: "Needs sponsorship",
@@ -163,6 +174,10 @@ export function contactRows(): RowSpec[] {
     single(CONTACT, `${CONTACT}.phone`, "phone", "text", d),
     { id: `${CONTACT}.address`, path: CONTACT, label: FIELD_LABEL.address, scope: d, sensitive: true, composite: true, parts: ADDRESS_PARTS },
     single(CONTACT, `${CONTACT}.date_of_birth`, "date_of_birth", "date", d),
+    // Owner, 2026-10-26: where you live now is its own question, apart from
+    // citizenship. A typed name ("United Kingdom") is stored as its code (GB).
+    single(CONTACT, `${CONTACT}.residence_country`, "residence_country", "text", d, { placeholder: "e.g. United Kingdom" }),
+    single(CONTACT, `${CONTACT}.residence_city`, "residence_city", "text", d, { placeholder: "e.g. London" }),
   ];
 }
 
@@ -220,6 +235,25 @@ export function equalityRows(): RowSpec[] {
   return ["gender", "ethnicity", "disability", "veteran", "sexual_orientation", "transgender"].map((k) =>
     single(EQUALITY, `${EQUALITY}.${k}`, k, "text", d, { pns: true }),
   );
+}
+
+/** The job targets, one row per preference (lists are one item per line). */
+export function targetRows(): RowSpec[] {
+  const w = { kind: "whole" } as const;
+  const row = (key: string, label: string, input: PartInput, extra: Partial<Part> = {}): RowSpec => ({
+    id: `preferences.${key}`, path: `preferences.${key}`, label, scope: w, sensitive: false,
+    parts: [{ key, label, input, ...extra }],
+  });
+  return [
+    row("target_job_titles", "Roles", "textarea", { placeholder: "One per line" }),
+    row("experience_level", "Level", "select", { options: EXPERIENCE_OPTIONS }),
+    row("experience_years_min", "Years of experience, from", "number"),
+    row("experience_years_max", "Years of experience, up to", "number"),
+    row("preferred_locations", "Locations", "textarea", { placeholder: "One per line" }),
+    row("work_arrangement", "Work arrangement", "select", { options: ARRANGEMENT_OPTIONS }),
+    row("looking_for", "What you look for", "textarea", { placeholder: "One per line" }),
+    row("dealbreakers", "Dealbreakers", "textarea", { placeholder: "One per line" }),
+  ];
 }
 
 export function salaryRow(code: string): RowSpec {
@@ -284,7 +318,9 @@ export function writeRow(spec: RowSpec, block: Block, value: unknown): unknown {
     }
     return out;
   };
-  if (scope.kind === "whole") return isEmpty(value) ? [] : value;
+  // Languages clear to []; any other whole value (a preference) clears to null,
+  // which the server accepts as "not set" for every path (rule #29).
+  if (scope.kind === "whole") return isEmpty(value) ? (spec.path === LANGUAGES ? [] : null) : value;
   if (scope.kind === "dict") return apply(isObj(block) ? block : {});
   if (scope.kind === "country") {
     const base = isObj(block) ? block : {};
@@ -445,11 +481,16 @@ export function showRow(spec: RowSpec, value: unknown): string {
   if (key === "remote_priority" || key === "onsite_priority") return PRIORITY_LABEL[String(value)] ?? String(value);
   if (key === "work_authorization") return WORK_AUTH_LABEL[String(value)] ?? String(value);
   if (key === "citizenship" && Array.isArray(value)) return value.map((c) => countryName(String(c))).join(", ");
+  if (key === "residence_country") return countryName(String(value));
   if (key === "languages" && Array.isArray(value)) {
     return recordsOf(value).map((r) => `${String(r.language)} (${String(r.level)})`).join(" · ");
   }
   if (key === "visa_expires" || key === "date_of_birth") return formatDateText(String(value));
   if (key === "travel_ok_pct") return `${String(value)}%`;
+  if (key === "experience_level" || key === "work_arrangement") {
+    const t = String(value);
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
   return Array.isArray(value) ? value.join(", ") : String(value);
 }
 

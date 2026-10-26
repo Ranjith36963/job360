@@ -99,7 +99,7 @@ export function splitReady(items: ReadyCardData[]): { clean: ReadyCardData[]; he
 /** Where "Answer" goes for a held row: missing facts live in Memory, anything else on the card. */
 export function answerHref(c: ReadyCardData): string {
   return c.flags[0]?.code === "missing" && c.flags[0].key !== "job_country"
-    ? "/profile?tab=memory"
+    ? "/profile/memory"
     : `/applications/${c.application_id}`;
 }
 

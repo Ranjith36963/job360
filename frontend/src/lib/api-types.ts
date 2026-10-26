@@ -987,6 +987,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asks/{ask_id}/answers/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save Ask Row Answers
+         * @description Save the rows the user edited or checked on a job card, at once, while the ask stays open
+         *     (owner bug 2026-10-26: an edit was lost on reload). Session only - an open ask's saved rows are
+         *     always the user's own word, so a personal or consent row may read as checked from them. No MCP twin.
+         */
+        post: operations["save_ask_row_answers_api_asks__ask_id__answers_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asks/{ask_id}/confirm": {
         parameters: {
             query?: never;
@@ -8006,6 +8028,12 @@ export interface components {
             changed_reason?: ("owner_edit" | "approved_for_employer" | "saved_answer") | null;
             /** Changed To */
             changed_to?: string | null;
+            /**
+             * Check
+             * @default verify
+             * @enum {string}
+             */
+            check: "verify" | "confirm";
             /** Key */
             key?: string | null;
             /** Question */
@@ -8828,6 +8856,13 @@ export interface components {
             fit: components["schemas"]["ApplicationFitOut"];
             line: components["schemas"]["SaveFitLineOut"];
             visa?: components["schemas"]["ApplicationVisaOut"] | null;
+        };
+        /** SaveRowAnswersRequest */
+        SaveRowAnswersRequest: {
+            /** Answers */
+            answers: {
+                [key: string]: string;
+            };
         };
         /** SaveTemplateRequest */
         SaveTemplateRequest: {
@@ -11976,6 +12011,45 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AnswerAskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_ask_row_answers_api_asks__ask_id__answers_save_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ask_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveRowAnswersRequest"];
             };
         };
         responses: {

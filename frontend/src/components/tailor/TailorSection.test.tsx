@@ -37,7 +37,7 @@ describe("TailorSection", () => {
     render(<TailorSection jobId={7} applicationId={3} />);
     expect(screen.getByRole("link", { name: /connect your assistant/i })).toHaveAttribute(
       "href",
-      "/settings/connect"
+      "/connect"
     );
   });
 

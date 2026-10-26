@@ -1,17 +1,14 @@
 /**
- * PreferencesForm — visa sponsorship control.
+ * PreferencesForm — visa answers left the CV tab (owner, 2026-10-26).
  *
- * needs_visa is stored on the profile so the user's own agent knows whether
- * sponsorship is required when it judges a job's fit. It had NO UI control
- * anywhere until 2026-08-08, so the field was always the default False and
- * the agent had no way to know a user needed one. These tests pin the
- * round-trip: the checkbox must hydrate from a saved value AND send its new
- * value on change — and, per the serialize/hydrate symmetry the component
- * depends on, hydration alone must NOT fire a save.
+ * needs_visa, the countries where the user can already work, and salary now
+ * live in Memory -> Job targets (the "Where you'll work" grid). This card has
+ * no control for them and never sends them, so the server keeps each one as
+ * stored and a stale copy here can never overwrite a newer answer.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { PreferencesForm } from "./PreferencesForm";
 
 const VISA_LABEL = /i need visa sponsorship/i;
@@ -23,22 +20,26 @@ describe("PreferencesForm — visa sponsorship", () => {
     vi.clearAllMocks();
   });
 
-  it("renders a visa control (the dimension had no front door before)", () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
-    expect(screen.getByLabelText(VISA_LABEL)).toBeTruthy();
+  it("the CV tab has no visa control: visa answers live in Memory, Job targets", () => {
+    render(<PreferencesForm preferences={{ needs_visa: true }} onSave={vi.fn()} loading={false} />);
+    expect(screen.queryByLabelText(VISA_LABEL)).toBeNull();
+    expect(screen.queryByTestId("work-authorization-countries")).toBeNull();
   });
 
-  it("hydrates as checked from a saved needs_visa=true", () => {
+  it("a save never sends needs_visa, so a stored answer is kept as it is", async () => {
+    // The server keeps an omitted key as stored; a stale copy here can never overwrite it.
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(
-      <PreferencesForm
-        preferences={{ needs_visa: true }}
-        onSave={onSave}
-        loading={false}
-      />
-    );
-    expect((screen.getByLabelText(VISA_LABEL) as HTMLInputElement).checked).toBe(true);
+    render(<PreferencesForm preferences={{ needs_visa: true }} onSave={onSave} loading={false} />);
+    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
+      target: { value: "Data engineer" },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(900);
+    });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.about_me).toBe("Data engineer");
+    for (const key of ["needs_visa"]) expect(sent).not.toHaveProperty(key);
   });
 
   it("does NOT save on hydration (serialize/hydrate symmetry)", async () => {
@@ -56,19 +57,20 @@ describe("PreferencesForm — visa sponsorship", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it("sends needs_visa=true when the user ticks the box", async () => {
+  it("a save never sends the countries where the user can already work", async () => {
+    // Kept as stored; edited in Memory (Job targets) only.
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
-
-    fireEvent.click(screen.getByLabelText(VISA_LABEL));
-    expect(onSave).not.toHaveBeenCalled(); // debounced
-
+    render(<PreferencesForm preferences={{ work_authorization_countries: ["GB", "IN"] }} onSave={onSave} loading={false} />);
+    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
+      target: { value: "Data engineer" },
+    });
     await act(async () => {
       vi.advanceTimersByTime(900);
     });
-    expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ needs_visa: true })
-    );
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.about_me).toBe("Data engineer");
+    for (const key of ["work_authorization_countries"]) expect(sent).not.toHaveProperty(key);
   });
 });
 
@@ -84,27 +86,19 @@ describe("PreferencesForm — work authorization countries", () => {
     vi.clearAllMocks();
   });
 
-  it("labels the field without naming the UK, and searches by country name to save the ISO code", async () => {
+  it("a save never sends salary, so the stored range is kept", async () => {
+    // Salary is set per country in Memory (Job targets).
     const onSave = vi.fn().mockResolvedValue(undefined);
-    render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
-
-    const field = screen.getByTestId("work-authorization-countries");
-    expect(
-      within(field).getByText("Countries where I can already work (no visa needed)")
-    ).toBeTruthy();
-
-    const input = within(field).getByLabelText(/search countries/i);
-    fireEvent.change(input, { target: { value: "United Kingdom" } });
-    fireEvent.click(within(field).getByRole("option", { name: "United Kingdom" }));
-
-    // Displayed as the country name, stored as the ISO code.
-    expect(within(field).getByText("United Kingdom")).toBeTruthy();
-
+    render(<PreferencesForm preferences={{ salary_min: 50000, salary_max: 70000 }} onSave={onSave} loading={false} />);
+    fireEvent.change(screen.getByPlaceholderText(/Experienced data scientist/), {
+      target: { value: "Data engineer" },
+    });
     await act(async () => {
       vi.advanceTimersByTime(900);
     });
-    expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ work_authorization_countries: ["GB"] })
-    );
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const sent = onSave.mock.calls[0][0];
+    expect(sent.about_me).toBe("Data engineer");
+    for (const key of ["salary_min", "salary_max", "salary_by_country"]) expect(sent).not.toHaveProperty(key);
   });
 });

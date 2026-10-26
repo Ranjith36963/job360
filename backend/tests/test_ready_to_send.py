@@ -113,6 +113,7 @@ async def test_each_flag_fires_on_its_own_row_and_is_absent_otherwise(authentica
         assert _codes(cards[none]) == ["no_answers"]
         assert _codes(cards[guess]) == ["guessed", "sensitive"]  # "Visa?" is also a private question
         assert cards[guess]["flags"][0]["text"] == "An answer was guessed: Visa?"
+        assert {a["question"]: a["check"] for a in cards[guess]["answers"]}["Visa?"] == "verify"  # a reused fact
         assert _codes(cards[blank]) == ["blank"] and cards[blank]["flags"][0]["text"] == "An answer is blank: Middle name"
         assert _codes(cards[gone]) == ["not_in_memory"]
         assert _codes(cards[nocv]) == ["no_cv"]
@@ -300,3 +301,17 @@ def test_missing_flags_list_only_what_the_form_asks_not_salary():
         {"key": "right_to_work.DE.work_authorization", "why": "x"},
     ]
     assert [f["key"] for f in _missing_flags(profile, missing, "DE")] == ["right_to_work.DE.work_authorization"]
+
+
+@pytest.mark.asyncio
+async def test_a_written_answer_reads_confirm_and_a_fact_reads_verify(authenticated_async_context):
+    """Owner 2026-10-26: the card says which check each answer needs (value, not just the key)."""
+    async with authenticated_async_context() as client:
+        await _memory(client)
+        app_id = await _bring(client, title="Essay role", apply_url="https://essay.example/c/1")
+        await _cv(client, app_id)
+        essay = "At Calnex I built a Bedrock RAG pipeline; I would bring the same care to Northwind's data."
+        await _fill(client, app_id, [*FULL, {"question": "Why this team?", "answer": essay, "source": "written"}])
+        [card] = [c for c in (await _ready(client))["items"] if c["application_id"] == app_id]
+        checks = {a["question"]: a["check"] for a in card["answers"]}
+        assert checks["Why this team?"] == "confirm" and checks["Full name"] == "verify"

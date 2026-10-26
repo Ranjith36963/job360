@@ -23,8 +23,9 @@ const AGENT_EDITS = [
     set_at: "2026-09-01T10:00:00Z",
   },
   {
-    path: "preferences.work_arrangement",
-    value: "remote",
+    // A field the CV tab still shows (work arrangement moved to Memory, 2026-10-26).
+    path: "preferences.about_me",
+    value: "Data engineer",
     previous_value: "",
     set_by: "agent:cli",
     set_at: "2026-09-02T11:00:00Z",
@@ -57,12 +58,12 @@ const MOCK_PROFILE = {
     industries: [],
     salary_min: null,
     salary_max: null,
-    // The overlaid value — the page shows the already-merged value; the mark
-    // is what tells the seeker an agent (not them) set it.
-    work_arrangement: "remote",
+    work_arrangement: "",
     experience_level: "",
     negative_keywords: [],
-    about_me: "",
+    // The overlaid value — the page shows the already-merged value; the mark
+    // is what tells the seeker an agent (not them) set it.
+    about_me: "Data engineer",
     needs_visa: false,
   },
   cv_detail: {
@@ -76,7 +77,7 @@ const MOCK_PROFILE = {
     experience_text: "",
     name: "Test User",
     headline: "",
-    // Overlaid value, same reasoning as work_arrangement above.
+    // Overlaid value, same reasoning as about_me above.
     location: "London, UK",
     achievements: [],
     // R9's new field — one https:// link (renders as an anchor) and one
@@ -133,14 +134,14 @@ test.describe("Profile page — agent-edit provenance mark", () => {
     await expect(nameHeading).toBeVisible();
     await expect(nameHeading).not.toContainText("Changed by");
 
-    // preferences.work_arrangement carries an edit — its label shows the mark.
-    const workArrangementLabel = page.locator("label", { hasText: "Work Arrangement" });
-    await expect(workArrangementLabel).toContainText("Changed by cli · was empty");
+    // preferences.about_me carries an edit — its label shows the mark.
+    const aboutMeLabel = page.locator("label", { hasText: "About Me" });
+    await expect(aboutMeLabel).toContainText("Changed by cli · was empty");
 
-    // preferences.target_job_titles carries NO edit — no mark on its label.
-    const targetTitlesLabel = page.locator("label", { hasText: "Target Job Titles" });
-    await expect(targetTitlesLabel).toBeVisible();
-    await expect(targetTitlesLabel).not.toContainText("Changed by");
+    // preferences.industries carries NO edit — no mark on its label.
+    const industriesLabel = page.locator("label", { hasText: "Industries" });
+    await expect(industriesLabel).toBeVisible();
+    await expect(industriesLabel).not.toContainText("Changed by");
 
     // Exactly two marks on the whole page — one per edited path, no more.
     await expect(page.getByTestId("agent-edit-mark")).toHaveCount(2);
@@ -165,23 +166,23 @@ test.describe("Profile page — agent-edit provenance mark", () => {
       takenBack = route.request().postDataJSON();
       const after = {
         ...MOCK_PROFILE,
-        preferences: { ...MOCK_PROFILE.preferences, work_arrangement: "" },
-        agent_edits: AGENT_EDITS.filter((e) => e.path !== "preferences.work_arrangement"),
+        preferences: { ...MOCK_PROFILE.preferences, about_me: "" },
+        agent_edits: AGENT_EDITS.filter((e) => e.path !== "preferences.about_me"),
       };
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(after) });
     });
     // ONE combined history for the whole preferences section (owner
     // decision, 2026-09-27) — FieldHistory fetches every preference path,
-    // so only `preferences.work_arrangement` returns real rows here; every
+    // so only `preferences.about_me` returns real rows here; every
     // other path answers empty, keeping the merged list to exactly these 2.
     await page.route("**/api/profile/edits/history**", (route) => {
       const url = new URL(route.request().url());
       const path = url.searchParams.get("path");
       const rows =
-        path === "preferences.work_arrangement"
+        path === "preferences.about_me"
           ? [
-              { value: "remote", set_by: "agent:cli", set_at: "2026-09-02T11:00:00Z" },
-              { value: "hybrid", set_by: "web", set_at: "2026-09-01T09:00:00Z" },
+              { value: "Data engineer", set_by: "agent:cli", set_at: "2026-09-02T11:00:00Z" },
+              { value: "ML engineer", set_by: "web", set_at: "2026-09-01T09:00:00Z" },
             ]
           : [];
       return route.fulfill({
@@ -205,15 +206,15 @@ test.describe("Profile page — agent-edit provenance mark", () => {
     const rows = page.getByTestId("field-history-row");
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText("cli");
-    await expect(rows.nth(0)).toContainText("remote");
+    await expect(rows.nth(0)).toContainText("Data engineer");
     await expect(rows.nth(1)).toContainText("You");
-    await expect(rows.nth(1)).toContainText("hybrid");
+    await expect(rows.nth(1)).toContainText("ML engineer");
 
-    // Take back the work-arrangement change.
-    const workArrangementLabel = page.locator("label", { hasText: "Work Arrangement" });
-    await workArrangementLabel.getByRole("button", { name: "Take back cli's change" }).click();
-    await expect.poll(() => takenBack).toEqual({ path: "preferences.work_arrangement" });
-    await expect(workArrangementLabel).not.toContainText("Changed by");
+    // Take back the About me change.
+    const aboutMeLabel = page.locator("label", { hasText: "About Me" });
+    await aboutMeLabel.getByRole("button", { name: "Take back cli's change" }).click();
+    await expect.poll(() => takenBack).toEqual({ path: "preferences.about_me" });
+    await expect(aboutMeLabel).not.toContainText("Changed by");
     await expect(page.getByTestId("agent-edit-mark")).toHaveCount(1);
     await expect(page.getByText(/set by your assistant/)).toHaveCount(0);
   });
