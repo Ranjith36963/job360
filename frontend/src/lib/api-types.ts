@@ -2760,8 +2760,8 @@ export interface paths {
          *     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
          *     (``user_info.*``: contact, right to work, logistics, languages, equality
          *     answers, saved answers): the base column and the assistant's overlay rows.
-         *     It takes no version snapshot (it copies the memory into ``profile_edits``
-         *     first instead, ``_snapshot_memory_then_clear``) and leaves the CV, the
+         *     It takes no version snapshot and ERASES the user's earlier ``user_info.*``
+         *     history rows (``_erase_memory_then_clear``), and leaves the CV, the
          *     preferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
          *     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
          *     ``github`` leave it alone; only ``all`` resets it.

@@ -1099,37 +1099,36 @@ def record_edits(
     return applied
 
 
-def record_snapshot_then_clear(
-    user_id: str, actor: str, snapshot: list[tuple[str, Any]], clear_paths: Iterable[str]
-) -> int:
-    """Append each ``snapshot`` value, then a clearing row (``value = NULL``) for
-    every snapshot path and every ``clear_paths`` path, in ONE transaction.
+def erase_then_clear(user_id: str, actor: str, prefix: str, clear_paths: Iterable[str]) -> tuple[int, list[str]]:
+    """ERASE every ``profile_edits`` row of ``user_id`` under ``prefix`` (the user-info
+    memory, ``user_info.``), then append a clearing row (``value = NULL``) for each
+    erased path and each ``clear_paths`` path, in ONE transaction.
 
-    For a clear that wipes a BASE column no version snapshot covers (the
-    user-info memory): the values about to be wiped land in this append-only
-    history first, so the clear is recoverable (``path_history``, the export).
-    The clearing row follows in the same transaction, so a snapshot row is
-    never the newest row for its path and never becomes overlay.
-
-    Not validated, on purpose: the values are copied from what is already
-    stored, not taken from a caller, and a legacy shape refused by today's
-    validators would turn a clear into a 500. No rate limit (a person's own
-    clear). Returns the number of rows written.
+    Owner decision 2026-10-26: "Clear memory should erase. Just clear it." The one
+    erasure exception to append-only history besides account deletion
+    (``hard_delete_user``): the user's own earlier values for the cleared paths are
+    deleted, never copied. Only THIS user's rows, only paths under ``prefix``. The
+    clearing rows carry no value; they keep ``MAX(id)`` (``current_edit_id``, the
+    ``expected_profile_version`` check) moving forward, as every write does.
+    Returns ``(rows erased, paths cleared)``.
     """
-    snapshot_rows = [(path, json.dumps(value, default=str)) for path, value in snapshot]
-    cleared = list(dict.fromkeys([path for path, _ in snapshot] + list(clear_paths)))
-    rows = snapshot_rows + [(path, None) for path in cleared]
-    if not rows:
-        return 0
     now = datetime.now(timezone.utc).isoformat()
     row_source = SOURCE_USER_SAID if actor == WEB_ACTOR else ""
     with pgsync.connect(str(DB_PATH)) as conn, conn._raw.transaction():
-        for path, encoded in rows:
+        _take_edit_lock(conn, user_id)
+        stored = conn.execute("SELECT DISTINCT path FROM profile_edits WHERE user_id = ?", (user_id,)).fetchall()
+        erased_paths = sorted(str(r[0]) for r in stored if str(r[0]).startswith(prefix))
+        erased = 0
+        for path in erased_paths:
+            cur = conn.execute("DELETE FROM profile_edits WHERE user_id = ? AND path = ?", (user_id, path))
+            erased += max(cur.rowcount, 0)
+        cleared = list(dict.fromkeys([*erased_paths, *clear_paths]))
+        for path in cleared:
             conn.execute(
                 "INSERT INTO profile_edits (user_id, path, value, set_by, set_at, source) VALUES (?, ?, ?, ?, ?, ?)",
-                (user_id, path, encoded, actor, now, row_source),
+                (user_id, path, None, actor, now, row_source),
             )
-    return len(rows)
+    return erased, cleared
 
 
 def field_values(profile: UserProfile, paths: Iterable[str]) -> dict[str, Any]:
