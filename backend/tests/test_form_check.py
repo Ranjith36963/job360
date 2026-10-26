@@ -746,3 +746,24 @@ async def test_each_page_of_a_multi_page_form_is_judged_by_its_newest_check(
         assert (await _post_event(client, app_id, "form_swept", sweep)).status_code == 201
         resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": form})
         assert resp.json()["reason"] != "required_unanswered"
+
+
+@pytest.mark.asyncio
+async def test_an_approved_answer_an_assistant_saved_still_waits_on_a_private_question(
+    authenticated_async_context, fixture_user_id
+):
+    """Review of #1263: an assistant can write approved: true itself (the Cadence H1B "Yes" was saved
+    that way). Only the user's own save fills a private question without their click."""
+    from src.api.main import app
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                               headers={"Authorization": f"Bearer {token}"}) as agent:
+            saved = await agent.patch("/api/profile", json={"edits": [{"path": "user_info.answers", "value": [
+                {"question": "notice period in days", "answer": "30", "approved": True}]}]})
+            assert saved.status_code == 200, saved.text
+        [row] = (await _form_check(client, app_id, [{"question": "Notice period (In days)?"}])).json()["answered"]
+        assert (row["value"], row.get("needs_confirmation")) == ("30", True)
