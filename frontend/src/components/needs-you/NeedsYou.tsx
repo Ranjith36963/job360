@@ -6,9 +6,8 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
-import { OutcomeSuggestions } from "./OutcomeSuggestions";
-import { UnmatchedMail } from "./UnmatchedMail";
-import { SettingRequestCard } from "./SettingRequestCard";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { OtherList } from "./OtherList";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
 import { askerName, whoLabel } from "@/lib/event-labels";
@@ -315,6 +314,8 @@ export function NeedsYou() {
   const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
+  // Answered is folded until the user opens it (owner plan 3b).
+  const [showAnswered, setShowAnswered] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The badge counts the questions, the changes waiting for an OK AND what is ready to send.
@@ -432,42 +433,35 @@ export function NeedsYou() {
         {!(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
         <JobCards open={open} onChanged={load} onReport={setJobs} />
       </section>
-      <OutcomeSuggestions />
-      {waiting.length > 0 && (
-        <section aria-labelledby="waiting-ok" className="flex flex-col gap-3">
-          <h2 id="waiting-ok" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-            Waiting for your OK
-          </h2>
-          <ul className="flex flex-col gap-3" data-testid="waiting-for-ok">
-            {waiting.map((r) => (
-              <SettingRequestCard key={r.id} request={r} onChanged={load} />
-            ))}
-          </ul>
-        </section>
-      )}
-      {general.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-medium" data-testid="other-questions">Other questions</h3>
-          <ul className="flex flex-col gap-3">
-            {general.map((a) => (
-              <AskCard key={a.id} ask={a} mode="open" onChanged={load} />
-            ))}
-          </ul>
-        </section>
-      )}
-      <UnmatchedMail />
+      <OtherList
+        waiting={waiting}
+        questions={general}
+        onChanged={load}
+        renderQuestion={(a) => <AskCard key={a.id} ask={a} mode="open" onChanged={load} />}
+      />
 
       {answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">
-          <h2 id="answered-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
-            Answered
+          <h2 id="answered-asks">
+            <button
+              type="button"
+              aria-expanded={showAnswered}
+              data-testid="answered-toggle"
+              onClick={() => setShowAnswered((v) => !v)}
+              className="flex items-center gap-1 font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint hover:text-foreground"
+            >
+              {showAnswered ? <ChevronDown aria-hidden className="size-3.5" /> : <ChevronRight aria-hidden className="size-3.5" />}
+              Answered ({answered.length}{moreAnswered ? "+" : ""})
+            </button>
           </h2>
-          <ul className="flex flex-col gap-2">
-            {answered.map((a) => (
-              <AnsweredRow key={a.id} ask={a} onChanged={load} />
-            ))}
-          </ul>
-          {moreAnswered && (
+          {showAnswered && (
+            <ul className="flex flex-col gap-2">
+              {answered.map((a) => (
+                <AnsweredRow key={a.id} ask={a} onChanged={load} />
+              ))}
+            </ul>
+          )}
+          {showAnswered && moreAnswered && (
             <div>
               <button
                 type="button"
