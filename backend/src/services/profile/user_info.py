@@ -61,6 +61,9 @@ _RTW_COUNTRY: dict[str, str] = {
     # Owner decision 2026-10-10 - what people really say: "remote anywhere, on-site only if
     # sponsored". `country` may also be "ANY" = every other country.
     "remote_ok": "bool", "onsite": "onsite", "note": "line",
+    # Owner decision 2026-10-26 (job priority sketch) - contract roles OK in this place.
+    # Empty = not answered (rule #29), never a default.
+    "contract_ok": "bool",
     # Owner decision 2026-10-19 - the user's own order of search effort per place
     # (job_priority.PRIORITY_LEVELS). Empty = not chosen (rule #29), never a default.
     "remote_priority": "priority", "onsite_priority": "priority",
