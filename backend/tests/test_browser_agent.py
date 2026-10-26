@@ -13,6 +13,7 @@ Three layers, each pinned here:
 """
 from __future__ import annotations
 
+import re
 import socket
 
 import pytest
@@ -1963,7 +1964,9 @@ async def test_look_shows_the_address_without_its_secret(page_url, shown):
     page = _FakePage(page_url)
     out = await look(Session(context=page.context, page=page))
     assert out["url"] == shown
-    assert "abc" not in str(out) and "secret" not in str(out) and "S1" not in str(out)
+    # The page-text fence carries a random hex nonce that can itself read "abc": drop it first.
+    seen = re.sub(r"<<(end )?page-text [0-9a-f]+>>", "", str(out))
+    assert "abc" not in seen and "secret" not in seen and "S1" not in seen
 
 
 def test_load_failed_and_error_text_carry_no_secret_either():

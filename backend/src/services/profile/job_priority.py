@@ -19,8 +19,10 @@ from typing import Any, Optional
 from src.services.profile.regions import REGIONS, is_region, record_code_for
 from src.services.profile.user_info import ANY_COUNTRY, PRIORITY_LEVELS
 
-REMOTE, ONSITE = "remote", "onsite"
-PRIORITY_KEYS = {REMOTE: "remote_priority", ONSITE: "onsite_priority"}
+REMOTE, ONSITE, CONTRACT = "remote", "onsite", "contract"
+# CONTRACT (owner decision 2026-10-26) ranks contract roles in a place; a job carries
+# no contract flag, so the applications filter keeps to remote / on-site.
+PRIORITY_KEYS = {REMOTE: "remote_priority", ONSITE: "onsite_priority", CONTRACT: "contract_priority"}
 OFF = "off"
 NOT_SET = "not_set"
 # Effort weights for the hunt split. A place with no level chosen gets the middle
