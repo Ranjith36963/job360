@@ -28,19 +28,16 @@ const CONTAINS_PLACEHOLDER = [
   "[...]",
 ];
 const ONLY_DOTS = /^[\s.…]*$/;
-// Questions that ask for writing, not a fact. "how" and "tell us" only in their essay forms.
-const ESSAY_QUESTION =
-  /\b(describe|explain|essay|cover letter|motivation|why)\b|\btell us (about|why|how|what)\b|\bhow (would|do|did|have|has) you\b(?!.*\bhear\b)/i;
 
 /** True when the stored answer describes a draft instead of being the draft (for example
  *  "drafted from profile facts"). Narrow on purpose: short factual answers are not placeholders. */
-export function looksLikePlaceholder(question: string, answer: string | null | undefined): boolean {
+export function looksLikePlaceholder(_question: string, answer: string | null | undefined): boolean {
   const a = (answer ?? "").trim();
   if (a === "") return false;
   const low = a.toLowerCase();
   if (STARTS_DRAFT.test(low)) return true;
   if (ONLY_DOTS.test(a)) return true;
   if (/\btbd\b/.test(low)) return true;
-  if (CONTAINS_PLACEHOLDER.some((p) => low.includes(p))) return true;
-  return ESSAY_QUESTION.test(question ?? "") && a.length < 60;
+  // Never by length alone: "Relocating" is a real answer to "Why are you leaving?".
+  return CONTAINS_PLACEHOLDER.some((p) => low.includes(p));
 }

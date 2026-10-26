@@ -15,8 +15,6 @@ describe("looksLikePlaceholder", () => {
     ["Anything", "placeholder text"],
     ["Anything", "..."],
     ["Anything", "[...]"],
-    ["Why do you want this job?", "Because I like it."],
-    ["Describe your experience", "Five years."],
   ])("%s / %s is a placeholder", (q, a) => expect(looksLikePlaceholder(q, a)).toBe(true));
 
   it.each([
@@ -28,6 +26,8 @@ describe("looksLikePlaceholder", () => {
     ["Tell us your notice period", "1 month"],
     ["Anything", ""],
     ["Anything", "Drafting tools: Figma"],
+    ["Why are you leaving?", "Relocating"],
+    ["Describe your right to work", "UK citizen"],
   ])("%s / %s is a real answer", (q, a) => expect(looksLikePlaceholder(q, a)).toBe(false));
 
   it("a real 400-character essay is not a placeholder", () => {
