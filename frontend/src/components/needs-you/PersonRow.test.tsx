@@ -81,13 +81,13 @@ describe("PersonRow", () => {
 
   it("has no browser button without own_browser_task", () => {
     show(person({ linkedin_state: "connected" }));
-    expect(screen.queryByText("Send with my own browser")).toBeNull();
+    expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
     expect(screen.queryByText("Don't send")).toBeNull();
   });
 
   it("approves with the task's message_id", async () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you", 77) }));
-    fireEvent.click(screen.getByText("Send with my own browser"));
+    fireEvent.click(screen.getByTestId("own-browser-send-4"));
     await waitFor(() =>
       expect(requestJson).toHaveBeenCalledWith("/api/contacts/4/own-browser-send", "POST", { message_id: 77, decision: "approve" }));
     expect(onChanged).toHaveBeenCalled();
@@ -109,9 +109,9 @@ describe("PersonRow", () => {
     expect(screen.queryByTestId("own-browser-cancel-4")).toBeNull();
   });
 
-  it("declined offers Send with my own browser again", () => {
+  it("declined offers Send again", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("declined") }));
-    expect(screen.getByTestId("own-browser-send-4")).toHaveTextContent("Send with my own browser");
+    expect(screen.getByTestId("own-browser-send-4")).toHaveTextContent(/^Send$/);
   });
 
   it("a 409 toasts that the draft changed and reloads", async () => {
@@ -124,7 +124,7 @@ describe("PersonRow", () => {
 
   it("ignores a malformed own_browser_task", () => {
     show(person({ linkedin_state: "connected", own_browser_task: { state: "weird", message_id: 1 } }));
-    expect(screen.queryByText("Send with my own browser")).toBeNull();
+    expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
   });
 
   it("shows the send browser label, and its reason only for own_browser or human", () => {
@@ -136,6 +136,21 @@ describe("PersonRow", () => {
     show(person({ linkedin_state: "connected", send_browser: { kind: "job360", label: "Job360's browser", reason: "first choice" } }));
     expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Job360's browser");
     expect(screen.queryByTestId("send-browser-reason-4")).toBeNull();
+  });
+
+  it("names Job360's browser beside Send when the backend sent no label, and the own browser when it did", () => {
+    const { unmount } = show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you") }));
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Job360's browser");
+    unmount();
+    show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you"),
+      send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Job360's browser could not sign in" } }));
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Needs your own browser: turn your PC on");
+    expect(screen.getByTestId("own-browser-send-4")).toHaveTextContent(/^Send$/);
+  });
+
+  it("shows no browser chip when nothing can be sent", () => {
+    show(person({ linkedin_state: "connected" }));
+    expect(screen.queryByTestId("send-browser-label-4")).toBeNull();
   });
 
   it("shows LinkedIn as the channel when the contact has no email", () => {

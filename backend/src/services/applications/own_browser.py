@@ -114,6 +114,26 @@ def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]
     return {**base, "state": "queued"}
 
 
+# A reason a claim holder gives a person back that means Job360's browser could not do it -> the routing word.
+FAILURE_FOR_RELEASE = {"captcha": "captcha", "login_wall": "login_required", "other": "manual_only"}
+
+
+def job360_failure(rows: list[dict[str, Any]]) -> str:
+    """The routing word for why Job360's browser gave this person up (``""`` = it has not): the NEWEST row after
+    the user's newest click on the newest message is a release for captcha / login_wall / other. Pure."""
+    messages = [r for r in rows if r["entry"] == "message"]
+    if not messages or messages[-1]["channel"] != "linkedin":
+        return ""
+    mid = str(messages[-1]["id"])
+    clicks = [r for r in rows if r["entry"] in (APPROVED, DECLINED) and str(r.get("text")) == mid]
+    if not clicks or clicks[-1]["entry"] != APPROVED:
+        return ""
+    later = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and int(r["id"]) > int(clicks[-1]["id"])]
+    if not later or later[-1]["entry"] != RELEASED:
+        return ""
+    return FAILURE_FOR_RELEASE.get(str(later[-1]["text"]), "")
+
+
 def public_task(task: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     """The four fields ``ContactOut.own_browser_task`` carries (never the claiming session's label)."""
     if task is None:

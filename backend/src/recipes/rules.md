@@ -461,14 +461,17 @@ save_artifact returned: `send` = press Send, then record outreach_sent; `ask` =
 save a Gmail draft (it shows on Needs you); `stop` = do not send. It counts only RECORDED
 sends against the daily and per-company caps. A guessed address (email_source pattern_guess) makes check_outreach answer `ask` (email_guessed): save a Gmail draft, the user sends. When a delivery-failure email (a bounce) arrives for outreach you sent, record_event outreach_bounced with contact_id, channel "email" and the bounce's Gmail message id as `source` (no detail text); check_outreach then answers `stop` (email_bounced) for that address on every contact until update_contact gives a new email (with its email_source). Never resend to a bounced address. Without browser control: save it as a
 Gmail draft; the saved message shows under People to reach on Needs you;
-the user sends. A LinkedIn or other-channel message is ALWAYS sent by the
+the user sends. A LinkedIn message is sent only after the user pressed Send on that person's card for that exact draft AND
+check_outreach(contact_id, message_id, session) says `send` (owner_clicked) while you hold the person
+(own_browser_queue take, in either browser); `outreach_send` = auto never covers it; follow get_recipe("own_browser"). An other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's
 Gmail Sent folder for a message to that address since this version was saved,
 AND check list_people for a `sent` mark on this contact recorded after this
 version's recorded_at; if either exists, do not send. In every mode record
 `outreach_sent` (record_event with contact_id+channel, or save_artifact's
-contact_id path for a cold contact) only when the Sent folder shows it, with
-its Gmail message id as `source`, or the user says it went. When outreach_send is
+contact_id path for a cold contact) for email only when the Sent folder shows it, with
+its Gmail message id as `source`, or the user says it went. LinkedIn: record outreach_sent at once after
+Send (own_browser recipe). When outreach_send is
 "draft_only" (the default, whatever the Gmail mode) it is draft only: save it, show it,
 the USER sends it, and you record outreach_sent only after the user tells you
 it actually went. outreach_send = "auto" never covers anything else: never send any other

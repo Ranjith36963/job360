@@ -29,7 +29,7 @@ RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 # AND a row here; tests/test_recipes.py pins that the two agree.
 RECIPE_NAMES: tuple[str, ...] = (
     "setup", "hunt", "research", "apply", "batch", "forms", "ats", "reach", "daily", "feedback", "prep", "debrief",
-    "review", "rules",
+    "review", "own_browser", "rules",
 )
 
 
