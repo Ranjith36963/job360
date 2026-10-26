@@ -12,6 +12,7 @@ import { DutyStatus } from "@/components/home/DutyStatus";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
 import { SetupCard } from "@/components/profile/SetupProgress";
+import { LessonsList } from "@/components/profile/LessonsList";
 import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
 import {
   FEED_LIMIT,
@@ -291,6 +292,9 @@ export function Home() {
               </button>
             </div>
           )}
+
+          {/* Lessons live on Home (owner, 2026-10-26), not on Profile. */}
+          <LessonsList />
         </div>
 
         {showRail && (
