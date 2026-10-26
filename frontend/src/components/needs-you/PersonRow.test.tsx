@@ -122,6 +122,20 @@ describe("PersonRow", () => {
     expect(screen.getByText("Don't send")).toBeInTheDocument();
   });
 
+  it("queued for LinkedIn's own browser by the user's choice: waiting, not broken, no reason code shown", () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
+      send_browser: { kind: "own_browser", label: "Your own browser: runs when your PC is on", reason: "linkedin_own_browser" } }));
+    const el = screen.getByTestId("send-status-4");
+    expect(el.textContent).toBe(
+      "Waiting for your own browser. It goes out the next time your assistant runs on your PC.");
+    expect(el).toHaveAttribute("data-state", "waiting-own-browser");
+    expect(el).not.toHaveClass("text-warning");
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your own browser: runs when your PC is on");
+    expect(screen.getByTestId("send-browser-label-4").textContent).not.toMatch(/turn your PC on/);
+    expect(screen.queryByTestId("send-browser-reason-4")).toBeNull();
+    expect(screen.getByText("Don't send")).toBeInTheDocument();
+  });
+
   it("queued and only you can do it: needs you", () => {
     show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
       send_browser: { kind: "human", label: "Only you can do this", reason: "CAPTCHA" } }));
@@ -171,9 +185,9 @@ describe("PersonRow", () => {
     expect(screen.queryByTestId("send-browser-reason-4")).toBeNull();
   });
 
-  it("names Job360's browser beside Send when the backend sent no label, and the own browser when it did", () => {
+  it("names the own browser beside Send when the backend sent no label (LinkedIn goes only there), and the backend's label when it did", () => {
     const { unmount } = show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you") }));
-    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Job360's browser");
+    expect(screen.getByTestId("send-browser-label-4")).toHaveTextContent("Your own browser: runs when your PC is on");
     unmount();
     show(person({ linkedin_state: "connected", own_browser_task: task("waiting_on_you"),
       send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Job360's browser could not sign in" } }));

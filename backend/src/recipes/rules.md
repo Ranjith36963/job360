@@ -126,14 +126,19 @@ to apply to a job the user did not bring.
 
 ## Which browser
 
-Job360's browser (the `browser` tool) goes FIRST for everything, job forms and LinkedIn: it runs in the cloud,
+**linkedin.com goes to the user's own browser ONLY** (the user's choice, 2026-10-26): LinkedIn job search, Easy
+Apply, messages and connection notes run in the browser your app drives on the user's PC, never in Job360's
+browser (it refuses linkedin.com). When the PC is off, the task waits in the own-browser queue
+(`own_browser_queue`) and runs the next time the own browser runs; a scheduled cloud run skips it. A LinkedIn
+job whose Apply leaves LinkedIn for the company's site is a normal job form (below).
+Job360's browser (the `browser` tool) goes FIRST for everything else, job forms included: it runs in the cloud,
 so it works with the user's computer off. Only when it stops on a task (a sign-in wall, a CAPTCHA or bot check,
 or a safety stop: its `needs_you` / open `blocked`) does that task wait for the user's own browser: the one your
 app drives on the user's PC, there only while the PC is on and the user agrees. A scheduled cloud run never has
 one: leave the task on Needs you and go on. Passwords, one-time codes and MFA are the user's alone; no browser
 solves a CAPTCHA: it is always solved by the user, on Needs you while Job360's browser holds the page
 (Finish it here), otherwise in their own browser. Every card on Needs you says which: "I'll use Job360's browser", "Needs your own
-browser: turn your PC on" or "Only you can do this".
+browser: turn your PC on", "Your own browser: runs when your PC is on" (LinkedIn) or "Only you can do this".
 
 ## Writing the CV
 

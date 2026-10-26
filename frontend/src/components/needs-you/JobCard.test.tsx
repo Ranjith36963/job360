@@ -424,7 +424,7 @@ describe("JobCard", () => {
     const c = card([ask("Notice period?")], { people: [reach(4)] });
     render(<JobCard card={c} onChanged={onChanged} />);
     const pace = screen.getByTestId("outreach-pace-7");
-    expect(pace).toHaveTextContent("Job360's browser sends first; your own browser only if Job360's browser fails. 1–3 minutes between sends, at most 10 LinkedIn sends a day.");
+    expect(pace).toHaveTextContent("LinkedIn sends go out from your own browser only, when your PC is on. 2–3 minutes between sends, at most 10 LinkedIn sends a day.");
     expect(within(screen.getByTestId("section-outreach-7")).getByTestId("outreach-pace-7")).toBe(pace);
   });
 

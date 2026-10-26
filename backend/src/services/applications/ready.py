@@ -702,7 +702,7 @@ async def ready_cards(
             "brought_by": b["recorded_by"] if b else None, "brought_at": b["occurred_at"] if b else None,
             "fit_score": score, "fit_by": r.get("fit_recorded_by") if score is not None else None,
             "line_side": settings_rules.line_side(score, profile.assistant_settings.apply_min_score),
-            "cv": cv, "cover_letter": letter, "answers": answers, "flags": flags,
+            "cv": cv, "cover_letter": letter, "answers": answers, "flags": flags, "apply_url": r.get("job_url") or "",
         })
     return cards
 

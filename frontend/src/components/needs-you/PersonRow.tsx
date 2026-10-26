@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { contactSendBrowser, decideOwnBrowserSend, ownBrowserTask } from "@/lib/browser-contract";
 import { BrowserReason } from "./BrowserReason";
-import { JOB360_BROWSER_LABEL } from "@/lib/browser-labels";
+import { LINKEDIN_OWN_BROWSER_LABEL, LINKEDIN_OWN_BROWSER_REASON } from "@/lib/browser-labels";
 import { closedSetLabel } from "@/lib/closed-sets";
 import type { PersonToReach } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -31,10 +31,18 @@ function clock(iso: string | null): string {
 function sendStatus(
   task: { state: string; approved_at: string | null; claim_until: string | null },
   kind: string | undefined,
+  reason: string | undefined,
 ): { state: string; text: string } {
   if (task.state === "in_progress") {
     const t = clock(task.claim_until);
     return { state: "sending", text: `Sending now${t ? ` \u2014 held until ${t}` : ""}.` };
+  }
+  // LinkedIn goes only through the user's own browser, by their choice (owner 2026-10-26): waiting, not broken.
+  if (kind === "own_browser" && reason === LINKEDIN_OWN_BROWSER_REASON) {
+    return {
+      state: "waiting-own-browser",
+      text: "Waiting for your own browser. It goes out the next time your assistant runs on your PC.",
+    };
   }
   if (kind === "own_browser") {
     return {
@@ -86,10 +94,11 @@ export function PersonRow({
   // Field names are the Browser agent's contract: read only through the adapter.
   const task = ownBrowserTask(c);
   const sendBrowser = contactSendBrowser(c);
-  // Which browser will send it: the backend's label, else Job360's browser (it goes first) while a Send is on offer.
-  const browserText = sendBrowser?.label ?? (task ? JOB360_BROWSER_LABEL : null);
+  // Which browser will send it: the backend's label, else the user's own browser (LinkedIn goes only there)
+  // while a Send is on offer.
+  const browserText = sendBrowser?.label ?? (task ? LINKEDIN_OWN_BROWSER_LABEL : null);
   const status = task && (task.state === "queued" || task.state === "in_progress")
-    ? sendStatus(task, sendBrowser?.kind)
+    ? sendStatus(task, sendBrowser?.kind, sendBrowser?.reason)
     : null;
 
   async function decide(decision: "approve" | "decline") {

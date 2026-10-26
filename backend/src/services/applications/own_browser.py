@@ -1,11 +1,13 @@
-"""The own-browser queue (owner decisions 2026-10-25).
+"""The own-browser queue (owner decisions 2026-10-25, 2026-10-26).
 
-Job360's own browser goes FIRST for every task. A task reaches the user's OWN browser (the one their
-assistant drives on their computer) only after Job360's browser failed on it (an open ``blocked`` with
-``by: browser`` that ``routing.ask_route`` sends to ``own_browser``, or a LinkedIn person it gave back with
-``release``). The user's per-card Send click on one LinkedIn person is their yes for THAT message and never
-expires until it is sent or cancelled; a rewritten draft (a new message id) needs a new click. Either browser
-sends only while it holds a live claim (:func:`take`, optionally for one ``contact_id``).
+What waits for the user's OWN browser (the one their assistant drives on their computer): every LinkedIn
+send the user pressed Send on and every batch-queued application whose apply link is on linkedin.com (Easy
+Apply), from the start, since Job360's browser never opens linkedin.com (``routing.is_linkedin``); and any
+other application only after Job360's browser failed on it (an open ``blocked`` with ``by: browser`` that
+``routing.ask_route`` sends to ``own_browser``). The user's per-card Send click on one LinkedIn person is their
+yes for THAT message and never expires until it is sent or cancelled; a rewritten draft (a new message id)
+needs a new click. A send happens only while the session holds a live claim (:func:`take`, optionally for one
+``contact_id``). Easy Apply is at most ``EASY_APPLY_DAILY_MAX`` a day, enforced in :func:`take`.
 
 Stored as ``contact_outreach`` entries Job360 writes itself and never accepts from a caller (they are not in
 ``settings.OUTREACH_ENTRIES``, so ``record_outreach`` refuses them): ``send_approved`` / ``send_declined``
@@ -37,6 +39,7 @@ QUEUE_MAX = 50
 ROWS_PER_CONTACT_MAX = 200
 LINKEDIN_MIN_GAP_SECONDS = 120
 LINKEDIN_DAILY_MAX = 10
+EASY_APPLY_DAILY_MAX = 10
 RELEASE_REASONS = (
     "captcha", "login_wall", "weekly_limit", "draft_rewritten", "already_pending", "profile_not_found", "other",
 )
@@ -47,6 +50,7 @@ WHY_WORDS = {
     "job360_bot_check": "Job360's browser hit a CAPTCHA or bot check.",
     "job360_safety_stop": "Job360's browser stopped for safety.",
     "default": "You pressed Send for this message.",
+    "linkedin_own_browser": "LinkedIn runs only in your own browser: your choice.",
 }
 
 
@@ -112,26 +116,6 @@ def derive(rows: list[dict[str, Any]], now: datetime) -> Optional[dict[str, Any]
                 "claimed_by": after[-1]["text"], "claimed_actor": after[-1].get("recorded_by") or "",
             }
     return {**base, "state": "queued"}
-
-
-# A reason a claim holder gives a person back that means Job360's browser could not do it -> the routing word.
-FAILURE_FOR_RELEASE = {"captcha": "captcha", "login_wall": "login_required", "other": "manual_only"}
-
-
-def job360_failure(rows: list[dict[str, Any]]) -> str:
-    """The routing word for why Job360's browser gave this person up (``""`` = it has not): the NEWEST row after
-    the user's newest click on the newest message is a release for captcha / login_wall / other. Pure."""
-    messages = [r for r in rows if r["entry"] == "message"]
-    if not messages or messages[-1]["channel"] != "linkedin":
-        return ""
-    mid = str(messages[-1]["id"])
-    clicks = [r for r in rows if r["entry"] in (APPROVED, DECLINED) and str(r.get("text")) == mid]
-    if not clicks or clicks[-1]["entry"] != APPROVED:
-        return ""
-    later = [r for r in rows if r["entry"] in (CLAIMED, RELEASED) and int(r["id"]) > int(clicks[-1]["id"])]
-    if not later or later[-1]["entry"] != RELEASED:
-        return ""
-    return FAILURE_FOR_RELEASE.get(str(later[-1]["text"]), "")
 
 
 def public_task(task: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -302,7 +286,7 @@ async def _contact_tasks(db: JobDatabase, user: CurrentUser, now: datetime) -> l
             continue
         view = await contacts._full_contact_view(db, user.id, base)
         text = view["outreach"]["messages"][-1]["text"] if view["outreach"]["messages"] else ""
-        route = routing.Route("own_browser", "default")
+        route = routing.browser_for(linkedin=True)  # owner 2026-10-26: LinkedIn only in the own browser
         out.append({
             "task_id": f"contact:{contact_id}", "kind": "linkedin_outreach",
             "what": f"Send your LinkedIn message to {view['name']}", "url": view.get("linkedin_url") or "",
@@ -320,7 +304,7 @@ async def _contact_tasks(db: JobDatabase, user: CurrentUser, now: datetime) -> l
 async def _application_tasks(
     db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str]
 ) -> list[dict[str, Any]]:
-    from src.services.applications import blocked, kit  # noqa: PLC0415
+    from src.services.applications import blocked, kit, spine  # noqa: PLC0415
 
     cur = await db._db.execute(
         "SELECT id, job_title, job_company, job_url FROM applications WHERE user_id = ? AND status = 'considering' "
@@ -329,7 +313,7 @@ async def _application_tasks(
     )
     apps = {int(dict(r)["id"]): dict(r) for r in await cur.fetchall()}
     blocks = await blocked.open_blocks(db, user.id, list(apps))
-    out: list[dict[str, Any]] = []
+    routes: list[tuple[int, routing.Route]] = []
     for app_id, p in sorted(blocks.items()):
         if p.get(blocked.BY_KEY) != blocked.BY_BROWSER:
             continue
@@ -339,8 +323,16 @@ async def _application_tasks(
             # While Job360's browser still holds that page the user finishes it on Needs you; once it let go, no.
             finish_here=reason == "captcha" and blocked.browser_hold_live(user.id, app_id),
         )
-        if route.kind != "own_browser":
-            continue
+        if route.kind == "own_browser":
+            routes.append((app_id, route))
+    # Easy Apply (owner 2026-10-26): a batch-queued application on linkedin.com with no open block waits here
+    # from the start, oldest queued first; Job360's browser never opens it.
+    linked = [i for i, a in apps.items() if i not in blocks and routing.is_linkedin(str(a.get("job_url") or ""))]
+    queued = await spine.queued_at_by_app(db, user.id, linked)
+    for app_id in sorted(queued, key=lambda i: (queued[i], i)):
+        routes.append((app_id, routing.browser_for(url=str(apps[app_id]["job_url"]))))
+    out: list[dict[str, Any]] = []
+    for app_id, route in routes:
         if session is not None and await kit.live_hold(db, user, app_id, now, session) is not None:
             continue
         a = apps[app_id]
@@ -361,7 +353,8 @@ async def queue_tasks(
     db: JobDatabase, user: CurrentUser, now: datetime, session: Optional[str] = None
 ) -> list[dict[str, Any]]:
     """The tasks that wait for the user's own browser: approved, unsent LinkedIn drafts (oldest approval first)
-    then applications whose open block Job360's browser wrote and the router sends to ``own_browser``. With a
+    then applications whose open block Job360's browser wrote and the router sends to ``own_browser``, then
+    batch-queued Easy Apply applications (an apply link on linkedin.com, no open block). With a
     ``session`` (an assistant's read) an application another session holds is left out; the website passes none."""
     tasks = await _contact_tasks(db, user, now) + await _application_tasks(db, user, now, session)
     return tasks[:QUEUE_MAX]
@@ -417,6 +410,34 @@ async def weekly_limit_until(db: JobDatabase, user_id: str, now: datetime) -> Op
     return until if until is not None and until > now else None
 
 
+_SUBMIT_MARKS = "e.event_type IN ('applied', 'submit_attempted')"
+
+
+async def easy_apply_today(db: JobDatabase, user_id: str, now: datetime) -> int:
+    """How many Easy Apply submits fall on the user's own day: applications whose apply link is on linkedin.com
+    with an ``applied`` or ``submit_attempted`` event, each application once, at its first such mark (a click
+    that was never recorded still counts, as an unreleased claim does for a LinkedIn send)."""
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+
+    floor = (now - timedelta(hours=48)).isoformat()
+    cur = await db._db.execute(
+        "SELECT DISTINCT a.id, a.job_url FROM applications a JOIN application_events e ON e.application_id = a.id "  # noqa: S608
+        f"AND e.user_id = a.user_id WHERE a.user_id = ? AND {_SUBMIT_MARKS} AND e.recorded_at >= ?",
+        (user_id, floor),
+    )
+    ids = [int(dict(r)["id"]) for r in await cur.fetchall() if routing.is_linkedin(str(dict(r)["job_url"] or ""))]
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    return await rules.count_on_user_today(
+        db, user_id, now,
+        "SELECT x.recorded_at FROM (SELECT MIN(e.recorded_at) AS recorded_at FROM application_events e "  # noqa: S608
+        f"WHERE e.user_id = ? AND {_SUBMIT_MARKS} AND e.application_id IN ({marks}) GROUP BY e.application_id) x "
+        "WHERE x.recorded_at >= ?",
+        (user_id, *ids),
+    )
+
+
 async def _pace(db: JobDatabase, user_id: str, now: datetime) -> Optional[tuple[str, int]]:
     """``("wait", seconds_left)`` when the last LinkedIn send was under the minimum gap ago;
     ``("daily_limit", 0)`` at the day's maximum (the user's own day); else ``None``."""
@@ -446,10 +467,11 @@ async def take(
     db: JobDatabase, user: CurrentUser, session: str, now: datetime, contact_id: Optional[int] = None
 ) -> dict[str, Any]:
     """Hand ONE task to the session (15 minutes for a person; an application's kit read is its own hold).
-    With ``contact_id`` only that person is claimed (Job360's browser takes the one the user clicked Send on);
+    With ``contact_id`` only that person is claimed (the one the user clicked Send on);
     ``empty`` when they are not waiting for a send. The same locks, pace, pause and window apply.
     ``status``: task | already_yours | empty | closed (outside the PC-on hours, no Run now) | paused | busy
-    (another session is sending) | wait (``wait_seconds`` left) | daily_limit. The same session asking again
+    (another session is sending) | wait (``wait_seconds`` left) | daily_limit (LinkedIn sends, or Easy Apply at
+    ``EASY_APPLY_DAILY_MAX``: :func:`easy_apply_today`). The same session asking again
     gets its live claim back. The user row is locked first, so two sessions never take one person."""
     from src.services.applications import kit  # noqa: PLC0415
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
@@ -510,6 +532,11 @@ async def take(
         _log("own_browser_take", user.id, "task", contact_id=chosen["contact_id"], actor=actor_for(user))
         return _answer("task", task=chosen, next=_next_step(chosen))
     apps = [t for t in tasks if t["kind"] == "application"]
+    if any(routing.is_linkedin(t["url"]) for t in apps) and (
+        await easy_apply_today(db, user.id, now) >= EASY_APPLY_DAILY_MAX
+    ):  # Easy Apply's own day cap; any other application is still handed out
+        apps = [t for t in apps if not routing.is_linkedin(t["url"])]
+        refusal = refusal or _answer("daily_limit", "daily_limit", wait_seconds=0)
     if apps:
         _log("own_browser_take", user.id, "task", application_id=apps[0]["application_id"])
         return _answer("task", task=apps[0], next=_next_step(apps[0]))

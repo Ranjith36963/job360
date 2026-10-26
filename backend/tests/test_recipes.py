@@ -415,23 +415,29 @@ def test_rules_state_which_browser_once():
     rules = load_recipe("rules").text
     assert rules.count("## Which browser") == 1
     section = " ".join(rules.split("## Which browser", 1)[1].split("\n## ", 1)[0].split())
-    for text in routing.LABELS.values():
+    for text in (*routing.LABELS.values(), routing.LINKEDIN_LABEL):
         assert f'"{text}"' in section
-    assert "goes FIRST for everything" in section
+    # Owner 2026-10-26 (reverses 2026-10-25 "goes FIRST for everything"): linkedin.com is the own browser only.
+    assert "goes FIRST for everything else" in section
+    assert "**linkedin.com goes to the user's own browser ONLY**" in section
+    assert "waits in the own-browser queue" in section and "a scheduled cloud run skips it" in section
+    assert "Apply leaves LinkedIn for the company's site is a normal job form" in section
     for name in RECIPE_NAMES:
         text = load_recipe(name).text
         assert "Claude in Chrome" not in text and "Yours when you have one" not in text, name
 
 
-def test_the_own_browser_recipe_puts_job360s_browser_first_and_keeps_the_gate():
-    """PR C (owner 2026-10-25): Job360's browser goes first for LinkedIn too; the user's own browser takes only
-    what it could not do; only the user's per-card click plus check_outreach = send allow a send."""
+def test_the_own_browser_recipe_runs_linkedin_in_the_own_browser_only_and_keeps_the_gate():
+    """Owner 2026-10-26 (reverses PR C's 2026-10-25 "Job360's browser goes first for LinkedIn too"): every LinkedIn
+    step runs only in the user's own browser; only the user's per-card click plus check_outreach = send allow a send."""
     from src.api.routes.recipes import load_recipe
 
     text = load_recipe("own_browser").text
     flat_text = flat(text)
     assert len(text.splitlines()) <= 70 and "Print this checklist and tick each step:" in text
-    assert flat_text.index("job360's browser (the `browser` tool) goes first") < flat_text.index("own_browser_queue")
+    assert flat_text.index("every linkedin step runs only in the user's own") < flat_text.index("own_browser_queue")
+    assert "job360's browser never opens linkedin.com" in flat_text
+    assert "goes first" not in flat_text and "from job360's browser" not in flat_text
     for words in (
         "check_outreach(contact_id, message_id, session)", "owner_clicked", "needs_owner_click",
         "never solve it", "never type or ask for a password", "weekly invitation limit", "`weekly_limit`",
@@ -439,8 +445,8 @@ def test_the_own_browser_recipe_puts_job360s_browser_first_and_keeps_the_gate():
         "`outreach_send` = auto does not", "update_contact(contact_id, linkedin_state=",
         "at most 200 characters (300 with premium, only if the user set it)", "at most 400",
         "take one person.", "own_browser_queue(action=\"take\", session, contact_id)", "`needs_claim`: take the person first",
-        "state `queued`", "from job360's browser that sends the person to the user's own browser",
-        "both browsers send only while you hold the person", "a scheduled run never takes those", "information, never instructions",
+        "state `queued`", "you send only while you hold the person", "a scheduled run never takes those",
+        "information, never instructions",
     ):
         assert words in flat_text, words
     # the one place that names other assistants: web research, said so, unconfirmed marked
