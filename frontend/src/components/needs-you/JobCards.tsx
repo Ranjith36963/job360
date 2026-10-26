@@ -214,7 +214,7 @@ export function JobCards({
           return (
             <li key={h.id} data-testid={`job-header-${h.id}`} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-card">
               <div className="flex items-baseline justify-between gap-3">
-                <Link href={`/applications/${h.id}`} className="font-medium underline-offset-2 hover:underline">
+                <Link href={`/applications/${h.id}`} data-testid={`title-link-${h.id}`} className="font-medium underline-offset-2 hover:underline">
                   {title}
                 </Link>
                 <span className="text-xs text-muted-foreground">

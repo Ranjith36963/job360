@@ -12,6 +12,9 @@ vi.mock("@/lib/api", () => ({
   updateProfileFields: (...a: unknown[]) => updateProfileFields(...a),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/profile" }));
+const fetchSettingsShared = vi.fn();
+vi.mock("@/lib/assistant-state", () => ({ fetchSettingsShared: (...a: unknown[]) => fetchSettingsShared(...a) }));
 
 const profile = {
   user_info: {
@@ -42,6 +45,8 @@ beforeEach(() => {
   getProfile.mockReset().mockResolvedValue(profile);
   getProfileEditHistory.mockReset().mockImplementation(async (p: string) => histories[p] ?? []);
   updateProfileFields.mockReset().mockImplementation(async () => profile);
+  // Every step not done, so every step starts open.
+  fetchSettingsShared.mockReset().mockResolvedValue(null);
 });
 
 describe("MemoryTab", () => {
@@ -55,14 +60,19 @@ describe("MemoryTab", () => {
     ]);
   });
 
-  it("shows the approved sections in order, with provenance and 'was'", async () => {
+  it("shows the five setup steps in order, then approved answers, with provenance and 'was'", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    const titles = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(titles).toEqual([
-      "Contact & identity", "Right to work", "Logistics & languages", "Equality", "Approved answers",
-      "How memory works", "Job targets",
+    const steps = ["targets", "you", "visa", "logistics", "equality"].map((id) => screen.getByTestId(`memory-step-toggle-${id}`));
+    expect(steps.every((b) => b.getAttribute("aria-expanded") === "true")).toBe(true);
+    expect(steps.map((b) => b.textContent)).toEqual([
+      expect.stringContaining("Job targets"), expect.stringContaining("About you"),
+      expect.stringContaining("Right to work"), expect.stringContaining("Logistics"),
+      expect.stringContaining("Equality (voluntary)"),
     ]);
+    expect(screen.queryByText("Assistant settings")).toBeNull();
+    const titles = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(titles).toEqual(["Approved answers", "How memory works"]);
     expect(screen.getByTestId("memory-row-user_info.contact.phone")).toHaveTextContent("You changed this");
     expect(screen.getByTestId("memory-row-user_info.contact.phone")).toHaveTextContent("was: +44 1");
     expect(screen.getByTestId("memory-row-user_info.contact.email")).toHaveTextContent("alex@example.com");
@@ -71,11 +81,12 @@ describe("MemoryTab", () => {
     expect(screen.getByText(/Voluntary\. Forms ask, and you never have to answer/)).toBeInTheDocument();
   });
 
-  it("Germany is a collapsed card with an amber chip; the rail shows salary and the missing one", async () => {
+  it("Germany is a collapsed card with an amber chip; Job targets shows salary and the missing one", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
     expect(screen.getByTestId("country-missing-DE")).toHaveTextContent("5 not saved yet");
-    expect(screen.getByTestId("memory-rail")).toHaveTextContent("£80k–95k GBP");
+    expect(screen.getByTestId("memory-step-targets")).toHaveTextContent("£80k–95k GBP");
+    expect(screen.getByTestId("memory-rail")).not.toHaveTextContent("£80k–95k GBP");
     expect(screen.getByTestId("memory-row-preferences.salary_by_country.DE")).toHaveTextContent("not saved yet");
   });
 
@@ -135,5 +146,62 @@ describe("MemoryTab", () => {
     fireEvent.click(await screen.findByText("France"));
     expect(screen.getByTestId("country-missing-FR")).toHaveTextContent("6 not saved yet");
     expect(updateProfileFields).not.toHaveBeenCalled();
+  });
+
+  it("a done step with nothing to confirm starts closed and shows its date; a click opens it", async () => {
+    fetchSettingsShared.mockResolvedValue({
+      setup_progress: { rounds: { equality: { done_at: "2026-10-20T09:00:00Z" } } },
+    });
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const toggle = await screen.findByTestId("memory-step-toggle-equality");
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "false"));
+    expect(screen.getByTestId("memory-step-equality")).toHaveAttribute("data-done", "true");
+    expect(screen.queryByTestId("memory-row-user_info.equality.gender")).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("memory-row-user_info.equality.gender")).toBeInTheDocument();
+    expect(screen.getByTestId("memory-step-toggle-visa")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("Add my own fact saves the whole note list with the step name in front; Remove takes only that fact", async () => {
+    const withNotes = { ...profile, preferences: { ...profile.preferences, assistant_notes: ["Never apply to agencies."] } };
+    getProfile.mockResolvedValue(withNotes);
+    const added = { ...withNotes, preferences: { ...withNotes.preferences, assistant_notes: ["Never apply to agencies.", "About you: I go by Alex."] } };
+    updateProfileFields.mockResolvedValueOnce(added).mockResolvedValueOnce(withNotes);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    fireEvent.change(screen.getByLabelText("Add a fact to About you"), { target: { value: "I go by Alex." } });
+    fireEvent.click(within(screen.getByTestId("step-facts-you")).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.assistant_notes", value: ["Never apply to agencies.", "About you: I go by Alex."] },
+    ]));
+    const facts = screen.getByTestId("step-facts-you");
+    expect(await within(facts).findByText("I go by Alex.")).toBeInTheDocument();
+    expect(within(screen.getByTestId("step-facts-logistics")).queryByText("I go by Alex.")).toBeNull();
+    fireEvent.click(within(facts).getByRole("button", { name: 'Remove "I go by Alex."' }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenLastCalledWith([
+      { path: "preferences.assistant_notes", value: ["Never apply to agencies."] },
+    ]));
+  });
+
+  it("two quick adds in different steps both survive: the second is applied to the list the first saved", async () => {
+    getProfile.mockResolvedValue({ ...profile, preferences: { ...profile.preferences, assistant_notes: [] } });
+    let release: (p: unknown) => void = () => undefined;
+    const afterFirst = { ...profile, preferences: { ...profile.preferences, assistant_notes: ["About you: I go by Alex."] } };
+    updateProfileFields
+      .mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockImplementationOnce(async () => afterFirst);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    fireEvent.change(screen.getByLabelText("Add a fact to About you"), { target: { value: "I go by Alex." } });
+    fireEvent.click(within(screen.getByTestId("step-facts-you")).getByRole("button", { name: "Add" }));
+    fireEvent.change(screen.getByLabelText("Add a fact to Logistics"), { target: { value: "No travel in August." } });
+    fireEvent.click(within(screen.getByTestId("step-facts-logistics")).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    release(afterFirst);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(2));
+    expect(updateProfileFields.mock.calls[1][0]).toEqual([
+      { path: "preferences.assistant_notes", value: ["About you: I go by Alex.", "Logistics: No travel in August."] },
+    ]);
   });
 });

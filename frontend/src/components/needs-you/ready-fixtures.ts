@@ -27,7 +27,7 @@ export const card = (id: number, over: Record<string, unknown> = {}) => ({
   answers: [
     answer(),
     answer({ question: "Full name", answer: "Alex Example", source: "profile", key: "contact.name", saved_by: null, saved_at: null }),
-    answer({ question: "Why Poolside?", answer: "I build agents.", source: "written", key: null, saved_by: null, saved_at: null }),
+    answer({ question: "Why Poolside?", answer: "I build production agents that ship real work, and Poolside builds the models they run on.", source: "written", key: null, saved_by: null, saved_at: null }),
     answer({ question: "Visa?", answer: "no", source: "guessed", key: null, saved_by: null, saved_at: null }),
   ],
   flags: [],

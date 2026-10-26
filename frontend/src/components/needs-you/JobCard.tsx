@@ -256,7 +256,12 @@ export function JobCard({
         <Link href={`/applications/${card.applicationId}`} className="font-heading text-xl leading-snug underline-offset-2 hover:underline">
           {card.company || "Unknown company"}
         </Link>
-        <p className="text-sm">{card.role || "Untitled role"}</p>
+        <p className="text-sm">
+          <Link href={`/applications/${card.applicationId}`} data-testid={`title-link-${card.applicationId}`}
+            className="underline-offset-2 hover:underline">
+            {card.role || "Untitled role"}
+          </Link>
+        </p>
         <p className="text-xs text-muted-foreground">
           since {relativeTime(card.oldestAskAt)}
         </p>
