@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { getProfile, keepProfileEdit, takeBackProfileEdit, updateProfileFields } from "@/lib/api";
 import type { ProfileResponse } from "@/lib/types";
 import { findAgentEdit } from "@/lib/agent-edits";
+import { isStepFact } from "@/lib/step-facts";
 import { AssistantNotes } from "@/components/profile/AssistantNotes";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -100,14 +101,18 @@ function NotesCard() {
   if (!profile) return null;
 
   const stored = profile.preferences?.assistant_notes;
-  const notes = Array.isArray(stored) ? stored.map(String) : [];
+  const all = Array.isArray(stored) ? stored.map(String) : [];
+  // General instructions only: a fact filed under a Memory step ("About you: …") is
+  // shown in that step. Every save sends them back unchanged, after the general ones.
+  const notes = all.filter((n) => !isStepFact(n));
+  const stepFacts = all.filter(isStepFact);
   const edit = findAgentEdit(profile.agent_edits ?? [], "preferences.assistant_notes");
 
   return (
     <section data-testid="assistant-notes-card" className="rounded-xl border border-border bg-card p-4">
       <AssistantNotes
         notes={notes}
-        onChange={save}
+        onChange={(next) => save([...next, ...stepFacts])}
         disabled={settling}
         showHistory
         trailing={
