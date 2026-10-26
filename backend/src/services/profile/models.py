@@ -36,7 +36,13 @@ VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"1h", "3h", "6h", "12h", "
 # Preference fields the web preferences form does not own: written only through
 # the agent-edit overlay, carried forward by a web save, kept by a "Clear
 # preferences" (only "Clear all" resets them).
-OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset({"daily_check", "check_every", "linkedin_premium"})
+# Owner decision 2026-10-26 - the levels a user would take, several at once, in order.
+EXPERIENCE_LEVEL_CHOICES: tuple[str, ...] = (
+    "entry", "junior", "junior_mid", "mid", "mid_senior", "senior", "lead", "executive",
+)
+OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset(
+    {"daily_check", "check_every", "linkedin_premium", "experience_levels", "experience_ranges"}
+)
 VALID_WORK_AUTH_STATUSES: frozenset[str] = frozenset(
     {"citizen", "permanent_resident", "visa", "needs_sponsorship"}
 )
@@ -600,6 +606,12 @@ class UserPreferences:
     # Empty / None = "don't care" (rule #29): never a default, never a penalty.
     experience_years_min: Optional[int] = None
     experience_years_max: Optional[int] = None
+    # Owner decision 2026-10-26 - several levels (EXPERIENCE_LEVEL_CHOICES) and several
+    # year ranges ([{"min": 1, "max": 3}, ...]) at once. They replace the single
+    # experience_level / experience_years_min / _max on the Memory page; those stay
+    # readable for older answers. Empty = don't care (rule #29).
+    experience_levels: list[str] = field(default_factory=list)
+    experience_ranges: list[dict[str, int]] = field(default_factory=list)
     looking_for: list[str] = field(default_factory=list)
     dealbreakers: list[str] = field(default_factory=list)
     avoid_companies: list[str] = field(default_factory=list)

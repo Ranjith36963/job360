@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRow } from "./MemoryRow";
-import { contactRows, equalityRows, logisticsRows, rtwCountryRows, salaryRow } from "@/lib/memory";
-import type { RowSpec } from "@/lib/memory";
+import { contactRows, equalityRows, logisticsRows, rtwCountryRows, salaryRow, type RowSpec } from "@/lib/memory";
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
@@ -10,12 +9,9 @@ vi.mock("sonner", () => ({ toast: { success: (...a: unknown[]) => toastSuccess(.
 
 const phone = contactRows().find((r) => r.id.endsWith(".phone"))!;
 const visaType = rtwCountryRows("GB").find((r) => r.id.endsWith("visa_type"))!;
-// A yes / no / Prefer-not-to-say row (Memory no longer shows the sanctions one; the editor behaviour stays).
+// A yes / no row that offers Prefer not to say (the sanctions question left Memory 2026-10-26).
 const sanctions: RowSpec = {
-  id: "user_info.right_to_work.sanctions_country_citizen",
-  path: "user_info.right_to_work",
-  label: "Citizen of a sanctioned country?",
-  scope: { kind: "dict" },
+  id: "rtw-sanctions", path: "user_info.right_to_work", label: "Citizen of a sanctioned country?", scope: { kind: "dict" },
   sensitive: true,
   parts: [{ key: "sanctions_country_citizen", label: "Citizen of a sanctioned country?", input: "yesno", pns: true }],
 };

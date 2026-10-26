@@ -21,6 +21,7 @@ from src.services.profile import assistant_settings as _settings
 from src.services.profile import edits as _edits
 from src.services.profile import user_info as _ui
 from src.services.profile.models import (
+    EXPERIENCE_LEVEL_CHOICES,
     VALID_CHECK_EVERY_VALUES,
     VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
@@ -128,6 +129,14 @@ SHAPES: dict[str, dict[str, Any]] = {
     "preferences.experience_level": {
         "example": "mid", "allowed_values": _sorted(VALID_EXPERIENCE_LEVELS),
         "note": "one value; use experience_years_min/max for a range",
+    },
+    "preferences.experience_levels": {
+        "example": ["junior_mid", "mid"], "allowed_values": list(EXPERIENCE_LEVEL_CHOICES),
+        "note": "every level the user would take; replaces experience_level",
+    },
+    "preferences.experience_ranges": {
+        "example": [{"min": 1, "max": 3}, {"min": 2, "max": 5}],
+        "note": "every years range the user would take, 0-60, min <= max; replaces experience_years_min/max",
     },
     "preferences.experience_years_min": {"example": 2, "note": "whole number 0-60, not above max"},
     "preferences.experience_years_max": {"example": 5, "note": "whole number 0-60"},

@@ -38,6 +38,7 @@ from src.repositories import pgsync
 from src.services.auth import rate_limit
 from src.services.profile import forgiving
 from src.services.profile.models import (
+    EXPERIENCE_LEVEL_CHOICES,
     VALID_CHECK_EVERY_VALUES,
     VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
@@ -534,6 +535,42 @@ YEARS_MIN_PATH = "preferences.experience_years_min"
 YEARS_MAX_PATH = "preferences.experience_years_max"
 YEARS_PATHS: frozenset[str] = frozenset({YEARS_MIN_PATH, YEARS_MAX_PATH})
 YEARS_LIMIT = 60
+LEVELS_PATH = "preferences.experience_levels"
+RANGES_PATH = "preferences.experience_ranges"
+MAX_RANGES = 10
+
+
+def _validate_levels(value: Any) -> list[str]:
+    """Several levels from ``EXPERIENCE_LEVEL_CHOICES``; "Mid-senior" and "mid senior" mean
+    ``mid_senior``. Stored once each, in the choices' order (entry first)."""
+    items = [value] if isinstance(value, str) else value
+    if not isinstance(items, list):
+        raise ProfileEditError(422, f"{LEVELS_PATH} must be a list of levels")
+    picked: set[str] = set()
+    for item in items:
+        key = re.sub(r"[\s-]+", "_", item.strip().lower()) if isinstance(item, str) else ""
+        if key not in EXPERIENCE_LEVEL_CHOICES:
+            raise ProfileEditError(
+                422, f"{LEVELS_PATH} items must be one of: {', '.join(EXPERIENCE_LEVEL_CHOICES)}", "bad_value"
+            )
+        picked.add(key)
+    return [lvl for lvl in EXPERIENCE_LEVEL_CHOICES if lvl in picked]
+
+
+def _validate_ranges(value: Any) -> list[dict[str, int]]:
+    """Up to ``MAX_RANGES`` ``{"min", "max"}`` year ranges, each 0-60 with min <= max.
+    Duplicates are stored once; sorted by min, then max."""
+    if not isinstance(value, list) or len(value) > MAX_RANGES:
+        raise ProfileEditError(422, f"{RANGES_PATH} must be a list of at most {MAX_RANGES} {{min, max}} ranges")
+    seen: set[tuple[int, int]] = set()
+    for rec in value:
+        if not isinstance(rec, dict) or set(rec) != {"min", "max"}:
+            raise ProfileEditError(422, f"{RANGES_PATH} items must be {{\"min\": n, \"max\": n}}", "bad_value")
+        low, high = _validate_years(RANGES_PATH, rec["min"]), _validate_years(RANGES_PATH, rec["max"])
+        if low > high:
+            raise ProfileEditError(422, f"{RANGES_PATH}: min must not be above max", "bad_value")
+        seen.add((low, high))
+    return [{"min": lo, "max": hi} for lo, hi in sorted(seen)]
 
 
 def _validate_years(path: str, value: Any) -> int:
@@ -574,6 +611,10 @@ def validate_edit(path: str, value: Any) -> Any:
 
     if path in YEARS_PATHS:
         return _validate_years(path, value)
+    if path == LEVELS_PATH:
+        return _validate_levels(value)
+    if path == RANGES_PATH:
+        return _validate_ranges(value)
     if path == assistant_settings.SETUP_PROGRESS_PATH:
         return _bound_encoded_size(path, assistant_settings.validate_setup_progress(path, value))
     if path in assistant_settings.SETTING_PATHS:

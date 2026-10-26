@@ -55,30 +55,77 @@ describe("MemoryTab", () => {
     await screen.findByTestId("memory-tab");
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(getProfileEditHistory.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "preferences.dealbreakers", "preferences.experience_level",
-      "preferences.experience_years_max", "preferences.experience_years_min", "preferences.looking_for",
-      "preferences.preferred_locations", "preferences.salary_by_country", "preferences.target_job_titles",
-      "preferences.work_arrangement",
+      "preferences.experience_levels", "preferences.experience_ranges",
+      "preferences.salary_by_country", "preferences.target_job_titles",
       "user_info.answers", "user_info.contact", "user_info.equality",
       "user_info.languages", "user_info.logistics", "user_info.right_to_work",
     ]);
   });
 
   it("Job targets shows the roles and other targets; an edit saves that one preference", async () => {
-    const withTargets = { ...profile, preferences: { ...profile.preferences, target_job_titles: ["Data Engineer"], experience_level: "senior" } };
+    // An older single level and years range show as the new lists until saved again.
+    const withTargets = {
+      ...profile,
+      preferences: { ...profile.preferences, target_job_titles: ["Data Engineer"], experience_level: "senior", experience_years_min: 2, experience_years_max: 5 },
+    };
     getProfile.mockResolvedValue(withTargets);
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
     const targets = screen.getByTestId("memory-step-targets");
     expect(within(targets).getByTestId("memory-row-preferences.target_job_titles")).toHaveTextContent("Data Engineer");
-    expect(within(targets).getByTestId("memory-row-preferences.experience_level")).toHaveTextContent("Senior");
-    expect(within(targets).getByTestId("memory-row-preferences.dealbreakers")).toHaveTextContent("Not saved yet");
+    expect(within(targets).getByTestId("memory-row-preferences.experience_levels")).toHaveTextContent("Senior");
+    expect(within(targets).getByTestId("memory-row-preferences.experience_ranges")).toHaveTextContent("2–5 years");
+    // Owner, 2026-10-26: Where you'll work answers these, so they are not asked here.
+    for (const gone of ["preferred_locations", "work_arrangement", "looking_for", "dealbreakers", "experience_level"]) {
+      expect(within(targets).queryByTestId(`memory-row-preferences.${gone}`)).toBeNull();
+    }
     fireEvent.click(within(targets).getByRole("button", { name: "Edit Roles" }));
     fireEvent.change(screen.getByLabelText("Roles"), { target: { value: "Data Engineer\nAnalytics Engineer" } });
     fireEvent.click(within(screen.getByTestId("memory-row-preferences.target_job_titles")).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
       { path: "preferences.target_job_titles", value: ["Data Engineer", "Analytics Engineer"] },
     ]));
+  });
+
+  it("several levels and years ranges save as lists and clear the older single answers", async () => {
+    const withTargets = { ...profile, preferences: { ...profile.preferences, experience_level: "senior", experience_years_min: 2, experience_years_max: 5 } };
+    getProfile.mockResolvedValue(withTargets);
+    updateProfileFields.mockImplementation(async () => withTargets);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const levels = screen.getByTestId("memory-row-preferences.experience_levels");
+    fireEvent.click(within(levels).getByRole("button", { name: "Edit Levels" }));
+    fireEvent.click(within(levels).getByTestId("level-junior_mid"));
+    fireEvent.click(within(levels).getByTestId("level-mid"));
+    fireEvent.click(within(levels).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.experience_levels", value: ["junior_mid", "mid", "senior"] },
+      { path: "preferences.experience_level", value: null },
+    ]));
+    const years = screen.getByTestId("memory-row-preferences.experience_ranges");
+    fireEvent.click(within(years).getByRole("button", { name: "Edit Years of experience" }));
+    fireEvent.change(within(years).getByLabelText("Years from"), { target: { value: "1" } });
+    fireEvent.change(within(years).getByLabelText("Years up to"), { target: { value: "3" } });
+    fireEvent.click(within(years).getByTestId("range-add"));
+    // the same range again is kept once
+    fireEvent.change(within(years).getByLabelText("Years from"), { target: { value: "1" } });
+    fireEvent.change(within(years).getByLabelText("Years up to"), { target: { value: "3" } });
+    fireEvent.click(within(years).getByTestId("range-add"));
+    expect(within(years).getAllByRole("button", { name: "Remove 1–3 years" })).toHaveLength(1);
+    fireEvent.click(within(years).getByRole("button", { name: "Remove 2–5 years" }));
+    fireEvent.click(within(years).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.experience_ranges", value: [{ min: 1, max: 3 }] },
+      { path: "preferences.experience_years_min", value: null },
+      { path: "preferences.experience_years_max", value: null },
+    ]));
+  });
+
+  it("does not ask the sanctioned-country question (owner, 2026-10-26)", async () => {
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    expect(screen.queryByTestId("memory-row-user_info.right_to_work.sanctions_country_citizen")).toBeNull();
+    expect(screen.queryByText(/sanctioned country/i)).toBeNull();
   });
 
   it("puts your details for forms first and pinned open, then the four steps, then approved answers", async () => {
@@ -178,19 +225,32 @@ describe("MemoryTab", () => {
     );
   });
 
-  it("a country is added once, in Job targets; Right to work has no second Add a country", async () => {
+  it("Right to work can add a country or a region too: same list, so it shows in both steps", async () => {
+    const after = (code: string) => ({
+      ...profile, user_info: { ...profile.user_info, right_to_work: {
+        ...profile.user_info.right_to_work, countries: [...profile.user_info.right_to_work.countries, { country: code }],
+      } },
+    });
+    updateProfileFields.mockResolvedValueOnce(after("FR"));
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    expect(screen.getAllByRole("button", { name: "Add a country" })).toHaveLength(1);
-    expect(within(screen.getByTestId("memory-step-targets")).getByTestId("work-grid-add")).toBeInTheDocument();
-    expect(screen.getByTestId("visa-add-hint")).toHaveTextContent("A new country is added once, in Job targets");
-    fireEvent.click(screen.getByTestId("work-grid-add"));
-    fireEvent.change(screen.getByPlaceholderText("Search countries…"), { target: { value: "France" } });
-    fireEvent.click(await screen.findByText("France"));
+    const visa = screen.getByTestId("memory-step-visa");
+    fireEvent.click(within(visa).getByTestId("visa-add"));
+    fireEvent.change(within(visa).getByPlaceholderText("Search countries…"), { target: { value: "France" } });
+    fireEvent.click(await within(visa).findByText("France"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
     const [{ path, value }] = updateProfileFields.mock.calls[0][0];
     expect(path).toBe("user_info.right_to_work");
     expect(value.countries.at(-1)).toEqual({ country: "FR" });
+    // its visa card opens in Right to work, and its line is in Job targets
+    expect(await within(visa).findByTestId("country-card-FR")).toBeInTheDocument();
+    expect(within(screen.getByTestId("memory-step-targets")).getByTestId("work-grid-row-FR")).toBeInTheDocument();
+    // a region gets a card of its own
+    updateProfileFields.mockResolvedValueOnce({ ...after("FR"), user_info: { ...after("FR").user_info, right_to_work: {
+      ...after("FR").user_info.right_to_work, countries: [...after("FR").user_info.right_to_work.countries, { country: "EUROPE" }],
+    } } });
+    fireEvent.click(within(visa).getByTestId("visa-add-region-EUROPE"));
+    expect(await within(visa).findByTestId("country-card-EUROPE")).toHaveTextContent("Europe");
   });
 
   it("a done step with nothing to confirm starts closed and shows its date; a click opens it", async () => {
@@ -262,6 +322,20 @@ describe("MemoryTab", () => {
     expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("Country you live in");
     expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("United Kingdom");
     expect(screen.getByTestId("memory-row-user_info.contact.residence_city")).toHaveTextContent("London");
+  });
+
+  it("a region or all-other-countries card holds visa facts only (relocation, travel and licence are per real country)", async () => {
+    const withPlaces = { ...profile, user_info: { ...profile.user_info, right_to_work: {
+      ...profile.user_info.right_to_work,
+      countries: [...profile.user_info.right_to_work.countries, { country: "ANY" }, { country: "EUROPE" }],
+    } } };
+    getProfile.mockResolvedValue(withPlaces);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const cards = within(screen.getByTestId("memory-step-visa")).getAllByTestId(/^country-card-/).map((c) => c.getAttribute("data-testid"));
+    expect(cards).toEqual(["country-card-GB", "country-card-DE", "country-card-EUROPE", "country-card-ANY"]);
+    expect(screen.queryByTestId("memory-row-user_info.logistics.EUROPE.willing_to_relocate")).toBeNull();
+    expect(screen.queryByTestId("memory-row-user_info.logistics.ANY.willing_to_relocate")).toBeNull();
   });
 });
 

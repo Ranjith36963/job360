@@ -48,7 +48,11 @@ export function ApplicationDecisions({
   status = "considering",
   changesSinceApproved = 0,
   handoff,
+  handoffShownAbove = false,
 }: {
+  /** The page's Needs-you card already shows this job's FormHandoff: the blocked section keeps its other
+   *  controls but shows no second one (owner 2026-10-26, two "The filled form was closed" on one page). */
+  handoffShownAbove?: boolean;
   /** From the open CAPTCHA / sign-in ask, when the page has it: whether Job360's browser still holds the
    *  filled form and whether it can be refilled. Absent = the old behaviour (Finish it here). */
   handoff?: { finishHere: boolean; canRefill?: boolean; heldSeconds?: number | null };
@@ -118,7 +122,7 @@ export function ApplicationDecisions({
             </Link>
           )}
           {/* Job360's own browser met a human check: the person solves it on that same filled form. */}
-          {blocked.step === "Job360 browser" && blocked.reason === "captcha" && (
+          {blocked.step === "Job360 browser" && blocked.reason === "captcha" && !handoffShownAbove && (
             <FormHandoff
               applicationId={applicationId}
               finishHere={handoff?.finishHere ?? true}

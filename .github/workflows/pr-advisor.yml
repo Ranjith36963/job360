@@ -477,42 +477,46 @@ jobs:
       # what. Four PRs sat for a day and a half and the reason was a lane
       # nobody could see without opening a comment and reading it.
       #
-      # Exactly one `lane:*` label at a time, so the label cannot say two
-      # things. Failure here is loud but not fatal: a missing label must not
-      # stop the advice from being posted.
-      - name: Stamp the lane on the PR
+      # TWO MERGE LABELS, AND ONLY TWO (owner, 2026-10-26): `hand-merge` on a
+      # lane a machine may not decide, `assistant-merge` on every other. When
+      # the owner switches a hand-merge PR to `assistant-merge` that is his yes
+      # (merge_cage.owner_yes); this step never undoes it, except after a NEW
+      # PUSH (`synchronize`), which voids it. The cage checks the push time
+      # itself; the removal keeps the PR list honest. The old `lane:*` labels
+      # are swept off. Failure here is loud but not fatal.
+      - name: Stamp the merge label on the PR
         id: lanelabel
         if: steps.rules.outputs.ready == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.pick.outputs.pr }}
+          ACTION: ${{ github.event.action }}
         run: |
           set -euo pipefail
           lane=$(python -c "import json;print(json.load(open('verdict.json')).get('lane',''))")
-          # ONE LABEL PER LANE (2026-09-19). `lane:owner` used to cover both
-          # owner lanes, and that stopped being one fact on 2026-09-17 when
-          # `product_owner` became `auto_merge: true`: the same label then said
-          # "the machine merges this and watches prod for 15 minutes" on one PR
-          # and "only the owner merges this" on the next. The owner asked for
-          # the split. The old label stays in the sweep below so a PR stamped
-          # before this change loses it on its next run.
-          case "$lane" in
-            product)       want="lane:product" ;;
-            harness)       want="lane:harness" ;;
-            product_owner) want="lane:product-owner" ;;
-            product_human) want="lane:product-human" ;;   # migrations + auth (owner, 2026-10-20)
-            harness_owner) want="lane:harness-owner" ;;
-            *)
-              echo "::warning::lane.py returned '$lane' — no label stamped"
-              exit 0 ;;
-          esac
+          auto=$(python -c "import json;print(json.load(open('verdict.json')).get('auto_merge') is True)")
+          [ -n "$lane" ] || { echo "::warning::lane.py returned no lane — no label stamped"; exit 0; }
+          have=$(gh pr view "$PR" --json labels --jq '[.labels[].name] | join(" ")')
           for l in lane:product lane:harness lane:product-owner lane:product-human lane:harness-owner lane:owner; do
-            [ "$l" = "$want" ] && continue
-            gh pr edit "$PR" --remove-label "$l" 2>/dev/null || true
+            case " $have " in *" $l "*) gh pr edit "$PR" --remove-label "$l" || true ;; esac
           done
-          if gh pr edit "$PR" --add-label "$want"; then
-            echo "lane label: \`$want\` (lane.py said \`$lane\`)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$auto" = "True" ]; then
+            want="assistant-merge"
+            gh pr edit "$PR" --remove-label hand-merge 2>/dev/null || true
+          else
+            want="hand-merge"
+            if [ "$ACTION" = "synchronize" ]; then
+              gh pr edit "$PR" --remove-label assistant-merge 2>/dev/null || true
+            elif [[ " $have " == *" assistant-merge "* ]]; then
+              echo "kept the owner's \`assistant-merge\` (lane \`$lane\`)" >> "$GITHUB_STEP_SUMMARY"
+              echo "lane=$lane" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          # The issues API creates a label that does not exist yet; `gh pr edit` errors.
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/labels" -f "labels[]=$want" >/dev/null; then
+            echo "merge label: \`$want\` (lane.py said \`$lane\`)" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::warning::could not add $want to PR #$PR — the lane is still only in the comment"
           fi

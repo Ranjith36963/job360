@@ -2,9 +2,36 @@ import { describe, it, expect } from "vitest";
 import {
   CONTACT, RTW, SALARY, LANGUAGES, contactRows, equalityRows, fieldProvenance, fromInputs, inputProblem,
   isSensitive, parseLanguages, provenanceText, readRow, rtwCountryRows, rtwTopRows, salaryRow, salaryText,
-  showRow, toInputs, writeRow, logisticsRows, countrySaved, answerApprover, approvalText,
+  showRow, toInputs, writeRow, logisticsRows, countrySaved, answerApprover, approvalText, type RowSpec,
+  legacyTarget, parseRanges, targetRows,
 } from "./memory";
-import type { RowSpec } from "./memory";
+
+describe("job targets (owner, 2026-10-26)", () => {
+  it("asks roles, several levels and several years ranges, and no sanctions question", () => {
+    expect(targetRows().map((r) => r.id)).toEqual([
+      "preferences.target_job_titles", "preferences.experience_levels", "preferences.experience_ranges",
+    ]);
+    expect(rtwTopRows().map((r) => r.id)).toEqual([`${RTW}.citizenship`]);
+  });
+
+  it("reads years ranges from the editor text, and refuses a backwards or too-big one", () => {
+    expect(parseRanges("1-3, 2–5")).toEqual([{ min: 1, max: 3 }, { min: 2, max: 5 }]);
+    expect(parseRanges("")).toEqual([]);
+    expect(parseRanges("5-2")).toBeNull();
+    expect(parseRanges("1-61")).toBeNull();
+    expect(parseRanges("three")).toBeNull();
+  });
+
+  it("shows an older single level and years range as the new lists", () => {
+    expect(legacyTarget({ experience_level: "senior" }, "experience_levels")).toEqual(["senior"]);
+    expect(legacyTarget({ experience_levels: ["mid"], experience_level: "senior" }, "experience_levels")).toEqual(["mid"]);
+    expect(legacyTarget({ experience_years_min: 2, experience_years_max: 5 }, "experience_ranges")).toEqual([{ min: 2, max: 5 }]);
+    expect(legacyTarget({}, "experience_ranges")).toBeUndefined();
+    const levels = targetRows()[1], years = targetRows()[2];
+    expect(showRow(levels, ["junior_mid", "mid_senior"])).toBe("Junior–mid, Mid–senior");
+    expect(showRow(years, [{ min: 1, max: 3 }, { min: 4, max: 4 }])).toBe("1–3 years, 4 years");
+  });
+});
 
 describe("country card count (ANY)", () => {
   const block = { countries: [{ country: "ANY", remote_ok: true, onsite: "only_if_sponsored" }] };
@@ -151,8 +178,8 @@ describe("readRow / writeRow", () => {
 describe("editor text", () => {
   it("round-trips yes / no / Prefer not to say", () => {
     const sanctions: RowSpec = {
-      id: "user_info.right_to_work.sanctions_country_citizen", path: RTW, label: "Citizen of a sanctioned country?",
-      scope: { kind: "dict" }, sensitive: true,
+      id: "rtw-sanctions", path: "user_info.right_to_work", label: "Citizen of a sanctioned country?", scope: { kind: "dict" },
+      sensitive: true,
       parts: [{ key: "sanctions_country_citizen", label: "Citizen of a sanctioned country?", input: "yesno", pns: true }],
     };
     expect(fromInputs(sanctions, { sanctions_country_citizen: "pns" })).toBe("Prefer not to say");
@@ -210,12 +237,5 @@ describe("job priority rows", () => {
   it("clearing a priority removes only that key", () => {
     const remote = rtwCountryRows("GB").find((s) => s.id.endsWith("remote_priority"))!;
     expect(writeRow(remote, block, undefined)).toEqual({ countries: [{ country: "GB", remote_ok: true }] });
-  });
-});
-
-describe("Memory rows", () => {
-  it("has no 'Citizen of a sanctioned country?' row (owner, 2026-10-26)", () => {
-    expect(rtwTopRows().map((r) => r.label)).toEqual(["Citizenship"]);
-    expect(rtwTopRows().some((r) => r.path.endsWith("sanctions_country_citizen") || r.id.endsWith("sanctions_country_citizen"))).toBe(false);
   });
 });

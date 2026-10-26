@@ -35,6 +35,7 @@ import { FollowUpField } from "@/components/applications/FollowUpField";
 import { JobCard } from "@/components/needs-you/JobCard";
 import { loadJobCard } from "@/components/needs-you/JobCards";
 import type { JobCardData } from "@/lib/job-cards";
+import { cardShowsFormHandoff } from "@/lib/job-cards";
 import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { STATUS_LABEL, whoLabel } from "@/lib/event-labels";
 import { formatDate, formatDateTime } from "@/lib/format-date";
@@ -466,6 +467,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 status={detail.status}
                 changesSinceApproved={cvChanges}
                 newFillWaiting={ready !== null}
+                handoffShownAbove={jobCard !== null && cardShowsFormHandoff(jobCard)}
                 handoff={(() => {
                   const a = (detail.asks ?? []).find(
                     (x) => x.status === "open" && !x.withdrawn_at && (x.kind === "captcha" || x.kind === "login"),

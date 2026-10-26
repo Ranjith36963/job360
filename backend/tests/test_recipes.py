@@ -100,16 +100,21 @@ def test_setup_is_six_short_rounds_and_forms_ask_only_what_is_missing():
     for words in ("six rounds", "read back", "save after each round", "setup_progress", "of 6 done", "resume",
                   "type run 360 to continue", "one at a time", "never converted", "prefer not to say",
                   "if the user skips, ask again only on the first form that needs it", "watched",
-                  "run 360 daily", "sanctions", "no cap by default", "never assume a number"):
+                  "run 360 daily", "no cap by default", "never assume a number"):
         assert words in setup, words
+    # Owner, 2026-10-26: the sanctioned-country question is not asked at setup; nor are
+    # locations, work arrangement, what they look for or dealbreakers (Where you'll work covers them).
+    for gone in ("sanctions", "preferred_locations", "work_arrangement", "looking_for", "dealbreakers"):
+        assert gone not in setup, gone
+    assert "experience_levels" in setup and "experience_ranges" in setup
     assert "how many applications a day" not in setup
     assert "ask everything once, in one message" not in setup
     # Owner decisions 2026-10-10: setup is an INTERVIEW, targets first, and the
     # score line is the user's own number - asked, never assumed, no default.
     assert "interview" in setup and "never answer for them from the cv" in setup
     assert setup.index("(1) **targets**") < setup.index("(2) **you**")
-    for words in ("preferences.target_job_titles", "preferences.experience_years_min", "preferences.looking_for",
-                  "preferences.dealbreakers", "preferences.avoid_companies", "assistant_settings.apply_min_score",
+    for words in ("preferences.target_job_titles", "preferences.experience_ranges", "preferences.experience_levels",
+                  "user_info.right_to_work", "preferences.avoid_companies", "assistant_settings.apply_min_score",
                   "never suggest or assume a number", "above and below it separately"):
         assert words in setup, words
     assert "75" not in setup and "selective_above_score" not in setup
