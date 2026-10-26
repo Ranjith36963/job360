@@ -131,3 +131,31 @@ describe("Verify / Edit on each answer", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 });
+
+describe("full answers and missing drafts", () => {
+  it("a long answer shows in full behind Show all", () => {
+    const long = "I built agents that ship real work. ".repeat(14);
+    const a = answer({ question: "Why Poolside?", answer: long, source: "written" });
+    render(<ReadyCard card={card(70, { answers: [a] })} paused={false} onChanged={() => {}} />);
+    expect(screen.getByText("Show all")).toBeInTheDocument();
+    expect(screen.getByTestId("answer-full-70-0").textContent).toBe(long);
+    expect(screen.getByTestId("ready-answer-verify-70-0")).toBeInTheDocument();
+    expect(screen.getByTestId("ready-answer-edit-70-0")).toBeInTheDocument();
+  });
+
+  it("a placeholder row shows the red line, the stored note, Edit, and no Verify", () => {
+    const a = answer({ question: "Structured JSON outputs", answer: "drafted", source: "guessed" });
+    render(<ReadyCard card={card(71, { answers: [a] })} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("draft-missing-71-0")).toHaveTextContent("Draft text missing: your assistant will write it on its next run");
+    expect(screen.getByText("Stored note: drafted")).toBeInTheDocument();
+    expect(screen.queryByTestId("ready-answer-verify-71-0")).toBeNull();
+    expect(screen.getByTestId("ready-answer-edit-71-0")).toBeInTheDocument();
+    expect(screen.getByTestId("ready-draft-missing-71")).toHaveTextContent("1 answer still needs");
+  });
+
+  it("the title and company link to the application", () => {
+    render(<ReadyCard card={card(72)} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("title-link-72")).toHaveAttribute("href", "/applications/72");
+    expect(screen.getByTestId("company-link-72")).toHaveAttribute("href", "/applications/72");
+  });
+});
