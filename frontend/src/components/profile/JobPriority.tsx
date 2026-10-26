@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { CountryPicker } from "@/components/profile/CountryPicker";
 import { updateProfileFields } from "@/lib/api";
@@ -199,8 +198,12 @@ type Status = "saving" | "saved" | "error";
 /** Profile -> CV tab: where should the assistant look first. Writes the two
  *  optional priority keys on each right-to-work record, nothing else. */
 export function JobPriority({
-  rightToWork, salaries, onSaved,
-}: { rightToWork: unknown; salaries?: unknown; onSaved: (profile: ProfileResponse) => void }) {
+  rightToWork, salaries, onSaved, embedded = false,
+}: {
+  rightToWork: unknown; salaries?: unknown; onSaved: (profile: ProfileResponse) => void;
+  /** Inside Memory's Job targets step: no card frame of its own. */
+  embedded?: boolean;
+}) {
   // Saves start from the LATEST block (not the render's copy) and run one
   // after another, so two quick changes never drop each other.
   const latest = useRef<unknown>(rightToWork);
@@ -273,15 +276,14 @@ export function JobPriority({
     });
 
   return (
-    <section data-testid="job-priority" className="rounded-xl border border-border bg-card p-6">
+    <section data-testid="job-priority" className={embedded ? "" : "rounded-xl border border-border bg-card p-6"}>
       <h3 className={LABEL}>Job priority</h3>
       <p className="mt-2 text-xs text-muted-foreground">
         Where should your assistant look first? It spends more of the hunt on higher priorities. Off = never search there.
       </p>
       {rows.length === 0 ? (
         <p data-testid="job-priority-empty" className="mt-4 text-sm text-muted-foreground">
-          Tick Remote or On-site for a place below first, or add where you can work in the{" "}
-          <Link href="/profile?tab=memory" className="text-brand underline">Memory tab</Link>.
+          Tick Remote or On-site for a place below first.
         </p>
       ) : (
         <ul className="mt-4 flex flex-col gap-3">

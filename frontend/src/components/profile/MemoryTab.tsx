@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CountryCard } from "@/components/profile/CountryCard";
-import { CountryPicker } from "@/components/profile/CountryPicker";
+import { JobPriority } from "@/components/profile/JobPriority";
 import { MemoryRow } from "@/components/profile/MemoryRow";
 import { StepFacts } from "@/components/profile/StepFacts";
 import { useSetupProgress } from "@/components/profile/SetupProgress";
@@ -27,6 +27,12 @@ function blockOf(profile: ProfileResponse | null, path: string): unknown {
   if (path === SALARY) return (profile.preferences as Record<string, unknown>)?.[ "salary_by_country" ];
   return (profile.user_info as Record<string, unknown>)?.[path.replace("user_info.", "")];
 }
+
+// Owner decision 2026-10-26: Job priority (the "Where you'll work" grid) lives
+// in Job targets, so these keys of a right-to-work record are edited there and
+// the Right to work cards keep only the visa facts (nothing shown twice).
+const GRID_KEYS = ["needs_sponsorship", "remote_ok", "onsite", "remote_priority", "onsite_priority", "contract_ok"];
+const visaCardRows = (code: string) => rtwCountryRows(code).filter((s) => !GRID_KEYS.some((k) => s.id.endsWith(`.${k}`)));
 
 function codesIn(list: unknown): string[] {
   return Array.isArray(list)
@@ -106,8 +112,6 @@ export function MemoryTab() {
   const [histories, setHistories] = useState<Histories>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [extra, setExtra] = useState<string[]>([]);
-  const [adding, setAdding] = useState(false);
   const [keepingAll, setKeepingAll] = useState<string | null>(null);
   const [keepAllError, setKeepAllError] = useState<string | null>(null);
   // The block a save starts from is the LATEST one (not the render's copy),
@@ -186,6 +190,15 @@ export function MemoryTab() {
     return done;
   }, []);
 
+  /** The grid saved a block itself: show it, and re-read the two histories it can touch. */
+  const gridSaved = useCallback((updated: ProfileResponse) => {
+    latest.current = updated;
+    setProfile(updated);
+    void Promise.all([RTW, SALARY].map(loadHistory)).then((lists) => {
+      setHistories((h) => ({ ...h, ...Object.fromEntries(lists.filter(([, rows]) => rows).map(([p, rows]) => [p, rows ?? []])) }));
+    });
+  }, [loadHistory]);
+
   /** Confirm an inferred fact: Keep writes a web row marked user_said, then re-read. */
   const confirm = useCallback(async (spec: RowSpec): Promise<void> => {
     const updated = await keepProfileEdit(spec.path);
@@ -200,8 +213,8 @@ export function MemoryTab() {
     const rtw = blockOf(profile, RTW) as Record<string, unknown> | undefined;
     const log = blockOf(profile, LOGISTICS) as Record<string, unknown> | undefined;
     const auth = Array.isArray(prefs.work_authorization_countries) ? prefs.work_authorization_countries.map(String) : [];
-    return [...new Set([...codesIn(rtw?.countries), ...codesIn(blockOf(profile, SALARY)), ...auth, ...codesIn(log?.countries), ...extra])];
-  }, [profile, extra]);
+    return [...new Set([...codesIn(rtw?.countries), ...codesIn(blockOf(profile, SALARY)), ...auth, ...codesIn(log?.countries)])];
+  }, [profile]);
 
   if (loading) return <div data-testid="memory-loading" className="space-y-3 pt-6"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></div>;
   if (error) {
@@ -238,7 +251,7 @@ export function MemoryTab() {
   const steps: { id: string; title: string; fact: string; pinned?: boolean; specs: RowSpec[] }[] = [
     { id: "you", title: "Your details for forms", fact: "About you", pinned: true, specs: contactRows() },
     { id: "targets", title: "Job targets", fact: "Job targets", specs: salaryCodes.map(salaryRow) },
-    { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
+    { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...visaCardRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
     { id: "logistics", title: "Logistics", fact: "Logistics", specs: logisticsRows() },
     { id: "equality", title: "Equality (voluntary)", fact: "Equality", specs: equalityRows() },
   ];
@@ -276,9 +289,8 @@ export function MemoryTab() {
   };
 
   const countrySummary = (code: string) => {
-    // The card counts the facts a form asks. The two job-priority rows are a
-    // search preference (empty = "not chosen"), so they never show as "not saved yet".
-    const specs = rtwCountryRows(code).filter((s) => !s.id.endsWith("_priority"));
+    // The card counts the visa facts a form asks; where to work is in Job targets.
+    const specs = visaCardRows(code);
     const filled = specs.map((s) => ({ s, ...state(s) })).filter((x) => !isEmpty(x.value));
     const first = filled[0];
     return {
@@ -293,8 +305,7 @@ export function MemoryTab() {
   const STEP_BODY: Record<string, React.ReactNode> = {
     targets: (
       <>
-              <p className="mb-1.5 text-[13px] text-muted-foreground">Salary, one line per country.</p>
-              {salaryCodes.map((code) => row(salaryRow(code), { amberEmpty: true }))}
+              <JobPriority embedded rightToWork={blockOf(profile, RTW)} salaries={blockOf(profile, SALARY)} onSaved={gridSaved} />
       </>
     ),
     you: (
@@ -309,24 +320,15 @@ export function MemoryTab() {
                 const sum = countrySummary(code);
                 return (
                   <CountryCard key={code} code={code} total={sum.total} saved={sum.saved} firstFact={sum.firstFact}
-                    defaultOpen={i === 0 || extra.includes(code)}>
-                    {rtwCountryRows(code).map((s) => row(s))}
+                    defaultOpen={i === 0}>
+                    {visaCardRows(code).map((s) => row(s))}
                     {logisticsCountryRows(code).map((s) => row(s))}
                   </CountryCard>
                 );
               })}
-              <div className="mt-2.5">
-                {adding ? (
-                  <CountryPicker label="Add a country" tags={[]} onChange={(codes) => {
-                    setExtra((e) => [...new Set([...e, ...codes])]);
-                    setAdding(false);
-                  }} />
-                ) : (
-                  <Button type="button" variant="outline" size="sm" className="min-h-11 md:min-h-8" onClick={() => setAdding(true)}>
-                    Add a country
-                  </Button>
-                )}
-              </div>
+              <p data-testid="visa-add-hint" className="mt-2.5 text-[13px] text-muted-foreground">
+                A new country is added once, in Job targets (Where you&apos;ll work); its visa card shows up here.
+              </p>
       </>
     ),
     logistics: (
