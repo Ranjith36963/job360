@@ -8,13 +8,14 @@
 // <Suspense> so the page tree is hydration-safe.
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { confirmPasswordReset } from "@/lib/api";
+import { useScrubbedUrlParams } from "@/lib/useScrubbedUrlParams";
 import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,8 +40,7 @@ type ResetSchema = z.infer<typeof resetSchema>;
 
 function ResetForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const token = useScrubbedUrlParams(["token"]).token ?? "";
 
   const [serverError, setServerError] = useState<string | null>(null);
   const [done, setDone] = useState(false);

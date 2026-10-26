@@ -9,10 +9,10 @@
 // while the request is in flight and then a success / failure card.
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { confirmEmailVerification } from "@/lib/api";
+import { useScrubbedUrlParams } from "@/lib/useScrubbedUrlParams";
 import { friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,8 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 type State = "pending" | "ok" | "error";
 
 function VerifyBody() {
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const token = useScrubbedUrlParams(["token"]).token ?? "";
   // Derive the missing-token error from initial state instead of calling
   // setState synchronously inside the effect (react-hooks/set-state-in-effect).
   const [state, setState] = useState<State>(token ? "pending" : "error");
