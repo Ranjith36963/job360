@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
 import { AskText } from "./AskText";
 import { JobCards } from "./JobCards";
+import { useLiveAsks, useLiveRefresh, useLiveRequests } from "./useLiveLists";
 import type { JobCardsReport } from "./JobCards";
 import { groupAsks } from "@/lib/job-cards";
 import { RunChromeTasks } from "./RunChromeTasks";
@@ -346,7 +347,10 @@ export function NeedsYou() {
 
   // Reload after an answer or withdraw. On failure the old lists stay on
   // screen and the error shows above them with a retry.
-  const general = useMemo(() => (open ? [...groupAsks(open).general, ...jobs.failed] : []), [open, jobs.failed]);
+  // Live (PR 6): the asks and requests as shown; one the user is in survives a refresh.
+  const shown = useLiveAsks(open);
+  const shownWaiting = useLiveRequests(waiting);
+  const general = useMemo(() => (open ? [...groupAsks(shown).general, ...jobs.failed] : []), [open, shown, jobs.failed]);
 
   const load = useCallback(async () => {
     void getOwnBrowserQueue().then(setQueue);
@@ -373,6 +377,12 @@ export function NeedsYou() {
   }, [apply]);
 
   // The user's own Apply in "Finish it here" was seen confirmed: its asks are closed now, re-read.
+  // The assistant changed something: re-read quietly (a failed read keeps what is on screen).
+  useLiveRefresh(() => {
+    void getOwnBrowserQueue().then(setQueue);
+    fetchAll().then((all) => apply(...all), () => {});
+  });
+
   useEffect(() => {
     const onSubmitted = () => void load();
     window.addEventListener(LIVE_SUBMITTED_EVENT, onSubmitted);
@@ -459,12 +469,12 @@ export function NeedsYou() {
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">No questions right now.</p>
         )}
         {active === "all" && !(queue && queue.count > 0) && jobs.cards.some((c) => c.ownBrowser) && <RunChromeTasks />}
-        <JobCards open={open} onChanged={load} onReport={setJobs} sort={sort} show={active} />
+        <JobCards open={shown} onChanged={load} onReport={setJobs} sort={sort} show={active} />
       </section>
       <OtherList
         hidden={active !== "all" && active !== "other"}
         onCount={setOtherLoaded}
-        waiting={waiting}
+        waiting={shownWaiting}
         questions={general}
         onChanged={load}
         renderQuestion={(a) => <AskCard key={a.id} ask={a} mode="open" onChanged={load} />}

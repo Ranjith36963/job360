@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/components/layout/AuthProvider";
 import { getAssistantSettings, updateProfileFields } from "@/lib/api";
 import type { AssistantSettingsView } from "@/lib/api";
+import { onChanges } from "@/lib/live-changes";
 
 export const PAUSE_PATH = "assistant_settings.paused_until";
 /** Fired with `detail: boolean` (paused) after a successful pause or resume. */
@@ -59,6 +60,15 @@ export function usePause() {
     window.addEventListener(PAUSE_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(PAUSE_CHANGED_EVENT, onChanged);
   }, []);
+
+  // Live (PR 6): pause set elsewhere (another tab, the assistant asked and you said yes).
+  useEffect(() => {
+    if (!signedIn) return;
+    return onChanges((d) => {
+      if (!d.full && !d.areas.includes("settings")) return;
+      fetchSettingsShared(`live:${d.seq}`).then((view) => setPaused(Boolean(view.paused)), () => {});
+    });
+  }, [signedIn]);
 
   const change = useCallback(async (next: boolean): Promise<boolean> => {
     try {
