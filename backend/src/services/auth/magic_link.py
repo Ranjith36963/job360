@@ -182,23 +182,17 @@ async def consume_magic_link(
     now = _now_iso()
     async with open_db(db_path) as db:
         db.row_factory = pg.Row
+        # Claim the token in ONE statement (single-use): a concurrent second
+        # consume matches zero rows, so only one caller ever gets a session.
         cur = await db.execute(
-            """
-            SELECT id, email, expires_at, used_at
-            FROM magic_link_tokens
-            WHERE token_hash = ?
-            """,
-            (h,),
+            "UPDATE magic_link_tokens SET used_at = ? "
+            "WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? "
+            "RETURNING id, email",
+            (now, h, now),
         )
         row = await cur.fetchone()
         if row is None:
-            logger.info("magic link consume: unknown token")
-            return None
-        if row["used_at"] is not None:
-            logger.info("magic link consume: token already used")
-            return None
-        if row["expires_at"] <= now:
-            logger.info("magic link consume: token expired")
+            logger.info("magic link consume: unknown, used or expired token")
             return None
 
         # EMAIL-CASE belt-and-suspenders: tokens minted BEFORE the request-path
@@ -206,11 +200,6 @@ async def consume_magic_link(
         # here too so the find-or-create below can never split one mailbox
         # into two accounts.
         email = (row["email"] or "").strip().lower()
-        # Mark the token used first — single-use enforcement.
-        await db.execute(
-            "UPDATE magic_link_tokens SET used_at = ? WHERE id = ?",
-            (now, row["id"]),
-        )
 
         # Find-or-create the user by email, ATOMICALLY. `INSERT OR IGNORE`
         # (shim → `ON CONFLICT DO NOTHING`) creates the row on first sight and is
