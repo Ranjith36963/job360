@@ -66,7 +66,9 @@ SHAPES: dict[str, dict[str, Any]] = {
             "remote_priority": list(_ui.PRIORITY_LEVELS), "onsite_priority": list(_ui.PRIORITY_LEVELS),
         },
         "note": (
-            "one record per country; country 'ANY' = every other country. citizenship = list of ISO alpha-2 "
+            "one record per country; country 'ANY' = every other country, or a region (NORTH_AMERICA, "
+            "SOUTH_AMERICA, EUROPE, MIDDLE_EAST, ASIA, AFRICA, OCEANIA) = its countries without their own record. "
+            "citizenship = list of ISO alpha-2 "
             f"codes. sanctions_country_citizen = true, false or \"{_ui.PREFER_NOT_TO_SAY}\" (nothing else). "
             "needs_sponsorship, remote_ok and contract_ok (contract roles OK there) = true or false. "
             "visa_expires = YYYY-MM or YYYY-MM-DD. "

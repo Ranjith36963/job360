@@ -93,7 +93,7 @@ export function ConsentBanner() {
           and what you and your assistant do. Accept or Decline below controls
           optional analytics (PostHog); Job360 works the same either way. Masked
           screen recordings of errors happen only if you turn on &ldquo;Help
-          improve Job360&rdquo; in Settings.
+          improve Job360&rdquo; in Account.
         </p>
         <div className="flex shrink-0 gap-2">
           {/* Same size + weight as Accept: rejecting must be no harder. */}

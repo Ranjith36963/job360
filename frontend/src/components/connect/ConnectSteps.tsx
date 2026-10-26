@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-// The three connect steps, shared by /settings/connect and the brand-new-user
+// The three connect steps, shared by /connect and the brand-new-user
 // Home. Moved here unchanged (same copy) so both screens say the same thing.
 
 // Shared look for the connect + settings pages (class-only; no copy here).

@@ -94,7 +94,7 @@ export default function TrustPage() {
             data-testid="trust-replay"
           >
             Job360 records your screen only if you turn on &ldquo;Help improve
-            Job360&rdquo; in Settings. It is off by default. The recordings are
+            Job360&rdquo; in Account. It is off by default. The recordings are
             masked: all text and media on screen are hidden. When on, Sentry
             session replay records 10% of sessions, and every session
             that hits an error, to help us fix problems.
@@ -134,7 +134,7 @@ export default function TrustPage() {
           <h2 className={H2}>Delete everything</h2>
           {/* Source: privacy page "Your rights"; routes/auth.py delete_account (current password required). */}
           <p className="mt-2">
-            Settings → Account → Delete my account. Your password is
+            Account → Delete my account. Your password is
             required. Your per-user data is erased immediately.
           </p>
         </section>
@@ -143,7 +143,7 @@ export default function TrustPage() {
           <h2 className={H2}>Download everything</h2>
           {/* Source: routes/auth.py export_my_data (GET /api/auth/users/me/export; secrets redacted). */}
           <p className="mt-2">
-            Settings → Account → Download everything gives you one JSON file
+            Account → Download everything gives you one JSON file
             with all the data we hold on you. Secrets such as your password
             hash are redacted.
           </p>

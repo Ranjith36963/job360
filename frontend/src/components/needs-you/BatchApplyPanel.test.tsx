@@ -72,10 +72,10 @@ describe("BatchApplyPanel", () => {
     render(<BatchApplyPanel />);
     const panel = screen.getByTestId("batch-apply-panel");
     expect(panel).toHaveTextContent("Batch apply");
-    await screen.findByTestId("daily-cap");
     await screen.findByTestId("batch-row-11");
     await screen.findByTestId("started-5");
     expect(screen.getByTestId("batch-rules")).toHaveTextContent("Your rules");
+    expect(screen.queryByTestId("daily-cap")).toBeNull();
     expect(screen.getByTestId("batch-queue")).toHaveTextContent("Queue");
     expect(screen.getByTestId("started-not-confirmed")).toHaveTextContent("Started, not confirmed");
   });
@@ -100,44 +100,53 @@ describe("BatchApplyPanel", () => {
   });
 
   describe("Your rules", () => {
+    // Owner rule 2026-10-26: rules are assistant settings and live on /connect.
+    // Needs you shows one line that links there, and no inputs.
     it("shows empty rules as not set and the never-apply list", async () => {
       render(<BatchApplyPanel />);
-      const cap = (await screen.findByTestId("daily-cap")) as HTMLInputElement;
-      expect(cap.value).toBe("");
-      expect(cap.placeholder).toBe("No limit");
-      expect(await screen.findByTestId("batch-never-apply")).toHaveTextContent("Evil Corp");
-      expect(screen.getByTestId("batch-never-apply-link")).toHaveAttribute("href", "/profile");
+      const rules = screen.getByTestId("batch-rules");
+      expect(rules).toHaveTextContent("Your rules");
+      expect(screen.getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=assistant");
+      expect(screen.queryByTestId("daily-cap")).toBeNull();
+      expect(screen.queryByTestId("batch-never-apply")).toBeNull();
+      expect(rules.querySelectorAll("input, select, textarea, button")).toHaveLength(0);
     });
 
     it("saves the daily limit at once", async () => {
       render(<BatchApplyPanel />);
-      const cap = await screen.findByTestId("daily-cap");
-      fireEvent.change(cap, { target: { value: "7" } });
-      fireEvent.blur(cap);
-      await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
-      expect(updateProfileFields.mock.calls[0][0]).toEqual([{ path: "assistant_settings.daily_cap", value: 7 }]);
-      await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Saved."));
+      await screen.findByTestId("batch-row-11");
+      expect(screen.queryByTestId("daily-cap")).toBeNull();
+      expect(updateProfileFields).not.toHaveBeenCalled();
+      expect(getAssistantSettings).not.toHaveBeenCalled();
     });
 
     it("starts auto for a while after one confirm", async () => {
       render(<BatchApplyPanel />);
-      fireEvent.click(await screen.findByTestId("mode-while"));
-      fireEvent.change(screen.getByTestId("auto-grant-count"), { target: { value: "3" } });
-      const later = new Date(Date.now() + 2 * 3600_000);
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const local = `${later.getFullYear()}-${pad(later.getMonth() + 1)}-${pad(later.getDate())}T${pad(later.getHours())}:${pad(later.getMinutes())}`;
-      fireEvent.change(screen.getByTestId("auto-grant-until"), { target: { value: local } });
-      fireEvent.click(screen.getByTestId("auto-grant-save"));
-      fireEvent.click(screen.getByTestId("auto-grant-confirm"));
-      await waitFor(() => expect(updateProfileFields).toHaveBeenCalled());
-      expect(updateProfileFields.mock.calls[0][0]).toHaveLength(4);
+      await screen.findByTestId("batch-row-11");
+      for (const id of ["mode-while", "auto-grant-count", "auto-grant-until", "auto-grant-save"]) {
+        expect(screen.queryByTestId(id)).toBeNull();
+      }
+      expect(updateProfileFields).not.toHaveBeenCalled();
     });
 
     it("shows a retry when the rules cannot load", async () => {
-      getAssistantSettings.mockRejectedValueOnce(new Error("down"));
       render(<BatchApplyPanel />);
-      fireEvent.click(await screen.findByTestId("batch-rules-retry"));
-      await screen.findByTestId("daily-cap");
+      expect(screen.queryByTestId("batch-rules-retry")).toBeNull();
+      expect(screen.getByTestId("batch-rules-link")).toBeInTheDocument();
+    });
+
+    it("Needs you renders no rule inputs and links to /connect?tab=assistant", async () => {
+      listAsks.mockResolvedValue({ asks: [], open_count: 0 });
+      render(<NeedsYou />);
+      const panel = await screen.findByTestId("batch-apply-panel");
+      await screen.findByTestId("batch-row-11");
+      expect(within(panel).getByTestId("batch-rules-link")).toHaveAttribute("href", "/connect?tab=assistant");
+      for (const id of ["daily-cap", "mode-while", "auto-grant-count", "batch-never-apply"]) {
+        expect(screen.queryByTestId(id)).toBeNull();
+      }
+      expect(screen.queryByTestId("mc-editor")).toBeNull();
+      expect(screen.queryByRole("spinbutton")).toBeNull();
+      expect(updateProfileFields).not.toHaveBeenCalled();
     });
   });
 

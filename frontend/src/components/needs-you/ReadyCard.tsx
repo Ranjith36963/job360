@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { approveSend, confirmAnswer, declineSend } from "@/lib/api";
 import { startAssistantAfterSend } from "@/lib/assistant-start";
 import { ApiError } from "@/lib/api-error";
-import type { ReadyAnswer, ReadyCardData } from "@/lib/api";
+import type { Ask, ReadyAnswer, ReadyCardData } from "@/lib/api";
 import { canCheck, clock, docText, flagText, heldText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
 import type { ChipTone } from "@/lib/ready-to-send";
@@ -18,6 +18,8 @@ import { readyBrowser } from "@/lib/browser-contract";
 import { BrowserReason } from "./BrowserReason";
 import { AnswerText } from "@/components/AnswerText";
 import { AnswerValue, DraftMissing } from "./AnswerValue";
+import { AskQuestions } from "./AskQuestions";
+import { openQuestionAsks, useReadyAsks } from "./useReadyAsks";
 import { looksLikePlaceholder } from "@/lib/answer-text";
 
 // Every string here (company, title, questions, answers, flags) was written by
@@ -42,7 +44,10 @@ export function ReadyCard({
   onChanged,
   status = "considering",
   changes,
+  asks,
 }: {
+  /** This job's open asks: the ones with form questions show inline and must be answered before Send. */
+  asks?: Ask[];
   /** The application status: "Nothing has been sent" shows while the table says so. */
   status?: string;
   /** CV changes not yet approved; unknown (e.g. the Needs-you list) shows no count. */
@@ -51,6 +56,9 @@ export function ReadyCard({
   paused: boolean;
   onChanged: () => void;
 }) {
+  const openAsks = openQuestionAsks(asks);
+  const ra = useReadyAsks(openAsks);
+  const askBlocked = openAsks.length > 0 && !ra.complete;
   const [busy, setBusy] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const preparer = whoLabel(card.filled_by).name;
@@ -66,6 +74,11 @@ export function ReadyCard({
   async function decide(send: boolean) {
     setBusy(true);
     try {
+      // Never approve a job whose open ask is unanswered: answer it first (the owner's own click on each row).
+      if (send && openAsks.length > 0) {
+        if (!ra.complete) return;
+        await ra.answerAll();
+      }
       await (send
         ? approveSend(card.application_id, {
             artifactId: card.cv?.artifact_id,
@@ -153,6 +166,29 @@ export function ReadyCard({
         )}
       </div>
 
+      {openAsks.length > 0 && (
+        <section data-testid="ready-ask-questions" className="flex flex-col gap-2">
+          <h4 className={label}>Your assistant also needs these answered before you send</h4>
+          <AskQuestions
+            items={ra.merged.rows}
+            rows={ra.rows}
+            busy={busy}
+            onChange={ra.setRow}
+            onSave={(id, value) => {
+              setBusy(true);
+              ra.saveRow(id, value)
+                .catch(() => toast.error("Could not save that answer. Try again."))
+                .finally(() => setBusy(false));
+            }}
+          />
+          {askBlocked && (
+            <p data-testid="ready-ask-blocked" className="text-xs text-muted-foreground">
+              Answer every question above to turn on Send.
+            </p>
+          )}
+        </section>
+      )}
+
       {(card.flags.length > 0 || missing > 0) && (
         <ul data-testid={`ready-flags-${card.application_id}`} className="flex flex-col gap-1 rounded-lg bg-warning-soft px-3 py-2 text-[13px] text-warning">
           {card.flags.map((f, i) => (
@@ -187,7 +223,7 @@ export function ReadyCard({
         <button
           type="button"
           data-testid={`ready-send-${card.application_id}`}
-          disabled={busy || paused}
+          disabled={busy || paused || askBlocked}
           onClick={() => void decide(true)}
           className={cn(tap, "rounded-lg bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50")}
         >
@@ -280,7 +316,9 @@ function AnswerRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
-  const chip = sourceChip(a, card.filled_by);
+  // No value to type (a sensitive answer not kept, or blank): never "Approved"; it waits for the user.
+  const missing = a.changed_to == null && (a.redacted || !a.answer.trim());
+  const chip = missing ? { text: "Needs your answer", tone: "guess" as const } : sourceChip(a, card.filled_by);
   const stub = isDraftStub(a);
   const checkable = canCheck(a) || stub;
   const id = `${card.application_id}-${index}`;
@@ -360,14 +398,14 @@ function AnswerRow({
         </span>
       ) : (
         <span className="break-words">
-          {a.redacted ? (
-            "(not kept: sensitive - Edit to type it)"
+          {missing ? (
+            <span data-testid={`ready-answer-missing-${id}`} className="font-medium text-danger">
+              {a.redacted ? "Not kept (private). Tap Edit to type your answer." : "Blank. Tap Edit to type your answer."}
+            </span>
           ) : stub ? (
             <DraftMissing id={id} value={a.answer} />
-          ) : a.answer ? (
-            <AnswerValue id={id} value={a.answer} />
           ) : (
-            "(blank)"
+            <AnswerValue id={id} value={a.answer} />
           )}
         </span>
       )}
@@ -384,9 +422,11 @@ function AnswerRow({
             Verified
           </span>
         )}
-        {checkable && !editing && (
+        {/* Edit sits on EVERY row (owner 2026-10-26: a private salary row had no way to type it); Verify only
+            where there is an answer to vouch for. */}
+        {!editing && (
           <>
-            {!a.verified && !stub && a.changed_to == null && a.answer && (
+            {checkable && !missing && !a.verified && !stub && a.changed_to == null && (
               <button
                 type="button"
                 data-testid={`ready-answer-verify-${id}`}

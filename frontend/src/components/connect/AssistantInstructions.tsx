@@ -2,24 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { getProfile, keepProfileEdit, takeBackProfileEdit, uploadProfile } from "@/lib/api";
+import { getProfile, keepProfileEdit, takeBackProfileEdit, updateProfileFields } from "@/lib/api";
 import type { ProfileResponse } from "@/lib/types";
 import { findAgentEdit } from "@/lib/agent-edits";
-import { prefsFromRaw } from "@/components/profile/PreferencesForm";
 import { AssistantNotes } from "@/components/profile/AssistantNotes";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { EditedMark } from "@/components/profile/EditedMark";
 
 // ---------------------------------------------------------------------------
-// "Things your AI assistant should know" on Home — the standing lines the agent
-// reads first on every get_profile, shown where the owner lands so they can
-// be read and changed without opening Profile. Same data, same save path and
-// same Keep / Take back mark as the Profile page; nothing new is stored.
+// Standing instructions for the assistant, on Connect your assistant > Assistant
+// configure (owner rule, 2026-10-26: every assistant setting lives on /connect).
+// "Things your AI assistant should know" = the lines the agent reads first on
+// every get_profile, with the same Keep / Take back mark as before. "Never apply
+// to" = the companies the assistant skips. Each save writes ONE preference path,
+// so the two editors can never overwrite each other.
 //
-// A user with no profile yet (or a failed read) sees nothing here: the card
-// is a convenience, never a reason to block Home.
+// A user with no profile yet (or a failed read) sees nothing here.
 // ---------------------------------------------------------------------------
 
-export function HomeAssistantNotes() {
+function NotesCard() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [settling, setSettling] = useState(false);
@@ -58,11 +60,8 @@ export function HomeAssistantNotes() {
     setProfile(shown);
     chain.current = chain.current.then(async () => {
       if (mine !== seq.current) return;
-      // The save replaces the whole preferences block, so send every other
-      // field back exactly as stored — only the notes change.
-      const prefs = { ...prefsFromRaw(shown.preferences ?? {}), assistant_notes: notes };
       try {
-        const next = await uploadProfile(null, prefs);
+        const next = await updateProfileFields([{ path: "preferences.assistant_notes", value: notes }]);
         if (mine === seq.current) {
           latest.current = next;
           setProfile(next);
@@ -100,11 +99,12 @@ export function HomeAssistantNotes() {
 
   if (!profile) return null;
 
-  const notes = prefsFromRaw(profile.preferences ?? {}).assistant_notes ?? [];
+  const stored = profile.preferences?.assistant_notes;
+  const notes = Array.isArray(stored) ? stored.map(String) : [];
   const edit = findAgentEdit(profile.agent_edits ?? [], "preferences.assistant_notes");
 
   return (
-    <section data-testid="home-assistant-notes" className="rounded-xl border border-border bg-card p-4">
+    <section data-testid="assistant-notes-card" className="rounded-xl border border-border bg-card p-4">
       <AssistantNotes
         notes={notes}
         onChange={save}
@@ -126,5 +126,87 @@ export function HomeAssistantNotes() {
         }
       />
     </section>
+  );
+}
+
+/** Companies the assistant never applies to: one per line, saved as that one preference. */
+function NeverApplyCard() {
+  const [text, setText] = useState<string | null>(null);
+  const [saved, setSaved] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    getProfile()
+      .then((p) => {
+        if (!live) return;
+        const raw = p.preferences?.avoid_companies;
+        const t = Array.isArray(raw) ? raw.map(String).filter(Boolean).join("\n") : "";
+        setText(t);
+        setSaved(t);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (text === null) return null;
+
+  async function save() {
+    const list = (text ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+    setBusy(true);
+    try {
+      await updateProfileFields([{ path: "preferences.avoid_companies", value: list }]);
+      const t = list.join("\n");
+      setText(t);
+      setSaved(t);
+      toast.success("Saved.");
+    } catch {
+      toast.error("Could not save. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section data-testid="never-apply-card" className="space-y-2 rounded-xl border border-border bg-card p-4">
+      <label
+        htmlFor="never-apply-input"
+        className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint"
+      >
+        Never apply to
+      </label>
+      <p className="text-xs text-muted-foreground">
+        One company per line. Your assistant skips these. Leave it empty and nothing is skipped.
+      </p>
+      <Textarea
+        id="never-apply-input"
+        data-testid="never-apply-input"
+        value={text}
+        rows={3}
+        disabled={busy}
+        placeholder="One per line"
+        onChange={(e) => setText(e.target.value)}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        data-testid="never-apply-save"
+        onClick={() => void save()}
+        disabled={busy || text.trim() === saved.trim()}
+      >
+        {busy ? "Saving…" : "Save"}
+      </Button>
+    </section>
+  );
+}
+
+export function AssistantInstructions() {
+  return (
+    <div className="flex flex-col gap-6" data-testid="assistant-instructions">
+      <NeverApplyCard />
+      <NotesCard />
+    </div>
   );
 }

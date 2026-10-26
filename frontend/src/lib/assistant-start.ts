@@ -28,7 +28,7 @@ export async function startAssistantAfterSend(opts: { manual?: boolean } = {}): 
     const wait = out.retry_after ?? 60;
     toast.info(
       `Your yes is saved. Your assistant was started a moment ago, so this job is not in that start: in ${wait} ` +
-        "seconds press Start now on Settings → Connect your assistant (or say “run 360”).",
+        "seconds press Start now on Connect your assistant (or say “run 360”).",
     );
   } else if (opts.manual && out.reason === "nothing_approved") {
     toast.info("Nothing is waiting on your yes right now.");

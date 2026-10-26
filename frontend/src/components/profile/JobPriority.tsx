@@ -5,6 +5,7 @@ import { CountryPicker } from "@/components/profile/CountryPicker";
 import { updateProfileFields } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { countryName } from "@/lib/countries";
+import { REGIONS, isRegion } from "@/lib/regions";
 import {
   PRIORITY_LABEL, PRIORITY_OPTIONS, RTW, SALARY, fromInputs, inputProblem, readRow, salaryRow, salaryText, toInputs, writeRow,
 } from "@/lib/memory";
@@ -33,11 +34,15 @@ const isObj = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 function placeName(code: unknown): string {
   const c = String(code ?? "");
   if (c === "ANY") return "anywhere else";
-  return c ? countryName(c) : "unknown place";
+  return c ? countryName(c) : "unknown place"; // a region code reads as its name ("Europe")
 }
 
-/** One row per place the user can work, in record order. Nothing is invented:
- *  a record with neither remote_ok nor an on-site yes gives no row. */
+/** Countries, then regions, then all other countries: the order a job's place is answered in. */
+const placeRank = (code: unknown) => (code === "ANY" ? 2 : isRegion(String(code)) ? 1 : 0);
+
+/** One row per place the user can work: countries, then regions, then all other countries
+ *  (record order within each). Nothing is invented: a record with neither remote_ok nor an
+ *  on-site yes gives no row. */
 export function priorityRows(block: unknown): PlaceRow[] {
   const out: PlaceRow[] = [];
   // Index into the RAW countries list (not the filtered one) so a write lands on the right record.
@@ -61,7 +66,8 @@ export function priorityRows(block: unknown): PlaceRow[] {
       });
     }
   });
-  return out;
+  const code = (row: PlaceRow) => (list[row.index] as Rec).country;
+  return out.sort((a, b) => placeRank(code(a)) - placeRank(code(b)));
 }
 
 /** A copy of the WHOLE right_to_work block with one key of one record changed.
@@ -264,7 +270,7 @@ export function JobPriority({
   const records: { rec: Rec; index: number }[] = (
     isObj(rightToWork) && Array.isArray(rightToWork.countries) ? rightToWork.countries : []
   ).flatMap((rec: unknown, index: number) => (isObj(rec) && typeof rec.country === "string" ? [{ rec, index }] : []));
-  records.sort((a, b) => Number(a.rec.country === "ANY") - Number(b.rec.country === "ANY"));
+  records.sort((a, b) => placeRank(a.rec.country) - placeRank(b.rec.country));
   const hasAny = records.some((r) => r.rec.country === "ANY");
   const [adding, setAdding] = useState(false);
   // A grid write is keyed by country, not index: the index can move when a place is added.
@@ -277,52 +283,7 @@ export function JobPriority({
 
   return (
     <section data-testid="job-priority" className={embedded ? "" : "rounded-xl border border-border bg-card p-6"}>
-      <h3 className={LABEL}>Job priority</h3>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Where should your assistant look first? It spends more of the hunt on higher priorities. Off = never search there.
-      </p>
-      {rows.length === 0 ? (
-        <p data-testid="job-priority-empty" className="mt-4 text-sm text-muted-foreground">
-          Tick Remote or On-site for a place below first.
-        </p>
-      ) : (
-        <ul className="mt-4 flex flex-col gap-3">
-          {rows.map((row) => {
-            const st = status[row.id];
-            const selectId = `job-priority-${row.id}`;
-            return (
-              <li key={row.id} data-testid={`job-priority-row-${row.id}`} className="flex flex-col gap-1">
-                <label htmlFor={selectId} className="text-sm">{row.label}</label>
-                <div className="flex items-center gap-3">
-                  <select
-                    id={selectId}
-                    data-testid={`job-priority-select-${row.id}`}
-                    className={FIELD}
-                    value={row.value}
-                    disabled={st?.state === "saving"}
-                    onChange={(e) => { void change(row, e.target.value); }}
-                  >
-                    <option value="">Not set</option>
-                    {PRIORITY_OPTIONS.map((o) => <option key={o} value={o}>{PRIORITY_LABEL[o]}</option>)}
-                  </select>
-                  <span
-                    role="status"
-                    data-testid={`job-priority-status-${row.id}`}
-                    className="w-16 shrink-0 text-xs text-muted-foreground"
-                  >
-                    {st?.state === "saving" ? "Saving…" : st?.state === "saved" ? "Saved" : ""}
-                  </span>
-                </div>
-                {st?.state === "error" && (
-                  <p role="alert" className="text-xs text-destructive">{st.message}</p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <div data-testid="work-grid" className="mt-6 border-t border-border pt-5">
+      <div data-testid="work-grid">
         <h4 className={LABEL}>Where you&apos;ll work</h4>
         <p className="mt-2 text-xs text-muted-foreground">
           For each place: the kinds of work you&apos;ll take, whether you need a visa there, and your salary range.
@@ -429,6 +390,65 @@ export function JobPriority({
             </button>
           )}
         </div>
+        {/* One line for a whole region (owner, 2026-10-26). A country's own line wins over it. */}
+        <div data-testid="work-grid-regions" className="mt-3">
+          <p className="text-xs text-muted-foreground">Or add a whole region (a country&apos;s own line wins over it):</p>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {REGIONS.filter((r) => !records.some(({ rec }) => rec.country === r.code)).map((r) => (
+              <button key={r.code} type="button" data-testid={`work-grid-add-region-${r.code}`} title={r.hint}
+                className={`${CHIP} border-border`}
+                onClick={() => void write(`grid-${r.code}`, (b) => withPlace(b, r.code))}>
+                + {r.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div data-testid="priorities" className="mt-6 border-t border-border pt-5">
+      <h4 className={LABEL}>Priorities</h4>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Where should your assistant look first? It spends more of the hunt on higher priorities. Off = never search there.
+      </p>
+      {rows.length === 0 ? (
+        <p data-testid="job-priority-empty" className="mt-4 text-sm text-muted-foreground">
+          Tick Remote or On-site for a place below first.
+        </p>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-3">
+          {rows.map((row) => {
+            const st = status[row.id];
+            const selectId = `job-priority-${row.id}`;
+            return (
+              <li key={row.id} data-testid={`job-priority-row-${row.id}`} className="flex flex-col gap-1">
+                <label htmlFor={selectId} className="text-sm">{row.label}</label>
+                <div className="flex items-center gap-3">
+                  <select
+                    id={selectId}
+                    data-testid={`job-priority-select-${row.id}`}
+                    className={FIELD}
+                    value={row.value}
+                    disabled={st?.state === "saving"}
+                    onChange={(e) => { void change(row, e.target.value); }}
+                  >
+                    <option value="">Not set</option>
+                    {PRIORITY_OPTIONS.map((o) => <option key={o} value={o}>{PRIORITY_LABEL[o]}</option>)}
+                  </select>
+                  <span
+                    role="status"
+                    data-testid={`job-priority-status-${row.id}`}
+                    className="w-16 shrink-0 text-xs text-muted-foreground"
+                  >
+                    {st?.state === "saving" ? "Saving…" : st?.state === "saved" ? "Saved" : ""}
+                  </span>
+                </div>
+                {st?.state === "error" && (
+                  <p role="alert" className="text-xs text-destructive">{st.message}</p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       </div>
     </section>
   );

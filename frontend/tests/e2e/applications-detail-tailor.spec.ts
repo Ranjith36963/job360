@@ -102,7 +102,7 @@ test.describe("Application detail — the documents card lives here (R9)", () =>
     await expect(
       // Scoped: the nav carries a "Connect your assistant" link too.
       page.getByTestId("section-documents").getByRole("link", { name: /connect your assistant/i })
-    ).toHaveAttribute("href", "/settings/connect");
+    ).toHaveAttribute("href", "/connect");
     await expect(page.getByRole("button", { name: /tailor my cv/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /generate/i })).toHaveCount(0);
 
