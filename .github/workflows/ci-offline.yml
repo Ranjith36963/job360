@@ -193,18 +193,28 @@ jobs:
       - name: Install Chromium for the browser-agent tests
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
-        # Usually ~20 s. On #1258 (2026-10-26) the runner's apt mirror stalled
-        # and this step took 14 min, so the job hit its 30-min timeout mid-suite
-        # and was CANCELLED, not judged. Cap each attempt at 5 min and try once
-        # more: a stalled mirror fails fast and a retry usually lands on a
-        # working one. Two failed attempts are a real failure (red).
+        # `--with-deps` went through the runner's Ubuntu apt mirror, which on
+        # 2026-10-26 crawled (3.7 MB in 2.5 min): one install took 14 min and
+        # cancelled #1258 at the 30-min timeout, and a timed-out attempt left
+        # apt holding the dpkg lock so a retry could not even start. The runner
+        # image already carries Chromium's libraries (that run's apt log listed
+        # every one "already the newest version"; only extra fonts were new).
+        # So: fetch only the browser (Playwright's CDN, seconds), PROVE it
+        # launches, and fall back to the apt deps only if that launch fails.
         run: |
           for attempt in 1 2; do
-            if timeout 300 python -m playwright install --with-deps chromium; then exit 0; fi
-            echo "::warning title=chromium::install attempt $attempt failed or took over 5 min"
+            if timeout -k 10 300 python -m playwright install chromium; then break; fi
+            echo "::warning title=chromium::browser download attempt $attempt failed or took over 5 min"
+            if [ "$attempt" = 2 ]; then echo "::error title=chromium::Chromium download failed twice"; exit 1; fi
           done
-          echo "::error title=chromium::Chromium install failed twice"
-          exit 1
+          launch() {
+            python -c "from playwright.sync_api import sync_playwright as s
+          with s() as p: p.chromium.launch().close()"
+          }
+          if launch; then echo "Chromium launches with the runner's own libraries"; exit 0; fi
+          echo "::warning title=chromium::Chromium did not launch; installing its system libraries"
+          timeout -k 10 900 python -m playwright install-deps chromium
+          launch
       # Fail in seconds, not after the suite: the tests' own helper must now
       # see Chromium. If it ever does not, the suite would skip ~66 tests and
       # the skip ratchet in `offline-suite` goes red too ("Playwright + Chromium
