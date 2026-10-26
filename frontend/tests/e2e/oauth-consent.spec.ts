@@ -11,7 +11,7 @@ import { test, expect } from "@playwright/test";
  *    description. Allow / Deny POST {approve} and follow `redirect_to`.
  * 3. A 404 from the GET (unknown/consumed/expired request) shows the expired
  *    copy and no Allow button.
- * 4. /settings/connect lists connected apps (oauth_grants) and Revoke calls
+ * 4. /connect lists connected apps (oauth_grants) and Revoke calls
  *    DELETE and removes the row.
  * 5. /auth/magic honours ?next — including falling back to /applications for
  *    an external next.
@@ -142,7 +142,7 @@ test.describe("OAuth consent — signed in", () => {
   });
 });
 
-test.describe("Connected apps (oauth_grants) on /settings/connect", () => {
+test.describe("Connected apps (oauth_grants) on /connect", () => {
   const GRANT_ROW = {
     id: 3,
     client_name: "Claude",
@@ -177,7 +177,7 @@ test.describe("Connected apps (oauth_grants) on /settings/connect", () => {
       return route.continue();
     });
 
-    await page.goto("/settings/connect?tab=apps");
+    await page.goto("/connect?tab=apps");
     await expect(page).not.toHaveURL(/\/login/);
 
     const rows = page.getByTestId("grant-row");
