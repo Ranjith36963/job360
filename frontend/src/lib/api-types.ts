@@ -2064,8 +2064,8 @@ export interface paths {
         put?: never;
         /**
          * Own Browser Send
-         * @description The user's per-card click "Send" (approve: Job360's browser first, the own browser after) or "Don't send"
-         *     (decline) for ONE LinkedIn message. Session only; no MCP twin. 409 when the draft changed since they looked.
+         * @description The user's per-card click "Send with my own browser" (approve) or "Don't send" (decline) for ONE
+         *     LinkedIn message. Session only; no MCP twin. 409 when the draft changed since they looked.
          */
         post: operations["own_browser_send_api_contacts__contact_id__own_browser_send_post"];
         delete?: never;

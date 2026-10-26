@@ -404,8 +404,7 @@ async def test_the_pace_is_still_serialised_across_two_people(authenticated_asyn
 
 @pytest.mark.asyncio
 async def test_take_by_contact_id_keeps_one_person_at_a_time(authenticated_async_context):
-    """Naming a person never bypasses the lock: another session's live claim on someone else makes a take busy,
-    and a session that already holds someone gets that one back, not a second claim."""
+    """Naming a person never bypasses one-person-at-a-time: busy for others, the holder gets its claim back."""
     async with authenticated_async_context() as client:
         _a, first, m1 = await _person(client, 0)
         _b, second, m2 = await _person(client, 1)

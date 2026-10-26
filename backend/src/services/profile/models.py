@@ -625,10 +625,8 @@ class UserPreferences:
     # S16 (2026-10-20) - the user's LinkedIn account tier, told to the assistant in
     # chat: True = Premium / Sales Navigator (a connection note may run to
     # LINKEDIN_NOTE_MAX_CHARS_PREMIUM), False = not told / assume the free limit, the
-    # safer budget (career-ops modes/contacto.md:168). The warn-only save check reads it as
-    # stored; the LinkedIn SEND gate (check_outreach) honours it only when the newest edit of
-    # it is the user's own web write, never an assistant's; never a penalty (hard rule #29).
-    # Same write/carry-forward rules as
+    # safer budget (career-ops modes/contacto.md:168). Only a warn-only save check
+    # reads it; never a penalty (hard rule #29). Same write/carry-forward rules as
     # daily_check: overlay only, kept on a "preferences" clear, reset only by "clear all".
     linkedin_premium: bool = False
     # Owner decision 2026-10-08 — the salary the user wants, one record per
