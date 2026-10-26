@@ -105,6 +105,7 @@ def test_sentry_with_dsn_in_prod_calls_init(monkeypatch):
     assert calls[0]["dsn"] == fake_dsn
     assert calls[0]["environment"] == "production"
     assert calls[0]["max_request_body_size"] == "never"
+    assert calls[0]["include_local_variables"] is False
     # Frame locals are scrubbed at every depth: a token inside a dict local (headers, a decrypted state)
     # is caught too, not only a local NAMED token.
     event = {"exception": {"values": [{"stacktrace": {"frames": [{"vars": {
@@ -126,7 +127,58 @@ def test_sentry_drops_the_framework_frames_variables_that_hold_the_raw_body():
     ]}}]}}
     frames = _scrub_pii(event, None)["exception"]["values"][0]["stacktrace"]["frames"]
     assert "hunter2-secret" not in str(event)
-    assert [f.get("vars") for f in frames] == [None, None, {"attempt": 2}]   # our own frames keep theirs
+    assert [f.get("vars") for f in frames] == [None, None, {"attempt": 2}]   # the filter itself leaves ours; init_sentry sends no locals at all (test above)
+
+
+def test_sentry_event_carries_no_frame_locals_from_our_own_code(monkeypatch):
+    """C1/D3: the scrubber matches dict KEYS only, so the repr of a pydantic model in a frame local
+    (email, password) or a local named ``current_password`` would go out in plaintext. Real client,
+    capturing transport, the exact kwargs ``init_sentry`` passes."""
+    import sentry_sdk
+    from pydantic import BaseModel
+    from sentry_sdk.transport import Transport
+
+    import src.core.settings as settings
+    from src.core.observability import init_sentry
+
+    class LoginRequest(BaseModel):
+        email: str
+        password: str
+
+    sent: list = []
+
+    class Capture(Transport):
+        def capture_envelope(self, envelope):
+            for item in envelope.items:
+                if item.payload.json is not None:
+                    sent.append(item.payload.json)
+
+    monkeypatch.setattr(settings, "SENTRY_DSN", "https://key@o0.ingest.example.invalid/1")
+    monkeypatch.setenv("APP_ENV", "production")
+    real_init = sentry_sdk.init
+    monkeypatch.setattr(sentry_sdk, "init", lambda **kw: real_init(**{**kw, "transport": Capture()}))
+
+    # Built at runtime: Sentry also ships source lines, so a literal in this file would show up anyway.
+    fakes = ("fake-current-" + "pw-1234", "fake.person@" + "example.invalid", "fake-login-" + "pw-5678")
+
+    def fails():
+        current_password = fakes[0]
+        req = LoginRequest(email=fakes[1], password=fakes[2])
+        raise RuntimeError(f"boom {len(current_password)} {type(req).__name__}")
+
+    try:
+        assert init_sentry() is True
+        try:
+            fails()
+        except RuntimeError:
+            sentry_sdk.capture_exception()
+        sentry_sdk.flush()
+    finally:
+        sentry_sdk.get_client().close()
+    assert sent, "no event was captured"
+    dumped = str(sent)
+    for fake in fakes:
+        assert fake not in dumped
 
 
 # ---------------------------------------------------------------------------
