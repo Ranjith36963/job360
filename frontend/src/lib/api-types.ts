@@ -7966,6 +7966,8 @@ export interface components {
              * @enum {string}
              */
             check: "verify" | "confirm";
+            /** Draft */
+            draft?: string | null;
             /** Key */
             key?: string | null;
             /** Question */

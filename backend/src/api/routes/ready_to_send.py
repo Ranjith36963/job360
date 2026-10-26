@@ -56,6 +56,8 @@ class ReadyAnswer(BaseModel):
     # G023 (slice 11): a sensitive answer the user did not agree to remember - stored as its
     # sha256 only, so ``answer`` is "" (Verify cannot see it; Edit types it again).
     redacted: bool = False
+    # Owner 2026-10-26: for a hashed row, the user's own saved answer to edit (None = none saved).
+    draft: Optional[str] = None
     # Owner 2026-10-26: ``confirm`` = text written for THIS job (read it each time); ``verify`` = a fact
     # reused on every form (verified once in Memory, then filled). ``ready.answer_check`` decides.
     check: Literal["verify", "confirm"] = "verify"
