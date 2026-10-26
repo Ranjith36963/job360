@@ -3980,6 +3980,162 @@
         "title": "ClientLogRequest",
         "type": "object"
       },
+      "CommonQuestionOut": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "group": {
+            "enum": [
+              "you",
+              "experience",
+              "work",
+              "pay",
+              "form",
+              "equality"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kit_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kit Key"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "seen": {
+            "default": 0,
+            "title": "Seen",
+            "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "state": {
+            "enum": [
+              "confirmed",
+              "relayed",
+              "inferred",
+              "sensitive",
+              "missing"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "group",
+          "question",
+          "state",
+          "verified"
+        ],
+        "title": "CommonQuestionOut",
+        "type": "object"
+      },
+      "CommonQuestionsOut": {
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/CommonQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/CommonQuestionsSummary"
+          }
+        },
+        "required": [
+          "questions",
+          "summary"
+        ],
+        "title": "CommonQuestionsOut",
+        "type": "object"
+      },
+      "CommonQuestionsSummary": {
+        "properties": {
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "to_verify": {
+            "title": "To Verify",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "verified",
+          "to_verify",
+          "missing"
+        ],
+        "title": "CommonQuestionsSummary",
+        "type": "object"
+      },
       "ConfirmAnswerRequest": {
         "properties": {
           "answer": {
@@ -27094,6 +27250,71 @@
           }
         },
         "summary": "Clear Profile Section",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/common-questions": {
+      "get": {
+        "operationId": "list_common_questions_api_profile_common_questions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommonQuestionsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Common Questions",
         "tags": [
           "profile"
         ]
