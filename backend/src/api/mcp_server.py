@@ -756,6 +756,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         # response from a single connection — so the `fields` map below costs
         # nothing extra. Calling the route and then re-loading the profile
         # meant four connections to answer one tool call.
+        from src.services.profile import common_questions  # noqa: PLC0415
         from src.services.profile import edits as profile_edits  # noqa: PLC0415
         from src.services.profile.models import UserProfile  # noqa: PLC0415
         from src.services.profile.search_brief import build_search_brief  # noqa: PLC0415
@@ -853,6 +854,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
                 profile.user_info.contact.get("residence_country"),
                 profile.user_info.answers,
             ),
+            # Owner 2026-10-26 - the common form questions with NO answer yet: draft each as a guess from the
+            # profile and save it (rules: "Common form questions"). Absent when none (rule #29).
+            **({"common_questions_open": open_qs} if (open_qs := common_questions.open_questions(profile)) else {}),
             # Owner decision 2026-10-08 (S2) - the assistant settings with the
             # safe defaults filled in, the practice-run state and the riskier
             # changes still waiting for the user's click. Read before ANY apply.

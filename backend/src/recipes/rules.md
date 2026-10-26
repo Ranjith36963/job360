@@ -250,7 +250,7 @@ and writes nothing; the same `request_id` with different fields is refused (409
 `idempotency_key_reused`). `applied_at` is ISO-8601 with a timezone.
 After a network error, re-read (get_application) before you retry; pass request_id so a retry is safe.
 Leave `answers` out and the receipt freezes the newest form_filled / form_swept answers (`answers_from`);
-an empty `channel` reads the form's host. A sensitive answer the user did not agree to remember is kept as its hash only.
+an empty `channel` reads the form's host. Every answer is kept as typed (salary and equality included), so the user can read it.
 Leave cv_artifact_id / cover_letter_artifact_id out when the browser uploaded the files: the receipt names exactly what was uploaded (`files`).
 
 Write tools take an optional `client_key` the same way: `save_artifact`,
@@ -685,6 +685,11 @@ A confirmation email for an application already applied: record_event `applied` 
 apply to agencies"), one line each; they win over anything you would
 otherwise assume. Empty means the user has none. They are also in
 `fields["preferences.assistant_notes"]`.
+
+Common form questions (owner, 2026-10-26: "only two things, from memory and guessed; there is no not known"):
+get_profile `common_questions_open` lists the ones with no answer yet. Draft each from the profile and save it
+to its `save_to` - a `topic` row as `user_info.answers` {question, answer, approved: false, topic}, a field row
+with `source: "agent_inferred"` - so Memory shows it as Guessed for the user to verify. Never leave one blank.
 
 Use `update_profile` to fill the structured fields, to correct something the
 structural read got wrong, and for a preference the user told you. An empty

@@ -2787,6 +2787,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/common-questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Common Questions */
+        get: operations["list_common_questions_api_profile_common_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/cv": {
         parameters: {
             query?: never;
@@ -5088,6 +5105,59 @@ export interface components {
             stack?: string | null;
             /** Url */
             url?: string | null;
+        };
+        /** CommonQuestionOut */
+        CommonQuestionOut: {
+            /** Answer */
+            answer?: string | null;
+            /** Country */
+            country?: string | null;
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "you" | "experience" | "work" | "pay" | "form" | "equality";
+            /** Id */
+            id: string;
+            /** Kit Key */
+            kit_key?: string | null;
+            /** Label */
+            label?: ("memory" | "guessed") | null;
+            /** Question */
+            question: string;
+            /**
+             * Seen
+             * @default 0
+             */
+            seen: number;
+            /** Source */
+            source?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "confirmed" | "relayed" | "inferred" | "sensitive" | "guessed" | "missing";
+            /** Topic */
+            topic?: string | null;
+            /** Verified */
+            verified: boolean;
+        };
+        /** CommonQuestionsOut */
+        CommonQuestionsOut: {
+            /** Questions */
+            questions: components["schemas"]["CommonQuestionOut"][];
+            summary: components["schemas"]["CommonQuestionsSummary"];
+        };
+        /** CommonQuestionsSummary */
+        CommonQuestionsSummary: {
+            /** Missing */
+            missing: number;
+            /** To Verify */
+            to_verify: number;
+            /** Total */
+            total: number;
+            /** Verified */
+            verified: number;
         };
         /** ConfirmAnswerRequest */
         ConfirmAnswerRequest: {
@@ -8005,6 +8075,8 @@ export interface components {
              * @enum {string}
              */
             check: "verify" | "confirm";
+            /** Draft */
+            draft?: string | null;
             /** Key */
             key?: string | null;
             /** Question */
@@ -14884,6 +14956,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_common_questions_api_profile_common_questions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommonQuestionsOut"];
                 };
             };
             /** @description Validation Error */

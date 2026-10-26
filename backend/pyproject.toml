@@ -159,6 +159,7 @@ include = ["src*"]
 src = [
     "data/job_signals/*.txt",
     "data/connector_catalog.json",
+    "data/common_form_questions.json",
     "services/tailoring/fonts/*.ttf",
     "services/tailoring/fonts/LICENSE",
 ]
