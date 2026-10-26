@@ -338,18 +338,10 @@ async def test_another_users_application_is_404_and_opens_no_ask(authenticated_a
     from fastapi.testclient import TestClient
 
     from src.api.main import app
-    from src.core import settings
-    from src.repositories import pgsync
+    from tests._signin import sign_in
 
     sync = TestClient(app)
-    email = "intruder-s6@example.com"
-    assert sync.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"}).status_code == 201
-    conn = pgsync.connect(str(settings.DB_PATH))
-    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
-    conn.commit()
-    conn.close()
-    login = sync.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
-    cookie = str(login.cookies.get("job360_session"))
+    cookie, _ = sign_in(sync, "intruder-s6@example.com")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
                            cookies={"job360_session": cookie}) as intruder:
         assert (await _event(intruder, app_id, "blocked", _blocked())).status_code == 404
@@ -483,18 +475,10 @@ async def test_i_submitted_it_on_another_users_application_is_404(authenticated_
     from fastapi.testclient import TestClient
 
     from src.api.main import app
-    from src.core import settings
-    from src.repositories import pgsync
+    from tests._signin import sign_in
 
     sync = TestClient(app)
-    email = "intruder-g426@example.com"
-    assert sync.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"}).status_code == 201
-    conn = pgsync.connect(str(settings.DB_PATH))
-    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
-    conn.commit()
-    conn.close()
-    login = sync.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
-    cookie = str(login.cookies.get("job360_session"))
+    cookie, _ = sign_in(sync, "intruder-g426@example.com")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
                            cookies={"job360_session": cookie}) as intruder:
         resp = await intruder.post(f"/api/applications/{app_id}/blocked/submitted", json={"confirmation": "1234"})

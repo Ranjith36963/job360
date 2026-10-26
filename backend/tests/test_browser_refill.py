@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from aiohttp import web
 
+from tests._signin import async_sign_in
 from tests.test_browser_agent import _ref, _site_resolver, _to_site, needs_chromium
 
 APPLY = """<!doctype html><html><head><title>Apply - Acme</title></head><body>
@@ -188,18 +189,6 @@ async def _filled_and_blocked(client, app_id: int) -> None:
     assert blocked.json()["blocked_recorded"] is True
 
 
-def _verify(user_id: str) -> None:
-    from src.core import settings
-    from src.repositories import pgsync
-
-    conn = pgsync.connect(str(settings.DB_PATH))
-    try:
-        conn.execute("UPDATE users SET email_verified_at = ? WHERE id = ?", ("2026-01-01T00:00:00Z", user_id))
-        conn.commit()
-    finally:
-        conn.close()
-
-
 async def _open_asks(client) -> list[dict[str, Any]]:
     return (await client.get("/api/asks")).json()["asks"]
 
@@ -324,11 +313,7 @@ async def test_refill_refuses_without_a_script_on_another_host_and_for_someone_e
         token = (await client.post("/api/tokens", json={"name": "agent"})).json()["token"]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as other:
-        creds = {"email": "someone-else@example.com", "password": "s3cretpassword"}
-        assert (await other.post("/api/auth/register", json=creds)).status_code == 201
-        login = await other.post("/api/auth/login", json=creds)
-        assert login.status_code == 200, login.text
-        _verify((await other.get("/api/auth/me")).json()["id"])
+        await async_sign_in(other, "someone-else@example.com")
         resp = await other.post(f"/api/applications/{app_id}/browser/refill")
         assert resp.status_code == 404, resp.text  # never the other user's form
     async with AsyncClient(
