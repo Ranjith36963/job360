@@ -60,7 +60,7 @@ describe("JobCard", () => {
     expect(screen.getByText("Only you can do this")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
     for (const l of screen.getAllByRole("link", { name: "Open the form ↗" })) expect(l).toHaveAttribute("href", "https://jobs.example.com/7");
-    expect(within(screen.getByTestId(`blocker-${captcha.id}`)).getByRole("link", { name: "Open the form ↗" })).toBeInTheDocument();
+    expect(within(screen.getByTestId(`blocker-${captcha.id}`)).getByTestId("ask-open-empty-form")).toHaveAttribute("href", "https://jobs.example.com/7");
     fireEvent.click(screen.getByTestId(`did-it-${captcha.id}`));
     await waitFor(() => expect(answerAsk).toHaveBeenCalledWith(captcha.id, "I did it myself on the form."));
     expect(onChanged).toHaveBeenCalled();

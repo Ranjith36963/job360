@@ -16,7 +16,6 @@ import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
 import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
-import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
 import { AnswerText } from "@/components/AnswerText";
 import { AskText } from "./AskText";
@@ -26,7 +25,7 @@ import { groupAsks } from "@/lib/job-cards";
 import { RunChromeTasks } from "./RunChromeTasks";
 import { OwnBrowserQueueCard } from "./OwnBrowserQueueCard";
 import { getOwnBrowserQueue, type OwnBrowserQueue } from "@/lib/browser-contract";
-import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
+import { FormHandoff } from "@/components/applications/FormHandoff";
 
 // Every string on an ask (question, context, answer, job fields) is written by
 // the user's assistant or by the user — untrusted. It is only ever rendered as
@@ -60,7 +59,7 @@ export function AskCard({
   const [pending, setPending] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
   // "Finish it here": the CAPTCHA in Job360's browser, solved on this card (owner, 2026-10-24).
-  const [finish, setFinish] = useState<"off" | "on" | "done">("off");
+  const [finish, setFinish] = useState<"off" | "done">("off");
 
   async function run(fn: () => Promise<unknown>, failMsg: string, onDone?: () => void) {
     setBusy(true);
@@ -104,18 +103,9 @@ export function AskCard({
         </p>
       </div>
 
-      {mode === "open" && ask.finish_here && finish === "off" && (
-        <button
-          type="button"
-          data-testid="ask-finish-here"
-          onClick={() => setFinish("on")}
-          className={`${confirmBtn} self-start`}
-        >
-          Finish it here{heldText(ask.held_seconds)}
-        </button>
-      )}
-      {mode === "open" && finish === "on" && ask.application_id != null && (
-        <FinishInBrowser applicationId={ask.application_id} onDone={() => setFinish("done")} />
+      {mode === "open" && ask.application_id != null && finish !== "done" && (ask.finish_here || ask.can_refill === true) && (
+        <FormHandoff applicationId={ask.application_id} finishHere={ask.finish_here === true} canRefill={ask.can_refill}
+          heldSeconds={ask.held_seconds} finishTestId="ask-finish-here" onFinished={() => setFinish("done")} />
       )}
       {finish === "done" && ask.application_id != null && (
         <p data-testid="ask-finish-done" className="text-xs text-muted-foreground">
@@ -420,7 +410,7 @@ export function NeedsYou() {
     <div className="flex min-w-0 flex-col gap-8" data-testid="needs-you-main">
       <MorningCheck />
       <CvToApprove skip={new Set(jobs.cards.filter((c) => c.cv).map((c) => c.applicationId))} />
-      <ReadyToSend onTotal={setReadyTotal} />
+      <ReadyToSend onTotal={setReadyTotal} asks={open} />
       <OutcomeSuggestions />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">

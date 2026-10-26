@@ -11,9 +11,8 @@ import { BLOCKER_TITLE, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuest
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
-import { heldText } from "@/lib/ready-to-send";
 import { Textarea } from "@/components/ui/textarea";
-import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
+import { FormHandoff } from "@/components/applications/FormHandoff";
 import { AskQuestions } from "./AskQuestions";
 import { AskText } from "./AskText";
 import { BrowserReason } from "./BrowserReason";
@@ -66,8 +65,6 @@ export function JobCard({
   const [hidden, setHidden] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
-  // A CAPTCHA on a form filled in Job360's own browser: the user can finish it right here.
-  const [finishing, setFinishing] = useState<number | null>(null);
   const structured = card.asks.filter((a) => a.kind === "structured");
   // Each question is shown once, however many open asks listed it; its answer as it stands and
   // whether the user checked it, per merged row.
@@ -228,14 +225,13 @@ export function JobCard({
         </div>
       </div>
       <AskText id={ask.id} question={ask.question} headClass="text-xs text-muted-foreground" />
-      {finishing === ask.id && <FinishInBrowser applicationId={card.applicationId} onDone={() => setFinishing(null)} />}
+      {(kind === "captcha" || kind === "login") && (
+        // Job360's browser holds the filled form: finish it there. The employer page is an EMPTY form.
+        <FormHandoff applicationId={card.applicationId} finishHere={ask.finish_here === true} canRefill={ask.can_refill}
+          heldSeconds={ask.held_seconds} formUrl={card.formUrl} finishTestId={`finish-here-${ask.id}`} />
+      )}
       <div className="flex flex-wrap gap-2">
-        {ask.finish_here && finishing !== ask.id && (
-          <button type="button" className={btn} data-testid={`finish-here-${ask.id}`} onClick={() => setFinishing(ask.id)}>
-            Finish it here{heldText(ask.held_seconds)}
-          </button>
-        )}
-        {rowLink(ask.id)}
+        {kind !== "captcha" && kind !== "login" && rowLink(ask.id)}
         {kind === "upload" && card.latestCv && (
           <button type="button" className={btn} onClick={() => void downloadCv(card)}>
             Download CV
