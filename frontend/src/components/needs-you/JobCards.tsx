@@ -6,12 +6,13 @@ import { getApplication, getCvToApprove, getReadyToSend, listPeople } from "@/li
 import type { ApplicationDetail, Ask, CvToApproveRow, ReadyCardData, ReadyToSend as ReadyData } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { buildCard, groupAsks, waitSummary } from "@/lib/job-cards";
-import type { JobCardData } from "@/lib/job-cards";
+import type { JobCardData, PersonToReach } from "@/lib/job-cards";
 import { sortByUrgency } from "@/lib/needs-you-rank";
 import { splitReady } from "@/lib/ready-to-send";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { JobCard } from "./JobCard";
+import { NewConnections, newConnections } from "./NewConnections";
 import { ReadyCard, isMissingAnswer } from "./ReadyCard";
 import { SendAllCard } from "./SendAllCard";
 import { openQuestionAsks } from "./useReadyAsks";
@@ -26,13 +27,15 @@ const MAX_IN_FLIGHT = 8;
 
 type PersonJob = { application_id: number; job_company: string; job_title: string };
 
-/** Jobs with a drafted message nobody has marked sent (best effort: a failed read adds none). */
-async function jobsWithUnsentMessages(): Promise<PersonJob[]> {
+/** Jobs with a drafted message nobody has marked sent, and the people with no job who have one
+ *  (best effort: a failed read adds none). */
+async function unsentMessages(): Promise<{ jobs: PersonJob[]; cold: PersonToReach[] }> {
   try {
     const { people } = await listPeople();
-    return (people ?? []).filter((p) => p.message_count > 0 && !p.last_sent).flatMap((p) => p.jobs);
+    const unsent = (people ?? []).filter((p) => p.message_count > 0 && !p.last_sent);
+    return { jobs: unsent.flatMap((p) => p.jobs), cold: await newConnections(unsent) };
   } catch {
-    return [];
+    return { jobs: [], cold: [] };
   }
 }
 
@@ -92,6 +95,8 @@ export type JobCardsReport = {
   failed: Ask[];
   /** Jobs that need the owner (every filter; the summary line's number). */
   total: number;
+  /** People with no job and an unsent drafted note (the "New connections" group; also on the summary line). */
+  connections?: number;
   /** False until people to reach, CVs to check and Ready to send have answered (more jobs may join). */
   settled: boolean;
   /** Ready-to-send cards for the badge: null until that read answers, 0 when it failed. */
@@ -141,6 +146,9 @@ export function JobCards({
   // One token per load of the asks: a card is refetched when its token is out of date.
   const gen = useMemo(() => ({}), [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [people, setPeople] = useState<PersonJob[] | null>(null);
+  const [cold, setCold] = useState<PersonToReach[]>([]);
+  // New connections sent or skipped here: hidden at once and across reloads (Skip is not saved anywhere).
+  const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
   const [cvRows, setCvRows] = useState<CvToApproveRow[] | null>(null);
   const [ready, setReady] = useState<ReadyData | null>(null);
   const [readyFailed, setReadyFailed] = useState(false);
@@ -160,7 +168,11 @@ export function JobCards({
   // Someone-to-reach jobs and CVs to check: read after the first paint, never in its way.
   useEffect(() => {
     let live = true;
-    void jobsWithUnsentMessages().then((p) => live && setPeople(p));
+    void unsentMessages().then((p) => {
+      if (!live) return;
+      setPeople(p.jobs);
+      setCold(p.cold);
+    });
     void cvRowsToCheck().then((r) => live && setCvRows(r));
     return () => {
       live = false;
@@ -244,10 +256,14 @@ export function JobCards({
     () => headers.flatMap((h) => (slots.get(h.id)?.status === "failed" ? h.asks.filter((a) => !h.ready || !a.questions?.length) : [])),
     [headers, slots],
   );
+  const connections = useMemo(() => cold.filter((p) => !doneIds.has(p.contact.id)), [cold, doneIds]);
   const settled = people !== null && cvRows !== null && (ready !== null || readyFailed);
   useEffect(() => {
-    onReport?.({ cards, failed, total: alive.length, settled, readyTotal: ready ? ready.total : readyFailed ? 0 : null });
-  }, [onReport, cards, failed, alive.length, settled, ready, readyFailed]);
+    onReport?.({
+      cards, failed, total: alive.length, connections: connections.length, settled,
+      readyTotal: ready ? ready.total : readyFailed ? 0 : null,
+    });
+  }, [onReport, cards, failed, alive.length, connections.length, settled, ready, readyFailed]);
 
   const { clean, held } = useMemo(() => {
     const asked = new Set(openQuestionAsks(open).map((a) => a.application_id));
@@ -264,20 +280,24 @@ export function JobCards({
       </button>
     </div>
   );
-  if (alive.length === 0) return readyError || null;
+  if (alive.length === 0 && connections.length === 0) return readyError || null;
   const paused = ready?.paused ?? false;
   const readyPart = (h: Header, embedded: boolean) =>
     h.ready && <ReadySection card={h.ready} asks={h.asks} paused={paused} embedded={embedded} onChanged={readyChanged} salaryFacts={salaryFacts} />;
   const pending = alive.length - page.length;
   const next = Math.min(JOBS_PER_PAGE, pending);
+  const counted = [
+    alive.length > 0 && `${alive.length} ${alive.length === 1 ? "job" : "jobs"}`,
+    connections.length > 0 && `${connections.length} new ${connections.length === 1 ? "connection" : "connections"}`,
+  ].filter(Boolean);
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground" data-testid="jobs-count">
-        {alive.length} {alive.length === 1 ? "job" : "jobs"} waiting for you
+        {counted.join(" and ")} waiting for you
       </p>
       {readyError}
       {clean.length >= 2 && <SendAllCard clean={clean} held={held} paused={paused} onChanged={readyChanged} />}
-      <ul className="flex flex-col gap-3" data-testid="job-cards">
+      {page.length > 0 && <ul className="flex flex-col gap-3" data-testid="job-cards">
         {page.map((h) => {
           const slot = slots.get(h.id);
           const card = cardOf(h);
@@ -297,7 +317,7 @@ export function JobCards({
             </li>
           );
         })}
-      </ul>
+      </ul>}
       {pending > 0 && (
         <button
           type="button"
@@ -308,6 +328,8 @@ export function JobCards({
           Show {next} more · {pending} left
         </button>
       )}
+      <NewConnections people={connections} onChanged={onChanged}
+        onDone={(id) => setDoneIds((s) => new Set(s).add(id))} />
     </div>
   );
 }
