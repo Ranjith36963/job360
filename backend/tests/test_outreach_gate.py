@@ -73,7 +73,7 @@ _CASES: list[tuple[str, str, dict[str, Any]]] = [
     ("stop", "paused", _PAUSED),
     ("stop", "message_not_found", {"facts": {"message_found": False}}),
     ("stop", "not_latest_draft", {"facts": {"latest_draft": False}}),
-    ("stop", "not_email_channel", {"facts": {"channel": "linkedin"}}),
+    ("stop", "not_email_channel", {"facts": {"channel": "other"}}),
     ("stop", "no_email", {"facts": {"has_email": False}}),
     ("stop", "email_bounced", {"facts": {"email_bounced": True}}),
     ("stop", "already_sent", {"facts": {"already_sent": True}}),
@@ -424,12 +424,27 @@ async def test_stop_not_latest_draft(authenticated_async_context, fixture_user_i
 
 
 @pytest.mark.asyncio
-async def test_stop_linkedin_channel(authenticated_async_context, fixture_user_id):
+async def test_stop_other_channel(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id, cid, _mid = await _auto_ready(client, fixture_user_id)
+        other = await _draft(client, app_id, cid, channel="other")
+        verdict = await _check(client, cid, other)
+    assert (verdict["decision"], verdict["reason"]) == ("stop", "not_email_channel")
+
+
+@pytest.mark.asyncio
+async def test_linkedin_without_click_asks(authenticated_async_context, fixture_user_id):
+    """outreach_send is auto here, and a LinkedIn draft still waits for the user's click on the card."""
+    async with authenticated_async_context() as client:
+        app_id, cid, _mid = await _auto_ready(client, fixture_user_id)
+        patched = await client.patch(
+            f"/api/contacts/{cid}",
+            json={"linkedin_url": "https://www.linkedin.com/in/bo", "linkedin_state": "connected"},
+        )
+        assert patched.status_code == 200, patched.text
         linkedin = await _draft(client, app_id, cid, channel="linkedin")
         verdict = await _check(client, cid, linkedin)
-    assert (verdict["decision"], verdict["reason"]) == ("stop", "not_email_channel")
+    assert (verdict["decision"], verdict["reason"]) == ("ask", "needs_owner_click")
 
 
 @pytest.mark.asyncio
@@ -543,7 +558,7 @@ async def test_mcp_check_outreach_parity(authenticated_async_context, fixture_us
         try:
             route_send = await _check(client, cid, mid)
             assert await tool.fn(contact_id=cid, message_id=mid) == route_send
-            linkedin = await _draft(client, app_id, cid, channel="linkedin")
+            linkedin = await _draft(client, app_id, cid, channel="other")
             route_stop = await _check(client, cid, linkedin)
             assert await tool.fn(contact_id=cid, message_id=linkedin) == route_stop
             with pytest.raises(ToolError) as info:
@@ -553,7 +568,7 @@ async def test_mcp_check_outreach_parity(authenticated_async_context, fixture_us
             await mcp_server.build_server()._tool_manager.get_tool("update_profile").fn(
                 edits=[{"path": SEND, "value": "draft_only"}]
             )
-            latest = await _draft(client, app_id, cid)  # the linkedin draft above superseded `mid`
+            latest = await _draft(client, app_id, cid)  # the other-channel draft above superseded `mid`
             route_ask = await _check(client, cid, latest)
             assert await tool.fn(contact_id=cid, message_id=latest) == route_ask
             assert route_ask["reason"] == "mode_not_auto"

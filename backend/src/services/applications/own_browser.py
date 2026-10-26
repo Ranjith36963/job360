@@ -2,9 +2,10 @@
 
 Job360's own browser goes FIRST for every task. A task reaches the user's OWN browser (the one their
 assistant drives on their computer) only after Job360's browser failed on it (an open ``blocked`` with
-``by: browser`` that ``routing.ask_route`` sends to ``own_browser``), or when the user clicked "Send with my
-own browser" on one LinkedIn person. That click is the user's yes for THAT message and never expires until
-it is sent or cancelled; a rewritten draft (a new message id) needs a new click.
+``by: browser`` that ``routing.ask_route`` sends to ``own_browser``, or a LinkedIn person it gave back with
+``release``). The user's per-card Send click on one LinkedIn person is their yes for THAT message and never
+expires until it is sent or cancelled; a rewritten draft (a new message id) needs a new click. Either browser
+sends only while it holds a live claim (:func:`take`, optionally for one ``contact_id``).
 
 Stored as ``contact_outreach`` entries Job360 writes itself and never accepts from a caller (they are not in
 ``settings.OUTREACH_ENTRIES``, so ``record_outreach`` refuses them): ``send_approved`` / ``send_declined``
@@ -45,7 +46,7 @@ WHY_WORDS = {
     "job360_login_required": "Job360's browser hit a sign-in page.",
     "job360_bot_check": "Job360's browser hit a CAPTCHA or bot check.",
     "job360_safety_stop": "Job360's browser stopped for safety.",
-    "default": "You chose to send it from your own browser.",
+    "default": "You pressed Send for this message.",
 }
 
 
@@ -350,26 +351,52 @@ _SENDS = (
 )
 
 
-async def _pace(db: JobDatabase, user_id: str, now: datetime) -> Optional[tuple[str, int]]:
-    """``("wait", seconds_left)`` when the last LinkedIn send was under the minimum gap ago;
-    ``("daily_limit", 0)`` at the day's maximum (the user's own day); else ``None``."""
+async def pace_facts(
+    db: JobDatabase, user_id: str, now: datetime, exclude_contact_id: Optional[int] = None
+) -> tuple[Optional[datetime], int]:
+    """``(last LinkedIn send or unreleased claim, how many today)`` for the user's own day. The ONE count
+    :func:`take` and ``check_outreach`` share. ``exclude_contact_id`` leaves one person's rows out: the gate
+    asks about a person the caller has just claimed, and that claim must not make the gate say "too soon"."""
     from src.services.profile import assistant_settings as rules  # noqa: PLC0415
 
+    skip, params = (" AND o.contact_id <> ?", (user_id, exclude_contact_id)) if exclude_contact_id is not None else (
+        "", (user_id,)
+    )
     cur = await db._db.execute(
-        f"SELECT MAX(o.recorded_at) FROM contact_outreach o WHERE {_SENDS}",  # noqa: S608 - constant text
-        (user_id,),
+        f"SELECT MAX(o.recorded_at) FROM contact_outreach o WHERE {_SENDS}{skip}",  # noqa: S608 - constant text
+        params,
     )
     got = await cur.fetchone()
     last = _when(got[0]) if got is not None and got[0] else None
+    today = await rules.count_on_user_today(
+        db, user_id, now,
+        f"SELECT o.recorded_at FROM contact_outreach o WHERE {_SENDS}{skip} AND o.recorded_at >= ?",  # noqa: S608
+        params,
+    )
+    return last, today
+
+
+async def weekly_limit_until(db: JobDatabase, user_id: str, now: datetime) -> Optional[datetime]:
+    """When LinkedIn's weekly invitation limit, which the user's assistant reported by releasing a task with
+    reason ``weekly_limit``, is over (seven days after the newest such release); ``None`` when none is live."""
+    cur = await db._db.execute(
+        "SELECT MAX(recorded_at) FROM contact_outreach WHERE user_id = ? AND entry = ? AND text = 'weekly_limit'",
+        (user_id, RELEASED),
+    )
+    got = await cur.fetchone()
+    at = _when(got[0]) if got is not None and got[0] else None
+    until = at + timedelta(days=7) if at is not None else None
+    return until if until is not None and until > now else None
+
+
+async def _pace(db: JobDatabase, user_id: str, now: datetime) -> Optional[tuple[str, int]]:
+    """``("wait", seconds_left)`` when the last LinkedIn send was under the minimum gap ago;
+    ``("daily_limit", 0)`` at the day's maximum (the user's own day); else ``None``."""
+    last, today = await pace_facts(db, user_id, now)
     if last is not None:
         left = LINKEDIN_MIN_GAP_SECONDS - (now - last).total_seconds()
         if left > 0:
             return "wait", int(math.ceil(left))
-    today = await rules.count_on_user_today(
-        db, user_id, now,
-        f"SELECT o.recorded_at FROM contact_outreach o WHERE {_SENDS} AND o.recorded_at >= ?",  # noqa: S608
-        (user_id,),
-    )
     return ("daily_limit", 0) if today >= LINKEDIN_DAILY_MAX else None
 
 
@@ -381,14 +408,18 @@ def _next_step(task: dict[str, Any]) -> str:
     if task["kind"] == "application":
         return f'get_application_kit(application_id={task["application_id"]}, session="<your session>")'
     return (
-        f'call check_outreach(contact_id={task["contact_id"]}, message_id={task["message_id"]}); only if it says '
-        "send, open the person's LinkedIn page in your own browser and send the draft, then record_event sent. "
-        "Otherwise own_browser_queue release with reason other"
+        f'call check_outreach(contact_id={task["contact_id"]}, message_id={task["message_id"]}, '
+        "session=<your session>); only if it says send, open the person's LinkedIn page and send the draft, "
+        "then record_event outreach_sent. Otherwise own_browser_queue release with reason other"
     )
 
 
-async def take(db: JobDatabase, user: CurrentUser, session: str, now: datetime) -> dict[str, Any]:
+async def take(
+    db: JobDatabase, user: CurrentUser, session: str, now: datetime, contact_id: Optional[int] = None
+) -> dict[str, Any]:
     """Hand ONE task to the session (15 minutes for a person; an application's kit read is its own hold).
+    With ``contact_id`` only that person is claimed (Job360's browser takes the one the user clicked Send on);
+    ``empty`` when they are not waiting for a send. The same locks, pace, pause and window apply.
     ``status``: task | already_yours | empty | closed (outside the PC-on hours, no Run now) | paused | busy
     (another session is sending) | wait (``wait_seconds`` left) | daily_limit. The same session asking again
     gets its live claim back. The user row is locked first, so two sessions never take one person."""
@@ -410,6 +441,9 @@ async def take(db: JobDatabase, user: CurrentUser, session: str, now: datetime) 
         await db._db.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", (user.id,))
         tasks = await queue_tasks(db, user, now, label)
         contacts_ = [t for t in tasks if t["kind"] == "linkedin_outreach"]
+        if contact_id is not None:
+            contacts_ = [t for t in contacts_ if t["contact_id"] == contact_id]
+            tasks = contacts_
         mine = next(
             (t for t in contacts_ if t["claim"] and (t["claim"]["session"], t["claim"]["actor"]) == (label, actor)),
             None,

@@ -2830,10 +2830,13 @@ async def record_outreach(
 async def outreach_check(
     contact_id: int,
     message_id: int = Query(...),
+    session: str = Query("", max_length=200),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """THE one gate before pressing Send on an outreach email (feature 10).
+    """THE one gate before pressing Send on an outreach email, or on a LinkedIn message after the user's
+    click on that person's card (feature 10). ``session`` is the caller's own session label: a LinkedIn
+    person another session holds reads as ``claimed_by_other_session``.
 
     Reads the user's settings (``assistant_settings.outreach_send`` decides send vs
     ask; the Gmail mode never does), this contact's facts and the saved message
@@ -2849,7 +2852,9 @@ async def outreach_check(
         now = datetime.now(timezone.utc)
         profile = load_profile(user.id) or UserProfile()
         cfg = settings_rules.effective(profile.assistant_settings)
-        facts = await contacts_service.outreach_gate_facts(db, user.id, contact, message_id)
+        facts = await contacts_service.outreach_gate_facts(
+            db, user.id, contact, message_id, session=session, actor=actor_for(user), now=now
+        )
         counts = await settings_rules.load_outreach_counts(db, user.id, now, facts.company or None)
     except SpineError as exc:
         _raise(exc)

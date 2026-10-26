@@ -1569,6 +1569,26 @@ async def _linkedin_premium(user_id: str, contact_id: int) -> bool:
     return bool(getattr(prefs, "linkedin_premium", False))
 
 
+async def _linkedin_premium_by_user(user_id: str, contact_id: int) -> bool:
+    """Premium for the SEND gate: only when the user set ``preferences.linkedin_premium`` themselves (the newest
+    edit of that path is a web write, not an assistant's). An assistant cannot widen the note limit to 300 by
+    editing the profile. Not set, an assistant's edit or a failed read = False (the free limit, 200)."""
+    import asyncio  # noqa: PLC0415
+
+    if not await _linkedin_premium(user_id, contact_id):
+        return False
+    try:
+        from src.services.profile import edits as profile_edits  # noqa: PLC0415 - rule #16
+
+        rows = await asyncio.to_thread(profile_edits.path_history, user_id, "preferences.linkedin_premium", 1)
+    except Exception:  # noqa: BLE001 - advisory; a history read must not break a gate answer
+        logging.getLogger("job360.contacts").exception(
+            "linkedin_premium_history_unavailable", extra={"contact_id": safe_log_value(contact_id)},
+        )
+        return False
+    return bool(rows) and rows[0]["value"] is True and not profile_edits.is_assistant_actor(str(rows[0]["set_by"]))
+
+
 async def _check_draft_kind(
     user_id: str, contact_id: int, entry: str, channel: str, text: str, draft_kind: str
 ) -> None:
@@ -1884,11 +1904,18 @@ async def record_outreach(
 
 
 async def outreach_gate_facts(
-    db: JobDatabase, user_id: str, contact: dict[str, Any], message_id: int
+    db: JobDatabase,
+    user_id: str,
+    contact: dict[str, Any],
+    message_id: int,
+    session: str = "",
+    actor: str = "",
+    now: Optional[datetime] = None,
 ) -> settings_rules.OutreachFacts:
     """The closed facts ``may_send_outreach`` reads for one OWNED contact (the
     caller already checked ownership via ``get_owned_contact``) and one saved
-    message version. Read-only; never returns the message text or the email
+    message version. ``session`` + ``actor`` are the caller's own session label and name: a live own-browser
+    claim by anyone else reads as ``claimed_by_other``. Read-only; never returns the message text or the email
     address, only whether they exist. A message row that belongs to another
     contact (or user) reads as ``message_found=False`` (no existence oracle)."""
     contact_id = int(contact["id"])
@@ -1916,7 +1943,11 @@ async def outreach_gate_facts(
             (user_id, email),
         )
         bounced = await cur.fetchone() is not None
+    linkedin = await _linkedin_gate_facts(
+        db, user_id, contact_id, rows, target, current, session, actor, now or datetime.now(timezone.utc)
+    )
     return settings_rules.OutreachFacts(
+        **linkedin,
         message_found=True,
         latest_draft=int(target["id"]) == max(int(r["id"]) for r in messages),
         channel=str(target.get("channel") or ""),
@@ -1930,6 +1961,39 @@ async def outreach_gate_facts(
         email_source=current.get("email_source") or None,
         email_bounced=bounced,
     )
+
+
+async def _linkedin_gate_facts(
+    db: JobDatabase, user_id: str, contact_id: int, rows: list[dict[str, Any]], target: dict[str, Any],
+    current: dict[str, Any], session: str, actor: str, now: datetime,
+) -> dict[str, Any]:
+    """The LinkedIn facts of :class:`OutreachFacts` (``{}`` for any other channel: nothing is read). The click
+    and the claim come from ``own_browser.derive`` (the one place that reads those rows); the pace from the
+    same counts ``own_browser.take`` uses, leaving this person's own claim out."""
+    if str(target.get("channel") or "") != "linkedin":
+        return {}
+    from src.services.applications import kit  # noqa: PLC0415
+
+    label = kit.clean_session(session)
+    task = own_browser.derive(rows, now)
+    mine = task is not None and int(task["message_id"]) == int(target["id"])
+    holder = (
+        (task["claimed_by"], task["claimed_actor"])
+        if task is not None and mine and task["state"] == "in_progress" else None
+    )
+    last, today = await own_browser.pace_facts(db, user_id, now, exclude_contact_id=contact_id)
+    return {
+        "has_linkedin_url": bool((current.get("linkedin_url") or "").strip()),
+        "linkedin_state": current.get("linkedin_state") or None,
+        "text_chars": len(str(target.get("text") or "")),
+        "premium": await _linkedin_premium_by_user(user_id, contact_id),
+        "owner_approved": mine and task is not None and task["state"] in ("queued", "in_progress"),
+        "claimed_by_other": holder is not None and holder != (label, actor),
+        "claimed_by_caller": holder is not None and holder == (label, actor),
+        "invite_limit_until": await own_browser.weekly_limit_until(db, user_id, now),
+        "last_linkedin_sent_at": last,
+        "linkedin_sent_today": today,
+    }
 
 
 async def count_company_sends(db: JobDatabase, user_id: str, key: str, since: str) -> int:

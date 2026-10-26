@@ -1607,6 +1607,16 @@ class OutreachFacts:
     * ``email_source`` - where the CURRENT email came from (``None`` = not said);
     * ``email_bounced`` - a ``bounced`` mark exists for this user on the contact's
       CURRENT address (on any of the user's contacts).
+
+    LinkedIn facts (all closed; defaults keep email fixtures building): ``has_linkedin_url`` - the contact's
+    CURRENT profile link is set; ``linkedin_state`` - connected | pending | not_connected | unknown (``None``
+    = not said); ``text_chars`` - length of the saved version; ``premium`` - the user said they have LinkedIn
+    Premium; ``owner_approved`` - the user pressed Send on this person's card for THIS version
+    (``own_browser.derive``); ``claimed_by_other`` - a live claim is held by a session other than the
+    caller's; ``invite_limit_until`` - LinkedIn's weekly invitation limit was reported and has not ended;
+    ``claimed_by_caller`` - the caller holds a live claim on this person (``own_browser_queue`` take, in
+    either browser); ``last_linkedin_sent_at`` / ``linkedin_sent_today`` - the pace ``own_browser.take`` enforces (other
+    people's sends and unreleased claims).
     """
 
     message_found: bool
@@ -1621,6 +1631,16 @@ class OutreachFacts:
     company: str = ""
     email_source: Optional[str] = None
     email_bounced: bool = False
+    has_linkedin_url: bool = False
+    linkedin_state: Optional[str] = None
+    text_chars: int = 0
+    premium: bool = False
+    owner_approved: bool = False
+    claimed_by_other: bool = False
+    claimed_by_caller: bool = False
+    invite_limit_until: Optional[datetime] = None
+    last_linkedin_sent_at: Optional[datetime] = None
+    linkedin_sent_today: int = 0
 
 
 @dataclass(frozen=True)
@@ -1633,12 +1653,108 @@ class OutreachDecision:
     detail: str
 
 
-# In the order :func:`may_send_outreach` checks them (first match wins).
+# LinkedIn's own limits (a connection note: ``settings.LINKEDIN_NOTE_MAX_CHARS``, 300 with Premium). The pace
+# constants live in ``services/applications/own_browser`` (``take`` enforces the same ones).
+LINKEDIN_MESSAGE_MAX_CHARS = 400
+
+# In the order :func:`may_send_outreach` checks them (first match wins) for an email (or other-channel) version.
 OUTREACH_REASONS: tuple[str, ...] = (
     "paused", "message_not_found", "not_latest_draft", "not_email_channel", "no_email", "email_bounced",
     "already_sent", "replied", "application_closed", "daily_outreach_cap_reached", "company_cap_reached",
     "email_guessed", "mode_not_auto", "no_found_via", "unlinked_contact", "auto_mode",
 )
+# The same for a LinkedIn version (:func:`_may_send_linkedin`). All stop except the last two: ask, then send.
+LINKEDIN_OUTREACH_REASONS: tuple[str, ...] = (
+    "paused", "message_not_found", "not_latest_draft", "no_linkedin_url", "already_sent", "replied",
+    "application_closed", "linkedin_state_unknown", "linkedin_pending", "note_too_long", "message_too_long",
+    "invite_limit_reached", "linkedin_daily_cap_reached", "too_soon", "claimed_by_other_session",
+    "needs_owner_click", "needs_claim", "owner_clicked",
+)
+# Said on every LinkedIn answer: its counts are the email caps, not LinkedIn's.
+_LINKEDIN_COUNTS_NOTE = " (sent_today and daily_max count email only.)"
+
+
+def _may_send_linkedin(facts: OutreachFacts, now: datetime) -> OutreachDecision:
+    """The LinkedIn half of :func:`may_send_outreach`. ``outreach_send`` never applies here: the only yes is
+    the user's click on that person's card for this exact version (``facts.owner_approved``) AND a live claim
+    the caller holds on that person (``facts.claimed_by_caller``), in either browser."""
+    got = _linkedin_verdict(facts, now)
+    return OutreachDecision(got.decision, got.reason, got.detail + _LINKEDIN_COUNTS_NOTE)
+
+
+def _linkedin_verdict(facts: OutreachFacts, now: datetime) -> OutreachDecision:
+    from src.services.applications import own_browser  # noqa: PLC0415 - own_browser imports this package lazily
+
+    def stop(reason: str, detail: str) -> OutreachDecision:
+        return OutreachDecision("stop", reason, detail)
+
+    if not facts.has_linkedin_url:
+        return stop("no_linkedin_url", "This person has no LinkedIn link saved. Do not send.")
+    if facts.already_sent:
+        return stop("already_sent", "A message to this person is already recorded as sent.")
+    if facts.replied:
+        return stop("replied", "This person already replied. Do not send; tell the user instead.")
+    if facts.application_closed:
+        return stop("application_closed", "This application is closed. Do not send.")
+    state = facts.linkedin_state or "unknown"
+    if state not in ("connected", "not_connected", "pending"):
+        return stop(
+            "linkedin_state_unknown",
+            "Their LinkedIn state is not saved. Read Connect / Pending / Message on their page and save it with "
+            "update_contact(linkedin_state=...); do not send yet.",
+        )
+    if state == "pending":
+        return stop("linkedin_pending", "A connection request to this person is already pending. Do not send.")
+    note_max = settings.LINKEDIN_NOTE_MAX_CHARS_PREMIUM if facts.premium else settings.LINKEDIN_NOTE_MAX_CHARS
+    if state == "not_connected" and facts.text_chars > note_max:
+        return stop(
+            "note_too_long",
+            f"A connection note is at most {note_max} characters; this draft is {facts.text_chars}. Shorten it "
+            "with save_artifact; the user must press Send again for the new text.",
+        )
+    if state == "connected" and facts.text_chars > LINKEDIN_MESSAGE_MAX_CHARS:
+        return stop(
+            "message_too_long",
+            f"A LinkedIn message is at most {LINKEDIN_MESSAGE_MAX_CHARS} characters; this draft is "
+            f"{facts.text_chars}. Shorten it with save_artifact; the user must press Send again for the new text.",
+        )
+    if state == "not_connected" and facts.invite_limit_until is not None and facts.invite_limit_until > now:
+        return stop(
+            "invite_limit_reached",
+            "LinkedIn's weekly invitation limit was reached. Send no connection note until it resets.",
+        )
+    if facts.linkedin_sent_today >= own_browser.LINKEDIN_DAILY_MAX:
+        return stop(
+            "linkedin_daily_cap_reached",
+            f"Today's limit of {own_browser.LINKEDIN_DAILY_MAX} LinkedIn sends is reached. Try tomorrow.",
+        )
+    if facts.last_linkedin_sent_at is not None:
+        left = own_browser.LINKEDIN_MIN_GAP_SECONDS - (now - facts.last_linkedin_sent_at).total_seconds()
+        if left > 0:
+            return stop(
+                "too_soon",
+                f"The last LinkedIn send was less than {own_browser.LINKEDIN_MIN_GAP_SECONDS} seconds ago. Wait "
+                f"{int(left) + 1} seconds, then check again.",
+            )
+    if facts.claimed_by_other:
+        return stop(
+            "claimed_by_other_session",
+            "Another session holds this person right now. Do not send; leave it to that session.",
+        )
+    if not facts.owner_approved:
+        return OutreachDecision(
+            "ask", "needs_owner_click",
+            "The user has not pressed Send on this person's card for this draft. Do not send; it waits on Needs you.",
+        )
+    if not facts.claimed_by_caller:
+        return stop(
+            "needs_claim",
+            "Take this person first: own_browser_queue take, then check_outreach with your session.",
+        )
+    return OutreachDecision(
+        "send", "owner_clicked",
+        "The user pressed Send for this draft: paste it on LinkedIn exactly, send, then record outreach_sent.",
+    )
 
 
 def may_send_outreach(
@@ -1650,7 +1766,7 @@ def may_send_outreach(
     """May the assistant press Send on this outreach email? Pure; first match wins.
 
     STOP (do not send; nothing clears these): paused, message_not_found,
-    not_latest_draft, not_email_channel (LinkedIn/other: the user sends),
+    not_latest_draft, not_email_channel (channel other: the user sends),
     no_email, email_bounced (a bounce is recorded for this address), already_sent, replied, application_closed,
     daily_outreach_cap_reached (``OUTREACH_AUTO_SENDS_MAX_PER_DAY``),
     company_cap_reached (``OUTREACH_COMPANY_MAX`` within
@@ -1658,6 +1774,11 @@ def may_send_outreach(
     ASK (save a Gmail draft, ask_user): email_guessed (email_source pattern_guess), mode_not_auto
     (``assistant_settings.outreach_send`` is not ``auto``; the Gmail mode never counts), no_found_via, unlinked_contact.
     SEND: auto_mode.
+    LinkedIn (:func:`_may_send_linkedin`, after not_latest_draft): stop no_linkedin_url, already_sent, replied,
+    application_closed, linkedin_state_unknown, linkedin_pending, note_too_long, message_too_long,
+    invite_limit_reached, linkedin_daily_cap_reached, too_soon, claimed_by_other_session, needs_claim (the click
+    is there but the caller holds no live claim); ask needs_owner_click; SEND owner_clicked.
+    ``outreach_send`` never reaches it.
     """
     if is_paused(cfg.paused_until, now):
         return OutreachDecision("stop", "paused", "Your assistant is paused. Do not send anything.")
@@ -1670,9 +1791,13 @@ def may_send_outreach(
         return OutreachDecision(
             "stop", "not_latest_draft", "A newer version of this message exists. Check that one instead; do not send.",
         )
+    if facts.channel == "linkedin":
+        return _may_send_linkedin(facts, now)
     if facts.channel != "email":
         return OutreachDecision(
-            "stop", "not_email_channel", "Only email can be sent by you. The user sends LinkedIn and other messages.",
+            "stop", "not_email_channel",
+            "Only email, or LinkedIn after the user's click on that person's card, can be sent by you. "
+            "The user sends other-channel messages.",
         )
     if not facts.has_email:
         return OutreachDecision("stop", "no_email", "This person has no email address saved. Do not send.")

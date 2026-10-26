@@ -190,7 +190,7 @@ async def test_take_gives_one_person_and_the_same_session_gets_it_back(authentic
         async with await _agent(client) as agent:
             got = await _take(agent, "desk-1")
             assert got["status"] == "task" and got["task"]["contact_id"] == first  # oldest click first
-            assert got["task"]["draft_text"] == "Hi, a note" and "record_event sent" in got["next"]
+            assert got["task"]["draft_text"] == "Hi, a note" and "record_event outreach_sent" in got["next"]
             assert (await _task(client, first))["state"] == "in_progress"
             assert (await _task(client, first))["claim_until"]
             assert (await _take(agent, "desk-1"))["status"] == "already_yours"
@@ -367,7 +367,7 @@ async def test_the_next_step_names_check_outreach_and_never_sends_without_it(aut
         await _click(client, contact_id, message_id)
         async with await _agent(client) as agent:
             step = (await _take(agent))["next"]
-        assert f"check_outreach(contact_id={contact_id}, message_id={message_id})" in step
+        assert f"check_outreach(contact_id={contact_id}, message_id={message_id}, session=<your session>)" in step
         assert "only if it says send" in step and "as written" not in step
         assert step.index("check_outreach") < step.lower().index("send")
 
