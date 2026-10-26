@@ -522,6 +522,14 @@ def is_paused(paused_until: str, now: datetime) -> bool:
         return False
 
 
+def pause_state(s: AssistantSettings, now: datetime) -> tuple[bool, str]:
+    """``(paused, until)`` for stored settings: ``until`` is ``"until_resumed"`` or the ISO time while
+    paused, ``""`` when not (an expired pause reads as not paused). Owner 2026-10-26: Pause stops
+    everything the assistant does, not only submit and send."""
+    until = effective(s).paused_until
+    return (True, until) if is_paused(until, now) else (False, "")
+
+
 def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) -> Any:
     """The EFFECTIVE value of one gated path from its raw stored value.
 
