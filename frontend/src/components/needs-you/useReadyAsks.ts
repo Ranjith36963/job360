@@ -13,7 +13,7 @@ export function openQuestionAsks(asks: Ask[] | undefined): Ask[] {
 
 /**
  * Row state for the open asks shown inside a Ready card. A row counts as answered once it is checked
- * (a choice, "Leave blank", Looks right, or an edit) and has text; a pre-filled consent row is never
+ * (a choice, "Leave blank", OK, or an edit) and has text; a pre-filled consent row is never
  * checked until the owner clicks. `answerAll` answers every ask with its own keys, as the job card does.
  */
 export function useReadyAsks(asks: Ask[]) {

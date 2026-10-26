@@ -439,4 +439,38 @@ describe("ApplicationList — Queued filter (batch queue)", () => {
     fireEvent.click(screen.getByTestId("queued-filter"));
     await screen.findByText("Your batch is empty. Bring a job and leave Add to batch ticked, or let your AI hunt.");
   });
+
+  it("shows a browser chip per queued row and a filter with counts that narrows the list", async () => {
+    listApplications.mockImplementation(async (params: { queued?: boolean }) =>
+      params.queued
+        ? {
+            applications: [
+              summary({
+                id: 5, job_title: "Greenhouse Job", queue_position: 1,
+                browser: { kind: "job360", label: "I'll use Job360's browser", reason: "default" },
+              } as never),
+              summary({
+                id: 6, job_title: "LinkedIn Job", queue_position: 2,
+                browser: { kind: "own_browser", label: "Your own browser: runs when your PC is on", reason: "linkedin_own_browser" },
+              } as never),
+            ],
+            total: 2,
+            queue_summary: { queued: 2, by_browser: { job360: 1, own_browser: 1, human: 0 } },
+          }
+        : { applications: [summary()], total: 1 },
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("queued-filter"));
+    await screen.findByText("Greenhouse Job");
+    expect(screen.getByTestId("queue-browser-5")).toHaveAttribute("data-kind", "job360");
+    expect(screen.getByTestId("queue-browser-6")).toHaveTextContent("Your own browser: runs when your PC is on");
+    expect(screen.getByTestId("queue-filter-all")).toHaveTextContent("All 2");
+    expect(screen.getByTestId("queue-filter-job360")).toHaveTextContent("Job360's browser 1");
+    expect(screen.getByTestId("queue-filter-own_browser")).toHaveTextContent("Your own browser 1");
+    expect(screen.queryByTestId("queue-filter-human")).toBeNull();
+    fireEvent.click(screen.getByTestId("queue-filter-own_browser"));
+    expect(screen.queryByText("Greenhouse Job")).toBeNull();
+    expect(screen.getByText("LinkedIn Job")).toBeInTheDocument();
+  });
 });

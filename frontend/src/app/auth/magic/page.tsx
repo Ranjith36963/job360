@@ -14,11 +14,12 @@
 // in the browser — confirmed via Context7 /vercel/next.js).
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { consumeMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
+import { useScrubbedUrlParams } from "@/lib/useScrubbedUrlParams";
 import { safeNext } from "@/lib/safe-next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,11 +28,12 @@ type State = "confirm" | "submitting" | "error";
 
 function MagicBody() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  // Read once, then the token and next leave the address bar (analytics/Sentry).
+  const params = useScrubbedUrlParams(["token", "next"]);
+  const token = params.token ?? "";
   // Where to land after sign-in — e.g. back on an OAuth consent page (spec
   // R9). safeNext() falls back to /applications for anything external/malformed.
-  const next = searchParams.get("next");
+  const next = params.next;
   const [state, setState] = useState<State>(token ? "confirm" : "error");
   const [error, setError] = useState<string | null>(
     token ? null : "Sign-in token missing from the URL. Use the link from your email."

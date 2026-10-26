@@ -40,6 +40,12 @@ delete a lesson; if one stops being true, say so on its line and why.
 - 2026-10-24: I launched two workers without `model:` on the Agent call. They inherited the lead's
   model, one had to be stopped and restarted on Sonnet, and the owner had to point it out.
   **Rule:** name `model:` on every Agent call, as the model-delegation skill says.
+- 2026-10-26: in the security-audit fixes, two of nine PRs went CodeQL-red (high) after push. The
+  client-log URL scrubber used `(https?://[^\s?#]+)[?#]\S*` on unauthenticated text, which is polynomial
+  (#1303). A header test asserted `"cdn.jsdelivr.net" in csp`, which repeated the substring-host lesson
+  from 2026-10-20 (#1306). The worker brief never named either trap. **Rule:** a worker brief names
+  the CodeQL traps. Scan caller text word by word, with no backtracking regex. Tests compare exact
+  hosts or tokens.
 - 2026-10-23: a deploy watcher grepped main for a commit subject that did not exist (`merge=` came
   back empty), so its loop could never finish. **Rule:** a watcher checks that its grep found a
   commit (non-empty sha) before it starts looping, and fails loudly otherwise.

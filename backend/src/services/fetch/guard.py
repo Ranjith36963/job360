@@ -298,6 +298,50 @@ def screen_url(raw: str) -> UrlVerdict:
     return UrlVerdict(ok=True, scheme=scheme, host=host, port=port or (443 if scheme == "https" else 80))
 
 
+def canonical_host(raw_url: str) -> Optional[str]:
+    """The ONE host a URL names, or ``None`` when it cannot be trusted to name one.
+
+    The host is ``screen_url``'s (lowercased, one trailing dot stripped, IDNA-encoded). ``None`` when the URL
+    fails screening, has no host, or when the host as written is not already that ASCII form: IDNA maps
+    ``ⓛ``, ``。``, a soft hyphen (U+00AD) or a zero-width space (U+200B) onto plain letters and dots, so
+    ``www.ⓛinkedin.com`` connects to ``www.linkedin.com``. Any host that needs mapping is refused, never
+    guessed: every host test (LinkedIn's, an applicant system's, a sign-in's) compares this one string.
+    """
+    verdict = screen_url(raw_url)
+    if not verdict.ok or not verdict.host:
+        return None
+    try:
+        written = urlsplit(raw_url).hostname or ""
+    except ValueError:
+        return None
+    written = written[:-1] if written.endswith(".") else written
+    if written.lower() != verdict.host:
+        return None
+    if not _DNS_HOST.fullmatch(verdict.host):  # "not a link", "a b.com": no name a resolver could look up
+        try:
+            ipaddress.ip_address(verdict.host)
+        except ValueError:
+            return None
+    return verdict.host
+
+
+# A host name as DNS spells it once lowercased and IDNA-encoded: letters, digits, hyphens and dots only.
+_DNS_HOST = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?")
+
+
+# LinkedIn's own hosts: the site, its link shortener and its static/media host. linkedin.com runs only in the
+# user's own browser (owner 2026-10-26), so Job360's browser reaches none of them.
+LINKEDIN_DOMAINS: tuple[str, ...] = ("linkedin.com", "lnkd.in", "licdn.com")
+
+
+def is_linkedin_host(host: str) -> bool:
+    """True for a LinkedIn domain or any subdomain of one: the exact host or ``.domain`` suffix, never a
+    substring (``notlinkedin.com`` and ``linkedin.com.evil.io`` are not LinkedIn)."""
+    h = (host or "").lower()
+    h = h[:-1] if h.endswith(".") else h
+    return any(h == d or h.endswith("." + d) for d in LINKEDIN_DOMAINS)
+
+
 # ---------------------------------------------------------------------------
 # screen_host — resolves ONCE, screens every returned address, denies the
 # WHOLE host on any bad one (S4). This IS the anti-rebinding device at the

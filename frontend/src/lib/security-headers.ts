@@ -43,5 +43,10 @@ export const SECURITY_HEADERS: { key: string; value: string }[] = [
     key: "Strict-Transport-Security",
     value: "max-age=31536000; includeSubDomains",
   },
+  // No camera, microphone, location, payment or USB use anywhere in src/.
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  },
   { key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY },
 ];

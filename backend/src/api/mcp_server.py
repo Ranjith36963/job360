@@ -175,6 +175,55 @@ def _audit(tool: str, status: str, **fields: Any) -> None:
     )
 
 
+# ── Pause stops everything (owner decision 2026-10-26) ─────────────────────────
+#
+# While the user's `assistant_settings.paused_until` holds, the tools that START or ADVANCE work answer
+# PAUSED_REFUSAL and write nothing. The gate sits on the MCP door only (StrictArgsMCPServer.call_tool):
+# the user's own web clicks are never paused. Reads, doctor, get_recipe, update_profile (how the user
+# pauses or asks to resume), answer_ask (the user's own answer), mark_done (closing a run) and
+# check_submit (which already answers stop / paused) keep working. record_application and an
+# `applied` event keep working too: they record a submit that happened before the pause, so the
+# history stays whole; no new submit can happen, because check_submit says stop.
+PAUSED_MESSAGE = "The user paused the assistant. Stop all work until they resume it in Job360."
+PAUSE_REFUSED_TOOLS = frozenset({
+    "bring_job", "ask_user", "match_email", "mark_inbox_checked", "record_events",
+    "save_artifact", "save_fit", "add_contact", "update_contact", "update_job", "check_outreach",
+    "check_auto_email", "check_form", "browser", "get_application_kit",
+})
+# record_event types that still go through while paused: they wind work down or record what
+# already happened, never advance it.
+PAUSE_ALLOWED_EVENT_TYPES = frozenset({"note", "withdrawn", "submit_declined", "ask_withdrawn", "applied"})
+# Recipes that start work: while paused, get_recipe puts the pause first.
+PAUSE_WORK_RECIPES = frozenset({"apply", "batch", "daily", "hunt", "own_browser", "reach"})
+
+
+def pause_blocks(name: str, arguments: Mapping[str, Any]) -> bool:
+    """Does a call to tool ``name`` with ``arguments`` start or advance work (so Pause refuses it)?"""
+    if name in PAUSE_REFUSED_TOOLS:
+        return True
+    if name == "own_browser_queue":  # a release gives a claimed task back: allowed
+        return (arguments.get("action") or "list") != "release"
+    if name == "record_event":
+        return arguments.get("event_type") not in PAUSE_ALLOWED_EVENT_TYPES
+    return False
+
+
+def paused_refusal(until: str) -> dict[str, Any]:
+    return {"status": "paused", "paused_until": until, "message": PAUSED_MESSAGE}
+
+
+def _pause_state() -> tuple[bool, str]:
+    """``(paused, until)`` for the calling user, read fresh (a resume on the web takes effect at once)."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    from src.services.profile import assistant_settings as rules  # noqa: PLC0415
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    profile = load_profile(_user().id) or UserProfile()
+    return rules.pause_state(profile.assistant_settings, datetime.now(timezone.utc))
+
+
 def _application_url(application_id: int) -> str:
     """Slice 5 (#483) deleted the public `/jobs/{id}` page; the only web view
     of a brought ad is now the user's own application page."""
@@ -539,6 +588,11 @@ def _strict_server_class() -> type[MCPServer]:
                         if _current_user.get() is not None:
                             _audit(name, "error", http_status=422, reason="unknown_key")
                         raise ToolError(refusal)
+                    if _current_user.get() is not None and pause_blocks(name, arguments or {}):
+                        paused, until = _pause_state()
+                        if paused:  # before the body runs, so nothing is written
+                            _audit(name, "error", reason="paused")
+                            return tool.fn_metadata.convert_result(paused_refusal(until))
                 return await super().call_tool(name, arguments, context)
 
         _STRICT_SERVER_CLASS = StrictArgsMCPServer
@@ -722,7 +776,7 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
     async def get_profile(
         include_raw: bool = False, raw_section: str = "", raw_offset: int = 0
     ) -> dict[str, Any]:
-        """READ `assistant_notes` FIRST — the user's standing instructions to you; they win.
+        """READ `assistant_notes` FIRST — the user's confirmed standing instructions to you.
 
         Read `settings` before any apply step: obey each `effective`; `paused: true` = stop all apply work;
         `waiting` = changes the user has not yet confirmed — do not ask again or act as if applied.
@@ -1292,6 +1346,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         bad = [d for d in duties or [] if d not in settings.SCHEDULE_DUTIES]
         if bad:
             raise _tool_error(HTTPException(422, f"duties must be from: {', '.join(settings.SCHEDULE_DUTIES)}"))
+        paused, until = _pause_state()
+        if paused:  # nothing is due and nothing is claimed while the user has paused the assistant
+            _audit("whats_due", "ok", count=0, reason="paused")
+            return {**paused_refusal(until), "paused": True, "due": [], "nothing_due": True}
         try:
             async with _request_db() as db:
                 resp = await schedule_route.whats_due(db, _user(), duties or None)  # type: ignore[arg-type]
@@ -2504,6 +2562,10 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
             _audit("get_recipe", "error", http_status=exc.status_code, actor=actor_for(_user()))
             raise _tool_error(exc) from None
         _audit("get_recipe", "ok", recipe=name, actor=actor_for(_user()))
+        if name in PAUSE_WORK_RECIPES:
+            paused, until = _pause_state()
+            if paused:  # the pause comes first: the steps below are for after the user resumes
+                return {**paused_refusal(until), "paused": True, **recipe.model_dump()}
         return recipe.model_dump()
 
     @mcp.tool()

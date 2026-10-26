@@ -7,10 +7,10 @@
 // everyone out) on its own.
 
 import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { undoEmailChange } from "@/lib/api";
+import { useScrubbedUrlParams } from "@/lib/useScrubbedUrlParams";
 import { ApiError, friendlyAuthError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,8 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 type State = "idle" | "working" | "ok" | "error";
 
 function UndoBody() {
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const token = useScrubbedUrlParams(["token"]).token ?? "";
   const [state, setState] = useState<State>(token ? "idle" : "error");
   const [error, setError] = useState<string | null>(
     token ? null : "Undo token missing from URL. Use the link from your email.",

@@ -72,10 +72,10 @@ SITES: tuple[Site, ...] = (
 
 
 def _host(url: str) -> str:
-    try:
-        return (urlsplit(url).hostname or "").lower().rstrip(".")
-    except ValueError:
-        return ""
+    """The canonical host (``guard.canonical_host``), or "" when the URL cannot be trusted to name one."""
+    from src.services.fetch.guard import canonical_host  # noqa: PLC0415
+
+    return canonical_host(url) or ""
 
 
 # The company's own job page on Greenhouse is heavy; the embed form is the light page the recipe

@@ -94,18 +94,11 @@ async def _second_user_session_cookie(email: str) -> str:
     from fastapi.testclient import TestClient
 
     from src.api.main import app
-    from src.repositories import pgsync
+    from tests._signin import sign_in
 
     sync_client = TestClient(app)
-    r = sync_client.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"})
-    assert r.status_code == 201, r.text
-    conn = pgsync.connect(str(settings.DB_PATH))
-    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
-    conn.commit()
-    conn.close()
-    lr = sync_client.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
-    assert lr.status_code == 200, lr.text
-    return str(lr.cookies.get("job360_session"))
+    cookie, _ = sign_in(sync_client, email)
+    return cookie
 
 
 # ── Pure ─────────────────────────────────────────────────────────────────────

@@ -694,18 +694,11 @@ async def _second_user_session_cookie(email: str = "second@example.com") -> str:
     from fastapi.testclient import TestClient
 
     from src.api.main import app
-    from src.repositories import pgsync
+    from tests._signin import sign_in
 
     sync_client = TestClient(app)
-    r = sync_client.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"})
-    assert r.status_code == 201, r.text
-    conn = pgsync.connect(str(settings.DB_PATH))
-    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
-    conn.commit()
-    conn.close()
-    lr = sync_client.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
-    assert lr.status_code == 200, lr.text
-    return str(lr.cookies.get("job360_session"))
+    cookie, _ = sign_in(sync_client, email)
+    return cookie
 
 
 class _Capture(logging.Handler):
@@ -879,9 +872,10 @@ async def test_the_inbox_mode_alias_auto_waits_and_the_three_preference_paths_st
             _e("preferences.assistant_notes", ["never apply to agencies"]),
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["waiting"] == []
+        # Security review D1: an assistant's notes change waits for the user's Confirm.
+        assert [w["path"] for w in resp.json()["waiting"]] == ["preferences.assistant_notes"]
         a = resp.json()["profile"]["assistant_settings"]
-        assert (a["inbox_mode"], a["check_every"], a["notes"]) == ("ask", "6h", ["never apply to agencies"])
+        assert (a["inbox_mode"], a["check_every"], a["notes"]) == ("ask", "6h", [])
         resp = await _patch(agent, _e("preferences.daily_check", "auto"))
         assert [w["path"] for w in resp.json()["waiting"]] == [INBOX]
         assert resp.json()["profile"]["preferences"]["daily_check"] == "ask", "the old value stands until the click"
@@ -889,10 +883,12 @@ async def test_the_inbox_mode_alias_auto_waits_and_the_three_preference_paths_st
         assert [w["path"] for w in legacy.json()["waiting"]] == [INBOX], "scheduled is auto"
     async with authenticated_async_context() as client:
         view = await _view(client)
-        assert [w["path"] for w in view["waiting"]] == [INBOX] and view["waiting"][0]["value"] == "scheduled"
-        confirmed = await client.post(f"/api/assistant-settings/requests/{view['waiting'][0]['id']}/confirm")
+        inbox = [w for w in view["waiting"] if w["path"] == INBOX]
+        assert [w["value"] for w in inbox] == ["scheduled"]
+        confirmed = await client.post(f"/api/assistant-settings/requests/{inbox[0]['id']}/confirm")
         assert confirmed.status_code == 200
-        assert confirmed.json()["inbox_mode"] == "scheduled" and confirmed.json()["waiting"] == []
+        assert confirmed.json()["inbox_mode"] == "scheduled"
+        assert [w["path"] for w in confirmed.json()["waiting"]] == ["preferences.assistant_notes"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1422,7 +1418,11 @@ async def test_logs_name_the_user_and_never_carry_free_text(
     assert by_path[SCORE]["value"] == "80" and by_path[SCORE]["risk"] == "safer"
     assert "value" not in by_path[REASON] and "value" not in by_path[PAUSE], "no pause text or time in the log"
     requested = _events(audit_capture, "assistant_setting_requested")
-    assert [(r["path"], r["request_id"], r["user_id"]) for r in requested] == [(APPLY, waiting_id, fixture_user_id)]
+    # Security review D1: the assistant's note is a waiting request too; its text never reaches a log.
+    assert [(r["path"], r["user_id"]) for r in requested] == [
+        ("preferences.assistant_notes", fixture_user_id), (APPLY, fixture_user_id)
+    ]
+    assert requested[1]["request_id"] == waiting_id
     assert _events(audit_capture, "assistant_setting_confirmed")[0]["request_id"] == waiting_id
     assert _events(audit_capture, "assistant_setting_taken_back")[0]["path"] == SCORE
     assert _events(audit_capture, "assistant_setting_request_rejected")[0]["status"] == 422

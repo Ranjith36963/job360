@@ -20,14 +20,25 @@ _access_log = get_logger("access")  # "job360.access" → main job360 handlers (
 # 'unsafe-inline' is required for Swagger UI's inline event handlers / styles;
 # the API endpoints themselves return JSON so the script/style directives are
 # only reachable via the /docs page.
-_CSP = (
+_CSP = "default-src 'none'; frame-ancestors 'none'"
+
+# Relaxed policy for FastAPI's Swagger UI / ReDoc pages only (mounted outside
+# production, see main._docs_urls): they load swagger-ui-bundle.js and css from
+# cdn.jsdelivr.net and use inline handlers / styles.
+_DOCS_CSP = (
     "default-src 'none'; "
     "script-src 'self' cdn.jsdelivr.net 'unsafe-inline'; "
     "style-src 'self' cdn.jsdelivr.net 'unsafe-inline'; "
-    "img-src 'self' data:; "
+    "img-src 'self' data: fastapi.tiangolo.com cdn.redoc.ly; "
+    "worker-src blob:; "
     "connect-src 'self'; "
     "frame-ancestors 'none'"
 )
+_DOCS_PATHS = frozenset({"/docs", "/docs/oauth2-redirect", "/redoc"})
+
+# Browser features this app never uses (no camera, mic, location, payment or
+# USB code in the frontend). Mirrors frontend/src/lib/security-headers.ts.
+_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 
 # HSTS: 1 year, include subdomains. Only sent in production (needs HTTPS).
 _HSTS = "max-age=31536000; includeSubDomains"
@@ -141,9 +152,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
       * ``X-Content-Type-Options: nosniff`` — prevent MIME sniffing.
       * ``X-Frame-Options: DENY`` — block framing (legacy browsers).
       * ``Referrer-Policy: strict-origin-when-cross-origin`` — limit referer leakage.
-      * ``Content-Security-Policy`` — lock down resource loading; allow what
-        Swagger UI needs (cdn.jsdelivr.net + unsafe-inline) while keeping the
-        default to 'none' for non-UI endpoints.
+      * ``Content-Security-Policy`` — strict (``default-src 'none'``) on every
+        route; the relaxed Swagger/ReDoc policy only on the docs pages.
+      * ``Permissions-Policy`` — camera, microphone, geolocation, payment, usb off.
 
     HSTS is only emitted in production (``APP_ENV=production`` or
     ``RAILWAY_ENVIRONMENT`` set), because HSTS pins HTTPS in the browser and
@@ -160,7 +171,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # ``no-referrer``); only fill the default when it did not.
         if "referrer-policy" not in response.headers:
             response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = _CSP
+        response.headers["Content-Security-Policy"] = (
+            _DOCS_CSP if request.url.path in _DOCS_PATHS else _CSP
+        )
+        response.headers["Permissions-Policy"] = _PERMISSIONS_POLICY
         if _is_production():
             response.headers["Strict-Transport-Security"] = _HSTS
         return response

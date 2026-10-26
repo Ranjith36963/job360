@@ -6,6 +6,7 @@ import { confirmSettingRequest, declineSettingRequest } from "@/lib/api";
 import type { SettingRequest } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT } from "@/lib/assistant-state";
 import { type GrantScopeCount, scopeText } from "@/lib/assistant-tab";
+import { askerName } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 
 // "Waiting for your OK" (S2, owner decision 2026-10-08). An assistant asked for a
@@ -176,6 +177,14 @@ export function describeSettingRequest(
       };
     case "preferences.daily_check":
       return { title: "Your inbox", change: INBOX_MODES[String(value)] ?? "Change the inbox check" };
+    case "preferences.assistant_notes": {
+      // Security review D1: show every line, so the user never confirms a note blind.
+      const notes = Array.isArray(value) ? value.map(String) : [];
+      return {
+        title: "Standing instructions for your assistants",
+        change: notes.length ? `Save these instructions:\n${notes.map((n) => `• ${n}`).join("\n")}` : "Clear all your instructions",
+      };
+    }
     default:
       return { title: "A setting", change: "A change to your assistant settings" };
   }
@@ -225,7 +234,7 @@ export function SettingRequestCard({
           </p>
         )}
         <p className="text-[12.5px] text-muted-foreground">
-          asked by {request.requested_by} ·{" "}
+          asked by {askerName(request.requested_by)} ·{" "}
           <span className="font-mono">{relativeTime(request.requested_at)}</span>
         </p>
         <p className="text-sm text-muted-foreground">

@@ -946,6 +946,8 @@ class ApplicationSummaryOut(BaseModel):
     origin: str = ""
     # Bulk-apply Q1: derived problems of a queued row (queued=true only; null otherwise).
     preflight: Optional[dict[str, Any]] = None
+    # Which browser runs a queued row (queued=true only; null otherwise): the chip on the queue.
+    browser: Optional[BrowserLabelOut] = None
 
 
 class ListApplicationsResponse(BaseModel):
