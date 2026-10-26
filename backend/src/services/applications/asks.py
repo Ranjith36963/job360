@@ -405,7 +405,7 @@ def is_leave_blank(text: Any) -> bool:
 def _remember_leave_blank(user_id: str, ask: dict[str, Any], answers: dict[str, str], actor: str) -> None:
     """Save every "Leave blank" answer of ``ask`` as the user's approved answer to that form wording, for
     this employer only (the approved list ``ready`` writes on a card Edit). All-or-nothing."""
-    from src.services.applications import ready  # noqa: PLC0415 - ready imports kit, which imports spine
+    from src.services.applications import kit, ready  # noqa: PLC0415 - ready imports kit, which imports spine
     from src.services.profile import edits as profile_edits  # noqa: PLC0415
     from src.services.profile import user_info  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
@@ -418,11 +418,21 @@ def _remember_leave_blank(user_id: str, ask: dict[str, Any], answers: dict[str, 
     loaded, _ = load_profile_with_overlay(user_id)
     profile = loaded or UserProfile()
     company_key = ready._company_key(company)
+    before = profile.user_info.answers
     for q in rows:
+        # One saved answer per wording (user_info): never let a blank for ONE employer replace the user's
+        # unscoped answer every other employer's form uses (reviewer-bugs P1 on #1273). The answered ask
+        # still covers this job's blank (``ready.blank_unasked``).
+        wording = ready._norm(str(q["question"]))
+        if any(ready._norm(r.get("question") or "") == wording and not str(r.get("company") or "").strip()
+               for r in kit._records(profile.user_info.answers)):
+            continue
         profile.user_info.answers = ready._with_approved(
             profile, str(q["question"]), LEAVE_BLANK, company_key, "", company
         )
     value = profile.user_info.answers
+    if value is before:
+        return
     profile_edits.validate_edit(user_info.USER_INFO_ANSWERS_PATH, value)
     if load_profile(user_id, with_overlay=False) is None:
         save_profile(UserProfile(), user_id, source_action="agent_edit")

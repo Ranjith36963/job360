@@ -166,6 +166,37 @@ async def test_leave_blank_is_saved_for_the_employer_and_reused_by_the_next_form
 
 
 @pytest.mark.asyncio
+async def test_leave_blank_for_one_employer_keeps_the_answer_every_other_employer_uses(
+    authenticated_async_context, fixture_user_id
+):
+    """reviewer-bugs P1 on #1273: user_info keeps ONE answer per wording, so a "Leave blank" for one employer
+    must never replace the user's unscoped answer. The answered ask still covers this job's blank."""
+    from src.services.applications import ready
+    from src.services.profile import edits as profile_edits
+    from src.services.profile import user_info
+    from src.services.profile.storage import load_profile
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        profile_edits.record_edits(
+            fixture_user_id, "test", [(user_info.USER_INFO_ANSWERS_PATH,
+                                       [{"question": "Pronouns", "answer": "she/her", "approved": True}])],
+            enforce_rate_limit=False, source=profile_edits.SOURCE_USER_SAID,
+        )
+        app_id = await _bring(client)
+        await _fill(client, app_id, ["Pronouns"])
+        ask = await _ask(client, app_id, [
+            {"key": "pronouns", "question": "Pronouns", "answer": "she/her", "source": "memory"},
+        ])
+        resp = await client.post(f"/api/asks/{ask['id']}/answer", json={"answers": {"pronouns": "Leave blank"}})
+        assert resp.status_code == 200, resp.text
+        saved = load_profile(fixture_user_id)
+        acme = ready._approved_record(saved, "Pronouns", ready._company_key("Acme"))
+        assert acme is not None and acme["answer"] == "she/her" and not acme.get("company")
+        assert (await _verdict(client, app_id))["reason"] != "blank_unasked"
+
+
+@pytest.mark.asyncio
 async def test_a_fill_without_blanks_never_asks(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
