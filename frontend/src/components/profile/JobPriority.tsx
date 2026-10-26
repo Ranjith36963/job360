@@ -160,6 +160,49 @@ function SalaryCell({ code, salaries, busy, onSave }: {
   );
 }
 
+/** Add a place: a country (search), all other countries, or a whole region (owner,
+ *  2026-10-26). Used by Where you'll work and by Right to work: both edit the same
+ *  right-to-work list, so a place added in either shows in both. */
+export function AddPlace({ have, onAdd, testIdPrefix }: {
+  have: string[]; onAdd: (code: string) => void; testIdPrefix: string;
+}) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {adding ? (
+          <CountryPicker label="Add a country" tags={[]} testId={`${testIdPrefix}-picker`} onChange={(codes) => {
+            setAdding(false);
+            for (const c of codes) if (!have.includes(c)) onAdd(c);
+          }} />
+        ) : (
+          <button type="button" data-testid={`${testIdPrefix}-add`} className={`${CHIP} border-border`} onClick={() => setAdding(true)}>
+            Add a country
+          </button>
+        )}
+        {!have.includes("ANY") && (
+          <button type="button" data-testid={`${testIdPrefix}-add-any`} className={`${CHIP} border-border`}
+            onClick={() => onAdd("ANY")}>
+            Add all other countries
+          </button>
+        )}
+      </div>
+      {/* One line for a whole region. A country's own line wins over it. */}
+      <div data-testid={`${testIdPrefix}-regions`} className="mt-3">
+        <p className="text-xs text-muted-foreground">Or add a whole region (a country&apos;s own line wins over it):</p>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {REGIONS.filter((r) => !have.includes(r.code)).map((r) => (
+            <button key={r.code} type="button" data-testid={`${testIdPrefix}-add-region-${r.code}`} title={r.hint}
+              className={`${CHIP} border-border`} onClick={() => onAdd(r.code)}>
+              + {r.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 type Status = "saving" | "saved" | "error";
 
 /** Profile -> CV tab: where should the assistant look first. Writes the two
@@ -229,8 +272,6 @@ export function JobPriority({
     isObj(rightToWork) && Array.isArray(rightToWork.countries) ? rightToWork.countries : []
   ).flatMap((rec: unknown, index: number) => (isObj(rec) && typeof rec.country === "string" ? [{ rec, index }] : []));
   records.sort((a, b) => placeRank(a.rec.country) - placeRank(b.rec.country));
-  const hasAny = records.some((r) => r.rec.country === "ANY");
-  const [adding, setAdding] = useState(false);
   // A grid write is keyed by country, not index: the index can move when a place is added.
   const editPlace = (code: string, edit: (rec: Rec) => Rec) =>
     write(`grid-${code}`, (b) => {
@@ -347,37 +388,8 @@ export function JobPriority({
             </tbody>
           </table>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {adding ? (
-            <CountryPicker label="Add a country" tags={[]} testId="work-grid-picker" onChange={(codes) => {
-              setAdding(false);
-              for (const c of codes) void write(`grid-${c}`, (b) => withPlace(b, c));
-            }} />
-          ) : (
-            <button type="button" data-testid="work-grid-add" className={`${CHIP} border-border`} onClick={() => setAdding(true)}>
-              Add a country
-            </button>
-          )}
-          {!hasAny && (
-            <button type="button" data-testid="work-grid-add-any" className={`${CHIP} border-border`}
-              onClick={() => void write("grid-ANY", (b) => withPlace(b, "ANY"))}>
-              Add all other countries
-            </button>
-          )}
-        </div>
-        {/* One line for a whole region (owner, 2026-10-26). A country's own line wins over it. */}
-        <div data-testid="work-grid-regions" className="mt-3">
-          <p className="text-xs text-muted-foreground">Or add a whole region (a country&apos;s own line wins over it):</p>
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {REGIONS.filter((r) => !records.some(({ rec }) => rec.country === r.code)).map((r) => (
-              <button key={r.code} type="button" data-testid={`work-grid-add-region-${r.code}`} title={r.hint}
-                className={`${CHIP} border-border`}
-                onClick={() => void write(`grid-${r.code}`, (b) => withPlace(b, r.code))}>
-                + {r.name}
-              </button>
-            ))}
-          </div>
-        </div>
+        <AddPlace testIdPrefix="work-grid" have={records.map(({ rec }) => String(rec.country))}
+          onAdd={(c) => void write(`grid-${c}`, (b) => withPlace(b, c))} />
       </div>
     </section>
   );
