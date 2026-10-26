@@ -25,12 +25,20 @@ export function AskQuestions({
   rows,
   busy,
   onChange,
+  onSave,
 }: {
   items: MergedRow[];
   rows: Record<string, RowState>;
   busy: boolean;
   onChange: (rowId: string, row: RowState) => void;
+  /** The owner settled this row (a pick, "Looks right", or leaving an edited box): save it now, so it
+   *  survives a reload even before every other row is checked (owner, 2026-10-26). */
+  onSave?: (rowId: string, value: string) => void;
 }) {
+  const settle = (id: string, row: RowState) => {
+    onChange(id, row);
+    if (row.ok && row.value.trim()) onSave?.(id, row.value);
+  };
   const [editing, setEditing] = useState<Set<string>>(new Set());
   const edit = (id: string) => setEditing((prev) => new Set(prev).add(id));
 
@@ -65,14 +73,15 @@ export function AskQuestions({
               <div className="flex flex-wrap gap-2">
                 {q.choices.map((c) => (
                   <button key={c} type="button" disabled={busy} aria-pressed={row.ok && row.value === c}
-                    className={row.ok && row.value === c ? picked : btn} onClick={() => onChange(id, { value: c, ok: true })}>
+                    className={row.ok && row.value === c ? picked : btn} onClick={() => settle(id, { value: c, ok: true })}>
                     {c}
                   </button>
                 ))}
               </div>
             ) : open ? (
               <Textarea aria-label={q.question} value={row.value} disabled={busy} placeholder="Type your answer" data-testid={`q-input-${askId}-${q.key}`}
-                onChange={(e) => onChange(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })} />
+                onChange={(e) => onChange(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })}
+                onBlur={(e) => settle(id, { value: e.target.value, ok: e.target.value.trim().length > 0 })} />
             ) : pending ? (
               <>
                 <p className="text-sm text-muted-foreground" data-testid={`q-pending-${askId}-${q.key}`}>
@@ -95,7 +104,7 @@ export function AskQuestions({
                   </button>
                   {!stub && (
                     <button type="button" disabled={busy || row.ok} data-testid={`q-ok-${askId}-${q.key}`}
-                      className={row.ok ? picked : btn} onClick={() => onChange(id, { value: row.value, ok: true })}>
+                      className={row.ok ? picked : btn} onClick={() => settle(id, { value: row.value, ok: true })}>
                       {row.ok ? "Checked" : "Looks right"}
                     </button>
                   )}

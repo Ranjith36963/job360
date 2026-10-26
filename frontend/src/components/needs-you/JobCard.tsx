@@ -153,6 +153,15 @@ export function JobCard({
       if (card.cv) await markCvSeen(card.applicationId, card.cv.artifactId);
     }, "Couldn't save everything");
 
+  // One settled row is remembered at once (owner, 2026-10-26: a gender or consent edit was lost when the
+  // card was left before "Approve all"). Approve all still answers the asks themselves.
+  const saveRow = (id: string, value: string) => {
+    const m = merged.rows.find((r) => r.id === id);
+    if (!m || value.trim() === m.q.answer.trim() && isStoredSource(m.q.source)) return;
+    rememberAnswers([{ topic: m.q.key || m.id, question: m.q.question, answer: value.trim() }])
+      .catch((err) => toast.apiError(err, "Couldn't save that answer"));
+  };
+
   const skipJob = () =>
     run(async () => {
       for (const a of card.asks) await answerAsk(a.ask.id, SKIP_JOB);
@@ -255,7 +264,7 @@ export function JobCard({
           <h3 className={label}>Form answers · {questions.length + rowCount}</h3>
           {rowCount > 0 && (
             <AskQuestions items={merged.rows} rows={rows} busy={busy}
-              onChange={(id, row) => setRows((prev) => ({ ...prev, [id]: row }))} />
+              onChange={(id, row) => setRows((prev) => ({ ...prev, [id]: row }))} onSave={saveRow} />
           )}
           {questions.map(({ ask, kind }) => (
             <div key={ask.id} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`question-${ask.id}`}>
