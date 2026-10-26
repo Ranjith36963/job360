@@ -17,21 +17,11 @@ vi.mock("@/lib/api", () => ({
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
   confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
   declineSettingRequest: (...a: unknown[]) => declineSettingRequest(...a),
+  getReadyToSend: async () => ({ paused: false, total: 0, unflagged: 0, items: [] }),
 }));
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => null }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) } }));
 
 const evil = "<img src=x onerror=alert(1)>";
@@ -143,6 +133,12 @@ describe("SettingRequestCard", () => {
     expect(screen.getByText(/Nothing changes until you confirm/)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull(); // the actor name is text, never HTML
     expect(confirmSettingRequest).not.toHaveBeenCalled();
+  });
+
+  it("says who asked by name, never the raw author id", () => {
+    render(<SettingRequestCard request={{ ...request, requested_by: "agent:Claude" }} onChanged={async () => {}} />);
+    expect(screen.getByText(/asked by Claude ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/agent:/)).toBeNull();
   });
 
   it("Confirm applies the request and reloads", async () => {

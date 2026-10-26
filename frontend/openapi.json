@@ -1839,6 +1839,16 @@
             "title": "Artifacts",
             "type": "object"
           },
+          "browser": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrowserLabelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "country": {
             "anyOf": [
               {
@@ -3928,6 +3938,73 @@
           "unlocks"
         ],
         "title": "CardOut",
+        "type": "object"
+      },
+      "ChangeAreas": {
+        "description": "One short marker per area of the page; a marker that moved = refetch that area.",
+        "properties": {
+          "applications": {
+            "title": "Applications",
+            "type": "string"
+          },
+          "asks": {
+            "title": "Asks",
+            "type": "string"
+          },
+          "assistant": {
+            "title": "Assistant",
+            "type": "string"
+          },
+          "other": {
+            "title": "Other",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "string"
+          },
+          "settings": {
+            "title": "Settings",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assistant",
+          "asks",
+          "ready",
+          "applications",
+          "settings",
+          "other"
+        ],
+        "title": "ChangeAreas",
+        "type": "object"
+      },
+      "ChangesOut": {
+        "properties": {
+          "areas": {
+            "$ref": "#/components/schemas/ChangeAreas"
+          },
+          "assistant_last_active_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Last Active At"
+          },
+          "cursor": {
+            "title": "Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "areas"
+        ],
+        "title": "ChangesOut",
         "type": "object"
       },
       "ClientLogRequest": {
@@ -8614,6 +8691,34 @@
             "title": "Applications",
             "type": "array"
           },
+          "outreach": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/QueuedOutreachOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outreach"
+          },
+          "queue_order": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Order"
+          },
           "queue_summary": {
             "anyOf": [
               {
@@ -11204,6 +11309,90 @@
           "tasks"
         ],
         "title": "QueueOut",
+        "type": "object"
+      },
+      "QueuedOutreachOut": {
+        "description": "One approved, unsent LinkedIn send on the one batch queue (owner 2026-10-26). Read-only: the name is\nuntrusted text; no draft text is carried.",
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "browser": {
+            "$ref": "#/components/schemas/BrowserLabelOut"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "outreach",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outreach_kind": {
+            "enum": [
+              "linkedin_note",
+              "linkedin_message"
+            ],
+            "title": "Outreach Kind",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "in_progress"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "kind",
+          "outreach_kind",
+          "title",
+          "name",
+          "contact_id",
+          "message_id",
+          "state",
+          "browser"
+        ],
+        "title": "QueuedOutreachOut",
         "type": "object"
       },
       "ReadyAnswer": {
@@ -24804,6 +24993,91 @@
         ]
       }
     },
+    "/api/changes": {
+      "get": {
+        "description": "What changed for the signed-in user: a cursor (also the ETag) and one marker per page area.\nSend the last cursor as ``If-None-Match``; an unchanged cursor answers 304 with no body.",
+        "operationId": "changes_api_changes_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Nothing changed since the cursor sent in If-None-Match"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Changes",
+        "tags": [
+          "changes"
+        ]
+      }
+    },
     "/api/client-log": {
       "post": {
         "description": "Record a browser-side log event into the server's data/logs/ stream.",
@@ -27407,7 +27681,7 @@
     },
     "/api/profile/clear": {
       "post": {
-        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\nWEB SESSION ONLY (gap roadmap slice 3): \"all\" wipes the CV, preferences,\nmemory and assistant settings at once, so a leaked agent token must not\nreach it. An assistant clears one field with ``update_profile(null)``.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot (it copies the memory into ``profile_edits``\nfirst instead, ``_snapshot_memory_then_clear``) and leaves the CV, the\npreferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\nWEB SESSION ONLY (gap roadmap slice 3): \"all\" wipes the CV, preferences,\nmemory and assistant settings at once, so a leaked agent token must not\nreach it. An assistant clears one field with ``update_profile(null)``.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot and ERASES the user's earlier ``user_info.*``\nhistory rows (``_erase_memory_then_clear``), and leaves the CV, the\npreferences and ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
         "operationId": "clear_profile_section_api_profile_clear_post",
         "parameters": [
           {

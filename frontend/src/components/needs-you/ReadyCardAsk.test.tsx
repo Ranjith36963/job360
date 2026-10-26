@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Ask } from "@/lib/api";
 import { ReadyCard } from "./ReadyCard";
-import { card } from "./ready-fixtures";
+import { sendableCard } from "./ready-fixtures";
 
 const approveSend = vi.fn();
 const answerAskQuestions = vi.fn();
@@ -36,11 +36,14 @@ beforeEach(() => {
 
 describe("Send with an open ask", () => {
   it("shows the ask's questions inline and keeps Send disabled until every row has an answer", async () => {
-    render(<ReadyCard card={card(64)} asks={[ask166]} paused={false} onChanged={() => {}} />);
+    render(<ReadyCard card={sendableCard(64)} asks={[ask166]} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("ready-ask-questions")).toBeInTheDocument();
     const send = screen.getByTestId("ready-send-64");
     expect(send).toBeDisabled();
-    fireEvent.click(screen.getByTestId("q-ok-166-salary"));
+    // A saved profile fact is already OK: no OK button to press.
+    expect(screen.getByTestId("q-state-166-salary")).toHaveTextContent("OK");
+    expect(screen.queryByTestId("q-ok-166-salary")).toBeNull();
+    expect(screen.getByTestId("q-state-166-sms")).toHaveTextContent("Needs you");
     expect(send).toBeDisabled(); // the SMS row is still open
     fireEvent.click(screen.getByRole("button", { name: "Leave blank" }));
     await waitFor(() => expect(send).not.toBeDisabled());
@@ -51,7 +54,7 @@ describe("Send with an open ask", () => {
   });
 
   it("no open ask with questions: no section, Send is enabled", () => {
-    render(<ReadyCard card={card(64)} asks={[{ ...ask166, status: "answered" } as Ask]} paused={false} onChanged={() => {}} />);
+    render(<ReadyCard card={sendableCard(64)} asks={[{ ...ask166, status: "answered" } as Ask]} paused={false} onChanged={() => {}} />);
     expect(screen.queryByTestId("ready-ask-questions")).toBeNull();
     expect(screen.getByTestId("ready-send-64")).not.toBeDisabled();
   });

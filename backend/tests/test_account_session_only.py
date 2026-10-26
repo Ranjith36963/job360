@@ -7,12 +7,11 @@ only now (``require_session_user``: 403 ``session_required``).
 
 Also here: a magic-link-only account (``users.has_password`` FALSE, migration
 0069) can delete itself from a FRESH email-link session (GDPR Art. 17), and a
-``/profile/clear`` copies the user-info memory into ``profile_edits`` first, so
-a clear is recoverable.
+``/profile/clear`` ERASES the user-info memory's ``profile_edits`` history
+(owner decision 2026-10-26: "Clear memory should erase").
 """
 from __future__ import annotations
 
-import json
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -189,23 +188,21 @@ async def test_a_password_reset_gives_a_magic_link_account_a_password(authentica
 
 
 @pytest.mark.asyncio
-async def test_clear_copies_the_memory_into_history_first(authenticated_async_context, fixture_user_id):
+async def test_clear_erases_the_memory_from_history(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         resp = await client.post("/api/profile/clear", data={"section": "all"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["user_info"]["contact"] == {}, "the clear really ran"
         rows = (await client.get("/api/profile/edits/history", params={"path": CONTACT})).json()["rows"]
-        # Newest first: the clearing row, then the value the clear wiped.
-        assert rows[0]["value"] is None
-        assert rows[1]["value"] == {"preferred_name": "Ada", "phone": "+44 7700 900123"}
+        # Owner decision 2026-10-26: the wiped value is not copied anywhere; one clearing row, no value.
+        assert [r["value"] for r in rows] == [None]
         eq = (await client.get("/api/profile/edits/history", params={"path": EQ})).json()["rows"]
-        assert [r["value"] for r in eq] == [None, {"gender": "Woman"}]
-        # An empty field is not copied (rule #29: nothing to keep).
+        assert [r["value"] for r in eq] == [None]
+        # An empty field leaves no row at all (rule #29: nothing was there).
         langs = (await client.get("/api/profile/edits/history", params={"path": "user_info.languages"})).json()
         assert langs["rows"] == []
     stored = _sql(
-        "SELECT value FROM profile_edits WHERE user_id = ? AND path = ? AND value IS NOT NULL",
-        (fixture_user_id, CONTACT),
+        "SELECT path, value FROM profile_edits WHERE user_id = ? AND value IS NOT NULL", (fixture_user_id,)
     )
-    assert [json.loads(v[0]) for v in stored] == [{"preferred_name": "Ada", "phone": "+44 7700 900123"}]
+    assert [r for r in stored if r[0].startswith("user_info.")] == []

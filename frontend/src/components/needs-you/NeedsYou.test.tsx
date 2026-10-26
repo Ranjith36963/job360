@@ -22,27 +22,16 @@ vi.mock("@/lib/api", () => ({
   getApplication: () => Promise.reject(new Error("no job record in this test")),
   getCvToApprove: async () => ({ items: [] }),
   listPeople: async () => ({ people: [] }),
+  // Ready to send has its own tests (ReadyToSend.test.tsx); here only its total, for the badge.
+  getReadyToSend: async () => ({ paused: false, total: readyMock.total, unflagged: 0, items: [] }),
 }));
+const readyMock = vi.hoisted(() => ({ total: 0 }));
 // The morning check has its own tests (MorningCheck.test.tsx).
 // The Batch apply panel has its own tests (BatchApplyPanel.test.tsx).
 vi.mock("./BatchApplyPanel", () => ({ BatchApplyPanel: () => <aside data-testid="batch-apply-panel" /> }));
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => <div data-testid="morning-check" /> }));
 vi.mock("./OutcomeSuggestions", () => ({ OutcomeSuggestions: () => null }));
-// Approve CV has its own tests (CvToApprove.test.tsx).
-vi.mock("./CvToApprove", () => ({ CvToApprove: () => null }));
 vi.mock("./UnmatchedMail", () => ({ UnmatchedMail: () => null }));
-// Ready to send has its own tests (ReadyToSend.test.tsx).
-// Ready to send has its own tests; this stand-in only reports its total for the badge.
-const readyMock = vi.hoisted(() => ({ total: 0 }));
-vi.mock("./ReadyToSend", async () => {
-  const { useEffect } = await import("react");
-  return {
-    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
-      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
-      return null;
-    },
-  };
-});
 // The live view is tested in ApplicationDecisions.test.tsx; this stand-in only offers Done.
 vi.mock("@/components/applications/FinishInBrowser", () => ({
   FinishInBrowser: ({ onDone }: { onDone: () => void }) => (
@@ -126,6 +115,13 @@ describe("NeedsYou", () => {
       "href",
       "/applications/7"
     );
+  });
+
+  it("says who asked by name, never the raw author id", async () => {
+    setup([{ ...openAsk, question: "Salary?", asked_by: "agent:Claude" }]);
+    render(<NeedsYou />);
+    expect(await screen.findByText(/asked by Claude ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/agent:/)).toBeNull();
   });
 
   it("puts a long question's tail and its context behind Details, as text", async () => {
@@ -218,6 +214,17 @@ describe("NeedsYou", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getAllByTestId("ask-change")[0]);
     expect(screen.getByTestId("ask-input-2")).toHaveValue("A2");
+  });
+
+  it("puts the one job list first, then Waiting for your OK and Other questions", async () => {
+    getAssistantSettings.mockResolvedValue({ waiting: [{ id: 11, key: "apply_daily_cap", value: 25, asked_by: "agent:Claude", asked_at: base.asked_at, reason: "" }] });
+    setup([{ ...openAsk, application_id: null }]);
+    render(<NeedsYou />);
+    const other = await screen.findByTestId("other-questions");
+    const jobs = screen.getByText("Waiting for you");
+    const ok = await screen.findByText("Waiting for your OK");
+    expect(jobs.compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ok.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows the empty state", async () => {

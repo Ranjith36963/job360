@@ -177,3 +177,10 @@ export function whoLabel(recordedBy: string): { who: "you" | "agent"; name: stri
   }
   return { who: "agent", name: recordedBy };
 }
+
+/** "asked by …": "you" for the web user, else the assistant's own name ("agent:Claude" -> "Claude"),
+ *  never the raw author id. */
+export function askerName(recordedBy: string | null | undefined): string {
+  const who = whoLabel(recordedBy ?? "");
+  return who.who === "you" ? "you" : who.name || "your assistant";
+}

@@ -2771,7 +2771,10 @@ async def list_applications(
     origins = await origin_by_app(db, user_id, app_ids)
     holds = await kit_service.holds_for_apps(db, user_id, app_ids, datetime.now(timezone.utc))
     preflights: dict[int, dict[str, Any]] = {}
+    browsers: dict[int, dict[str, str]] = {}
     summary: Optional[dict[str, Any]] = None
+    outreach: Optional[list[dict[str, Any]]] = None
+    merged: Optional[list[str]] = None
     if queued:
         # Bulk-apply Q1/Q2: derived, no table; the order above stays first in first out.
         import asyncio  # noqa: PLC0415
@@ -2787,7 +2790,13 @@ async def list_applications(
         preflights = await queue_preflight.preflight_rows(
             db, user_id, rows, queued_at, holds, cfg, profile, overlay
         )
-        summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg)
+        browsers = await queue_preflight.queue_browsers(db, user_id, queue_order)
+        # One queue (owner 2026-10-26): the approved, unsent LinkedIn sends too, merged by when the user said yes.
+        from src.services.applications import own_browser  # noqa: PLC0415 - imports spine
+
+        outreach = await own_browser.queued_outreach(db, user_id, datetime.now(timezone.utc))
+        merged = own_browser.merged_order({i: queued_at[i] for i in queue_order}, outreach)
+        summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg, browsers, outreach)
     out = []
     for r in rows:
         app_id = r["id"]
@@ -2825,6 +2834,7 @@ async def list_applications(
                 "queued_at": queued_at.get(app_id),
                 "queue_position": queue_position.get(app_id),
                 "preflight": preflights.get(app_id),
+                "browser": browsers.get(app_id),
                 "origin": origins.get(app_id, ""),
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
@@ -2845,7 +2855,9 @@ async def list_applications(
                 ),
             }
         )
-    return {"applications": out, "total": total, "queue_summary": summary}
+    return {
+        "applications": out, "total": total, "queue_summary": summary, "outreach": outreach, "queue_order": merged,
+    }
 
 
 # ── R9 — whats_new ────────────────────────────────────────────────────────────

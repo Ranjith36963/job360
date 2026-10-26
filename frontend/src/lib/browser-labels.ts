@@ -28,6 +28,7 @@ export const ROUTE_LABELS = {
   linkedin_paused: "LinkedIn showed a limit warning: LinkedIn tasks paused until {date}",
   account_step: "This site wants a new account: your own browser, or sign in once in Job360's browser",
   linkedin_guest_blocked: "LinkedIn blocked a signed-out read: LinkedIn job pages wait until {date}",
+  link_unclear: "This link looks broken or disguised: your own browser checks it",
   waiting: "Waiting for your PC",
 } as const;
 
@@ -51,3 +52,22 @@ export const PACE_TEXT =
 
 export const RUN_OWN_BROWSER_TASKS = "Run my own-browser tasks now";
 export const RUN_NOW_DONE = "Open for the next 60 minutes. Your assistant on your PC takes them one at a time.";
+
+/** The server's route reason codes (`routing.ROUTE_REASONS`) in plain words. "default" and the
+ *  LinkedIn choice need no line. A code not listed here is never shown raw. */
+export const REASON_WORDS: Record<string, string> = {
+  job360_login_required: "Job360's browser reached a sign-in page it cannot pass.",
+  job360_bot_check: "Job360's browser was stopped by a robot check.",
+  job360_safety_stop: "Job360's browser stopped here to be safe.",
+  password: "It asks for your password. Only you type passwords.",
+  mfa: "It asks for a one-time code. Only you can enter it.",
+  only_you: "This step is yours: no browser does it for you.",
+  link_unclear: "The apply link has no clear web address, so your own browser checks it.",
+};
+
+/** The words for a route reason: the plain line for a known code, "" for an unknown code
+ *  (a bare snake_case word), and an older server's already-written sentence as it is. */
+export function reasonWords(reason: string): string {
+  if (reason in REASON_WORDS) return REASON_WORDS[reason];
+  return /^[a-z0-9_]+$/.test(reason) ? "" : reason;
+}
