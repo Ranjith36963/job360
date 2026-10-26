@@ -317,7 +317,16 @@ def canonical_host(raw_url: str) -> Optional[str]:
     written = written[:-1] if written.endswith(".") else written
     if written.lower() != verdict.host:
         return None
+    if not _DNS_HOST.fullmatch(verdict.host):  # "not a link", "a b.com": no name a resolver could look up
+        try:
+            ipaddress.ip_address(verdict.host)
+        except ValueError:
+            return None
     return verdict.host
+
+
+# A host name as DNS spells it once lowercased and IDNA-encoded: letters, digits, hyphens and dots only.
+_DNS_HOST = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?")
 
 
 # LinkedIn's own hosts: the site, its link shortener and its static/media host. linkedin.com runs only in the

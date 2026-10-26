@@ -144,11 +144,13 @@ describe("JobCard", () => {
       ],
     } as unknown as Ask;
     render(<JobCard card={card([listed])} onChanged={onChanged} />);
-    expect(screen.getByTestId(`q-state-${listed.id}-country`)).toHaveTextContent("Verified"); // memory
-    expect(screen.getByTestId(`q-state-${listed.id}-visa`)).toHaveTextContent("Guessed"); // none
-    expect(screen.getByTestId(`q-state-${listed.id}-salary`)).toHaveTextContent("Guessed");
-    expect(screen.queryByText(/Not known|From memory|Guessed, please check/)).toBeNull();
-    expect(screen.getByTestId(`q-ok-${listed.id}-country`)).toHaveTextContent("Checked"); // Verified starts checked
+    expect(screen.getByTestId(`q-state-${listed.id}-country`)).toHaveTextContent("OK"); // memory
+    expect(screen.getByTestId(`q-source-${listed.id}-country`).textContent).toMatch(/^From your Memory · saved /);
+    expect(screen.getByTestId(`q-state-${listed.id}-visa`)).toHaveTextContent("Needs you"); // none
+    expect(screen.getByTestId(`q-state-${listed.id}-salary`)).toHaveTextContent("Check");
+    expect(screen.getByTestId(`q-source-${listed.id}-salary`)).toHaveTextContent("Your assistant's guess");
+    expect(screen.queryByText(/Not known|Verified|Guessed/)).toBeNull();
+    expect(screen.queryByTestId(`q-ok-${listed.id}-country`)).toBeNull(); // a saved fact starts OK: nothing to press
     expect(screen.queryByTestId("approve-all-7")).toBeNull(); // one primary button at a time
     fireEvent.click(screen.getByRole("button", { name: "No" }));
     await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(listed.id, { visa: "No" })); // saved at once
@@ -179,9 +181,11 @@ describe("JobCard", () => {
     render(<JobCard card={card([a1, a2, a3])} onChanged={onChanged} />);
     expect(screen.getAllByText("City?")).toHaveLength(1);
     expect(screen.getByText("Form answers · 3")).toBeInTheDocument();
-    expect(screen.getByTestId(`q-state-${a1.id}-city`)).toHaveTextContent("Verified"); // the profile copy won over the guess
-    expect(screen.getByTestId(`q-pending-${a1.id}-phone`)).toHaveTextContent("Your assistant will draft this on its next run");
-    expect(screen.queryByTestId(`q-state-${a1.id}-phone`)).toBeNull();
+    expect(screen.getByTestId(`q-state-${a1.id}-city`)).toHaveTextContent("OK"); // the profile copy won over the guess
+    expect(screen.getByTestId(`q-source-${a1.id}-city`)).toHaveTextContent("From your profile");
+    expect(screen.getByTestId(`q-pending-${a1.id}-phone`)).toBeInTheDocument();
+    expect(screen.getByTestId(`q-source-${a1.id}-phone`)).toHaveTextContent("Your assistant will draft this, or write it now");
+    expect(screen.getByTestId(`q-state-${a1.id}-phone`)).toHaveTextContent("Needs you");
     expect(screen.queryByTestId(`q-ok-${a1.id}-phone`)).toBeNull();
     fireEvent.click(screen.getByTestId(`q-edit-${a1.id}-phone`));
     fireEvent.change(screen.getByTestId(`q-input-${a1.id}-phone`), { target: { value: "123" } });
@@ -195,18 +199,20 @@ describe("JobCard", () => {
   it("a question the assistant could not guess reads Not known until the owner answers it", () => {
     const a = listing({}, [Q("postcode", "Postcode", "", "not_known")]);
     render(<JobCard card={card([a])} onChanged={onChanged} />);
-    expect(screen.getByTestId(`q-state-${a.id}-postcode`)).toHaveTextContent("Not known");
-    expect(screen.getByTestId(`q-pending-${a.id}-postcode`)).toHaveTextContent("could not guess this");
+    expect(screen.getByTestId(`q-state-${a.id}-postcode`)).toHaveTextContent("Needs you");
+    expect(screen.getByTestId(`q-source-${a.id}-postcode`)).toHaveTextContent("Your assistant could not guess this");
     fireEvent.click(screen.getByTestId(`q-edit-${a.id}-postcode`));
-    expect(screen.getByTestId(`q-state-${a.id}-postcode`)).not.toHaveTextContent("Not known");
+    fireEvent.change(screen.getByTestId(`q-input-${a.id}-postcode`), { target: { value: "SW1A 1AA" } });
+    expect(screen.getByTestId(`q-state-${a.id}-postcode`)).toHaveTextContent("OK");
+    expect(screen.getByTestId(`q-source-${a.id}-postcode`)).toHaveTextContent("You wrote this");
   });
 
   it("a saved personal answer reads Verified but still waits for the owner's click", () => {
     const a = listing({}, [Q("gender", "Gender", "Female", "profile")]);
     render(<JobCard card={card([a])} onChanged={onChanged} />);
-    expect(screen.getByTestId(`q-state-${a.id}-gender`)).toHaveTextContent("Verified");
-    expect(screen.getByTestId(`q-ok-${a.id}-gender`)).toHaveTextContent("Looks right");
-    expect(screen.getByText("Needs your click")).toBeInTheDocument();
+    expect(screen.getByTestId(`q-state-${a.id}-gender`)).toHaveTextContent("Needs you");
+    expect(screen.getByTestId(`q-source-${a.id}-gender`)).toHaveTextContent("From your profile · only you can choose");
+    expect(screen.getByTestId(`q-ok-${a.id}-gender`)).toHaveTextContent("OK");
   });
 
   it("Approve all pre-filled leaves consent and personal rows for the owner's own click", async () => {
@@ -217,15 +223,16 @@ describe("JobCard", () => {
       Q("empty", "Anything else?", "", "none"),
     ]);
     render(<JobCard card={card([a])} onChanged={onChanged} />);
-    expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("Guessed");
+    expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("Check");
     fireEvent.click(screen.getByTestId("approve-prefilled-7"));
-    expect(screen.getByTestId(`q-ok-${a.id}-city`)).toHaveTextContent("Checked");
+    expect(screen.queryByTestId(`q-ok-${a.id}-city`)).toBeNull();
     await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { city: "Berlin" })); // persisted, not only shown
     await waitFor(() => expect(screen.getByTestId(`q-edit-${a.id}-empty`)).toBeEnabled());
-    expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("Verified");
-    expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Guessed");
-    expect(screen.getByTestId(`q-ok-${a.id}-gdpr`)).toHaveTextContent("Looks right");
-    expect(screen.getAllByText("Needs your click")).toHaveLength(2);
+    expect(screen.getByTestId(`q-state-${a.id}-city`)).toHaveTextContent("OK");
+    expect(screen.getByTestId(`q-source-${a.id}-city`)).toHaveTextContent("You confirmed this");
+    expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Needs you");
+    expect(screen.getByTestId(`q-ok-${a.id}-gdpr`)).toHaveTextContent("OK");
+    expect(screen.getAllByText(/only you can choose/)).toHaveLength(2);
     expect(screen.getByTestId(`q-pending-${a.id}-empty`)).toBeInTheDocument();
     expect(screen.queryByTestId(`q-ok-${a.id}-empty`)).toBeNull();
     fireEvent.click(screen.getByTestId(`q-edit-${a.id}-empty`));
@@ -233,7 +240,7 @@ describe("JobCard", () => {
     expect(screen.queryByTestId("approve-all-7")).toBeNull();
     expect(screen.getByTestId("approve-prefilled-7")).toBeDisabled(); // nothing left it may check
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gdpr`));
-    expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("Verified");
+    expect(screen.getByTestId(`q-state-${a.id}-gdpr`)).toHaveTextContent("OK");
     await waitFor(() => expect(screen.getByTestId(`q-ok-${a.id}-gender`)).toBeEnabled());
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-gender`));
     await waitFor(() => expect(saveAskRowAnswers).toHaveBeenCalledWith(a.id, { gender: "Female" }));
@@ -265,16 +272,19 @@ describe("JobCard", () => {
     render(<JobCard card={card([a])} onChanged={onChanged} />);
     expect(within(screen.getByTestId(`q-${a.id}-privacy`)).getByText("Yes")).toBeInTheDocument();
     expect(within(screen.getByTestId(`q-${a.id}-ref`)).getByText("No")).toBeInTheDocument();
-    expect(screen.getByTestId(`q-state-${a.id}-privacy`)).toHaveTextContent("Guessed");
-    expect(screen.getByTestId(`q-state-${a.id}-ref`)).toHaveTextContent("Guessed");
+    // A consent row stays the owner's own tap, even with the pre-guess; the referral guess waits for a check.
+    expect(screen.getByTestId(`q-state-${a.id}-privacy`)).toHaveTextContent("Needs you");
+    expect(screen.getByTestId(`q-source-${a.id}-privacy`)).toHaveTextContent("Your assistant's guess · only you can choose");
+    expect(screen.getByTestId(`q-state-${a.id}-ref`)).toHaveTextContent("Check");
+    expect(screen.getByTestId(`q-source-${a.id}-ref`)).toHaveTextContent("Your assistant's guess");
     expect(screen.getByTestId(`q-pending-${a.id}-other`)).toBeInTheDocument();
-    expect(screen.queryByTestId(`q-state-${a.id}-other`)).toBeNull();
+    expect(screen.getByTestId(`q-state-${a.id}-other`)).toHaveTextContent("Needs you");
     expect(screen.queryByTestId(`q-input-${a.id}-other`)).toBeNull();
     fireEvent.click(screen.getByTestId(`q-edit-${a.id}-other`));
     const box = screen.getByTestId(`q-input-${a.id}-other`);
     expect(box).toHaveAttribute("placeholder", "Type your answer");
-    expect(screen.getByTestId(`q-state-${a.id}-other`)).toHaveTextContent("Guessed");
-    expect(screen.queryByText(/Not known/)).toBeNull();
+    expect(screen.getByTestId(`q-state-${a.id}-other`)).toHaveTextContent("Needs you");
+    expect(screen.queryByText(/Not known|Guessed/)).toBeNull();
   });
 
   it("hides an old send-it-yourself reminder for someone already under People, and answers it from that row", async () => {
@@ -444,7 +454,9 @@ describe("JobCard", () => {
     expect(screen.getByText("Stored note: drafted")).toBeInTheDocument();
     expect(screen.getByTestId(`q-edit-${listed.id}-json`)).toBeInTheDocument();
     expect(screen.queryByTestId(`q-ok-${listed.id}-json`)).toBeNull();
-    expect(screen.getByTestId(`q-ok-${listed.id}-city`)).toHaveTextContent("Looks right");
+    expect(screen.getByTestId(`q-state-${listed.id}-json`)).toHaveTextContent("Needs you");
+    expect(screen.getByTestId(`q-source-${listed.id}-json`)).toHaveTextContent("Draft missing, write it or ask again");
+    expect(screen.getByTestId(`q-ok-${listed.id}-city`)).toHaveTextContent("OK");
   });
 
   it("shows a long answer in full behind Show all", () => {
@@ -469,7 +481,7 @@ describe("JobCard saves each answer row on its own", () => {
   it("an edited sensitive row saves at once, and a fresh render from the saved data shows it Verified", async () => {
     const a = listing({}, rows());
     const { unmount } = render(<JobCard card={card([a])} onChanged={onChanged} />);
-    expect(screen.getByText("Needs your click")).toBeInTheDocument();
+    expect(screen.getByTestId(`q-state-${a.id}-equality.ethnicity`)).toHaveTextContent("Needs you");
     fireEvent.click(screen.getByTestId(`q-edit-${a.id}-equality.ethnicity`));
     fireEvent.change(screen.getByTestId(`q-input-${a.id}-equality.ethnicity`), { target: { value: " South Asian " } });
     fireEvent.click(screen.getByTestId(`q-save-${a.id}-equality.ethnicity`));
@@ -487,9 +499,9 @@ describe("JobCard saves each answer row on its own", () => {
     render(<JobCard card={card([saved])} onChanged={onChanged} />);
     const row = screen.getByTestId(`q-${a.id}-equality.ethnicity`);
     expect(within(row).getByText("South Asian")).toBeInTheDocument();
-    expect(screen.getByTestId(`q-state-${a.id}-equality.ethnicity`)).toHaveTextContent("Verified");
-    expect(screen.getByTestId(`q-changed-${a.id}-equality.ethnicity`)).toHaveTextContent("You changed");
-    expect(screen.queryByText("Needs your click")).toBeNull();
+    expect(screen.getByTestId(`q-state-${a.id}-equality.ethnicity`)).toHaveTextContent("OK");
+    expect(screen.getByTestId(`q-source-${a.id}-equality.ethnicity`)).toHaveTextContent("You changed this");
+    expect(screen.queryByText(/only you can choose/)).toBeNull();
   });
 
   it("Looks right and a choice save their row at once; Cancel puts an edit back", async () => {
@@ -515,7 +527,7 @@ describe("JobCard saves each answer row on its own", () => {
     const a = listing({}, rows());
     render(<JobCard card={card([a])} onChanged={onChanged} />);
     fireEvent.click(screen.getByTestId(`q-ok-${a.id}-equality.ethnicity`));
-    await waitFor(() => expect(screen.getByTestId(`q-ok-${a.id}-equality.ethnicity`)).toHaveTextContent("Looks right"));
-    expect(screen.getByText("Needs your click")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId(`q-ok-${a.id}-equality.ethnicity`)).toHaveTextContent("OK"));
+    expect(screen.getByTestId(`q-state-${a.id}-equality.ethnicity`)).toHaveTextContent("Needs you");
   });
 });
