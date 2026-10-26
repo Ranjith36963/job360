@@ -704,7 +704,7 @@ class JobDatabase:
     # The list and the schema must move together, in the same commit.
     _PER_USER_TABLES = (
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
-        "application_events",
+        "application_events", "application_fill_steps",
         "application_receipts", "application_stage_history", "applications",
         "application_proof_screenshots", "artifact_links", "assistant_capability_reports", "assistant_duty_runs",
         "assistant_setting_requests",
@@ -731,7 +731,7 @@ class JobDatabase:
     # stored, so the export can hand out nothing usable as a credential.
     _EXPORT_TABLES = (
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
-        "application_events",
+        "application_events", "application_fill_steps",
         "application_proof_screenshots", "application_receipts", "applications", "application_stage_history",
         "assistant_capability_reports", "assistant_duty_runs", "assistant_setting_requests", "audit_log",
         "connector_cards", "contact_edits", "contact_outreach",

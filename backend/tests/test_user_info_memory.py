@@ -1307,3 +1307,9 @@ def test_contract_ok_is_a_per_country_bool():
     assert [r["contract_ok"] for r in rtw["countries"]] == [True, False]
     assert "contract_ok" in _reject(RTW, {"countries": [{"country": "GB", "contract_ok": "maybe"}]})
 
+
+
+def test_contract_priority_takes_the_same_levels_as_remote_and_onsite():
+    rtw = validate_edit(RTW, {"countries": [{"country": "GB", "contract_ok": True, "contract_priority": "medium"}]})
+    assert rtw["countries"][0]["contract_priority"] == "medium"
+    assert "contract_priority" in _reject(RTW, {"countries": [{"country": "GB", "contract_priority": "urgent"}]})

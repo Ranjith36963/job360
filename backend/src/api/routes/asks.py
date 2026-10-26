@@ -135,9 +135,10 @@ async def list_asks(
         blocks = await blocked_service.open_blocks(db, user.id, blocked_service.open_app_ids(rows))
         finish = await blocked_service.finish_here_ask_ids(db, user.id, rows, blocks)
         browsers = await blocked_service.browser_for_asks(db, user.id, rows, blocks, finish)
+        refill = await blocked_service.refill_ask_ids(db, user.id, rows)
         rows = [
             {**r, "finish_here": r["id"] in finish, "held_seconds": _held(user.id, r, finish),
-             "browser": browsers.get(r["id"])}
+             "can_refill": r["id"] in refill, "browser": browsers.get(r["id"])}
             for r in rows
         ]
         return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id)}

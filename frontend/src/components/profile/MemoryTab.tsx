@@ -206,7 +206,16 @@ export function MemoryTab() {
 
   /** Confirm an inferred fact: Keep writes a web row marked user_said, then re-read. */
   const confirm = useCallback(async (spec: RowSpec): Promise<void> => {
-    const updated = await keepProfileEdit(spec.path);
+    // Keep accepts the assistant's NEWEST write to a block. When the user has written
+    // the block since (an edit to another answer in it), Keep has nothing to accept, yet
+    // answers the assistant wrote earlier still wait: confirm them by saving the block
+    // as it stands, as the user's word (owner, 2026-10-26: "Confirm says no change to keep").
+    const [, fresh] = await loadHistory(spec.path);
+    const newest = fresh?.[0];
+    const userWroteLast = !!newest && (newest.set_by === "web" || newest.source === "user_said");
+    const updated = userWroteLast
+      ? await updateProfileFields([{ path: spec.path, value: blockOf(latest.current, spec.path) }])
+      : await keepProfileEdit(spec.path);
     latest.current = updated;
     setProfile(updated);
     const [, rows] = await loadHistory(spec.path);
