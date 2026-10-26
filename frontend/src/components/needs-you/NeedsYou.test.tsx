@@ -128,6 +128,13 @@ describe("NeedsYou", () => {
     );
   });
 
+  it("says who asked by name, never the raw author id", async () => {
+    setup([{ ...openAsk, question: "Salary?", asked_by: "agent:Claude" }]);
+    render(<NeedsYou />);
+    expect(await screen.findByText(/asked by Claude ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/agent:/)).toBeNull();
+  });
+
   it("puts a long question's tail and its context behind Details, as text", async () => {
     setup([{ ...base, id: 9, question: "Batch run paused. <b>Three</b> jobs failed; open each form.", status: "open" }]);
     const { container } = render(<NeedsYou />);

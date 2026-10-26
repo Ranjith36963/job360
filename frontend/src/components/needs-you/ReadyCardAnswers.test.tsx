@@ -29,13 +29,13 @@ describe("Verify / Edit on each answer", () => {
     expect(link.textContent).toBe("https://linkedin.com/in/ranjith-ai-engineer");
     expect(link).toHaveAttribute("href", "https://linkedin.com/in/ranjith-ai-engineer");
     expect(link).toHaveAttribute("target", "_blank");
-    expect(screen.getByTestId("ready-answer-verify-64-0")).toHaveTextContent("Verify");
+    expect(screen.getByTestId("ready-answer-verify-64-0")).toHaveTextContent("OK");
   });
 
   it("memory, written and guessed rows get Verify and Edit; profile rows get Edit only", () => {
     render(<ReadyCard card={card(64)} paused={false} onChanged={() => {}} />);
     for (const i of [0, 2, 3]) {
-      expect(screen.getByTestId(`ready-answer-verify-64-${i}`)).toHaveTextContent("Verify");
+      expect(screen.getByTestId(`ready-answer-verify-64-${i}`)).toHaveTextContent("OK");
       expect(screen.getByTestId(`ready-answer-edit-64-${i}`)).toHaveTextContent("Edit");
     }
     // Owner 2026-10-26: every row can be edited, whatever its source.
@@ -48,13 +48,17 @@ describe("Verify / Edit on each answer", () => {
     const blank = { question: "Notice period?", answer: "", source: "approved", key: null, saved_by: null, saved_at: null };
     const onChanged = vi.fn();
     render(<ReadyCard card={card(122, { answers: [answer(salary), answer(blank)] })} paused={false} onChanged={onChanged} />);
+    // The private row WAS typed on the form, only the stored copy is hidden: OK, never a false alarm.
+    expect(screen.getByTestId("ready-answer-status-122-0")).toHaveTextContent("OK");
+    expect(screen.getByTestId("ready-answer-source-122-0")).toHaveTextContent("Typed on the form, hidden for privacy");
+    // The blank row has nothing to send: Needs you.
+    expect(screen.getByTestId("ready-answer-status-122-1")).toHaveTextContent("Needs you");
+    expect(screen.getByTestId("ready-answer-source-122-1")).toHaveTextContent("Blank on the form");
+    expect(screen.getByTestId("ready-answer-missing-122-1")).toHaveTextContent("Tap Edit to type your answer");
     for (const i of [0, 1]) {
-      const row = screen.getByTestId(`ready-answer-122-${i}`);
-      expect(row).toHaveTextContent("Needs your answer");
-      expect(row).not.toHaveTextContent("Approved");
+      expect(screen.getByTestId(`ready-answer-122-${i}`)).not.toHaveTextContent("Approved");
       expect(screen.queryByTestId(`ready-answer-verify-122-${i}`)).toBeNull();
     }
-    expect(screen.getByTestId("ready-answer-missing-122-0")).toHaveTextContent("Tap Edit to type your answer");
     fireEvent.click(screen.getByTestId("ready-answer-edit-122-0"));
     fireEvent.change(screen.getByTestId("ready-answer-input-122-0"), { target: { value: "£80,000" } });
     fireEvent.click(screen.getByTestId("ready-answer-save-122-0"));
@@ -66,7 +70,8 @@ describe("Verify / Edit on each answer", () => {
     const saved = { question: "What is your expected salary package?", answer: "", source: "approved", redacted: true, changed_to: "£80,000", changed_reason: "owner_edit", verified: true };
     render(<ReadyCard card={card(122, { answers: [answer(saved)] })} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("ready-answer-changed-122-0")).toHaveTextContent("£80,000");
-    expect(screen.getByTestId("ready-answer-verified-122-0")).toHaveTextContent("Verified");
+    expect(screen.getByTestId("ready-answer-status-122-0")).toHaveTextContent("OK");
+    expect(screen.getByTestId("ready-answer-source-122-0")).toHaveTextContent("You changed this");
     expect(screen.getByTestId("ready-answer-edit-122-0")).toBeInTheDocument();
   });
 
@@ -76,7 +81,7 @@ describe("Verify / Edit on each answer", () => {
     fireEvent.click(screen.getByTestId("ready-answer-verify-64-3"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(confirmAnswer).toHaveBeenCalledWith(64, 3, 640, undefined);
-    expect(toastSuccess).toHaveBeenCalledWith("Verified. Saved as your answer.");
+    expect(toastSuccess).toHaveBeenCalledWith("OK. Saved as your answer.");
   });
 
   it("Edit opens a box with the typed answer and saves the new text", async () => {
@@ -94,7 +99,8 @@ describe("Verify / Edit on each answer", () => {
   it("a verified answer shows the blue double tick and no Verify button, Edit stays", () => {
     const c = card(64, { answers: [answer({ verified: true, saved_by: "web" })] });
     render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
-    expect(screen.getByTestId("ready-answer-verified-64-0")).toHaveTextContent("Verified");
+    expect(screen.getByTestId("ready-answer-status-64-0")).toHaveTextContent("OK");
+    expect(screen.getByTestId("ready-answer-source-64-0").textContent).toMatch(/^From your Memory · saved /);
     expect(screen.queryByTestId("ready-answer-verify-64-0")).toBeNull();
     expect(screen.getByTestId("ready-answer-edit-64-0")).toBeInTheDocument();
   });
@@ -105,11 +111,11 @@ describe("Verify / Edit on each answer", () => {
     });
     render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("ready-answer-changed-64-0")).toHaveTextContent("Yes");
-    expect(screen.getByTestId("ready-answer-verified-64-0")).toHaveTextContent("Verified");
+    expect(screen.getByTestId("ready-answer-status-64-0")).toHaveTextContent("OK");
+    expect(screen.getByTestId("ready-answer-source-64-0")).toHaveTextContent("You changed this");
     expect(screen.getByTestId("ready-send-64")).toBeEnabled();
-    expect(screen.getByTestId("ready-changed-64")).toHaveTextContent(
-      "You changed 1 answer. Your assistant types it in before it sends.",
-    );
+    // Said once, on the row: no footer sentence repeats it.
+    expect(screen.queryByTestId("ready-changed-64")).toBeNull();
   });
 
   it("saved answers the assistant will type are not the user's change (application 122)", () => {
@@ -122,8 +128,11 @@ describe("Verify / Edit on each answer", () => {
       ],
     });
     render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
-    expect(screen.getByTestId("ready-changed-64")).toHaveTextContent("2 saved answers will be typed in before it sends.");
-    expect(screen.getByTestId("ready-changed-64").textContent).not.toMatch(/You changed/);
+    for (const i of [0, 1]) {
+      expect(screen.getByTestId(`ready-answer-status-64-${i}`)).toHaveTextContent("OK");
+      expect(screen.getByTestId(`ready-answer-source-64-${i}`)).toHaveTextContent("From your Memory · will be typed before sending");
+    }
+    expect(screen.getByTestId("ready-card-64").textContent).not.toMatch(/You changed/);
     // One label and the single value that will be typed: never "(blank) -> Yes", no struck-through old value.
     const row = screen.getByTestId("ready-answer-64-1");
     expect(row).toHaveTextContent("Location and right to work");
@@ -143,10 +152,9 @@ describe("Verify / Edit on each answer", () => {
       ],
     });
     render(<ReadyCard card={c} paused={false} onChanged={() => {}} />);
-    expect(screen.getByTestId("ready-changed-64")).toHaveTextContent(
-      "You changed 1 answer. Your assistant types it in before it sends. 1 saved answer will be typed in before it sends.",
-    );
-    expect(screen.getByTestId("ready-answer-64-1")).toHaveTextContent("Your approved answer for this employer.");
+    expect(screen.getByTestId("ready-answer-source-64-0")).toHaveTextContent("You changed this");
+    expect(screen.getByTestId("ready-answer-source-64-1")).toHaveTextContent("From your Memory · will be typed before sending");
+    expect(screen.queryByTestId("ready-changed-64")).toBeNull();
   });
 
   it("a stale card says look again and reloads", async () => {
@@ -156,6 +164,33 @@ describe("Verify / Edit on each answer", () => {
     fireEvent.click(screen.getByTestId("ready-answer-verify-64-0"));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("This changed since you looked. Check it again."));
     expect(onChanged).toHaveBeenCalled();
+  });
+});
+
+describe("one label system on the ready card", () => {
+  it("reads each row's status from the card's flags, like the send check", () => {
+    const flags = [
+      { code: "guessed", text: "An answer was guessed: Visa?", key: null },
+      { code: "unapproved", text: "A written answer needs your OK: Why Poolside?", key: null },
+    ];
+    render(<ReadyCard card={card(64, { flags })} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-answer-status-64-0")).toHaveTextContent("OK"); // Memory the assistant saved
+    expect(screen.getByTestId("ready-answer-verify-64-0")).toHaveTextContent("OK"); // ...with one tap to confirm it
+    expect(screen.getByTestId("ready-answer-status-64-1")).toHaveTextContent("OK");
+    expect(screen.getByTestId("ready-answer-status-64-2")).toHaveTextContent("Check");
+    expect(screen.getByTestId("ready-answer-source-64-2")).toHaveTextContent("Written by your assistant");
+    expect(screen.getByTestId("ready-answer-status-64-3")).toHaveTextContent("Check");
+    expect(screen.getByTestId("ready-answer-source-64-3")).toHaveTextContent("Your assistant's guess");
+    expect(screen.getByTestId("ready-card-64").textContent).not.toMatch(/Verified|Guessed|Written new|Approved/);
+  });
+
+  it("a private question waiting for the user's tap reads Needs you, with OK on the row", () => {
+    const a = answer({ question: "Gender", answer: "Female", key: "equality.gender" });
+    const flags = [{ code: "sensitive", text: "A private question needs your OK: Gender", key: "equality.gender" }];
+    render(<ReadyCard card={card(64, { answers: [a], flags })} paused={false} onChanged={() => {}} />);
+    expect(screen.getByTestId("ready-answer-status-64-0")).toHaveTextContent("Needs you");
+    expect(screen.getByTestId("ready-answer-source-64-0")).toHaveTextContent("only you can choose");
+    expect(screen.getByTestId("ready-answer-verify-64-0")).toHaveTextContent("OK");
   });
 });
 
@@ -201,7 +236,7 @@ describe("Suggested salary from Memory", () => {
     mk([priv("What is your current/last salary package?"), priv("What is your expected salary package?")]);
     expect(screen.getByTestId("ready-answer-suggest-130-0")).toHaveTextContent("Suggested from your Memory: £45,000 a year");
     expect(screen.getByTestId("ready-answer-suggest-130-1")).toHaveTextContent("Suggested from your Memory: £60,000 – £80,000 a year");
-    expect(screen.getByTestId("ready-answer-130-0")).toHaveTextContent("Needs your answer");
+    expect(screen.getByTestId("ready-answer-source-130-0")).toHaveTextContent("Typed on the form, hidden for privacy");
   });
 
   it("Use this saves exactly that text through the same path as Edit, and only on the tap", async () => {
@@ -223,7 +258,7 @@ describe("Suggested salary from Memory", () => {
     mk([priv("What is your expected salary package?")], { current: null, expected: [] });
     expect(screen.queryByTestId("ready-answer-suggest-130-0")).toBeNull();
     expect(screen.queryByTestId("ready-answer-use-130-0")).toBeNull();
-    expect(screen.getByTestId("ready-answer-130-0")).toHaveTextContent("Needs your answer");
+    expect(screen.getByTestId("ready-answer-source-130-0")).toHaveTextContent("Typed on the form, hidden for privacy");
   });
 
   it("shows no suggestion on a blank row that is not about salary", () => {

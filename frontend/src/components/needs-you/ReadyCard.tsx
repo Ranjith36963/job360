@@ -1,16 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCheck, Pencil } from "lucide-react";
+import { Check, Pencil } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { approveSend, confirmAnswer, declineSend } from "@/lib/api";
 import { startAssistantAfterSend } from "@/lib/assistant-start";
 import { ApiError } from "@/lib/api-error";
 import type { Ask, ReadyAnswer, ReadyCardData } from "@/lib/api";
-import { canCheck, clock, docText, flagText, heldText, readyEyebrow, readySub, sourceChip } from "@/lib/ready-to-send";
+import { canCheck, clock, docText, flagText, heldText, readyEyebrow, readySub } from "@/lib/ready-to-send";
+import { isDraftStub, readyRowLabel } from "@/lib/answer-status";
+import { SourceLine, StatusWord } from "./AnswerStatus";
 import { FinishInBrowser } from "@/components/applications/FinishInBrowser";
-import type { ChipTone } from "@/lib/ready-to-send";
 import { whoLabel } from "@/lib/event-labels";
 import { nothingSent } from "@/lib/application-actions";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,6 @@ import { AnswerText } from "@/components/AnswerText";
 import { AnswerValue, DraftMissing } from "./AnswerValue";
 import { AskQuestions } from "./AskQuestions";
 import { openQuestionAsks, useReadyAsks } from "./useReadyAsks";
-import { looksLikePlaceholder } from "@/lib/answer-text";
 import { suggestSalary } from "@/lib/salary-suggest";
 import type { SalaryFacts } from "@/lib/salary-suggest";
 
@@ -28,12 +28,6 @@ import type { SalaryFacts } from "@/lib/salary-suggest";
 // the user's assistants - untrusted. Only ever rendered as React text nodes.
 
 const label = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
-const CHIP: Record<ChipTone, string> = {
-  memory: "bg-brand-soft text-brand border-transparent",
-  plain: "border-border text-muted-foreground",
-  new: "border-dashed border-border text-foreground",
-  guess: "border-warning text-warning",
-};
 const tap = "min-h-11 md:min-h-0";
 
 /** The approval card: the job, the CV and letter, EVERY answer that will go out
@@ -68,11 +62,6 @@ export function ReadyCard({
   const [finishing, setFinishing] = useState(false);
   const preparer = whoLabel(card.filled_by).name;
   const prepared = clock(card.filled_at);
-  // Answers the user edited after this fill (owner_edit), and saved answers the assistant did not type
-  // as saved: the yes still goes through, and the assistant types them before it sends.
-  const changed = card.answers.filter((a) => a.changed_to != null && isOwnerEdit(a)).length;
-  const savedTyped = card.answers.filter((a) => a.changed_to != null && !isOwnerEdit(a)).length;
-
   // Answers that only describe a draft: they count as needing attention here (the backend gate is unchanged).
   const missing = card.answers.filter(isDraftStub).length;
 
@@ -265,20 +254,6 @@ export function ReadyCard({
             )}
           </p>
         )}
-        {changed + savedTyped > 0 ? (
-          <span data-testid={`ready-changed-${card.application_id}`} className="text-xs text-info">
-            {[
-              changed > 0 &&
-                `You changed ${changed} answer${changed === 1 ? "" : "s"}. Your assistant types ${changed === 1 ? "it" : "them"} in before it sends.`,
-              savedTyped > 0 &&
-                `${savedTyped} saved answer${savedTyped === 1 ? "" : "s"} will be typed in before it sends.`,
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          </span>
-        ) : (
-          <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
-        )}
       </div>
       {/* The filled form, kept open in Job360's browser: the user can look at it and press Submit themselves. */}
       {finishing && (
@@ -305,14 +280,9 @@ export function isMissingAnswer(a: ReadyAnswer): boolean {
   return a.changed_to == null && (!!a.redacted || !a.answer.trim());
 }
 
-/** A stored answer that only describes a draft (and was not replaced by a saved or edited one). */
-function isDraftStub(a: ReadyAnswer): boolean {
-  return a.changed_to == null && !a.redacted && looksLikePlaceholder(a.question, a.answer);
-}
-
-/** One answer: what was typed, where it came from, and - for a memory answer or a
- * guess - Verify (the user stands behind it, blue double tick) or Edit (the right
- * answer). Both save the user's word in memory so the assistant learns it. */
+/** One answer: what was typed, its status word and where it came from (lib/answer-status, read
+ * from the card's flags like the send check), OK (the user stands behind it) where it is not yet
+ * theirs, and Edit (the right answer). Both save the user's word in memory so the assistant learns it. */
 function AnswerRow({
   answer: a,
   index,
@@ -329,20 +299,22 @@ function AnswerRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
-  // No value to type (a sensitive answer not kept, or blank): never "Approved"; it waits for the user.
+  // No value to type (a private answer stored hidden, or blank): nothing to OK, only Edit.
   const missing = isMissingAnswer(a);
   // A salary the user already saved in Memory, offered (never saved) until they tap Use this or Edit.
   const suggestion = missing ? suggestSalary(a.question, card.job_country, salaryFacts) : null;
-  const chip = missing ? { text: "Needs your answer", tone: "guess" as const } : sourceChip(a, card.filled_by);
+  const label = readyRowLabel(a, card);
   const stub = isDraftStub(a);
-  const checkable = canCheck(a) || stub;
+  // OK sits where the answer is not yet the user's: a Check row, a private row waiting for their tap,
+  // and Memory an assistant saved.
+  const checkable = canCheck(a) || label.status !== "ok";
   const id = `${card.application_id}-${index}`;
 
   async function save(text?: string) {
     setSaving(true);
     try {
       await confirmAnswer(card.application_id, index, card.form_filled_event_id, text);
-      toast.success(text === undefined ? "Verified. Saved as your answer." : "Saved. Your assistant will use it next time.");
+      toast.success(text === undefined ? "OK. Saved as your answer." : "Saved. Your assistant will use it next time.");
       setEditing(false);
       onSaved();
     } catch (err) {
@@ -359,7 +331,10 @@ function AnswerRow({
 
   return (
     <li data-testid={`ready-answer-${id}`} className="grid gap-x-4 gap-y-1 py-2 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
-      <span className="text-muted-foreground">{a.question}</span>
+      <span className="flex flex-col gap-0.5">
+        <span className="text-muted-foreground">{a.question}</span>
+        <SourceLine text={label.source} testid={`ready-answer-source-${id}`} />
+      </span>
       {editing ? (
         <div className="flex flex-col gap-2">
           <textarea
@@ -397,11 +372,6 @@ function AnswerRow({
           <span data-testid={`ready-answer-changed-${id}`} className="whitespace-pre-wrap font-medium">
             <AnswerText value={a.changed_to} />
           </span>
-          <span className="text-xs text-info">
-            {a.changed_reason === "approved_for_employer"
-              ? "Your approved answer for this employer. Your assistant types it in before it sends."
-              : "Your saved answer. Your assistant types it in before it sends."}
-          </span>
         </span>
       ) : a.changed_to != null ? (
         <span className="flex flex-col gap-0.5 break-words">
@@ -409,15 +379,16 @@ function AnswerRow({
           <span data-testid={`ready-answer-changed-${id}`} className="whitespace-pre-wrap font-medium">
             <AnswerText value={a.changed_to} />
           </span>
-          <span className="text-xs text-info">Your answer. Your assistant types it in before it sends.</span>
         </span>
       ) : (
         <span className="flex flex-col gap-1 break-words">
           {missing ? (
             <>
-              <span data-testid={`ready-answer-missing-${id}`} className="font-medium text-danger">
-                {a.redacted ? "Not kept (private). Tap Edit to type your answer." : "Blank. Tap Edit to type your answer."}
-              </span>
+              {!a.redacted && (
+                <span data-testid={`ready-answer-missing-${id}`} className="font-medium text-danger">
+                  Tap Edit to type your answer.
+                </span>
+              )}
               {suggestion && (
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span data-testid={`ready-answer-suggest-${id}`} className="text-xs text-muted-foreground">
@@ -444,19 +415,8 @@ function AnswerRow({
         </span>
       )}
       <span className="flex flex-wrap items-start gap-1.5 sm:justify-end">
-        <span className={cn("whitespace-nowrap rounded-full border px-2 py-px font-mono text-[11px] font-medium", CHIP[chip.tone])}>
-          {chip.text}
-        </span>
-        {a.verified && (
-          <span
-            data-testid={`ready-answer-verified-${id}`}
-            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-info-soft px-2 py-px font-mono text-[11px] font-medium text-info"
-          >
-            <CheckCheck aria-hidden className="size-3.5" />
-            Verified
-          </span>
-        )}
-        {/* Edit sits on EVERY row (owner 2026-10-26: a private salary row had no way to type it); Verify only
+        <StatusWord status={label.status} testid={`ready-answer-status-${id}`} />
+        {/* Edit sits on EVERY row (owner 2026-10-26: a private salary row had no way to type it); OK only
             where there is an answer to vouch for. */}
         {!editing && (
           <>
@@ -466,11 +426,11 @@ function AnswerRow({
                 data-testid={`ready-answer-verify-${id}`}
                 disabled={saving}
                 onClick={() => void save()}
-                aria-label={`Verify: ${a.question}`}
+                aria-label={`OK: ${a.question}`}
                 className={cn(tap, "inline-flex items-center gap-1 rounded-full border border-info px-2 py-px text-[11px] font-medium text-info hover:bg-info-soft disabled:opacity-50")}
               >
-                <CheckCheck aria-hidden className="size-3.5" />
-                Verify
+                <Check aria-hidden className="size-3.5" />
+                OK
               </button>
             )}
             <button
