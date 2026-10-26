@@ -125,6 +125,8 @@ def _stale(verdict: dict[str, Any], part: str) -> None:
 async def test_the_yes_stores_the_fingerprint_and_holds_while_nothing_changes(
     authenticated_async_context, fixture_user_id
 ):
+    from src.services.applications.kit import answers_sha256
+
     async with authenticated_async_context() as client:
         app_id, fill = await _approved_app(client, fixture_user_id)
         detail = (await client.get(f"/api/applications/{app_id}")).json()
@@ -132,6 +134,7 @@ async def test_the_yes_stores_the_fingerprint_and_holds_while_nothing_changes(
         assert stored["where"] == "web" and stored["version"] == 1, "the old keys stay for old readers"
         assert stored["fingerprint"] == {
             "cover_letter_id": None, "cover_letter_sha256": None, "form_filled_event_id": fill,
+            "form_answers_sha256": answers_sha256({"answers": [NOTICE]}),
             "form_url": FORM, "profile_edit_id": 0,
             "email_drafted_event_id": None, "email_to": None, "attachments": [],  # slice 31: no email draft
         }
@@ -165,6 +168,24 @@ async def test_a_refill_with_other_answers_voids_the_yes(authenticated_async_con
         await _fill(client, app_id, [NOTICE])  # the same answers typed again: the yes holds
         assert (await _check(client, app_id))["reason"] == "user_approved"
         await _fill(client, app_id, [{**NOTICE, "answer": "3 months"}])
+        _stale(await _check(client, app_id), "form_fill")
+
+
+@pytest.mark.asyncio
+async def test_the_same_answers_re_recorded_keep_the_yes_whatever_the_labels_and_count(
+    authenticated_async_context, fixture_user_id
+):
+    """Owner 2026-10-26: the yes went stale twice after refills that changed nothing. The CONTENT of the
+    answers decides: other `source` labels, another field count or a repeated question keep it."""
+    async with authenticated_async_context() as client:
+        app_id, _ = await _approved_app(client, fixture_user_id)
+        relabelled = {**NOTICE, "source": "memory", "answer": "  1 Month "}
+        await _event(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 4, "answers": [relabelled]})
+        await _event(client, app_id, "form_swept", {"fields_checked": 4, "fixed": 0})
+        verdict = await _check(client, app_id)
+        assert (verdict["decision"], verdict["reason"]) == ("submit", "user_approved"), verdict
+        # Any changed answer value is a form the user has not seen.
+        await _fill(client, app_id, [{**relabelled, "answer": "2 months"}])
         _stale(await _check(client, app_id), "form_fill")
 
 
