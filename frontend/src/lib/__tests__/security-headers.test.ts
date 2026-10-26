@@ -30,6 +30,12 @@ describe("SECURITY_HEADERS (M15)", () => {
     );
   });
 
+  it("sets a Permissions-Policy denying unused powerful features", () => {
+    expect(headerValue("Permissions-Policy")).toBe(
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    );
+  });
+
   it("includes a Content-Security-Policy with frame-ancestors 'none'", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("frame-ancestors 'none'");
   });
