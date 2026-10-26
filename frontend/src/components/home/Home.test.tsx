@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
   keepProfileEdit: vi.fn(),
   takeBackProfileEdit: vi.fn(),
   getProfileEditHistory: vi.fn(),
+  listLessons: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" }));
@@ -98,6 +99,7 @@ function happy({ events = [event(1, "agent:Claude"), event(2, "web")], asks = []
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  api.listLessons.mockResolvedValue({ lessons: [], total: 0 });
 });
 
 describe("Home", () => {
@@ -248,5 +250,17 @@ describe("Home", () => {
     await screen.findByTestId("home-sentence");
     expect(screen.queryByTestId("assistant-notes")).toBeNull();
     expect(screen.queryByLabelText("New note for your assistant")).toBeNull();
+  });
+});
+
+describe("Home lessons", () => {
+  it("shows the Lessons section on Home (moved from Profile)", async () => {
+    api.listLessons.mockResolvedValue({
+      lessons: [{ application_id: 8282, detail: "Ask about sponsorship first.", job_title: "AI Engineer", job_company: "Acme", occurred_at: "2026-10-18T10:00:00+00:00" }],
+      total: 1,
+    });
+    render(<Home />);
+    expect(await screen.findByText("Ask about sponsorship first.")).toBeInTheDocument();
+    expect(api.listLessons).toHaveBeenCalled();
   });
 });
