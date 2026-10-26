@@ -77,11 +77,11 @@ describe("JobPriority", () => {
     expect(screen.getByTestId("job-priority-select-0-onsite")).not.toBeDisabled();
   });
 
-  it("shows the hint with a Memory link when there are no places", () => {
+  it("shows the hint to tick a place below when there are no places to rank", () => {
     render(<JobPriority rightToWork={{ countries: [{ country: "FR", remote_ok: false, onsite: "no" }] }} onSaved={() => {}} />);
     const hint = screen.getByTestId("job-priority-empty");
-    expect(hint).toHaveTextContent("Tick Remote or On-site for a place below first, or add where you can work in the Memory tab.");
-    expect(screen.getByRole("link", { name: "Memory tab" })).toHaveAttribute("href", "/profile?tab=memory");
+    expect(hint).toHaveTextContent("Tick Remote or On-site for a place below first.");
+    expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
