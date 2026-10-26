@@ -96,4 +96,20 @@ describe("MemoryTab confirm all, per step", () => {
     expect(await screen.findByTestId("memory-keep-all-error")).toBeInTheDocument();
     expect(keepProfileEdit).toHaveBeenCalledTimes(1);
   });
+
+  it("Confirm all on your details never confirms the right-to-work block (citizenship is confirmed with Right to work)", async () => {
+    const rtw = { citizenship: ["GB"], countries: [{ country: "GB", work_authorization: "citizen" }] };
+    getProfile.mockResolvedValue({ user_info: { contact, right_to_work: rtw }, preferences: {} });
+    getProfileEditHistory.mockImplementation(async (p: string) =>
+      p === "user_info.contact" ? agentHistory
+        : p === "user_info.right_to_work" ? [{ set_by: "agent:Claude", set_at: "2026-10-03T12:00:00Z", value: rtw }]
+        : []);
+    render(<MemoryTab />);
+    expect(await screen.findByTestId("memory-confirm-step-you")).toHaveTextContent("Confirm all 2");
+    // citizenship + the GB work authorisation wait in Right to work
+    expect(screen.getByTestId("memory-confirm-step-visa")).toHaveTextContent("Confirm all 2");
+    fireEvent.click(screen.getByTestId("memory-confirm-step-you"));
+    await waitFor(() => expect(keepProfileEdit).toHaveBeenCalledTimes(1));
+    expect(keepProfileEdit.mock.calls.map((c) => c[0])).toEqual(["user_info.contact"]);
+  });
 });

@@ -231,10 +231,14 @@ export function MemoryTab() {
   // `fact` names the step in front of the user's own facts ("About you: …").
   // "you" comes first and is pinned open: name, email, phone, address, date
   // of birth and citizenship are what every form asks for (owner, 2026-10-26).
+  // `specs` are what a step counts and confirms. Confirm works on a whole
+  // block, so citizenship (shown in your details, stored in the right-to-work
+  // block) is counted and confirmed with Right to work: a Confirm all on your
+  // details never confirms a visa answer you have not seen.
   const steps: { id: string; title: string; fact: string; pinned?: boolean; specs: RowSpec[] }[] = [
-    { id: "you", title: "Your details for forms", fact: "About you", pinned: true, specs: [...contactRows(), ...rtwTopRows()] },
+    { id: "you", title: "Your details for forms", fact: "About you", pinned: true, specs: contactRows() },
     { id: "targets", title: "Job targets", fact: "Job targets", specs: salaryCodes.map(salaryRow) },
-    { id: "visa", title: "Right to work", fact: "Right to work", specs: countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]) },
+    { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
     { id: "logistics", title: "Logistics", fact: "Logistics", specs: logisticsRows() },
     { id: "equality", title: "Equality (voluntary)", fact: "Equality", specs: equalityRows() },
   ];
