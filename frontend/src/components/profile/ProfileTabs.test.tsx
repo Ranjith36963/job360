@@ -6,10 +6,10 @@ let search = "";
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(search) }));
 
 describe("ProfileTabs", () => {
-  it("shows CV · Memory · Assistant · Setup and defaults to CV", () => {
+  it("shows CV · Memory · Assistant and defaults to CV", () => {
     search = "";
     render(<ProfileTabs />);
-    expect(screen.getAllByRole("link").map((l) => l.textContent)).toEqual(["CV", "Memory", "Assistant", "Setup"]);
+    expect(screen.getAllByRole("link").map((l) => l.textContent)).toEqual(["CV", "Memory", "Assistant"]);
     expect(screen.getByTestId("profile-tab-cv")).toHaveAttribute("aria-current", "page");
     expect(screen.getByTestId("profile-tab-memory")).not.toHaveAttribute("aria-current");
     expect(screen.getByTestId("profile-tab-memory")).toHaveAttribute("href", "/profile?tab=memory");
@@ -20,6 +20,13 @@ describe("ProfileTabs", () => {
     render(<ProfileTabs />);
     expect(screen.getByTestId("profile-tab-memory")).toHaveAttribute("aria-current", "page");
     expect(screen.getByTestId("profile-tab-cv")).not.toHaveAttribute("aria-current");
+  });
+
+  it("an old ?tab=setup link opens Memory (Setup lives there now)", () => {
+    search = "tab=setup";
+    render(<ProfileTabs />);
+    expect(screen.getByTestId("profile-tab-memory")).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByTestId("profile-tab-setup")).toBeNull();
   });
 
   it("an unknown tab falls back to CV", () => {

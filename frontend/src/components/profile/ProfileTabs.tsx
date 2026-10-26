@@ -7,18 +7,20 @@ export const PROFILE_TABS = [
   { id: "cv", label: "CV" },
   { id: "memory", label: "Memory" },
   { id: "assistant", label: "Assistant" },
-  { id: "setup", label: "Setup" },
 ] as const;
 export type ProfileTab = (typeof PROFILE_TABS)[number]["id"];
 
-/** The tab named by `?tab=`; anything else (or nothing) is the CV tab. */
+/** The tab named by `?tab=`; anything else (or nothing) is the CV tab. Setup
+ *  lives inside Memory now (owner, 2026-10-26), so an old `?tab=setup` link
+ *  opens Memory instead of falling back to CV. */
 export function useProfileTab(): ProfileTab {
   const params = useSearchParams();
   const raw = params?.get("tab");
+  if (raw === "setup") return "memory";
   return PROFILE_TABS.find((t) => t.id === raw)?.id ?? "cv";
 }
 
-/** Eyebrow, lede and one sub line. Shown above the Memory, Assistant and Setup
+/** Eyebrow, lede and one sub line. Shown above the Memory and Assistant
  *  tabs; the CV tab keeps the page's own header. */
 export function ProfileHeader() {
   return (
@@ -34,7 +36,7 @@ export function ProfileHeader() {
   );
 }
 
-/** CV · Memory · Assistant · Setup, as links so a tab can be deep-linked. */
+/** CV · Memory · Assistant, as links so a tab can be deep-linked. */
 export function ProfileTabs() {
   const active = useProfileTab();
   return (
