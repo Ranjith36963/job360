@@ -441,9 +441,8 @@ async def take(
         await db._db.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", (user.id,))
         tasks = await queue_tasks(db, user, now, label)
         contacts_ = [t for t in tasks if t["kind"] == "linkedin_outreach"]
-        if contact_id is not None:
-            contacts_ = [t for t in contacts_ if t["contact_id"] == contact_id]
-            tasks = contacts_
+        # One person at a time is judged over ALL the user's people, before any contact_id narrowing: a
+        # session holding someone gets that one back, and another session's live claim makes this one busy.
         mine = next(
             (t for t in contacts_ if t["claim"] and (t["claim"]["session"], t["claim"]["actor"]) == (label, actor)),
             None,
@@ -451,8 +450,11 @@ async def take(
         if mine is not None:
             _log("own_browser_take", user.id, "already_yours", contact_id=mine["contact_id"])
             return _answer("already_yours", task=mine, next=_next_step(mine))
+        busy = any(t["claim"] is not None for t in contacts_)  # another session holds a person
         free = [t for t in contacts_ if t["claim"] is None]
-        busy = bool(contacts_) and len(free) < len(contacts_)  # another session holds a person
+        if contact_id is not None:
+            free = [t for t in free if t["contact_id"] == contact_id]
+            tasks = [t for t in contacts_ if t["contact_id"] == contact_id]
         chosen: Optional[dict[str, Any]] = None
         refusal: Optional[dict[str, Any]] = None
         if free and not busy:

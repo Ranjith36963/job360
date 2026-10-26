@@ -392,7 +392,7 @@ async def test_the_pace_is_still_serialised_across_two_people(authenticated_asyn
         await _click(client, second, m2)
         async with await _agent(client) as one, await _agent(client) as two:
             got = await asyncio.gather(_take(one, first, "a"), _take(two, second, "b"))
-            assert sorted(g["status"] for g in got) == ["task", "wait"]  # one person at a time
+            assert sorted(g["status"] for g in got) == ["busy", "task"]  # one person at a time
             holder, waiting = (one, two) if got[0]["status"] == "task" else (two, one)
             assert waiting is not holder
         # the other person was never claimed, and the holder's unreleased claim holds them back like a send
@@ -400,6 +400,25 @@ async def test_the_pace_is_still_serialised_across_two_people(authenticated_asyn
         other_id = second if taken_id == first else first
         other_mid = m2 if other_id == second else m1
         assert _verdict(await _check(client, other_id, other_mid, "b")) == ("stop", "too_soon")
+
+
+@pytest.mark.asyncio
+async def test_take_by_contact_id_keeps_one_person_at_a_time(authenticated_async_context):
+    """Naming a person never bypasses the lock: another session's live claim on someone else makes a take busy,
+    and a session that already holds someone gets that one back, not a second claim."""
+    async with authenticated_async_context() as client:
+        _a, first, m1 = await _person(client, 0)
+        _b, second, m2 = await _person(client, 1)
+        await _click(client, first, m1)
+        await _click(client, second, m2)
+        async with await _agent(client) as one, await _agent(client) as two:
+            assert (await _take(one, first, "laptop"))["status"] == "task"
+            assert (await _take(two, second, "desk"))["status"] == "busy"
+            again = await _take(one, second, "laptop")
+            assert again["status"] == "already_yours" and again["task"]["contact_id"] == first
+            # the unclaimed person stops on the pace first (the gate's order), never on send
+            assert _verdict(await _check(two, second, m2, "desk")) == ("stop", "too_soon")
+            assert _verdict(await _check(one, second, m2, "laptop")) == ("stop", "too_soon")
 
 
 @pytest.mark.asyncio
@@ -534,7 +553,8 @@ async def test_an_unreleased_claim_on_someone_else_counts_like_take_counts_it(au
             assert taken["status"] == "task" and taken["task"]["contact_id"] == first
             # a send nobody recorded: the other person must wait, as a take would make them
             assert _verdict(await _check(agent, second, m2, "desk")) == ("stop", "too_soon")
-            assert (await _take(agent, second))["status"] == "wait"
+            again = await _take(agent, second)  # one person at a time: it gets its own claim back, not a second
+            assert again["status"] == "already_yours" and again["task"]["contact_id"] == first
 
 
 @pytest.mark.asyncio
