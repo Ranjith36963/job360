@@ -1775,7 +1775,7 @@ export interface paths {
          * @description One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
          *     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
          *     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
-         *     human check in their assistant's browser instead (shot, click, type, key, scroll, done), in the
+         *     human check in their assistant's browser instead (shot, click, type, key, scroll, back, done), in the
          *     browser of ``application_id``; when the user's click or key lands on the site's confirmation page,
          *     the application is recorded as submitted by the user and the answer carries ``submitted: true``.
          */

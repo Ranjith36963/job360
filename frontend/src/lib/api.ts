@@ -1356,7 +1356,8 @@ export type BrowserLiveShot = {
   | { action: "click"; x: number; y: number }
   | { action: "type"; text: string }
   | { action: "key"; key: string }
-  | { action: "scroll"; dy: number };
+  | { action: "scroll"; dy: number }
+  | { action: "back" };
 
 export async function getBrowserSignIns(): Promise<BrowserSignIns> {
   return request<BrowserSignIns>("/api/browser/sign-ins");

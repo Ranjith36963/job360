@@ -30,6 +30,7 @@ with the caller's assistant; the safety stays here and in
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -82,8 +83,9 @@ def _db() -> contextlib.AbstractAsyncContextManager[Any]:
 
 
 def _gate_and_files(
-    user: CurrentUser, application_id: int, session: str
+    user: CurrentUser, application_id: int, session: str, actor: Optional[str] = None,
 ) -> tuple[browser_agent.Gate, browser_agent.FileFn]:
+    """``actor``: who the upload records name (default: the caller; a boot restore passes ``"system"``)."""
     from src.api.routes import applications as applications_route  # noqa: PLC0415 - avoid an import cycle
 
     async def _check(form_url: str) -> dict[str, Any]:
@@ -127,7 +129,7 @@ def _gate_and_files(
             async with _db() as db:
                 await uploads.record(
                     db, user_id=user.id, application_id=application_id, kind=kind, artifact=row, data=pdf,
-                    fmt="pdf", renderer_version=RENDERER_VERSION, host=host, recorded_by=actor_for(user),
+                    fmt="pdf", renderer_version=RENDERER_VERSION, host=host, recorded_by=actor or actor_for(user),
                 )
         except Exception:  # noqa: BLE001 - opening the connection failed: the upload still goes ahead
             get_audit_logger().warning(
@@ -346,40 +348,9 @@ async def refill_form(
     anything new, never a submit, never a CAPTCHA; then keeps it open 30 minutes for Finish it here. Records
     ``form_filled`` {by: refill}: identical answers keep the user's yes. 404 when the job is not the
     caller's. Refusals: ``browser_off``, ``no_script``, ``host_mismatch``, ``busy``."""
-    from src.services.applications import fill_script  # noqa: PLC0415
-    from src.services.applications import kit as kit_service  # noqa: PLC0415
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
-    from src.services.browser_agent import refill  # noqa: PLC0415
 
-    async with _db() as db:
-        if await applications_spine.get_owned_application(db, user.id, application_id) is None:
-            raise HTTPException(status_code=404, detail="application not found")
-        steps, hosts = await fill_script.load(db, user.id, application_id)
-        form_url = await kit_service.latest_form_url(db, user.id, application_id)
-        last_fill = await fill_script.newest_fill(db, user.id, application_id)
-    if not settings.BROWSER_AGENT_ENABLED:
-        out = _refill_refused("browser_off")
-    elif not steps or not form_url:
-        out = _refill_refused("no_script")
-    elif refill.host_of(form_url) not in hosts:
-        out = _refill_refused("host_mismatch")
-    else:
-        host = refill.host_of(form_url)
-        _gate, files = _gate_and_files(user, application_id, "")
-        pool = browser_agent.get_pool()
-        try:
-            done = await refill.replay(
-                pool, user.id, application_id, form_url, [s for s in steps if s["host"] == host],
-                files=files, load_state=_loader(user),
-            )
-        except browser_agent.BrowserError as exc:
-            reason = {"busy": "busy", "off": "browser_off"}.get(exc.status, exc.reason)
-            done = _refill_refused(reason, REFILL_DETAIL.get(reason, exc.detail))
-        if done["status"] == "ok":
-            browser_agent.hold_for_user(pool, user.id, application_id, renew=True)
-            done["held_seconds"] = browser_agent.held_seconds(pool, user.id, application_id)
-            await _record_refill(user, application_id, last_fill, form_url, done, actor_for(user))
-        out = done
+    out = await replay_and_hold(user, application_id, actor=actor_for(user), by="refill")
     get_audit_logger().info(
         "browser_refill",
         extra={"event": "browser_refill", "user_id": safe_log_value(user.id), "application_id": int(application_id),
@@ -389,13 +360,60 @@ async def refill_form(
     return out
 
 
+async def replay_and_hold(
+    user: CurrentUser, application_id: int, *, actor: str, by: str, ends_at: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """Replay the job's stored fill script in Job360's browser (never a submit, never a CAPTCHA), hold the page
+    for Finish it here, and record ``form_filled`` {by}. The hold runs to ``ends_at`` (a boot restore: the
+    old hold's own end, never a fresh 30 minutes), else the full ``HANDOFF_HOLD_SECONDS``. 404 (HTTPException)
+    when the job is not ``user``'s. Refusals: ``browser_off``, ``no_script``, ``host_mismatch``, ``busy``."""
+    from src.services.applications import fill_script  # noqa: PLC0415
+    from src.services.applications import kit as kit_service  # noqa: PLC0415
+    from src.services.browser_agent import refill  # noqa: PLC0415
+
+    async with _db() as db:
+        if await applications_spine.get_owned_application(db, user.id, application_id) is None:
+            raise HTTPException(status_code=404, detail="application not found")
+        steps, hosts = await fill_script.load(db, user.id, application_id)
+        form_url = await kit_service.latest_form_url(db, user.id, application_id)
+        last_fill = await fill_script.newest_fill(db, user.id, application_id)
+    if not settings.BROWSER_AGENT_ENABLED:
+        return _refill_refused("browser_off")
+    if not steps or not form_url:
+        return _refill_refused("no_script")
+    host = refill.host_of(form_url)
+    if host not in hosts:
+        return _refill_refused("host_mismatch")
+    _gate, files = _gate_and_files(user, application_id, "", actor=actor)
+    pool = browser_agent.get_pool()
+    try:
+        done = await refill.replay(
+            pool, user.id, application_id, form_url, [s for s in steps if s["host"] == host],
+            files=files, load_state=_loader(user),
+        )
+    except browser_agent.BrowserError as exc:
+        reason = {"busy": "busy", "off": "browser_off"}.get(exc.status, exc.reason)
+        return _refill_refused(reason, REFILL_DETAIL.get(reason, exc.detail))
+    if done["status"] == "ok":
+        # Measured after the replay (it can take minutes): the hold still ends when the old one would have.
+        seconds = (
+            browser_agent.HANDOFF_HOLD_SECONDS if ends_at is None
+            else min((ends_at - datetime.now(timezone.utc)).total_seconds(), browser_agent.HANDOFF_HOLD_SECONDS)
+        )
+        if seconds > 0:
+            browser_agent.hold_for_user(pool, user.id, application_id, seconds, renew=True)
+        done["held_seconds"] = browser_agent.held_seconds(pool, user.id, application_id)
+        await _record_refill(user, application_id, last_fill, form_url, done, actor, by)
+    return done
+
+
 async def _record_refill(
     user: CurrentUser, application_id: int, last_fill: Optional[dict[str, Any]], form_url: str,
-    done: dict[str, Any], actor: str,
+    done: dict[str, Any], actor: str, by: str = "refill",
 ) -> None:
     """``form_filled`` {by: refill}: the newest fill's own record when every step held (the same answers, so the
     user's yes stays good), else that record without its answers (a form the user has not seen: the yes is stale)."""
-    payload = {**(last_fill or {}), "form_url": form_url, "by": "refill"}
+    payload = {**(last_fill or {}), "form_url": form_url, "by": by}
     payload.setdefault("fields_count", int(done["steps_ok"]))
     if done["steps_failed"]:
         payload.pop("answers", None)
@@ -437,7 +455,7 @@ async def browser_live(
     """One step of the user signing in to a job site themselves: start (url), shot, click (x, y),
     type (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never
     logged or returned; the audit line names the action only. ``mode: finish``: the user finishes a
-    human check in their assistant's browser instead (shot, click, type, key, scroll, done), in the
+    human check in their assistant's browser instead (shot, click, type, key, scroll, back, done), in the
     browser of ``application_id``; when the user's click or key lands on the site's confirmation page,
     the application is recorded as submitted by the user and the answer carries ``submitted: true``."""
     if body.mode == "finish" and body.application_id is None:

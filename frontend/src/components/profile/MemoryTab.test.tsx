@@ -55,7 +55,7 @@ describe("MemoryTab", () => {
     await screen.findByTestId("memory-tab");
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(getProfileEditHistory.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "preferences.experience_levels", "preferences.experience_ranges",
+      "preferences.avoid_companies", "preferences.experience_levels", "preferences.experience_ranges",
       "preferences.salary_by_country", "preferences.target_job_titles",
       "user_info.answers", "user_info.contact", "user_info.equality",
       "user_info.languages", "user_info.logistics", "user_info.right_to_work",
@@ -121,6 +121,21 @@ describe("MemoryTab", () => {
     ]));
   });
 
+  it("Never apply to sits in Job targets and saves one company per line", async () => {
+    const withList = { ...profile, preferences: { ...profile.preferences, avoid_companies: ["Evil Corp"] } };
+    getProfile.mockResolvedValue(withList);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const row = within(screen.getByTestId("memory-step-targets")).getByTestId("memory-row-preferences.avoid_companies");
+    expect(row).toHaveTextContent("Evil Corp");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit Never apply to" }));
+    fireEvent.change(within(row).getByLabelText("Never apply to"), { target: { value: "Evil Corp\n  Acme \n\n" } });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "preferences.avoid_companies", value: ["Evil Corp", "Acme"] },
+    ]));
+  });
+
   it("does not ask the sanctioned-country question (owner, 2026-10-26)", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
@@ -141,6 +156,9 @@ describe("MemoryTab", () => {
     }
     expect(within(details).getByTestId("memory-row-user_info.right_to_work.citizenship")).toBeInTheDocument();
     expect(within(screen.getByTestId("memory-step-visa")).queryByTestId("memory-row-user_info.right_to_work.citizenship")).toBeNull();
+    // Owner, 2026-10-26: no "Citizen of a sanctioned country?" row anywhere in Memory.
+    expect(screen.queryByTestId("memory-row-user_info.right_to_work.sanctions_country_citizen")).toBeNull();
+    expect(screen.queryByText("Citizen of a sanctioned country?")).toBeNull();
     const steps = ["targets", "visa", "logistics", "equality"].map((id) => screen.getByTestId(`memory-step-toggle-${id}`));
     expect(steps.every((b) => b.getAttribute("aria-expanded") === "true")).toBe(true);
     expect(steps.map((b) => b.textContent)).toEqual([

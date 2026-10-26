@@ -7,8 +7,6 @@ import type { ProfileResponse } from "@/lib/types";
 import { findAgentEdit } from "@/lib/agent-edits";
 import { isStepFact } from "@/lib/step-facts";
 import { AssistantNotes } from "@/components/profile/AssistantNotes";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { EditedMark } from "@/components/profile/EditedMark";
 
 // ---------------------------------------------------------------------------
@@ -134,83 +132,9 @@ function NotesCard() {
   );
 }
 
-/** Companies the assistant never applies to: one per line, saved as that one preference. */
-function NeverApplyCard() {
-  const [text, setText] = useState<string | null>(null);
-  const [saved, setSaved] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    getProfile()
-      .then((p) => {
-        if (!live) return;
-        const raw = p.preferences?.avoid_companies;
-        const t = Array.isArray(raw) ? raw.map(String).filter(Boolean).join("\n") : "";
-        setText(t);
-        setSaved(t);
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  if (text === null) return null;
-
-  async function save() {
-    const list = (text ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-    setBusy(true);
-    try {
-      await updateProfileFields([{ path: "preferences.avoid_companies", value: list }]);
-      const t = list.join("\n");
-      setText(t);
-      setSaved(t);
-      toast.success("Saved.");
-    } catch {
-      toast.error("Could not save. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section data-testid="never-apply-card" className="space-y-2 rounded-xl border border-border bg-card p-4">
-      <label
-        htmlFor="never-apply-input"
-        className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint"
-      >
-        Never apply to
-      </label>
-      <p className="text-xs text-muted-foreground">
-        One company per line. Your assistant skips these. Leave it empty and nothing is skipped.
-      </p>
-      <Textarea
-        id="never-apply-input"
-        data-testid="never-apply-input"
-        value={text}
-        rows={3}
-        disabled={busy}
-        placeholder="One per line"
-        onChange={(e) => setText(e.target.value)}
-      />
-      <Button
-        type="button"
-        variant="outline"
-        data-testid="never-apply-save"
-        onClick={() => void save()}
-        disabled={busy || text.trim() === saved.trim()}
-      >
-        {busy ? "Saving…" : "Save"}
-      </Button>
-    </section>
-  );
-}
-
 export function AssistantInstructions() {
   return (
     <div className="flex flex-col gap-6" data-testid="assistant-instructions">
-      <NeverApplyCard />
       <NotesCard />
     </div>
   );

@@ -129,6 +129,16 @@ def _start_browser_reaper() -> Optional[asyncio.Task[None]]:
     return asyncio.create_task(reap_forever(), name="browser-idle-sweep")
 
 
+def _start_form_restore() -> Optional[asyncio.Task[None]]:
+    """Reopen the forms the previous process held for a CAPTCHA (browser_agent/restore.py): one background
+    task, after this process is serving, never blocking startup or the healthcheck. Only when the agent is on."""
+    if not settings.BROWSER_AGENT_ENABLED:
+        return None
+    from src.services.browser_agent.restore import restore_after_boot  # noqa: PLC0415
+
+    return asyncio.create_task(restore_after_boot(), name="browser-form-restore")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Sentry init moved to MODULE scope (below, before `app = FastAPI(...)`) —
@@ -174,6 +184,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # instant-asyncio.sleep fixture would turn the sampler into a busy-spin.
     watchdog = start_loop_watchdog()
     reaper = _start_browser_reaper()
+    restorer = _start_form_restore()
     # MCP: the SDK session manager needs a running task group for the life of
     # the process (src/api/mcp_server.py). Tests enter mcp_runtime() themselves
     # because the auth fixture replaces this lifespan with a no-op.
@@ -183,10 +194,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if watchdog is not None:
             watchdog.cancel()
-        if reaper is not None:
-            reaper.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await reaper
+        for task in (restorer, reaper):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         # Background session `last_seen` touches (FC-008): finish or cancel
         # them before the DB closes. Bound: up to 2 s waiting, then up to 1 s
         # more for the cancelled ones to unwind, so at most ~3 s in total.

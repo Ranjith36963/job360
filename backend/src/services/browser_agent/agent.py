@@ -1908,7 +1908,7 @@ _live_hosts: dict[str, str] = {}
 # browser, on the page it stopped on. Unlike the sign-in view it acts on the assistant's browser (the
 # form stays filled), but it is reached the same way: from the website with a browser session only,
 # never a token, so no assistant can drive it. No start (it never opens a page) and no keep.
-FINISH_ACTIONS = ("shot", "click", "type", "key", "scroll", "done")
+FINISH_ACTIONS = ("shot", "click", "type", "key", "scroll", "back", "done")
 # How long a form stopped on a human check stays open for the user, however idle.
 HANDOFF_HOLD_SECONDS = 30 * 60
 
@@ -2136,6 +2136,16 @@ async def live(
                 await _settle(page)
             elif action == "scroll":
                 await page.mouse.wheel(0, max(-3000.0, min(3000.0, dy)))
+            elif action == "back":  # history only (finish mode): never a new address
+                try:
+                    await page.go_back()
+                except Exception as exc:  # noqa: BLE001
+                    if "ERR_BLOCKED_BY_CLIENT" in str(exc):  # a private address: the request screen refused it
+                        raise BrowserError(
+                            "refused", "blocked_address", "That earlier page cannot be opened."
+                        ) from None
+                    raise
+                await _settle(page)
             elif action == "keep":
                 if keep is None:
                     raise BrowserError("refused", "cannot_keep", "Sign-ins cannot be kept here.")

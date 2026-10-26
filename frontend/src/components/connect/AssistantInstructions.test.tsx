@@ -98,19 +98,11 @@ describe("AssistantInstructions (Connect your assistant > Assistant configure)",
     expect(screen.queryByTestId("never-apply-card")).toBeNull();
   });
 
-  it("Never apply to lists the saved companies and saves one per line as that one preference", async () => {
-    api.updateProfileFields.mockResolvedValue({ preferences: { avoid_companies: ["Evil Corp", "Acme"] }, agent_edits: [] });
+  it("Never apply to lives in Memory only (owner, 2026-10-26): no copy of it here", async () => {
     render(<AssistantInstructions />);
-    const input = (await screen.findByTestId("never-apply-input")) as HTMLTextAreaElement;
-    expect(input.value).toBe("Evil Corp");
-    expect(screen.getByTestId("never-apply-save")).toBeDisabled();
-    fireEvent.change(input, { target: { value: "Evil Corp\n  Acme \n\n" } });
-    fireEvent.click(screen.getByTestId("never-apply-save"));
-    await waitFor(() =>
-      expect(api.updateProfileFields).toHaveBeenCalledWith([
-        { path: "preferences.avoid_companies", value: ["Evil Corp", "Acme"] },
-      ]),
-    );
+    await screen.findByTestId("assistant-notes-card");
+    expect(screen.queryByTestId("never-apply-card")).toBeNull();
+    expect(screen.queryByText("Never apply to")).toBeNull();
   });
 
   it("shows only the general instructions: Memory step facts stay in their step and ride along unchanged on every save", async () => {

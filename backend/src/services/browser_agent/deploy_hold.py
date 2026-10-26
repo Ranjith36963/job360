@@ -13,6 +13,12 @@ the new one asks for the exclusive lock with ``pg_try_advisory_lock``: refused m
 some process is busy. A crash drops the connection, which releases the lock. No
 migration. Every failure here answers "not busy": a deploy must never be held by a
 broken signal.
+
+The hold only delays the loss. Once this process answers ready it stays ready (``_serving``),
+and only then does ``restore.py`` reopen, on boot, the forms the old process held for a CAPTCHA:
+it replays their stored fill script and holds each for what is left of its 30 minutes. Those
+restored browsers take this process's own shared lock, which ``_probe``'s exclusive try would
+read as "busy"; the latch means they can never turn this container's own healthcheck to 503.
 """
 from __future__ import annotations
 
@@ -31,6 +37,9 @@ HOLD_LOCK_KEY = 0
 _DB_TIMEOUT_S = 5.0
 
 _BOOT_AT = time.monotonic()
+# Set the first time hold_reason answers "no hold": Railway has had (or will get) its 200, and this
+# process's own browsers (a boot restore) must never hold its own healthcheck afterwards.
+_serving = False
 
 
 class Beacon:
@@ -144,10 +153,15 @@ def seconds_since_boot() -> int:
 
 
 async def hold_reason() -> Optional[str]:
-    """``"browser_busy"`` while the hold window is open and another process is busy, else None."""
+    """``"browser_busy"`` while the hold window is open and another process is busy, else None.
+    Once it has answered None it always does (``_serving``)."""
+    global _serving
     from src.core import settings  # noqa: PLC0415 - live read, house style
 
-    max_s = settings.DEPLOY_HOLD_MAX_SECONDS
-    if max_s <= 0 or time.monotonic() - _BOOT_AT >= max_s:
+    if _serving:
         return None
-    return "browser_busy" if await others_busy() else None
+    max_s = settings.DEPLOY_HOLD_MAX_SECONDS
+    if max_s > 0 and time.monotonic() - _BOOT_AT < max_s and await others_busy():
+        return "browser_busy"
+    _serving = True
+    return None

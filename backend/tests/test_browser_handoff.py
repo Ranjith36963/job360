@@ -68,6 +68,47 @@ async def test_the_finish_view_needs_an_open_form_and_has_no_start_or_keep():
     assert "u1" in pool._sessions  # noqa: SLF001 - Done never closes the assistant's browser
 
 
+@pytest.mark.asyncio
+async def test_the_finish_view_goes_back_in_history_only(monkeypatch):
+    """Owner, 2026-10-26: a tapped "Terms" link left the form; Back = page.go_back() on the held page, never a URL."""
+    from src.services.browser_agent import agent
+    from src.services.browser_agent.agent import BrowserError, BrowserPool, Session, live
+
+    class _Page:
+        calls = 0
+        fail = ""
+        url = "https://jobs.acme.com/apply"
+
+        def is_closed(self):
+            return False
+
+        async def go_back(self):
+            self.calls += 1
+            if self.fail:
+                raise RuntimeError(self.fail)
+
+    async def fake_shot(s):
+        return {"status": "ok", "image": "data:image/jpeg;base64,AA==", "width": 10, "height": 10}
+
+    async def fake_settle(page):
+        return None
+
+    monkeypatch.setattr(agent, "_shot", fake_shot)
+    monkeypatch.setattr(agent, "_settle", fake_settle)
+    page = _Page()
+    pool = BrowserPool(max_sessions=1, idle_s=600, resolve=_no_dns)
+    pool._sessions = {agent.browser_key("u1", 7): Session(context=_Ctx(), page=page)}  # noqa: SLF001
+    out = await live(pool, "u1", "back", finish=True, application_id=7, url="https://evil.example/")
+    assert out["status"] == "ok" and page.calls == 1  # a url sent along is ignored: history only
+    page.fail = "net::ERR_BLOCKED_BY_CLIENT"
+    with pytest.raises(BrowserError) as blocked:
+        await live(pool, "u1", "back", finish=True, application_id=7)
+    assert blocked.value.reason == "blocked_address"
+    with pytest.raises(BrowserError) as bad:  # the sign-in view has no back
+        await live(pool, "u1", "back")
+    assert bad.value.reason == "bad_action"
+
+
 @needs_chromium
 @pytest.mark.real_sleep
 @pytest.mark.asyncio
