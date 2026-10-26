@@ -823,8 +823,10 @@ async def password_reset_request(
     # rotates IPs email-bomb ONE address (each fresh IP is a fresh bucket). The
     # per-email throttle caps total reset emails to a single address regardless
     # of source IP. Evaluate both eagerly so both counters record this attempt.
-    email_hash = hashlib.sha256(str(req.email).lower().encode("utf-8")).hexdigest()[:16]
-    email_key = f"password-reset-email:{email_hash}"
+    # In-memory bucket key only (never stored or logged), like magic-link/request's.
+    # Not hashed: CodeQL reads a fast hash of request data in a password route as
+    # "weak password hashing" (py/weak-sensitive-data-hashing).
+    email_key = f"password-reset-email:{str(req.email).strip().lower()}"
     ip_ok = auth_rate_limit.check_and_record(key, max_in_window=1, window_seconds=60)
     email_ok = auth_rate_limit.check_and_record(
         email_key, max_in_window=3, window_seconds=3600
