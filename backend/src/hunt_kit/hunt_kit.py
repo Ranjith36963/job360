@@ -49,6 +49,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zlib
 from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
@@ -854,6 +855,18 @@ FEED_MAX_BYTES = 5_000_000  # explicit cap for an RSS/Atom/XML job feed (full de
 _STATUS_TL = threading.local()  # a board task sets .log; http_request then notes every status it returns
 
 
+def _gunzip(body: bytes, max_bytes: int, truncate: bool) -> bytes | None:
+    """Inflate a gzip body to at most ``max_bytes`` (more is None unless ``truncate``); a broken stream is None."""
+    d = zlib.decompressobj(zlib.MAX_WBITS | 16)
+    try:
+        out = d.decompress(body, max_bytes + 1)
+    except zlib.error:
+        return None
+    if len(out) > max_bytes:
+        return out[:max_bytes] if truncate else None
+    return out
+
+
 def http_request(
     url: str,
     params: Any = None,
@@ -917,6 +930,10 @@ def _http_request(
                     body = r.read(max_bytes if truncate else max_bytes + 1)
                     if len(body) > max_bytes:  # oversize is a failed request, never a half-parsed body
                         return 0, url, b""
+                    if body[:2] == b"\x1f\x8b":  # gzip sent unasked (careerviet, 2026-10-25): inflate, same cap
+                        body = _gunzip(body, max_bytes, truncate)
+                        if body is None:
+                            return 0, url, b""
                     return r.status, r.geturl(), body
             except urllib.error.HTTPError as e:
                 if once:

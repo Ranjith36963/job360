@@ -10,9 +10,19 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterator
+from html.entities import name2codepoint
 from typing import Any, cast
 
 _FORBIDDEN = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.I)
+_NAMED = re.compile(r"&([A-Za-z][A-Za-z0-9]{1,31});")
+_XML_NAMED = frozenset(("amp", "lt", "gt", "quot", "apos"))
+
+
+def _numeric(m: re.Match[str]) -> str:
+    """An HTML named entity (``&nbsp;``) as its numeric reference; XML's five and unknown names stay as they are."""
+    name = m.group(1)
+    cp = name2codepoint.get(name)
+    return m.group(0) if name in _XML_NAMED or cp is None else f"&#{cp};"
 
 
 def safe_fromstring(data: str | bytes) -> ET.Element | None:
@@ -22,6 +32,9 @@ def safe_fromstring(data: str | bytes) -> ET.Element | None:
     text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
     if _FORBIDDEN.search(text):
         return None
+    # Feeds written by HTML tools use HTML entities XML does not define; one used to fail
+    # the whole feed (nodesk, 2026-10-25).
+    text = _NAMED.sub(_numeric, text)
     # A pull parser fed only text whose DOCTYPE/ENTITY declarations were rejected
     # above: no entity expansion, no external entity, ever.
     parser: ET.XMLPullParser[ET.Element] = ET.XMLPullParser(events=("start",))
