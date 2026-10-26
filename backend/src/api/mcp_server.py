@@ -2186,12 +2186,13 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         form_pages_incomplete, email_not_drafted, type_first_pending (`fill`),
         duplicate_job (same job applied to: `stop`
         in auto mode, else `ask`), duplicate_role (`ask`: same company+title),
-        new_site_first_time (`ask`: auto, new site), cv_unsupported_claims,
-        answer_unapproved (`ask`: essay unapproved), held_by_other_session,
+        new_site_first_time, cv_unsupported_claims,
+        answer_unapproved (`ask`: essay unapproved), blank_unasked (`ask`: blank fields never asked),
+        held_by_other_session,
         unknown_site,
         form_host_mismatch / form_page_mismatch (not the site / page you filled),
         email_not_verified, ask_always_site, job_override_confirm,
-        submit_mode_confirm, grant_scope (auto grant does not cover it), cv_not_seen,
+        submit_mode_confirm, grant_scope, cv_not_seen,
         practice_run, user_approved (user's yes: `submit`), approval_stale (`ask`: the yes expired or what it
         named changed), auto_when_sure, blocked (you recorded `blocked`, no `unblocked`: `ask`).
         A yes NEVER clears unknown_site, form_*_mismatch, email_not_verified, blocked or
@@ -2518,7 +2519,9 @@ def build_server(version: str = "", *, instructions_text: Optional[str] = None) 
         never re-ask what one holds. A new ask on a job with an open one merges into it (`merged_from`;
         repeats join under fixed names). An ask that also names another open job is refused.
         `questions` = every open form question, each {key, question, answer, source, choices?,
-        remembered_on?}. Read the form yourself; never ask the user to paste or copy question text.
+        remembered_on?}, blank optional, consent and file fields too, with "Leave blank" in `choices`
+        (that answer is saved as the user's word for this employer). Read the form yourself; never ask the
+        user to paste or copy question text.
         Every question carries an answer: source profile|memory|cv = the user said it or a saved fact;
         guess|draft = your best guess (consent = Yes, referred by an employee = No) or text you drafted
         from profile facts. An empty answer or source none is refused; a guess is never memory. Type a

@@ -855,6 +855,7 @@ async def gate_facts(
         guessed_unverified=await _guessed_unverified(db, user_id, app_row),
         sensitive_unconfirmed=await _sensitive_unconfirmed(db, user_id, app_row),
         written_unapproved=await _written_unapproved(db, user_id, app_row),
+        blank_unasked=await _blank_unasked(db, user_id, app_row),
         application_id=application_id,
         email_to=draft["to"] if draft else None,
     )
@@ -872,6 +873,13 @@ async def _written_unapproved(db: JobDatabase, user_id: str, app_row: dict[str, 
     from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
 
     return await ready.has_unapproved_written(db, user_id, app_row)
+
+
+async def _blank_unasked(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> tuple[str, ...]:
+    """The newest form's blank fields nobody asked the user about (``ready`` reads them)."""
+    from src.services.applications import ready  # noqa: PLC0415 - ready imports this module
+
+    return tuple(await ready.blank_unasked(db, user_id, app_row))
 
 
 async def _sensitive_unconfirmed(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> bool:
@@ -1032,7 +1040,7 @@ async def submit_verdict(
             form_host=settings_rules.screen_form_url(form_url),
             form_url=settings_rules.clean_form_url(form_url),
             # The answers of an OLD fill say nothing about the form about to be filled.
-            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False,
+            guessed_unverified=False, sensitive_unconfirmed=False, written_unapproved=False, blank_unasked=(),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 

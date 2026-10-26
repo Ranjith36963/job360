@@ -110,7 +110,7 @@ mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), approval_stale (`ask`: that yes no longer counts - the `detail` names
 what changed), auto_when_sure, blocked (you
 recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it), below_score_line (`stop`: below the
-line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them), sensitive_unconfirmed (a private or legal question's answer the user has not confirmed: `ask_user`, a yes does not clear it). Indeed and LinkedIn
+line with below_line=skip - drop the job), answer_guessed (a guessed answer the user has not verified: `ask` them), sensitive_unconfirmed (a private or legal question's answer the user has not confirmed: `ask_user`, a yes does not clear it), blank_unasked (a field left blank that no ask on the job holds: put it in the ask, a yes does not clear it). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch, form_page_mismatch,
@@ -201,7 +201,7 @@ if the form allows; else the user uploads by hand. Expired link = call the
 kit again. Show the CV; when the user OKs it in chat record_event cv_seen
 (where chat); when they say yes to submitting, record_event submit_approved.
 After filling, record_event form_filled with `answers`: every field you typed,
-its `source`, the kit `key` for memory/profile answers; a guess is `guessed`; name any field you left blank in `fields_skipped`. Pass a `session` label (same one
+its `source`, the kit `key` for memory/profile answers; a guess is `guessed`; name any field you left blank in `fields_skipped` (every one of them, optional and consent ones too, must be in the job's ask first). Pass a `session` label (same one
 all conversation) to get_application_kit and check_submit. `hold` set means another session is working this
 application: tell the user and stop unless they say continue. When you finish or hand over, record
 `hold_released` {reason: done|stopped}. `duplicate` set = warn before any work. `autofill`
@@ -271,6 +271,9 @@ answer or source none is refused, nothing saved). `source` says where YOUR answe
 honestly: profile, memory (a saved answer; `remembered_on` its date) or cv = Verified; guess (your
 best guess; data-processing consent = Yes, referred by an employee = No) or draft (text you wrote
 from profile facts) = Guessed. A guess is never memory. Yes/no or a closed list: give `choices`.
+Every field you leave blank goes into the ONE ask for that job, optional and consent ones included,
+each with a pre-filled best answer or "Leave blank" (any row may be answered "Leave blank"; Job360
+saves it as the user's answer for that employer, and the next form leaves that field empty).
 Read the form yourself (another reader if the page is cut off); never ask the user to paste or copy
 question text. Set job facts yourself (`update_job`, e.g. country); never ask the user to confirm a
 fact the profile already holds. An ask is only for what you may not do yourself: a CAPTCHA, a
