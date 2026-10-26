@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { CircleHelp, Mail, RotateCcw, Settings, type LucideIcon } from "lucide-react";
 import type { Ask } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/event-labels";
@@ -51,7 +51,7 @@ function OtherRow({ kind, id, summary, verb, children }: {
 
 const firstLine = (s: string) => s.split("\n").find((l) => l.trim()) ?? s;
 
-export function OtherList({ waiting, questions, onChanged, renderQuestion }: {
+export function OtherList({ waiting, questions, onChanged, renderQuestion, hidden = false, onCount }: {
   /** Setting changes an assistant asked for, waiting for the user's OK. */
   waiting: WaitingRequest[];
   /** Open asks not about one loaded job. */
@@ -59,12 +59,18 @@ export function OtherList({ waiting, questions, onChanged, renderQuestion }: {
   onChanged: () => Promise<void>;
   /** The question's full card (AskCard lives on the page). */
   renderQuestion: (ask: Ask) => ReactNode;
+  /** Another chip is chosen: the list still loads (its counts feed the chips), it just does not show. */
+  hidden?: boolean;
+  /** The outcome suggestions and unmatched mail this list loaded, for the page's one count. */
+  onCount?: (n: { outcomes: number; mail: number }) => void;
 }) {
   const outcomes = useOutcomeSuggestions();
   const mail = useUnmatchedMail();
+  const [nOutcomes, nMail] = [outcomes.items.length, mail.items.length];
+  useEffect(() => onCount?.({ outcomes: nOutcomes, mail: nMail }), [onCount, nOutcomes, nMail]);
   // A real count: the section is hidden when nothing is in it.
   const count = waiting.length + questions.length + outcomes.items.length + mail.items.length;
-  if (count === 0) return null;
+  if (count === 0 || hidden) return null;
   return (
     <section aria-labelledby="other-heading" data-testid="other-list" className="flex flex-col gap-3">
       <h2 id="other-heading" data-testid="other-count" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">

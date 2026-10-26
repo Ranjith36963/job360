@@ -355,6 +355,59 @@ describe("NeedsYou", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("reads every page of open asks, and the summary counts them all", async () => {
+    const page = (from: number, n: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...openAsk, id: from + i, application_id: null, question: `Q${from + i}` }));
+    listAsks.mockImplementation(async (s: string, offset = 0) =>
+      s === "open" ? { asks: offset === 0 ? page(0, 50) : page(50, 10), open_count: 60 } : { asks: [], open_count: 60 });
+    render(<NeedsYou />);
+    expect(await screen.findByTestId("needs-you-summary")).toHaveTextContent("60 things need you");
+    expect(listAsks).toHaveBeenCalledWith("open", 50);
+    expect(screen.getByTestId("chip-all")).toHaveTextContent("All 60");
+    expect(screen.getByTestId("chip-other")).toHaveTextContent("Other 60");
+  });
+
+  it("a chip shows only its part of the page and lives in the link; chips at 0 are hidden", async () => {
+    readyMock.total = 2;
+    try {
+      setup([{ ...openAsk, application_id: null }], [{ ...base, id: 2, question: "Q2", status: "answered", answer: "A2" }]);
+      render(<NeedsYou />);
+      await waitFor(() => expect(screen.getByTestId("needs-you-summary")).toHaveTextContent("3 things need you"));
+      expect(screen.getByTestId("chip-ready")).toHaveTextContent("Ready 2");
+      expect(screen.queryByTestId("chip-waiting")).toBeNull();
+      expect(screen.queryByTestId("chip-checks")).toBeNull();
+      fireEvent.click(screen.getByTestId("chip-ready"));
+      expect(window.location.search).toBe("?show=ready");
+      expect(screen.getByTestId("chip-ready")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.queryByTestId("other-list")).toBeNull();
+      expect(screen.queryByTestId("answered-toggle")).toBeNull();
+      fireEvent.click(screen.getByTestId("chip-other"));
+      expect(window.location.search).toBe("?show=other");
+      expect(screen.getByTestId("other-list")).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("chip-all"));
+      expect(window.location.search).toBe("");
+      expect(screen.getByTestId("answered-toggle")).toBeInTheDocument();
+    } finally {
+      readyMock.total = 0;
+    }
+  });
+
+  it("the sort menu has three options, explains the order and is kept per browser", async () => {
+    window.localStorage.removeItem("needs-you-sort");
+    setup([openAsk]);
+    const { unmount } = render(<NeedsYou />);
+    const menu = await screen.findByTestId("needs-you-sort");
+    expect([...(menu as HTMLSelectElement).options].map((o) => o.text)).toEqual(["Most urgent", "Newest first", "Oldest first"]);
+    expect(screen.getByTestId("needs-you-sort-line")).toHaveTextContent(
+      "Forms open now, then ready to send, then waiting on your answer, then quick checks.");
+    fireEvent.change(menu, { target: { value: "oldest" } });
+    expect(window.localStorage.getItem("needs-you-sort")).toBe("oldest");
+    unmount();
+    render(<NeedsYou />);
+    expect(await screen.findByTestId("needs-you-sort")).toHaveValue("oldest");
+    window.localStorage.removeItem("needs-you-sort");
+  });
+
   it("pages older answers instead of stopping at the first 50", async () => {
     const page = (from: number, n: number) =>
       Array.from({ length: n }, (_, i) => ({

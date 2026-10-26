@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ASKS_CHANGED_EVENT, getReadyToSend, listAsks } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, getReadyToSend } from "@/lib/api";
 import { fetchSettingsShared } from "@/lib/assistant-state";
-import { isSimulation } from "@/lib/job-cards";
-import type { Ask } from "@/lib/api";
+import { countNeedsYou, listAllOpenAsks } from "@/lib/needs-you-items";
 
 /**
  * Count of things waiting on the user (the Needs-you badge): jobs with an open ask plus
@@ -30,40 +29,21 @@ async function readyTotal(): Promise<number> {
   }
 }
 
-const ASKS_PAGE = 50; // the server's default page size
-const MAX_ASK_PAGES = 10;
-
-/** Jobs that need the owner, not asks: one per job with an open ask (practice asks left out), plus
- *  each open ask that belongs to no job. Reads every page of open asks (capped). */
-async function openJobCount(): Promise<number> {
-  const open: Ask[] = [];
-  for (let page = 0; page < MAX_ASK_PAGES; page++) {
-    const { asks } = await (open.length ? listAsks("open", open.length) : listAsks("open"));
-    open.push(...asks);
-    if (asks.length < ASKS_PAGE) break;
-  }
-  const jobs = new Set<number>();
-  let general = 0;
-  for (const ask of open) {
-    if (isSimulation(ask)) continue;
-    if (ask.application_id == null) general++;
-    else jobs.add(ask.application_id);
-  }
-  return jobs.size + general;
-}
-
 let inFlight: { key: string; count: Promise<number> } | null = null;
 
 function fetchOpenCount(key: string): Promise<number> {
   if (inFlight?.key === key) return inFlight.count;
+  // The same count as the page (countNeedsYou), from cheap reads only: every open ask, the waiting
+  // changes and the ready TOTAL (limit=0, never the full cards). CVs, people, outcomes and mail are
+  // not read here; while Needs you is open, the page announces its own full count.
   const count = Promise.all([
-    openJobCount(),
+    listAllOpenAsks(),
     fetchSettingsShared(key).then(
       (view) => view.waiting.length,
       () => 0,
     ),
     readyTotal(),
-  ]).then(([jobs, waiting, ready]) => jobs + waiting + ready);
+  ]).then(([open, waiting, ready]) => countNeedsYou({ open, waiting, ready }).n);
   const entry = { key, count };
   inFlight = entry;
   const clear = () => {
@@ -94,7 +74,8 @@ export function useOpenAsks(signedIn: boolean, pathname: string): number {
   const [openAsks, setOpenAsks] = useState(0);
 
   useEffect(() => {
-    if (!signedIn) return;
+    // On Needs you the page announces its own full count; a cheaper count here would make the badge jump.
+    if (!signedIn || pathname.startsWith("/needs-you")) return;
     let cancelled = false;
     fetchOpenCount(pathname)
       .then((count) => {

@@ -78,8 +78,7 @@ describe("New connections", () => {
     expect(within(await screen.findByTestId("people-to-reach")).getByTestId("person-2")).toBeInTheDocument();
     // Person 2 is read only through the job list, never as a new connection.
     expect(calls.some((c) => c.url.includes("contact_id=2"))).toBe(false);
-    expect(screen.getByTestId("jobs-count")).toHaveTextContent("1 job and 1 new connection waiting for you");
-    await waitFor(() => expect(onReport).toHaveBeenLastCalledWith(expect.objectContaining({ connections: 1, settled: true })));
+    await waitFor(() => expect(onReport).toHaveBeenLastCalledWith(expect.objectContaining({ total: 1, connections: 1, settled: true })));
   });
 
   it("leaves out a cold contact whose note was sent since", async () => {
@@ -97,7 +96,6 @@ describe("New connections", () => {
     render(<JobCards open={[]} onChanged={async () => {}} onReport={onReport} />);
     await waitFor(() => expect(onReport).toHaveBeenLastCalledWith(expect.objectContaining({ settled: true, connections: 0 })));
     expect(screen.queryByTestId("new-connections")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("jobs-count")).not.toBeInTheDocument();
   });
 
   it("I sent it records a sent mark on the contact, then hides the person", async () => {
