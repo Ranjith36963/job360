@@ -122,6 +122,12 @@ describe("JobCards", () => {
     expect(screen.getByTestId("job-header-1")).not.toHaveTextContent(/things? wait/);
   });
 
+  it("a collapsed header title links to the application", () => {
+    getApplication.mockImplementation(() => new Promise(() => {}));
+    render(<JobCards open={[ask(1, 1, { kind: "captcha" } as Partial<Ask>)]} onChanged={async () => {}} />);
+    expect(screen.getByTestId("title-link-1")).toHaveAttribute("href", "/applications/1");
+  });
+
   it("a people-only header reads Send notes", async () => {
     getApplication.mockImplementation(() => new Promise(() => {}));
     listPeople.mockResolvedValue({

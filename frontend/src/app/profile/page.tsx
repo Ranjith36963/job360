@@ -16,7 +16,6 @@ import { LessonsList } from "@/components/profile/LessonsList";
 import { AssistantTab } from "@/components/profile/AssistantTab";
 import { JobPriority } from "@/components/profile/JobPriority";
 import { MemoryTab } from "@/components/profile/MemoryTab";
-import { SetupTab } from "@/components/profile/SetupProgress";
 import { ProfileHeader, ProfileTabs, useProfileTab } from "@/components/profile/ProfileTabs";
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
@@ -582,8 +581,8 @@ function CvTab() {
   );
 }
 
-/** Profile has three tabs, picked by `?tab=` (CV when absent). Memory opens
- *  with the setup checklist, then the memory rows. Only the open
+/** Profile has three tabs, picked by `?tab=` (CV when absent). Memory is the
+ *  five setup steps, each holding its own facts (owner, 2026-10-26). Only the open
  *  tab mounts, so the CV page's fetches stay off the other tabs. */
 function ProfileRouter() {
   const tab = useProfileTab();
@@ -592,14 +591,7 @@ function ProfileRouter() {
     <PageContainer className="py-8 lg:py-12">
       <ProfileHeader />
       <ProfileTabs />
-      {tab === "assistant" ? (
-        <AssistantTab />
-      ) : (
-        <>
-          <SetupTab />
-          <MemoryTab />
-        </>
-      )}
+      {tab === "assistant" ? <AssistantTab /> : <MemoryTab />}
     </PageContainer>
   );
 }

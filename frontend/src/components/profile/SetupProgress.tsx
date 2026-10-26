@@ -60,7 +60,7 @@ export function SetupProgress({ progress, compact = false }: { progress: Progres
 
 /** The stored setup progress; `failed` when the read did not work (nothing is
  *  shown that was not read). */
-function useSetupProgress(): { progress: Progress | null; failed: boolean } {
+export function useSetupProgress(): { progress: Progress | null; failed: boolean } {
   const pathname = usePathname();
   const [progress, setProgress] = useState<Progress | null>(null);
   const [failed, setFailed] = useState(false);
@@ -88,22 +88,4 @@ export function SetupCard() {
   const { progress } = useSetupProgress();
   if (!progress || progress.done >= (progress.total || ROUNDS.length)) return null;
   return <SetupProgress progress={progress} compact />;
-}
-
-/** Profile -> Setup: always there. */
-export function SetupTab() {
-  const { progress, failed } = useSetupProgress();
-  if (!progress && failed) {
-    return (
-      <p role="alert" data-testid="setup-failed" className="pt-6 text-sm text-destructive">
-        Could not load your setup progress. Reload the page to try again.
-      </p>
-    );
-  }
-  if (!progress) return <p className="pt-6 text-sm text-muted-foreground">Loading…</p>;
-  return (
-    <div className="max-w-xl pt-6">
-      <SetupProgress progress={progress} />
-    </div>
-  );
 }
