@@ -235,6 +235,7 @@ async def browser_action(
     stop_source = str(result.pop(browser_agent.STOP_KEY, "") or "")
     if steps and body.application_id is not None:
         await _keep_steps(user, body.application_id, steps)
+    await _book_attempt(user, body, result, stop_source)
     if result.get("status") == "needs_you" and body.application_id is not None:
         result["blocked_recorded"] = await _hand_off(user, body.application_id, result)
     elif body.action == "open" and body.application_id is not None and _bot_blocked(result, stop_source):
@@ -250,14 +251,46 @@ async def browser_action(
 _BLOCKED_REASON = {"captcha": "captcha", "login_required": "login_needed", "bot_check": "bot_check"}
 
 
-def _bot_blocked(result: dict[str, Any], stop_source: str) -> bool:
-    """The open's outcome is ``bot_block``: read from its ``transport`` (status, headers, final host) only,
-    never the page text (a body-text stop is ``outcome.TEXT_STOP``, never a bot block)."""
+def _open_outcome(result: dict[str, Any], stop_source: str) -> str:
+    """The open's outcome, read from its ``transport`` (status, headers, final host) only, never the page
+    text (a body-text stop is ``outcome.TEXT_STOP``, never a bot block)."""
     needs_you = str(result.get("reason") or "") if result.get("status") == "needs_you" else ""
     transport = result.get("transport")
     return browser_outcome.classify(
         transport if isinstance(transport, dict) else {}, stop_reason=stop_source, needs_you=needs_you,
-    ) == "bot_block"
+    )
+
+
+def _bot_blocked(result: dict[str, Any], stop_source: str) -> bool:
+    return _open_outcome(result, stop_source) == "bot_block"
+
+
+async def _book_attempt(
+    user: CurrentUser, body: BrowserActionRequest, result: dict[str, Any], stop_source: str,
+) -> None:
+    """Routes PR C1, record only: book what this action met in the route book. Every ``open`` that came back
+    books its outcome (``ok`` once per session, site and task); a confirmation page seen after any action books
+    ``confirmed`` once. A refused or failed action never reaches here (the SSRF guard's refusals included), and
+    this never breaks the action: any failure is logged without the host and dropped."""
+    from src.services.browser_agent import route_book, routing  # noqa: PLC0415
+
+    task = routing.learn_task(body.action, body.application_id, bool(result.get("application_form")))
+    booked: list[tuple[str, str]] = []
+    if body.action == "open":
+        booked.append((body.url, _open_outcome(result, stop_source)))
+    if result.get("confirmation_seen") is True:
+        booked.append((body.url or str(result.get("url") or ""), "confirmed"))
+    for url, outcome in booked:
+        try:
+            if not route_book.first_in_session(user.id, body.session, body.application_id, url, task, outcome):
+                continue
+            async with _db() as db:
+                await route_book.record(db, user.id, url, task, "job360", outcome)
+        except Exception as exc:  # noqa: BLE001 - booking never breaks a browser action
+            route_book._log.warning(
+                "route attempt not booked",
+                extra={"event": "route_attempt_failed", "outcome": outcome, "error": type(exc).__name__},
+            )
 HAND_OFF_DETAIL = (
     "Job360's cloud browser stopped here. It is waiting for your own browser: finish it with your assistant on "
     "your computer when it is on, or sign in once on Settings, Job sites."
