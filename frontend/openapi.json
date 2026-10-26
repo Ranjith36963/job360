@@ -24285,7 +24285,7 @@
     },
     "/api/browser/live": {
       "post": {
-        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only. ``mode: finish``: the user finishes a\nhuman check in their assistant's browser instead (shot, click, type, key, scroll, done), in the\nbrowser of ``application_id``.",
+        "description": "One step of the user signing in to a job site themselves: start (url), shot, click (x, y),\ntype (text), key, scroll (dy), keep, cancel. Returns a picture of the page. Typed text is never\nlogged or returned; the audit line names the action only. ``mode: finish``: the user finishes a\nhuman check in their assistant's browser instead (shot, click, type, key, scroll, back, done), in the\nbrowser of ``application_id``.",
         "operationId": "browser_live_api_browser_live_post",
         "parameters": [
           {

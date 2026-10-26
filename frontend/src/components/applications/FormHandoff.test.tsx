@@ -4,7 +4,11 @@ import { FormHandoff } from "./FormHandoff";
 
 const refillForm = vi.fn();
 vi.mock("@/lib/api", () => ({ refillForm: (...a: unknown[]) => refillForm(...a), browserLive: vi.fn() }));
-vi.mock("./FinishInBrowser", () => ({ FinishInBrowser: () => <div data-testid="finish-browser" /> }));
+vi.mock("./FinishInBrowser", () => ({
+  FinishInBrowser: ({ startMaximized }: { startMaximized?: boolean }) => (
+    <div data-testid="finish-browser" data-maximized={String(!!startMaximized)} />
+  ),
+}));
 vi.mock("@/lib/toast", () => ({ toast: { error: vi.fn(), apiError: vi.fn() } }));
 
 const URL_ = "https://ats.rippling.com/acme/jobs/1";
@@ -21,7 +25,7 @@ describe("FormHandoff", () => {
     expect(finish.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByTestId("ask-form-closed")).toBeNull();
     fireEvent.click(finish);
-    expect(screen.getByTestId("finish-browser")).toBeInTheDocument();
+    expect(screen.getByTestId("finish-browser")).toHaveAttribute("data-maximized", "false"); // a card
   });
 
   it("not finish_here and no can_refill: says the form closed, no Refill button", () => {
@@ -43,6 +47,7 @@ describe("FormHandoff", () => {
     done({ status: "ok" });
     await waitFor(() => expect(screen.getByTestId("finish-browser")).toBeInTheDocument());
     expect(screen.queryByTestId("ask-refill-progress")).toBeNull();
+    expect(screen.getByTestId("finish-browser")).toHaveAttribute("data-maximized", "true"); // lands full-screen
   });
 
   it("refused: shows the detail and no live view", async () => {
