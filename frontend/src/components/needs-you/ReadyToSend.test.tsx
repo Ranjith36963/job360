@@ -49,11 +49,11 @@ describe("Ready to send", () => {
     expect(el.textContent).toContain(`Cover letter v1 · ${dayMonth("2026-10-08T08:05:00+00:00", true)}`);
     expect(screen.getByRole("link", { name: "Open both" })).toHaveAttribute("href", "/applications/64#section-documents");
     expect(el).toHaveTextContent("Every answer that will go out");
-    expect(el.textContent).toContain(`Memory · saved by Claude, ${dayMonth("2026-10-03T09:00:00+00:00")}`);
-    expect(el).toHaveTextContent("Profile");
-    expect(el).toHaveTextContent("Written new · by Claude");
-    expect(el).toHaveTextContent("Guessed · by Claude");
-    expect(el).toHaveTextContent("Your choice is saved with the time and this page as the place.");
+    expect(screen.getByTestId("ready-answer-source-64-0")).toHaveTextContent("From your Memory · your assistant saved it");
+    expect(screen.getByTestId("ready-answer-source-64-1")).toHaveTextContent("From your profile");
+    expect(screen.getByTestId("ready-answer-source-64-2")).toHaveTextContent("Written by your assistant");
+    expect(screen.getByTestId("ready-answer-source-64-3")).toHaveTextContent("Your assistant's guess");
+    expect(el.textContent).not.toMatch(/Your choice is saved|by Claude,|Written new|Guessed/);
   });
 
   it("flags show in words, with the country spelled out", async () => {
