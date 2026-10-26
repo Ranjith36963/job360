@@ -55,7 +55,7 @@ describe("MemoryTab", () => {
     await screen.findByTestId("memory-tab");
     expect(getProfile).toHaveBeenCalledTimes(1);
     expect(getProfileEditHistory.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "preferences.avoid_companies", "preferences.dealbreakers", "preferences.experience_level",
+      "preferences.dealbreakers", "preferences.experience_level",
       "preferences.experience_years_max", "preferences.experience_years_min", "preferences.looking_for",
       "preferences.preferred_locations", "preferences.salary_by_country", "preferences.target_job_titles",
       "preferences.work_arrangement",

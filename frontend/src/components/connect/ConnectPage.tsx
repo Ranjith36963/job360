@@ -21,6 +21,7 @@ import { apiErrorMessage } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AssistantTab } from "@/components/profile/AssistantTab";
+import { AssistantInstructions } from "@/components/connect/AssistantInstructions";
 import { JobSitesPanel } from "@/components/connect/JobSitesPanel";
 import { CalendarFeedSection } from "@/components/settings/CalendarFeedSection";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -1025,6 +1026,7 @@ function ConnectAgentPageInner() {
 
         <TabsContent value="assistant" className="space-y-8">
           <AssistantTab />
+          <AssistantInstructions />
         </TabsContent>
 
         <TabsContent value="job-sites" className="space-y-8">

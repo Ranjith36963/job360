@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-import { BATCH_RULES_SAVED } from "./BatchRulesCard";
 import { toast } from "sonner";
 import { listApplications, recordApplicationEvent } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
@@ -42,12 +41,6 @@ export function BatchQueueCard() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- existing working effect; refactor tracked
     void load();
-  }, [load]);
-
-  useEffect(() => {
-    const reload = () => void load();
-    window.addEventListener(BATCH_RULES_SAVED, reload);
-    return () => window.removeEventListener(BATCH_RULES_SAVED, reload);
   }, [load]);
 
   async function remove(id: number) {
