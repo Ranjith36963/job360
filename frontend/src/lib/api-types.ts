@@ -4261,6 +4261,7 @@ export interface components {
             artifacts: {
                 [key: string]: number;
             };
+            browser?: components["schemas"]["BrowserLabelOut"] | null;
             /** Country */
             country?: string | null;
             /**

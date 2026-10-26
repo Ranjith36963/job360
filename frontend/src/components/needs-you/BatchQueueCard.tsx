@@ -6,8 +6,9 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { listApplications, recordApplicationEvent } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
-import { originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
-import type { QueueSummary } from "@/lib/batch-queue";
+import { filterByBrowser, originLabel, preflightProblems, queueSummaryLine } from "@/lib/batch-queue";
+import type { QueueBrowserFilter, QueueSummary } from "@/lib/batch-queue";
+import { QueueBrowserChip, QueueBrowserFilterRow } from "./QueueBrowser";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 
@@ -18,6 +19,7 @@ type QueueRow = {
   job_title: string;
   job_company?: string | null;
   preflight?: Record<string, unknown> | null;
+  browser?: { kind?: string; label?: string; reason?: string } | null;
 };
 
 /** The jobs lined up for your assistant to apply to, in order, with anything wrong in plain words. */
@@ -26,6 +28,8 @@ export function BatchQueueCard() {
   const [summary, setSummary] = useState<QueueSummary | null>(null);
   const [error, setError] = useState(false);
   const [removing, setRemoving] = useState<number | null>(null);
+  // Client-side over the loaded rows (the card loads the first 50); the counts come from the whole queue.
+  const [browserFilter, setBrowserFilter] = useState<QueueBrowserFilter>("all");
 
   const load = useCallback(async () => {
     try {
@@ -91,8 +95,9 @@ export function BatchQueueCard() {
               {queueSummaryLine(summary)}
             </p>
           )}
+          <QueueBrowserFilterRow summary={summary} total={rows.length} value={browserFilter} onChange={setBrowserFilter} />
           <ul className="flex flex-col">
-            {rows.map((r) => {
+            {filterByBrowser(rows, browserFilter).map((r) => {
               const problems = preflightProblems(r.preflight);
               const name = [r.job_title || "Untitled role", r.job_company].filter(Boolean).join(" · ");
               return (
@@ -119,6 +124,7 @@ export function BatchQueueCard() {
                         {originLabel(r.origin)}
                       </span>
                     )}
+                    <QueueBrowserChip id={r.id} browser={r.browser} />
                     {problems.length > 0 && (
                       <ul data-testid={`batch-row-problems-${r.id}`} className="mt-1 flex flex-col gap-0.5 text-xs text-warning">
                         {problems.map((p) => (
