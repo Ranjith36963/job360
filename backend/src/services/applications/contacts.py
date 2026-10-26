@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.repositories import pg
+from src.services.applications import own_browser
 from src.services.applications.spine import (
     FOLLOW_UP_UNSET,
     SpineError,
@@ -2039,6 +2040,7 @@ async def _full_contact_view(
     rows = await _outreach_rows(db, contact_id)
     view["outreach"] = _outreach_view(rows, include_text=include_text)
     view["send_browser"] = _send_browser(user_id, contact_id, view["outreach"]["messages"])
+    view["own_browser_task"] = own_browser.public_task(own_browser.derive(rows, datetime.now(timezone.utc)))
     return view
 
 

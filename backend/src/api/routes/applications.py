@@ -659,6 +659,15 @@ class ContactOutreachOut(BaseModel):
     interactions: list[OutreachEntryOut] = Field(default_factory=list)
 
 
+class OwnBrowserTaskOut(BaseModel):
+    """Where this person's LinkedIn send stands (``services/applications/own_browser.py``)."""
+
+    state: Literal["waiting_on_you", "queued", "in_progress", "declined"]
+    message_id: int
+    approved_at: Optional[str] = None
+    claim_until: Optional[str] = None
+
+
 class ContactOut(BaseModel):
     """A contact row (``contacts.list_contacts`` / ``add_contact``'s return).
     Same shape everywhere a contact appears — detail, export, the add
@@ -689,6 +698,8 @@ class ContactOut(BaseModel):
     linkedin_state: Optional[str] = None
     # Which browser sends this person's LinkedIn message (null = the newest message is not a LinkedIn one).
     send_browser: Optional[BrowserLabelOut] = None
+    # The user's own-browser send of the newest LinkedIn draft (null = nothing to send in it).
+    own_browser_task: Optional[OwnBrowserTaskOut] = None
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)

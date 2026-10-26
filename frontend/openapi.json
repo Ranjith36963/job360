@@ -4230,6 +4230,16 @@
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
           },
+          "own_browser_task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnBrowserTaskOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "phone": {
             "anyOf": [
               {
@@ -9477,6 +9487,53 @@
         "title": "OutreachEntryOut",
         "type": "object"
       },
+      "OwnBrowserTaskOut": {
+        "description": "Where this person's LinkedIn send stands (``services/applications/own_browser.py``).",
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "claim_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Until"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "waiting_on_you",
+              "queued",
+              "in_progress",
+              "declined"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "message_id"
+        ],
+        "title": "OwnBrowserTaskOut",
+        "type": "object"
+      },
       "PasswordChangeRequest": {
         "properties": {
           "current_password": {
@@ -9712,6 +9769,16 @@
           },
           "outreach": {
             "$ref": "#/components/schemas/ContactOutreachOut"
+          },
+          "own_browser_task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnBrowserTaskOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "phone": {
             "anyOf": [

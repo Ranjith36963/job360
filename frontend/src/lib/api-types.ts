@@ -5032,6 +5032,7 @@ export interface components {
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            own_browser_task?: components["schemas"]["OwnBrowserTaskOut"] | null;
             /** Phone */
             phone?: string | null;
             /**
@@ -7156,6 +7157,23 @@ export interface components {
             /** Version No */
             version_no: number | null;
         };
+        /**
+         * OwnBrowserTaskOut
+         * @description Where this person's LinkedIn send stands (``services/applications/own_browser.py``).
+         */
+        OwnBrowserTaskOut: {
+            /** Approved At */
+            approved_at?: string | null;
+            /** Claim Until */
+            claim_until?: string | null;
+            /** Message Id */
+            message_id: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "waiting_on_you" | "queued" | "in_progress" | "declined";
+        };
         /** PasswordChangeRequest */
         PasswordChangeRequest: {
             /** Current Password */
@@ -7247,6 +7265,7 @@ export interface components {
             /** Notes */
             notes: string;
             outreach: components["schemas"]["ContactOutreachOut"];
+            own_browser_task?: components["schemas"]["OwnBrowserTaskOut"] | null;
             /** Phone */
             phone?: string | null;
             /**

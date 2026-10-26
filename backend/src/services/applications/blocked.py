@@ -271,6 +271,14 @@ async def open_blocks(db: JobDatabase, user_id: str, app_ids: list[int]) -> dict
     return out
 
 
+def browser_hold_live(user_id: str, application_id: int) -> bool:
+    """Job360's own browser still holds this application's page for the user (the 30-minute hand-off hold, in
+    memory in this process). Read-only: it opens no browser and renews nothing."""
+    from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy, heavy
+
+    return browser_agent.held_seconds(browser_agent.get_pool(), user_id, int(application_id)) is not None
+
+
 async def finish_here_ask_ids(
     db: JobDatabase, user_id: str, asks: list[dict[str, Any]], blocks: Optional[dict[int, dict[str, Any]]] = None,
 ) -> set[int]:
@@ -287,7 +295,9 @@ async def finish_here_ask_ids(
         p = blocks.get(app_id, {})
         by = p.get(BY_KEY)
         ours = by == BY_BROWSER or (by is None and p.get("step") == "Job360 browser")
-        if p.get("reason") == "captcha" and ours and isinstance(p.get("ask_id"), int):
+        if p.get("reason") == "captcha" and ours and isinstance(p.get("ask_id"), int) and browser_hold_live(
+            user_id, app_id
+        ):
             out.add(int(p["ask_id"]))
     return out
 
