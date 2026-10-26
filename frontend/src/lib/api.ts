@@ -850,6 +850,15 @@ export async function answerAskQuestions(id: number, answers: Record<string, str
   });
 }
 
+/** Save SOME rows of an open ask at once (the user's Edit / Looks right / choice click). The ask stays
+ *  open; a reload reads the rows back from its `answers`. Web session only. */
+export async function saveAskRowAnswers(id: number, answers: Record<string, string>): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/answers/save`, {
+    method: "POST",
+    body: JSON.stringify({ answers }),
+  });
+}
+
 /** "Remember these answers for every form": each one becomes an approved saved answer on the
  *  profile (user_info.answers), replacing an older one with the same topic. */
 export async function rememberAnswers(items: { topic: string; question: string; answer: string }[]): Promise<void> {

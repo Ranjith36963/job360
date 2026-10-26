@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { Ask } from "@/lib/api";
-import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers } from "@/lib/api";
+import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen, markOutreachSent, rememberAnswers, saveAskRowAnswers } from "@/lib/api";
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
 import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
@@ -73,7 +73,16 @@ export function JobCard({
   // whether the user checked it, per merged row.
   const merged = mergeQuestions(structured.map((s) => s.ask));
   const [rows, setRows] = useState<Record<string, RowState>>({});
-  const rowOf = (id: string, q: Parameters<typeof initialRow>[0]): RowState => rows[id] ?? initialRow(q);
+  // Rows the owner already saved on this card (an open ask's `answers` hold only the owner's own word: the
+  // save is web-session only), so a reload shows them checked, a consent or personal row included.
+  const savedRows = new Map<string, string>();
+  for (const { ask } of structured)
+    for (const k of merged.byAsk.get(ask.id) ?? []) {
+      const v = ask.answers?.[k.key];
+      if (typeof v === "string" && v.trim()) savedRows.set(k.rowId, v);
+    }
+  const rowOf = (id: string, q: Parameters<typeof initialRow>[0]): RowState =>
+    rows[id] ?? (savedRows.has(id) ? { value: savedRows.get(id)!, ok: true } : initialRow(q));
 
   const blockers = card.asks.filter((a) => isBlocker(a.kind));
   const questions = card.asks.filter((a) => a.kind === "question" || a.kind === "yes_no");
@@ -114,11 +123,48 @@ export function JobCard({
   });
   const prefillMode = merged.rows.some((m) => !rowOf(m.id, m.q).ok || !rowOf(m.id, m.q).value.trim());
 
-  const approvePrefilled = () =>
-    setRows((prev) => ({
-      ...prev,
-      ...Object.fromEntries(prefillable.map((m) => [m.id, { value: rowOf(m.id, m.q).value, ok: true }])),
-    }));
+  /** Owner bug 2026-10-26: an edit saves at once, one row on its own (a row still waiting never holds
+   *  it back): onto every open ask that lists the row, and as a remembered answer unless it is the stored
+   *  fact unchanged. The row shows checked first and goes back if the save fails. */
+  async function persistRow(id: string, value: string) {
+    const m = merged.rows.find((r) => r.id === id);
+    const text = value.trim();
+    if (!m || !text) return;
+    for (const { ask } of structured) {
+      const keys = (merged.byAsk.get(ask.id) ?? []).filter((k) => k.rowId === id).map((k) => k.key);
+      if (keys.length) await saveAskRowAnswers(ask.id, Object.fromEntries(keys.map((k) => [k, text])));
+    }
+    if (!(isStoredSource(m.q.source) && text === m.q.answer.trim()))
+      await rememberAnswers([{ topic: m.q.key || m.id, question: m.q.question, answer: text }]);
+  }
+
+  function saveRows(entries: [string, string][]) {
+    const before = Object.fromEntries(entries.map(([id]) => [id, rows[id]]));
+    const now = Object.fromEntries(entries.map(([id, value]) => [id, { value: value.trim(), ok: true }]));
+    setRows((prev) => ({ ...prev, ...now }));
+    setBusy(true);
+    void (async () => {
+      try {
+        for (const [id] of entries) await persistRow(id, now[id].value);
+        await onChanged();
+      } catch (err) {
+        setRows((prev) => {
+          const next = { ...prev };
+          for (const [id] of entries) {
+            if (before[id]) next[id] = before[id];
+            else delete next[id];
+          }
+          return next;
+        });
+        toast.apiError(err, "Couldn't save that answer");
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }
+
+  const saveRow = (id: string, value: string) => saveRows([[id, value]]);
+  const approvePrefilled = () => saveRows(prefillable.map((m) => [m.id, rowOf(m.id, m.q).value]));
 
   async function run(fn: () => Promise<unknown>, failMsg: string) {
     setBusy(true);
@@ -152,15 +198,6 @@ export function JobCard({
       );
       if (card.cv) await markCvSeen(card.applicationId, card.cv.artifactId);
     }, "Couldn't save everything");
-
-  // One settled row is remembered at once (owner, 2026-10-26: a gender or consent edit was lost when the
-  // card was left before "Approve all"). Approve all still answers the asks themselves.
-  const saveRow = (id: string, value: string) => {
-    const m = merged.rows.find((r) => r.id === id);
-    if (!m || value.trim() === m.q.answer.trim() && isStoredSource(m.q.source)) return;
-    rememberAnswers([{ topic: m.q.key || m.id, question: m.q.question, answer: value.trim() }])
-      .catch((err) => toast.apiError(err, "Couldn't save that answer"));
-  };
 
   const skipJob = () =>
     run(async () => {
@@ -263,7 +300,8 @@ export function JobCard({
         <section className="flex flex-col gap-2" data-testid="form-answers">
           <h3 className={label}>Form answers · {questions.length + rowCount}</h3>
           {rowCount > 0 && (
-            <AskQuestions items={merged.rows} rows={rows} busy={busy}
+            <AskQuestions items={merged.rows} busy={busy}
+              rows={Object.fromEntries(merged.rows.map((m) => [m.id, rowOf(m.id, m.q)]))}
               onChange={(id, row) => setRows((prev) => ({ ...prev, [id]: row }))} onSave={saveRow} />
           )}
           {questions.map(({ ask, kind }) => (

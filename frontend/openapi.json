@@ -13493,6 +13493,23 @@
         "title": "SaveFitResponse",
         "type": "object"
       },
+      "SaveRowAnswersRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Answers",
+            "type": "object"
+          }
+        },
+        "required": [
+          "answers"
+        ],
+        "title": "SaveRowAnswersRequest",
+        "type": "object"
+      },
       "SaveTemplateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -21721,6 +21738,91 @@
           }
         },
         "summary": "Answer Ask",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/asks/{ask_id}/answers/save": {
+      "post": {
+        "description": "Save the rows the user edited or checked on a job card, at once, while the ask stays open\n(owner bug 2026-10-26: an edit was lost on reload). Session only - an open ask's saved rows are\nalways the user's own word, so a personal or consent row may read as checked from them. No MCP twin.",
+        "operationId": "save_ask_row_answers_api_asks__ask_id__answers_save_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRowAnswersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Ask Row Answers",
         "tags": [
           "asks"
         ]
