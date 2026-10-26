@@ -686,6 +686,11 @@ apply to agencies"), one line each; they win over anything you would
 otherwise assume. Empty means the user has none. They are also in
 `fields["preferences.assistant_notes"]`.
 
+Common form questions (owner, 2026-10-26: "only two things, from memory and guessed; there is no not known"):
+get_profile `common_questions_open` lists the ones with no answer yet. Draft each from the profile and save it
+to its `save_to` - a `topic` row as `user_info.answers` {question, answer, approved: false, topic}, a field row
+with `source: "agent_inferred"` - so Memory shows it as Guessed for the user to verify. Never leave one blank.
+
 Use `update_profile` to fill the structured fields, to correct something the
 structural read got wrong, and for a preference the user told you. An empty
 preference (salary, locations, workplace, experience level) means "don't
