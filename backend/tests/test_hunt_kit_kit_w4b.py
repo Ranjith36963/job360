@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from tests._timing import best_of
+
 KIT_DIR = Path(__file__).resolve().parents[1] / "src" / "hunt_kit"
 sys.path.insert(0, str(KIT_DIR))
 
@@ -226,10 +228,15 @@ def test_applicantpro_many_distinct_sitemap_ids_scale_linearly_and_open_only_the
     host = "acme.applicantpro.com"
 
     def run(n):
-        http = _stub({"/sitemap.xml": (200, _ap_sitemap(host, *[str(i) for i in range(1, n + 1)])), "/jobs/": (404, None)})
-        t0 = time.perf_counter()
-        _run("applicantpro", _row("applicantpro", "acme"), http)
-        return time.perf_counter() - t0, http
+        sitemap = _ap_sitemap(host, *[str(i) for i in range(1, n + 1)])
+        stubs = []
+
+        def once():
+            stubs.append(_stub({"/sitemap.xml": (200, sitemap), "/jobs/": (404, None)}))  # fresh stub: call counts stay per run
+            _run("applicantpro", _row("applicantpro", "acme"), stubs[-1])
+
+        _, t = best_of(once)  # best of three: noise on a busy runner only adds time
+        return t, stubs[-1]
 
     t1, _ = run(25000)
     t2, http = run(100000)

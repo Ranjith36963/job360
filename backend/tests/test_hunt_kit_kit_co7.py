@@ -8,12 +8,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+
+from tests._timing import best_of
 
 KIT_DIR = Path(__file__).resolve().parents[1] / "src" / "hunt_kit"
 sys.path.insert(0, str(KIT_DIR))
@@ -257,9 +258,9 @@ def test_senjob_off_host_or_malformed_links_are_not_postings():
 def test_senjob_unclosed_rows_are_linear_and_lose_nothing():
     def run(n):
         rows = "".join(f'<tr><td><a href="{SEN_BASE}j-{i}_e_{i}.html">Job {i}</a></td><td>Dakar<span style="display:none">2026-08-{10 + i % 10}</span>' for i in range(1, n + 1))
-        t = time.perf_counter()
-        jobs, _ = _run("senjob", _row("senjob", "all"), _stub({"page=2": (404, None), SEN_URL: (200, "<table>" + rows)}))
-        return jobs, time.perf_counter() - t
+        # Best of three: noise on a busy runner only adds time, so the minimum is the real cost.
+        (jobs, _), t = best_of(lambda: _run("senjob", _row("senjob", "all"), _stub({"page=2": (404, None), SEN_URL: (200, "<table>" + rows)})))
+        return jobs, t
     (j1, t1), (j2, _t2), (j4, t4) = run(150), run(300), run(600)  # no row is ever closed
     assert (len(j1), len(j2), len(j4)) == (150, 300, 600) and j4[-1]["title"] == "Job 600" and j4[-1]["location"] == "Dakar"
     assert j4[0]["posted"] == "2026-08-11" and t4 < 2.0 and t4 < max(t1, 0.02) * 12

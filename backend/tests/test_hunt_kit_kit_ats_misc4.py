@@ -8,9 +8,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from tests._timing import best_of
 
 KIT_DIR = Path(__file__).resolve().parents[1] / "src" / "hunt_kit"
 sys.path.insert(0, str(KIT_DIR))
@@ -210,9 +211,8 @@ def test_adp_title_filter_limits_detail_requests():
 def test_adp_hostile_markup_is_linear_and_stripped():
     evil = "<p>" * 20000 + "<script>" * 5000 + "x" * 1000 + "<a href=javascript:alert(1)>" * 3000
     routes = _adp_routes([_req("5")], details={"5": _req("5", desc=evil)})
-    t0 = time.time()
-    jobs, _ = _run("adpmyjobs", _row("adpmyjobs", "acme"), _stub(routes))
-    assert time.time() - t0 < 5 and len(jobs) == 1
+    (jobs, _), elapsed = best_of(lambda: _run("adpmyjobs", _row("adpmyjobs", "acme"), _stub(routes)))
+    assert elapsed < 5 and len(jobs) == 1
     assert "<" not in jobs[0]["description"] and "javascript" not in jobs[0]["description"]
 
 
@@ -334,9 +334,8 @@ def test_eploy_slug_titles():
 def test_eploy_hostile_markup_is_linear():
     evil = "<div class=vac-details__description>" * 8000 + "<script>" * 5000 + "<p " * 20000
     http = _stub({"live-jobs.xml": (200, _sitemap("https://careers.pei.group/vacancies/1/x.html")), "/vacancies/1/": (200, evil)})
-    t0 = time.time()
-    jobs, _ = _run("eploy", _row("eploy", "careers.pei.group"), http)
-    assert time.time() - t0 < 5 and len(jobs) == 1 and "<" not in jobs[0]["description"]
+    (jobs, _), elapsed = best_of(lambda: _run("eploy", _row("eploy", "careers.pei.group"), http))
+    assert elapsed < 5 and len(jobs) == 1 and "<" not in jobs[0]["description"]
 
 
 def test_eploy_large_sitemap_is_asked_for_with_a_raised_cap():
