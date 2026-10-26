@@ -23,7 +23,7 @@ export const SALARY = "preferences.salary_by_country";
 export const TARGET_PATHS = [
   "preferences.target_job_titles", "preferences.experience_level", "preferences.experience_years_min",
   "preferences.experience_years_max", "preferences.preferred_locations", "preferences.work_arrangement",
-  "preferences.looking_for", "preferences.dealbreakers", "preferences.avoid_companies",
+  "preferences.looking_for", "preferences.dealbreakers",
 ] as const;
 export const MEMORY_PATHS = [CONTACT, RTW, LOGISTICS, LANGUAGES, EQUALITY, ANSWERS, SALARY, ...TARGET_PATHS] as const;
 export const EXPERIENCE_OPTIONS = ["entry", "mid", "senior", "lead", "executive"] as const;
@@ -253,7 +253,6 @@ export function targetRows(): RowSpec[] {
     row("work_arrangement", "Work arrangement", "select", { options: ARRANGEMENT_OPTIONS }),
     row("looking_for", "What you look for", "textarea", { placeholder: "One per line" }),
     row("dealbreakers", "Dealbreakers", "textarea", { placeholder: "One per line" }),
-    row("avoid_companies", "Companies to avoid", "textarea", { placeholder: "One per line" }),
   ];
 }
 
