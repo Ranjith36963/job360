@@ -252,6 +252,34 @@ async def test_release_needs_your_own_live_claim(authenticated_async_context):
 
 
 @pytest.mark.asyncio
+async def test_closed_outside_the_pc_on_hours_unless_run_now_and_paused_closes(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        contact_id, message_id = await _person(client)
+        await _click(client, contact_id, message_id)
+        tomorrow = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][(datetime.now(timezone.utc).weekday() + 3) % 7]
+        window = {"days": [tomorrow], "from": "09:00", "to": "10:00"}
+        edit = await client.patch("/api/profile", json={"edits": [{"path": "assistant_settings.pc_on_hours", "value": window}]})
+        assert edit.status_code == 200, edit.text
+        q = (await client.get("/api/own-browser/queue")).json()
+        assert q["open_now"] is False and q["why"] == "closed" and q["opens_at"] and q["pc_on_hours"] == window
+        assert q["count"] == 1  # still listed: the user sees it waiting
+        async with await _agent(client) as agent:
+            closed = await _take(agent)
+            assert closed["status"] == "closed" and closed["task"] is None and closed["opens_at"]
+            run = await client.post("/api/own-browser/run-now")
+            assert run.status_code == 200 and run.json()["minutes"] == 60
+            q = (await client.get("/api/own-browser/queue")).json()
+            assert q["open_now"] is True and q["why"] == "run_now" and q["run_now_until"] == run.json()["run_now_until"]
+            assert (await _take(agent))["status"] == "task"
+            paused = await client.patch(
+                "/api/profile", json={"edits": [{"path": "assistant_settings.paused_until", "value": "until_resumed"}]}
+            )
+            assert paused.status_code == 200, paused.text
+            assert (await _take(agent, "other"))["status"] == "paused"
+            assert (await client.get("/api/own-browser/queue")).json()["why"] == "paused"
+
+
+@pytest.mark.asyncio
 async def test_run_now_is_not_a_scheduled_duty(authenticated_async_context):
     async with authenticated_async_context() as client:
         assert (await client.post("/api/own-browser/run-now")).status_code == 200

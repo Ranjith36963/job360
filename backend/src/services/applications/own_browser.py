@@ -242,22 +242,30 @@ async def run_now_until(db: JobDatabase, user_id: str, now: datetime) -> Optiona
 
 
 async def window(db: JobDatabase, user_id: str, now: datetime) -> dict[str, Any]:
-    """``{open_now, why, pc_on_hours, opens_at, run_now_until}``; why = paused | any_time | run_now.
-
-    The PC-on hours setting is wired in once #1231 merges: until then the window is "not set" (any time)."""
+    """``{open_now, why, pc_on_hours, opens_at, run_now_until}``; why = paused | any_time | pc_on_hours |
+    run_now | closed."""
+    from src.services.applications import spine  # noqa: PLC0415
     from src.services.profile import assistant_settings as rules  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     cfg = rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
+    zone = await spine.user_zone(db, user_id)
+    is_open, opens_at = rules.pc_on_state(cfg.pc_on_hours, now.astimezone(zone))
     until = await run_now_until(db, user_id, now)
     if rules.is_paused(cfg.paused_until, now):
         why, open_now = "paused", False
-    else:
+    elif cfg.pc_on_hours is None:
         why, open_now = "any_time", True
+    elif is_open:
+        why, open_now = "pc_on_hours", True
+    elif until is not None:
+        why, open_now = "run_now", True
+    else:
+        why, open_now = "closed", False
     return {
-        "open_now": open_now, "why": why, "pc_on_hours": None,
-        "opens_at": None,
+        "open_now": open_now, "why": why, "pc_on_hours": cfg.pc_on_hours,
+        "opens_at": opens_at.isoformat() if opens_at else None,
         "run_now_until": until.isoformat() if until else None,
     }
 
