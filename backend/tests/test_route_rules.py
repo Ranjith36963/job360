@@ -26,7 +26,7 @@ def test_every_ats_in_sites_maps_to_an_ats_key(site):
     [
         ("https://www.linkedin.com/jobs/view/1", ("linkedin", "linkedin", "www.linkedin.com")),
         ("https://lnkd.in/abc", ("linkedin", "linkedin", "lnkd.in")),
-        ("https://www.ⓛinkedin.com/jobs/view/1", ("linkedin", "linkedin", "")),  # mixed form: fails closed
+        ("https://www.ⓛinkedin.com/jobs/view/1", ("unnamed", "unnamed", "")),  # host cannot be named: own browser
         ("https://uk.indeed.com/viewjob?jk=1", ("job_board", "indeed", "uk.indeed.com")),
         ("https://www.glassdoor.co.uk/x", ("job_board", "glassdoor", "www.glassdoor.co.uk")),
         ("https://www.reed.co.uk/jobs/1", ("job_board", "reed", "www.reed.co.uk")),
@@ -44,7 +44,7 @@ def test_every_ats_in_sites_maps_to_an_ats_key(site):
 )
 def test_site_of(url, want):
     assert site_of(url) == want
-    assert want[0] in routing.SITE_KINDS
+    assert want[0] in (*routing.SITE_KINDS, routing.UNNAMED)
 
 
 def test_learn_task_uses_the_application_id_only():
@@ -98,11 +98,35 @@ def test_no_learned_route_overrides_a_strict_result(guest, monkeypatch):
         {"url": JOB}, {"linkedin": True}, {"url": "https://www.linkedin.com/jobs/view/1", "queue_kind": "application"},
         {"url": "https://x.example/a", "page_stop": "password"}, {"url": "https://x.example/a", "page_stop": "mfa"},
         {"url": "https://x.example/a", "account_step": True}, {"url": "https://www.ⓛinkedin.com/"},
+        {"url": "https://not a link/x"},
     ]
     for case, route in itertools.product(cases, learned):
         base = routing.browser_for(**case)
         assert base.kind != "job360" or base.reason == "linkedin_guest_read"  # the one decided server read
         assert routing.browser_for(**case, route=route) == base
+
+
+@pytest.mark.parametrize("url", ["https://not a link/x", "https://www.ⓛinkedin.com/jobs/view/1", "http://[::1"])
+def test_an_unnameable_link_is_unnamed_and_link_unclear_not_linkedin(url):
+    assert site_of(url) == ("unnamed", "unnamed", "")
+    route = routing.browser_for(url=url)
+    assert route == Route("own_browser", "link_unclear") == routing.browser_for(url=url, route=Route("job360", "probe"))
+    assert route.reason in routing.ROUTE_REASONS
+    assert routing.label(route) == {
+        "kind": "own_browser", "reason": "link_unclear",
+        "label": "This link looks broken or disguised: your own browser checks it",
+    }
+    assert routing.is_linkedin(url) is True  # the safety test still fails closed
+    assert routing.names_linkedin(url) is False
+    assert routing.ask_route("", url=url) == route
+    assert routing.browser_for(url=url, page_stop="password") == Route("human", "password")
+
+
+def test_a_real_linkedin_job_still_gives_the_linkedin_reason():
+    for url in (JOB, "https://lnkd.in/abc", "www.linkedin.com/jobs/view/2"):
+        assert routing.names_linkedin(url) is True
+        assert routing.browser_for(url=url) == Route("own_browser", "linkedin_own_browser")
+        assert routing.ask_route("", url=url) == Route("own_browser", "linkedin_own_browser")
 
 
 def test_a_learned_route_applies_when_nothing_strict_does():
@@ -136,5 +160,5 @@ def test_label_formats_from_closed_values_only():
 @pytest.mark.parametrize("url", ["foo.com[/x", "jobs.acme.com[/apply", "https://[::1"])
 def test_an_unsplittable_link_fails_closed_and_never_raises(url):
     route = routing.browser_for(url=url)
-    assert route.kind == "own_browser"
-    assert routing.site_of(url)[0] == "linkedin"
+    assert route == Route("own_browser", "link_unclear")
+    assert routing.site_of(url)[0] == "unnamed"
