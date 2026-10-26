@@ -34,7 +34,9 @@ describe("JobPriority", () => {
     expect(screen.getByText("On-site — United Kingdom")).toBeInTheDocument();
     expect(screen.getByText("Remote — anywhere else")).toBeInTheDocument();
     expect(screen.getByText("On-site — anywhere else (visa sponsorship)")).toBeInTheDocument();
-    expect(screen.queryByText(/France/)).toBeNull();
+    // France is off: no priority row (it still has its line in the grid below)
+    expect(screen.queryByTestId(/^job-priority-row-2-/)).toBeNull();
+    expect(screen.getAllByTestId(/^job-priority-row-/).map((r) => r.textContent)).not.toContain(expect.stringContaining("France"));
     expect(screen.getByTestId("job-priority-select-0-remote")).toHaveValue("high");
     expect(screen.getByTestId("job-priority-select-0-onsite")).toHaveValue("");
   });
@@ -78,7 +80,7 @@ describe("JobPriority", () => {
   it("shows the hint with a Memory link when there are no places", () => {
     render(<JobPriority rightToWork={{ countries: [{ country: "FR", remote_ok: false, onsite: "no" }] }} onSaved={() => {}} />);
     const hint = screen.getByTestId("job-priority-empty");
-    expect(hint).toHaveTextContent("Add where you can work in the Memory tab first.");
+    expect(hint).toHaveTextContent("Tick Remote or On-site for a place below first, or add where you can work in the Memory tab.");
     expect(screen.getByRole("link", { name: "Memory tab" })).toHaveAttribute("href", "/profile?tab=memory");
     expect(screen.queryByRole("combobox")).toBeNull();
   });
@@ -87,4 +89,75 @@ describe("JobPriority", () => {
     render(<JobPriority rightToWork={undefined} onSaved={() => {}} />);
     expect(screen.getByTestId("job-priority-empty")).toBeInTheDocument();
   });
+
+  it("the grid shows every place, all other countries last, with its ticks and visa answer", () => {
+    render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
+    const rows = screen.getAllByTestId(/^work-grid-row-/).map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual(["work-grid-row-GB", "work-grid-row-FR", "work-grid-row-ANY"]);
+    expect(screen.getByTestId("work-grid-row-ANY")).toHaveTextContent("All other countries");
+    expect(screen.getByTestId("work-grid-remote-GB")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("work-grid-onsite-ANY")).toHaveAttribute("aria-pressed", "true"); // only if sponsored = on
+    expect(screen.getByTestId("work-grid-onsite-FR")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("work-grid-contract-GB")).toHaveAttribute("aria-pressed", "false"); // unanswered reads off
+    expect(screen.getByTestId("work-grid-visa-need-ANY")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("work-grid-visa-noneed-GB")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("work-grid-add-any")).toBeNull(); // ANY already there
+  });
+
+  it("a tick writes one key of that place's record and keeps everything else", async () => {
+    updateProfileFields.mockImplementation(async (edits: { value: unknown }[]) => saved(edits[0].value));
+    render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
+    fireEvent.click(screen.getByTestId("work-grid-contract-GB"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    const block = updateProfileFields.mock.calls[0][0][0].value;
+    expect(block.citizenship).toEqual(["IN"]);
+    expect(block.countries[0]).toEqual({ ...BLOCK.countries[0], contract_ok: true });
+    expect(block.countries.slice(1)).toEqual(BLOCK.countries.slice(1));
+  });
+
+  it("on-site on is yes, off is no; the visa choice clicked again clears it", async () => {
+    updateProfileFields.mockImplementation(async (edits: { value: unknown }[]) => saved(edits[0].value));
+    render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
+    fireEvent.click(screen.getByTestId("work-grid-onsite-FR"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    expect(updateProfileFields.mock.calls[0][0][0].value.countries[2].onsite).toBe("yes");
+    fireEvent.click(screen.getByTestId("work-grid-visa-need-ANY"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(2));
+    expect(updateProfileFields.mock.calls[1][0][0].value.countries[1]).not.toHaveProperty("needs_sponsorship");
+  });
+
+  it("two quick ticks on different places both land (each starts from the last save)", async () => {
+    let release: (p: unknown) => void = () => undefined;
+    updateProfileFields
+      .mockImplementationOnce((edits: { value: unknown }[]) => new Promise((r) => { release = () => r(saved(edits[0].value)); }))
+      .mockImplementationOnce(async (edits: { value: unknown }[]) => saved(edits[0].value));
+    render(<JobPriority rightToWork={BLOCK} onSaved={() => {}} />);
+    fireEvent.click(screen.getByTestId("work-grid-contract-GB"));
+    fireEvent.click(screen.getByTestId("work-grid-remote-FR"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    release(undefined);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(2));
+    const last = updateProfileFields.mock.calls[1][0][0].value.countries;
+    expect(last[0].contract_ok).toBe(true);
+    expect(last[2].remote_ok).toBe(true);
+  });
+
+  it("Add all other countries adds an empty ANY place; a refused save shows its reason", async () => {
+    updateProfileFields.mockRejectedValueOnce(new Error("nope"));
+    render(<JobPriority rightToWork={{ countries: [{ country: "GB", remote_ok: true }] }} onSaved={() => {}} />);
+    fireEvent.click(screen.getByTestId("work-grid-add-any"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([
+      { path: "user_info.right_to_work", value: { countries: [{ country: "GB", remote_ok: true }, { country: "ANY" }] } },
+    ]));
+    fireEvent.click(screen.getByTestId("work-grid-contract-GB"));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
+  it("Need on a place where you are a citizen says why in plain words and sends nothing", () => {
+    render(<JobPriority rightToWork={{ countries: [{ country: "IN", work_authorization: "citizen", remote_ok: true }] }} onSaved={() => {}} />);
+    fireEvent.click(screen.getByTestId("work-grid-visa-need-IN"));
+    expect(screen.getByRole("alert")).toHaveTextContent("You saved that you're a citizen of India, so no visa is needed there.");
+    expect(updateProfileFields).not.toHaveBeenCalled();
+  });
 });
+
