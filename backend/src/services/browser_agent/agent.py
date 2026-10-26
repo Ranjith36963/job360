@@ -409,6 +409,10 @@ class BrowserPool:
         context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
 
         async def _route(route: Any) -> None:
+            if routing.is_linkedin(route.request.url):  # defence in depth: the egress proxy is the real door
+                logger.info("browser_agent blocked a request: linkedin is the user's own browser")
+                await route.abort("blockedbyclient")
+                return
             verdict = await self.screen.screen(route.request.url)
             if verdict.ok:
                 await route.continue_()

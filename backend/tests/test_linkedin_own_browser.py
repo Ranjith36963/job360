@@ -35,10 +35,24 @@ _AD = {
         ("https://linkedin.com.evil.example/jobs", False),
         ("https://notlinkedin.com/jobs", False),
         ("https://evil.example/?next=https://www.linkedin.com/jobs", False),
-        ("https://www.linkedin.com@evil.example/jobs", False),
         ("https://boards.greenhouse.io/acme/jobs/1", False),
-        ("", False),
-        ("http://[::1", False),
+        ("", False),  # no link at all: nothing to route
+        ("mailto:jobs@acme.example", False),  # no web host
+        # The canonical host (routes PR 0): every IDNA trick, the other LinkedIn domains, ports and dots.
+        ("https://www.ⓛinkedin.com/jobs/view/1", True),
+        ("https://www.linkedin。com/jobs/view/1", True),
+        ("https://www.linked­in.com/", True),
+        ("https://www.lin​kedin.com/", True),
+        ("https://lnkd.in/abc", True),
+        ("https://media.licdn.com/x.png", True),
+        ("https://LINKEDIN.COM.", True),
+        ("https://linkedin.com:443/feed", True),
+        ("https://notlinkedin.com", False),
+        ("https://linkedin.com.evil.io", False),
+        ("https://evil.io/?u=linkedin.com", False),
+        # Fails closed: a non-empty link whose host cannot be named waits for the own browser.
+        ("https://www.linkedin.com@evil.example/jobs", True),
+        ("http://[::1", True),
     ],
 )
 def test_is_linkedin_compares_the_exact_hostname(url, want):
