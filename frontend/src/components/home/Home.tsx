@@ -5,8 +5,6 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { getStats, listAsks } from "@/lib/api";
 import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { announceOpenCount } from "@/components/layout/useOpenAsks";
-import { AskCard } from "@/components/needs-you/NeedsYou";
 import { RunProblems } from "@/components/needs-you/RunProblems";
 import { DutyStatus } from "@/components/home/DutyStatus";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
@@ -17,7 +15,6 @@ import {
   FEED_LIMIT,
   FEED_LOOKBACK_DAYS,
   FEED_MAX_PAGES,
-  HOME_ASKS_LIMIT,
   buildSentence,
   dayAt,
   daysAgoIso,
@@ -49,7 +46,6 @@ type SinceVisit = Pick<WhatsNewPages, "events" | "truncated" | "now">;
 type Asks = { asks: Ask[]; openCount: number };
 type Feed = { items: FeedItem[]; eventCount: number; applied: ReturnType<typeof lastApplied> };
 
-const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
 const linkBtn =
   "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
 
@@ -150,19 +146,6 @@ export function Home() {
     run();
   }
 
-  // After an answer or a withdraw: re-read the open questions and tell the
-  // sidebar badge, exactly as the Needs-you page does.
-  const reloadAsks = useCallback(async () => {
-    try {
-      const r = await listAsks("open");
-      setAsks({ status: "ok", value: { asks: r.asks, openCount: r.open_count } });
-      // The badge also counts waiting setting changes and Ready to send (S5d):
-      // re-count all of it, never announce the questions alone.
-      void announceOpenCount();
-    } catch {
-      // Keep what is on screen; the next full load will correct it.
-    }
-  }, []);
 
   const brandNew = isBrandNew({
     applicationsTotal: apps.status === "ok" ? apps.value.total : null,
@@ -262,26 +245,6 @@ export function Home() {
 
           <RunProblems />
           <DutyStatus />
-
-          {asks.status === "ok" && asks.value.asks.length > 0 && (
-            <section aria-labelledby="home-asks" className="flex flex-col gap-3" data-testid="home-asks">
-              <div className="flex items-baseline justify-between gap-3">
-                <h2 id="home-asks" className={LABEL}>
-                  Needs you
-                </h2>
-                {(asks.value.asks.length > HOME_ASKS_LIMIT || asks.value.openCount > HOME_ASKS_LIMIT) && (
-                  <Link href="/needs-you" className={linkBtn}>
-                    See all
-                  </Link>
-                )}
-              </div>
-              <ul className="flex flex-col gap-3">
-                {asks.value.asks.slice(0, HOME_ASKS_LIMIT).map((a) => (
-                  <AskCard key={a.id} ask={a} mode="open" onChanged={reloadAsks} />
-                ))}
-              </ul>
-            </section>
-          )}
 
           {apps.status === "error" && (
             <div role="alert" className="flex items-center gap-3 text-sm text-destructive">

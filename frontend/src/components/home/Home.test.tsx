@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { Home } from "@/components/home/Home";
 import { LAST_VISIT_KEY } from "@/lib/home";
 
@@ -121,36 +121,21 @@ describe("Home", () => {
     await waitFor(() => expect(window.localStorage.getItem(LAST_VISIT_KEY)).toBe(NOW));
   });
 
-  it("first 3 asks as cards, with See all when there are more", async () => {
+  it("Home shows no Needs-you cards, even with questions open (owner, 2026-10-26)", async () => {
     happy({ asks: [ask(1), ask(2), ask(3), ask(4)] });
     render(<Home />);
-    expect(await screen.findByTestId("ask-1")).toBeInTheDocument();
-    expect(screen.getByTestId("ask-3")).toBeInTheDocument();
-    expect(screen.queryByTestId("ask-4")).toBeNull();
-    expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "/needs-you");
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByTestId("home-asks")).toBeNull();
+    expect(screen.queryByTestId("ask-1")).toBeNull();
+    expect(screen.queryByRole("link", { name: "See all" })).toBeNull();
   });
 
-  it("after an answer the badge hears jobs + waiting changes + ready to send, never the asks alone", async () => {
-    happy({ asks: [ask(1)] });
-    api.answerAsk.mockResolvedValue({});
-    api.getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }], paused: false });
-    api.getReadyToSend.mockResolvedValue({ paused: false, total: 3, unflagged: 3, items: [] });
-    const heard: number[] = [];
-    const onChanged = (e: Event) => heard.push(Number((e as CustomEvent).detail));
-    window.addEventListener("job360:asks-changed", onChanged);
-    try {
-      render(<Home />);
-      await screen.findByTestId("ask-1");
-      // One job still waits (two of its asks are open): it counts once.
-      api.listAsks.mockResolvedValue({ asks: [ask(2), ask(3)], open_count: 2 });
-      fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Yes" } });
-      fireEvent.click(screen.getByTestId("ask-save"));
-      fireEvent.click(screen.getByTestId("ask-answer-confirm"));
-      await waitFor(() => expect(heard).toEqual([5]));
-      expect(api.getReadyToSend).toHaveBeenCalledWith({ limit: 0 });
-    } finally {
-      window.removeEventListener("job360:asks-changed", onChanged);
-    }
+  it("the open questions are still counted for the sentence, read once", async () => {
+    happy({ asks: [ask(1), ask(2)] });
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1 });
+    expect(api.listAsks).toHaveBeenCalledWith("open");
+    expect(screen.queryByTestId("ask-input-1")).toBeNull();
   });
 
   it("names the last application you confirmed, under the sentence", async () => {
