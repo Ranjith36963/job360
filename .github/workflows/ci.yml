@@ -207,12 +207,7 @@ jobs:
 
       - name: Frontend API types match the backend (check:types-drift)
         if: needs.scope.outputs.scope == 'full'
-        run: |
-          bash scripts/gen-api-types.sh
-          if ! git diff --exit-code -- frontend/openapi.json frontend/src/lib/api-types.ts; then
-            echo "::error::Frontend API types are out of date with the backend. Run 'npm run gen:types' in frontend/ and commit frontend/openapi.json + frontend/src/lib/api-types.ts."
-            exit 1
-          fi
+        run: python scripts/check_api_types_drift.py
 
       - name: Lint (ruff)
         if: needs.scope.outputs.scope == 'full'
