@@ -6,7 +6,8 @@ import type { Ask, ReadyToSend as ReadyData } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { splitReady } from "@/lib/ready-to-send";
 import { openQuestionAsks } from "./useReadyAsks";
-import { ReadyCard } from "./ReadyCard";
+import { ReadyCard, isMissingAnswer } from "./ReadyCard";
+import { useSalaryFacts } from "./useSalaryFacts";
 import { SendAllCard } from "./SendAllCard";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,8 @@ const sectionLabel = "font-mono text-[11px] font-medium uppercase tracking-[0.09
 export function ReadyToSend({ onTotal, asks }: { onTotal?: (total: number) => void; asks?: Ask[] }) {
   const [data, setData] = useState<ReadyData | null>(null);
   const [failed, setFailed] = useState(false);
+  // One profile read for the whole list, and only when some answer is waiting for the user.
+  const salaryFacts = useSalaryFacts(!!data?.items.some((c) => c.answers.some(isMissingAnswer)));
 
   const load = useCallback(() => {
     getReadyToSend().then(
@@ -79,7 +82,7 @@ export function ReadyToSend({ onTotal, asks }: { onTotal?: (total: number) => vo
       <ul className="flex flex-col gap-3">
         {data.items.map((c) => (
           <li key={c.application_id}>
-            <ReadyCard card={c} asks={asks?.filter((a) => a.application_id === c.application_id)} paused={data.paused} onChanged={changed} />
+            <ReadyCard card={c} asks={asks?.filter((a) => a.application_id === c.application_id)} paused={data.paused} onChanged={changed} salaryFacts={salaryFacts} />
           </li>
         ))}
       </ul>

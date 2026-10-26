@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ReadyCard } from "./ReadyCard";
 import { answer, card } from "./ready-fixtures";
 import { ApiError } from "@/lib/api-error";
+import type { SalaryFacts } from "@/lib/salary-suggest";
 
 const confirmAnswer = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -183,5 +184,52 @@ describe("full answers and missing drafts", () => {
     render(<ReadyCard card={card(72)} paused={false} onChanged={() => {}} />);
     expect(screen.getByTestId("title-link-72")).toHaveAttribute("href", "/applications/72");
     expect(screen.getByTestId("company-link-72")).toHaveAttribute("href", "/applications/72");
+  });
+});
+
+describe("Suggested salary from Memory", () => {
+  const facts: SalaryFacts = {
+    current: { amount: 45000, currency: "GBP", period: "year" },
+    expected: [{ country: "GB", min: 60000, max: 80000, currency: "GBP", period: "year" }],
+  };
+  const priv = (question: string) => answer({ question, answer: "", source: "approved", key: null, redacted: true, saved_by: null, saved_at: null });
+  const gb = (answers: unknown[]) => card(130, { job_country: "GB", answers });
+  const mk = (answers: unknown[], f: SalaryFacts | undefined = facts, onChanged = () => {}) =>
+    render(<ReadyCard card={gb(answers)} paused={false} onChanged={onChanged} salaryFacts={f} />);
+
+  it("shows the suggestion on a private salary row, keeping the Needs your answer chip", () => {
+    mk([priv("What is your current/last salary package?"), priv("What is your expected salary package?")]);
+    expect(screen.getByTestId("ready-answer-suggest-130-0")).toHaveTextContent("Suggested from your Memory: £45,000 a year");
+    expect(screen.getByTestId("ready-answer-suggest-130-1")).toHaveTextContent("Suggested from your Memory: £60,000 – £80,000 a year");
+    expect(screen.getByTestId("ready-answer-130-0")).toHaveTextContent("Needs your answer");
+  });
+
+  it("Use this saves exactly that text through the same path as Edit, and only on the tap", async () => {
+    const onChanged = vi.fn();
+    mk([priv("What is your current/last salary package?")], facts, onChanged);
+    expect(confirmAnswer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("ready-answer-use-130-0"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(confirmAnswer).toHaveBeenCalledWith(130, 0, 1300, "£45,000 a year");
+  });
+
+  it("Edit opens with the suggestion in the box", () => {
+    mk([priv("What is your expected salary package?")]);
+    fireEvent.click(screen.getByTestId("ready-answer-edit-130-0"));
+    expect(screen.getByTestId("ready-answer-input-130-0")).toHaveValue("£60,000 – £80,000 a year");
+  });
+
+  it("shows no suggestion when the profile has no salary, or no facts were loaded", () => {
+    mk([priv("What is your expected salary package?")], { current: null, expected: [] });
+    expect(screen.queryByTestId("ready-answer-suggest-130-0")).toBeNull();
+    expect(screen.queryByTestId("ready-answer-use-130-0")).toBeNull();
+    expect(screen.getByTestId("ready-answer-130-0")).toHaveTextContent("Needs your answer");
+  });
+
+  it("shows no suggestion on a blank row that is not about salary", () => {
+    mk([answer({ question: "Notice period?", answer: "", source: "approved", key: null, saved_by: null, saved_at: null })]);
+    expect(screen.queryByTestId("ready-answer-suggest-130-0")).toBeNull();
+    fireEvent.click(screen.getByTestId("ready-answer-edit-130-0"));
+    expect(screen.getByTestId("ready-answer-input-130-0")).toHaveValue("");
   });
 });

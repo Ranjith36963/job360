@@ -13,7 +13,8 @@ import {
 } from "@/lib/api";
 import { LIVE_SUBMITTED_EVENT } from "@/lib/live-submitted";
 import type { ApplicationControls, ApplicationDetail, ReadyCardData, VisaShape } from "@/lib/api";
-import { ReadyCard } from "@/components/needs-you/ReadyCard";
+import { ReadyCard, isMissingAnswer } from "@/components/needs-you/ReadyCard";
+import { useSalaryFacts } from "@/components/needs-you/useSalaryFacts";
 import { allowedActions, changesSinceApprovedCv, isQueued, submitUnconfirmed } from "@/lib/application-actions";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
 import { BatchButton } from "@/components/applications/BatchButton";import { SubmitUnconfirmedBanner } from "@/components/applications/SubmitUnconfirmedBanner";
@@ -104,6 +105,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   // S5d: this application's "ready to send" card, when the assistant filled the
   // form and no yes / no has come after it. A failed read shows no card.
   const [ready, setReady] = useState<{ card: ReadyCardData; paused: boolean } | null>(null);
+  const salaryFacts = useSalaryFacts(!!ready?.card.answers.some(isMissingAnswer));
   // "Needs you" for this job: the SAME card the Needs-you page shows, built by the same loader.
   const [jobCard, setJobCard] = useState<JobCardData | null>(null);
   useEffect(() => {
@@ -464,7 +466,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             )}
             {ready && actions.includes("ready_card") && (
               <div className="w-full">
-                <ReadyCard card={ready.card} asks={detail.asks} paused={ready.paused} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} />
+                <ReadyCard card={ready.card} asks={detail.asks} paused={ready.paused} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} salaryFacts={salaryFacts} />
               </div>
             )}
             {controls && (
