@@ -246,4 +246,19 @@ describe("MemoryTab", () => {
       { path: "preferences.assistant_notes", value: ["About you: I go by Alex.", "Logistics: No travel in August."] },
     ]);
   });
+
+  it("your details ask citizenship, the country and the city you live in as separate questions, in that order", async () => {
+    const lives = { ...profile, user_info: { ...profile.user_info, contact: { ...profile.user_info.contact, residence_country: "GB", residence_city: "London" } } };
+    getProfile.mockResolvedValue(lives);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    const ids = within(screen.getByTestId("memory-step-you")).getAllByTestId(/^memory-row-/).map((r) => r.getAttribute("data-testid"));
+    const at = (id: string) => ids.indexOf(`memory-row-${id}`);
+    expect(at("user_info.right_to_work.citizenship")).toBeLessThan(at("user_info.contact.residence_country"));
+    expect(at("user_info.contact.residence_country")).toBe(at("user_info.contact.residence_city") - 1);
+    expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("Country you live in");
+    expect(screen.getByTestId("memory-row-user_info.contact.residence_country")).toHaveTextContent("United Kingdom");
+    expect(screen.getByTestId("memory-row-user_info.contact.residence_city")).toHaveTextContent("London");
+  });
 });
+
