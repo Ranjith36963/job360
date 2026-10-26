@@ -7,7 +7,7 @@ import { apiErrorMessage } from "@/lib/api-error";
 import { countryName } from "@/lib/countries";
 import { REGIONS, isRegion } from "@/lib/regions";
 import {
-  PRIORITY_LABEL, PRIORITY_OPTIONS, RTW, SALARY, fromInputs, inputProblem, readRow, salaryRow, salaryText, toInputs, writeRow,
+  PRIORITY_LABEL, RTW, SALARY, fromInputs, inputProblem, readRow, salaryRow, salaryText, toInputs, writeRow,
 } from "@/lib/memory";
 import type { ProfileResponse } from "@/lib/types";
 
@@ -15,75 +15,16 @@ const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] tex
 const FIELD =
   "h-9 w-full min-w-0 rounded-lg border border-border bg-background px-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 min-h-11 md:min-h-9";
 
-type Kind = "remote" | "onsite";
 type Rec = Record<string, unknown>;
 
-interface PlaceRow {
-  /** Stable key + test id suffix: <record index>-<remote|onsite>. */
-  id: string;
-  index: number;
-  kind: Kind;
-  label: string;
-  /** The key inside the record this row writes. */
-  key: "remote_priority" | "onsite_priority";
-  value: string;
-}
 
 const isObj = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
 
-function placeName(code: unknown): string {
-  const c = String(code ?? "");
-  if (c === "ANY") return "anywhere else";
-  return c ? countryName(c) : "unknown place"; // a region code reads as its name ("Europe")
-}
 
 /** Countries, then regions, then all other countries: the order a job's place is answered in. */
 const placeRank = (code: unknown) => (code === "ANY" ? 2 : isRegion(String(code)) ? 1 : 0);
 
-/** One row per place the user can work: countries, then regions, then all other countries
- *  (record order within each). Nothing is invented: a record with neither remote_ok nor an
- *  on-site yes gives no row. */
-export function priorityRows(block: unknown): PlaceRow[] {
-  const out: PlaceRow[] = [];
-  // Index into the RAW countries list (not the filtered one) so a write lands on the right record.
-  const list: unknown[] = isObj(block) && Array.isArray(block.countries) ? block.countries : [];
-  list.forEach((rec, index) => {
-    if (!isObj(rec)) return;
-    const place = placeName(rec.country);
-    const level = (key: string) =>
-      (PRIORITY_OPTIONS as readonly string[]).includes(String(rec[key])) ? String(rec[key]) : "";
-    if (rec.remote_ok === true) {
-      out.push({
-        id: `${index}-remote`, index, kind: "remote", label: `Remote — ${place}`,
-        key: "remote_priority", value: level("remote_priority"),
-      });
-    }
-    if (rec.onsite === "yes" || rec.onsite === "only_if_sponsored") {
-      out.push({
-        id: `${index}-onsite`, index, kind: "onsite",
-        label: `On-site — ${place}${rec.onsite === "only_if_sponsored" ? " (visa sponsorship)" : ""}`,
-        key: "onsite_priority", value: level("onsite_priority"),
-      });
-    }
-  });
-  const code = (row: PlaceRow) => (list[row.index] as Rec).country;
-  return out.sort((a, b) => placeRank(code(a)) - placeRank(code(b)));
-}
 
-/** A copy of the WHOLE right_to_work block with one key of one record changed.
- *  `""` (Not set) removes the key. */
-export function withPriority(block: unknown, index: number, key: string, value: string): Rec {
-  const base: Rec = isObj(block) ? block : {};
-  const list: unknown[] = Array.isArray(base.countries) ? base.countries : [];
-  const countries = list.map((rec, i) => {
-    if (i !== index || !isObj(rec)) return rec;
-    const next = { ...rec };
-    if (value === "") delete next[key];
-    else next[key] = value;
-    return next;
-  });
-  return { ...base, countries };
-}
 
 // ---- Where you'll work (owner sketch, 2026-10-26) -------------------------
 // One line per place: Remote / On-site / Contract ticks, then Visa need / no
@@ -142,6 +83,26 @@ export function withPlace(block: unknown, code: string): Rec {
 // FIELD without w-full, so the four salary boxes sit side by side.
 const SMALL_FIELD = FIELD.replace("w-full ", "");
 const TICK_LABEL: Record<Tick, string> = { remote: "Remote", onsite: "On-site", contract: "Contract" };
+
+// Owner, 2026-10-26: a priority right next to each ticked work type, per place.
+// Three choices; an older level (high / off) is kept and shown until changed.
+export const PRIORITY_KEY: Record<Tick, string> = {
+  remote: "remote_priority", onsite: "onsite_priority", contract: "contract_priority",
+};
+const LEVELS = ["highest", "medium", "low"] as const;
+
+/** The choices for one priority box: the three levels, plus a stored older one. */
+export function levelChoices(current: string): string[] {
+  return current && !(LEVELS as readonly string[]).includes(current) ? [...LEVELS, current] : [...LEVELS];
+}
+
+/** The record with one work type's priority set; "" (not chosen) removes it. */
+export function withLevel(rec: Rec, tick: Tick, level: string): Rec {
+  const next = { ...rec };
+  if (level === "") delete next[PRIORITY_KEY[tick]];
+  else next[PRIORITY_KEY[tick]] = level;
+  return next;
+}
 const CHIP =
   "inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-sm md:min-h-8 disabled:opacity-60 " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -220,7 +181,6 @@ export function JobPriority({
   const latestSalaries = useRef<unknown>(salaries);
   useEffect(() => { latestSalaries.current = salaries; }, [salaries]);
 
-  const rows = priorityRows(rightToWork);
 
   /** Save `next(latest block)` in turn; `key` is the status slot it reports on. */
   const write = (key: string, next: (block: unknown) => unknown): Promise<void> => {
@@ -263,8 +223,6 @@ export function JobPriority({
     return done;
   };
 
-  const change = (row: PlaceRow, value: string): Promise<void> =>
-    write(row.id, (b) => withPriority(b, row.index, row.key, value));
 
   // Grid lines: every record, by raw index, "every other country" last.
   const records: { rec: Rec; index: number }[] = (
@@ -286,7 +244,8 @@ export function JobPriority({
       <div data-testid="work-grid">
         <h4 className={LABEL}>Where you&apos;ll work</h4>
         <p className="mt-2 text-xs text-muted-foreground">
-          For each place: the kinds of work you&apos;ll take, whether you need a visa there, and your salary range.
+          For each place: the kinds of work you&apos;ll take and how much each matters (Highest, Medium, Low; your
+          assistant spends more of the hunt on higher ones), whether you need a visa there, and your salary range.
         </p>
         {/* Owner, 2026-10-26: one line per country, four columns. On a narrow
             screen the table scrolls inside its own box; the page never does. */}
@@ -317,16 +276,32 @@ export function JobPriority({
                         </span>
                       </th>
                       <td className="py-3 pr-3">
-                        <div className="flex gap-1 whitespace-nowrap">
+                        <div className="flex flex-wrap gap-x-2 gap-y-1.5">
                           {(["remote", "onsite", "contract"] as const).map((tick) => {
                             const on = tickOn(rec, tick);
+                            const level = typeof rec[PRIORITY_KEY[tick]] === "string" ? String(rec[PRIORITY_KEY[tick]]) : "";
                             return (
-                              <button key={tick} type="button" aria-pressed={on} disabled={busy}
-                                data-testid={`work-grid-${tick}-${code}`} aria-label={`${TICK_LABEL[tick]} in ${name}`}
-                                className={`${CHIP} ${chipTone(on)} px-2`}
-                                onClick={() => void editPlace(code, (r) => flipTick(r, tick))}>
-                                <span aria-hidden="true">{on ? "☑" : "☐"}</span>{TICK_LABEL[tick]}
-                              </button>
+                              <span key={tick} className="inline-flex items-center whitespace-nowrap">
+                                <button type="button" aria-pressed={on} disabled={busy}
+                                  data-testid={`work-grid-${tick}-${code}`} aria-label={`${TICK_LABEL[tick]} in ${name}`}
+                                  className={`${CHIP} ${chipTone(on)} px-2 ${on ? "rounded-r-none" : ""}`}
+                                  onClick={() => void editPlace(code, (r) => flipTick(r, tick))}>
+                                  <span aria-hidden="true">{on ? "☑" : "☐"}</span>{TICK_LABEL[tick]}
+                                </button>
+                                {on && (
+                                  <select data-testid={`work-grid-priority-${tick}-${code}`} disabled={busy}
+                                    aria-label={`Priority for ${TICK_LABEL[tick]} in ${name}`} value={level}
+                                    className="-ml-px min-h-11 rounded-l-none rounded-r-lg border border-primary bg-background px-1.5 text-sm md:min-h-8"
+                                    onChange={(e) => {
+                                      // Read now: the save runs later, when this controlled box shows the old value again.
+                                      const level = e.target.value;
+                                      void editPlace(code, (r) => withLevel(r, tick, level));
+                                    }}>
+                                    <option value="">Priority…</option>
+                                    {levelChoices(level).map((l) => <option key={l} value={l}>{PRIORITY_LABEL[l] ?? l}</option>)}
+                                  </select>
+                                )}
+                              </span>
                             );
                           })}
                         </div>
@@ -403,52 +378,6 @@ export function JobPriority({
             ))}
           </div>
         </div>
-      </div>
-      <div data-testid="priorities" className="mt-6 border-t border-border pt-5">
-      <h4 className={LABEL}>Priorities</h4>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Where should your assistant look first? It spends more of the hunt on higher priorities. Off = never search there.
-      </p>
-      {rows.length === 0 ? (
-        <p data-testid="job-priority-empty" className="mt-4 text-sm text-muted-foreground">
-          Tick Remote or On-site for a place below first.
-        </p>
-      ) : (
-        <ul className="mt-4 flex flex-col gap-3">
-          {rows.map((row) => {
-            const st = status[row.id];
-            const selectId = `job-priority-${row.id}`;
-            return (
-              <li key={row.id} data-testid={`job-priority-row-${row.id}`} className="flex flex-col gap-1">
-                <label htmlFor={selectId} className="text-sm">{row.label}</label>
-                <div className="flex items-center gap-3">
-                  <select
-                    id={selectId}
-                    data-testid={`job-priority-select-${row.id}`}
-                    className={FIELD}
-                    value={row.value}
-                    disabled={st?.state === "saving"}
-                    onChange={(e) => { void change(row, e.target.value); }}
-                  >
-                    <option value="">Not set</option>
-                    {PRIORITY_OPTIONS.map((o) => <option key={o} value={o}>{PRIORITY_LABEL[o]}</option>)}
-                  </select>
-                  <span
-                    role="status"
-                    data-testid={`job-priority-status-${row.id}`}
-                    className="w-16 shrink-0 text-xs text-muted-foreground"
-                  >
-                    {st?.state === "saving" ? "Saving…" : st?.state === "saved" ? "Saved" : ""}
-                  </span>
-                </div>
-                {st?.state === "error" && (
-                  <p role="alert" className="text-xs text-destructive">{st.message}</p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
       </div>
     </section>
   );

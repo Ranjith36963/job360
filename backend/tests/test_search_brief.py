@@ -308,3 +308,32 @@ def test_contract_answer_rides_on_each_place_and_is_never_guessed():
     # not answered stays silent (rule #29): no tail, None, never a default
     assert rows["ANY"]["contract_ok"] is None
     assert "contract" not in " ".join(rows["ANY"]["counts_if"])
+
+
+def test_contract_roles_get_their_own_priority_in_the_hunt_plan():
+    """Owner decision 2026-10-26: a priority right next to each work type - remote,
+    on-site AND contract - per country or region."""
+    brief = build_search_brief(_rtw(
+        {"country": "EUROPE", "needs_sponsorship": True, "remote_ok": True, "onsite": "only_if_sponsored",
+         "contract_ok": True, "remote_priority": "highest", "onsite_priority": "medium", "contract_priority": "low"},
+        {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no", "contract_ok": True},
+    ))
+    europe = next(r for r in brief["rows"] if r["country"] == "EUROPE")
+    assert europe["priority"] == {"remote": "highest", "onsite": "medium", "contract": "low"}
+    kinds = [(p["country"], p["kind"], p["priority"]) for p in brief["plan"]]
+    assert ("EUROPE", "contract", "low") in kinds
+    assert ("IN", "contract", None) in kinds  # ticked, no level chosen: an even share, never a default
+    # most effort first: Europe remote (highest) leads the plan
+    assert brief["plan"][0]["country"] == "EUROPE" and brief["plan"][0]["kind"] == "remote"
+    contract_line = next(p["counts_if"] for p in brief["plan"] if p["kind"] == "contract" and p["country"] == "EUROPE")
+    assert contract_line.startswith("contract roles in Europe")
+
+
+def test_contract_priority_off_or_contract_unticked_adds_no_contract_place():
+    brief = build_search_brief(_rtw(
+        {"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes",
+         "contract_ok": True, "contract_priority": "off"},
+        {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes",
+         "contract_ok": False, "contract_priority": "highest"},
+    ))
+    assert not [p for p in brief["plan"] if p["kind"] == "contract"]

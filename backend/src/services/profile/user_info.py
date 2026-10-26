@@ -68,6 +68,9 @@ _RTW_COUNTRY: dict[str, str] = {
     # Owner decision 2026-10-19 - the user's own order of search effort per place
     # (job_priority.PRIORITY_LEVELS). Empty = not chosen (rule #29), never a default.
     "remote_priority": "priority", "onsite_priority": "priority",
+    # Owner decision 2026-10-26 - the priority of contract roles in that place, chosen
+    # right next to the Contract tick (like remote and on-site).
+    "contract_priority": "priority",
 }
 ANY_COUNTRY = "ANY"
 ONSITE_VALUES = ("yes", "only_if_sponsored", "no")

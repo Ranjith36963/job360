@@ -180,6 +180,13 @@ def build_search_brief(
                 counts_if.append(line)
                 priorities[job_priority.ONSITE] = lvl
                 plan.append({"country": country, "kind": job_priority.ONSITE, "counts_if": line, "priority": lvl})
+        if rec.get("contract_ok") is True:
+            # Contract roles in this place, ranked on their own (owner decision 2026-10-26).
+            lvl = job_priority.level_of(rec, job_priority.CONTRACT)
+            if lvl != job_priority.OFF and counts_if:
+                line = f"contract roles in {_name(country)}, remote or on-site as above"
+                priorities[job_priority.CONTRACT] = lvl
+                plan.append({"country": country, "kind": job_priority.CONTRACT, "counts_if": line, "priority": lvl})
         if onsite not in ONSITE_VALUES:
             gaps.append({
                 "path": RIGHT_TO_WORK_PATH, "country": country,
