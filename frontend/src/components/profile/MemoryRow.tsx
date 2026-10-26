@@ -7,12 +7,16 @@ import { Input } from "@/components/ui/input";
 import { CountryPicker } from "@/components/profile/CountryPicker";
 import { apiErrorMessage } from "@/lib/api-error";
 import {
+  EXPERIENCE_LABEL,
   PNS,
+  YEARS_MAX,
   fromInputs,
   inputProblem,
   isEmpty,
   isPns,
+  parseRanges,
   provenanceText,
+  rangeText,
   showRow,
   toInputs,
   type Part,
@@ -57,6 +61,31 @@ function PartField({
       />
     );
   }
+  if (part.input === "levels") {
+    // Owner decision 2026-10-26: any number of levels at once; tap to pick.
+    const on = value ? value.split(",") : [];
+    const toggle = (o: string) => {
+      const next = on.includes(o) ? on.filter((x) => x !== o) : [...on, o];
+      onChange((part.options ?? []).filter((x) => next.includes(x)).join(","));
+    };
+    return (
+      <div className="flex flex-col gap-1" role="group" aria-label={part.label}>
+        <span className="text-xs text-muted-foreground">{part.label} (pick any)</span>
+        <div className="flex flex-wrap gap-1.5">
+          {(part.options ?? []).map((o) => (
+            <button
+              key={o} type="button" aria-pressed={on.includes(o)} disabled={disabled}
+              data-testid={`level-${o}`} onClick={() => toggle(o)}
+              className={`${TAP} rounded-full border px-3 text-sm ${on.includes(o) ? "border-brand bg-brand text-white" : "border-border bg-background text-foreground"}`}
+            >
+              {EXPERIENCE_LABEL[o] ?? o}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (part.input === "ranges") return <RangesField label={part.label} value={value} disabled={disabled} onChange={onChange} />;
   if (part.input === "yesno" || part.input === "select") {
     const opts: [string, string][] =
       part.input === "yesno"
@@ -91,6 +120,58 @@ function PartField({
           type={part.input === "date" ? "date" : part.input === "number" ? "number" : "text"}
           onChange={(e) => onChange(e.target.value)} />
       )}
+    </div>
+  );
+}
+
+/** Several years ranges ("1-3,2-5"): each one a chip with a remove button, plus From / Up to / Add. */
+function RangesField({
+  label, value, disabled, onChange,
+}: { label: string; value: string; disabled: boolean; onChange: (v: string) => void }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const ranges = parseRanges(value) ?? [];
+  const lo = Number(from), hi = to.trim() === "" ? lo : Number(to);
+  const ok = from.trim() !== "" && Number.isInteger(lo) && Number.isInteger(hi) && lo >= 0 && lo <= hi && hi <= YEARS_MAX;
+  const add = () => {
+    if (!ok) return;
+    // Once each, lowest first: the order the server keeps them in.
+    const all = [...ranges, { min: lo, max: hi }].sort((a, b) => a.min - b.min || a.max - b.max);
+    onChange([...new Set(all.map((r) => `${r.min}-${r.max}`))].join(","));
+    setFrom("");
+    setTo("");
+  };
+  return (
+    <div className="flex flex-col gap-1.5" role="group" aria-label={label}>
+      <span className="text-xs text-muted-foreground">{label} (add as many ranges as you like)</span>
+      {ranges.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {ranges.map((r, i) => (
+            <span key={`${r.min}-${r.max}-${i}`} className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-0.5 text-sm">
+              {rangeText(r)}
+              <button
+                type="button" disabled={disabled} aria-label={`Remove ${rangeText(r)}`}
+                className="px-1 text-muted-foreground hover:text-foreground"
+                onClick={() => onChange(ranges.filter((_, j) => j !== i).map((x) => `${x.min}-${x.max}`).join(","))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Input aria-label="Years from" type="number" min={0} max={YEARS_MAX} className="w-20" value={from}
+          disabled={disabled} onChange={(e) => setFrom(e.target.value)} placeholder="From" />
+        <span className="text-muted-foreground">to</span>
+        <Input aria-label="Years up to" type="number" min={0} max={YEARS_MAX} className="w-20" value={to}
+          disabled={disabled} onChange={(e) => setTo(e.target.value)} placeholder="Up to"
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
+        <Button type="button" variant="outline" size="sm" className={TAP} disabled={disabled || !ok} onClick={add}
+          data-testid="range-add">
+          Add range
+        </Button>
+      </div>
     </div>
   );
 }

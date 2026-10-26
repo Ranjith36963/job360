@@ -1648,6 +1648,35 @@ async def test_looking_for_preferences_validate_and_show_in_the_profile(authenti
 
 
 @pytest.mark.asyncio
+async def test_several_levels_and_year_ranges_validate_and_survive_a_web_save(
+    authenticated_async_context, fixture_user_id
+):
+    """Owner, 2026-10-26: several levels (8 to choose from) and several years ranges at once."""
+    levels, ranges = "preferences.experience_levels", "preferences.experience_ranges"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        ok = await _patch(
+            client, _e(levels, ["Mid-senior", "junior mid", "mid", "mid"]),
+            _e(ranges, [{"min": 2, "max": 3}, {"min": 1, "max": 3}, {"min": 1, "max": 3}]),
+        )
+        assert ok.status_code == 200, ok.text
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert prefs["experience_levels"] == ["junior_mid", "mid", "mid_senior"]  # choices' order, once each
+        assert prefs["experience_ranges"] == [{"min": 1, "max": 3}, {"min": 2, "max": 3}]
+        for path, value in [
+            (levels, ["boss"]), (ranges, [{"min": 3, "max": 1}]), (ranges, [{"min": 1}]),
+            (ranges, [{"min": 0, "max": 61}]), (ranges, [{"min": 1, "max": 2}] * 11), (ranges, "1-3"),
+        ]:
+            bad = await _patch(client, _e(path, value))
+            assert bad.status_code == 422 and path in bad.json()["detail"], (path, value)
+        # A routine web preferences save (the CV tab) never resets them.
+        assert (await client.post("/api/profile", data={"preferences": "{}"})).status_code == 200
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert prefs["experience_levels"] == ["junior_mid", "mid", "mid_senior"]
+        assert prefs["experience_ranges"] == [{"min": 1, "max": 3}, {"min": 2, "max": 3}]
+
+
+@pytest.mark.asyncio
 async def test_save_fit_answers_with_the_line_and_the_list_and_stats_carry_it(
     authenticated_async_context, fixture_user_id
 ):

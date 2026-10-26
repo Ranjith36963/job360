@@ -14,7 +14,7 @@ import { getProfile, getProfileEditHistory, keepProfileEdit, updateProfileFields
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import type { ProfileResponse } from "@/lib/types";
 import {
-  ANSWERS, LOGISTICS, MEMORY_PATHS, RTW, SALARY,
+  ANSWERS, LEGACY_PATHS, LOGISTICS, MEMORY_PATHS, RTW, SALARY, legacyTarget,
   contactRows, equalityRows, targetRows, fieldProvenance, isEmpty, logisticsCountryRows, logisticsRows,
   answerApprover, approvalText, countrySaved, provenanceText, readRow, rtwCountryRows, rtwTopRows, salaryRow, showRow, writeRow,
   type HistoryRow, type RowSpec,
@@ -25,7 +25,7 @@ type Histories = Record<string, HistoryRow[]>;
 
 function blockOf(profile: ProfileResponse | null, path: string): unknown {
   if (!profile) return undefined;
-  if (path.startsWith("preferences.")) return (profile.preferences as Record<string, unknown>)?.[path.replace("preferences.", "")];
+  if (path.startsWith("preferences.")) return legacyTarget(profile.preferences as Record<string, unknown>, path.replace("preferences.", ""));
   return (profile.user_info as Record<string, unknown>)?.[path.replace("user_info.", "")];
 }
 
@@ -166,7 +166,11 @@ export function MemoryTab() {
   const save = useCallback((spec: RowSpec, next: unknown): Promise<void> => {
     const run = async () => {
       const block = writeRow(spec, blockOf(latest.current, spec.path), next);
-      const updated = await updateProfileFields([{ path: spec.path, value: block }]);
+      const prefs = (latest.current?.preferences ?? {}) as Record<string, unknown>;
+      const legacy = (LEGACY_PATHS[spec.path] ?? [])
+        .filter((p) => !isEmpty(prefs[p.replace("preferences.", "")]))
+        .map((p) => ({ path: p, value: null }));
+      const updated = await updateProfileFields([{ path: spec.path, value: block }, ...legacy]);
       latest.current = updated;
       setProfile(updated);
       // The save worked. If the re-read did not, keep the provenance this block
@@ -350,15 +354,14 @@ export function MemoryTab() {
       <>
               {(() => {
                 // Identity first, then where you belong: citizenship, the country
-                // and city you live in now, then the sanctions question.
+                // and city you live in now.
                 const contact = contactRows();
                 const lives = contact.filter((r) => r.id.includes(".residence_"));
-                const [citizenship, sanctions] = rtwTopRows();
+                const [citizenship] = rtwTopRows();
                 return [
                   ...contact.filter((r) => !lives.includes(r)).map((r) => row(r)),
                   row(citizenship),
                   ...lives.map((r) => row(r)),
-                  row(sanctions, { emptyNote: "Your assistant will ask" }),
                 ];
               })()}
       </>

@@ -727,7 +727,8 @@ skill (a line-wrap fragment, a non-skill) from every surface, add its name to
 per-edit list cap.
 
 Also returned: whether the profile is complete, job titles, `experience_level`
-(the user's own choice — it wins) and `experience_level_inferred` (read off the
+(an older single answer; `fields` holds `preferences.experience_levels` and
+`preferences.experience_ranges`, every level and years range the user would take: they win) and `experience_level_inferred` (read off the
 dated work history, including the positions you write; if no dated role gives a
 level it falls back to the level the CV itself states; empty when neither says
 anything; used only when the user chose none), which inputs the user has given,
