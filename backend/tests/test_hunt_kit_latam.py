@@ -459,3 +459,10 @@ def test_vagas_hostile_listing_and_deep_job_page_do_not_lose_the_board():
     jobs, _ = _run("vagas", _row("vagas", "all"), http)
     assert [j["title"] for j in jobs] == ["Dev Backend"]
     assert time.perf_counter() - t0 < 10.0
+
+
+def test_recrutei_202_with_the_full_payload_is_read():
+    st, body = _rc_list(_rc_item(1, "Analista", [], RC_BASE + "1-a"))
+    http = _stub({"per-departments": (202, body), "/vacancy/": (200, _rc_page())})
+    jobs, _ = _run("recrutei", _row("recrutei", "digisystem"), http)
+    assert st == 200 and [j["title"] for j in jobs] == ["Analista"]

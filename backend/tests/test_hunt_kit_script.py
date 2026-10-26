@@ -826,3 +826,47 @@ def test_html_to_text_and_pipe_spacing_are_linear():
         _grows_linearly(hk.html_to_text, lambda k, e=evil: e * k)
     assert hk._respace("a|  b | c", "|", " | ") == "a | b | c" and hk._respace("a b", "|", " | ") == "a b"
     _grows_linearly(lambda s: hk._respace(s, "|", " | "), lambda k: " " * (4 * k) + "x")
+
+
+class _Resp:
+    def __init__(self, body: bytes) -> None:
+        self.body, self.status = body, 200
+
+    def read(self, n: int = -1) -> bytes:
+        return self.body if n < 0 else self.body[:n]
+
+    def geturl(self) -> str:
+        return "https://h.example/x"
+
+    def __enter__(self) -> _Resp:
+        return self
+
+    def __exit__(self, *a: object) -> None:
+        return None
+
+
+def test_http_inflates_gzip_sent_unasked_within_the_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gzip
+
+    page = "<html>Việc làm</html>".encode()
+    monkeypatch.setattr(hk, "_open", lambda req, timeout=0: _Resp(gzip.compress(page)))
+    assert hk.http("https://h.example/x", as_json=False) == (200, page.decode())
+    bomb = gzip.compress(b"a" * 5_000_000)  # 5 MB inflated from a few KB: over the cap is a failed request
+    monkeypatch.setattr(hk, "_open", lambda req, timeout=0: _Resp(bomb))
+    assert hk.http_request("https://h.example/x", max_bytes=1_000_000)[0] == 0
+    monkeypatch.setattr(hk, "_open", lambda req, timeout=0: _Resp(b"\x1f\x8bnot gzip"))
+    assert hk.http_request("https://h.example/x")[0] == 0
+
+
+def test_xml_reads_html_named_entities_but_still_refuses_declarations() -> None:
+    import importlib.util as iu
+
+    spec = iu.spec_from_file_location("kit_xml_under_test", SCRIPT.parent / "kit_xml.py")
+    assert spec and spec.loader
+    kx = iu.module_from_spec(spec)
+    spec.loader.exec_module(kx)
+    root = kx.safe_fromstring("<rss><item><title>Dev&nbsp;Lead &amp; Co &mdash; &bogus;</title></item></rss>")
+    assert root is None  # an unknown name is still malformed XML
+    root = kx.safe_fromstring("<rss><item><title>Dev&nbsp;Lead &amp; Co &mdash; x</title></item></rss>")
+    assert root is not None and root.find("item/title").text == "Dev Lead & Co — x"
+    assert kx.safe_fromstring('<!DOCTYPE a [<!ENTITY x "y">]><a>&x;</a>') is None
