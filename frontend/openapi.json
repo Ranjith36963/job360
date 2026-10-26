@@ -3940,6 +3940,73 @@
         "title": "CardOut",
         "type": "object"
       },
+      "ChangeAreas": {
+        "description": "One short marker per area of the page; a marker that moved = refetch that area.",
+        "properties": {
+          "applications": {
+            "title": "Applications",
+            "type": "string"
+          },
+          "asks": {
+            "title": "Asks",
+            "type": "string"
+          },
+          "assistant": {
+            "title": "Assistant",
+            "type": "string"
+          },
+          "other": {
+            "title": "Other",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "string"
+          },
+          "settings": {
+            "title": "Settings",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assistant",
+          "asks",
+          "ready",
+          "applications",
+          "settings",
+          "other"
+        ],
+        "title": "ChangeAreas",
+        "type": "object"
+      },
+      "ChangesOut": {
+        "properties": {
+          "areas": {
+            "$ref": "#/components/schemas/ChangeAreas"
+          },
+          "assistant_last_active_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Last Active At"
+          },
+          "cursor": {
+            "title": "Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "areas"
+        ],
+        "title": "ChangesOut",
+        "type": "object"
+      },
       "ClientLogRequest": {
         "properties": {
           "context": {
@@ -24811,6 +24878,91 @@
         "summary": "Report Capabilities",
         "tags": [
           "connectors"
+        ]
+      }
+    },
+    "/api/changes": {
+      "get": {
+        "description": "What changed for the signed-in user: a cursor (also the ETag) and one marker per page area.\nSend the last cursor as ``If-None-Match``; an unchanged cursor answers 304 with no body.",
+        "operationId": "changes_api_changes_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Nothing changed since the cursor sent in If-None-Match"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Changes",
+        "tags": [
+          "changes"
         ]
       }
     },
