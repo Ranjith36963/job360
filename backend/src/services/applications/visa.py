@@ -22,6 +22,7 @@ from typing import Any, Optional
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications.spine import SpineError, get_owned_application
+from src.services.profile.regions import REGIONS, is_region
 
 _ALPHA2 = re.compile(r"^[A-Za-z]{2}$")
 
@@ -121,15 +122,26 @@ async def user_work_countries(db: JobDatabase, user_id: str) -> list[str]:
     return out
 
 
-def _sponsorship_countries(right_to_work: Any) -> list[str]:
-    """ISO2 codes whose ``right_to_work`` record says ``needs_sponsorship`` true."""
+def _country_records(right_to_work: Any) -> list[tuple[str, dict[str, Any]]]:
+    """``(code, record)`` per place: each country's own record, then each region record
+    once per member country WITHOUT its own record (owner decision 2026-10-26: a region
+    line answers for its countries; a country's own line wins). ``ANY`` passes as it is."""
     records = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
-    return [
-        rec["country"].strip().upper()
-        for rec in (records if isinstance(records, list) else [])
-        if isinstance(rec, dict) and rec.get("needs_sponsorship") is True
-        and isinstance(rec.get("country"), str) and rec["country"].strip()
+    recs = [
+        (rec["country"].strip().upper(), rec) for rec in (records if isinstance(records, list) else [])
+        if isinstance(rec, dict) and isinstance(rec.get("country"), str) and rec["country"].strip()
     ]
+    own = {code for code, _ in recs if not is_region(code)}
+    out = [(code, rec) for code, rec in recs if not is_region(code)]
+    for code, rec in recs:
+        if is_region(code):
+            out += [(cc, rec) for cc in sorted(REGIONS[code] - own)]
+    return out
+
+
+def _sponsorship_countries(right_to_work: Any) -> list[str]:
+    """ISO2 codes whose ``right_to_work`` record (or region record) says ``needs_sponsorship`` true."""
+    return [code for code, rec in _country_records(right_to_work) if rec.get("needs_sponsorship") is True]
 
 
 def _no_sponsorship_countries(right_to_work: Any) -> list[str]:
@@ -146,12 +158,11 @@ def _no_sponsorship_countries(right_to_work: Any) -> list[str]:
         if isinstance(code, str) and code.strip() and code.strip().upper() not in out:
             out.append(code.strip().upper())
 
-    records = right_to_work.get("countries")
-    for rec in records if isinstance(records, list) else []:
-        if not isinstance(rec, dict) or rec.get("needs_sponsorship") is True:
+    for code, rec in _country_records(right_to_work):
+        if rec.get("needs_sponsorship") is True:
             continue
         if rec.get("needs_sponsorship") is False or rec.get("work_authorization") in ("citizen", "permanent_resident"):
-            _add(rec.get("country"))
+            _add(code)
     citizenship = right_to_work.get("citizenship")
     for code in citizenship if isinstance(citizenship, list) else []:
         _add(code)

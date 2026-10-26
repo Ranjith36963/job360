@@ -1,3 +1,4 @@
+import { regionName } from "@/lib/regions";
 /**
  * The full ISO-3166-1 alpha-2 code list, for the "Countries where I can
  * already work" picker (docs/product/VISION.md decision 27 — a country
@@ -77,6 +78,8 @@ export function allCountries(): Country[] {
  * cannot resolve it, so an old or unusual value never renders as blank. */
 export function countryName(code: string): string {
   if (code === "ANY") return "Any other country";
+  const region = regionName(code);
+  if (region) return region;
   const found = allCountries().find((c) => c.code === code);
   return found ? found.name : code;
 }

@@ -18,6 +18,7 @@ from src.services.applications.kit import _json
 from src.services.profile import edits as profile_edits
 from src.services.profile import user_info
 from src.services.profile.edits import is_assistant_actor
+from src.services.profile.regions import region_of
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -129,9 +130,11 @@ def _flag(code: str, text: str, key: Optional[str] = None, country: Optional[str
 
 
 def _salary_saved(profile: Any, country: str) -> bool:
-    """Any salary record with a value for ``country`` counts (one amount or a min / max)."""
+    """Any salary record with a value for ``country`` - or for its region (owner decision
+    2026-10-26) - counts (one amount or a min / max)."""
+    places = {country.upper(), region_of(country) or country.upper()}
     return any(
-        str(r.get("country") or "").upper() == country
+        str(r.get("country") or "").upper() in places
         and any(kit._present(r.get(k)) for k in ("amount", "min", "max"))
         for r in kit._records(profile.preferences.salary_by_country)
     )

@@ -809,7 +809,9 @@ needs_sponsorship), needs_sponsorship (bool), visa_type, visa_expires (YYYY-MM
 or YYYY-MM-DD), remote_ok (bool), onsite (yes | only_if_sponsored | no), contract_ok
 (bool: contract roles OK there; false = permanent only), note
 (one line, the user's own words), remote_priority / onsite_priority (highest | high | medium | low | off:
-the user's own job priority for that place; set only what they chose)}] - country "ANY" = every other country
+the user's own job priority for that place; set only what they chose)}] - country "ANY" = every other country,
+or a region (NORTH_AMERICA | SOUTH_AMERICA | EUROPE | MIDDLE_EAST | ASIA | AFRICA | OCEANIA) = its countries
+without their own record (a country's own record wins, then its region's, then ANY; salary_by_country takes regions too)
 (e.g. remote anywhere, on-site only if sponsored), citizenship: [ISO2], sanctions_country_citizen (bool, or "Prefer not to say")}.
 `user_info.logistics` = {notice_period, earliest_start, countries: [ONE record
 per country {country (ISO2, required), willing_to_relocate (bool),

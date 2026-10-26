@@ -33,6 +33,7 @@ from src.services.profile.answer_match import TOPIC_MAX_CHARS, TOPIC_PATTERN
 from src.services.profile.countries import is_plain_code, to_iso2
 from src.services.profile.edits import ProfileEditError, _strip_control
 from src.services.profile.models import VALID_LANGUAGE_LEVELS, VALID_WORK_AUTH_STATUSES
+from src.services.profile.regions import region_code
 
 USER_INFO_PATHS: frozenset[str] = frozenset({
     "user_info.contact",
@@ -200,6 +201,9 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
     if kind == "iso2_or_any":
         if isinstance(raw, str) and raw.strip().upper() == ANY_COUNTRY:
             return ANY_COUNTRY
+        # Owner decision 2026-10-26: one line may cover a whole region (regions.REGIONS).
+        if isinstance(raw, str) and (region := region_code(raw)):
+            return region
         return _iso2(at, raw, remote_hint=True) or None
     if kind == "line_or_bool":
         yes_no = forgiving.bool_to_yes_no(raw)
@@ -740,7 +744,8 @@ def validate_salary_by_country(path: str, value: Any) -> list[dict[str, Any]]:
         country = raw.get("country")
         if not isinstance(country, str) or not _strip_control(country):
             raise need
-        code = _iso2(f"{where}.country", country, remote_hint=True)
+        # A region's line can carry its own salary too (owner decision 2026-10-26).
+        code = region_code(country) or _iso2(f"{where}.country", country, remote_hint=True)
         if _SALARY_LEGACY_KEY in raw:
             if "min" in raw or "max" in raw:
                 raise _fail(f"{where}: send min and max, or the old amount — never both")
