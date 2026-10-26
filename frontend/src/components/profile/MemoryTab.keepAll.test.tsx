@@ -44,12 +44,14 @@ describe("MemoryTab confirm all, per step", () => {
     expect(screen.queryByTestId("memory-confirm-step-visa")).toBeNull();
   });
 
-  it("a done step with answers to confirm still starts open", async () => {
-    useHistory(agentHistory);
+  it("your details stay open when done and fully confirmed (they never fold away)", async () => {
+    useHistory(webHistory);
     fetchSettingsShared.mockResolvedValue({ setup_progress: { rounds: { you: { done_at: "2026-10-20T09:00:00Z" } } } });
     render(<MemoryTab />);
-    await screen.findByTestId("memory-confirm-step-you");
-    expect(screen.getByTestId("memory-step-toggle-you")).toHaveAttribute("aria-expanded", "true");
+    await screen.findByTestId("memory-tab");
+    await waitFor(() => expect(screen.getByTestId("memory-step-you")).toHaveAttribute("data-done", "true"));
+    expect(screen.getByTestId("memory-row-user_info.contact.email")).toHaveTextContent("alex@example.com");
+    expect(screen.queryByTestId("memory-confirm-step-you")).toBeNull();
   });
 
   it("is hidden when nothing is unconfirmed", async () => {
@@ -93,5 +95,21 @@ describe("MemoryTab confirm all, per step", () => {
     fireEvent.click(await screen.findByTestId("memory-confirm-step-you"));
     expect(await screen.findByTestId("memory-keep-all-error")).toBeInTheDocument();
     expect(keepProfileEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("Confirm all on your details never confirms the right-to-work block (citizenship is confirmed with Right to work)", async () => {
+    const rtw = { citizenship: ["GB"], countries: [{ country: "GB", work_authorization: "citizen" }] };
+    getProfile.mockResolvedValue({ user_info: { contact, right_to_work: rtw }, preferences: {} });
+    getProfileEditHistory.mockImplementation(async (p: string) =>
+      p === "user_info.contact" ? agentHistory
+        : p === "user_info.right_to_work" ? [{ set_by: "agent:Claude", set_at: "2026-10-03T12:00:00Z", value: rtw }]
+        : []);
+    render(<MemoryTab />);
+    expect(await screen.findByTestId("memory-confirm-step-you")).toHaveTextContent("Confirm all 2");
+    // citizenship + the GB work authorisation wait in Right to work
+    expect(screen.getByTestId("memory-confirm-step-visa")).toHaveTextContent("Confirm all 2");
+    fireEvent.click(screen.getByTestId("memory-confirm-step-you"));
+    await waitFor(() => expect(keepProfileEdit).toHaveBeenCalledTimes(1));
+    expect(keepProfileEdit.mock.calls.map((c) => c[0])).toEqual(["user_info.contact"]);
   });
 });
