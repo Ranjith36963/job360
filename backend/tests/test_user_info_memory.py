@@ -1297,3 +1297,11 @@ async def test_every_writer_waits_for_the_user_edit_lock(authenticated_async_con
             assert edits.current_edit_id(fixture_user_id) == 0
         thread.join(5)
         assert done.is_set() and edits.current_edit_id(fixture_user_id) > 0
+
+
+def test_contract_ok_is_a_per_country_bool():
+    """Owner decision 2026-10-26: contract roles OK per place - true or false, nothing else."""
+    rtw = validate_edit(RTW, {"countries": [{"country": "GB", "contract_ok": True}, {"country": "ANY", "contract_ok": False}]})
+    assert [r["contract_ok"] for r in rtw["countries"]] == [True, False]
+    assert "contract_ok" in _reject(RTW, {"countries": [{"country": "GB", "contract_ok": "maybe"}]})
+

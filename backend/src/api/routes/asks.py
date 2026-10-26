@@ -129,6 +129,8 @@ async def list_asks(
         if actor_for(user) == "web" and status == "open":  # the user's own page tidies old duplicates once
             await asks_service.tidy_open_asks(db, user.id)
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
+        if actor_for(user) == "web" and status == "open":
+            rows = _with_saved_answers(user.id, rows)
         # Each application's open block is read once and shared by both.
         blocks = await blocked_service.open_blocks(db, user.id, blocked_service.open_app_ids(rows))
         finish = await blocked_service.finish_here_ask_ids(db, user.id, rows, blocks)
@@ -142,6 +144,34 @@ async def list_asks(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _with_saved_answers(user_id: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Owner 2026-10-26: an answer the user saved on Needs you (a gender, a consent...) shows on its open
+    ask row instead of the assistant's older guess, so a reload never brings the old value back. Only the
+    user's approved, in-scope answers (``answer_match``) - a display overlay; the stored ask is unchanged."""
+    from src.services.applications.kit import normalized_company_key  # noqa: PLC0415
+    from src.services.profile.answer_match import find_answer  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415
+
+    if not any(r.get("questions") for r in rows):
+        return rows
+    profile = load_profile(user_id)
+    saved = getattr(getattr(profile, "user_info", None), "answers", None) if profile else None
+    if not saved:
+        return rows
+    out = []
+    for r in rows:
+        qs = r.get("questions") or []
+        company = normalized_company_key(str(r.get("job_company") or "")) or None
+        fixed = []
+        for q in qs:
+            rec = find_answer(saved, topic=q.get("key"), question=q.get("question"), company_key=company)
+            if rec is not None and str(rec.get("answer") or "").strip() and rec["answer"] != q.get("answer"):
+                q = {**q, "answer": str(rec["answer"]), "source": "memory"}
+            fixed.append(q)
+        out.append({**r, "questions": fixed} if qs else r)
+    return out
 
 
 def _held(user_id: str, ask: dict[str, Any], finish: set[int]) -> Optional[int]:

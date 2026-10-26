@@ -429,6 +429,7 @@ function CvTab() {
                 />
                 <JobPriority
                   rightToWork={(profile?.user_info as Record<string, unknown> | undefined)?.right_to_work}
+                  salaries={(profile?.preferences as Record<string, unknown> | undefined)?.salary_by_country}
                   onSaved={setProfile}
                 />
               </div>

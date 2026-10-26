@@ -228,6 +228,17 @@ describe("JobCard", () => {
     ]));
   });
 
+  it("a personal answer the owner edits is saved at once, before Approve all (2026-10-26)", async () => {
+    const a = listing({}, [Q("gender", "Gender", "Male", "guess"), Q("city", "City?", "", "none")]);
+    render(<JobCard card={card([a])} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId(`q-edit-${a.id}-gender`));
+    fireEvent.change(screen.getByTestId(`q-input-${a.id}-gender`), { target: { value: "Female" } });
+    expect(rememberAnswers).not.toHaveBeenCalled(); // nothing saved while typing
+    fireEvent.click(screen.getByTestId(`q-save-${a.id}-gender`));
+    await waitFor(() => expect(rememberAnswers).toHaveBeenCalledWith([{ topic: "gender", question: "Gender", answer: "Female" }]));
+    expect(screen.queryByTestId("approve-all-7")).toBeNull(); // the card itself is not done yet
+  });
+
   it("pre-guesses consent and referral rows as Guessed, and shows an empty free-text row as waiting for the assistant", () => {
     const a = listing({}, [
       Q("privacy", "I agree to the processing of my personal data", "", "none"),

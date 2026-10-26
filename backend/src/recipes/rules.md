@@ -806,7 +806,8 @@ legal_last_name, preferred_name, linkedin_url}.
 `user_info.right_to_work` = {countries: [ONE record per country {country (ISO2,
 required), work_authorization (citizen | permanent_resident | visa |
 needs_sponsorship), needs_sponsorship (bool), visa_type, visa_expires (YYYY-MM
-or YYYY-MM-DD), remote_ok (bool), onsite (yes | only_if_sponsored | no), note
+or YYYY-MM-DD), remote_ok (bool), onsite (yes | only_if_sponsored | no), contract_ok
+(bool: contract roles OK there; false = permanent only), note
 (one line, the user's own words), remote_priority / onsite_priority (highest | high | medium | low | off:
 the user's own job priority for that place; set only what they chose)}] - country "ANY" = every other country
 (e.g. remote anywhere, on-site only if sponsored), citizenship: [ISO2], sanctions_country_citizen (bool, or "Prefer not to say")}.

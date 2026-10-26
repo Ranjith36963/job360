@@ -36,29 +36,42 @@ function codesIn(list: unknown): string[] {
 
 /** One setup step: a header that opens and closes it (dot, name, the date the
  *  step was done, how many answers wait for the user's word) and, when open,
- *  its facts plus one "Confirm all" for that step. */
-function Step({ id, title, doneAt, waiting, defaultOpen, confirming, onConfirmAll, children }: {
-  id: string; title: string; doneAt?: string; waiting: number; defaultOpen: boolean;
+ *  its facts plus one "Confirm all" for that step. A `pinned` step is always
+ *  open and has no toggle: the details every form asks for (owner, 2026-10-26). */
+function Step({ id, title, doneAt, waiting, defaultOpen, pinned = false, confirming, onConfirmAll, children }: {
+  id: string; title: string; doneAt?: string; waiting: number; defaultOpen: boolean; pinned?: boolean;
   confirming: boolean; onConfirmAll: () => void; children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [opened, setOpen] = useState(defaultOpen);
+  const open = pinned || opened;
   const done = doneAt !== undefined;
   const when = done ? doneDate(doneAt) : "";
   return (
     <section data-testid={`memory-step-${id}`} data-done={done} className="border-t border-border first:border-t-0">
-      <button type="button" aria-expanded={open} aria-controls={`memory-step-body-${id}`}
-        data-testid={`memory-step-toggle-${id}`} onClick={() => setOpen((o) => !o)}
-        className="flex min-h-11 w-full items-center gap-2.5 py-3 text-left">
-        <span aria-hidden="true" className={`inline-block h-2 w-2 flex-none rounded-full ${done ? "bg-primary" : "border border-faint"}`} />
-        <span className="text-[15px] font-medium">{title}</span>
-        {waiting > 0 && (
-          <span data-testid={`memory-step-waiting-${id}`} className="rounded-full bg-muted px-2 py-0.5 text-xs text-warning">
-            {waiting} to confirm
-          </span>
-        )}
-        <span className="ml-auto font-mono text-xs text-faint">{when || (done ? "" : "not done")}</span>
-        <span aria-hidden="true" className="text-faint">{open ? "−" : "+"}</span>
-      </button>
+      {(() => {
+        const head = (
+          <>
+            <span aria-hidden="true" className={`inline-block h-2 w-2 flex-none rounded-full ${done ? "bg-primary" : "border border-faint"}`} />
+            <span className="text-[15px] font-medium">{title}</span>
+            {waiting > 0 && (
+              <span data-testid={`memory-step-waiting-${id}`} className="rounded-full bg-muted px-2 py-0.5 text-xs text-warning">
+                {waiting} to confirm
+              </span>
+            )}
+            <span className="ml-auto font-mono text-xs text-faint">{when || (done ? "" : "not done")}</span>
+          </>
+        );
+        return pinned ? (
+          <h2 className="flex min-h-11 w-full items-center gap-2.5 py-3">{head}</h2>
+        ) : (
+          <button type="button" aria-expanded={open} aria-controls={`memory-step-body-${id}`}
+            data-testid={`memory-step-toggle-${id}`} onClick={() => setOpen((o) => !o)}
+            className="flex min-h-11 w-full items-center gap-2.5 py-3 text-left">
+            {head}
+            <span aria-hidden="true" className="text-faint">{open ? "−" : "+"}</span>
+          </button>
+        );
+      })()}
       {open && (
         <div id={`memory-step-body-${id}`} className="flex flex-col pb-4">
           {waiting > 0 && (
@@ -216,9 +229,15 @@ export function MemoryTab() {
   // The five setup steps and the rows each one holds. Assistant settings, the
   // sixth setup round, lives on the Assistant tab (owner, 2026-10-26).
   // `fact` names the step in front of the user's own facts ("About you: …").
-  const steps: { id: string; title: string; fact: string; specs: RowSpec[] }[] = [
+  // "you" comes first and is pinned open: name, email, phone, address, date
+  // of birth and citizenship are what every form asks for (owner, 2026-10-26).
+  // `specs` are what a step counts and confirms. Confirm works on a whole
+  // block, so citizenship (shown in your details, stored in the right-to-work
+  // block) is counted and confirmed with Right to work: a Confirm all on your
+  // details never confirms a visa answer you have not seen.
+  const steps: { id: string; title: string; fact: string; pinned?: boolean; specs: RowSpec[] }[] = [
+    { id: "you", title: "Your details for forms", fact: "About you", pinned: true, specs: contactRows() },
     { id: "targets", title: "Job targets", fact: "Job targets", specs: salaryCodes.map(salaryRow) },
-    { id: "you", title: "About you", fact: "About you", specs: contactRows() },
     { id: "visa", title: "Right to work", fact: "Right to work", specs: [...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]), ...rtwTopRows()] },
     { id: "logistics", title: "Logistics", fact: "Logistics", specs: logisticsRows() },
     { id: "equality", title: "Equality (voluntary)", fact: "Equality", specs: equalityRows() },
@@ -281,6 +300,7 @@ export function MemoryTab() {
     you: (
       <>
               {contactRows().map((s) => row(s))}
+              {rtwTopRows().map((s) => row(s, { emptyNote: s.id.endsWith("sanctions_country_citizen") ? "Your assistant will ask" : undefined }))}
       </>
     ),
     visa: (
@@ -307,7 +327,6 @@ export function MemoryTab() {
                   </Button>
                 )}
               </div>
-              <div className="mt-2.5">{rtwTopRows().map((s) => row(s, { emptyNote: s.id.endsWith("sanctions_country_citizen") ? "Your assistant will ask" : undefined }))}</div>
       </>
     ),
     logistics: (
@@ -339,7 +358,7 @@ export function MemoryTab() {
               // Keyed on the done date: progress arrives after the profile, and a
               // step it marks done must then start closed.
               <Step key={`${st.id}-${doneAt ?? ""}`} id={st.id} title={st.title} doneAt={doneAt} waiting={waiting}
-                defaultOpen={doneAt === undefined || waiting > 0}
+                defaultOpen={doneAt === undefined || waiting > 0} pinned={st.pinned}
                 confirming={keepingAll === st.id} onConfirmAll={() => void confirmStep(st.id, st.specs)}>
                 {STEP_BODY[st.id]}
                 <StepFacts id={st.id} step={st.fact} notes={notes} onSave={saveNotes} />
