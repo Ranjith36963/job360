@@ -24,7 +24,7 @@ PREFLIGHT_KEYS = {
 }
 SUMMARY_KEYS = {
     "queued", "ready_to_send", "asked", "blocked", "submitted_today", "daily_cap", "daily_left", "removed_today",
-    "by_browser",
+    "by_browser", "outreach",
 }
 
 

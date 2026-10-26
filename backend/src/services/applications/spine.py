@@ -2773,6 +2773,8 @@ async def list_applications(
     preflights: dict[int, dict[str, Any]] = {}
     browsers: dict[int, dict[str, str]] = {}
     summary: Optional[dict[str, Any]] = None
+    outreach: Optional[list[dict[str, Any]]] = None
+    merged: Optional[list[str]] = None
     if queued:
         # Bulk-apply Q1/Q2: derived, no table; the order above stays first in first out.
         import asyncio  # noqa: PLC0415
@@ -2789,7 +2791,12 @@ async def list_applications(
             db, user_id, rows, queued_at, holds, cfg, profile, overlay
         )
         browsers = await queue_preflight.queue_browsers(db, user_id, queue_order)
-        summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg, browsers)
+        # One queue (owner 2026-10-26): the approved, unsent LinkedIn sends too, merged by when the user said yes.
+        from src.services.applications import own_browser  # noqa: PLC0415 - imports spine
+
+        outreach = await own_browser.queued_outreach(db, user_id, datetime.now(timezone.utc))
+        merged = own_browser.merged_order({i: queued_at[i] for i in queue_order}, outreach)
+        summary = await queue_preflight.queue_summary(db, user_id, queue_order, cfg, browsers, outreach)
     out = []
     for r in rows:
         app_id = r["id"]
@@ -2848,7 +2855,9 @@ async def list_applications(
                 ),
             }
         )
-    return {"applications": out, "total": total, "queue_summary": summary}
+    return {
+        "applications": out, "total": total, "queue_summary": summary, "outreach": outreach, "queue_order": merged,
+    }
 
 
 # ── R9 — whats_new ────────────────────────────────────────────────────────────

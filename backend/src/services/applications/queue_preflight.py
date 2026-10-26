@@ -226,13 +226,17 @@ async def queue_browsers(db: JobDatabase, user_id: str, queued_ids: list[int]) -
 async def queue_summary(
     db: JobDatabase, user_id: str, queued_ids: list[int], cfg: Any,
     browsers: Optional[dict[int, dict[str, str]]] = None,
+    outreach: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """The whole open queue at a glance (Q2): ``queued``; ``ready_to_send`` (form filled, waiting
     for the user's yes); ``asked`` (an open Needs-you ask, not a block); ``blocked`` (an open
     ``blocked``); ``submitted_today`` / ``daily_cap`` / ``daily_left`` (null = no cap);
     ``removed_today`` = ``unqueued`` events today by closed reason (M1); ``by_browser`` = the whole queue
     counted by which browser runs it (``job360`` / ``own_browser`` / ``human``; ``browsers`` is the
-    :func:`queue_browsers` map, read here when not given)."""
+    :func:`queue_browsers` map, read here when not given), approved LinkedIn sends included; ``outreach`` = how
+    many of those sends wait (``own_browser.queued_outreach``, read here when not given). ``queued`` stays the
+    applications alone (the daily cap and the batch recipe count those)."""
+    from src.services.applications import own_browser  # noqa: PLC0415 - own_browser imports spine
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
 
     now = datetime.now(timezone.utc)
@@ -240,7 +244,10 @@ async def queue_summary(
     in_queue = set(queued_ids)
     if browsers is None:
         browsers = await queue_browsers(db, user_id, queued_ids)
-    by_browser = {k: sum(1 for v in browsers.values() if v["kind"] == k) for k in BROWSER_KINDS}
+    if outreach is None:
+        outreach = await own_browser.queued_outreach(db, user_id, now)
+    chips = [*browsers.values(), *(o["browser"] for o in outreach)]
+    by_browser = {k: sum(1 for v in chips if v["kind"] == k) for k in BROWSER_KINDS}
     ready_ids = {
         int(r["application_id"])
         for r in await ready.ready_rows(db, user_id, limit=settings.READY_TO_SEND_MAX)
@@ -249,6 +256,7 @@ async def queue_summary(
     asked_ids = (await _open_ask_apps(db, user_id, sorted(in_queue))) - blocked_ids
     return {
         "queued": len(in_queue),
+        "outreach": len(outreach),
         "ready_to_send": len(ready_ids),
         "asked": len(asked_ids),
         "blocked": len(blocked_ids),

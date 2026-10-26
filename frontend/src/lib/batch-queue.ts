@@ -2,6 +2,7 @@
 
 export type QueueSummary = {
   queued?: number;
+  outreach?: number;
   ready_to_send?: number;
   asked?: number;
   blocked?: number;
@@ -21,6 +22,7 @@ export function queueSummaryLine(s: QueueSummary | null | undefined): string {
     `${num(s.ready_to_send)} ready`,
     `${num(s.asked) + num(s.blocked)} need you`,
   ];
+  if (num(s.outreach) > 0) parts.push(`${num(s.outreach)} outreach`);
   if (typeof s.daily_left === "number") parts.push(`${s.daily_left} left today`);
   return parts.join(" · ");
 }
@@ -95,7 +97,8 @@ export function browserFilterOptions(
   fallbackTotal: number,
 ): BrowserFilterOption[] {
   const by = (s?.by_browser ?? {}) as Record<string, unknown>;
-  const total = typeof s?.queued === "number" ? s.queued : fallbackTotal;
+  // One queue (owner, 2026-10-26): "All" counts the approved LinkedIn sends too, as `by_browser` does.
+  const total = typeof s?.queued === "number" ? s.queued + num(s.outreach) : fallbackTotal;
   const opts: BrowserFilterOption[] = [
     { key: "all", text: `All ${total}`, count: total },
     { key: "job360", text: `${BROWSER_FILTER_WORDS.job360} ${num(by.job360)}`, count: num(by.job360) },
@@ -113,4 +116,41 @@ export function filterByBrowser<T extends { browser?: { kind?: string } | null }
   filter: QueueBrowserFilter,
 ): T[] {
   return filter === "all" ? rows : rows.filter((r) => r.browser?.kind === filter);
+}
+
+/** The kind tag on one queue item (owner, 2026-10-26). Email has no approved-but-unsent state yet, so the
+ *  backend never sends one; the word is here for when it does. */
+const KIND_TAG: Record<string, string> = {
+  application: "Application",
+  linkedin_note: "LinkedIn note",
+  linkedin_message: "LinkedIn message",
+  email: "Email",
+};
+export function kindTag(kind: string | undefined): string {
+  return (kind && KIND_TAG[kind]) || "";
+}
+
+type Chip = { kind?: string } | null | undefined;
+export type QueueItem<A, O> =
+  | { key: string; kind: "application"; row: A; browser: Chip }
+  | { key: string; kind: "outreach"; row: O; browser: Chip };
+
+/** The one queue in order: the server's `queue_order` (task ids, oldest yes first) over the loaded rows.
+ *  Rows the order does not name (an older backend, or a row past the page) follow in their own order. */
+export function mergeQueue<A extends { id: number; browser?: Chip }, O extends { task_id: string; browser?: Chip }>(apps: A[], outreach: O[], order: string[] | null | undefined): QueueItem<A, O>[] {
+  const all = new Map<string, QueueItem<A, O>>();
+  for (const a of apps) {
+    const key = `application:${a.id}`;
+    all.set(key, { key, kind: "application", row: a, browser: a.browser });
+  }
+  for (const o of outreach) all.set(o.task_id, { key: o.task_id, kind: "outreach", row: o, browser: o.browser });
+  const out: QueueItem<A, O>[] = [];
+  for (const k of order ?? []) {
+    const item = all.get(k);
+    if (item) {
+      out.push(item);
+      all.delete(k);
+    }
+  }
+  return [...out, ...all.values()];
 }

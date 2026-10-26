@@ -119,7 +119,7 @@ export function PersonRow({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`person-${c.id}`}>
+    <div id={`person-${c.id}`} className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3" data-testid={`person-${c.id}`}>
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm font-medium">
           {c.name}
