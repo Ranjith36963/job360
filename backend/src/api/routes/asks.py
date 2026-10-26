@@ -131,16 +131,8 @@ async def list_asks(
         rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
         if actor_for(user) == "web" and status == "open":
             rows = _with_saved_answers(user.id, rows)
-        # Each application's open block is read once and shared by both.
-        blocks = await blocked_service.open_blocks(db, user.id, blocked_service.open_app_ids(rows))
-        finish = await blocked_service.finish_here_ask_ids(db, user.id, rows, blocks)
-        browsers = await blocked_service.browser_for_asks(db, user.id, rows, blocks, finish)
-        refill = await blocked_service.refill_ask_ids(db, user.id, rows)
-        rows = [
-            {**r, "finish_here": r["id"] in finish, "held_seconds": _held(user.id, r, finish),
-             "can_refill": r["id"] in refill, "browser": browsers.get(r["id"])}
-            for r in rows
-        ]
+        # The hand-off fields, shared with the application page (GET /applications/{id}).
+        rows = await blocked_service.with_hand_off(db, user.id, rows)
         return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id)}
     except SpineError as exc:
         _raise(exc)
@@ -173,15 +165,6 @@ def _with_saved_answers(user_id: str, rows: list[dict[str, Any]]) -> list[dict[s
             fixed.append(q)
         out.append({**r, "questions": fixed} if qs else r)
     return out
-
-
-def _held(user_id: str, ask: dict[str, Any], finish: set[int]) -> Optional[int]:
-    """A finish-here ask's seconds left on its browser hold (in memory, this process); None otherwise."""
-    if ask["id"] not in finish:
-        return None
-    from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy
-
-    return browser_agent.held_seconds(browser_agent.get_pool(), user_id, int(ask["application_id"]))
 
 
 @router.post("/asks/{ask_id}/answer", response_model=AskOut, dependencies=AUTH_FIRST)

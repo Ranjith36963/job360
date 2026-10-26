@@ -39,6 +39,16 @@ export function isBlocker(kind: RowKind): kind is BlockerKind {
   return kind === "captcha" || kind === "upload" || kind === "login" || kind === "safety";
 }
 
+/** A CAPTCHA / sign-in row carries the filled-form hand-off (FormHandoff: Finish it here, Refill the form). */
+export function hasFormHandoff(kind: RowKind): boolean {
+  return kind === "captcha" || kind === "login";
+}
+
+/** This card shows a FormHandoff, so the application page shows no second one (owner 2026-10-26). */
+export function cardShowsFormHandoff(card: Pick<JobCardData, "asks">): boolean {
+  return card.asks.some((a) => hasFormHandoff(a.kind));
+}
+
 /** A practice ask (a SIMULATION run, a test job) never belongs on the real list. */
 export function isSimulation(ask: Ask): boolean {
   return [ask.question, ask.context, ask.job_title ?? "", ask.job_company ?? ""].some((t) => SIMULATION.test(t));

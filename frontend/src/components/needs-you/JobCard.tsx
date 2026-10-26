@@ -7,7 +7,7 @@ import { answerAsk, answerAskQuestions, downloadApplicationArtifact, markCvSeen,
 import { effectiveAskBrowser } from "@/lib/browser-contract";
 import type { BrowserLabel } from "@/lib/browser-contract";
 import { JOB360_BROWSER_LABEL, OWN_BROWSER_LABEL, PACE_TEXT } from "@/lib/browser-labels";
-import { BLOCKER_TITLE, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
+import { BLOCKER_TITLE, hasFormHandoff, isBlocker, needsOwnBrowser, initialRow, isSensitiveQuestion, isStoredSource, mergeQuestions, remindersCovered } from "@/lib/job-cards";
 import type { JobCardData, PersonToReach, RowKind } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
 import { relativeTime } from "@/lib/utils";
@@ -225,7 +225,7 @@ export function JobCard({
         </div>
       </div>
       <AskText id={ask.id} question={ask.question} headClass="text-xs text-muted-foreground" />
-      {(kind === "captcha" || kind === "login") && (
+      {hasFormHandoff(kind) && (
         // Job360's browser holds the filled form: finish it there. The employer page is an EMPTY form.
         <FormHandoff applicationId={card.applicationId} finishHere={ask.finish_here === true} canRefill={ask.can_refill}
           heldSeconds={ask.held_seconds} formUrl={card.formUrl} finishTestId={`finish-here-${ask.id}`} />

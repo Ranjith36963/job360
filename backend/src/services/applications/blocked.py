@@ -367,6 +367,30 @@ async def browser_for_asks(
     return out
 
 
+async def with_hand_off(db: JobDatabase, user_id: str, asks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """These asks, each with ``finish_here``, ``held_seconds``, ``can_refill`` and ``browser``: the hand-off
+    fields Needs you (``GET /asks``) and the application page (``GET /applications/{id}``) both show, read
+    from ONE ``open_blocks`` map. Read-only."""
+    blocks = await open_blocks(db, user_id, open_app_ids(asks))
+    finish = await finish_here_ask_ids(db, user_id, asks, blocks)
+    browsers = await browser_for_asks(db, user_id, asks, blocks, finish)
+    refill = await refill_ask_ids(db, user_id, asks)
+    return [
+        {**a, "finish_here": a["id"] in finish, "held_seconds": _held_seconds(user_id, a, finish),
+         "can_refill": a["id"] in refill, "browser": browsers.get(a["id"])}
+        for a in asks
+    ]
+
+
+def _held_seconds(user_id: str, ask: dict[str, Any], finish: set[int]) -> Optional[int]:
+    """A finish-here ask's seconds left on its browser hold (in memory, this process); None otherwise."""
+    if ask["id"] not in finish:
+        return None
+    from src.services.browser_agent import agent as browser_agent  # noqa: PLC0415 - lazy, heavy
+
+    return browser_agent.held_seconds(browser_agent.get_pool(), user_id, int(ask["application_id"]))
+
+
 async def _open_ask_ids(db: JobDatabase, user_id: str, ask_ids: list[int]) -> set[int]:
     if not ask_ids:
         return set()

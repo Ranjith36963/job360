@@ -2495,12 +2495,10 @@ async def get_application_detail(
         "inbox_checked_at": app_row.get("inbox_checked_at"),
     }
     detail["form_state"] = derive_form_state(events, detail["receipts"])
-    # Which browser each open ask needs (blocked imports this module, so a lazy import).
-    from src.services.applications.blocked import browser_for_asks, open_app_ids, open_blocks  # noqa: PLC0415
+    # The same hand-off fields as Needs you: which browser, finish here, refill (blocked imports this module).
+    from src.services.applications.blocked import with_hand_off  # noqa: PLC0415
 
-    blocks = await open_blocks(db, user_id, open_app_ids(detail["asks"]))
-    browsers = await browser_for_asks(db, user_id, detail["asks"], blocks)
-    detail["asks"] = [{**a, "browser": browsers.get(a["id"])} for a in detail["asks"]]
+    detail["asks"] = await with_hand_off(db, user_id, detail["asks"])
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
     # reaches the web header and every agent calling get_application.
