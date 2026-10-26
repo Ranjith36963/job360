@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { contactSendBrowser, decideOwnBrowserSend, ownBrowserTask } from "@/lib/browser-contract";
 import { BrowserReason } from "./BrowserReason";
+import { JOB360_BROWSER_LABEL } from "@/lib/browser-labels";
 import { closedSetLabel } from "@/lib/closed-sets";
 import type { PersonToReach } from "@/lib/job-cards";
 import { toast } from "@/lib/toast";
@@ -53,6 +54,8 @@ export function PersonRow({
   // Field names are the Browser agent's contract: read only through the adapter.
   const task = ownBrowserTask(c);
   const sendBrowser = contactSendBrowser(c);
+  // Which browser will send it: the backend's label, else Job360's browser (it goes first) while a Send is on offer.
+  const browserText = sendBrowser?.label ?? (task ? JOB360_BROWSER_LABEL : null);
 
   async function decide(decision: "approve" | "decline") {
     if (!task) return;
@@ -79,8 +82,8 @@ export function PersonRow({
           {c.role && <span className="font-normal text-muted-foreground"> · {c.role}</span>}
         </p>
         <span className={chip} data-testid={`channel-${c.id}`}>{email ? "Email" : "LinkedIn"}</span>
-        {sendBrowser && (
-          <span className={chip} data-testid={`send-browser-label-${c.id}`}>{sendBrowser.label}</span>
+        {browserText && (
+          <span className={chip} data-testid={`send-browser-label-${c.id}`}>{browserText}</span>
         )}
         <span className={chip} data-testid={`li-state-${c.id}`}>{STATE_LABEL[state]}</span>
       </div>
@@ -114,7 +117,7 @@ export function PersonRow({
           <button type="button" className={primaryBtn} data-testid={`own-browser-send-${c.id}`}
             disabled={busy || sending}
             onClick={() => void decide("approve")}>
-            Send with my own browser
+            Send
           </button>
         )}
         {task?.state === "queued" && (

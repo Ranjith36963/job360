@@ -72,6 +72,7 @@ class QueueOut(BaseModel):
 class TakeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session: str = Field(default="", max_length=200)
+    # Claim this one person (the one the user pressed Send on); omitted = the next task in the queue.
     contact_id: Optional[int] = Field(default=None, ge=1)
 
 
@@ -190,8 +191,8 @@ async def own_browser_send(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 - the user's own yes (session only)
 ) -> SendDecisionOut:
-    """The user's per-card click "Send with my own browser" (approve) or "Don't send" (decline) for ONE
-    LinkedIn message. Session only; no MCP twin. 409 when the draft changed since they looked."""
+    """The user's per-card click "Send" (approve: Job360's browser first, the own browser after) or "Don't send"
+    (decline) for ONE LinkedIn message. Session only; no MCP twin. 409 when the draft changed since they looked."""
     try:
         got = await own_browser.decide(db, user, contact_id, body.message_id, body.decision)
     except SpineError as exc:

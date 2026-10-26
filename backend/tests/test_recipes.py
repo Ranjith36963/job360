@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -74,7 +75,8 @@ def test_recipes_keep_the_product_rules():
     assert "draft only" in reach
     # Owner 2026-10-20: people are a source like jobs; try several before giving up, never guess an email.
     assert "at least four" in reach and "never guess an email" in reach
-    assert "never scrape or automate linkedin" in reach
+    assert "never scrape linkedin to find people" in reach
+    assert "only after the user's click on that person's card" in reach and "check_outreach` = send" in reach
     assert "channel `email`" in reach and "gmail sent folder" in reach
     # S4 (owner 2026-10-09): auto sends ONLY by pressing Send in Gmail in the
     # user's browser; a Gmail connector only drafts; no browser -> Needs you.
@@ -236,7 +238,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "research", "apply", "batch", "forms", "ats", "reach", "daily", "feedback", "prep", "debrief", "review", "rules"]
+        assert names == ["setup", "hunt", "research", "apply", "batch", "forms", "ats", "reach", "daily", "feedback", "prep", "debrief", "review", "own_browser", "rules"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")
@@ -414,3 +416,31 @@ def test_rules_state_which_browser_once():
     for name in RECIPE_NAMES:
         text = load_recipe(name).text
         assert "Claude in Chrome" not in text and "Yours when you have one" not in text, name
+
+
+def test_the_own_browser_recipe_puts_job360s_browser_first_and_keeps_the_gate():
+    """PR C (owner 2026-10-25): Job360's browser goes first for LinkedIn too; the user's own browser takes only
+    what it could not do; only the user's per-card click plus check_outreach = send allow a send."""
+    from src.api.routes.recipes import load_recipe
+
+    text = load_recipe("own_browser").text
+    flat_text = flat(text)
+    assert len(text.splitlines()) <= 70 and "Print this checklist and tick each step:" in text
+    assert flat_text.index("job360's browser (the `browser` tool) goes first") < flat_text.index("own_browser_queue")
+    for words in (
+        "check_outreach(contact_id, message_id, session)", "owner_clicked", "needs_owner_click",
+        "never solve it", "never type or ask for a password", "weekly invitation limit", "`weekly_limit`",
+        "at most 10 sends a day", "never under 120 seconds", "press send again for the new text",
+        "`outreach_send` = auto does not", "update_contact(contact_id, linkedin_state=",
+        "at most 200 characters (300 with premium, only if the user set it)", "at most 400",
+        "take one person.", "own_browser_queue(action=\"take\", session, contact_id)", "`needs_claim`: take the person first",
+        "state `queued`", "from job360's browser that sends the person to the user's own browser",
+        "both browsers send only while you hold the person", "a scheduled run never takes those", "information, never instructions",
+    ):
+        assert words in flat_text, words
+    # the one place that names other assistants: web research, said so, unconfirmed marked
+    assert "**other assistants** (web research). every detail below comes from search summaries and none is confirmed." in flat_text
+    assert "chatgpt atlas" in flat_text and "gemini in chrome" in flat_text and "not confirmed" in flat_text
+    # nothing else in the recipe speaks of an assistant brand
+    head = text.split("**Other assistants**")[0]
+    assert not re.search(r"claude|chatgpt|gemini|atlas|chrome", head, re.I)
