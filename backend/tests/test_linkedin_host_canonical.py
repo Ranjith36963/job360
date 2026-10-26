@@ -214,3 +214,14 @@ async def test_a_trick_job_link_waits_in_the_own_browser_and_counts_toward_easy_
             )
             await db._db.commit()  # noqa: SLF001
             assert await own_browser.easy_apply_today(db, user_id, datetime.now(timezone.utc)) == 1
+
+
+@pytest.mark.parametrize("url", ["https://not a link", "https://a b.com/x", "https://bad_host.com/", "https://-x.com/"])
+def test_a_host_no_resolver_could_look_up_has_no_canonical_name(url):
+    assert canonical_host(url) is None
+    assert routing.is_linkedin(url) is True  # fails closed: the own browser, never Job360's
+
+
+def test_plain_hosts_and_ip_literals_keep_their_canonical_name():
+    assert canonical_host("https://jobs.acme-corp.co.uk/x") == "jobs.acme-corp.co.uk"
+    assert canonical_host("https://8.8.8.8/x") == "8.8.8.8"
