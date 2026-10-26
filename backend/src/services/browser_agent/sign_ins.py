@@ -19,7 +19,6 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Optional
-from urllib.parse import urlsplit
 
 _HKDF_INFO = b"job360 browser sign-ins v1"
 
@@ -59,10 +58,14 @@ def decrypt_state(token: str) -> Optional[dict[str, Any]]:
 
 
 def site_host(url_or_host: str) -> str:
-    """The lower-case host of a URL (or a bare host); "" when there is none."""
+    """The canonical host of a URL (or a bare host), ``guard.canonical_host``; "" when there is none or it
+    cannot be trusted to name one."""
+    from src.services.fetch.guard import canonical_host  # noqa: PLC0415
+
     text = (url_or_host or "").strip()
-    host = urlsplit(text if "//" in text else f"//{text}").hostname or ""
-    return host.lower().rstrip(".")
+    if not text:
+        return ""
+    return canonical_host(text if "://" in text else "https://" + text.removeprefix("//")) or ""
 
 
 def _applies_to(cookie_domain: str, host: str) -> bool:

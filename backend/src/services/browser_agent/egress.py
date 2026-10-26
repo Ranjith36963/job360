@@ -30,7 +30,7 @@ import secrets
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urlsplit
 
-from src.services.fetch.guard import ResolveFn, screen_host, screen_url
+from src.services.fetch.guard import ResolveFn, canonical_host, is_linkedin_host, screen_host, screen_url
 
 logger = logging.getLogger("job360.services.browser_agent.egress")
 
@@ -42,6 +42,7 @@ _HOP_BY_HOP = (b"proxy-connection", b"connection", b"keep-alive", b"proxy-author
 BLOCK_HEADER = "x-job360-egress-refused"
 BLOCK_MARK = secrets.token_hex(16)
 UNREACHABLE_MARK = secrets.token_hex(16)  # the host could not be resolved or did not answer
+LINKEDIN_REFUSED = "linkedin is the user's own browser"
 
 
 async def _default_open(host: str, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -143,6 +144,11 @@ class EgressProxy:
         shape = screen_url(url)
         if not shape.ok or not shape.host:
             await self._refuse(writer, host, shape.reason or "no host")
+            return
+        # Every connection (redirect hops, popups, frames, WebSockets, live-view clicks) passes here, so this is
+        # the real door: no LinkedIn host, and no host that only IDNA mapping turns into a name, ever leaves.
+        if is_linkedin_host(shape.host) or canonical_host(url) is None:
+            await self._refuse(writer, host, LINKEDIN_REFUSED)
             return
         try:
             verdict = await screen_host(shape.host, port, resolve=self._resolve)

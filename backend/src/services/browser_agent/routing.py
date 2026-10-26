@@ -1,4 +1,4 @@
-"""Which browser a task uses - pure, stdlib only (owner decisions 2026-10-25, 2026-10-26).
+"""Which browser a task uses - pure: stdlib plus ``fetch.guard``'s host helpers (owner, 2026-10-25 and 10-26).
 
 Every page on linkedin.com (job search, Easy Apply, messages, connection notes) runs ONLY in the user's OWN
 browser (the one their assistant drives on their computer), by the user's choice (owner, 2026-10-26):
@@ -16,6 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlsplit
+
+# Pure helpers only (stdlib + ipaddress; the module's aiohttp import is for its resolver type): one host test.
+from src.services.fetch.guard import canonical_host, is_linkedin_host
 
 BrowserKind = Literal["job360", "own_browser", "human"]
 
@@ -40,18 +43,27 @@ LABELS: dict[str, str] = {
 }
 # The chip for linkedin.com: the user's own browser by their choice, not because anything failed.
 LINKEDIN_LABEL = "Your own browser: runs when your PC is on"
-LINKEDIN_HOST = "linkedin.com"
 
 
 def is_linkedin(url: str) -> bool:
-    """True for a link on linkedin.com or any subdomain of it: the exact hostname, never a substring."""
+    """True for a link on a LinkedIn domain (``guard.LINKEDIN_DOMAINS``) or any subdomain of one, compared on
+    ``guard.canonical_host``: the exact host, never a substring. Fails closed: a non-empty web link whose host
+    cannot be named (unparseable, userinfo, a host IDNA would remap like ``www.ⓛinkedin.com``) counts as
+    LinkedIn, so it waits for the user's own browser. "" is no link (False); a link with no web host at all
+    (``mailto:``) is not LinkedIn either. A link written without a scheme is read as ``https://``."""
     text = (url or "").strip()
-    try:
-        host = urlsplit(text if "//" in text else f"//{text}").hostname or ""
-    except ValueError:
+    if not text:
         return False
-    host = host.rstrip(".")
-    return host == LINKEDIN_HOST or host.endswith("." + LINKEDIN_HOST)
+    try:
+        scheme = urlsplit(text).scheme.lower()
+    except ValueError:
+        return True
+    if scheme not in ("http", "https"):
+        if scheme and "." not in scheme:
+            return False  # mailto:, tel:, about: - no web host to open
+        text = "https://" + text.removeprefix("//")  # "www.linkedin.com/x" or "host:443/x": scheme-less
+    host = canonical_host(text)
+    return host is None or is_linkedin_host(host)
 
 
 @dataclass(frozen=True)
