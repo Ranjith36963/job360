@@ -157,10 +157,13 @@ export function MemoryTab() {
     return done;
   }, [loadHistory]);
 
-  /** Save the whole note list (the user's own facts live there), in the same
-   *  queue as every other write so two saves never land out of order. */
-  const saveNotes = useCallback((next: string[]): Promise<void> => {
+  /** Save the note list (the user's own facts live there), in the same queue
+   *  as every other write. The change is applied to the list as last saved,
+   *  inside the queue, so a second quick add never overwrites the first. */
+  const saveNotes = useCallback((change: (notes: string[]) => string[]): Promise<void> => {
     const run = async () => {
+      const stored = latest.current?.preferences?.assistant_notes;
+      const next = change(Array.isArray(stored) ? stored.map(String) : []);
       const updated = await updateProfileFields([{ path: "preferences.assistant_notes", value: next }]);
       latest.current = updated;
       setProfile(updated);

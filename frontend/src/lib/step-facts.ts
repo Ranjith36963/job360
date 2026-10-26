@@ -26,7 +26,8 @@ export function withFact(notes: string[], step: string, fact: string): string[] 
   return text ? [...notes, prefix(step) + text] : notes;
 }
 
-/** The whole note list without the step's nth fact; every other note stays. */
+/** The whole note list without the step's nth fact; every other note stays.
+ *  An index of -1 (the fact is already gone) changes nothing. */
 export function withoutFact(notes: string[], step: string, index: number): string[] {
   const p = prefix(step);
   let seen = -1;

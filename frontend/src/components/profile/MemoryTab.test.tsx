@@ -183,4 +183,25 @@ describe("MemoryTab", () => {
       { path: "preferences.assistant_notes", value: ["Never apply to agencies."] },
     ]));
   });
+
+  it("two quick adds in different steps both survive: the second is applied to the list the first saved", async () => {
+    getProfile.mockResolvedValue({ ...profile, preferences: { ...profile.preferences, assistant_notes: [] } });
+    let release: (p: unknown) => void = () => undefined;
+    const afterFirst = { ...profile, preferences: { ...profile.preferences, assistant_notes: ["About you: I go by Alex."] } };
+    updateProfileFields
+      .mockImplementationOnce(() => new Promise((r) => { release = r; }))
+      .mockImplementationOnce(async () => afterFirst);
+    render(<MemoryTab />);
+    await screen.findByTestId("memory-tab");
+    fireEvent.change(screen.getByLabelText("Add a fact to About you"), { target: { value: "I go by Alex." } });
+    fireEvent.click(within(screen.getByTestId("step-facts-you")).getByRole("button", { name: "Add" }));
+    fireEvent.change(screen.getByLabelText("Add a fact to Logistics"), { target: { value: "No travel in August." } });
+    fireEvent.click(within(screen.getByTestId("step-facts-logistics")).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(1));
+    release(afterFirst);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledTimes(2));
+    expect(updateProfileFields.mock.calls[1][0]).toEqual([
+      { path: "preferences.assistant_notes", value: ["About you: I go by Alex.", "Logistics: No travel in August."] },
+    ]);
+  });
 });

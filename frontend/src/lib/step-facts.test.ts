@@ -18,6 +18,10 @@ describe("step facts", () => {
     expect(withoutFact(notes, "About you", 1)).toEqual(["Never apply to agencies.", "About you: I go by Alex.", "Logistics: No travel in August."]);
   });
 
+  it("index -1 (already gone) changes nothing", () => {
+    expect(withoutFact(notes, "About you", -1)).toEqual(notes);
+  });
+
   it("leaves room for the step name inside the 200-character note cap", () => {
     expect(factRoom("About you")).toBe(200 - "About you: ".length);
   });

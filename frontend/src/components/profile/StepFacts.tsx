@@ -8,7 +8,9 @@ import { factRoom, factsFor, withFact, withoutFact } from "@/lib/step-facts";
  *  assistant to know for this step, read before every form. The user wrote
  *  them, so they need no confirming. */
 export function StepFacts({ id, step, notes, onSave }: {
-  id: string; step: string; notes: string[]; onSave: (next: string[]) => Promise<void>;
+  id: string; step: string; notes: string[];
+  /** Gets a change to apply to the notes as last saved (never a stale copy). */
+  onSave: (change: (notes: string[]) => string[]) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -16,11 +18,11 @@ export function StepFacts({ id, step, notes, onSave }: {
   const facts = factsFor(notes, step);
   const room = factRoom(step);
 
-  const run = async (next: string[], after?: () => void) => {
+  const run = async (change: (notes: string[]) => string[], after?: () => void) => {
     setBusy(true);
     setFailed(false);
     try {
-      await onSave(next);
+      await onSave(change);
       after?.();
     } catch {
       setFailed(true);
@@ -39,7 +41,7 @@ export function StepFacts({ id, step, notes, onSave }: {
             <li key={`${i}-${fact}`} className="flex items-start justify-between gap-3 text-sm">
               <span className="min-w-0 break-words">{fact}</span>
               <Button type="button" variant="ghost" size="sm" className="min-h-11 md:min-h-7" disabled={busy}
-                aria-label={`Remove "${fact}"`} onClick={() => void run(withoutFact(notes, step, i))}>
+                aria-label={`Remove "${fact}"`} onClick={() => void run((n) => withoutFact(n, step, factsFor(n, step).indexOf(fact)))}>
                 Remove
               </Button>
             </li>
@@ -49,7 +51,8 @@ export function StepFacts({ id, step, notes, onSave }: {
       <form className="flex gap-2" onSubmit={(e) => {
         e.preventDefault();
         if (!draft.trim()) return;
-        void run(withFact(notes, step, draft), () => setDraft(""));
+        const fact = draft;
+        void run((n) => withFact(n, step, fact), () => setDraft(""));
       }}>
         <input value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={room} disabled={busy}
           aria-label={`Add a fact to ${step}`} placeholder="Add a fact"
