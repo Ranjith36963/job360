@@ -70,6 +70,8 @@ TOOL_ROUTES = {
     "match_email": ("applications", "match_email", {"sender": "recruiter@acme.example"}),  # feature 8 - require_user, read-only, no email gate.
     # Owner 2026-10-23 - the scheduled run asks what is due and stamps a duty (migration 0082).
     "whats_due": ("schedule", "whats_due", {}),
+    # Owner 2026-10-25 - the own-browser queue (require_user, no email gate; the user's clicks are session-only routes).
+    "own_browser_queue": ("own_browser", "queue", {}),
     "mark_done": ("schedule", "mark_done", {"duty": "hunt"}),
     "record_events": (
         "applications", "record_events", {"events": [{"application_id": 987654321, "event_type": "note"}]}
