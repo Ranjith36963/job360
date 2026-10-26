@@ -93,18 +93,51 @@ describe("PersonRow", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
-  it("queued shows Queued and Don't send, which declines", async () => {
-    show(person({ linkedin_state: "connected", own_browser_task: task("queued", 77) }));
-    expect(screen.getByTestId("own-browser-queued-4")).toHaveTextContent("Queued");
+  it("queued with Job360's browser says it is waiting and when you said yes", async () => {
+    const approved = "2026-10-26T09:05:00";
+    const at = new Date(approved).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    show(person({ linkedin_state: "connected", own_browser_task: { ...task("queued", 77), approved_at: approved } }));
+    const el = screen.getByTestId("send-status-4");
+    expect(el).toHaveTextContent(`Waiting to send. You said yes at ${at}. Your assistant sends it the next time it runs.`);
+    expect(el).toHaveAttribute("data-state", "waiting");
     expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
-    fireEvent.click(screen.getByTestId("own-browser-cancel-4"));
+    fireEvent.click(screen.getByText("Don't send"));
     await waitFor(() =>
       expect(requestJson).toHaveBeenCalledWith("/api/contacts/4/own-browser-send", "POST", { message_id: 77, decision: "decline" }));
   });
 
-  it("in progress shows Sending now with no buttons", () => {
-    show(person({ linkedin_state: "connected", own_browser_task: task("in_progress") }));
-    expect(screen.getByTestId("own-browser-in-progress-4")).toHaveTextContent("Sending now");
+  it("queued with no approved_at drops the time", () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("queued") }));
+    expect(screen.getByTestId("send-status-4").textContent).toBe(
+      "Waiting to send. You said yes. Your assistant sends it the next time it runs.");
+  });
+
+  it("queued and Job360's browser gave up: needs your own browser", () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
+      send_browser: { kind: "own_browser", label: "Needs your own browser: turn your PC on", reason: "Sign-in wall" } }));
+    const el = screen.getByTestId("send-status-4");
+    expect(el.textContent).toBe(
+      "Needs your own browser. Job360's browser couldn't send this one (see why below). Ask your assistant to send it from your own browser \u2014 you stay signed in to LinkedIn there.");
+    expect(el).toHaveAttribute("data-state", "needs-own-browser");
+    expect(screen.getByText("Don't send")).toBeInTheDocument();
+  });
+
+  it("queued and only you can do it: needs you", () => {
+    show(person({ linkedin_state: "connected", own_browser_task: task("queued"),
+      send_browser: { kind: "human", label: "Only you can do this", reason: "CAPTCHA" } }));
+    const el = screen.getByTestId("send-status-4");
+    expect(el.textContent).toBe("Needs you. Open the profile and send it yourself, then press I sent it.");
+    expect(el).toHaveAttribute("data-state", "needs-you");
+    expect(screen.getByText("Don't send")).toBeInTheDocument();
+  });
+
+  it("in progress says sending now and until when, with no buttons", () => {
+    const until = "2026-10-26T09:20:00";
+    const at = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    show(person({ linkedin_state: "connected", own_browser_task: { ...task("in_progress"), claim_until: until } }));
+    const el = screen.getByTestId("send-status-4");
+    expect(el.textContent).toBe(`Sending now \u2014 held until ${at}.`);
+    expect(el).toHaveAttribute("data-state", "sending");
     expect(screen.queryByTestId("own-browser-send-4")).toBeNull();
     expect(screen.queryByTestId("own-browser-cancel-4")).toBeNull();
   });
