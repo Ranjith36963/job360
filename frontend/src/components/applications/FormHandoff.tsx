@@ -38,13 +38,18 @@ export function FormHandoff({
   const [finishing, setFinishing] = useState(false);
   const [refilling, setRefilling] = useState(false);
   const [refused, setRefused] = useState("");
+  // A successful refill lands straight in the full-screen live view (the owner solves it on his phone).
+  const [maximizeAtOpen, setMaximizeAtOpen] = useState(false);
 
   async function refill() {
     setRefilling(true);
     setRefused("");
     try {
       const res = await refillForm(applicationId);
-      if (res.status === "ok") setFinishing(true);
+      if (res.status === "ok") {
+        setMaximizeAtOpen(true);
+        setFinishing(true);
+      }
       else setRefused(res.detail || "Job360 could not fill the form again.");
     } catch (err) {
       toast.apiError(err, "Could not fill the form again.");
@@ -58,6 +63,7 @@ export function FormHandoff({
       {finishing && (
         <FinishInBrowser
           applicationId={applicationId}
+          startMaximized={maximizeAtOpen}
           onDone={() => {
             setFinishing(false);
             onFinished?.();
@@ -71,7 +77,10 @@ export function FormHandoff({
       )}
       <div className="flex flex-wrap items-center gap-2">
         {finishHere && !finishing && (
-          <button type="button" className={BTN} data-testid={finishTestId} onClick={() => setFinishing(true)}>
+          <button type="button" className={BTN} data-testid={finishTestId} onClick={() => {
+              setMaximizeAtOpen(false);
+              setFinishing(true);
+            }}>
             Finish it here{heldText(heldSeconds)}
           </button>
         )}
