@@ -582,7 +582,8 @@ function CvTab() {
   );
 }
 
-/** Profile has four tabs, picked by `?tab=` (CV when absent). Only the open
+/** Profile has three tabs, picked by `?tab=` (CV when absent). Memory opens
+ *  with the setup checklist, then the memory rows. Only the open
  *  tab mounts, so the CV page's fetches stay off the other tabs. */
 function ProfileRouter() {
   const tab = useProfileTab();
@@ -591,7 +592,14 @@ function ProfileRouter() {
     <PageContainer className="py-8 lg:py-12">
       <ProfileHeader />
       <ProfileTabs />
-      {tab === "memory" ? <MemoryTab /> : tab === "assistant" ? <AssistantTab /> : <SetupTab />}
+      {tab === "assistant" ? (
+        <AssistantTab />
+      ) : (
+        <>
+          <SetupTab />
+          <MemoryTab />
+        </>
+      )}
     </PageContainer>
   );
 }
